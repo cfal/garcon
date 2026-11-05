@@ -1,5 +1,32 @@
 # Garcon CLI And Server
 
+## Delivery Workflows
+
+Workflows are optional and disabled by default. Enable them in browser settings. CLI authority can create/edit drafts, inspect state, pause admissions, and request Stop. Activation, gate approval, resume, retry, resolution, clear-hold, cancel, archive, publication recheck, and managed cleanup require a current authenticated browser session.
+
+```sh
+garcon-cli workflow list --json
+garcon-cli workflow create --plan plan.json --json
+garcon-cli workflow create --plan - --json
+garcon-cli workflow show <workflow-id> --json
+garcon-cli workflow inspect-plan <workflow-id> --plan-revision 1 --json
+garcon-cli workflow attempt <workflow-id> --attempt-id <attempt-id> --json
+garcon-cli workflow gate <workflow-id> --gate-id <gate-id> --json
+garcon-cli workflow diagram <workflow-id> --plan-revision 1 --json
+garcon-cli workflow plan <workflow-id> --file revised.json --expected-plan-revision 1
+garcon-cli workflow attempts <workflow-id> --limit 50 --json
+garcon-cli workflow artifacts <workflow-id> --limit 50 --json
+garcon-cli workflow activity <workflow-id> --limit 50 --json
+garcon-cli workflow pause <workflow-id>
+garcon-cli workflow stop <workflow-id>
+garcon-cli workflow operation <operation-id> --json
+garcon-cli workflow retry-operation --payload <private-recovery-file> --operation-id <operation-id>
+```
+
+Plan paths and `-` stdin belong to the CLI host. Repository paths remain executor-qualified data. Page with `--cursor`; a nonempty byte-short attempt/artifact page can have a following page. Diagrams identify their stored revision. `show` returns a bounded overview; inspect exact plans, gates, and historical attempts separately. Drafts do not execute.
+
+Mutations print an operation ID and recovery command before submission, with a mode-0600 exact payload under the selected config root. Preserve the config/runtime selector and operation ID after an uncertain response. Recovery checks storage identity and principal-bound results before an explicit same-payload submission. Expired receipts are tombstones, not permission to repeat. Git/GitHub effects have separate durable intent and uncertainty handling.
+
 `bun cli/main.ts` controls ordinary Garcon chats through an already-running server. Chats started or resumed from the CLI stay visible in the SPA with their tools, permission requests, transcript, queue, and Stop controls.
 
 The examples below run from a Garcon checkout. `bun run build-exe` produces `dist/garcon-cli-linux-x64` and `dist/garcon-cli-darwin-arm64`; their help and command syntax use the `garcon-cli` name.

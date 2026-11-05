@@ -46,6 +46,7 @@ import { runExecutorCommand } from './executor-commands.js';
 import { applyScheduleDefinitionStdin } from './schedule-args.js';
 import { readScheduleDefinitionStdin } from './schedule-definition.js';
 import { runScheduleCommand } from './schedule-commands.js';
+import { runWorkflowCommand } from './workflows.js';
 import { requireCompletedTurnReceipt, writeTerminalResult } from './terminal-receipt.js';
 
 export interface MainOptions {
@@ -236,6 +237,7 @@ export async function main(
   let ticketSubmissionStarted = false;
   let executorSubmissionStarted = false;
   let scheduleSubmissionStarted = false;
+  let workflowSubmissionStarted = false;
   let forkTargetChatId: string | undefined;
   try {
     command = parseCliArgs(argv);
@@ -245,6 +247,11 @@ export async function main(
     }
     if (command.kind === 'version') {
       process.stdout.write(`${packageJson.version}\n`);
+      return 0;
+    }
+    if (command.kind === 'workflow') {
+      const { client, command: connected } = await connectedClient(command, options);
+      await runWorkflowCommand(connected, client, output, options.signal, () => { workflowSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'schedule') {
@@ -538,6 +545,11 @@ export async function main(
           diagnostic = scheduleSubmissionStarted
             ? 'terminal interrupted; schedule mutation may have committed. Inspect schedules before retrying.'
             : 'terminal interrupted; no schedule mutation was submitted';
+          break;
+        case 'workflow':
+          diagnostic = workflowSubmissionStarted
+            ? 'terminal interrupted; workflow mutation may have committed. Use the printed operation identity and recovery payload.'
+            : 'terminal interrupted; no workflow mutation was submitted';
           break;
         case 'executor':
           diagnostic = executorSubmissionStarted

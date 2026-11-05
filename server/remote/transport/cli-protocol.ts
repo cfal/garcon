@@ -29,6 +29,21 @@ const document = { mutation: false, management: false, timeoutMs: 120_000, pool:
 const maintenance = { mutation: true, management: false, timeoutMs: null, pool: 'long', lane: 'bulk' } as const;
 
 export const CLI_OPERATIONS = {
+  'GET /api/v1/workflows/bootstrap': read,
+  'GET /api/v1/workflows': read,
+  'POST /api/v1/workflows': write,
+  'GET /api/v1/workflows/detail': read,
+  'GET /api/v1/workflows/diagram': read,
+  'GET /api/v1/workflows/attempts': read,
+  'GET /api/v1/workflows/attempt': read,
+  'GET /api/v1/workflows/plan': read,
+  'GET /api/v1/workflows/gate': read,
+  'GET /api/v1/workflows/activity': read,
+  'GET /api/v1/workflows/artifacts': read,
+  'GET /api/v1/workflows/operation': read,
+  'POST /api/v1/workflows/plan': write,
+  'POST /api/v1/workflows/pause': { ...write, lane: 'primary' },
+  'POST /api/v1/workflows/stop': { ...write, lane: 'primary' },
   'GET /api/v1/scheduled-prompts': read,
   'POST /api/v1/scheduled-prompts': write,
   'PUT /api/v1/scheduled-prompts': write,
