@@ -69,7 +69,7 @@ test('publication failure closes only its captured lease even if terminal persis
   healthy.close();
 });
 
-test('routes events while the integration cannot report its scope', async () => {
+test('routes events with their captured scope while the integration cannot report its scope', async () => {
   const producer = createProducerFixture();
   const events = [];
   const errors = [];
@@ -82,12 +82,13 @@ test('routes events while the integration cannot report its scope', async () => 
     },
   } };
   const manager = new ProducerBindings(error => errors.push(error), () => {}, () => {}, () => {}, () => {});
-  const lease = new ProducerLease(event => events.push(event), () => {});
+  const lease = new ProducerLease((event, scope) => events.push({ event, scope }), () => {});
   const binding = await manager.bind(integration, 'chat-1', lease);
   reconnecting = true;
   expect(() => producer.emit(binding, { type: 'rows', rows: [] })).not.toThrow();
   producer.emit({ ...binding, instanceId: 'another-instance' }, { type: 'rows', rows: [] });
-  expect(events).toEqual([{ type: 'rows', rows: [] }]);
+  expect(events).toEqual([{ event: { type: 'rows', rows: [] },
+    scope: { executorId: binding.executorId, instanceId: binding.instanceId } }]);
   expect(errors).toEqual([]);
   reconnecting = false;
   lease.close();

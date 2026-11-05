@@ -12,7 +12,7 @@ import { effectFence, fixture, plan, prepareManagedTarget } from './fixture.js';
 
 const fixtures: ReturnType<typeof fixture>[] = [];
 afterEach(() => fixtures.splice(0).forEach(f => f.cleanup()));
-const completed: AutomationResult = { kind: 'completed', commandOutcome: null, receivedOutputCoverage: 'complete',
+const completed: AutomationResult = { executionScope: null, kind: 'completed', commandOutcome: null, receivedOutputCoverage: 'complete',
   receipt: { state: 'completed', chatId: '1234567890123456', turnId: 'synthetic-turn', clientRequestId: 'synthetic-request',
     acceptedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', settledAt: '2026-01-01T00:00:00.000Z',
     output: { availability: 'available', completeness: 'complete', text: 'Synthetic output.' } } };
@@ -171,7 +171,7 @@ test('supersession cancels the captured turn without classifying it as operator 
   const f = setup(); const entered = Promise.withResolvers<void>();
   f.start.mockImplementation(async () => { entered.resolve(); return { kind: 'published' }; });
   f.cancel.mockImplementation(async () => {
-    f.terminal.resolve({ kind: 'interrupted', receipt: null, termination: 'observed', commandOutcome: null, receivedOutputCoverage: 'complete' });
+    f.terminal.resolve({ executionScope: null, kind: 'interrupted', receipt: null, termination: 'observed', commandOutcome: null, receivedOutputCoverage: 'complete' });
   });
   const running = f.run(); await entered.promise;
   await f.admission.stop(f.attempt, 'superseded'); await running;
@@ -240,7 +240,7 @@ test('command deadline requests exact cancellation but does not claim native ter
   const f = setup();
   f.start.mockResolvedValueOnce({ kind: 'published' });
   f.cancel.mockImplementation(async () => {
-    f.terminal.resolve({ kind: 'interrupted', receipt: null, termination: 'requested',
+    f.terminal.resolve({ executionScope: null, kind: 'interrupted', receipt: null, termination: 'requested',
       commandOutcome: null, receivedOutputCoverage: 'unknown' });
   });
   await f.run(); await f.admission.waitForStops();
@@ -273,7 +273,7 @@ test('storage failure while binding the turn cancels it without dispatch', async
 test('early failure followed by takeover remains held after start settles and restart', async () => {
   const f = setup(); const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
   f.start.mockImplementation(async () => {
-    f.terminal.resolve({ kind: 'failed', certainty: 'not-started', receipt: null, detail: 'Synthetic rejection.',
+    f.terminal.resolve({ executionScope: null, kind: 'failed', certainty: 'not-started', receipt: null, detail: 'Synthetic rejection.',
       commandOutcome: null, receivedOutputCoverage: 'unknown' });
     entered.resolve(); await release.promise; return { kind: 'published' };
   });
@@ -350,7 +350,7 @@ for (const stage of ['first-inspection', 'capture', 'final-inspection'] as const
 test.each(['pending-terminal', 'early-failure'] as const)('Stop cannot resolve %s while admission still owns start', async phase => {
   const f = setup(); const entered = Promise.withResolvers<void>(); const finish = Promise.withResolvers<void>();
   f.start.mockImplementation(async () => {
-    if (phase === 'early-failure') f.terminal.resolve({ kind: 'failed', certainty: 'not-started', receipt: null,
+    if (phase === 'early-failure') f.terminal.resolve({ executionScope: null, kind: 'failed', certainty: 'not-started', receipt: null,
       detail: 'Synthetic early rejection.', commandOutcome: null, receivedOutputCoverage: 'unknown' });
     entered.resolve(); await finish.promise; return { kind: 'published' };
   });
@@ -369,7 +369,7 @@ test.each(['pending-terminal', 'early-failure'] as const)('Stop cannot resolve %
 test.each(['\u0001', '\u6f22'])('escaped terminal detail preserves definite non-start evidence (%s)', async character => {
   const f = setup();
   f.start.mockImplementation(async () => {
-    f.terminal.resolve({ kind: 'failed', certainty: 'not-started', receipt: null, detail: character.repeat(4096),
+    f.terminal.resolve({ executionScope: null, kind: 'failed', certainty: 'not-started', receipt: null, detail: character.repeat(4096),
       commandOutcome: null, receivedOutputCoverage: 'complete' });
     return { kind: 'published' };
   });
@@ -380,7 +380,7 @@ test.each(['\u0001', '\u6f22'])('escaped terminal detail preserves definite non-
 test.each(['cwd', 'signal'] as const)('oversized command %s retains definite terminal evidence through admission', async field => {
   const f = setup();
   f.start.mockImplementation(async () => {
-    f.terminal.resolve({ kind: 'failed', certainty: 'definite', receipt: null, detail: 'Synthetic command exit.',
+    f.terminal.resolve({ executionScope: null, kind: 'failed', certainty: 'definite', receipt: null, detail: 'Synthetic command exit.',
       receivedOutputCoverage: 'complete', commandOutcome: { outcome: 'failed', exitCode: 7,
         capture: 'complete', signal: field === 'signal' ? '\u0001'.repeat(3000) : null,
         cwd: { kind: 'reported', path: field === 'cwd' ? '/' + '\u0001'.repeat(3000) : '/synthetic/managed' } } });
@@ -414,10 +414,12 @@ test('ownership that never releases produces bounded attention rather than retai
   expect(f.output.capture).not.toHaveBeenCalled();
 });
 
-test('a gap after capture preparation prevents a non-checking evidence port from committing', async () => {
+test('a gap after capture remains live at the atomic evidence finalizer', async () => {
   const f = setup(); const commit = mock(() => {});
-  f.output.capture.mockImplementation(async () => { f.outputGapped.abort(); return { commit }; });
+  f.output.capture.mockImplementation(async (_attempt, _task, _terminal, fence) => {
+    f.outputGapped.abort(); return { commit() { expect(fence.outputGapped).toBe(true); commit(); } };
+  });
   await f.run();
-  expect(commit).not.toHaveBeenCalled();
+  expect(commit).toHaveBeenCalledTimes(1);
   expect(f.attempts.get(f.attempt.attemptId).result?.receivedOutputCoverage).toBe('gapped');
 });

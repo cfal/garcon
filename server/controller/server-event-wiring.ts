@@ -440,6 +440,7 @@ export function wireServerEvents({
     commandLedger.recordExecutionEvidence(event.chatId, event.runId, {
       outcome: event.row.outcome, origin: event.row.origin,
       failureCertainty: event.failureCertainty ?? 'unknown',
+      executionScope: event.executionScope ?? null,
       commandOutcome: event.commandOutcome ?? null, receivedOutputCoverage: event.receivedOutputCoverage ?? 'unknown',
     });
     await commandLedger.setTurnResult(event.chatId, event.runId, event.finalResponse);

@@ -61,7 +61,7 @@ function branch(value: unknown): string {
   return ref;
 }
 export function parseWorkflowRepository(value: unknown): WorkflowRepositoryTarget {
-  const raw = workflowRecord(value, ['executorId', 'projectPath', 'repositoryId', 'baseCommit', 'remote']);
+  const raw = workflowRecord(value, ['executorId', 'projectPath', 'repositoryId', 'baseCommit', 'inputTaskId', 'worktreeRoot', 'remote']);
   if (!isExecutorId(raw.executorId)) return workflowInvalid('An explicit executor is required.');
   let remote: WorkflowRepositoryTarget['remote'] = null;
   if (raw.remote !== null) {
@@ -74,7 +74,9 @@ export function parseWorkflowRepository(value: unknown): WorkflowRepositoryTarge
     remote = { name: branch(selected.name), url };
   }
   return { executorId: raw.executorId, projectPath: workflowText(raw.projectPath, 'project path'),
-    repositoryId: workflowText(raw.repositoryId, 'repository identity'), baseCommit: workflowCommit(raw.baseCommit), remote };
+    repositoryId: workflowText(raw.repositoryId, 'repository identity'), baseCommit: workflowCommit(raw.baseCommit),
+    inputTaskId: raw.inputTaskId === null ? null : workflowId(raw.inputTaskId),
+    worktreeRoot: workflowText(raw.worktreeRoot, 'managed worktree root'), remote };
 }
 function selection(value: unknown): WorkflowAgentSelection {
   const raw = workflowRecord(value, ['agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol',

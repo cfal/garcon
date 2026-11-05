@@ -92,15 +92,15 @@ test('unknown commit failure rolls back records and fences all subsequent reads'
   expect(f.service.detail(first.workflowId).workflow.desired).toBe('draft');
   expect(f.service.activity(first.workflowId)).toHaveLength(1);
 });
-test('corrupt and newer schema storage is never replaced or migrated', () => {
+test.each([1, 99])('unsupported schema %i storage is never replaced or migrated', version => {
   const f = setup();
   f.create(); f.store.close();
   const path = join(f.directory, 'workflows.sqlite');
-  const db = new Database(path); db.exec('PRAGMA user_version=99'); db.close();
+  const db = new Database(path); db.exec(`PRAGMA user_version=${version}`); db.close();
   expect(() => new WorkflowStore(f.directory)).toThrow(expect.objectContaining({ code: 'WORKFLOW_UNAVAILABLE' }));
   expect(inspectWorkflowProviderReferences(f.directory, true)).toBeNull();
   const verify = new Database(path, { readonly: true });
-  expect(verify.query('PRAGMA user_version').get()).toEqual({ user_version: 99 }); verify.close();
+  expect(verify.query('PRAGMA user_version').get()).toEqual({ user_version: version }); verify.close();
 });
 
 test('post-commit invalidation failures do not make a durable mutation appear rejected', () => {

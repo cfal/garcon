@@ -13,7 +13,7 @@ function fixture() {
   }) satisfies Pick<ChatExecutionCoordinator, 'on' | 'removeListener' | 'ownsExecution' | 'readChatExecutionControl'>;
   const automation = {
     prepare: mock(async () => ({ kind: 'rejected' as const, code: 'synthetic' })),
-    waitForTerminal: mock(async () => ({ kind: 'unavailable' as const, reason: 'Synthetic',
+    waitForTerminal: mock(async () => ({ executionScope: null, kind: 'unavailable' as const, reason: 'Synthetic',
       commandOutcome: null, receivedOutputCoverage: 'unknown' as const })),
     stop: mock(async () => ({ kind: 'stale-target' as const })),
   } satisfies Pick<AutomationService, 'prepare' | 'waitForTerminal' | 'stop'>;

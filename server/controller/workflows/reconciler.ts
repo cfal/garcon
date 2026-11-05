@@ -186,7 +186,7 @@ export class WorkflowReconciler {
         this.attempts.revoke(attempt.attemptId, 'Unclassified workflow dispatch failure.');
         this.attempts.observe(attempt.attemptId, { resolution: 'unknown', result: {
           certainty: 'unknown', detail: 'Workflow dispatch failed without a definitive observation.',
-          commandOutcome: null, receivedOutputCoverage: 'unknown', outputCaptured: false, termination: 'unknown',
+          commandOutcome: null, receivedOutputCoverage: 'unknown', outputCaptured: false, termination: 'unknown', executionScope: null,
         } }, { revoked: true, reason: 'Unclassified workflow dispatch failure.' });
       } catch (failure) { logger.warn('Unsettled attempt retained for restart recovery.', { failure }); }
     }).finally(() => {

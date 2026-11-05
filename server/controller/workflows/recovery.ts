@@ -24,7 +24,7 @@ export async function recoverWorkflowAttempts(store: WorkflowStore, now: () => s
         const detail = notStarted ? 'Controller restarted before dispatch.'
           : attempt.result ? 'Terminal survived, but output observation did not.' : 'Controller restarted with an unresolved dispatch.';
         const result: WorkflowAttemptResult = attempt.result ?? { certainty: notStarted ? 'not-started' : 'unknown', detail,
-          commandOutcome: null, receivedOutputCoverage: 'unknown', outputCaptured: false,
+          commandOutcome: null, receivedOutputCoverage: 'unknown', outputCaptured: false, executionScope: null,
           termination: notStarted ? 'not-started' : 'unknown' };
         db.query(`UPDATE attempts SET resolution=?,dispatch_phase='settled',control_state=?,result_json=? WHERE id=?`)
           .run(notStarted ? 'not-started' : 'unknown', attempt.controlState === 'revoked' ? 'revoked' : 'released', JSON.stringify(result), id);

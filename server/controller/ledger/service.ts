@@ -5,7 +5,6 @@ import type {
   AgentPermissionLifecycle,
   AgentPermissionResponseCapability,
   AgentProducerEvent,
-  AgentProducerSink,
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../../common/agent-execution.js';
@@ -51,22 +50,15 @@ import {
 } from './garcon-command-publication.js';
 import { LedgerFencedError, PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
 import { permissionRowKind, validatePermissionDecision } from './permission-rows.js';
-import { ProducerLease } from './producer-lease.js';
+import { ProducerLease, type TranscriptProducerLease } from './producer-lease.js';
 import { TranscriptOutputCoverage } from './output-coverage.js';
 import { inputDetail } from './input-submission.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandOutcome, parseCommandWorkingDirectory, type CommandOutcome, type CommandWorkingDirectory } from '../../../common/command-output.js';
-import type { ExecutionFailureCertainty } from '../../../common/automation.js';
+import type { AutomationExecutionScope, ExecutionFailureCertainty } from '../../../common/automation.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
-
-export interface TranscriptProducerLease {
-  readonly sink: AgentProducerSink;
-  close(): void;
-  readonly closed: boolean;
-  onClosed(listener: () => void): () => void;
-}
 
 export interface TranscriptLedgerServiceOptions extends Partial<GarconCommandSinks> {
   readonly now?: () => string;
@@ -167,10 +159,10 @@ export class TranscriptLedgerService {
     if (existing && !existing.closed) {
       throw new TypeError(`Transcript producer sink is already open for ${chatId}`);
     }
-    const lease = new ProducerLease((event) => {
+    const lease = new ProducerLease((event, scope) => {
       if (this.#leases.get(chatId) !== lease) throw new TranscriptSinkClosedError();
       try {
-        this.#publish(chatId, view.viewId, ownerAgentId, event);
+        this.#publish(chatId, view.viewId, ownerAgentId, event, scope);
       } catch (error) {
         const runId = this.#activeRuns.get(chatId);
         if (error instanceof LedgerFencedError && runId) this.#abandonRun(chatId, runId);
@@ -736,6 +728,7 @@ export class TranscriptLedgerService {
     viewId: TranscriptViewId,
     ownerAgentId: string,
     event: AgentProducerEvent,
+    scope: AutomationExecutionScope | null,
   ): void {
     switch (event.type) {
       case 'rows': {
@@ -840,6 +833,7 @@ export class TranscriptLedgerService {
           parseCommandWorkingDirectory(event.workingDirectory) ?? undefined,
           commandOutcome,
           event.outcome === 'failed' && event.error?.code === 'OUTCOME_UNKNOWN' ? 'unknown' : 'definite',
+          scope,
         );
       }
     }
@@ -855,6 +849,7 @@ export class TranscriptLedgerService {
     workingDirectory?: CommandWorkingDirectory,
     commandOutcome: CommandOutcome | null = null,
     failureCertainty: ExecutionFailureCertainty = 'unknown',
+    executionScope: AutomationExecutionScope | null = null,
   ): LedgerRunEndedRow {
     let view: TranscriptView;
     let row: LedgerRow;
@@ -879,7 +874,7 @@ export class TranscriptLedgerService {
     for (const listener of this.#runEndCommitListeners) listener(chatId, runId);
     const receivedOutputCoverage = this.outputCoverage.endRun(chatId, origin, failureCertainty);
     this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended, finalResponse, workingDirectory,
-      commandOutcome, failureCertainty, receivedOutputCoverage });
+      commandOutcome, failureCertainty, receivedOutputCoverage, executionScope });
     return ended;
   }
 

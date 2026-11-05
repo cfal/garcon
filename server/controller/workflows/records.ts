@@ -113,13 +113,16 @@ export function readArtifacts(database: Database, workflowId: string): WorkflowA
 }
 export function readDependencyArtifacts(database: Database, workflowId: string, taskIds: readonly string[]): WorkflowDependencyArtifact[] {
   if (!taskIds.length) return [];
-  return database.query<{ id: string; digest: string; commit: string | null; taskId: string }, string[]>(`SELECT r.id,
-    json_extract(r.payload_json,'$.digest') AS digest,json_extract(r.payload_json,'$.commit') AS 'commit',a.task_id AS taskId
+  return database.query<Omit<WorkflowDependencyArtifact, 'attempt' | 'dirty'> & { taskId: string; dirty: number | null }, string[]>(`SELECT r.id,
+    json_extract(r.payload_json,'$.digest') AS digest,json_extract(r.payload_json,'$.commit') AS 'commit',a.task_id AS taskId,
+    json_extract(r.payload_json,'$.kind') AS kind,json_extract(r.payload_json,'$.outcome') AS outcome,
+    json_extract(r.payload_json,'$.provenance') AS provenance,json_extract(r.payload_json,'$.executorId') AS executorId,
+    json_extract(r.payload_json,'$.repositoryId') AS repositoryId,json_extract(r.payload_json,'$.dirty') AS dirty
     FROM artifacts r JOIN attempts a ON a.id=r.attempt_id JOIN tasks t ON t.workflow_id=a.workflow_id AND t.id=a.task_id
     WHERE a.workflow_id=? AND a.generation=t.generation AND a.input_digest=t.input_digest AND a.resolution='succeeded'
     AND a.control_state='released' AND a.dispatch_phase='settled'
     AND t.hold='none' AND a.task_id IN (${taskIds.map(() => '?').join(',')}) ORDER BY r.id`)
-    .all(workflowId, ...taskIds).map(({ taskId, ...artifact }) => ({ ...artifact, attempt: { taskId } }));
+    .all(workflowId, ...taskIds).map(({ taskId, dirty, ...artifact }) => ({ ...artifact, dirty: dirty === null ? null : dirty === 1, attempt: { taskId } }));
 }
 export function readApprovals(database: Database, workflowId: string): WorkflowApproval[] {
   return database.query<{ payload_json: string }, [string]>(`SELECT a.payload_json FROM approvals a JOIN gate_manifests g

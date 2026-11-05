@@ -34,7 +34,12 @@ export function parseChatAutomationPolicy(value: unknown): ChatAutomationPolicy 
 }
 
 export type ExecutionFailureCertainty = 'definite' | 'not-started' | 'unknown';
+export interface AutomationExecutionScope {
+  readonly executorId: string;
+  readonly instanceId: string;
+}
 export interface AutomationTerminalEvidence {
+  readonly executionScope: AutomationExecutionScope | null;
   readonly commandOutcome: CommandOutcome | null;
   readonly receivedOutputCoverage: 'complete' | 'gapped' | 'unknown';
 }

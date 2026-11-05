@@ -3,12 +3,13 @@ import type { AutomationTurnKey, EffectiveAutomationInput } from '../../../commo
 import { WORKFLOW_LIMITS, type WorkflowAttempt, type WorkflowAttemptResult,
   type WorkflowDispatchPhase, type WorkflowManagedTarget, type WorkflowRevocationKind } from '../../../common/workflows.js';
 import { workflowConflict } from './errors.js';
-import { workflowDigest, workflowEffectiveInput, workflowInputDigest, workflowStartInput } from './inputs.js';
+import { workflowDigest, workflowEffectiveInput, workflowInputDigest, workflowResolvedTarget, workflowStartInput } from './inputs.js';
 import { appendWorkflowActivity, readDependencyArtifacts, readPlan, readTasks, readWorkflowSchedule,
   requireAttempt, requireWorkflow, workflowEpoch, workflowRevision } from './records.js';
 import type { WorkflowStore } from './store.js';
 import { managedTargetRequest, parseManagedTarget } from './managed-target.js';
 import { workflowResultDetail } from './terminal-observation.js';
+import { requireWorkflowGates } from './acceptance.js';
 
 export interface WorkflowTerminalObservation {
   readonly resolution: 'checking' | 'failed' | 'interrupted' | 'not-started' | 'unknown';
@@ -49,14 +50,15 @@ export class WorkflowAttempts {
       const now = this.options.now();
       if (detail.workflow.archived || !task || task.phase !== 'ready' || !spec || spec.spec.kind === 'approval'
         || task.nextEligibleAt && task.nextEligibleAt > now) return null;
-      const target = spec.spec.target;
+      const dependencies = readDependencyArtifacts(db, workflowId, spec.dependsOn);
+      const target = workflowResolvedTarget(spec, dependencies);
       const capacity = readWorkflowCapacity(db);
       if (capacity.length >= WORKFLOW_LIMITS.globalAttempts
         || capacity.filter(row => row.workflowId === workflowId).length >= Math.min(WORKFLOW_LIMITS.workflowAttempts, detail.active!.plan.policy.concurrency)
         || capacity.filter(row => row.executorId === target.executorId).length >= WORKFLOW_LIMITS.executorAttempts) return null;
       if (db.query(`SELECT 1 FROM resource_claims c JOIN attempts a ON a.id=c.attempt_id
         WHERE a.workflow_id=? AND a.task_id=? AND c.risk_released=0 AND c.retained=0 LIMIT 1`).get(workflowId, taskId)) return null;
-      const inputDigest = workflowInputDigest(spec, readDependencyArtifacts(db, workflowId, spec.dependsOn));
+      const inputDigest = workflowInputDigest(spec, dependencies);
       if (task.inputDigest !== null && task.inputDigest !== inputDigest) workflowConflict('Task inputs changed; activate a new generation.');
       const attemptId = crypto.randomUUID();
       db.query('UPDATE tasks SET input_digest=?,next_eligible_at=NULL WHERE workflow_id=? AND id=?')
@@ -88,6 +90,7 @@ export class WorkflowAttempts {
       requireWorkflowDispatch(db, attempt);
       if (!attempt.target || target.executorId !== attempt.target.executorId
         || target.repositoryId !== attempt.target.repositoryId || target.baseCommit !== attempt.target.baseCommit
+        || target.inputTaskId !== attempt.target.inputTaskId || target.worktreeRoot !== attempt.target.worktreeRoot
         || workflowDigest(target.remote) !== workflowDigest(attempt.target.remote)) {
         workflowConflict('Prepared repository does not match the approved target.');
       }
@@ -263,10 +266,16 @@ export function currentGeneration(db: Database, attempt: WorkflowAttempt): boole
 
 export function requireWorkflowDispatch(db: Database, attempt: WorkflowAttempt): void {
   const workflow = requireWorkflow(db, attempt.workflowId);
+  if (workflow.archived || workflow.desired !== 'active' || workflow.admissionEpoch !== workflowEpoch(db)) {
+    workflowConflict('Workflow admission changed.');
+  }
+  requireWorkflowInputs(db, attempt);
+}
+
+export function requireWorkflowInputs(db: Database, attempt: WorkflowAttempt): void {
   const tasks = readTasks(db, attempt.workflowId);
   const task = tasks.find(task => task.id === attempt.taskId);
-  if (workflow.archived || workflow.desired !== 'active' || workflow.admissionEpoch !== workflowEpoch(db)
-    || attempt.resolution !== 'open' || attempt.controlState !== 'leased' || !currentGeneration(db, attempt)
+  if (attempt.resolution !== 'open' || attempt.controlState !== 'leased' || !currentGeneration(db, attempt)
     || task?.hold !== 'none') {
     workflowConflict('Workflow admission or attempt generation changed.');
   }
@@ -279,9 +288,12 @@ export function requireWorkflowDispatch(db: Database, attempt: WorkflowAttempt):
       workflowConflict('Dependency evidence is no longer current.');
     }
   }
-  if (attempt.inputDigest !== workflowInputDigest(spec, readDependencyArtifacts(db, attempt.workflowId, spec.dependsOn))) {
+  const dependencies = readDependencyArtifacts(db, attempt.workflowId, spec.dependsOn);
+  if (attempt.inputDigest !== workflowInputDigest(spec, dependencies)
+    || 'target' in spec.spec && attempt.target?.baseCommit !== workflowResolvedTarget(spec, dependencies).baseCommit) {
     workflowConflict('Dependency artifacts changed after reservation.');
   }
+  if (attempt.target) requireWorkflowGates(db, attempt, spec, attempt.target.baseCommit);
 }
 
 export function holdTask(db: Database, attempt: WorkflowAttempt, hold: 'intervention' | 'output-unknown', reason: string): void {

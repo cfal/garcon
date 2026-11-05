@@ -4,14 +4,27 @@ import { AUTOMATION_PRESENTATION, GUARDED_AUTOMATION_POLICY, type AutomationStar
   type EffectiveAutomationInput } from '../../../common/automation.js';
 import type { WorkflowArtifact, WorkflowAttempt, WorkflowPlanTask } from '../../../common/workflows.js';
 import { workflowConflict } from './errors.js';
+import { workflowAgentPrompt } from './agent-output.js';
 
 export function workflowDigest(value: unknown): string {
   return `sha256:${createHash('sha256').update(stableJsonStringify(value)).digest('hex')}`;
 }
 
-export type WorkflowDependencyArtifact = Pick<WorkflowArtifact, 'id' | 'digest' | 'commit'> & {
+export type WorkflowDependencyArtifact = Pick<WorkflowArtifact, 'id' | 'digest' | 'commit' | 'kind' | 'outcome' | 'provenance' | 'executorId' | 'repositoryId' | 'dirty'> & {
   readonly attempt: Pick<WorkflowArtifact['attempt'], 'taskId'>;
 };
+
+export function workflowResolvedTarget(task: WorkflowPlanTask, dependencies: readonly WorkflowDependencyArtifact[]) {
+  if (!('target' in task.spec)) return workflowConflict('Task has no repository target.');
+  const target = task.spec.target;
+  const inputTaskId = task.spec.kind === 'publish-pr' ? task.spec.sourceTaskId : target.inputTaskId;
+  if (inputTaskId === null) return target;
+  const commits = dependencies.filter(artifact => artifact.attempt.taskId === inputTaskId && artifact.kind === 'commit'
+    && artifact.outcome === 'pass' && artifact.provenance === 'runtime-observed' && artifact.dirty === false
+    && artifact.repositoryId === target.repositoryId && artifact.commit !== null);
+  if (commits.length !== 1) return workflowConflict('Repository input requires exactly one accepted commit artifact.');
+  return { ...target, baseCommit: commits[0]!.commit! };
+}
 
 export function workflowInputDigest(task: WorkflowPlanTask, dependencies: readonly WorkflowDependencyArtifact[]): string {
   return workflowDigest({ task, inputs: task.dependsOn.map(taskId => ({ taskId,
@@ -33,7 +46,7 @@ export function workflowStartInput(attempt: WorkflowAttempt, task: WorkflowPlanT
   };
   return { ...selection, clientRequestId: attempt.requestId, title: task.title,
     executorId: attempt.target.executorId, projectPath: attempt.target.projectPath,
-    command: spec.kind === 'agent' ? spec.prompt.trim() : spec.command,
+    command: spec.kind === 'agent' ? workflowAgentPrompt(spec, attempt.target.baseCommit) : spec.command,
     presentation: AUTOMATION_PRESENTATION, automationPolicy: GUARDED_AUTOMATION_POLICY };
 }
 

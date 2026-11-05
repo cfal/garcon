@@ -12,6 +12,18 @@ async function pending() {
   const accepted = await ledger.accept({ commandType: 'chat-start', chatId: 'synthetic', clientRequestId: 'request', turnId: 'turn', payload: {} });
   return { ledger, command: { key: accepted.record.key, chatId: 'synthetic', clientRequestId: 'request', turnId: 'turn' } };
 }
+test('exact-turn runtime scope survives projection and is never inferred from a current executor', async () => {
+  const { ledger, command } = await pending();
+  const executionScope = { executorId: 'local', instanceId: 'synthetic-execution-runtime' };
+  ledger.recordExecutionEvidence('synthetic', 'turn', { executionScope, outcome: 'failed', origin: 'provider',
+    failureCertainty: 'definite', commandOutcome: outcome, receivedOutputCoverage: 'complete' });
+  executionScope.instanceId = 'replacement';
+  await ledger.settleTerminal(command.key, 'failed');
+  await ledger.markPublicTerminal('synthetic', 'turn');
+  expect(automationTerminalResult(await ledger.getTurnRecord('synthetic', 'turn')).executionScope)
+    .toEqual({ executorId: 'local', instanceId: 'synthetic-execution-runtime' });
+  expect(automationTerminalResult(null).executionScope).toBeNull();
+});
 test.each(['not-dispatched', 'rejected', 'unknown'] as const)('preserves %s delivery evidence before generic error projection', async delivery => {
   const { ledger, command } = await pending();
   await new ChatCommandSettlement(ledger).settleOperationFailure(command, new AgentCallError(delivery, 'Synthetic failure'));
@@ -22,7 +34,7 @@ test.each(['not-dispatched', 'rejected', 'unknown'] as const)('preserves %s deli
 test('terminal metadata survives an earlier failed settlement and never upgrades unknown to retryable', async () => {
   const { ledger, command } = await pending();
   await ledger.settleTerminal(command.key, 'failed', { errorCode: 'INTERNAL_ERROR' });
-  ledger.recordExecutionEvidence('synthetic', 'turn', { outcome: 'failed', origin: 'core', failureCertainty: 'unknown',
+  ledger.recordExecutionEvidence('synthetic', 'turn', { executionScope: null, outcome: 'failed', origin: 'core', failureCertainty: 'unknown',
     commandOutcome: null, receivedOutputCoverage: 'gapped' });
   await ledger.markPublicTerminal('synthetic', 'turn');
   expect(automationTerminalResult(await ledger.getTurnRecord('synthetic', 'turn'))).toMatchObject({ kind: 'failed', certainty: 'unknown', receivedOutputCoverage: 'gapped' });
@@ -39,7 +51,7 @@ test('cleanup aggregation cannot erase previously captured delivery evidence', a
 test('nonzero exits and provider interruptions retain structured command evidence', async () => {
   for (const status of ['failed', 'interrupted'] as const) {
     const { ledger, command } = await pending();
-    ledger.recordExecutionEvidence('synthetic', 'turn', { outcome: status, origin: 'provider', failureCertainty: 'definite',
+    ledger.recordExecutionEvidence('synthetic', 'turn', { executionScope: null, outcome: status, origin: 'provider', failureCertainty: 'definite',
       commandOutcome: outcome, receivedOutputCoverage: 'complete' });
     await ledger.settleTerminal(command.key, status === 'failed' ? 'failed' : 'finished');
     await ledger.markPublicTerminal('synthetic', 'turn');
@@ -49,7 +61,7 @@ test('nonzero exits and provider interruptions retain structured command evidenc
 
 test('a failed settlement after completed execution is never retryable failure evidence', async () => {
   const { ledger, command } = await pending();
-  ledger.recordExecutionEvidence('synthetic', 'turn', { outcome: 'finished', origin: 'provider', failureCertainty: 'definite',
+  ledger.recordExecutionEvidence('synthetic', 'turn', { executionScope: null, outcome: 'finished', origin: 'provider', failureCertainty: 'definite',
     commandOutcome: { ...outcome, outcome: 'finished', exitCode: 0 }, receivedOutputCoverage: 'complete' });
   await ledger.settleTerminal(command.key, 'failed', { errorCode: 'PROJECT_PATH_DESTINATION_REJECTED' });
   await ledger.markPublicTerminal('synthetic', 'turn');
@@ -59,7 +71,7 @@ test('a failed settlement after completed execution is never retryable failure e
 
 test('cleanup failure after observed Shell interruption remains nonretryable interruption', async () => {
   const { ledger, command } = await pending();
-  ledger.recordExecutionEvidence('synthetic', 'turn', { outcome: 'failed', origin: 'provider', failureCertainty: 'definite',
+  ledger.recordExecutionEvidence('synthetic', 'turn', { executionScope: null, outcome: 'failed', origin: 'provider', failureCertainty: 'definite',
     commandOutcome: { ...outcome, outcome: 'interrupted', exitCode: null, signal: 'SIGTERM' }, receivedOutputCoverage: 'complete' });
   await ledger.settleTerminal(command.key, 'failed', { errorCode: 'INTERNAL_ERROR', error: 'Synthetic cleanup failure.' });
   await ledger.markPublicTerminal('synthetic', 'turn');

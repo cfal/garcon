@@ -20,7 +20,8 @@ export function managedTarget(attempt: WorkflowAttempt, resourceKey = attempt.at
   projectPath = `/synthetic/worktrees/${resourceKey}`): WorkflowManagedTarget {
   return { operationId: crypto.randomUUID(), resourceKey, target: { ...attempt.target!, projectPath },
     managedResourceId: crypto.randomUUID(), repositoryIdentity: '/synthetic/admin', worktreeIdentity: `/synthetic/admin/${resourceKey}`,
-    branch: `managed/${resourceKey}`, head: attempt.target!.baseCommit };
+    branch: `managed/${resourceKey}`, head: attempt.target!.baseCommit, baseTree: 'c'.repeat(40),
+    instanceId: 'synthetic-runtime', sourceProjectPath: attempt.target!.projectPath };
 }
 
 export function prepareManagedTarget(resources: WorkflowResources, attempt: WorkflowAttempt, resourceKey = attempt.attemptId): WorkflowManagedTarget {
@@ -34,7 +35,8 @@ export function prepareManagedTarget(resources: WorkflowResources, attempt: Work
 export function plan(): WorkflowPlan {
   return { title: 'Synthetic delivery', goal: { kind: 'artifacts', taskIds: ['check'] },
     policy: { allowRemoteWrites: false, concurrency: 2 }, tasks: [{ id: 'check', title: 'Check', dependsOn: [],
-      spec: { kind: 'command', target: { executorId: 'local', projectPath: '/synthetic/repo', repositoryId: 'synthetic', baseCommit: commit, remote: null },
+      spec: { kind: 'command', target: { executorId: 'local', projectPath: '/synthetic/repo', repositoryId: 'synthetic', baseCommit: commit,
+        inputTaskId: null, worktreeRoot: '/synthetic/worktrees', remote: null },
         shellModel: 'bash', command: 'printf synthetic', timeoutMs: 1000, expectedExitCode: 0, outputRequirement: 'full-log' },
       acceptance: [], retry: { maxAttempts: 1, backoffMs: 1000, repeatableFailure: false } }] };
 }
