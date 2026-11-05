@@ -100,14 +100,29 @@
 		const viewport = tabViewport;
 		const rail = measurementRail;
 		if (!viewport || !rail || typeof ResizeObserver === 'undefined') return;
-		const observer = new ResizeObserver(recomputeVisibleTabs);
+		let frame: number | null = null;
+		let active = true;
+		// Tab presentation can resize its observed viewport through the titlebar actions.
+		const observer = new ResizeObserver(() => {
+			if (frame !== null) return;
+			frame = requestAnimationFrame(() => {
+				frame = null;
+				if (active) recomputeVisibleTabs();
+			});
+		});
 		observer.observe(viewport);
 		observer.observe(rail);
 		for (const item of rail.querySelectorAll<HTMLElement>('[data-window-tab-measure-id]')) {
 			observer.observe(item);
 		}
-		queueMicrotask(recomputeVisibleTabs);
-		return () => observer.disconnect();
+		queueMicrotask(() => {
+			if (active) recomputeVisibleTabs();
+		});
+		return () => {
+			active = false;
+			observer.disconnect();
+			if (frame !== null) cancelAnimationFrame(frame);
+		};
 	});
 
 	$effect(() => {
