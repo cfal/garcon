@@ -34,6 +34,7 @@
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import { sidebarGroupingUsesProjects } from './sidebar-display-options';
 	import NativeServerChooserItem from './NativeServerChooserItem.svelte';
+	import NativeTitlebarItem from './NativeTitlebarItem.svelte';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
@@ -296,6 +297,7 @@
 					{m.settings_title()}
 				</DropdownMenuItem>
 				<NativeServerChooserItem />
+				<NativeTitlebarItem />
 			</DropdownMenuContent>
 		</DropdownMenu>
 	</div>

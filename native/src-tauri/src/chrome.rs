@@ -1,6 +1,33 @@
 #[cfg(desktop)]
 use tauri::WebviewWindow;
 
+#[cfg(desktop)]
+#[derive(serde::Serialize)]
+pub struct TitlebarSnapshot {
+    pub hidden: bool,
+    pub failed: bool,
+}
+
+#[cfg(any(desktop, test))]
+pub fn requested_titlebar_hidden(destination: &url::Url) -> Option<bool> {
+    match destination.as_str() {
+        "garcon-host://hide-titlebar/" => Some(true),
+        "garcon-host://show-titlebar/" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(desktop)]
+pub fn publish_titlebar_snapshot(
+    window: &WebviewWindow,
+    snapshot: TitlebarSnapshot,
+) -> tauri::Result<()> {
+    window.eval(format!(
+        "window.dispatchEvent(new CustomEvent('garcon-titlebar-state', {{ detail: {} }}))",
+        serde_json::to_string(&snapshot)?
+    ))
+}
+
 #[cfg(target_os = "linux")]
 pub fn setup() -> Result<(), Box<dyn std::error::Error>> {
     use gtk::prelude::CssProviderExt;
@@ -120,6 +147,40 @@ fn recovery_shortcut(
         constants::r if modifiers == M::CONTROL_MASK => Some(RecoveryShortcut::Reload),
         constants::q if modifiers == M::CONTROL_MASK => Some(RecoveryShortcut::Quit),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod titlebar_tests {
+    use super::requested_titlebar_hidden;
+
+    #[test]
+    fn titlebar_requests_require_exact_host_owned_urls() {
+        for (url, hidden) in [
+            ("garcon-host://hide-titlebar/", true),
+            ("garcon-host://show-titlebar/", false),
+        ] {
+            assert_eq!(
+                requested_titlebar_hidden(&url::Url::parse(url).unwrap()),
+                Some(hidden)
+            );
+        }
+        for url in [
+            "https://hide-titlebar/",
+            "garcon-host://hide-titlebar/?hidden=true",
+            "garcon-host://hide-titlebar/#fragment",
+            "garcon-host://user@hide-titlebar/",
+            "garcon-host://hide-titlebar:123/",
+            "garcon-host://hide-titlebar/extra",
+            "garcon-host://switch-server/",
+            "garcon-host://show-titlebar//",
+        ] {
+            assert_eq!(
+                requested_titlebar_hidden(&url::Url::parse(url).unwrap()),
+                None,
+                "{url}"
+            );
+        }
     }
 }
 

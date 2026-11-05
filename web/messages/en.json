@@ -3259,5 +3259,7 @@
 	],
 	"native_open_server": "Open Server",
 	"native_open_server_unavailable": "Open Server unavailable",
+	"native_hide_titlebar": "Hide titlebar",
+	"native_titlebar_unavailable": "Titlebar unavailable",
 	"native_connected_to_server": "Connected to {server}"
 }

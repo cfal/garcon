@@ -185,9 +185,18 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
     .title(&title)
     .inner_size(1200.0, 800.0)
     .visible(false)
+    .decorations(!server.titlebar_hidden)
     .disable_drag_drop_handler()
-    .initialization_script(include_str!("../bridge.js"))
+    .initialization_script(format!(
+        "{}({});",
+        include_str!("../bridge.js"),
+        server.titlebar_hidden
+    ))
     .on_navigation(move |destination| {
+        if let Some(hidden) = crate::chrome::requested_titlebar_hidden(destination) {
+            request_titlebar_visibility(&navigation_app, id, hidden);
+            return false;
+        }
         let host = navigation_app.state::<Host>();
         if destination.as_str() == CHOOSER_REQUEST {
             dispatch_chooser_request(&host, id, |revision| {
@@ -210,6 +219,27 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
             .is_ok_and(|host| host.allows_navigation(id, destination))
     })
     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+    .on_page_load(move |window, payload| {
+        if payload.event() != tauri::webview::PageLoadEvent::Finished {
+            return;
+        }
+        let snapshot = window
+            .app_handle()
+            .state::<Host>()
+            .lock()
+            .ok()
+            .and_then(|host| {
+                host.windows
+                    .get(&id)
+                    .map(|server| crate::chrome::TitlebarSnapshot {
+                        hidden: server.titlebar_hidden,
+                        failed: false,
+                    })
+            });
+        if let Some(snapshot) = snapshot {
+            let _ = crate::chrome::publish_titlebar_snapshot(&window, snapshot);
+        }
+    })
     .build();
     let window = match built {
         Ok(window) => window,
@@ -249,6 +279,39 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
     crate::chrome::show_initial(&window)
         .map_err(|_| "Unable to show the server page. Choose another server or retry.")?;
     Ok(())
+}
+
+#[cfg(desktop)]
+fn request_titlebar_visibility(app: &tauri::AppHandle, id: u64, hidden: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let current = handle
+            .state::<Host>()
+            .lock()
+            .is_ok_and(|host| host.windows.contains_key(&id));
+        if !current {
+            return;
+        }
+        let Some(window) = handle.get_webview_window(&window_label(id)) else {
+            return;
+        };
+        let failed = window.set_decorations(!hidden).is_err();
+        let snapshot = {
+            let host = handle.state::<Host>();
+            let Ok(mut host) = host.lock() else { return };
+            let Some(server) = host.windows.get_mut(&id) else {
+                return;
+            };
+            if !failed {
+                server.titlebar_hidden = hidden;
+            }
+            crate::chrome::TitlebarSnapshot {
+                hidden: server.titlebar_hidden,
+                failed,
+            }
+        };
+        let _ = crate::chrome::publish_titlebar_snapshot(&window, snapshot);
+    });
 }
 
 #[cfg(desktop)]
@@ -361,6 +424,7 @@ mod tests {
             ServerWindow {
                 deployment: Deployment::parse("https://synthetic.test/").unwrap(),
                 name: None,
+                titlebar_hidden: false,
             },
         );
         let host = Mutex::new(switcher);

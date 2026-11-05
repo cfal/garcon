@@ -173,6 +173,20 @@ async function nativeTitlebarChooser() {
     && !document.querySelector('#server-form button').disabled`, [opened]), 'titlebar chooser');
 }
 
+async function nativeFrameHeight(page) {
+  const window = await focusNativeRemote();
+  const geometry = Bun.spawn(['xdotool', 'getwindowgeometry', '--shell', window], { stdout: 'pipe', stderr: 'inherit' });
+  const height = Number((await new Response(geometry.stdout).text()).match(/^HEIGHT=(\d+)$/m)?.[1]);
+  assert.equal(await geometry.exited, 0);
+  assert.ok(height > 100);
+  return height - await page.run('return innerHeight');
+}
+
+async function setTitlebarHidden(page, hidden) {
+  await page.run('window.__GARCON_NATIVE__.titlebar.requestHidden(arguments[0]);', [hidden]);
+  await until(() => page.run('return window.titlebarSnapshot.hidden === arguments[0] && !window.titlebarSnapshot.failed', [hidden]), 'native titlebar state');
+}
+
 async function nativeRemoteKey(key) {
   // Host recovery requires OS input, not synthesized DOM keyboard events.
   await focusNativeRemote();
@@ -273,6 +287,7 @@ function fixture(base, outsideUrl) {
       return new Response(`<!doctype html><title>Synthetic remote</title><h1 id="remote">Synthetic remote</h1>
         <script type="module">import { copyToClipboard } from ${JSON.stringify(`${base}/workflow-clipboard.js`)}; window.copyToClipboard = copyToClipboard;</script>
         <script>
+          window.__GARCON_NATIVE__.titlebar.subscribe(value => { window.titlebarSnapshot = value; });
           fetch(${JSON.stringify(`${base}/api`)}, {headers: {Authorization: ${JSON.stringify(`Bearer ${token}`)}}});
           const socket = new WebSocket('ws://' + location.host + ${JSON.stringify(`${base}/ws`)}, ${JSON.stringify(webSocketProtocolsForAuth(token))});
           socket.onopen = () => { document.body.dataset.connected = 'true'; };
@@ -386,7 +401,6 @@ try {
       await until(() => remote.connected(), 'host-created remote HTTP and WebSocket');
       console.log('Remote transport connected');
       const aHandle = await openedRemote();
-      const aPage = remote.page();
       await until(() => remote.run('return document.body.dataset.connected === "true"'), 'remote HTTP and WebSocket');
       assert.equal(remote.connected(), true);
       const denied = await remote.run(`
@@ -394,6 +408,22 @@ try {
             window.__TAURI_INTERNALS__.invoke(command, {url: 'https://synthetic.test/', generation: 1, acknowledged: true})
               .then(() => false, () => true))).then(results => results.every(Boolean));`);
       assert.equal(denied, true, 'remote page must not read host settings');
+      const frameHeight = await nativeFrameHeight(remote);
+      assert.ok(frameHeight > 0, 'native titlebar starts visible');
+      await setTitlebarHidden(remote, true);
+      await setTitlebarHidden(remote, true);
+      await until(async () => await nativeFrameHeight(remote) === 0, 'native titlebar is removed, not just marked hidden');
+      const beforePageReload = remote.socketConnections();
+      await remote.run('setTimeout(() => location.reload(), 0);');
+      await until(() => remote.connected() && remote.socketConnections() > beforePageReload, 'ordinary page reload');
+      await until(() => remote.run('return window.titlebarSnapshot.hidden'), 'ordinary reload restores current native titlebar state');
+      await hostShortcutChooser('s', true);
+      await evaluate('document.querySelector("#cancel").click();');
+      await setTitlebarHidden(remote, false);
+      await until(async () => await nativeFrameHeight(remote) === frameHeight, 'native titlebar restored');
+      const aPage = remote.page();
+      await assertNavigationBlocked('garcon-host://hide-titlebar/?unexpected=true', remote.url, remote);
+      assert.equal(await remote.run('return window.titlebarSnapshot.hidden'), false);
       await assertRemoteWorkflows(remote, aHandle);
       await assertNavigationBlocked(pathToFileURL(workflows.attachment).href, remote.url, remote);
       await remote.run(`
@@ -464,10 +494,17 @@ try {
       await remote.run('window.duplicateSentinel = "duplicate-unsaved";');
       const bConnections = outside.socketConnections();
       remoteTitle = 'Synthetic B \u2014 Garcon';
+      await setTitlebarHidden(outside, true);
+      assert.equal(await aPage.run('return window.titlebarSnapshot.hidden'), false, 'B titlebar changes do not affect A');
+      assert.equal(await remote.run('return window.titlebarSnapshot.hidden'), false, 'B titlebar changes do not affect duplicate A');
       await hostShortcutChooser('r');
       await connect(outside.url, 'Synthetic B');
       bHandle = await openedRemote();
       await until(() => outside.socketConnections() > bConnections && outside.connected(), 'reload B while both A windows remain alive');
+      await until(() => outside.run('return window.titlebarSnapshot.hidden'), 'source reload preserves hidden titlebar');
+      await until(async () => await nativeFrameHeight(outside) === 0, 'replacement native titlebar stays hidden');
+      await setTitlebarHidden(outside, false);
+      await until(async () => await nativeFrameHeight(outside) > 0, 'replacement native titlebar can be restored');
       assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'B reload preserves original A');
       assert.equal(await remote.run('return window.duplicateSentinel'), 'duplicate-unsaved', 'B reload preserves duplicate A');
       remoteTitle = 'Synthetic Duplicate \u2014 Garcon';

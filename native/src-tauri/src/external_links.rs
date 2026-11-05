@@ -201,6 +201,7 @@ mod tests {
             crate::switcher::ServerWindow {
                 deployment: Deployment::parse("https://selected.test/garcon/").unwrap(),
                 name: None,
+                titlebar_hidden: false,
             },
         );
         let target = "https://external.example.test/guide";

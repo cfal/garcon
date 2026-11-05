@@ -32,6 +32,7 @@ pub struct ServerChoices {
 pub struct ServerWindow {
     pub deployment: Deployment,
     pub name: Option<String>,
+    pub titlebar_hidden: bool,
 }
 
 impl ServerWindow {
@@ -110,7 +111,7 @@ impl Switcher {
         acknowledged: bool,
     ) -> Result<(u64, Option<u64>), String> {
         self.check_generation(generation)?;
-        let (previous, name) = if self.action == ChooserAction::Reload {
+        let (previous, name, titlebar_hidden) = if self.action == ChooserAction::Reload {
             let id = self.chooser_source.ok_or("No server page is open.")?;
             let window = self.windows.get(&id).ok_or("No server page is open.")?;
             if deployment.url() != window.deployment.url() {
@@ -120,17 +121,24 @@ impl Switcher {
                 return Err("Confirm that unsaved changes and attachments may be lost.".into());
             }
             // Reload preserves this window's title, not its stale copy of a saved name.
-            (Some(id), window.name.clone())
+            (Some(id), window.name.clone(), window.titlebar_hidden)
         } else {
             let selection = self.selection.as_mut().map_err(|error| error.clone())?;
-            (None, selection.select_named(&deployment, name)?)
+            (None, selection.select_named(&deployment, name)?, false)
         };
         self.next_window_id += 1;
         let id = self.next_window_id;
         if let Some(previous) = previous {
             self.windows.remove(&previous);
         }
-        self.windows.insert(id, ServerWindow { deployment, name });
+        self.windows.insert(
+            id,
+            ServerWindow {
+                deployment,
+                name,
+                titlebar_hidden,
+            },
+        );
         self.generation += 1;
         self.pending = true;
         Ok((id, previous))
@@ -251,6 +259,9 @@ mod tests {
         let (mut host, directory) = fixture("window-reload");
         let a = open(&mut host, "https://a.test/", None);
         let b = open(&mut host, "https://b.test/", None);
+        assert!(!host.windows[&a].titlebar_hidden);
+        host.windows.get_mut(&a).unwrap().titlebar_hidden = true;
+        assert!(!host.windows[&b].titlebar_hidden);
         assert!(host.request_chooser(Some(a), ChooserAction::Reload));
         let revision = host.generation;
         let a_url = Deployment::parse("https://a.test/").unwrap();
@@ -270,6 +281,8 @@ mod tests {
         assert!(host.windows.contains_key(&b));
         assert!(!host.windows.contains_key(&a));
         assert!(host.allows_navigation(replacement, a_url.url()));
+        assert!(host.windows[&replacement].titlebar_hidden);
+        assert!(!host.windows[&b].titlebar_hidden);
         assert!(!host.request_chooser(Some(b), ChooserAction::Open));
         assert!(host.begin(revision, a_url, None, true).is_err());
         drop(host);
@@ -328,6 +341,7 @@ mod tests {
         let window = ServerWindow {
             deployment: Deployment::parse("https://a.example.com:8443/tools/garcon/").unwrap(),
             name: None,
+            titlebar_hidden: false,
         };
         assert_eq!(window.title(), "a.example.com \u{2014} Garcon");
     }

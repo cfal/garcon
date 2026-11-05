@@ -1,9 +1,12 @@
+import type { NativeTitlebar } from './titlebar';
+
 export interface NativeServerChooser {
 	requestServerChooser(): void;
 }
 
 interface NativeHost extends NativeServerChooser {
 	readonly version: 1;
+	readonly titlebar?: NativeTitlebar;
 }
 
 declare global {

@@ -212,8 +212,16 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   is still open, otherwise to another server window.
 - Linux uses a compact, theme-aware GTK titlebar with native window controls and
   an **Open Server** icon for pointer-accessible recovery. Windows/macOS retain
-  their OS titlebars; no frameless window or remote window-control commands are
-  introduced. Titlebar dimensions still respect the system theme and scaling.
+  their OS titlebars. Titlebar dimensions respect the system theme and scaling.
+- On desktop, the sidebar menu separates native actions from **Settings** and
+  includes a **Hide titlebar** checkbox below **Open Server**. It hides the current
+  server window's entire titlebar, including the drag area and window controls;
+  unchecking restores them. Other windows are unaffected. The setting survives
+  page and native reloads, but new windows and app restarts start with a titlebar.
+  The native chooser always keeps its titlebar, and host recovery shortcuts remain
+  available while server-window controls are hidden. The capability is absent on
+  mobile and in ordinary browsers. Only two fixed, source-window-bound titlebar
+  requests are admitted; remote pages gain no general Tauri command permissions.
 - After its first authenticated WebSocket connection, a native-capable web page
   briefly shows **Connected to &lt;server&gt;**, including the deployment mount.
   Failed connection attempts do not show success, and routine reconnects do not

@@ -11,6 +11,8 @@ it('omits the native action in browsers', async () => {
 	render(Host);
 	await fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
 	expect(screen.queryByText('Open Server')).toBeNull();
+	expect(screen.queryByRole('separator')).toBeNull();
+	expect(screen.queryByRole('menuitemcheckbox', { name: 'Hide titlebar' })).toBeNull();
 });
 
 it('requests the chooser without navigating or logging out', async () => {
@@ -18,7 +20,12 @@ it('requests the chooser without navigating or logging out', async () => {
 	window.__GARCON_NATIVE__ = { version: 1, requestServerChooser };
 	render(Host);
 	await fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-	await fireEvent.click(await screen.findByRole('menuitem', { name: 'Open Server' }));
+	const open = await screen.findByRole('menuitem', { name: 'Open Server' });
+	const separator = screen.getByRole('separator');
+	expect(open.previousElementSibling).toBe(separator);
+	expect(separator.previousElementSibling).toBe(screen.getByRole('menuitem', { name: 'Settings' }));
+	expect(screen.queryByRole('menuitemcheckbox', { name: 'Hide titlebar' })).toBeNull();
+	await fireEvent.click(open);
 	expect(requestServerChooser).toHaveBeenCalledTimes(1);
 });
 
