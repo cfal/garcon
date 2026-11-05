@@ -80,6 +80,7 @@ export interface RemoteSessions {
 
 interface SessionWaiter {
   readonly lane: RpcLane;
+  readonly instanceId: string | undefined;
   resolve(backing: RemoteSessionBacking): void;
   reject(error: Error): void;
 }
@@ -298,6 +299,11 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     const initial = !this.#initialized;
     // A restarted worker holds none of the previous bindings or native turns.
     if (this.#instanceId !== null && this.#instanceId !== info.instanceId && this.#availability === 'reconnecting') {
+      for (const waiter of [...this.#waiters]) {
+        if (waiter.instanceId !== undefined && waiter.instanceId !== info.instanceId) {
+          waiter.reject(staleInstance());
+        }
+      }
       this.#abandonBindings();
     }
     const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
@@ -421,7 +427,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   async #acquire(lane: RpcLane, options: HeldCallOptions = {}): Promise<HeldSession> {
     const session = await this.#holdSession(lane, options);
     if (options.instanceId !== undefined && session.backing.info.instanceId !== options.instanceId) {
-      throw new AgentCallError('not-dispatched', 'The executor restarted before the request was sent.');
+      throw staleInstance();
     }
     return session;
   }
@@ -440,7 +446,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     const started = performance.now();
     const release = this.#admission.outgoing.acquire(lane);
     try {
-      const backing = await this.#nextSession(lane, options.signal, Number.isFinite(waitMs) ? waitMs : null);
+      const backing = await this.#nextSession(lane, options.signal, Number.isFinite(waitMs) ? waitMs : null, options.instanceId);
       return { backing, timeoutMs: timeoutMs === null ? null : Math.max(reserved, Math.ceil(timeoutMs - (performance.now() - started))) };
     } finally { release(); }
   }
@@ -466,7 +472,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     }
   }
 
-  #nextSession(lane: RpcLane, signal: AbortSignal | undefined, timeoutMs: number | null): Promise<RemoteSessionBacking> {
+  #nextSession(lane: RpcLane, signal: AbortSignal | undefined, timeoutMs: number | null, instanceId: string | undefined): Promise<RemoteSessionBacking> {
     const next = Promise.withResolvers<RemoteSessionBacking>();
     const finish = () => {
       this.#waiters.delete(waiter);
@@ -474,7 +480,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       signal?.removeEventListener('abort', cancel);
     };
     const waiter: SessionWaiter = {
-      lane,
+      lane, instanceId,
       resolve: (backing) => { finish(); next.resolve(backing); },
       reject: (error) => { finish(); next.reject(error); },
     };
@@ -498,4 +504,8 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
 
 function heldCallCancelled(): AgentCallError {
   return new AgentCallError('not-dispatched', 'The request was cancelled while the executor reconnected.');
+}
+
+function staleInstance(): AgentCallError {
+  return new AgentCallError('not-dispatched', 'The executor restarted before the request was sent.', 'STALE_RESOURCE');
 }

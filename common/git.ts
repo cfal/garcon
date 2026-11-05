@@ -1,5 +1,5 @@
 import type { GitRefKind, GitRefsResponse, GitRefSort } from './git-refs.js';
-import type { CreateManagedWorktreeRequest, InspectManagedWorktreeRequest, ManagedWorktreeSnapshot } from './git-managed-worktrees.js';
+import type { CreateManagedWorktreeRequest, InspectManagedWorktreeRequest, RemoveManagedWorktreeRequest, ManagedWorktreeSnapshot } from './git-managed-worktrees.js';
 import type { CommitIdentity, ExactRefResult, ExactRemoteRefRequest, InspectCommitRequest, IntegrateCommitsRequest, IntegrateCommitsResult, PushExactRefRequest } from './git-delivery.js';
 
 export type { GitRefKind, GitRefOption, GitRefsResponse, GitRefSort } from './git-refs.js';
@@ -847,6 +847,7 @@ export interface GitRequests {
   removeWorktree: RemoveWorktreeOptions;
   createManagedWorktree: CreateManagedWorktreeRequest;
   inspectManagedWorktree: InspectManagedWorktreeRequest;
+  removeManagedWorktree: RemoveManagedWorktreeRequest;
   inspectCommit: InspectCommitRequest;
   fetchExactRef: ExactRemoteRefRequest;
   pushExactRef: PushExactRefRequest;
@@ -901,6 +902,7 @@ export interface GitResults {
   removeWorktree: GitMutationResult;
   createManagedWorktree: { success: true; managed: ManagedWorktreeSnapshot };
   inspectManagedWorktree: { managed: ManagedWorktreeSnapshot | null };
+  removeManagedWorktree: { success: true; removed: ManagedWorktreeSnapshot };
   inspectCommit: CommitIdentity;
   fetchExactRef: ExactRefResult;
   pushExactRef: ExactRefResult;

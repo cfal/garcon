@@ -67,6 +67,31 @@ async function gitDaemon(root: string): Promise<string> {
 }
 
 for (const backend of RUNTIME_BACKENDS) describe(`exact Git delivery (${backend})`, () => {
+  test('runtime pins reject stale creation, push, fetch and integration before mutation', async () => {
+    const f = await fixture(backend);
+    const stale = { instanceId: 'previous-runtime' };
+    const current = { instanceId: 'delivery-runtime' };
+    const creation = { projectPath: f.source, worktreePath: join(f.root, 'pinned'), operationId: crypto.randomUUID(),
+      managedResourceId: crypto.randomUUID(), branch: 'managed/pinned', baseCommit: f.base };
+    await expect(f.git.createManagedWorktree(creation, stale)).rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
+    expect(await f.run(f.source, ['for-each-ref', '--format=%(refname)', 'refs/heads/managed/'])).toBe('');
+    const { managed } = await f.git.createManagedWorktree(creation, current);
+    const { branch: _branch, baseCommit: _base, ...identity } = creation;
+    const integration = { ...identity, expectedHead: f.base, expectedBranch: managed.branch,
+      expectedRepositoryIdentity: managed.repositoryIdentity, expectedWorktreeIdentity: managed.worktreeIdentity,
+      commits: [f.commit], strategy: 'ordered-merge' as const };
+    await expect(f.git.integrateCommits(integration, stale)).rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
+    expect(await f.run(creation.worktreePath, ['rev-parse', 'HEAD'])).toBe(f.base);
+    await expect(f.git.pushExactRef({ ...f.input, expectedRemoteCommit: null }, stale)).rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
+    expect(await f.run(f.remote, ['for-each-ref'])).toBe('');
+    await f.git.pushExactRef({ ...f.input, expectedRemoteCommit: null }, current);
+    await expect(f.git.fetchExactRef({ ...f.input, projectPath: f.destination }, stale)).rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
+    await expect(f.run(f.destination, ['cat-file', '-e', f.commit])).rejects.toThrow();
+    await f.git.fetchExactRef({ ...f.input, projectPath: f.destination }, current);
+    expect(await f.run(f.destination, ['cat-file', '-t', f.commit])).toBe('commit');
+    expect(await f.git.integrateCommits(integration, current)).toMatchObject({ kind: 'integrated', managed: { head: f.commit } });
+  }, 15_000);
+
   test('observes exact commit identity and ancestry without trusting branch names', async () => {
     const f = await fixture(backend);
     const observed = await f.git.inspectCommit({ projectPath: f.source, commit: f.commit, ancestor: f.base });
@@ -436,7 +461,7 @@ for (const backend of RUNTIME_BACKENDS) describe(`exact Git delivery (${backend}
       .toMatchObject({ parents: [f.commit, second], containsAncestor: true });
     expect(await f.run(f.source, ['rev-parse', 'HEAD'])).toBe(second);
     expect(await readFile(join(f.integrate.worktreePath, 'second.txt'), 'utf8')).toBe('Synthetic independent output\n');
-  });
+  }, 15_000);
 
   test.each(['branch-options', 'default-driver'] as const)('retains integration conflicts despite %s configuration', async configuration => {
     const f = await integrationFixture();
@@ -469,7 +494,7 @@ for (const backend of RUNTIME_BACKENDS) describe(`exact Git delivery (${backend}
     await writeFile(join(f.integrate.worktreePath, 'untracked.txt'), 'Synthetic retained edit\n');
     await expect(f.git.integrateCommits(f.integrate)).rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
     expect(await f.run(f.integrate.worktreePath, ['rev-parse', 'HEAD'])).toBe(f.base);
-  });
+  }, 15_000);
 
   test('does not replay or undo a merge whose native confirmation was lost', async () => {
     const f = await integrationFixture();

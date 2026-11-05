@@ -17,6 +17,7 @@ export interface FilesServiceOptions {
   readonly projectBasePath: string;
   readonly homeDirectory?: string;
   readonly assertAvailable?: (options?: ExecutorCallOptions) => void;
+  readonly reserveMutation?: () => () => void;
   readonly resolveSaveTarget?: typeof resolveRealWithinBase;
   readonly readDirectory?: typeof readFileDirectory;
   /**
@@ -112,7 +113,8 @@ export class FilesService implements ExecutionFilesService {
   }
 
   async save(request: Parameters<ExecutionFilesService['save']>[0], options?: ExecutorCallOptions) {
-    return this.#runContent(options, async () => {
+    const release = this.options.reserveMutation?.();
+    try { return await this.#runContent(options, async () => {
       this.#validateTarget(request);
       if (!parseSaveTextRequest(request)) throw new ValidationDomainError('Content, expectedRevision, and conflictResolution are required');
       if (Buffer.byteLength(request.content) > MAX_FILE_SAVE_BYTES) throw new FileTooLargeError(MAX_FILE_SAVE_BYTES);
@@ -130,11 +132,12 @@ export class FilesService implements ExecutionFilesService {
         const revision = await writeVersionedTextFile(target, request.content);
         return { success: true as const, path: toExecutorPath(target), message: 'File saved successfully', revision };
       });
-    });
+    }); } finally { release?.(); }
   }
 
   async createDirectory(request: Parameters<ExecutionFilesService['createDirectory']>[0], options?: ExecutorCallOptions) {
-    return this.#run(options, async () => {
+    const release = this.options.reserveMutation?.();
+    try { return await this.#run(options, async () => {
       const descriptorPaths = this.#descriptorPaths;
       if (descriptorPaths === null) throw directoryCreationUnsupported();
       const problem = typeof request.name === 'string' ? directoryNameProblem(request.name) : 'empty';
@@ -145,7 +148,7 @@ export class FilesService implements ExecutionFilesService {
       // The name is one segment, so the target stays inside its canonical parent.
       const target = await createChildDirectory(descriptorPaths, directory, request.name).catch((error: unknown) => { throw directoryCreationError(error); });
       return { name: request.name, path: toExecutorPath(target), type: 'directory' as const };
-    });
+    }); } finally { release?.(); }
   }
 
   async #directory(input?: string) {

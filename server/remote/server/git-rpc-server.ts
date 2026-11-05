@@ -35,6 +35,9 @@ export class GitRpcServer {
   async #gh(method: keyof GhRequests, input: unknown, options: ExecutorCallOptions): Promise<unknown> {
     const gh = await this.executor.getGhService(options);
     switch (method) {
+      case 'getPublicationTarget': validateGhRequest(method, input); return gh.getPublicationTarget(input, options);
+      case 'createPullRequest': validateGhRequest(method, input); return gh.createPullRequest(input, options);
+      case 'findPullRequests': validateGhRequest(method, input); return gh.findPullRequests(input, options);
       case 'getStatus': validateGhRequest(method, input); return gh.getStatus(options);
       case 'listPullRequests': validateGhRequest(method, input); return gh.listPullRequests(input, options);
       case 'getPullRequest': validateGhRequest(method, input); return gh.getPullRequest(input, options);

@@ -19,7 +19,7 @@ Use the executor's paired Noise lanes: `git.getQuickSummary` stays on primary fo
 
 Reuse the existing Git implementation. Do not build a second Git engine or make the controller issue primitive subprocess commands to a worker. Multi-command operations, locks, direct filesystem reads, temporary indexes, and review documents all belong beside the repository.
 
-No repository synchronization, cloning workflow, cross-executor worktree migration, SSH-key forwarding, credential synchronization, GitHub writes beyond review comments, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the executor. Remoting is not an OS sandbox.
+No general repository synchronization, cloning workflow, cross-executor worktree migration, SSH-key forwarding, credential synchronization, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Exact commit transfer and approved PR creation are narrow typed operations described below, not arbitrary shell or GitHub writes. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the executor. Remoting is not an OS sandbox.
 
 ## Managed Worktree Primitives
 
@@ -54,8 +54,19 @@ An incomplete marker is uncertain, not proof of ownership or non-execution.
 Missing markers return `managed: null`, which is not retry authority. Failed or
 canceled creation retains its marker and never compensates by deleting a branch
 or directory. A new runtime may inspect confirmed ownership without recreating
-the worktree. Identity-conditioned adoption and writer-guarded removal are not
-yet provided; ordinary path-only removal is not a substitute.
+the worktree. Explicit controller recovery can adopt independently inspected
+immutable output without reconstructing the old execution lease.
+
+`removeManagedWorktree` requires the original creation operation ID and marker,
+exact repository/worktree identity, branch and expected current HEAD. It rechecks
+cleanliness under repository coordination, then uses non-force Git removal while
+retaining the branch and marker. Ignored files are not dirty and may be removed.
+The runtime brackets removal with executor-wide exclusion of native admissions,
+known uncertain native work, running provider sessions and PTYs. New native
+admissions, PTY creation and Files mutations cannot enter until removal settles;
+in-flight Files mutations retain exclusion through settlement. External writers
+remain trusted and outside this exclusion. A lost
+reply is unknown; ordinary path-only removal is not a recovery substitute.
 
 ## Exact Delivery Primitives
 
@@ -109,6 +120,13 @@ resolutions or effects. Integration rejects branch names with `=` as creation do
 Successful integration verifies all input commits in the
 resulting lineage. These primitives share existing Git coordination and bulk
 RPC continuity; they do not schedule transfers or authorize publication.
+
+Git service calls may supply `GitCallOptions.instanceId` to pin a previously
+observed runtime. Local admission checks the runtime instance; remote admission
+checks the authenticated session instance immediately before sending. A mismatch
+rejects as `not-dispatched` with `STALE_RESOURCE`, without submitting to the replacement runtime.
+The pin is client-side call context, not an RPC payload field. Lost replies after
+dispatch retain the existing unknown-outcome and journal-continuity rules.
 
 ## Original Behavior
 

@@ -89,6 +89,7 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
     && typeof v.ref === 'string' && v.ref.startsWith('refs/');
   if (method === 'createManagedWorktree') return v.success === true && isManagedWorktreeSnapshot(v.managed);
   if (method === 'inspectManagedWorktree') return v.managed === null || isManagedWorktreeSnapshot(v.managed);
+  if (method === 'removeManagedWorktree') return v.success === true && isManagedWorktreeSnapshot(v.removed) && v.removed.dirty === false;
   if (isGitMutation(method)) {
     if (!shape(v, { success: oneOf(true), output: optional(str), message: optional(str), outputTruncated: optional(bool), worktreePath: optional(str) })) return false;
     return method !== 'commit' || shape(v, { commitScope: oneOf('selected-files', 'whole-index'), indexSynchronized: bool });
@@ -163,7 +164,15 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
     reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
   const state = oneOf('open', 'closed', 'merged');
   let valid: boolean;
-  if (method === 'getStatus') {
+  const published = (v: unknown) => shape(v, { repository: isGhRepositoryIdentity, actor: isGhActorIdentity, number: num, url: str,
+    state, baseBranch: str, baseCommit: isGitObjectId, headBranch: str, headCommit: isGitObjectId, title: str, body: str, draft: bool });
+  if (method === 'getPublicationTarget') {
+    valid = shape(value, { repository: isGhRepositoryIdentity, actor: isGhActorIdentity, baseCommit: isGitObjectId });
+  } else if (method === 'createPullRequest') {
+    valid = published(value);
+  } else if (method === 'findPullRequests') {
+    valid = shape(value, { repository: isGhRepositoryIdentity, actor: isGhActorIdentity, pulls: array(published, 100) });
+  } else if (method === 'getStatus') {
     valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
   } else if (method === 'listPullRequests') {
     valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none'),

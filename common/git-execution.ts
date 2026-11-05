@@ -34,7 +34,7 @@ export type ExecutionGhResults = { [K in keyof GhResults]: GhResults[K] & GitExe
 export const GIT_MUTATIONS = [
   'initialCommit', 'commit', 'checkout', 'createBranch', 'fetch', 'pull', 'push', 'discard', 'deleteUntracked',
   'stageSelection', 'stageHunk', 'acceptConflictSide', 'markConflictResolved', 'createStash', 'applyStash',
-  'popStash', 'dropStash', 'createWorktree', 'removeWorktree', 'createManagedWorktree', 'commitIndex', 'stagePaths', 'revertCommit',
+  'popStash', 'dropStash', 'createWorktree', 'removeWorktree', 'createManagedWorktree', 'removeManagedWorktree', 'commitIndex', 'stagePaths', 'revertCommit',
   'fetchExactRef', 'pushExactRef', 'integrateCommits',
 ] as const satisfies readonly GitMethod[];
 
