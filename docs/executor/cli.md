@@ -1,5 +1,11 @@
 # CLI Access Through Executors
 
+## Workflow Authority
+
+Workflow catalog/detail/diagram/history reads, exact plan/gate/attempt inspection, and draft create/edit are forwarded over bulk. Detail is a bounded overview; full immutable plans and per-attempt evidence use the dedicated inspection routes. Workflow pause and Stop are bounded primary-lane control requests; actual worker stops settle separately. Payload parsers, encoded limits, storage identity, operation recovery, and selected-controller fencing are identical to direct HTTP. Plan files/stdin remain on the CLI host.
+
+Activation, approval, resume, retry, resolve, clear-hold, cancel, archive, recheck-publication, and cleanup have no executor gateway route. A delegated executor or controller-local capability cannot approve its own work. Current authenticated browser authority is required, even when the workflow feature is disabled for recovery. Unknown external effects are never replayed by the gateway. Protocol revision 47 includes the workflow detail resource/operation views and operator-adopted artifact provenance; controller and worker must be upgraded together.
+
 Current worker startup and credential handling are documented in
 [Executor Connections](../cli.md#executor-connections): `GARCON_CONTROLLER_URL`
 replaces `--connect`; TLS listeners require a certificate/private-key pair or

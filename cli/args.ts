@@ -83,6 +83,7 @@ import { SHARED_PARSE_OPTIONS } from './shared-options.js';
 import { TICKET_PARSE_OPTIONS, TICKET_STRING_OPTIONS, parseTicketCliCommand, type TicketCliCommand } from './ticket-args.js';
 import { EXECUTOR_PARSE_OPTIONS, EXECUTOR_STRING_OPTIONS, parseExecutorCliCommand, type ExecutorCliCommand } from './executor-args.js';
 import { parseScheduleCliCommand, type ScheduleCliCommand } from './schedule-args.js';
+import { WORKFLOW_PARSE_OPTIONS, parseWorkflowCliCommand, type WorkflowCliCommand } from './workflow-args.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
   ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
@@ -91,6 +92,7 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 
 export const CLI_HELP = `Usage:
   garcon-cli [connection options] schedule <list|show|history|create|update|enable|disable|delete> [schedule-id] [options]
+  garcon-cli [connection options] workflow <list|show|diagram|attempts|activity|artifacts|create|plan|pause|stop|operation|retry-operation> [id] [options]
   garcon-cli [connection options] executor <list|show|create|update|enable|disable|delete|connection|wait|providers|assign-provider|unassign-provider> [executor-id] [options]
   garcon-cli [connection options] ticket <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [ticket-id] [options]
   garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
@@ -148,6 +150,21 @@ Schedule management:
   New-chat targets require explicit executorId and an absolute executor-local projectPath.
   Use --definition - for bounded UTF-8 stdin. Updates replace one definition and preserve its pause.
   No automatic mutation retries; inspect schedules after an unknown outcome. Pausing does not stop claimed work.
+
+Workflow management:
+  workflow create --plan <local-plan.json> [--operation-id <id>]
+  workflow plan <id> --file <local-plan.json> --expected-plan-revision <n>
+  workflow show <id> [--json]
+  workflow inspect-plan <id> --plan-revision <n> [--json]
+  workflow attempt <id> --attempt-id <attempt-id> [--json]
+  workflow gate <id> --gate-id <gate-id> [--json]
+  workflow diagram <id> --plan-revision <n>
+  workflow pause|stop <id> [--operation-id <id>]
+  workflow operation <operation-id> [--json]
+  workflow retry-operation --payload <private-recovery.json> --operation-id <id>
+  list, attempts, activity and artifacts accept --limit and --cursor.
+  Activation, approval, resume, retry and resolution require the authenticated browser.
+  Mutation identities and private recovery paths are printed before submission; no automatic replay.
   History retains the latest ${SCHEDULED_PROMPT_RUN_LOG_LIMIT} workspace dispatches in memory (default limit 50).
 
 Executor management:
@@ -548,10 +565,12 @@ export type ParsedCliCommand =
   | TicketCliCommand
   | ExecutorCliCommand
   | ScheduleCliCommand
+  | WorkflowCliCommand
   | StartAsyncCliInvocation
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
+  ...Object.keys(WORKFLOW_PARSE_OPTIONS),
   'definition',
   ...TICKET_STRING_OPTIONS,
   ...EXECUTOR_STRING_OPTIONS,
@@ -1539,6 +1558,7 @@ export function parseCliArgs(
         ...SHARED_PARSE_OPTIONS,
         ...TICKET_PARSE_OPTIONS,
         ...EXECUTOR_PARSE_OPTIONS,
+        ...WORKFLOW_PARSE_OPTIONS,
         definition: { type: 'string' },
         'config-dir': { type: 'string' },
         runtime: { type: 'string' },
@@ -1643,6 +1663,7 @@ export function parseCliArgs(
   if (commandName === 'ticket') return parseTicketCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'executor') return parseExecutorCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'schedule') return parseScheduleCliCommand(parsed.positionals, values, connection);
+  if (commandName === 'workflow') return parseWorkflowCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'fork' || commandName === 'fork-async') {
     return parseFork(commandName, parsed, values, connection);
