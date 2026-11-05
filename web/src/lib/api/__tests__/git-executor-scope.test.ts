@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGitStatus, gitCommitIndex, gitStageHunk } from '../git.js';
 import { getGitReviewDocumentFileBodies } from '../git-review-documents.js';
 import { getPullRequest } from '../pull-requests.js';
+import { gitReviewWorker } from '$lib/git/review/git-review-worker-client.js';
+import { createGitPatchIndex, getGitSplitPatchIndex } from '$lib/git/review/git-patch-index.js';
 
 const target = { executorId: 'remote-executor', projectPath: '/project' };
 const scope = { executorId: target.executorId, instanceId: 'instance-a' };
@@ -13,9 +15,86 @@ beforeEach(() => {
 	fetchMock.mockReset();
 	vi.stubGlobal('fetch', fetchMock);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+});
 
 describe('Git executor response boundaries', () => {
+	it.each(['file.ts', 'constructor', 'toString', '__proto__'])(
+		'indexes %s without changing executor-qualified metadata or selection proof',
+		async (path) => {
+			const patch = '@@ -0,0 +1 @@\n+const synthetic = true;\n';
+			const index = createGitPatchIndex(patch);
+			const run = vi.spyOn(gitReviewWorker, 'run').mockResolvedValue({
+				kind: 'index',
+				index: index.toData(),
+				split: getGitSplitPatchIndex(index).toData(),
+			});
+			fetchMock.mockResolvedValue(
+				response({
+					...scope,
+					documentId: document.documentId,
+					status: 'ready',
+					errors: {},
+					files: {
+						[path]: {
+							path,
+							bodyFingerprint: 'synthetic',
+							patchDigest: 'a'.repeat(64),
+							bodyState: 'loaded',
+							category: 'normal',
+							isBinary: false,
+							isTooLarge: false,
+							patch,
+							patchBytes: patch.length,
+							renderedRowCount: 2,
+						},
+					},
+				}),
+			);
+			const result = await getGitReviewDocumentFileBodies(target, document, [path], 'visible');
+			expect(result.documentId).toContain('remote-executor');
+			if (result.status !== 'ready') throw new Error('Expected ready result');
+			expect(Object.hasOwn(result.files, path)).toBe(true);
+			expect(result.files[path].patchDigest).toBe('a'.repeat(64));
+			expect(result.files[path].patchIndex?.rowAt(1).text).toBe('const synthetic = true;');
+			expect(run).toHaveBeenCalledOnce();
+		},
+	);
+
+	it('surfaces indexing failures as per-file errors, not empty loaded bodies', async () => {
+		vi.spyOn(gitReviewWorker, 'run').mockRejectedValue(new Error('Synthetic indexing deadline'));
+		fetchMock.mockResolvedValue(
+			response({
+				...scope,
+				documentId: document.documentId,
+				status: 'ready',
+				errors: {},
+				files: {
+					'file.ts': {
+						path: 'file.ts',
+						bodyFingerprint: 'synthetic',
+						bodyState: 'loaded',
+						category: 'normal',
+						isBinary: false,
+						isTooLarge: false,
+						patch: '@@ -0,0 +1 @@\n+synthetic\n',
+						patchBytes: 32,
+						renderedRowCount: 2,
+					},
+				},
+			}),
+		);
+		const result = await getGitReviewDocumentFileBodies(target, document, ['file.ts'], 'visible');
+		if (result.status !== 'ready') throw new Error('Expected ready result');
+		expect(result.files['file.ts']).toMatchObject({
+			bodyState: 'error',
+			patch: null,
+			patchIndex: null,
+			error: 'Synthetic indexing deadline',
+		});
+	});
 	it('rejects a Local response to an explicit remote read', async () => {
 		fetchMock.mockResolvedValue(response({ ...scope, executorId: 'local' }));
 		await expect(getGitStatus(target)).rejects.toMatchObject({ errorCode: 'GIT_INVALID_RESULT' });
@@ -89,7 +168,13 @@ describe('Git executor response boundaries', () => {
 	});
 
 	it('qualifies PR rendering identities by executor, instance, project, and GitHub repository', async () => {
-		const payload = { ...scope, number: 1, updatedAt: '2026-01-01', fileBodies: {} };
+		const payload = {
+			...scope,
+			number: 1,
+			headRefOid: 'a'.repeat(40),
+			updatedAt: '2026-01-01',
+			fileBodies: {},
+		};
 		fetchMock.mockImplementation(async () => response(payload));
 		const prTarget = { ...target, repository: { host: 'github.com', nameWithOwner: 'acme/app' } };
 		const first = await getPullRequest(prTarget, 1);
@@ -101,5 +186,15 @@ describe('Git executor response boundaries', () => {
 		expect(first.documentId).not.toBe(second.documentId);
 		expect(first.documentId).not.toBe(otherHost.documentId);
 		expect(first.documentId).toContain('remote-executor');
+		expect(first.reviewId).not.toBe(second.reviewId);
+		expect(first.reviewId).not.toBe(otherHost.reviewId);
+		fetchMock.mockResolvedValue(response({ ...payload, updatedAt: '2026-01-02' }));
+		const refreshed = await getPullRequest(prTarget, 1);
+		expect(refreshed.reviewId).toBe(first.reviewId);
+		expect(refreshed.documentId).not.toBe(first.documentId);
+		fetchMock.mockResolvedValue(response({ ...payload, headRefOid: 'b'.repeat(40) }));
+		const replacedHead = await getPullRequest(prTarget, 1);
+		expect(replacedHead.reviewId).toBe(first.reviewId);
+		expect(replacedHead.documentId).not.toBe(first.documentId);
 	});
 });

@@ -10,7 +10,40 @@ export type GitReviewPerformancePhase =
 	| 'syntax-reconstruct'
 	| 'syntax-language-load'
 	| 'syntax-parse'
+	| 'syntax-transfer'
 	| 'syntax-project';
+
+export interface GitReviewWorkerTiming {
+	phase: string;
+	durationMs: number;
+}
+
+export function takeGitReviewWorkerTimings(): GitReviewWorkerTiming[] {
+	const timing = browserPerformance();
+	if (!timing) return [];
+	const entries = timing
+		.getEntriesByType('measure')
+		.filter((entry) => entry.name.startsWith(MEASURE_PREFIX));
+	for (const entry of entries) timing.clearMeasures(entry.name);
+	return entries.map((entry) => ({
+		phase: entry.name.slice(MEASURE_PREFIX.length),
+		durationMs: entry.duration,
+	}));
+}
+
+export function recordGitReviewWorkerTimings(timings: readonly GitReviewWorkerTiming[]): void {
+	const timing = browserPerformance();
+	if (!timing) return;
+	for (const { phase, durationMs } of timings) {
+		const name = `${MEASURE_PREFIX}worker.${phase}`;
+		try {
+			timing.clearMeasures(name);
+			timing.measure(name, { start: timing.now(), duration: durationMs });
+		} catch {
+			/* Telemetry must never affect publication. */
+		}
+	}
+}
 
 export interface GitReviewPerformanceSpan {
 	phase: GitReviewPerformancePhase;
@@ -86,14 +119,10 @@ export function registerGitReviewDocument(
 	}
 }
 
-export function markGitReviewBodyReady(
-	documentId: string,
-	purpose: 'visible' | 'prefetch',
-): void {
+export function markGitReviewBodyReady(documentId: string, purpose: 'visible' | 'prefetch'): void {
 	const document = documents.get(documentId);
 	if (!document) return;
-	const key =
-		purpose === 'visible' ? 'visibleBodyReadyMeasured' : 'prefetchBodyReadyMeasured';
+	const key = purpose === 'visible' ? 'visibleBodyReadyMeasured' : 'prefetchBodyReadyMeasured';
 	if (document[key]) return;
 	document[key] = true;
 	markDocumentMilestone(documentId, `${purpose}-body-ready`);
@@ -135,9 +164,6 @@ function markDocumentMilestone(documentId: string, milestone: string): void {
 	}
 }
 
-function pruneCompletedDocument(
-	documentId: string,
-	document: GitReviewDocumentPerformance,
-): void {
+function pruneCompletedDocument(documentId: string, document: GitReviewDocumentPerformance): void {
 	if (document.firstRowMeasured && document.viewportReadyMeasured) documents.delete(documentId);
 }

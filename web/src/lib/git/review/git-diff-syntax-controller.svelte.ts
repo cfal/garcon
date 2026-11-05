@@ -54,25 +54,13 @@ export interface GitDiffSyntaxCacheLimits {
 
 const DEFAULT_CACHE_LIMITS: GitDiffSyntaxCacheLimits = Object.freeze({
 	files: 64,
-	characters: 2_000_000,
-	segments: 100_000,
+	characters: 4_000_000,
+	segments: 200_000,
 });
-
-type GitDiffSyntaxHighlighterModule = typeof import('./git-diff-syntax-highlighter.js');
-
-let highlighterModulePromise: Promise<GitDiffSyntaxHighlighterModule> | null = null;
-
-function loadGitDiffSyntaxHighlighter(): Promise<GitDiffSyntaxHighlighterModule> {
-	highlighterModulePromise ??= import('./git-diff-syntax-highlighter.js').catch((error) => {
-		highlighterModulePromise = null;
-		throw error;
-	});
-	return highlighterModulePromise;
-}
 
 const DEFAULT_DEPENDENCIES = {
 	waitForWorkSlot: waitForGitDiffSyntaxWorkSlot,
-	loadHighlighter: loadGitDiffSyntaxHighlighter,
+	loadHighlighter: () => import('./git-review-worker-operations.js'),
 } satisfies GitDiffSyntaxControllerDependencies;
 
 export class GitDiffSyntaxController {
@@ -168,6 +156,7 @@ export class GitDiffSyntaxController {
 	}
 
 	private reconcileDemand(): void {
+		if (this.activeJob && !this.isDemanded(this.activeJob.filePath)) this.activeAbort?.abort();
 		this.queue = [];
 		this.queuedKeys.clear();
 		for (const filePath of this.navigationPaths) this.enqueue(filePath);
@@ -243,6 +232,10 @@ export class GitDiffSyntaxController {
 				} finally {
 					this.activeJob = null;
 					this.activeAbort = null;
+				}
+				if (abort.signal.aborted) {
+					if (this.isCurrent(job) && this.isDemanded(job.filePath)) this.enqueue(job.filePath);
+					continue;
 				}
 				if (attempt.status === 'cancelled' || !this.isCurrent(job)) continue;
 

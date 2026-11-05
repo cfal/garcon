@@ -7,8 +7,6 @@ import type {
 	PullRequestListResult,
 } from '$shared/gh';
 import { ghOperationTimeoutMs } from '$shared/git-execution';
-import type { GitReviewFileBody } from './git.js';
-import { createIndexedGitReviewFileBody } from '$lib/git/review/git-review-body-index.js';
 export type {
 	PullRequestState,
 	PullRequestChecksState,
@@ -23,9 +21,9 @@ export type {
 	PullRequestCheck,
 } from '$shared/gh';
 
-export interface PullRequestDetail extends Omit<PullRequestDetailWire, 'fileBodies'> {
+export interface PullRequestDetail extends PullRequestDetailWire {
+	reviewId: string;
 	documentId: string;
-	fileBodies: Record<string, GitReviewFileBody>;
 }
 
 export async function getPullRequests(
@@ -54,6 +52,13 @@ export async function getPullRequest(
 	);
 	return {
 		...detail,
+		reviewId: JSON.stringify([
+			target.executorId,
+			target.projectPath,
+			target.repository.host,
+			target.repository.nameWithOwner,
+			detail.number,
+		]),
 		documentId: gitDocumentKey({
 			...detail,
 			documentId: JSON.stringify([
@@ -61,14 +66,9 @@ export async function getPullRequest(
 				target.repository.host,
 				target.repository.nameWithOwner,
 				detail.number,
+				detail.headRefOid,
 				detail.updatedAt,
 			]),
 		}),
-		fileBodies: Object.fromEntries(
-			Object.entries(detail.fileBodies).map(([path, body]) => [
-				path,
-				createIndexedGitReviewFileBody(body),
-			]),
-		),
 	};
 }
