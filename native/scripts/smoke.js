@@ -517,7 +517,7 @@ try {
   await hostShortcutChooser('s', true);
   assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Opened from: ${unreachable}`);
   await Bun.write(resolve(artifacts, 'chooser-recovery.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
-  await connect('http://not-loopback.test/');
+  await connect('ftp://synthetic.test/');
   await until(() => evaluate('return document.querySelector("[role=alert]").textContent.includes("Use HTTPS")'), 'bad URL recovery');
   const recovered = fixture('');
   try {

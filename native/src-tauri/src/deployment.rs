@@ -1,4 +1,4 @@
-use url::{Host, Url};
+use url::Url;
 
 #[derive(Clone, Debug)]
 pub struct Deployment(Url);
@@ -13,17 +13,8 @@ impl Deployment {
             return Err("Enter a valid HTTPS server URL.".into());
         }
         let mut url = Url::parse(input).map_err(|_| "Enter a complete HTTPS server URL.")?;
-        let development_host = matches!(
-            url.host(),
-            Some(Host::Ipv4(_) | Host::Ipv6(_) | Host::Domain("localhost"))
-        );
-        if url.scheme() != "https"
-            && !(allow_development_http && development_host && url.scheme() == "http")
-        {
-            return Err(
-                "Use HTTPS. Development builds also allow HTTP on localhost or an IP address."
-                    .into(),
-            );
+        if url.scheme() != "https" && !(allow_development_http && url.scheme() == "http") {
+            return Err("Use HTTPS. Development builds also allow HTTP.".into());
         }
         if url.host_str().is_none()
             || !url.username().is_empty()
@@ -100,9 +91,13 @@ mod tests {
     }
 
     #[test]
-    fn only_debug_localhost_and_ip_addresses_may_use_http() {
+    fn http_requires_development_mode_for_all_hosts() {
         for host in [
             "localhost",
+            "example.test",
+            "garcon.vpn.test",
+            "garcon",
+            "localhost.example.test",
             "127.0.0.1",
             "[::1]",
             "192.168.1.2",
@@ -118,17 +113,19 @@ mod tests {
             assert!(Deployment::parse(&format!("https://{host}:3001"), false).is_ok());
         }
         for url in [
-            "http://example.test",
-            "http://localhost.example.test",
             "ftp://192.168.1.2",
+            "ftp://example.test",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
         ] {
             assert!(Deployment::parse(url, true).is_err(), "{url}");
+            assert!(Deployment::parse(url, false).is_err(), "{url}");
         }
     }
 
     #[test]
     fn development_http_keeps_url_and_navigation_boundaries() {
-        for host in ["100.64.0.2", "[fd00::2]"] {
+        for host in ["100.64.0.2", "[fd00::2]", "garcon.vpn.test", "garcon"] {
             let origin = format!("http://{host}:3001");
             let deployment = Deployment::parse(&format!("{origin}/garcon"), true).unwrap();
             assert!(deployment.allows(&Url::parse(&format!("{origin}/garcon/chat/123")).unwrap()));
@@ -137,6 +134,8 @@ mod tests {
                 format!("{origin}/garcon-other/"),
                 format!("{origin}/garcon/%2fother"),
                 format!("http://{host}:3002/garcon/"),
+                format!("https://{host}:3001/garcon/"),
+                "http://other.vpn.test:3001/garcon/".into(),
                 "http://203.0.113.8:3001/garcon/".into(),
             ] {
                 assert!(

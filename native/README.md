@@ -55,8 +55,8 @@ Windows for the same origin share login and browser storage, like browser tabs;
 they are not separate accounts. Different origins retain their own storage.
 
 Release builds require HTTPS with valid certificates. Debug builds additionally
-allow HTTP on `localhost` or any IPv4/IPv6 address, including LAN and VPN addresses
-(for example `http://100.64.0.2:3001/`). Other hostnames still require HTTPS.
+allow HTTP on any hostname or IPv4/IPv6 address, including LAN and VPN servers
+(for example `http://garcon.vpn.test:3001/` or `http://100.64.0.2:3001/`).
 HTTP itself is unencrypted; use it only over a trusted network or VPN. A phone's
 localhost is the phone, not the development machine. No release ATS exception,
 certificate bypass, native HTTP bridge, or controller CORS change is introduced.
@@ -148,8 +148,9 @@ sites. The smoke runner honors `CARGO_TARGET_DIR`, `GARCON_NATIVE_SMOKE_TMP`, an
 file-input assignment, multipart upload bytes, shared clipboard copy/paste, focus,
 OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count,
 both initially and after replacing a remote window.
-Set `GARCON_NATIVE_SMOKE_HOST` to an IPv4 address assigned to the test machine to
-exercise development HTTP on a non-loopback interface; fixtures still bind `0.0.0.0`.
+Set `GARCON_NATIVE_SMOKE_HOST` to an IPv4 address assigned to the test machine or
+a hostname resolving to it to exercise development HTTP beyond `localhost`;
+fixtures still bind `0.0.0.0`.
 Open/cancel/reload shortcuts are exercised across eight further reloads
 for each root/mount fixture, requiring a fresh chooser-open event rather than
 accepting stale hidden-page controls. Linux registers its recovery handlers on
