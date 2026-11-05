@@ -6,6 +6,9 @@ import { createStashOperations } from './stashes.js';
 import { createFileHistoryOperations } from './file-history.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
+import { createManagedWorktreeOperations } from './managed-worktrees.js';
+import { createDeliveryOperations } from './delivery.js';
+import { createIntegrationOperations } from './integration.js';
 import { createQuickSummaryOperations } from './quick-summary.js';
 import { GitReviewDocumentRegistry } from './review-document-registry.js';
 import { createReviewDocumentOperations } from './review-document-service.js';
@@ -37,6 +40,9 @@ export function createGitOperations({ assertProjectPathAllowed, reviewRegistry =
     ...stashes,
     ...fileHistory,
     ...worktrees,
+    ...createManagedWorktreeOperations(),
+    ...createDeliveryOperations(),
+    ...createIntegrationOperations(),
     ...quickSummary,
   };
 }

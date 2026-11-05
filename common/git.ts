@@ -1,4 +1,6 @@
 import type { GitRefKind, GitRefsResponse, GitRefSort } from './git-refs.js';
+import type { CreateManagedWorktreeRequest, InspectManagedWorktreeRequest, ManagedWorktreeSnapshot } from './git-managed-worktrees.js';
+import type { CommitIdentity, ExactRefResult, ExactRemoteRefRequest, InspectCommitRequest, IntegrateCommitsRequest, IntegrateCommitsResult, PushExactRefRequest } from './git-delivery.js';
 
 export type { GitRefKind, GitRefOption, GitRefsResponse, GitRefSort } from './git-refs.js';
 export { GIT_REF_RESULT_LIMITS } from './git-refs.js';
@@ -843,6 +845,12 @@ export interface GitRequests {
   getTargetCandidates: ProjectOptions;
   createWorktree: CreateWorktreeOptions;
   removeWorktree: RemoveWorktreeOptions;
+  createManagedWorktree: CreateManagedWorktreeRequest;
+  inspectManagedWorktree: InspectManagedWorktreeRequest;
+  inspectCommit: InspectCommitRequest;
+  fetchExactRef: ExactRemoteRefRequest;
+  pushExactRef: PushExactRefRequest;
+  integrateCommits: IntegrateCommitsRequest;
   commitIndex: CommitIndexOptions;
   stagePaths: StagePathsOptions;
   revertCommit: RevertCommitOptions;
@@ -891,6 +899,12 @@ export interface GitResults {
   getTargetCandidates: { targets: TargetCandidate[] };
   createWorktree: GitMutationResult;
   removeWorktree: GitMutationResult;
+  createManagedWorktree: { success: true; managed: ManagedWorktreeSnapshot };
+  inspectManagedWorktree: { managed: ManagedWorktreeSnapshot | null };
+  inspectCommit: CommitIdentity;
+  fetchExactRef: ExactRefResult;
+  pushExactRef: ExactRefResult;
+  integrateCommits: IntegrateCommitsResult;
   commitIndex: GitMutationResult;
   stagePaths: GitMutationResult;
   revertCommit: GitMutationResult;

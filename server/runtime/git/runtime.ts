@@ -157,13 +157,14 @@ export class GitRuntime {
   async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
     const mutation = isGitMutation(method);
+    const coordinated = mutation || method === 'inspectManagedWorktree';
     try {
       return await this.#admit(method, mutation, options, async (callOptions) => {
         const projectPath = await this.#repository(request.projectPath, callOptions);
         const execute = async () => {
           this.#available(callOptions);
-          // Mutations may have waited for the repository lock since admission.
-          if (mutation && await this.#repository(request.projectPath, callOptions) !== projectPath) throw new GitServiceError('GIT_INVALID_INPUT', 'Repository path changed');
+          // Coordinated operations may have waited for the repository lock since admission.
+          if (coordinated && await this.#repository(request.projectPath, callOptions) !== projectPath) throw new GitServiceError('GIT_INVALID_INPUT', 'Repository path changed');
           const trace: GitCommandTrace[] = [];
           const metrics: GitReviewRouteMetrics = { phases: [] };
           const input = { ...request, projectPath, signal: callOptions.signal, trace, metrics };
@@ -171,7 +172,7 @@ export class GitRuntime {
             if (input.document.executorId !== this.configuration.executorId || input.document.instanceId !== this.configuration.instanceId) throw new GitServiceError('GIT_STALE_DOCUMENT', 'Git review belongs to a different executor or serving instance');
             Object.assign(input, { documentId: input.document.documentId });
           }
-          if ('worktreePath' in input) input.worktreePath = await this.#path(path.resolve(projectPath, toNativePath(input.worktreePath)));
+          if ('worktreePath' in input) Object.assign(input, { worktreePath: await this.#path(path.resolve(projectPath, toNativePath(input.worktreePath))) });
           await this.#validateFiles(method, request, projectPath);
           const result = await this.#operations[method](input as GitOperationOptions<K>);
           const diagnostics = { ...metrics, phases: metrics.phases.slice(0, 128), commands: trace.slice(0, 128).map(({ args, durationMs, stdoutBytes, stderrBytes }) => ({ command: args[0], durationMs, stdoutBytes, stderrBytes })) };
@@ -184,7 +185,7 @@ export class GitRuntime {
           }
           return response;
         };
-        return mutation ? withRepositoryMutation(projectPath, execute) : execute();
+        return coordinated ? withRepositoryMutation(projectPath, execute) : execute();
       });
     } catch (error) {
       const failure = gitServiceError(error);
@@ -308,6 +309,12 @@ export class GitRuntime {
       getTargetCandidates: (request, options) => this.#run('getTargetCandidates', request, options),
       createWorktree: (request, options) => this.#run('createWorktree', request, options),
       removeWorktree: (request, options) => this.#run('removeWorktree', request, options),
+      createManagedWorktree: (request, options) => this.#run('createManagedWorktree', request, options),
+      inspectManagedWorktree: (request, options) => this.#run('inspectManagedWorktree', request, options),
+      inspectCommit: (request, options) => this.#run('inspectCommit', request, options),
+      fetchExactRef: (request, options) => this.#run('fetchExactRef', request, options),
+      pushExactRef: (request, options) => this.#run('pushExactRef', request, options),
+      integrateCommits: (request, options) => this.#run('integrateCommits', request, options),
       commitIndex: (request, options) => this.#run('commitIndex', request, options),
       stagePaths: (request, options) => this.#run('stagePaths', request, options),
       revertCommit: (request, options) => this.#run('revertCommit', request, options),
