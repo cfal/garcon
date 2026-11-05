@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { runExactGit, runExactGitWithStdin } from '../exact-objects.js';
 import {
   assertGitRepository,
   GitOutputLimitError,
@@ -219,6 +220,20 @@ stream.write(output);
     expect(attemptTimes[1] - attemptTimes[0]).toBeGreaterThanOrEqual(90);
     expect(performance.now() - startedAt).toBeGreaterThanOrEqual(150);
     expect(performance.now() - startedAt).toBeLessThan(300);
+  });
+
+  it.each(['argv', 'stdin'])('never retries an exact-delivery %s command after a native lock error', async input => {
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream(''),
+      stderr: textStream("fatal: Unable to create '.git/index.lock': File exists."),
+      exited: Promise.resolve(128),
+      kill: mock(() => undefined),
+    }));
+    const result = input === 'argv' ? runExactGit('/repo', ['merge', 'a'.repeat(40)])
+      : runExactGitWithStdin('/repo', ['update-ref', '--stdin'], 'start\nabort\n');
+    await expect(result).rejects.toMatchObject({ code: 128 });
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0][1].env).toMatchObject({ GIT_NO_REPLACE_OBJECTS: '1', GIT_GRAFT_FILE: os.devNull, GIT_NO_LAZY_FETCH: '1' });
   });
 
   it('keeps the lock retry delay inside the timeout budget', async () => {

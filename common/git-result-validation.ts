@@ -1,4 +1,5 @@
 import { isRecord } from './json.js';
+import { isGitObjectId, isManagedWorktreeSnapshot } from './git-managed-worktrees.js';
 import { GitServiceError } from './git-error.js';
 import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
@@ -80,6 +81,14 @@ export function validateGitResult<K extends GitMethod>(method: K, value: unknown
 }
 
 function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
+  if (method === 'integrateCommits') return v.kind === 'unknown' ? str(v.reason)
+    : isManagedWorktreeSnapshot(v.managed) && (v.kind === 'integrated' || v.kind === 'conflicts' && array(str, 1024)(v.paths));
+  if (method === 'inspectCommit') return shape(v, { commit: isGitObjectId, tree: isGitObjectId,
+    parents: array(isGitObjectId, 256), containsAncestor: nullable(bool) });
+  if (method === 'fetchExactRef' || method === 'pushExactRef') return v.success === true && isGitObjectId(v.commit)
+    && typeof v.ref === 'string' && v.ref.startsWith('refs/');
+  if (method === 'createManagedWorktree') return v.success === true && isManagedWorktreeSnapshot(v.managed);
+  if (method === 'inspectManagedWorktree') return v.managed === null || isManagedWorktreeSnapshot(v.managed);
   if (isGitMutation(method)) {
     if (!shape(v, { success: oneOf(true), output: optional(str), message: optional(str), outputTruncated: optional(bool), worktreePath: optional(str) })) return false;
     return method !== 'commit' || shape(v, { commitScope: oneOf('selected-files', 'whole-index'), indexSynchronized: bool });

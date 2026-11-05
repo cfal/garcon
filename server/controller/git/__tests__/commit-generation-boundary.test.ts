@@ -3,6 +3,7 @@ import { generateCommitMessageForFiles } from '../commit-generation.js';
 import { createGitOperations } from '../../../runtime/git/git-service.js';
 import type { GitAgentRunner } from '../commit-generation-types.js';
 import type { GitOperations } from '../../../runtime/git/types.js';
+import { GIT_REQUEST_FIELDS } from '../../../../common/git-request-validation.js';
 
 test('repository context collection is separate from model execution and its executor', async () => {
   const calls: string[] = [];
@@ -32,7 +33,7 @@ test('repository context collection is separate from model execution and its exe
 
 test('executor Git operations expose neither HTTP formatting nor model generation', () => {
   const git = createGitOperations();
-  expect(Object.keys(git)).toHaveLength(45);
+  expect(Object.keys(git).sort()).toEqual(Object.keys(GIT_REQUEST_FIELDS).sort());
   expect(git).not.toHaveProperty('toHttpError');
   expect(git).not.toHaveProperty('generateCommitMessageForFiles');
 });
