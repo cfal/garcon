@@ -11,7 +11,7 @@ export async function recordDisplayWindows(page: Page): Promise<void> {
     const reads: CapturedDisplayWindow[] = [];
     scope.__displayWindowReads = reads;
     const nativeFetch = globalThis.fetch.bind(globalThis);
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const recordedFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input), location.href);
       if (url.pathname !== '/api/v1/chats/transcript-display/window') return nativeFetch(input, init);
       const read: CapturedDisplayWindow = { request: JSON.parse(String(init?.body)), response: null };
@@ -20,6 +20,11 @@ export async function recordDisplayWindows(page: Page): Promise<void> {
       if (response.ok) read.response = await response.clone().json();
       return response;
     };
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: recordedFetch,
+    });
   };
   await page.evaluateOnNewDocument(install);
   await page.evaluate(install);
