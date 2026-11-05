@@ -82,6 +82,14 @@ function input(
 	return { documentId: 'document:syntax', file: fileValue, body: bodyValue };
 }
 
+function aggregateOversizedPatch(): string {
+	const line = 'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxLineCharacters / 2);
+	const count =
+		Math.floor((GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide + 1) / (line.length + 1)) + 1;
+	const deletions = Array.from({ length: count }, () => `-${line}`).join('\n');
+	return `@@ -1,${count} +1 @@\n${deletions}\n+const next = true;\n`;
+}
+
 function projectSide(
 	side: GitDiffSyntheticSide,
 	path: string,
@@ -147,8 +155,7 @@ describe('Git diff syntax reconstruction', () => {
 	});
 
 	it('discards only the synthetic side that exceeds its character budget', () => {
-		const longDeletion = 'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide + 1);
-		const patch = `@@ -1 +1 @@\n-${longDeletion}\n+const next = true;\n`;
+		const patch = aggregateOversizedPatch();
 		const reconstructed = buildGitDiffSyntheticSides(body('large.ts', patch));
 
 		expect(reconstructed.beforeExceeded).toBe(true);
@@ -398,8 +405,7 @@ describe('Git diff syntax highlighting', () => {
 	});
 
 	it('keeps the other side when one synthetic side exceeds the character limit', async () => {
-		const deletion = 'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide + 1);
-		const patch = `@@ -1 +1 @@\n-${deletion}\n+const next = true;\n`;
+		const patch = aggregateOversizedPatch();
 		const fileValue = file('large.ts');
 		const bodyValue = body(fileValue.path, patch, { bodyFingerprint: fileValue.bodyFingerprint });
 

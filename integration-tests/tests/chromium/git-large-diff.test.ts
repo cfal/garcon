@@ -83,13 +83,17 @@ test('retains a large highlighted threaded review through inbox refresh, failure
     expect(await panel.locator('[data-git-virtual-row]').count()).toBeLessThan(200);
     const indexTime = await page.evaluate(() => performance.getEntriesByName('garcon.git-review.worker.patch-index')[0]?.startTime);
     expect(indexTime).toBeDefined();
+    const syntaxTime = await page.evaluate(() => performance.getEntriesByName('garcon.git-review.worker.syntax-project')[0]?.startTime);
+    expect(syntaxTime).toBeDefined();
     const assertRetained = async () => {
       expect(await row.evaluate(element => element.isConnected)).toBe(true);
       expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selected);
       expect(await viewport.evaluate(element => element.scrollTop)).toBe(scrollTop);
       await browserExpect(thread).toHaveAttribute('aria-expanded', 'false');
       await browserExpect(panel.getByText('1/2 viewed', { exact: true })).toBeVisible();
+      await browserExpect(panel.locator('[data-git-diff-review-row]').last().locator('.cm-code-keyword').first()).toBeVisible();
       expect(await page.evaluate(() => performance.getEntriesByName('garcon.git-review.worker.patch-index')[0]?.startTime)).toBe(indexTime);
+      expect(await page.evaluate(() => performance.getEntriesByName('garcon.git-review.worker.syntax-project')[0]?.startTime)).toBe(syntaxTime);
     };
 
     const requested = Promise.withResolvers<void>();
