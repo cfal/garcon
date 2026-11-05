@@ -24,6 +24,56 @@ test('restores the saved server without connecting automatically', async () => {
   } finally { await window.happyDOM.close(); }
 });
 
+test('HTTP warning follows typed URLs, saved selections and Add Server without blocking connection', async () => {
+  const window = new Window();
+  try {
+    window.document.write(html);
+    const commands = [];
+    await mountLauncher(window.document, async (command, args) => {
+      if (command === 'server_choices') return choices({ lastUrl: 'http://garcon.vpn.test/', recents: ['http://garcon.vpn.test/', 'https://secure.test/'] });
+      commands.push([command, args]);
+    });
+    const input = window.document.querySelector('#server-url');
+    const warning = window.document.querySelector('#insecure-endpoint');
+    expect(input.getAttribute('aria-describedby').split(' ')).toContain(warning.id);
+    expect(warning.hidden).toBe(false);
+    expect(warning.textContent).toContain('unencrypted');
+    for (const [url, hidden] of [
+      ['https://secure.test/', true], ['http://garcon/', false],
+      ['HTTP://garcon.vpn.test:3001/mount/', false], ['http://100.64.0.2/', false],
+      ['http://[fd00::2]/', false], ['', true], ['not a URL', true],
+    ]) {
+      input.value = url;
+      input.dispatchEvent(new window.Event('input'));
+      expect(warning.hidden).toBe(hidden);
+    }
+    window.document.querySelector('#recent-servers li:nth-child(2) button').click();
+    expect(warning.hidden).toBe(true);
+    window.document.querySelector('#recent-servers button').click();
+    expect(warning.hidden).toBe(false);
+    window.document.querySelector('form').requestSubmit();
+    expect(commands).toEqual([['connect_server', { url: 'http://garcon.vpn.test/', name: '', generation: 0, acknowledged: false }]]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    window.document.querySelector('#add-server').click();
+    expect(warning.hidden).toBe(true);
+    input.value = 'http://autofill.test/';
+    input.dispatchEvent(new window.Event('change'));
+    expect(warning.hidden).toBe(false);
+  } finally { await window.happyDOM.close(); }
+});
+
+test('HTTP warning is shown for the reload source rather than the last opened server', async () => {
+  const window = new Window();
+  try {
+    window.document.write(html);
+    await mountLauncher(window.document, async () => choices({
+      action: 'reload', currentUrl: 'http://garcon.vpn.test/', lastUrl: 'https://secure.test/', canCancel: true,
+    }));
+    expect(window.document.querySelector('#insecure-endpoint').hidden).toBe(false);
+    expect(window.document.querySelector('#server-url').readOnly).toBe(true);
+  } finally { await window.happyDOM.close(); }
+});
+
 test('submit paths share pending admission and show native validation errors', async () => {
   const window = new Window();
   try {
@@ -187,13 +237,14 @@ test('failed opens retain the attempted URL and name across queued host refreshe
     await mountLauncher(window.document, command => command === 'server_choices'
       ? Promise.resolve(choices({ lastUrl: 'https://saved.test/' }))
       : new Promise((_, reject) => { rejectOpen = reject; }));
-    window.document.querySelector('#server-url').value = 'https://attempt.test/';
+    window.document.querySelector('#server-url').value = 'http://attempt.test/';
     window.document.querySelector('#server-name').value = 'Attempt';
     window.document.querySelector('form').requestSubmit();
     window.dispatchEvent(new window.Event('garcon-chooser-open'));
     rejectOpen('Synthetic failure');
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(window.document.querySelector('#server-url').value).toBe('https://attempt.test/');
+    expect(window.document.querySelector('#server-url').value).toBe('http://attempt.test/');
+    expect(window.document.querySelector('#insecure-endpoint').hidden).toBe(false);
     expect(window.document.querySelector('#server-name').value).toBe('Attempt');
     expect(window.document.querySelector('#connection-error').textContent).toBe('Synthetic failure');
   } finally { await window.happyDOM.close(); }

@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn ios_main_changes_from_local_launcher_to_the_confined_deployment() {
         let mode = connection_mode("ios");
-        let deployment = Deployment::parse("https://synthetic.test/mount/", false).unwrap();
+        let deployment = Deployment::parse("https://synthetic.test/mount/").unwrap();
         let launcher = Url::parse("tauri://localhost/").unwrap();
         assert!(main_navigation_allowed(mode, None, &launcher, None));
         assert!(!main_navigation_allowed(mode, None, deployment.url(), None));
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn desktop_and_disabled_main_never_admit_remote_content() {
-        let deployment = Deployment::parse("https://synthetic.test/mount/", false).unwrap();
+        let deployment = Deployment::parse("https://synthetic.test/mount/").unwrap();
         for mode in [ConnectionMode::Switcher, ConnectionMode::Disabled] {
             assert!(!main_navigation_allowed(
                 mode,

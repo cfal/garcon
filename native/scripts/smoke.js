@@ -8,7 +8,9 @@ import { GARCON_WS_PROTOCOL, webSocketProtocolsForAuth } from '../../common/ws-a
 import { prepareWorkflows, checkWorkflows } from './workflows-smoke.js';
 
 const root = resolve(import.meta.dir, '..');
-const binary = resolve(process.env.CARGO_TARGET_DIR ?? resolve(root, 'src-tauri/target'), 'debug/garcon-native');
+const profile = process.env.GARCON_NATIVE_SMOKE_PROFILE ?? 'debug';
+assert.ok(['debug', 'release'].includes(profile), 'Expected a debug or release smoke profile');
+const binary = resolve(process.env.CARGO_TARGET_DIR ?? resolve(root, 'src-tauri/target'), profile, 'garcon-native');
 const artifacts = resolve(root, 'artifacts');
 await mkdir(artifacts, { recursive: true });
 const temporaryRoot = process.env.GARCON_NATIVE_SMOKE_TMP ?? process.env.TMPDIR ?? resolve(homedir(), 'tmp');
@@ -112,7 +114,9 @@ async function connect(url, name = '') {
   beforeOpen = await webdriver(`/session/${session}/window/handles`);
   reloading = await evaluate('return document.querySelector("#server-form button").textContent === "Reload Server"');
   remoteTitle = `${name.trim() || new URL(url).hostname} \u2014 Garcon`;
-  await evaluate('document.querySelector("#server-url").value = arguments[0]; document.querySelector("#server-name").value = arguments[1]; document.querySelector("#acknowledged").checked = true; document.querySelector("form").requestSubmit();', [url, name]);
+  await evaluate('document.querySelector("#server-url").value = arguments[0]; document.querySelector("#server-url").dispatchEvent(new Event("input")); document.querySelector("#server-name").value = arguments[1];', [url, name]);
+  assert.equal(await evaluate('return !document.querySelector("#insecure-endpoint").hidden'), new URL(url).protocol === 'http:', 'HTTP endpoints show an advisory warning');
+  await evaluate('document.querySelector("#acknowledged").checked = true; document.querySelector("form").requestSubmit();');
 }
 
 async function openedRemote() {
@@ -188,7 +192,7 @@ async function settleChooserPaint() {
       document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(() => done(null))));`,
     args: [],
   });
-  assert.equal(await evaluate(`return ['#server-name', '#cancel'].every(selector => {
+  assert.equal(await evaluate(`return ['#insecure-endpoint', '#server-name', '#cancel'].every(selector => {
     const element = document.querySelector(selector);
     const rect = element.getBoundingClientRect();
     return !element.hidden && rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight;
@@ -518,7 +522,7 @@ try {
   assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Opened from: ${unreachable}`);
   await Bun.write(resolve(artifacts, 'chooser-recovery.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
   await connect('ftp://synthetic.test/');
-  await until(() => evaluate('return document.querySelector("[role=alert]").textContent.includes("Use HTTPS")'), 'bad URL recovery');
+  await until(() => evaluate('return document.querySelector("[role=alert]").textContent.includes("Use an HTTP or HTTPS")'), 'bad URL recovery');
   const recovered = fixture('');
   try {
     await connect(recovered.url);

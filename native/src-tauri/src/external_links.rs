@@ -181,7 +181,7 @@ mod tests {
     use super::*;
 
     fn accepts(source: &str, target: &str) -> bool {
-        let deployment = Deployment::parse("https://selected.test/garcon/", false).unwrap();
+        let deployment = Deployment::parse("https://selected.test/garcon/").unwrap();
         destination(&deployment, source, target).is_some()
     }
 
@@ -199,7 +199,7 @@ mod tests {
         host.windows.insert(
             2,
             crate::switcher::ServerWindow {
-                deployment: Deployment::parse("https://selected.test/garcon/", false).unwrap(),
+                deployment: Deployment::parse("https://selected.test/garcon/").unwrap(),
                 name: None,
             },
         );

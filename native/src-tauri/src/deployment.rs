@@ -4,17 +4,18 @@ use url::Url;
 pub struct Deployment(Url);
 
 impl Deployment {
-    pub fn parse(input: &str, allow_development_http: bool) -> Result<Self, String> {
+    pub fn parse(input: &str) -> Result<Self, String> {
         let input = input.trim();
         if input.contains(['\\', '%'])
             || input.chars().any(char::is_control)
             || input.split('/').any(|part| part == "." || part == "..")
         {
-            return Err("Enter a valid HTTPS server URL.".into());
+            return Err("Enter a valid HTTP or HTTPS server URL.".into());
         }
-        let mut url = Url::parse(input).map_err(|_| "Enter a complete HTTPS server URL.")?;
-        if url.scheme() != "https" && !(allow_development_http && url.scheme() == "http") {
-            return Err("Use HTTPS. Development builds also allow HTTP.".into());
+        let mut url =
+            Url::parse(input).map_err(|_| "Enter a complete HTTP or HTTPS server URL.")?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err("Use an HTTP or HTTPS server URL.".into());
         }
         if url.host_str().is_none()
             || !url.username().is_empty()
@@ -64,17 +65,13 @@ mod tests {
                 "https://example.test/tools/garcon/",
             ),
         ] {
-            assert_eq!(
-                Deployment::parse(input, false).unwrap().url().as_str(),
-                expected
-            );
+            assert_eq!(Deployment::parse(input).unwrap().url().as_str(), expected);
         }
     }
 
     #[test]
     fn rejects_unsafe_or_ambiguous_servers() {
         for input in [
-            "http://example.test",
             "javascript:alert(1)",
             "file:///etc/passwd",
             "https://user@example.test",
@@ -86,12 +83,12 @@ mod tests {
             "https://exa\nmple.test",
             "https://example.test/%2e%2e/admin",
         ] {
-            assert!(Deployment::parse(input, false).is_err(), "{input}");
+            assert!(Deployment::parse(input).is_err(), "{input}");
         }
     }
 
     #[test]
-    fn http_requires_development_mode_for_all_hosts() {
+    fn accepts_http_and_https_for_all_hosts() {
         for host in [
             "localhost",
             "example.test",
@@ -108,9 +105,8 @@ mod tests {
             "[2001:db8::2]",
         ] {
             let url = format!("http://{host}:3001");
-            assert!(Deployment::parse(&url, true).is_ok(), "{url}");
-            assert!(Deployment::parse(&url, false).is_err(), "{url}");
-            assert!(Deployment::parse(&format!("https://{host}:3001"), false).is_ok());
+            assert!(Deployment::parse(&url).is_ok(), "{url}");
+            assert!(Deployment::parse(&format!("https://{host}:3001")).is_ok());
         }
         for url in [
             "ftp://192.168.1.2",
@@ -118,16 +114,15 @@ mod tests {
             "file:///etc/passwd",
             "javascript:alert(1)",
         ] {
-            assert!(Deployment::parse(url, true).is_err(), "{url}");
-            assert!(Deployment::parse(url, false).is_err(), "{url}");
+            assert!(Deployment::parse(url).is_err(), "{url}");
         }
     }
 
     #[test]
-    fn development_http_keeps_url_and_navigation_boundaries() {
+    fn http_keeps_url_and_navigation_boundaries() {
         for host in ["100.64.0.2", "[fd00::2]", "garcon.vpn.test", "garcon"] {
             let origin = format!("http://{host}:3001");
-            let deployment = Deployment::parse(&format!("{origin}/garcon"), true).unwrap();
+            let deployment = Deployment::parse(&format!("{origin}/garcon")).unwrap();
             assert!(deployment.allows(&Url::parse(&format!("{origin}/garcon/chat/123")).unwrap()));
             for target in [
                 format!("{origin}/other/"),
@@ -149,14 +144,14 @@ mod tests {
                 format!("{origin}/#secret"),
                 format!("{origin}/a%2fb"),
             ] {
-                assert!(Deployment::parse(&input, true).is_err(), "{input}");
+                assert!(Deployment::parse(&input).is_err(), "{input}");
             }
         }
     }
 
     #[test]
     fn navigation_stays_inside_the_selected_origin_and_mount() {
-        let deployment = Deployment::parse("https://example.test/garcon", false).unwrap();
+        let deployment = Deployment::parse("https://example.test/garcon").unwrap();
         for path in ["/garcon", "/garcon/", "/garcon/chat/123?view=chat#message"] {
             assert!(
                 deployment.allows(&Url::parse(&format!("https://example.test{path}")).unwrap())

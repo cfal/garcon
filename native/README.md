@@ -23,7 +23,7 @@ regression harness, distribution preflight, and readiness matrix.
 flowchart LR
     Launcher[Bundled launcher] --> Host[Rust URL validation and navigation]
     Host --> Web[Unprivileged server-hosted web UI]
-    Web <-->|HTTPS and WSS| Controller[Existing Garcon controller]
+    Web <-->|HTTP/S and WS/S| Controller[Existing Garcon controller]
     Controller --> Executors[Local and remote executors]
 ```
 
@@ -54,12 +54,17 @@ the port and mount path. Removing a name restores the hostname fallback.
 Windows for the same origin share login and browser storage, like browser tabs;
 they are not separate accounts. Different origins retain their own storage.
 
-Release builds require HTTPS with valid certificates. Debug builds additionally
-allow HTTP on any hostname or IPv4/IPv6 address, including LAN and VPN servers
+Both release and development builds accept HTTP and HTTPS on any hostname or
+IPv4/IPv6 address, including LAN and VPN servers
 (for example `http://garcon.vpn.test:3001/` or `http://100.64.0.2:3001/`).
-HTTP itself is unencrypted; use it only over a trusted network or VPN. A phone's
-localhost is the phone, not the development machine. No release ATS exception,
-certificate bypass, native HTTP bridge, or controller CORS change is introduced.
+The chooser shows a red warning beneath HTTP URLs without blocking connection.
+HTTP itself is unencrypted; use HTTPS unless the network or VPN is trusted.
+HTTPS still requires valid certificates. A phone's localhost is the phone,
+not the development machine. The shared Apple `Info.plist` permits HTTP in
+WebView content via `NSAllowsArbitraryLoadsInWebContent`, not a general native
+networking exception. Apple runtime verification and App Store justification
+remain platform/distribution gates. No certificate bypass, native HTTP bridge,
+or controller CORS change is introduced.
 Android's upstream debug template permits cleartext subresources platform-wide;
 the launcher's URL admission rule is not a network-wide restriction, and Android
 server connections remain disabled.
@@ -149,8 +154,10 @@ file-input assignment, multipart upload bytes, shared clipboard copy/paste, focu
 OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count,
 both initially and after replacing a remote window.
 Set `GARCON_NATIVE_SMOKE_HOST` to an IPv4 address assigned to the test machine or
-a hostname resolving to it to exercise development HTTP beyond `localhost`;
+a hostname resolving to it to exercise HTTP beyond `localhost`;
 fixtures still bind `0.0.0.0`.
+Set `GARCON_NATIVE_SMOKE_PROFILE=release` to exercise an already-built release
+executable instead of the default debug executable.
 Open/cancel/reload shortcuts are exercised across eight further reloads
 for each root/mount fixture, requiring a fresh chooser-open event rather than
 accepting stale hidden-page controls. Linux registers its recovery handlers on

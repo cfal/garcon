@@ -16,7 +16,8 @@
       <button id="add-server" type="button" disabled>Add Server</button>
       <form id="server-form">
         <label for="server-url">Server URL</label>
-        <input id="server-url" name="server-url" type="url" placeholder="https://garcon.example.com/" required autocapitalize="none" autocomplete="url" spellcheck="false" aria-describedby="connection-error">
+        <input id="server-url" name="server-url" type="url" placeholder="https://garcon.example.com/" required autocapitalize="none" autocomplete="url" spellcheck="false" aria-describedby="insecure-endpoint connection-error">
+        <p id="insecure-endpoint" role="status" hidden>This endpoint is unencrypted. Use HTTPS, or connect only over a trusted network or VPN.</p>
         <label for="server-name">Name (optional)</label>
         <input id="server-name" name="server-name" type="text" maxlength="120" autocomplete="off" placeholder="Work">
         <p id="connection-error" role="alert"></p>

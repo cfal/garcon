@@ -200,7 +200,7 @@ mod tests {
         let (id, previous) = host
             .begin(
                 host.generation,
-                Deployment::parse(url, false).unwrap(),
+                Deployment::parse(url).unwrap(),
                 name.map(str::to_string),
                 false,
             )
@@ -253,12 +253,12 @@ mod tests {
         let b = open(&mut host, "https://b.test/", None);
         assert!(host.request_chooser(Some(a), ChooserAction::Reload));
         let revision = host.generation;
-        let a_url = Deployment::parse("https://a.test/", false).unwrap();
+        let a_url = Deployment::parse("https://a.test/").unwrap();
         assert!(host.begin(revision, a_url.clone(), None, false).is_err());
         assert!(
             host.begin(
                 revision,
-                Deployment::parse("https://b.test/", false).unwrap(),
+                Deployment::parse("https://b.test/").unwrap(),
                 None,
                 true
             )
@@ -293,7 +293,7 @@ mod tests {
             let (replacement, _) = host
                 .begin(
                     host.generation,
-                    Deployment::parse("https://a.test/", false).unwrap(),
+                    Deployment::parse("https://a.test/").unwrap(),
                     old_name.map(str::to_string),
                     true,
                 )
@@ -326,8 +326,7 @@ mod tests {
     #[test]
     fn title_uses_only_the_hostname_unless_named() {
         let window = ServerWindow {
-            deployment: Deployment::parse("https://a.example.com:8443/tools/garcon/", false)
-                .unwrap(),
+            deployment: Deployment::parse("https://a.example.com:8443/tools/garcon/").unwrap(),
             name: None,
         };
         assert_eq!(window.title(), "a.example.com \u{2014} Garcon");
@@ -342,7 +341,7 @@ mod tests {
         assert!(
             host.begin(
                 revision,
-                Deployment::parse("https://b.test/", false).unwrap(),
+                Deployment::parse("https://b.test/").unwrap(),
                 None,
                 false
             )

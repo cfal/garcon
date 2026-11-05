@@ -1,9 +1,23 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { Window } from 'happy-dom';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const config = JSON.parse(read('../src-tauri/tauri.conf.json'));
 const workflow = Bun.YAML.parse(read('../../.github/workflows/native-app.yml'));
+
+test('Apple HTTP allowance is limited to WebView content', async () => {
+  const window = new Window();
+  try {
+    const plist = new window.DOMParser().parseFromString(read('../src-tauri/Info.plist'), 'application/xml');
+    const entries = [...plist.querySelector('plist > dict').children];
+    expect(entries.map(entry => entry.tagName)).toEqual(['key', 'dict']);
+    expect(entries[0].textContent).toBe('NSAppTransportSecurity');
+    const transport = [...entries[1].children];
+    expect(transport.map(entry => entry.tagName)).toEqual(['key', 'true']);
+    expect(transport[0].textContent).toBe('NSAllowsArbitraryLoadsInWebContent');
+  } finally { await window.happyDOM.close(); }
+});
 
 test('only the bundled launcher receives narrowly enumerated native permissions', () => {
   const capability = JSON.parse(read('../src-tauri/capabilities/launcher.json'));

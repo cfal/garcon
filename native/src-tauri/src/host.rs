@@ -100,7 +100,7 @@ pub async fn connect_server(
     if mode == ConnectionMode::Disabled {
         return Err("Server connections are unavailable in the Android build-only preview.".into());
     }
-    let deployment = Deployment::parse(&url, cfg!(debug_assertions))?;
+    let deployment = Deployment::parse(&url)?;
     let (id, previous) = locked(app.state::<Host>().inner())?.begin(
         generation,
         deployment.clone(),
@@ -359,7 +359,7 @@ mod tests {
         switcher.windows.insert(
             3,
             ServerWindow {
-                deployment: Deployment::parse("https://synthetic.test/", false).unwrap(),
+                deployment: Deployment::parse("https://synthetic.test/").unwrap(),
                 name: None,
             },
         );

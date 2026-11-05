@@ -12,6 +12,7 @@
 export async function mountLauncher(document, invoke) {
   const form = document.querySelector('#server-form');
   const input = document.querySelector('#server-url');
+  const insecureEndpoint = document.querySelector('#insecure-endpoint');
   const name = document.querySelector('#server-name');
   const add = document.querySelector('#add-server');
   const button = form.querySelector('button[type=submit]');
@@ -27,6 +28,14 @@ export async function mountLauncher(document, invoke) {
   let ready = false;
   let refreshId = 0;
   let refreshRequested = false;
+
+  function updateEndpointWarning() {
+    try {
+      insecureEndpoint.hidden = new URL(input.value.trim()).protocol !== 'http:';
+    } catch {
+      insecureEndpoint.hidden = true;
+    }
+  }
 
   function savedName(value) {
     try {
@@ -72,6 +81,7 @@ export async function mountLauncher(document, invoke) {
       choices = result;
       const reload = choices.action === 'reload';
       input.value = (reload ? choices.currentUrl : choices.lastUrl) ?? '';
+      updateEndpointWarning();
       name.value = reload ? (choices.currentName ?? '') : savedName(input.value);
       input.readOnly = reload;
       name.readOnly = reload;
@@ -98,6 +108,7 @@ export async function mountLauncher(document, invoke) {
         if (url === choices.currentUrl) select.setAttribute('aria-current', 'true');
         select.addEventListener('click', () => {
           input.value = url;
+          updateEndpointWarning();
           name.value = server.name ?? '';
           acknowledgement.checked = false;
           input.focus();
@@ -132,14 +143,20 @@ export async function mountLauncher(document, invoke) {
       const message = error.textContent;
       await refresh();
       input.value = attemptedUrl;
+      updateEndpointWarning();
       name.value = attemptedName;
       error.textContent = message;
     }
   });
 
-  input.addEventListener('input', () => { name.value = savedName(input.value); });
+  input.addEventListener('input', () => {
+    name.value = savedName(input.value);
+    updateEndpointWarning();
+  });
+  input.addEventListener('change', updateEndpointWarning);
   add.addEventListener('click', () => {
     input.value = '';
+    updateEndpointWarning();
     name.value = '';
     acknowledgement.checked = false;
     button.textContent = 'Open Server';
