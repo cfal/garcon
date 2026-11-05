@@ -363,12 +363,20 @@ describe('PullRequestsPanel', () => {
 				await tick();
 				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
 				failedRefresh.reject(new Error('Metadata refresh unavailable.'));
-				await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+				await screen.findByText('Metadata refresh unavailable.');
 				expect(controller.detailError).toBe('Metadata refresh unavailable.');
 				expect(notifyError).toHaveBeenCalledWith('Metadata refresh unavailable.');
 				expect(document.querySelector('[data-git-virtual-diff-root]')).toBe(viewport);
 				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
 				expect(row?.textContent).toBe(text);
+				expect(viewport.scrollTop).toBe(20000);
+				expect(indexCalls()).toBe(1);
+				getDetail.mockResolvedValueOnce({ ...structuredClone(original), documentId: 'revision:4' });
+				await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(4));
+				await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+				expect(screen.queryByText('Metadata refresh unavailable.')).toBeNull();
+				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
 				expect(viewport.scrollTop).toBe(20000);
 				expect(indexCalls()).toBe(1);
 				viewport.scrollTop = 0;
@@ -499,6 +507,8 @@ describe('PullRequestsPanel', () => {
 					expect(controller.detail).toBe(displayedDetail);
 					expect(controller.detailError).toBe('Metadata refresh unavailable.');
 					expect(notifyError).toHaveBeenCalledWith('Metadata refresh unavailable.');
+					expect(screen.getByRole('alert').textContent).toContain('Metadata refresh unavailable.');
+					expect(screen.getByRole('button', { name: 'Retry' })).not.toBeNull();
 				}
 				expect(signal?.aborted).toBe(false);
 				const index = createGitPatchIndex(original.fileBodies['synthetic.ts'].patch!, 3001);

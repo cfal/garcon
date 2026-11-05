@@ -178,6 +178,7 @@
 			advancePullRequestHead: () => pullRequestPanel!.advanceLiveHead(),
 			beginPullRequestRefresh: () => pullRequestPanel!.beginRefresh(),
 			finishPullRequestRefresh: () => pullRequestPanel!.finishRefresh(),
+			failPullRequestRefresh: () => pullRequestPanel!.failRefresh(),
 			refreshPullRequest: async () => {
 				await pullRequestPanel!.beginRefresh();
 				await pullRequestPanel!.finishRefresh();

@@ -135,6 +135,18 @@
 			throw new Error('Inbox refresh did not publish replacement detail');
 		pending = null;
 	}
+
+	export async function failRefresh(): Promise<void> {
+		if (!pending) throw new Error('No pending refresh');
+		const request = pending;
+		request.reject(new Error('Synthetic PR detail unavailable'));
+		await request.promise.catch(() => undefined);
+		pending = null;
+		await tick();
+		await new Promise(requestAnimationFrame);
+		if (controller.isDetailLoading || !controller.detailError)
+			throw new Error('Inbox refresh did not publish its error');
+	}
 </script>
 
 <div class="min-h-0 flex-1">

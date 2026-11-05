@@ -43,6 +43,7 @@ declare global {
 			advancePullRequestHead(): Promise<void>;
 			beginPullRequestRefresh(): Promise<void>;
 			finishPullRequestRefresh(): Promise<void>;
+			failPullRequestRefresh(): Promise<void>;
 			refreshPullRequest(): Promise<void>;
 			unicodeProbe(): Promise<{ expected: string; indexed: string; highlighted: string | null }>;
 		};
@@ -414,6 +415,29 @@ try {
 			assert.deepEqual(metadataRefresh.pending, metadataRefresh.before);
 			assert.deepEqual(metadataRefresh.after, metadataRefresh.before);
 			await page.screenshot({ path: resolve(output, `${viewport.width}-pr-refresh.png`) });
+			const failedRefresh = await page.evaluate(async () => {
+				const row = document.querySelector('[data-git-diff-review-row]')!;
+				const scroller = document.querySelector('[data-git-virtual-diff-root]')!;
+				const snapshot = () => ({
+					selected: window.getSelection()!.toString(),
+					scrollTop: scroller.scrollTop,
+					rowTop: row.getBoundingClientRect().top,
+				});
+				const before = snapshot();
+				await window.reviewBenchmark.beginPullRequestRefresh();
+				await window.reviewBenchmark.failPullRequestRefresh();
+				return {
+					before,
+					after: snapshot(),
+					rowRetained: row === document.querySelector('[data-git-diff-review-row]'),
+				};
+			});
+			assert.ok(failedRefresh.rowRetained, 'Failed refresh must retain PR rows');
+			assert.deepEqual(failedRefresh.after, failedRefresh.before);
+			await page.getByRole('alert').getByText('Synthetic PR detail unavailable').waitFor();
+			await page.screenshot({ path: resolve(output, `${viewport.width}-pr-refresh-error.png`) });
+			await page.getByRole('button', { name: 'Retry', exact: true }).click();
+			await page.getByRole('alert').waitFor({ state: 'hidden' });
 			await page.evaluate(() => {
 				window.getSelection()?.removeAllRanges();
 				document.querySelector('[data-git-virtual-diff-root]')!.scrollTop = 0;
@@ -443,6 +467,7 @@ try {
 				cancellation,
 				unicode,
 				metadataRefresh,
+				failedRefresh,
 				inboxHeadCatchUp: 'preserved',
 				viewedAndCollapsed: 'preserved',
 			});
