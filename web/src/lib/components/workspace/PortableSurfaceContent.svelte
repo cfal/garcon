@@ -32,6 +32,7 @@
 		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
 	);
 	const ticketsRenderer = lazyRenderer(() => import('$lib/components/tickets/TicketsPanel.svelte'));
+	const workflowRenderer = lazyRenderer(() => import('$lib/components/workflows/WorkflowSurface.svelte'));
 	const usageRenderer = lazyRenderer(() => import('$lib/components/usage/UsagePanel.svelte'));
 </script>
 
@@ -82,6 +83,7 @@
 	const remoteSettings = getRemoteSettings();
 	const ticketSourceNavigation = getTicketSourceNavigation();
 	const filesProjectState = $derived(workspaceContext.filesProjectState);
+	let inspectWorkflowHistory = $state(false);
 </script>
 
 <svelte:boundary>
@@ -197,6 +199,20 @@
 		{#await chatCanvasRenderer() then ChatCanvasSurface}
 			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
 		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'workflows'}
+		{#if remoteSettings.snapshot?.features.workflows.enabled || inspectWorkflowHistory}
+			{#await workflowRenderer() then WorkflowSurface}
+				<WorkflowSurface controller={singletonSurfaces.workflows()} {visible} onOpenChat={(id) => {
+					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(id);
+					else void workspace.openChatBeside(id, presentation);
+				}} />
+			{/await}
+		{:else}
+			<div class="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+				<p>Workflows disabled</p>
+				<button class="rounded-md border border-border px-3 py-2 text-foreground" onclick={() => { inspectWorkflowHistory = true; }}>Inspect retained workflows</button>
+			</div>
+		{/if}
 	{:else if surface.type === 'singleton' && surface.kind === 'tickets'}
 		{@const controller = singletonSurfaces.tickets()}
 		{#await ticketsRenderer() then TicketsPanel}

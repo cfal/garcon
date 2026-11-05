@@ -38,11 +38,17 @@ import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
 
 vi.mock('$lib/context', () => ({
+	getRemoteSettings: () => ({ snapshot: null } satisfies Pick<RemoteSettingsStore, 'snapshot'>),
+	getSingletonSurfaces: () => ({
+		workflows: vi.fn<SingletonSurfaceRegistry['workflows']>(),
+	} satisfies Pick<SingletonSurfaceRegistry, 'workflows'>),
 	getAuth: () => ({ token: null }),
 	getSidebarSearch: () => ({ discardStaleTranscriptResult: vi.fn() }),
 	setTicketSourceNavigation: () => {},

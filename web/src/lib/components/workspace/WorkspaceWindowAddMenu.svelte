@@ -15,7 +15,7 @@
 		DropdownMenuSubContent,
 		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import { getNotifications, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
+	import { getNotifications, getTerminalRegistry, getWorkspaceCoordinator, getRemoteSettings } from '$lib/context';
 	import {
 		PORTABLE_SINGLETON_KINDS,
 		singletonSurfaceId,
@@ -77,6 +77,7 @@
 		},
 		'files',
 		'tickets',
+		'workflows',
 		'usage',
 		{
 			id: 'chat-views',
@@ -96,6 +97,7 @@
 		'flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
 
 	const workspace = getWorkspaceCoordinator();
+	const remoteSettings = getRemoteSettings();
 	const terminals = getTerminalRegistry();
 	const notifications = getNotifications();
 	let creatingTerminal = $state(false);
@@ -107,7 +109,8 @@
 		),
 	);
 	const availableSingletonKinds = $derived(
-		PORTABLE_SINGLETON_KINDS.filter((kind) => !tabs.order.includes(singletonSurfaceId(kind))),
+		PORTABLE_SINGLETON_KINDS.filter((kind) => !tabs.order.includes(singletonSurfaceId(kind))
+			&& (kind !== 'workflows' || remoteSettings.snapshot?.features.workflows.enabled)),
 	);
 	const singletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
@@ -120,6 +123,7 @@
 		'chat-canvas': m.workspace_surface_chat_canvas,
 		'chat-board': m.workspace_surface_chat_board,
 		tickets: m.tickets_title,
+		workflows: () => 'Workflows',
 		usage: m.workspace_surface_usage,
 	};
 	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => {

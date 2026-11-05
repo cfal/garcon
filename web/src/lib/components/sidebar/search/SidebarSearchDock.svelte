@@ -40,6 +40,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowUsage: () => void;
+		onShowWorkflows?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -75,6 +76,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowUsage,
+		onShowWorkflows,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -114,6 +116,7 @@
 		{onShowPreambles}
 		{onShowSnippets}
 		{onShowUsage}
+		{onShowWorkflows}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext

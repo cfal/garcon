@@ -87,6 +87,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowUsage: () => void;
+		onShowWorkflows?: () => void;
 		onShowSettings: () => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 	}
@@ -119,6 +120,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowUsage,
+		onShowWorkflows,
 		onShowSettings,
 		newWindowEdges,
 	}: SidebarProps = $props();
@@ -470,6 +472,7 @@
 			{onShowPreambles}
 			{onShowSnippets}
 			{onShowUsage}
+			{onShowWorkflows}
 			{onShowSettings}
 		/>
 	</div>
