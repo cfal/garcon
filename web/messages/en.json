@@ -3257,6 +3257,7 @@
 			}
 		}
 	],
+	"native_reload": "Reload",
 	"native_open_server": "Open server",
 	"native_open_server_unavailable": "Open server unavailable",
 	"native_hide_titlebar": "Hide titlebar",

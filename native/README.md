@@ -140,7 +140,7 @@ xvfb-run -a bun run --cwd native test:smoke
 
 Build the launcher with `bun run --cwd native build` before running Rust checks
 from a clean checkout. Linux smoke tests need `webkit2gtk-driver`, `xvfb`,
-`xauth`, `xdotool`, `openssl`, and `curl`. Native recovery shortcuts use OS-level input;
+`xauth`, `xdotool`, `openssl`, and `curl`. Keyboard checks use OS-level input;
 WebDriver DOM key events are not proof of native menu activation. Tests use
 isolated app data and synthetic servers, never an existing
 user server. The real native WebView is tested for launcher rendering, root and
@@ -158,12 +158,14 @@ a hostname resolving to it to exercise HTTP beyond `localhost`;
 fixtures still bind `0.0.0.0`.
 Set `GARCON_NATIVE_SMOKE_PROFILE=release` to exercise an already-built release
 executable instead of the default debug executable.
-Open/cancel/reload shortcuts are exercised across eight further reloads
+Open/cancel and same-window page reload are exercised across eight further reloads
 for each root/mount fixture, requiring a fresh chooser-open event rather than
-accepting stale hidden-page controls. Linux registers its recovery handlers on
-each native window without installing a menubar; hiding GTK menus also disables
-their accelerators. Windows retains a hidden menu for accelerators, detached
-before window destruction. macOS retains its app-wide menu. The isolated Linux test environment
+accepting stale hidden-page controls. Managed Reload additionally checks source-only
+replacement, route/query/fragment retention, titlebar state and saved-name ownership.
+Slow and failed loads exercise the trusted loading controls, retry and cancellation.
+Linux installs its titlebar recovery button without a menubar. Windows retains
+a hidden platform menu, detached before window destruction; no custom recovery
+accelerators are registered. macOS retains its app-wide menu. The isolated Linux test environment
 shares only system icon and MIME-type resources, not user application associations.
 These checks do not qualify the OS file chooser or a real Garcon terminal session.
 The Linux WebDriver probe emitted cancellation without presenting an OS dialog;
@@ -193,19 +195,21 @@ Windows, macOS, or mobile interaction correctness.
 
 ## Preview Boundaries
 
-- Only the bundled launcher can invoke the four native commands. The remote UI
+- Only the bundled launcher can invoke the seven native commands. The remote UI
   has no Tauri command permissions, filesystem/process access, or general network bridge.
 - On desktop/iOS, top-level navigation remains restricted to the selected origin
   and mount. Linux supports the external links described below. Other platforms,
   same-window external navigation, and provider-login popups remain blocked.
   Mobile popup behavior still requires device validation.
-- The sidebar menu's **Open server** action opens the host-owned chooser. The
-  Linux in-window menubar is removed and the Windows menubar is hidden. Existing host recovery accelerators
-  (`Cmd/Ctrl+Shift+S` for the chooser and `Cmd/Ctrl+R` for reload) remain active even
-  when the page is unavailable; these are not previous/next-server shortcuts.
-  macOS keeps its standard app/edit menu, with recovery actions under **Garcon**
-  rather than a separate **Server** menu. Only **Reload Server** requires
-  acknowledging possible unsaved-state loss; opening another window does not.
+- The sidebar menu's **Reload** action opens the trusted loading screen and prepares
+  a replacement of the requesting window, without a confirmation dialog. **Open
+  server** below it opens the host-owned chooser. Neither action registers a
+  hotkey; the host does not intercept Ctrl+R, Ctrl+Shift+S or Ctrl+Q. Conventional
+  platform editing/system menu behavior is unchanged. The Linux in-window
+  menubar is removed and the Windows menubar stays hidden. macOS retains its
+  standard app/edit menu with an unaccelerated **Open server** entry under
+  **Garcon**. Ordinary page/engine reloads retain the existing web unload safeguards;
+  explicit native replacement can discard unsaved in-memory changes without prompting.
   Cancel preserves all pages and returns focus to the requesting window when it
   is still open, otherwise to another server window.
 - Linux uses a compact, theme-aware GTK titlebar with native window controls and
@@ -215,9 +219,10 @@ Windows, macOS, or mobile interaction correctness.
   includes a **Hide titlebar** checkbox below **Open server**. It hides the current
   server window's entire titlebar, including the drag area and window controls;
   unchecking restores them. Other windows are unaffected. The setting survives
-  page and native reloads, but new windows and app restarts start with a titlebar.
-  The native chooser always keeps its titlebar, and host recovery shortcuts remain
-  available while server-window controls are hidden. The capability is absent on
+  page reloads, but new windows and app restarts start with a titlebar.
+  The native chooser always keeps its titlebar. If a server page becomes unusable
+  after a successful load with its titlebar hidden, recovery may require closing the window through the
+  OS and reopening it; there are no custom recovery shortcuts. The capability is absent on
   mobile and in ordinary browsers. Only two fixed, source-window-bound titlebar
   requests are admitted; remote pages gain no general Tauri command permissions.
 - After its first authenticated WebSocket connection, a native-capable web page
@@ -232,9 +237,13 @@ Windows, macOS, or mobile interaction correctness.
 - Opening never closes or replaces another server window. Each window has its own
   deployment-bound navigation and external-link checks. Closing one window leaves
   the others running; closing the last server window returns to the chooser.
-  Closing the chooser cancels it when server windows remain, otherwise exits.
-  Explicit reload replaces only its requesting window after confirmation. A failed
-  load retains host recovery; failed creation retains the chooser. Opening or
+  Closing a loading chooser cancels its attempt; otherwise closing the chooser
+  returns to an existing page or exits when none remain.
+  Managed Reload retains the title, deployment boundary, current allowed URL and
+  titlebar state, but changes OS window identity. Size, position and maximized state
+  are restored where the platform permits. Reload/Retry never update saved names.
+  The source remains alive until the replacement is ready; cancellation returns
+  to it if it still exists. Failed creation retains the chooser. Opening or
   closing windows does not log out or send Stop. Previously admitted server
   requests may still complete; closing is not rollback or proof of cancellation.
 - The host remembers one mount per origin, across selections and restarts, with
@@ -261,10 +270,43 @@ Windows, macOS, or mobile interaction correctness.
   clipboard access, file pickers, and external authentication need platform
   validation and narrow native adapters where necessary.
 
+## Loading And Recovery
+
+Desktop Open server, managed Reload and Retry share one chooser-owned attempt.
+Existing windows remain usable; another request presents the existing attempt
+without replacing its target or silently queuing a reload.
+
+```mermaid
+flowchart LR
+    Request[Open / Reload / Retry] --> Loading[Trusted loading screen]
+    Loading --> Candidate[Hidden candidate window]
+    Candidate --> Ready[Garcon UI mounted and native chrome prepared]
+    Ready --> Reveal[Show candidate, retire reload source, hide chooser]
+    Loading --> Cancel[Cancel: return to source or server selection]
+    Candidate --> Timeout[Not ready after 30 seconds]
+    Timeout --> Loading
+    Timeout --> Show[Explicit Show page anyway]
+```
+
+Readiness is reported after the server-hosted login/setup UI, application shell,
+or authentication recovery surface mounts. It does not wait for every background
+request or WebSocket connection, and is not proof of server authentication.
+Construction success and WebView load-finished events alone never reveal a page.
+Retry becomes available once native window preparation finishes; Cancel is
+available throughout. A 30-second deadline reports only that Garcon has not
+become ready, not an inferred network diagnosis. **Show page anyway** explicitly
+reveals an unverified page after that deadline, including older server UI that
+does not report readiness. TLS validation remains unchanged.
+
+Ordinary `location.reload()`, engine context-menu reload, other full navigations,
+and failures after successful reveal do not use this loading screen. They can
+still show an engine loading/error page. No per-window loading overlay, custom
+hotkeys, right-click interception or network preflight is installed.
+
 ## Chooser Contract
 
 The remote page receives an optional, top-frame-only capability:
-`window.__GARCON_NATIVE__ = { version: 1, requestServerChooser(): void }`.
+`window.__GARCON_NATIVE__ = { version: 1, requestServerChooser(): void, lifecycle }`.
 The browser application discovers it through
 `web/src/lib/native/server-chooser.ts`; ordinary browsers have no capability.
 This is a request, not an acknowledgement or a navigation API. It takes no URL,
@@ -277,7 +319,14 @@ idempotently, and returns `false` so the remote document does not navigate.
 All other navigations are checked against that window's deployment. The
 callback identifies the owning WebView, not an independently authenticated
 initiating frame; even a subframe provoking this sentinel can only request the
-same non-destructive chooser. No saved data or navigation authority is returned.
+same non-destructive chooser. The optional `lifecycle` capability exposes only
+`requestReload()` and `reportReady()`, using exact `garcon-host://reload-server/`
+and `garcon-host://page-ready/` sentinels. Reload captures the owning window's
+native URL and checks its original deployment boundary; the page cannot supply
+a target URL or another window ID. Readiness can reveal only the current candidate.
+These requests share the WebView-level, not frame-authenticated, caller model;
+a subframe may request a reload of its own containing window or advisory readiness.
+No saved data or navigation authority is returned.
 The injected adapter is installed only in the top frame. All remote IPC remains
 denied by the local-only `main` capability. This avoids wildcard remote ACLs and
 does not depend on caller-supplied origin strings or Tauri detection as authority.
@@ -291,28 +340,32 @@ source inspection alone does not establish cross-platform interaction support.
 Local-only host commands:
 
 - `server_choices()` returns `{ generation, recents, lastUrl, currentUrl,
-  currentName, canCancel, pending, action: "open" | "reload" }`. Each recent is
+  canCancel, connection }`. `connection` is null or
+  `{ id, server, url, message, canRetry, canShow }`; it never exposes the current
+  route's query or fragment. Each recent is
   `{ url, name }`; `currentUrl` identifies the chooser's requesting window, not a
   global active server. The generation fences chooser snapshots independently of
   each server window's lifetime.
-- `connect_server({ url, name, generation, acknowledged })` validates URL/mount and
+- `connect_server({ url, name, generation })` validates URL/mount and
   the optional name, durably reserves the mount and saves the name, then creates a
   new window. Names are trimmed, limited to 120 characters and reject controls.
-  A stale generation is rejected. In reload mode, only the captured requesting
-  window's URL is accepted; acknowledgement is required before retiring and
-  replacing that window. Reload preserves its title without changing saved names
-  or recents. Closing the source invalidates the reload snapshot,
-  rather than redirecting reload to another window.
+  A stale generation is rejected. Closing the chooser's source invalidates its
+  snapshot without changing any surviving window's identity.
 - `cancel_chooser({ generation })` hides only the chooser and focuses the existing
   page. It never reloads, logs out, clears storage, or sends Stop.
 - `remove_recent({ url, generation })` removes only the recent-list entry.
+- `retry_connection({ id })`, `cancel_connection({ id })` and
+  `show_connection({ id })` act only on the current attempt. Retry allocates a
+  fresh candidate identity and retains the native-captured target; late callbacks
+  from retired candidates cannot complete another attempt.
 
 Draft audit: chat text is debounced to origin-local storage (250 ms); attachments
 are memory-only. File recovery checkpoints use asynchronous IndexedDB writes
 (750 ms idle, 5 s maximum interval), may fail, and do not cover every pending edit.
-Reload therefore requires a host-owned loss acknowledgement, including
-menu-initiated recovery when page JavaScript is unavailable. Opening a server
-does not destroy any existing document and needs no loss acknowledgement. No async
+Reload may discard recent in-memory changes. Explicit native Reload replaces its
+source after readiness without a confirmation or unload flush. Existing browser
+unload guards remain unchanged for ordinary reload/navigation. Opening
+a server does not destroy any existing document. No async
 unload flush is treated as a durability guarantee. The existing storage scopes
 and executor-qualified recovery identities are unchanged.
 

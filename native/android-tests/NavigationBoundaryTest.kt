@@ -85,7 +85,7 @@ class NavigationBoundaryTest {
                     for (target in targets) {
                         evaluate(view, """
                             window.guardResult = null;
-                            window.__TAURI_INTERNALS__.invoke('connect_server', {url: ${JSONObject.quote(target)}, generation: 0, acknowledged: false})
+                            window.__TAURI_INTERNALS__.invoke('connect_server', {url: ${JSONObject.quote(target)}, generation: 0})
                               .then(() => window.guardResult = 'UNEXPECTED_SUCCESS', error => window.guardResult = String(error));
                         """.trimIndent())
                         eventually("Direct IPC must reject Android connection, including after recreation") {

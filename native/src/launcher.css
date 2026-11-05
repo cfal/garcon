@@ -39,5 +39,10 @@ button:disabled { opacity: .55; cursor: default; }
 #recent-servers [aria-current] { border-color: var(--accent); }
 #add-server, #cancel { background: var(--input); color: var(--foreground); border: 1px solid var(--border); margin-bottom: 20px; }
 #cancel { margin-top: 12px; }
-#switch-warning { font-size: 14px; line-height: 1.5; margin: 12px 0 20px; }
-#acknowledged { width: 20px; min-height: 20px; height: 20px; vertical-align: middle; margin-right: 8px; }
+#server-form button { margin-top: 20px; }
+#connection h2 { font-size: 20px; }
+#connection-server { font-weight: 600; }
+#connection-url { overflow-wrap: anywhere; }
+#connection-status { min-height: 48px; line-height: 1.5; }
+#connection button { margin-top: 12px; }
+#show-connection, #cancel-connection { background: var(--input); color: var(--foreground); border: 1px solid var(--border); }

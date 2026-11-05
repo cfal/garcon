@@ -13,6 +13,14 @@
       requestServerChooser() {
         window.location.assign('garcon-host://switch-server/');
       },
+      lifecycle: Object.freeze({
+        requestReload() {
+          window.location.assign('garcon-host://reload-server/');
+        },
+        reportReady() {
+          window.location.assign('garcon-host://page-ready/');
+        },
+      }),
       titlebar: Object.freeze({
         requestHidden(hidden) {
           if (typeof hidden !== 'boolean') throw new TypeError('Expected titlebar visibility');

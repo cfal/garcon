@@ -46,6 +46,19 @@ pub fn setup() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(desktop)]
 pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
+    let shown = window.clone();
+    prepare(window, move |result| {
+        if result.is_ok() && shown.show().is_ok() {
+            let _ = shown.set_focus();
+        }
+    })
+}
+
+#[cfg(desktop)]
+pub fn prepare(
+    window: &WebviewWindow,
+    complete: impl FnOnce(tauri::Result<()>) + Send + 'static,
+) -> tauri::Result<()> {
     #[cfg(target_os = "windows")]
     window.hide_menu()?;
     #[cfg(target_os = "linux")]
@@ -59,30 +72,10 @@ pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
         let window = window.clone();
         let dispatch = window.clone();
         dispatch.run_on_main_thread(move || {
-            let Ok(gtk_window) = window.gtk_window() else {
-                return;
+            let gtk_window = match window.gtk_window() {
+                Ok(window) => window,
+                Err(error) => return complete(Err(error)),
             };
-            let shortcut_handle = handle.clone();
-            gtk_window.connect_key_press_event(move |_, event| {
-                use crate::switcher::ChooserAction;
-                use gtk::glib::Propagation;
-
-                match recovery_shortcut(event.keyval(), event.state()) {
-                    Some(RecoveryShortcut::Switch) => crate::host::request_host_chooser(
-                        &shortcut_handle,
-                        source,
-                        ChooserAction::Open,
-                    ),
-                    Some(RecoveryShortcut::Reload) => crate::host::request_host_chooser(
-                        &shortcut_handle,
-                        source,
-                        ChooserAction::Reload,
-                    ),
-                    Some(RecoveryShortcut::Quit) => shortcut_handle.exit(0),
-                    None => return Propagation::Proceed,
-                }
-                Propagation::Stop
-            });
             let header = gtk::HeaderBar::new();
             header.set_title(Some(&title));
             header.set_has_subtitle(false);
@@ -96,57 +89,19 @@ pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
                 chooser.set_focus_on_click(false);
                 chooser.set_tooltip_text(Some("Open server"));
                 chooser.connect_clicked(move |_| {
-                    crate::host::request_host_chooser(
-                        &handle,
-                        source,
-                        crate::switcher::ChooserAction::Open,
-                    );
+                    crate::host::request_host_chooser(&handle, source);
                 });
                 header.pack_start(&chooser);
             }
             gtk_window.set_titlebar(Some(&header));
             header.show_all();
-            if window.show().is_ok() {
-                let _ = window.set_focus();
-            }
+            complete(Ok(()));
         })
     }
     #[cfg(not(target_os = "linux"))]
     {
-        window.show()?;
-        window.set_focus()
-    }
-}
-
-#[cfg(target_os = "linux")]
-#[derive(Debug, PartialEq, Eq)]
-enum RecoveryShortcut {
-    Switch,
-    Reload,
-    Quit,
-}
-
-#[cfg(target_os = "linux")]
-fn recovery_shortcut(
-    key: gtk::gdk::keys::Key,
-    modifiers: gtk::gdk::ModifierType,
-) -> Option<RecoveryShortcut> {
-    use gtk::gdk::{ModifierType as M, keys::constants};
-
-    let modifiers = modifiers
-        & (M::CONTROL_MASK
-            | M::SHIFT_MASK
-            | M::MOD1_MASK
-            | M::SUPER_MASK
-            | M::HYPER_MASK
-            | M::META_MASK);
-    match key.to_lower() {
-        constants::s if modifiers == M::CONTROL_MASK | M::SHIFT_MASK => {
-            Some(RecoveryShortcut::Switch)
-        }
-        constants::r if modifiers == M::CONTROL_MASK => Some(RecoveryShortcut::Reload),
-        constants::q if modifiers == M::CONTROL_MASK => Some(RecoveryShortcut::Quit),
-        _ => None,
+        complete(Ok(()));
+        Ok(())
     }
 }
 
@@ -180,42 +135,6 @@ mod titlebar_tests {
                 None,
                 "{url}"
             );
-        }
-    }
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-    use gtk::gdk::{ModifierType as M, keys::constants};
-
-    #[test]
-    fn preserves_only_the_existing_host_recovery_shortcuts() {
-        assert_eq!(
-            recovery_shortcut(constants::S, M::CONTROL_MASK | M::SHIFT_MASK),
-            Some(RecoveryShortcut::Switch)
-        );
-        assert_eq!(
-            recovery_shortcut(constants::r, M::CONTROL_MASK),
-            Some(RecoveryShortcut::Reload)
-        );
-        assert_eq!(
-            recovery_shortcut(constants::R, M::CONTROL_MASK | M::LOCK_MASK),
-            Some(RecoveryShortcut::Reload)
-        );
-        assert_eq!(
-            recovery_shortcut(constants::q, M::CONTROL_MASK),
-            Some(RecoveryShortcut::Quit)
-        );
-        for (key, modifiers) in [
-            (constants::s, M::CONTROL_MASK),
-            (constants::r, M::CONTROL_MASK | M::MOD1_MASK),
-            (constants::R, M::CONTROL_MASK | M::SHIFT_MASK),
-            (constants::r, M::SUPER_MASK),
-            (constants::q, M::empty()),
-            (constants::z, M::CONTROL_MASK),
-        ] {
-            assert_eq!(recovery_shortcut(key, modifiers), None);
         }
     }
 }

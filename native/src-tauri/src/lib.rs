@@ -1,7 +1,10 @@
 mod chrome;
+mod connection;
 mod deployment;
 mod external_links;
 mod host;
+#[cfg(desktop)]
+mod loading;
 mod platform;
 mod selection;
 mod switcher;
@@ -17,7 +20,10 @@ pub fn run() {
             host::server_choices,
             host::connect_server,
             host::cancel_chooser,
-            host::remove_recent
+            host::remove_recent,
+            host::retry_connection,
+            host::cancel_connection,
+            host::show_connection
         ])
         .setup(|app| {
             #[cfg(target_os = "linux")]
@@ -67,8 +73,12 @@ pub fn run() {
                     let Ok(host) = host.lock() else {
                         return;
                     };
-                    if host.pending {
+                    #[cfg(desktop)]
+                    if let Some(attempt) = &host.attempt {
                         api.prevent_close();
+                        let id = attempt.id;
+                        drop(host);
+                        let _ = loading::cancel(&handle, id);
                         return;
                     }
                     if mode == platform::ConnectionMode::Switcher && !host.windows.is_empty() {

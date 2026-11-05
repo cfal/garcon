@@ -29,7 +29,7 @@ test('only the bundled launcher receives narrowly enumerated native permissions'
   expect(capability.remote).toBeUndefined();
   expect(capability.local).toBe(true);
   expect(capability.windows).toEqual(['main']);
-  expect(capability.permissions).toEqual(['allow-server-choices', 'allow-connect-server', 'allow-cancel-chooser', 'allow-remove-recent']);
+  expect(capability.permissions).toEqual(['allow-server-choices', 'allow-connect-server', 'allow-cancel-chooser', 'allow-remove-recent', 'allow-retry-connection', 'allow-cancel-connection', 'allow-show-connection']);
   expect(read('../src-tauri/build.rs')).toContain('AppManifest::new().commands');
 });
 
@@ -47,18 +47,19 @@ test('server pages retain browser file drag and drop instead of native path even
   }
 });
 
-test('desktop chrome hides the window menu without removing recovery accelerators', () => {
+test('desktop chrome keeps controls without custom recovery hotkeys or a reload dialog', () => {
   const chrome = read('../src-tauri/src/chrome.rs');
   expect(chrome).toContain('window.hide_menu()?');
-  expect(chrome).toContain('gtk_window.connect_key_press_event');
+  expect(chrome).not.toContain('connect_key_press_event');
   expect(chrome).toContain('header.set_show_close_button(true)');
   expect(chrome).toContain('"Open server"');
-  for (const owner of ['host.rs', 'lib.rs']) {
-    expect(read(`../src-tauri/src/${owner}`)).toContain('chrome::show_initial(');
-  }
+  expect(read('../src-tauri/src/lib.rs')).toContain('chrome::show_initial(');
+  expect(read('../src-tauri/src/host.rs')).toContain('chrome::prepare(');
   const host = read('../src-tauri/src/host.rs');
-  expect(host).toContain('Some("CmdOrCtrl+Shift+S")');
-  expect(host).toContain('Some("CmdOrCtrl+R")');
+  expect(host).not.toContain('CmdOrCtrl');
+  expect(host).not.toContain('reload-server');
+  expect(host).not.toContain('acknowledged');
+  expect(host).toContain('pub async fn connect_server(');
 });
 
 test('CI builds all five platform families without distribution secrets', () => {

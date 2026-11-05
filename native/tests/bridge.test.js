@@ -20,10 +20,13 @@ test('desktop bridge exposes only fixed chooser and titlebar requests on the top
   const host = window.__GARCON_NATIVE__;
   expect(Object.isFrozen(host)).toBe(true);
   expect(Object.isFrozen(host.titlebar)).toBe(true);
+  expect(Object.isFrozen(host.lifecycle)).toBe(true);
   host.requestServerChooser();
   host.titlebar.requestHidden(true);
   host.titlebar.requestHidden(false);
-  expect(destinations).toEqual(['garcon-host://switch-server/', 'garcon-host://hide-titlebar/', 'garcon-host://show-titlebar/']);
+  host.lifecycle.requestReload('https://ignored.test/');
+  host.lifecycle.reportReady();
+  expect(destinations).toEqual(['garcon-host://switch-server/', 'garcon-host://hide-titlebar/', 'garcon-host://show-titlebar/', 'garcon-host://reload-server/', 'garcon-host://page-ready/']);
   expect(() => host.titlebar.requestHidden('yes')).toThrow('Expected titlebar visibility');
   expect(fixture(false, true).window.__GARCON_NATIVE__).toBeUndefined();
 });

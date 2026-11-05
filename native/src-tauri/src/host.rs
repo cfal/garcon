@@ -1,5 +1,5 @@
 #[cfg(desktop)]
-use crate::switcher::{CHOOSER_REQUEST, ChooserAction, window_label};
+use crate::switcher::{CHOOSER_REQUEST, READY_REQUEST, RELOAD_REQUEST, window_label};
 use crate::{
     deployment::Deployment,
     platform::{ConnectionMode, connection_mode},
@@ -10,7 +10,7 @@ use tauri::{Manager, WebviewWindow};
 
 pub type Host = Mutex<Switcher>;
 
-fn locked(host: &Host) -> Result<MutexGuard<'_, Switcher>, String> {
+pub(crate) fn locked(host: &Host) -> Result<MutexGuard<'_, Switcher>, String> {
     host.lock()
         .map_err(|_| "Server settings are unavailable.".into())
 }
@@ -18,8 +18,11 @@ fn locked(host: &Host) -> Result<MutexGuard<'_, Switcher>, String> {
 #[cfg(any(desktop, test))]
 fn dispatch_chooser_request(host: &Host, id: u64, dispatch: impl FnOnce(u64)) {
     let revision = host.lock().ok().and_then(|mut host| {
-        host.request_chooser(Some(id), crate::switcher::ChooserAction::Open)
-            .then_some(host.generation)
+        if host.attempt.is_some() && host.windows.contains_key(&id) {
+            Some(host.generation)
+        } else {
+            host.request_chooser(Some(id)).then_some(host.generation)
+        }
     });
     // Tauri may execute a main-thread dispatch synchronously.
     if let Some(revision) = revision {
@@ -87,11 +90,11 @@ pub fn cancel_chooser(
 }
 
 #[tauri::command]
+// Windows WebView creation must not run in a synchronous IPC command.
 pub async fn connect_server(
     url: String,
     name: Option<String>,
     generation: u64,
-    acknowledged: bool,
     window: WebviewWindow,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -101,90 +104,145 @@ pub async fn connect_server(
         return Err("Server connections are unavailable in the Android build-only preview.".into());
     }
     let deployment = Deployment::parse(&url)?;
-    let (id, previous) = locked(app.state::<Host>().inner())?.begin(
-        generation,
-        deployment.clone(),
-        name,
-        acknowledged,
-    )?;
+    let id = locked(app.state::<Host>().inner())?.begin(generation, deployment.clone(), name)?;
     if mode == ConnectionMode::SingleWebview {
         let result = window
             .navigate(deployment.url().clone())
             .map_err(|_| "Unable to open the server.".to_string());
-        locked(app.state::<Host>().inner())?.pending = false;
+        locked(app.state::<Host>().inner())?.complete_attempt(id)?;
         return result;
     }
     #[cfg(desktop)]
     {
-        let mut result = open_remote(&app, id, previous).await;
-        if result.is_err() {
-            locked(app.state::<Host>().inner())?.retire(id);
-            if let Some(failed) = app.get_webview_window(&window_label(id)) {
-                #[cfg(not(target_os = "macos"))]
-                let _ = failed.remove_menu();
-                let _ = failed.destroy();
-            }
-        }
-        if result.is_ok() {
-            result = window
-                .hide()
-                .map_err(|_| "Unable to close the chooser.".to_string());
-        }
-        let show_chooser = {
-            let mut host = locked(app.state::<Host>().inner())?;
-            host.pending = false;
-            host.chooser_open = result.is_err() || host.windows.is_empty();
-            host.chooser_open
-        };
-        if show_chooser {
-            // Refreshes the snapshot after failed creation or a close during startup.
-            let _ = present_chooser(&app);
-        }
-        result
+        crate::loading::refresh(&app);
+        crate::loading::start(&app, id);
+        Ok(())
     }
     #[cfg(mobile)]
     {
-        let _ = (id, previous);
+        let _ = id;
         Err("The desktop server chooser is unavailable on this platform.".into())
     }
 }
 
-#[cfg(desktop)]
-async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> Result<(), String> {
-    if let Some(previous) = previous.and_then(|id| app.get_webview_window(&window_label(id))) {
-        let (sender, mut receiver) = tauri::async_runtime::channel(1);
-        previous.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                let _ = sender.try_send(());
-            }
-        });
-        #[cfg(not(target_os = "macos"))]
-        previous
-            .remove_menu()
-            .map_err(|_| "Unable to detach the previous server menu. Restart the app to retry.")?;
-        previous
-            .destroy()
-            .map_err(|_| "Unable to close the previous server page. Restart the app to retry.")?;
-        receiver
-            .recv()
-            .await
-            .ok_or("Unable to confirm the previous page closed.")?;
+#[tauri::command]
+pub fn retry_connection(
+    id: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    #[cfg(desktop)]
+    return crate::loading::retry(&app, id);
+    #[cfg(mobile)]
+    {
+        let _ = (id, app);
+        Err("Desktop connections are unavailable.".into())
     }
-    let server = locked(app.state::<Host>().inner())?
-        .windows
-        .get(&id)
-        .cloned()
-        .ok_or("The server window was closed.")?;
+}
+
+#[tauri::command]
+pub fn cancel_connection(
+    id: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    #[cfg(desktop)]
+    return crate::loading::cancel(&app, id);
+    #[cfg(mobile)]
+    {
+        let _ = (id, app);
+        Err("Desktop connections are unavailable.".into())
+    }
+}
+
+#[tauri::command]
+pub fn show_connection(
+    id: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    #[cfg(desktop)]
+    return crate::loading::show(&app, id);
+    #[cfg(mobile)]
+    {
+        let _ = (id, app);
+        Err("Desktop connections are unavailable.".into())
+    }
+}
+
+#[cfg(desktop)]
+fn request_reload(app: &tauri::AppHandle, source: u64) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let capture = (|| -> Result<Option<u64>, String> {
+            let server = {
+                let binding = handle.state::<Host>();
+                let host = locked(binding.inner())?;
+                let server = host
+                    .windows
+                    .get(&source)
+                    .ok_or("The server window was closed.")?;
+                if host.chooser_open || host.attempt.is_some() {
+                    return Ok(None);
+                }
+                server.clone()
+            };
+            let window = handle
+                .get_webview_window(&window_label(source))
+                .ok_or("The server window was closed.")?;
+            let target = crate::connection::ConnectionTarget {
+                server,
+                url: window.url().map_err(|_| "Unable to read the server URL.")?,
+                placement: Some(crate::connection::WindowPlacement {
+                    size: window
+                        .inner_size()
+                        .map_err(|_| "Unable to read window size.")?,
+                    position: window.outer_position().ok(),
+                    maximized: window.is_maximized().unwrap_or(false),
+                }),
+            };
+            locked(handle.state::<Host>().inner())?
+                .begin_reload(source, target)
+                .map(Some)
+        })();
+        match capture {
+            Ok(Some(id)) => {
+                if present_chooser(&handle).is_err() {
+                    let _ = crate::loading::cancel(&handle, id);
+                    return;
+                }
+                crate::loading::start(&handle, id);
+            }
+            Ok(None) => {
+                let _ = present_chooser(&handle);
+            }
+            Err(_) => request_host_chooser(&handle, Some(source)),
+        }
+    });
+}
+
+#[cfg(desktop)]
+pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String> {
+    let target = locked(app.state::<Host>().inner())?
+        .attempt(id)?
+        .target
+        .clone();
+    let server = target.server;
     let title = server.title();
     let navigation_app = app.clone();
     let window = tauri::WebviewWindowBuilder::new(
         app,
         window_label(id),
-        tauri::WebviewUrl::External(server.deployment.url().clone()),
+        tauri::WebviewUrl::External(target.url),
     )
     .title(&title)
     .inner_size(1200.0, 800.0)
     .visible(false)
+    .focused(false)
+    .background_color(tauri::window::Color(244, 246, 249, 255))
     .decorations(!server.titlebar_hidden)
     .disable_drag_drop_handler()
     .initialization_script(format!(
@@ -193,6 +251,14 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
         server.titlebar_hidden
     ))
     .on_navigation(move |destination| {
+        if destination.as_str() == READY_REQUEST {
+            crate::loading::ready(&navigation_app, id);
+            return false;
+        }
+        if destination.as_str() == RELOAD_REQUEST {
+            request_reload(&navigation_app, id);
+            return false;
+        }
         if let Some(hidden) = crate::chrome::requested_titlebar_hidden(destination) {
             request_titlebar_visibility(&navigation_app, id, hidden);
             return false;
@@ -206,7 +272,6 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
                         host.generation == revision
                             && host.windows.contains_key(&id)
                             && host.chooser_open
-                            && !host.pending
                     });
                     if current {
                         let _ = present_chooser(&handle);
@@ -220,6 +285,9 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
     })
     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
     .on_page_load(move |window, payload| {
+        if payload.event() == tauri::webview::PageLoadEvent::Started {
+            crate::loading::document_started(window.app_handle(), id);
+        }
         if payload.event() != tauri::webview::PageLoadEvent::Finished {
             return;
         }
@@ -242,6 +310,10 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
     })
     .build()
     .map_err(|_| "Unable to open the server page. Choose another server or retry.")?;
+    if locked(app.state::<Host>().inner())?.attempt(id).is_err() {
+        let _ = window.destroy();
+        return Ok(());
+    }
     let handle = app.clone();
     #[cfg(not(target_os = "macos"))]
     let closing_window = window.clone();
@@ -265,13 +337,17 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
             if show {
                 let _ = present_chooser(&handle);
             }
+            crate::loading::refresh(&handle);
         }
         _ => {}
     });
     crate::external_links::install(&window, id)
         .map_err(|_| "Unable to install native link handling. Choose another server or retry.")?;
-    crate::chrome::show_initial(&window)
-        .map_err(|_| "Unable to show the server page. Choose another server or retry.")?;
+    let handle = app.clone();
+    crate::chrome::prepare(&window, move |result| {
+        crate::loading::prepared(&handle, id, result)
+    })
+    .map_err(|_| "Unable to prepare the server window. Retry or choose another server.")?;
     Ok(())
 }
 
@@ -309,7 +385,7 @@ fn request_titlebar_visibility(app: &tauri::AppHandle, id: u64, hidden: bool) {
 }
 
 #[cfg(desktop)]
-fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
+pub(crate) fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         window.unminimize()?;
@@ -320,18 +396,18 @@ fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 #[cfg(desktop)]
-pub fn request_host_chooser(app: &tauri::AppHandle, source: Option<u64>, action: ChooserAction) {
+pub fn request_host_chooser(app: &tauri::AppHandle, source: Option<u64>) {
     let refresh = {
         let Ok(mut host) = app.state::<Host>().inner().lock() else {
             return;
         };
-        if host.pending || source.is_some_and(|id| !host.windows.contains_key(&id)) {
+        if source.is_some_and(|id| !host.windows.contains_key(&id)) {
             return;
         }
         if host.chooser_open {
             false
         } else {
-            if !host.request_chooser(source, action) {
+            if !host.request_chooser(source) {
                 return;
             }
             true
@@ -349,20 +425,7 @@ pub fn request_host_chooser(app: &tauri::AppHandle, source: Option<u64>, action:
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-    let switch = MenuItem::with_id(
-        app,
-        "switch-server",
-        "Open server...",
-        true,
-        Some("CmdOrCtrl+Shift+S"),
-    )?;
-    let reload = MenuItem::with_id(
-        app,
-        "reload-server",
-        "Reload Server...",
-        true,
-        Some("CmdOrCtrl+R"),
-    )?;
+    let switch = MenuItem::with_id(app, "switch-server", "Open server...", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, None)?;
     let server = Submenu::with_items(
         app,
@@ -372,7 +435,7 @@ pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             "Server"
         },
         true,
-        &[&switch, &reload, &quit],
+        &[&switch, &quit],
     )?;
     let edit = Submenu::with_items(
         app,
@@ -389,17 +452,15 @@ pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
     app.set_menu(Menu::with_items(app, &[&server, &edit])?)?;
     app.on_menu_event(|app, event| {
-        let action = match event.id().as_ref() {
-            "switch-server" => ChooserAction::Open,
-            "reload-server" => ChooserAction::Reload,
-            _ => return,
-        };
+        if event.id().as_ref() != "switch-server" {
+            return;
+        }
         let source = app
             .state::<Host>()
             .lock()
             .ok()
             .and_then(|host| host.focused_window);
-        request_host_chooser(app, source, action);
+        request_host_chooser(app, source);
     });
     Ok(())
 }

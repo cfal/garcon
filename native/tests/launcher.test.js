@@ -5,7 +5,7 @@ import { mountLauncher } from '../src/launcher.js';
 const html = await Bun.file(new URL('../src/index.html', import.meta.url)).text();
 const choices = (overrides = {}) => ({
   generation: 0, recents: [], lastUrl: null, currentUrl: null,
-  canCancel: false, pending: false, action: 'open', currentName: null, ...overrides,
+  canCancel: false, connection: null, ...overrides,
   recents: (overrides.recents ?? []).map(server => typeof server === 'string' ? { url: server, name: null } : server),
 });
 
@@ -55,7 +55,7 @@ test('HTTP warning follows typed URLs, saved selections and Add Server without b
   window.document.querySelector('#recent-servers button').click();
   expect(warning.hidden).toBe(false);
   window.document.querySelector('form').requestSubmit();
-  expect(commands).toEqual([['connect_server', { url: 'http://garcon.vpn.test/', name: '', generation: 0, acknowledged: false }]]);
+  expect(commands).toEqual([['connect_server', { url: 'http://garcon.vpn.test/', name: '', generation: 0 }]]);
   await new Promise(resolve => setTimeout(resolve, 0));
   window.document.querySelector('#add-server').click();
   expect(warning.hidden).toBe(true);
@@ -64,12 +64,15 @@ test('HTTP warning follows typed URLs, saved selections and Add Server without b
   expect(warning.hidden).toBe(false);
 }));
 
-test('HTTP warning is shown for the reload source rather than the last opened server', () => withLauncherDocument(async window => {
+test('opening keeps the last saved URL editable and has no reload confirmation', () => withLauncherDocument(async window => {
   await mountLauncher(window.document, async () => choices({
-    action: 'reload', currentUrl: 'http://garcon.vpn.test/', lastUrl: 'https://secure.test/', canCancel: true,
+    currentUrl: 'https://secure.test/', lastUrl: 'http://garcon.vpn.test/', canCancel: true,
   }));
   expect(window.document.querySelector('#insecure-endpoint').hidden).toBe(false);
-  expect(window.document.querySelector('#server-url').readOnly).toBe(true);
+  expect(window.document.querySelector('#server-url').value).toBe('http://garcon.vpn.test/');
+  expect(window.document.querySelector('#server-url').readOnly).toBe(false);
+  expect(window.document.querySelector('#acknowledged')).toBeNull();
+  expect(window.document.querySelector('#switch-warning')).toBeNull();
 }));
 
 test('submit paths share pending admission and show native validation errors', () => withLauncherDocument(async window => {
@@ -107,8 +110,7 @@ test('cancel preserves the page and opening another server requires no loss ackn
   expect(commands).toEqual([['cancel_chooser', { generation: 9 }]]);
   window.document.querySelector('#server-url').value = 'https://b.test/';
   window.document.querySelector('form').requestSubmit();
-  expect(window.document.querySelector('#switch-warning').hidden).toBe(true);
-  expect(commands[1]).toEqual(['connect_server', { url: 'https://b.test/', name: '', generation: 9, acknowledged: false }]);
+  expect(commands[1]).toEqual(['connect_server', { url: 'https://b.test/', name: '', generation: 9 }]);
 }));
 
 test('recent removal is a host operation, and Add Server resets the selection', () => withLauncherDocument(async window => {
@@ -136,30 +138,25 @@ test('settings errors supplied by the host remain visible without enabling conne
   expect(window.document.querySelector('button').disabled).toBe(true);
 }));
 
-test('reload uses the same confirmation gate and refreshes requests arriving during a transition', () => withLauncherDocument(async window => {
+test('refreshes requests arriving during an open transition after it settles', () => withLauncherDocument(async window => {
   let finish;
   let snapshots = 0;
   await mountLauncher(window.document, (command) => {
     if (command === 'server_choices') {
       snapshots++;
-      return Promise.resolve(choices({ generation: snapshots, currentUrl: 'https://a.test/', canCancel: true, action: 'reload' }));
+      return Promise.resolve(choices({ generation: snapshots, lastUrl: 'https://a.test/', canCancel: true }));
     }
     return new Promise(resolve => { finish = resolve; });
   });
-  expect(window.document.querySelector('#server-form button').textContent).toBe('Reload Server');
+  expect(window.document.querySelector('#server-form button').textContent).toBe('Open server');
   expect(window.document.querySelector('#server-url').value).toBe('https://a.test/');
-  window.document.querySelector('form').requestSubmit();
-  expect(finish).toBeUndefined();
-  expect(window.document.querySelector('#recent-servers').hidden).toBe(true);
-  expect(window.document.querySelector('#server-url').readOnly).toBe(true);
-  window.document.querySelector('#acknowledged').checked = true;
   window.document.querySelector('form').requestSubmit();
   window.dispatchEvent(new window.Event('garcon-chooser-open'));
   expect(snapshots).toBe(1);
   finish();
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(snapshots).toBe(2);
-  expect(window.document.querySelector('#acknowledged').checked).toBe(false);
+  expect(window.document.querySelector('#server-form button').disabled).toBe(false);
 }));
 
 test('named recents show their URL and reopen as a new window, including the current server', () => withLauncherDocument(async window => {
@@ -174,7 +171,7 @@ test('named recents show their URL and reopen as a new window, including the cur
   expect(window.document.querySelector('#server-form button').textContent).toBe('Open server');
   window.document.querySelector('#server-name').value = 'Personal';
   window.document.querySelector('form').requestSubmit();
-  expect(commands).toEqual([['connect_server', { url: 'https://a.test/', name: 'Personal', generation: 4, acknowledged: false }]]);
+  expect(commands).toEqual([['connect_server', { url: 'https://a.test/', name: 'Personal', generation: 4 }]]);
   await new Promise(resolve => setTimeout(resolve, 0));
   window.document.querySelector('#add-server').click();
   expect(window.document.querySelector('#server-name').value).toBe('');
@@ -210,4 +207,42 @@ test('failed opens retain the attempted URL and name across queued host refreshe
   expect(window.document.querySelector('#insecure-endpoint').hidden).toBe(false);
   expect(window.document.querySelector('#server-name').value).toBe('Attempt');
   expect(window.document.querySelector('#connection-error').textContent).toBe('Synthetic failure');
+}));
+
+test('loading hides selection while Cancel and Retry remain independently actionable', () => withLauncherDocument(async window => {
+  let connection = { id: 8, server: 'Work', url: 'https://synthetic.test/', message: null, canRetry: false, canShow: false };
+  const commands = [];
+  await mountLauncher(window.document, async (command, args) => {
+    if (command === 'server_choices') return choices({ connection });
+    commands.push([command, args]);
+  });
+  const document = window.document;
+  expect(document.querySelector('#server-selection').hidden).toBe(true);
+  expect(document.querySelector('#connection').hidden).toBe(false);
+  expect(document.querySelector('#retry-connection').disabled).toBe(true);
+  expect(document.querySelector('#cancel-connection').disabled).toBe(false);
+  expect(document.querySelector('#show-connection').hidden).toBe(true);
+  document.querySelector('#server-url').value = 'https://ignored.test/';
+  document.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  expect(commands).toEqual([]);
+  connection = { ...connection, message: 'Garcon has not become ready.', canRetry: true, canShow: true };
+  window.dispatchEvent(new window.Event('garcon-chooser-open'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('#connection-status').textContent).toBe(connection.message);
+  expect(document.querySelector('#retry-connection').disabled).toBe(false);
+  expect(document.querySelector('#show-connection').hidden).toBe(false);
+  document.querySelector('#retry-connection').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  document.querySelector('#show-connection').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(commands).toEqual([
+    ['retry_connection', { id: 8 }], ['show_connection', { id: 8 }], ['cancel_connection', { id: 8 }],
+  ]);
+  connection = null;
+  window.dispatchEvent(new window.Event('garcon-chooser-open'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('#server-selection').hidden).toBe(false);
+  expect(document.querySelector('#server-form button').disabled).toBe(false);
 }));

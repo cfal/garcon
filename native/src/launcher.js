@@ -4,10 +4,8 @@
  * @property {{url: string, name: string | null}[]} recents
  * @property {string | null} lastUrl
  * @property {string | null} currentUrl
- * @property {string | null} currentName
  * @property {boolean} canCancel
- * @property {boolean} pending
- * @property {'open' | 'reload'} action
+ * @property {{id: number, server: string, url: string, message: string | null, canRetry: boolean, canShow: boolean} | null} connection
  */
 export async function mountLauncher(document, invoke) {
   const form = document.querySelector('#server-form');
@@ -15,13 +13,15 @@ export async function mountLauncher(document, invoke) {
   const insecureEndpoint = document.querySelector('#insecure-endpoint');
   const name = document.querySelector('#server-name');
   const add = document.querySelector('#add-server');
-  const button = form.querySelector('button[type=submit]');
   const error = document.querySelector('#connection-error');
   const recents = document.querySelector('#recent-servers');
   const cancel = document.querySelector('#cancel');
-  const acknowledgement = document.querySelector('#acknowledged');
-  const warning = document.querySelector('#switch-warning');
   const current = document.querySelector('#current-server');
+  const selection = document.querySelector('#server-selection');
+  const connection = document.querySelector('#connection');
+  const retryConnection = document.querySelector('#retry-connection');
+  const cancelConnection = document.querySelector('#cancel-connection');
+  const showConnection = document.querySelector('#show-connection');
   /** @type {ServerChoices | undefined} */
   let choices;
   let pending = false;
@@ -50,6 +50,11 @@ export async function mountLauncher(document, invoke) {
   function setPending(value) {
     pending = value;
     for (const control of document.querySelectorAll('button, input')) control.disabled = value || !ready;
+    if (choices?.connection) {
+      for (const control of selection.querySelectorAll('button, input')) control.disabled = true;
+      retryConnection.disabled ||= !choices.connection.canRetry;
+      showConnection.disabled ||= !choices.connection.canShow;
+    }
   }
 
   async function run(operation) {
@@ -79,20 +84,20 @@ export async function mountLauncher(document, invoke) {
       const result = await invoke('server_choices');
       if (id !== refreshId) return;
       choices = result;
-      const reload = choices.action === 'reload';
-      input.value = (reload ? choices.currentUrl : choices.lastUrl) ?? '';
+      selection.hidden = !!choices.connection;
+      connection.hidden = !choices.connection;
+      if (choices.connection) {
+        document.querySelector('#connection-heading').textContent = choices.connection.message ? 'Connection not ready' : 'Connecting';
+        document.querySelector('#connection-server').textContent = choices.connection.server;
+        document.querySelector('#connection-url').textContent = choices.connection.url;
+        document.querySelector('#connection-status').textContent = choices.connection.message ?? 'Waiting for Garcon...';
+        showConnection.hidden = !choices.connection.canShow;
+      }
+      input.value = choices.lastUrl ?? '';
       updateEndpointWarning();
-      name.value = reload ? (choices.currentName ?? '') : savedName(input.value);
-      input.readOnly = reload;
-      name.readOnly = reload;
+      name.value = savedName(input.value);
       current.textContent = choices.currentUrl ? `Opened from: ${choices.currentUrl}` : '';
       cancel.hidden = !choices.canCancel;
-      warning.hidden = !reload;
-      acknowledgement.checked = false;
-      acknowledgement.required = reload;
-      button.textContent = reload ? 'Reload Server' : 'Open server';
-      recents.hidden = reload;
-      add.hidden = reload;
       recents.replaceChildren();
       for (const server of choices.recents) {
         const { url } = server;
@@ -110,7 +115,6 @@ export async function mountLauncher(document, invoke) {
           input.value = url;
           updateEndpointWarning();
           name.value = server.name ?? '';
-          acknowledgement.checked = false;
           input.focus();
         });
         const remove = document.createElement('button');
@@ -125,7 +129,7 @@ export async function mountLauncher(document, invoke) {
         row.append(select, remove);
         recents.append(row);
       }
-      ready = !choices.pending;
+      ready = true;
       setPending(false);
     } catch (cause) {
       if (id !== refreshId) return;
@@ -135,10 +139,10 @@ export async function mountLauncher(document, invoke) {
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!ready || pending || !form.reportValidity()) return;
+    if (!ready || pending || choices?.connection || !form.reportValidity()) return;
     const attemptedUrl = input.value;
     const attemptedName = name.value;
-    await run(() => invoke('connect_server', { url: attemptedUrl, name: attemptedName, generation: choices.generation, acknowledged: acknowledgement.checked }));
+    await run(() => invoke('connect_server', { url: attemptedUrl, name: attemptedName, generation: choices.generation }));
     if (error.textContent) {
       const message = error.textContent;
       await refresh();
@@ -158,13 +162,22 @@ export async function mountLauncher(document, invoke) {
     input.value = '';
     updateEndpointWarning();
     name.value = '';
-    acknowledgement.checked = false;
-    button.textContent = 'Open server';
     input.focus();
   });
   cancel.addEventListener('click', () => void run(() => invoke('cancel_chooser', { generation: choices.generation })));
+  for (const [button, command] of [
+    [retryConnection, 'retry_connection'],
+    [cancelConnection, 'cancel_connection'],
+    [showConnection, 'show_connection'],
+  ]) {
+    button.addEventListener('click', () => {
+      if (choices?.connection) void run(() => invoke(command, { id: choices.connection.id }));
+    });
+  }
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && choices?.canCancel) cancel.click();
+    if (event.key !== 'Escape') return;
+    if (choices?.connection) cancelConnection.click();
+    else if (choices?.canCancel) cancel.click();
   });
   document.defaultView.addEventListener('garcon-chooser-open', () => void refresh());
   await refresh();

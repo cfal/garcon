@@ -201,10 +201,18 @@ mod tests {
         let target = "https://external.example.test/guide";
         assert!(page_destination(&host, 2, SOURCE, target).is_some());
         assert!(page_destination(&host, 1, SOURCE, target).is_none());
-        host.pending = true;
+        host.attempt = Some(crate::connection::ConnectionAttempt::new(
+            4,
+            crate::connection::ConnectionTarget {
+                server: host.windows[&2].clone(),
+                url: host.windows[&2].deployment.url().clone(),
+                placement: None,
+            },
+            None,
+        ));
         host.generation += 1;
         assert!(page_destination(&host, 2, SOURCE, target).is_some());
-        host.pending = false;
+        host.attempt = None;
         let window = host.windows.remove(&2).unwrap();
         host.windows.insert(3, window);
         assert!(page_destination(&host, 2, SOURCE, target).is_none());

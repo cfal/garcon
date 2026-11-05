@@ -895,6 +895,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tokio",
  "url",
  "webkit2gtk",
 ]

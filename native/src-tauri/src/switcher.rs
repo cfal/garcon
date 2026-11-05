@@ -1,4 +1,5 @@
 use crate::{
+    connection::{ConnectionAttempt, ConnectionStatus, ConnectionTarget},
     deployment::Deployment,
     selection::{SavedServer, ServerSelection},
 };
@@ -6,14 +7,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 pub const CHOOSER_REQUEST: &str = "garcon-host://switch-server/";
-
-#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChooserAction {
-    #[default]
-    Open,
-    Reload,
-}
+pub const RELOAD_REQUEST: &str = "garcon-host://reload-server/";
+pub const READY_REQUEST: &str = "garcon-host://page-ready/";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,10 +17,8 @@ pub struct ServerChoices {
     pub recents: Vec<SavedServer>,
     pub last_url: Option<String>,
     pub current_url: Option<String>,
-    pub current_name: Option<String>,
     pub can_cancel: bool,
-    pub pending: bool,
-    pub action: ChooserAction,
+    pub connection: Option<ConnectionStatus>,
 }
 
 #[derive(Clone)]
@@ -61,9 +54,8 @@ pub struct Switcher {
     pub windows: BTreeMap<u64, ServerWindow>,
     pub chooser_source: Option<u64>,
     pub focused_window: Option<u64>,
-    pub pending: bool,
+    pub attempt: Option<ConnectionAttempt>,
     pub chooser_open: bool,
-    pub action: ChooserAction,
 }
 
 impl Switcher {
@@ -75,9 +67,8 @@ impl Switcher {
             windows: BTreeMap::new(),
             chooser_source: None,
             focused_window: None,
-            pending: false,
+            attempt: None,
             chooser_open: true,
-            action: ChooserAction::Open,
         }
     }
 
@@ -89,15 +80,13 @@ impl Switcher {
             recents: selection.saved_servers(),
             last_url: selection.last_url(),
             current_url: current.map(|window| window.deployment.url().to_string()),
-            current_name: current.and_then(|window| window.name.clone()),
-            can_cancel: self.cancel_target().is_some() && !self.pending,
-            pending: self.pending,
-            action: self.action,
+            can_cancel: self.cancel_target().is_some(),
+            connection: self.attempt.as_ref().map(ConnectionAttempt::status),
         })
     }
 
     pub fn check_generation(&self, generation: u64) -> Result<(), String> {
-        if generation != self.generation || self.pending {
+        if generation != self.generation || self.attempt.is_some() {
             return Err("The server selection changed. Reopen the chooser and try again.".into());
         }
         Ok(())
@@ -108,40 +97,87 @@ impl Switcher {
         generation: u64,
         deployment: Deployment,
         name: Option<String>,
-        acknowledged: bool,
-    ) -> Result<(u64, Option<u64>), String> {
+    ) -> Result<u64, String> {
         self.check_generation(generation)?;
-        let (previous, name, titlebar_hidden) = if self.action == ChooserAction::Reload {
-            let id = self.chooser_source.ok_or("No server page is open.")?;
-            let window = self.windows.get(&id).ok_or("No server page is open.")?;
-            if deployment.url() != window.deployment.url() {
-                return Err("Reload must use the current server URL.".into());
-            }
-            if !acknowledged {
-                return Err("Confirm that unsaved changes and attachments may be lost.".into());
-            }
-            // Reload preserves this window's title, not its stale copy of a saved name.
-            (Some(id), window.name.clone(), window.titlebar_hidden)
-        } else {
-            let selection = self.selection.as_mut().map_err(|error| error.clone())?;
-            (None, selection.select_named(&deployment, name)?, false)
-        };
+        let selection = self.selection.as_mut().map_err(|error| error.clone())?;
+        let name = selection.select_named(&deployment, name)?;
+        let url = deployment.url().clone();
+        Ok(self.start_attempt(
+            ConnectionTarget {
+                server: ServerWindow {
+                    deployment,
+                    name,
+                    titlebar_hidden: false,
+                },
+                url,
+                placement: None,
+            },
+            None,
+        ))
+    }
+
+    pub fn begin_reload(&mut self, source: u64, target: ConnectionTarget) -> Result<u64, String> {
+        if self.attempt.is_some() || self.chooser_open {
+            return Err("Another server action is open.".into());
+        }
+        let server = self
+            .windows
+            .get(&source)
+            .ok_or("The server window was closed.")?;
+        if !server.deployment.allows(&target.url) {
+            return Err("The current page is outside this server.".into());
+        }
+        self.chooser_source = Some(source);
+        Ok(self.start_attempt(target, Some(source)))
+    }
+
+    fn start_attempt(&mut self, target: ConnectionTarget, source: Option<u64>) -> u64 {
         self.next_window_id += 1;
         let id = self.next_window_id;
-        if let Some(previous) = previous {
-            self.windows.remove(&previous);
-        }
-        self.windows.insert(
-            id,
-            ServerWindow {
-                deployment,
-                name,
-                titlebar_hidden,
-            },
-        );
+        self.windows.insert(id, target.server.clone());
+        self.attempt = Some(ConnectionAttempt::new(id, target, source));
         self.generation += 1;
-        self.pending = true;
-        Ok((id, previous))
+        self.chooser_open = true;
+        id
+    }
+
+    pub fn attempt(&self, id: u64) -> Result<&ConnectionAttempt, String> {
+        self.attempt
+            .as_ref()
+            .filter(|attempt| attempt.id == id)
+            .ok_or_else(|| "The connection attempt changed.".into())
+    }
+
+    pub fn attempt_mut(&mut self, id: u64) -> Option<&mut ConnectionAttempt> {
+        self.attempt.as_mut().filter(|attempt| attempt.id == id)
+    }
+
+    pub fn cancel_attempt(&mut self, id: u64) -> Result<(), String> {
+        self.attempt(id)?;
+        self.attempt = None;
+        self.windows.remove(&id);
+        self.generation += 1;
+        self.chooser_open = true;
+        Ok(())
+    }
+
+    pub fn retry_attempt(&mut self, id: u64) -> Result<u64, String> {
+        let attempt = self.attempt(id)?;
+        if !attempt.status().can_retry {
+            return Err("The native window is still opening.".into());
+        }
+        let target = attempt.target.clone();
+        let source = attempt.source;
+        self.cancel_attempt(id)?;
+        Ok(self.start_attempt(target, source))
+    }
+
+    pub fn complete_attempt(&mut self, id: u64) -> Result<Option<u64>, String> {
+        let source = self.attempt(id)?.source;
+        self.attempt = None;
+        self.chooser_open = false;
+        self.generation += 1;
+        Ok(source)
     }
 
     pub fn allows_navigation(&self, id: u64, destination: &url::Url) -> bool {
@@ -150,17 +186,15 @@ impl Switcher {
             .is_some_and(|window| window.deployment.allows(destination))
     }
 
-    pub fn request_chooser(&mut self, source: Option<u64>, action: ChooserAction) -> bool {
-        if self.pending
+    pub fn request_chooser(&mut self, source: Option<u64>) -> bool {
+        if self.attempt.is_some()
             || self.chooser_open
             || source.is_some_and(|id| !self.windows.contains_key(&id))
-            || (action == ChooserAction::Reload && source.is_none())
         {
             return false;
         }
         self.generation += 1;
         self.chooser_source = source;
-        self.action = action;
         self.chooser_open = true;
         true
     }
@@ -169,21 +203,39 @@ impl Switcher {
         [self.chooser_source, self.focused_window]
             .into_iter()
             .flatten()
-            .find(|id| self.windows.contains_key(id))
-            .or_else(|| self.windows.keys().next_back().copied())
+            .find(|id| {
+                self.windows.contains_key(id)
+                    && self
+                        .attempt
+                        .as_ref()
+                        .is_none_or(|attempt| attempt.id != *id)
+            })
+            .or_else(|| {
+                self.windows.keys().rev().copied().find(|id| {
+                    self.attempt
+                        .as_ref()
+                        .is_none_or(|attempt| attempt.id != *id)
+                })
+            })
     }
 
     pub fn retire(&mut self, id: u64) -> bool {
-        self.windows.remove(&id);
+        if self.windows.remove(&id).is_none() {
+            return false;
+        }
+        if let Some(attempt) = self.attempt_mut(id) {
+            attempt.failure = Some("The server window closed before it was ready.".into());
+        }
         if self.focused_window == Some(id) {
             self.focused_window = None;
         }
         let source_closed = self.chooser_source == Some(id);
         if source_closed {
             self.chooser_source = None;
-            self.action = ChooserAction::Open;
         }
-        if !self.pending && (self.windows.is_empty() || (self.chooser_open && source_closed)) {
+        if self.attempt.is_none()
+            && (self.windows.is_empty() || (self.chooser_open && source_closed))
+        {
             self.generation += 1;
             self.chooser_open = true;
             return true;
@@ -205,17 +257,14 @@ mod tests {
     }
 
     fn open(host: &mut Switcher, url: &str, name: Option<&str>) -> u64 {
-        let (id, previous) = host
+        let id = host
             .begin(
                 host.generation,
                 Deployment::parse(url).unwrap(),
                 name.map(str::to_string),
-                false,
             )
             .unwrap();
-        assert!(previous.is_none());
-        host.pending = false;
-        host.chooser_open = false;
+        host.complete_attempt(id).unwrap();
         id
     }
 
@@ -236,15 +285,15 @@ mod tests {
         assert!(host.allows_navigation(b, &url::Url::parse("https://b.test/").unwrap()));
         assert_eq!(host.windows[&a].title(), "Work \u{2014} Garcon");
         assert_eq!(host.windows[&duplicate].title(), "a.test \u{2014} Garcon");
-        assert!(host.request_chooser(Some(a), ChooserAction::Open));
-        assert!(!host.request_chooser(Some(b), ChooserAction::Open));
+        assert!(host.request_chooser(Some(a)));
+        assert!(!host.request_chooser(Some(b)));
         assert_eq!(host.cancel_target(), Some(a));
         let revision = host.generation;
         assert!(host.check_generation(revision - 1).is_err());
         host.chooser_open = false;
         assert!(!host.retire(a));
         assert!(!host.allows_navigation(a, &url::Url::parse("https://a.test/mount/").unwrap()));
-        assert!(!host.request_chooser(Some(a), ChooserAction::Open));
+        assert!(!host.request_chooser(Some(a)));
         assert_eq!(host.windows.len(), 2);
         assert!(!host.retire(b));
         assert!(host.retire(duplicate));
@@ -255,42 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_replaces_only_the_requesting_window_after_acknowledgement() {
-        let (mut host, directory) = fixture("window-reload");
-        let a = open(&mut host, "https://a.test/", None);
-        let b = open(&mut host, "https://b.test/", None);
-        assert!(!host.windows[&a].titlebar_hidden);
-        host.windows.get_mut(&a).unwrap().titlebar_hidden = true;
-        assert!(!host.windows[&b].titlebar_hidden);
-        assert!(host.request_chooser(Some(a), ChooserAction::Reload));
-        let revision = host.generation;
-        let a_url = Deployment::parse("https://a.test/").unwrap();
-        assert!(host.begin(revision, a_url.clone(), None, false).is_err());
-        assert!(
-            host.begin(
-                revision,
-                Deployment::parse("https://b.test/").unwrap(),
-                None,
-                true
-            )
-            .is_err()
-        );
-        assert_eq!(host.windows.len(), 2);
-        let (replacement, previous) = host.begin(revision, a_url.clone(), None, true).unwrap();
-        assert_eq!(previous, Some(a));
-        assert!(host.windows.contains_key(&b));
-        assert!(!host.windows.contains_key(&a));
-        assert!(host.allows_navigation(replacement, a_url.url()));
-        assert!(host.windows[&replacement].titlebar_hidden);
-        assert!(!host.windows[&b].titlebar_hidden);
-        assert!(!host.request_chooser(Some(b), ChooserAction::Open));
-        assert!(host.begin(revision, a_url, None, true).is_err());
-        drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn reloading_an_older_window_never_changes_a_newer_saved_name() {
+    fn opening_duplicate_servers_preserves_existing_window_names() {
         for (index, (old_name, saved_name)) in [
             (Some("Old"), Some("New")),
             (None, Some("New")),
@@ -299,20 +313,14 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let (mut host, directory) = fixture(&format!("reload-name-{index}"));
+            let (mut host, directory) = fixture(&format!("window-name-{index}"));
             let old = open(&mut host, "https://a.test/", old_name);
+            host.windows.get_mut(&old).unwrap().titlebar_hidden = true;
             let newer = open(&mut host, "https://a.test/", saved_name);
-            assert!(host.request_chooser(Some(old), ChooserAction::Reload));
-            let (replacement, _) = host
-                .begin(
-                    host.generation,
-                    Deployment::parse("https://a.test/").unwrap(),
-                    old_name.map(str::to_string),
-                    true,
-                )
-                .unwrap();
-            assert_eq!(host.windows[&replacement].name.as_deref(), old_name);
-            assert!(host.windows.contains_key(&newer));
+            assert_eq!(host.windows[&old].name.as_deref(), old_name);
+            assert_eq!(host.windows[&newer].name.as_deref(), saved_name);
+            assert!(host.windows[&old].titlebar_hidden);
+            assert!(!host.windows[&newer].titlebar_hidden);
             drop(host);
             let selection = ServerSelection::load(directory.join("servers.json")).unwrap();
             assert_eq!(selection.saved_servers()[0].name.as_deref(), saved_name);
@@ -322,15 +330,15 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_chooser_source_fences_its_snapshot_without_retargeting_reload() {
+    fn closing_the_chooser_source_fences_its_snapshot_and_preserves_cancel() {
         let (mut host, directory) = fixture("source-close");
         let a = open(&mut host, "https://a.test/", None);
         let b = open(&mut host, "https://b.test/", None);
-        assert!(host.request_chooser(Some(a), ChooserAction::Reload));
+        assert!(host.request_chooser(Some(a)));
         let revision = host.generation;
         assert!(host.retire(a));
         assert!(host.check_generation(revision).is_err());
-        assert!(host.action == ChooserAction::Open);
+        assert!(host.choices().unwrap().current_url.is_none());
         assert_eq!(host.cancel_target(), Some(b));
         drop(host);
         std::fs::remove_dir_all(directory).unwrap();
@@ -347,25 +355,105 @@ mod tests {
     }
 
     #[test]
+    fn reload_retry_preserves_captured_page_and_never_rewrites_saved_names() {
+        for (index, (old_name, saved_name)) in [
+            (Some("Old"), Some("New")),
+            (None, Some("New")),
+            (Some("Old"), None),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (mut host, directory) = fixture(&format!("managed-reload-{index}"));
+            let source = open(&mut host, "https://a.test/mount/", old_name);
+            host.windows.get_mut(&source).unwrap().titlebar_hidden = true;
+            let sibling = open(&mut host, "https://a.test/mount/", saved_name);
+            let target = ConnectionTarget {
+                server: host.windows[&source].clone(),
+                url: url::Url::parse("https://a.test/mount/chat/example?q=1#latest").unwrap(),
+                placement: None,
+            };
+            let candidate = host.begin_reload(source, target.clone()).unwrap();
+            assert!(host.windows.contains_key(&source));
+            assert!(host.begin_reload(sibling, target).is_err());
+            assert!(!host.request_chooser(Some(sibling)));
+            assert!(host.retry_attempt(candidate).is_err());
+            host.attempt_mut(candidate).unwrap().prepared = true;
+            let retry = host.retry_attempt(candidate).unwrap();
+            assert_ne!(retry, candidate);
+            assert!(host.attempt_mut(candidate).is_none());
+            assert!(host.complete_attempt(candidate).is_err());
+            assert!(!host.retire(candidate));
+            assert_eq!(
+                host.attempt(retry).unwrap().target.url.as_str(),
+                "https://a.test/mount/chat/example?q=1#latest"
+            );
+            assert!(host.windows[&retry].titlebar_hidden);
+            assert_eq!(host.windows[&retry].name.as_deref(), old_name);
+            assert_eq!(host.complete_attempt(retry).unwrap(), Some(source));
+            assert!(!host.retire(source));
+            assert!(host.windows.contains_key(&sibling));
+            drop(host);
+            let selection = ServerSelection::load(directory.join("servers.json")).unwrap();
+            assert_eq!(selection.saved_servers()[0].name.as_deref(), saved_name);
+            drop(selection);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn cancellation_fences_late_events_even_when_source_was_closed() {
+        let (mut host, directory) = fixture("cancel-attempt");
+        let source = open(&mut host, "https://a.test/", None);
+        let target = ConnectionTarget {
+            server: host.windows[&source].clone(),
+            url: url::Url::parse("https://a.test/chat").unwrap(),
+            placement: None,
+        };
+        let mut escaped = target.clone();
+        escaped.url = url::Url::parse("https://other.test/").unwrap();
+        assert!(host.begin_reload(source, escaped).is_err());
+        let candidate = host.begin_reload(source, target).unwrap();
+        assert_eq!(host.cancel_target(), Some(source));
+        assert!(!host.retire(source));
+        assert_eq!(host.cancel_target(), None);
+        host.cancel_attempt(candidate).unwrap();
+        assert!(host.attempt_mut(candidate).is_none());
+        assert!(host.retry_attempt(candidate).is_err());
+        assert!(host.complete_attempt(candidate).is_err());
+        assert!(!host.retire(candidate));
+        assert!(host.chooser_open);
+        assert!(host.windows.is_empty());
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn failed_window_retirement_preserves_siblings_and_allows_retry() {
         let (mut host, directory) = fixture("window-creation-failure");
         let sibling = open(&mut host, "https://a.test/", None);
-        assert!(host.request_chooser(Some(sibling), ChooserAction::Open));
+        assert!(host.request_chooser(Some(sibling)));
         let deployment = Deployment::parse("https://b.test/").unwrap();
-        let (failed, _) = host
-            .begin(host.generation, deployment.clone(), None, false)
+        let failed = host
+            .begin(host.generation, deployment.clone(), None)
             .unwrap();
         let revision = host.generation;
         assert!(!host.retire(failed));
-        assert!(host.pending);
+        assert!(host.attempt(failed).unwrap().failure.is_some());
         assert_eq!(host.generation, revision);
         assert!(!host.allows_navigation(failed, deployment.url()));
         assert!(host.windows.contains_key(&sibling));
-        host.pending = false;
-        host.chooser_open = true;
-        let (retry, previous) = host.begin(revision, deployment, None, false).unwrap();
+        let retry = host.retry_attempt(failed).unwrap();
         assert_ne!(retry, failed);
-        assert!(previous.is_none());
+        assert!(!host.request_chooser(Some(sibling)));
+        assert!(
+            host.begin(
+                revision,
+                Deployment::parse("https://b.test/").unwrap(),
+                None
+            )
+            .is_err()
+        );
         assert!(host.windows.contains_key(&sibling));
         assert!(host.windows.contains_key(&retry));
         drop(host);
@@ -382,15 +470,14 @@ mod tests {
             host.begin(
                 revision,
                 Deployment::parse("https://b.test/").unwrap(),
-                None,
-                false
+                None
             )
             .is_err()
         );
         assert_eq!(host.generation, revision);
         assert_eq!(host.windows.len(), 1);
         assert!(host.windows.contains_key(&a));
-        assert!(!host.pending);
+        assert!(host.attempt.is_none());
         drop(host);
         std::fs::remove_dir_all(directory).unwrap();
     }

@@ -11,6 +11,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
 	import FontPreloads from '$lib/components/layout/FontPreloads.svelte';
+	import NativeReadySignal from '$lib/components/layout/NativeReadySignal.svelte';
 	import { installNativeConnectionNotification } from '$lib/native/connection-notification.js';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
@@ -646,6 +647,7 @@
 		</div>
 	</div>
 {:else if !auth.presentationOwner && auth.isUnavailable && (!isPublicRoute || auth.token || (isAuthRoute && auth.availability === 'storage-unavailable'))}
+	<NativeReadySignal />
 	<div data-auth-recovery class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="max-w-md text-center">
 			<div class="flex justify-center mb-4">
@@ -669,8 +671,10 @@
 	</div>
 {:else if isPublicRoute}
 	{@render children()}
+	<NativeReadySignal />
 {:else if auth.presentationOwner}
 	<AppShell />
+	<NativeReadySignal />
 
 	<CommandMenu bind:this={commandMenu} />
 	<KeyboardShortcuts
