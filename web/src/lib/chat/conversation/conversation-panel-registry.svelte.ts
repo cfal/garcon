@@ -597,7 +597,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		this.#visible = [...visible];
 		for (const chatId of admittedChatIds) {
-			void this.loadChatSnapshot(chatId).catch(() => {
+			void this.loadChatSnapshot(chatId, { purpose: 'activation' }).catch(() => {
 				this.markChatDirty(chatId);
 			});
 		}

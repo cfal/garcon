@@ -67,6 +67,7 @@ describe('display surface registry', () => {
 		registry.reconcile([presentation(left)]);
 		expect(await registry.loadChatSnapshot('chat-1')).toBe(true);
 		expect(api.open).toHaveBeenCalledOnce();
+		expect(api.open.mock.calls[0][0].reason).toBe('activate');
 	});
 
 	it('distributes metadata and refreshes siblings without waiting for one layout gate', async () => {
