@@ -5,6 +5,8 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
   'auth-request-bounds': 'Controller HTTP authentication body limits; no executor dispatch.',
   'browser-logout': 'Owns its browser-session and Local/remote execution matrix.',
   'runtime-base-path': 'Owns the root/nested mount and Local/remote transport matrix.',
+  'workflow-delivery': 'Owns both remote dial directions with simultaneous Local and remote providers.',
+  'workflows': 'Owns its Local and both remote dial direction command, approval and restart matrix.',
   'claude-scripted-steering-protocol': 'Direct pinned CLI protocol; no Garcon executor dispatch.',
   ...Object.fromEntries([
     'account-credentials', 'garcon-cli-schedules', 'scheduled-prompt-toggles',
