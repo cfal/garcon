@@ -72,7 +72,7 @@ import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
 import { AutomationLifecycle } from './automation/lifecycle.js';
 import { ChatMutationGuard } from './automation/mutation-guard.js';
-import { createWorkflowProviderReferences } from './workflows/setup.js';
+import { composeWorkflows, createWorkflowProviderReferences } from './workflows/adapters/composition.js';
 import { queuedSteerContentResolver } from './commands/steer-file-context.js';
 import { KeyedPromiseLock } from '../common/keyed-lock.js';
 import { ChatHandler } from './ws/chat.js';
@@ -656,6 +656,9 @@ export async function startServer(): Promise<void> {
       execution: queue,
       providerRevision: (input) => endpointResolver.resolveSelection(input).endpoint?.credential?.revision ?? null,
     });
+    const { workflows, workflowSettings, startWorkflows } = composeWorkflows(workspaceDir, settings, { automation, execution: queue, chats: chatRegistry, executors,
+      onInvalidated: (id, revision) => eventWiring?.broadcastWorkflowInvalidated(id, revision),
+    }, error => logger.warn('Workflows are unavailable; ordinary chats remain available.', error));
     const scheduledPromptStore = new ScheduledPromptStore(workspaceDir, retainExecutorReferences, retainProviderReferences);
     const scheduledPrompts = new ScheduledPromptScheduler({
       inspectProject,
@@ -743,6 +746,7 @@ export async function startServer(): Promise<void> {
       startDispatchers: async () => {
         await scheduledPrompts.start();
         pullRequestReviews.start();
+        await startWorkflows();
       },
     });
     unsubscribeSearchStatus = chatSearch.onStatusChanged((status) => {
@@ -769,6 +773,7 @@ export async function startServer(): Promise<void> {
       executors,
       projectBasePath,
       resolveTicketProject,
+      workflows, workflowSettings,
       registry: chatRegistry,
       settings,
       recentTitleIcons,
@@ -907,6 +912,7 @@ export async function startServer(): Promise<void> {
         () => agentCommands.shutdown(),
         () => carryOverGarbageCollector.shutdown(),
         () => { metadataClosed = metadata.close().catch(reportCleanupError); },
+        () => workflows.beginShutdown(),
         () => automation.beginShutdown(),
         () => { reservedChatIds = queue.beginShutdown(); },
         () => executors.quiesce(),
@@ -940,6 +946,7 @@ export async function startServer(): Promise<void> {
           () => chatCommands.waitForBackgroundTasks(),
           () => queue.waitForExecutionOwners(),
           () => eventWiring!.waitForIdle(),
+          () => workflows.close(),
         ]);
         if (!backgroundTasks.completed) {
           cleanupFailed = true;

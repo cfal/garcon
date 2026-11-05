@@ -4,6 +4,7 @@ import { validateWorkflowGraph, workflowMermaid, workflowOrder } from '../graph.
 import { workflowDigest } from '../inputs.js';
 import { invalidatedWorkflowTasks } from '../transitions.js';
 import { plan } from './fixture.js';
+import { integrationPlan, replaceTarget } from './integration-fixture.js';
 
 test('rejects missing, duplicate, self and cyclic dependencies', () => {
   const first = plan().tasks[0]!;
@@ -38,4 +39,37 @@ test('Mermaid uses stored edges and escapes executable labels', () => {
   expect(diagram).toContain('n0 --> n1');
   expect(diagram).not.toContain('\nclick');
   expect(diagram).not.toContain('javascript:');
+});
+
+test.each([15, 16])('integration input budget rejects %s inputs before effects', count => {
+  const validate = () => validateWorkflowGraph(parseWorkflowPlan(integrationPlan(count)));
+  if (count === 15) expect(validate).not.toThrow();
+  else expect(validate).toThrow('15');
+});
+
+test.each(['repository', 'root', 'retry', 'summary', 'clone', 'executor'] as const)('integration rejects invalid %s contracts', kind => {
+  const input = integrationPlan();
+  const tasks = input.tasks.map(task => {
+    if (task.id === 'source0') {
+      if (kind === 'repository') return replaceTarget(task, { repositoryId: 'different' });
+      if (kind === 'root') return replaceTarget(task, { baseCommit: 'b'.repeat(40) });
+      if (kind === 'clone') return replaceTarget(task, { projectPath: '/synthetic/other-clone' });
+      if (kind === 'executor') return replaceTarget(task, { executorId: '11111111-1111-4111-8111-111111111111' });
+    }
+    if (task.id === 'integrate') {
+      if (kind === 'retry') return { ...task, retry: { ...task.retry, maxAttempts: 2, repeatableFailure: true } };
+      if (kind === 'summary') return { ...task, acceptance: [{ kind: 'artifact' as const, output: 'summary' as const }] };
+    }
+    return task;
+  });
+  expect(() => validateWorkflowGraph(parseWorkflowPlan({ ...input, tasks }))).toThrow();
+});
+
+test('different clones on one executor require matching approved remote writes', () => {
+  const input = integrationPlan();
+  const remote = { name: 'origin', url: 'https://example.invalid/synthetic.git' };
+  const tasks = input.tasks.map(task => replaceTarget(task, { remote,
+    ...(task.id === 'source0' ? { projectPath: '/synthetic/other-clone' } : {}) }));
+  expect(() => validateWorkflowGraph(parseWorkflowPlan({ ...input, tasks, policy: { ...input.policy, allowRemoteWrites: true } }))).not.toThrow();
+  expect(() => validateWorkflowGraph(parseWorkflowPlan({ ...input, tasks }))).toThrow('remote');
 });

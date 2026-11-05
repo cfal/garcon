@@ -1,6 +1,13 @@
 import type { WorkflowManagedTarget } from '../../../common/workflows.js';
 import { parseWorkflowRepository, workflowCommit, workflowId, workflowRecord, workflowText } from '../../../common/workflow-validation.js';
 import { workflowConflict } from './errors.js';
+import type { ManagedWorktreeSnapshot } from '../../../common/git-managed-worktrees.js';
+
+export function matchesManagedTarget(input: WorkflowManagedTarget, observed: ManagedWorktreeSnapshot): boolean {
+  return observed.operationId === input.operationId && observed.managedResourceId === input.managedResourceId
+    && observed.repositoryIdentity === input.repositoryIdentity && observed.worktreeIdentity === input.worktreeIdentity
+    && observed.worktreePath === input.target.projectPath && observed.branch === input.branch && observed.baseCommit === input.head;
+}
 
 export function parseManagedTarget(value: unknown): WorkflowManagedTarget {
   try {

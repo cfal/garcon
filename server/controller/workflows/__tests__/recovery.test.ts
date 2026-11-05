@@ -119,6 +119,7 @@ test('restart preserves intervention and uncertain preparation claims', async ()
   f.reopen(); await recoverWorkflowAttempts(f.store, now);
   expect(f.service.detail(f.id).tasks[0]?.hold).toBe('intervention');
   expect(f.service.attempts(f.id)[0]?.resolution).toBe('not-started');
+  expect(f.service.attempts(f.id)[0]?.result?.detail).toContain('repository preparation may have executed');
   expect(f.store.read(db => db.query('SELECT * FROM resource_claims').all())).toHaveLength(1);
 });
 

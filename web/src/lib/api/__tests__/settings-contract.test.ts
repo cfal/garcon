@@ -23,6 +23,7 @@ function makeSnapshot(overrides?: Record<string, unknown>) {
 	return {
 		version: 1,
 		features: {
+			workflows: { enabled: false },
 			transcriptSearch: { enabled: false },
 			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, tickets: true },
 		},

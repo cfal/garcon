@@ -1,24 +1,46 @@
 import type { Database } from 'bun:sqlite';
 import { parseWorkflowPlan, parseWorkflowRepository } from '../../../common/workflow-validation.js';
-import { WORKFLOW_LIMITS, type WorkflowActivity, type WorkflowApproval, type WorkflowApprovalManifest, type WorkflowArtifact, type WorkflowAttempt,
-  type WorkflowAttemptResult, type WorkflowDetail, type WorkflowPlanRevision, type WorkflowRecord, type WorkflowTaskRecord } from '../../../common/workflows.js';
+import { WORKFLOW_LIMITS, WORKFLOW_ATTENTION_PHASES, type WorkflowActivity, type WorkflowApproval, type WorkflowApprovalManifest, type WorkflowArtifact, type WorkflowAttempt,
+  type WorkflowAttemptResult, type WorkflowCatalogEntry, type WorkflowDetail, type WorkflowPlanRevision, type WorkflowRecord, type WorkflowTaskRecord,
+  type WorkflowOperationView, type WorkflowResourceClaim } from '../../../common/workflows.js';
 import { DomainError } from '../../common/domain-error.js';
 import { workflowDigest, type WorkflowDependencyArtifact } from './inputs.js';
-import { projectWorkflowTasks, workflowOutcome, type WorkflowAttemptStatus, type WorkflowRetryCounts } from './transitions.js';
+import { projectWorkflowTasks, workflowOutcome, type WorkflowAttemptStatus, type WorkflowRetryCounts, type WorkflowTaskProjectionInput } from './transitions.js';
 
 const WORKFLOW_COLUMNS = `id,revision,desired,draft_plan_revision AS draftPlanRevision,
   active_plan_revision AS activePlanRevision,admission_epoch AS admissionEpoch,control_epoch AS controlEpoch,
   title,captain_chat_id AS captainChatId,archived,created_at AS createdAt,updated_at AS updatedAt`;
+
+export const WORKFLOW_OPERATION_ATTENTION_SQL = `(o.status='unknown' OR o.kind='cleanup' AND o.status='not-started'
+  AND EXISTS (SELECT 1 FROM resource_claims c WHERE c.attempt_id=o.attempt_id AND c.resource_key=o.resource_key AND c.retained=1))`;
 
 export function requireWorkflow(database: Database, id: string): WorkflowRecord {
   const row = database.query<Omit<WorkflowRecord, 'archived'> & { archived: number }, [string]>(`SELECT ${WORKFLOW_COLUMNS} FROM workflows WHERE id=?`).get(id);
   if (!row) throw new DomainError('WORKFLOW_NOT_FOUND', 'Workflow not found.', 404);
   return { ...row, archived: row.archived === 1 };
 }
-export function listWorkflowRecords(database: Database, after: string | null, limit: number): WorkflowRecord[] {
+export function listWorkflowRecords(database: Database, after: string | null, limit: number): WorkflowCatalogEntry[] {
   return database.query<{ id: string }, [string | null, string | null, number]>(
-    'SELECT id FROM workflows WHERE archived=0 AND (? IS NULL OR id>?) ORDER BY id LIMIT ?',
-  ).all(after, after, limit).map(row => requireWorkflow(database, row.id));
+    'SELECT id FROM workflows WHERE (? IS NULL OR id>?) ORDER BY id LIMIT ?',
+  ).all(after, after, limit).map(row => {
+    const workflow = requireWorkflow(database, row.id);
+    const revision = workflow.activePlanRevision ?? workflow.draftPlanRevision;
+    const goal = database.query<{ goal: WorkflowCatalogEntry['goal'] }, [string, number]>(
+      "SELECT json_extract(plan_json,'$.goal.kind') AS goal FROM plan_revisions WHERE workflow_id=? AND revision=?").get(row.id, revision)!;
+    const definitions = database.query<{ input: string; executorId: string | null }, [string, number]>(`SELECT
+      json_object('id',json_extract(t.value,'$.id'),'dependsOn',json_extract(t.value,'$.dependsOn'),
+        'retry',json_extract(t.value,'$.retry'),'spec',json_object('kind',json_extract(t.value,'$.spec.kind'))) AS input,
+      json_extract(t.value,'$.spec.target.executorId') AS executorId
+      FROM plan_revisions p,json_each(p.plan_json,'$.tasks') t WHERE p.workflow_id=? AND p.revision=?`).all(row.id, revision);
+    const tasks = definitions.map(row => JSON.parse(row.input) as WorkflowTaskProjectionInput);
+    const projection = workflow.activePlanRevision === null ? [] : readWorkflowTaskProjection(database, workflow, { tasks });
+    const { count } = database.query<{ count: number }, [string]>(`SELECT COUNT(*) AS count FROM operation_intents o
+      JOIN attempts a ON a.id=o.attempt_id WHERE a.workflow_id=? AND
+      ${WORKFLOW_OPERATION_ATTENTION_SQL}`).get(row.id)!;
+    return { ...workflow, ...goal, totalTasks: tasks.length, completedTasks: projection.filter(task => task.phase === 'succeeded').length,
+      attentionTasks: projection.filter(task => WORKFLOW_ATTENTION_PHASES.includes(task.phase)).length,
+      attentionOperations: count, executorIds: [...new Set(definitions.flatMap(row => row.executorId ? [row.executorId] : []))] };
+  });
 }
 export function listActiveWorkflowIds(database: Database, after: string | null, limit: number): string[] {
   return database.query<{ id: string }, [string | null, string | null, number]>(
@@ -77,6 +99,10 @@ function readRetryCounts(database: Database, workflowId: string): ReadonlyMap<st
 export function readWorkflowSchedule(database: Database, id: string) {
   const workflow = requireWorkflow(database, id);
   const active = workflow.activePlanRevision === null ? null : readPlan(database, id, workflow.activePlanRevision);
+  return { workflow, active, tasks: readWorkflowTaskProjection(database, workflow, active?.plan ?? null) };
+}
+function readWorkflowTaskProjection(database: Database, workflow: WorkflowRecord, plan: { readonly tasks: readonly WorkflowTaskProjectionInput[] } | null) {
+  const id = workflow.id;
   const attempts = database.query<Omit<WorkflowAttemptStatus, 'result'> & {
     certainty: WorkflowAttemptResult['certainty'] | null; termination: WorkflowAttemptResult['termination'] | null }, [string, string]>(`SELECT id AS attemptId,task_id AS taskId,
     generation,input_digest AS inputDigest,resolution,dispatch_phase AS dispatchPhase,control_state AS controlState,
@@ -84,9 +110,8 @@ export function readWorkflowSchedule(database: Database, id: string) {
     FROM attempts WHERE ${CURRENT_ATTEMPTS} ORDER BY rowid`).all(id, id).map(({ certainty, termination, ...attempt }) => ({
       ...attempt, result: certainty && termination ? { certainty, termination } : null,
     }));
-  const tasks = projectWorkflowTasks(workflow, active?.plan ?? null, readTasks(database, id), attempts,
+  return projectWorkflowTasks(workflow, plan, readTasks(database, id), attempts,
     workflowEpoch(database), readRetryCounts(database, id));
-  return { workflow, active, tasks };
 }
 export function readAttemptHistory(database: Database, workflowId: string, before: string | null, limit: number): WorkflowAttempt[] {
   if (before !== null && requireAttempt(database, before).workflowId !== workflowId) throw new DomainError('WORKFLOW_CONFLICT', 'Attempt cursor belongs to another workflow.', 409);
@@ -95,7 +120,7 @@ export function readAttemptHistory(database: Database, workflowId: string, befor
       || COALESCE(managed_target_json,'') || target_json AS BLOB))+2048 AS bytes FROM attempts
       WHERE workflow_id=? AND (? IS NULL OR rowid<(SELECT rowid FROM attempts WHERE id=?)) ORDER BY rowid DESC LIMIT ?)
     SELECT * FROM (SELECT *,SUM(bytes) OVER (ORDER BY position DESC) AS total FROM page) WHERE total<=? ORDER BY position DESC`)
-    .all(workflowId, before, before, limit, WORKFLOW_LIMITS.pageBytes).map(row => {
+    .all(workflowId, before, before, limit, WORKFLOW_LIMITS.pageBytes - 1024).map(row => {
       // SQL-only pagination fields do not cross the public contract.
       const { position: _position, bytes: _bytes, total: _total, ...attempt } = row as AttemptRow & { position: number; bytes: number; total: number };
       return decodeAttempt(attempt);
@@ -118,6 +143,7 @@ export function readDependencyArtifacts(database: Database, workflowId: string, 
     json_extract(r.payload_json,'$.kind') AS kind,json_extract(r.payload_json,'$.outcome') AS outcome,
     json_extract(r.payload_json,'$.provenance') AS provenance,json_extract(r.payload_json,'$.executorId') AS executorId,
     json_extract(r.payload_json,'$.repositoryId') AS repositoryId,json_extract(r.payload_json,'$.dirty') AS dirty
+    ,json_extract(r.payload_json,'$.git.scope') AS gitScope
     FROM artifacts r JOIN attempts a ON a.id=r.attempt_id JOIN tasks t ON t.workflow_id=a.workflow_id AND t.id=a.task_id
     WHERE a.workflow_id=? AND a.generation=t.generation AND a.input_digest=t.input_digest AND a.resolution='succeeded'
     AND a.control_state='released' AND a.dispatch_phase='settled'
@@ -158,7 +184,17 @@ export function readWorkflowDetail(database: Database, id: string): WorkflowDeta
   const tasks = projectWorkflowTasks(workflow, active?.plan ?? null, readTasks(database, id), readAttempts(database, id), workflowEpoch(database), readRetryCounts(database, id));
   const manifest = activationManifest(draft);
   return { workflow, draft, active, tasks, artifacts: readArtifacts(database, id), approvals: readApprovals(database, id),
-    gates: readGateManifests(database, id), outcome: workflowOutcome(active?.plan ?? null, tasks), activationManifest: manifest, activationDigest: workflowDigest(manifest) };
+    gates: readGateManifests(database, id), outcome: workflowOutcome(active?.plan ?? null, tasks), activationManifest: manifest, activationDigest: workflowDigest(manifest),
+    operations: database.query<WorkflowOperationView, [string]>(`SELECT o.id,o.attempt_id AS attemptId,o.kind,o.resource_key AS resourceKey,
+      o.status,o.reconcile_count AS reconcileCount,o.next_reconcile_at AS nextReconcileAt,
+      CASE WHEN json_valid(o.payload_json) THEN json_extract(o.payload_json,'$.stage') END AS stage,
+      CASE WHEN json_valid(o.result_json) THEN substr(json_extract(o.result_json,'$.detail'),1,2048) END AS detail
+      FROM operation_intents o JOIN attempts a ON a.id=o.attempt_id WHERE a.workflow_id=? ORDER BY o.rowid DESC LIMIT 256`).all(id),
+    resources: database.query<Omit<WorkflowResourceClaim, 'quarantined' | 'riskReleased' | 'retained'> & {
+      quarantined: number; riskReleased: number; retained: number }, [string]>(`SELECT c.resource_key AS resourceKey,c.attempt_id AS attemptId,
+      c.executor_id AS executorId,c.quarantined,c.risk_released AS riskReleased,c.retained FROM resource_claims c
+      JOIN attempts a ON a.id=c.attempt_id WHERE a.workflow_id=? ORDER BY a.rowid DESC,c.resource_key LIMIT 256`).all(id)
+      .map(claim => ({ ...claim, quarantined: claim.quarantined === 1, riskReleased: claim.riskReleased === 1, retained: claim.retained === 1 })) };
 }
 export function appendWorkflowActivity(database: Database, workflowId: string, action: string, actor: string, detail: string, at: string): void {
   database.query('INSERT INTO activity (workflow_id,action,actor,detail,at) VALUES (?,?,?,?,?)').run(workflowId, action, actor, detail, at);

@@ -21,7 +21,10 @@ export async function recoverWorkflowAttempts(store: WorkflowStore, now: () => s
           continue;
         }
         const notStarted = !attempt.result && ['planned', 'preparing', 'prepared'].includes(attempt.dispatchPhase);
-        const detail = notStarted ? 'Controller restarted before dispatch.'
+        const uncertainPreparation = notStarted && !!db.query(
+          "SELECT 1 FROM operation_intents WHERE attempt_id=? AND status IN ('unknown','abandoned') LIMIT 1").get(id);
+        const detail = uncertainPreparation ? 'Controller restarted before task dispatch; repository preparation may have executed and requires resolution.'
+          : notStarted ? 'Controller restarted before dispatch.'
           : attempt.result ? 'Terminal survived, but output observation did not.' : 'Controller restarted with an unresolved dispatch.';
         const result: WorkflowAttemptResult = attempt.result ?? { certainty: notStarted ? 'not-started' : 'unknown', detail,
           commandOutcome: null, receivedOutputCoverage: 'unknown', outputCaptured: false, executionScope: null,
@@ -48,13 +51,16 @@ export async function recoverWorkflowAttempts(store: WorkflowStore, now: () => s
 async function recoverResourceOperations(store: WorkflowStore, now: () => string): Promise<void> {
   for (;;) {
     const count = store.transaction(db => {
-      const rows = db.query<{ id: string; attempt_id: string; status: 'planned' | 'dispatching' }, []>(
-        "SELECT id,attempt_id,status FROM operation_intents WHERE status IN ('planned','dispatching') ORDER BY rowid LIMIT 32",
+      const rows = db.query<{ id: string; attempt_id: string; status: 'planned' | 'dispatching'; stage: string | null; kind: string; resource_key: string }, []>(
+        "SELECT id,attempt_id,status,kind,resource_key,CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.stage') END AS stage FROM operation_intents WHERE status IN ('planned','dispatching') ORDER BY rowid LIMIT 32",
       ).all();
       for (const operation of rows) {
         db.query('UPDATE operation_intents SET status=? WHERE id=?')
-          .run(operation.status === 'planned' ? 'not-started' : 'unknown', operation.id);
-        if (operation.status === 'dispatching') db.query('UPDATE resource_claims SET quarantined=1 WHERE attempt_id=?').run(operation.attempt_id);
+          .run(operation.status === 'planned' || operation.stage === 'recheck' ? 'not-started' : 'unknown', operation.id);
+        if (operation.status === 'dispatching' && operation.stage !== 'recheck') {
+          if (operation.kind === 'cleanup') db.query('UPDATE resource_claims SET quarantined=1 WHERE attempt_id=? AND resource_key=?').run(operation.attempt_id, operation.resource_key);
+          else db.query('UPDATE resource_claims SET quarantined=1 WHERE attempt_id=?').run(operation.attempt_id);
+        }
         appendWorkflowActivity(db, requireAttempt(db, operation.attempt_id).workflowId, 'resource-recovered', 'engine', operation.id, now());
       }
       return rows.length;

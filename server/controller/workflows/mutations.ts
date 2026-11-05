@@ -7,6 +7,7 @@ import { workflowDigest } from './inputs.js';
 import { activationManifest, readAttempts, readGateManifests, readPlan, readTasks, requireAttempt, requireWorkflow, workflowEpoch } from './records.js';
 import { invalidatedWorkflowTasks } from './transitions.js';
 import { holdTask, releaseSettledClaims } from './attempts.js';
+import { settleWorkflowApproval } from './approvals.js';
 
 export function mutateWorkflow(database: Database, mutation: WorkflowMutation, actor: string, now: string): string {
   if (mutation.action === 'create') {
@@ -18,7 +19,7 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
     return id;
   }
   const workflow = requireWorkflow(database, mutation.workflowId);
-  if (workflow.archived && mutation.action !== 'archive') workflowConflict('Archived workflows cannot be changed.');
+  if (workflow.archived && !['archive', 'pause', 'stop', 'cancel', 'resolve'].includes(mutation.action)) workflowConflict('Archived workflows cannot be changed.');
   switch (mutation.action) {
     case 'plan': {
       if (workflow.desired === 'canceled') workflowConflict('Canceled workflows cannot be replanned.');
@@ -60,12 +61,15 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
       const previous = database.query('SELECT 1 FROM approvals WHERE workflow_id=? AND gate_id=? AND manifest_digest=?')
         .get(workflow.id, mutation.gateId, mutation.manifestDigest);
       if (previous) workflowConflict('This manifest already has a decision.');
+      settleWorkflowApproval(database, workflow.id, gate.manifest, mutation.decision, now);
       database.query('INSERT INTO approvals VALUES (?,?,?,?)').run(workflow.id, mutation.gateId, mutation.manifestDigest,
         JSON.stringify({ gateId: mutation.gateId, manifestDigest: gate.digest, manifest: gate.manifest, decision: mutation.decision, actor, at: now }));
       break;
     }
     case 'retry': {
       const attempt = requireAttempt(database, mutation.attemptId);
+      const definition = readPlan(database, workflow.id, attempt.planRevision).plan.tasks.find(task => task.id === attempt.taskId);
+      if (definition?.spec.kind === 'publish-pr') workflowConflict('Replan publication with a fresh branch and review its new approval; publication is never repeated by retry.');
       const task = readTasks(database, workflow.id).find(entry => entry.id === mutation.taskId);
       if (!task || attempt.workflowId !== workflow.id || attempt.taskId !== task.id || task.generation !== mutation.generation
         || attempt.generation !== task.generation || task.hold !== 'none' || attempt.controlState === 'leased' || attempt.dispatchPhase !== 'settled'
@@ -77,12 +81,28 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
       invalidate(database, workflow, new Set([task.id]));
       break;
     }
+    case 'clear-hold': {
+      const task = readTasks(database, workflow.id).find(entry => entry.id === mutation.taskId);
+      if (!task || task.generation !== mutation.generation || task.hold === 'none'
+        || database.query(`SELECT 1 FROM attempts WHERE workflow_id=? AND task_id=?
+          AND (resolution IN ('open','unknown') OR control_state='leased' OR dispatch_phase!='settled')`).get(workflow.id, task.id)
+        || database.query(`SELECT 1 FROM resource_claims c JOIN attempts a ON a.id=c.attempt_id
+          WHERE a.workflow_id=? AND a.task_id=? AND c.retained=0 AND c.risk_released=0`).get(workflow.id, task.id)) {
+        workflowConflict('Resolve unsettled attempts and resources before clearing this hold.');
+      }
+      database.query("UPDATE tasks SET hold='none',hold_reason=NULL WHERE workflow_id=? AND id=?").run(workflow.id, task.id);
+      break;
+    }
+    case 'recheck-publication': case 'cleanup':
+      workflowConflict('Publication recheck requires the recovery service.');
     case 'resolve': {
       const attempt = requireAttempt(database, mutation.attemptId);
       const task = readTasks(database, workflow.id).find(entry => entry.id === mutation.taskId);
       if (!task || attempt.workflowId !== workflow.id || attempt.taskId !== task.id || attempt.generation !== mutation.generation
         || attempt.resolution === 'open' || attempt.controlState === 'leased' || attempt.dispatchPhase !== 'settled'
         || (attempt.resolution !== 'unknown' && task.hold === 'none')) workflowConflict('Uncertain attempt changed.');
+      const current = task.generation === mutation.generation
+        && readAttempts(database, workflow.id).findLast(entry => entry.taskId === task.id)?.attemptId === attempt.attemptId;
       // Runtime adoption is added by the execution service after independent observation.
       if (mutation.resolution === 'adopt') throw new DomainError('WORKFLOW_CONFLICT', 'Artifact adoption requires a current executor observation.', 409);
       if (mutation.resolution === 'not-started' && (attempt.resolution === 'succeeded' || attempt.result?.termination === 'observed')) {
@@ -90,7 +110,7 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
       }
       database.query(`UPDATE attempts SET resolution=?,dispatch_phase='settled',control_state='released' WHERE id=?`)
         .run(mutation.resolution === 'not-started' ? 'not-started' : 'abandoned', attempt.attemptId);
-      database.query(`UPDATE tasks SET hold='none',hold_reason=NULL WHERE workflow_id=? AND id=?`).run(workflow.id, task.id);
+      if (current) database.query(`UPDATE tasks SET hold='none',hold_reason=NULL WHERE workflow_id=? AND id=?`).run(workflow.id, task.id);
       if (mutation.resolution === 'not-started') {
         releaseSettledClaims(database, attempt.attemptId);
       }

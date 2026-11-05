@@ -8,6 +8,9 @@ import { inspectWorkflowProviderReferences, WorkflowStore } from './store.js';
 const logger = createLogger('workflows:lifecycle');
 
 export interface WorkflowEngineLifecycle {
+  readonly observeAdoption?: WorkflowServiceOptions['observeAdoption'];
+  readonly recheckPublication?: WorkflowServiceOptions['recheckPublication'];
+  readonly cleanup?: WorkflowServiceOptions['cleanup'];
   start(): void;
   pauseAdmission(): void;
   refreshControl(workflowId: string): void;
@@ -60,6 +63,18 @@ export class WorkflowRuntime {
   }
 
   referencesApiProvider(id: string): boolean { return this.#references.referencesApiProvider(id); }
+
+  openRecovery(): Promise<void> {
+    if (this.#failed || this.#shutdown) return Promise.reject(workflowUnavailable());
+    if (this.#service) return Promise.resolve();
+    if (this.#opening) return this.#opening;
+    if (!this.deps.storageInitialized()) return Promise.reject(workflowUnavailable());
+    this.#opening = this.#open().catch(error => {
+      this.#fail(error);
+      throw workflowUnavailable();
+    }).finally(() => { this.#opening = null; });
+    return this.#opening;
+  }
 
   enable(): Promise<void> {
     if (this.#failed || this.#shutdown) return Promise.reject(workflowUnavailable());
@@ -128,6 +143,18 @@ export class WorkflowRuntime {
     this.#service = new WorkflowService(store, {
       enabled: () => this.#enabled && !this.#failed && !this.#shutdown,
       now: this.deps.now,
+      observeAdoption: (capture, signal) => {
+        if (this.#shutdown || this.#failed || !this.#engine?.observeAdoption) throw workflowUnavailable();
+        return this.#engine.observeAdoption(capture, signal);
+      },
+      recheckPublication: (operationId, signal) => {
+        if (this.#shutdown || this.#failed || !this.#engine?.recheckPublication) throw workflowUnavailable();
+        return this.#engine.recheckPublication(operationId, signal);
+      },
+      cleanup: operationId => {
+        if (this.#shutdown || this.#failed || !this.#engine?.cleanup) throw workflowUnavailable();
+        return this.#engine.cleanup(operationId);
+      },
       onControl: (id, action) => {
         try {
           if (action === 'stop' || action === 'cancel') this.#engine!.stopRunning(id);

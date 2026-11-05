@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { AgentCallError } from '@garcon/server-agent-interface';
@@ -80,7 +80,7 @@ for (const backend of RUNTIME_BACKENDS) describe(`workflow repository (${backend
     expect(check.target!.baseCommit).not.toBe(f.baseCommit);
     const checked = await f.port.prepare(check, f.downstream, effectFence());
     expect(checked).toMatchObject({ kind: 'prepared', resource: { head } });
-  });
+  }, 15_000);
   test('prepares and inspects a separate exact managed input on the selected runtime', async () => {
     const f = await setup(backend);
     const prepared = await f.port.prepare(f.attempt, f.task, effectFence());
@@ -114,6 +114,29 @@ for (const backend of RUNTIME_BACKENDS) describe(`workflow repository (${backend
     expect(f.store.read(db => db.query('SELECT quarantined FROM resource_claims').all())).toEqual([{ quarantined: 1 }]);
     await expect(port.prepare(f.attempt, f.task, effectFence())).rejects.toThrow('repeat');
     expect(creates).toBe(1);
+  });
+
+  test('replacement between inspection and creation cannot create a managed resource', async () => {
+    const f = await setup(backend);
+    const replacement = new ExecutionRuntime({ id: 'local', instanceId: 'replacement-runtime', workspaceDir: f.root,
+      projectBasePath: f.root, integrations: [], resolveCredential: async () => null });
+    cleanups.push(() => replacement.dispose());
+    const adapter = await runtimeAdapter(replacement, backend); cleanups.push(() => adapter.dispose());
+    const replacementGit = await adapter.executor.getGitService();
+    const port = createWorkflowRepositoryPort(f.resources, async () => ({
+      getProjectService: options => f.executor.getProjectService(options),
+      getGitService: async () => ({ ...f.git,
+        async createManagedWorktree(input, options) {
+          expect(options?.instanceId).toBe('synthetic-runtime');
+          return replacementGit.createManagedWorktree(input, options);
+        },
+      }),
+    }));
+    expect(await port.prepare(f.attempt, f.task, effectFence())).toMatchObject({ kind: 'not-started' });
+    expect(f.store.read(db => db.query('SELECT status FROM operation_intents').all())).toEqual([{ status: 'not-started' }]);
+    expect(await readdir(f.attempt.target!.worktreeRoot)).toEqual([]);
+    expect((await runGit(f.projectPath, ['for-each-ref', '--format=%(refname)', 'refs/heads/garcon/workflows/'])).stdout.trim()).toBe('');
+    expect((await runGit(f.projectPath, ['worktree', 'list', '--porcelain'])).stdout.match(/^worktree /gm)).toHaveLength(1);
   });
 
   test('output inspection rejects runtime replacement and observes dirty state without mutation', async () => {

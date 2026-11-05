@@ -198,8 +198,25 @@ function parseWorkflowMutation(value: unknown): WorkflowMutation {
         : ['action', 'workflowId', 'taskId', 'generation', 'attemptId', 'resolution', 'evidence', 'commit', 'releaseRisk']);
       const identity = { workflowId: workflow, taskId: workflowId(raw.taskId), generation: workflowInteger(raw.generation, 1), attemptId: workflowId(raw.attemptId) };
       if (value.action === 'retry') return { action: 'retry', ...identity };
-      return { action: 'resolve', ...identity, resolution: workflowEnum(raw.resolution, ['not-started', 'abandon', 'adopt']),
+      const resolution = workflowEnum(raw.resolution, ['not-started', 'abandon', 'adopt']);
+      if (resolution === 'adopt' ? raw.releaseRisk !== false : raw.commit !== null) workflowInvalid('Resolution has incompatible commit or risk-release fields.');
+      return { action: 'resolve', ...identity, resolution,
         evidence: workflowText(raw.evidence, 'resolution evidence', 8192), commit: raw.commit === null ? null : workflowCommit(raw.commit), releaseRisk: workflowBoolean(raw.releaseRisk) };
+    }
+    case 'clear-hold': {
+      const raw = workflowRecord(value, ['action', 'workflowId', 'taskId', 'generation', 'evidence']);
+      return { action: 'clear-hold', workflowId: workflow, taskId: workflowId(raw.taskId), generation: workflowInteger(raw.generation, 1),
+        evidence: workflowText(raw.evidence, 'resolution evidence', 8192) };
+    }
+    case 'recheck-publication': {
+      const raw = workflowRecord(value, ['action', 'workflowId', 'attemptId', 'publicationOperationId']);
+      return { action: 'recheck-publication', workflowId: workflow, attemptId: workflowId(raw.attemptId),
+        publicationOperationId: workflowId(raw.publicationOperationId) };
+    }
+    case 'cleanup': {
+      const raw = workflowRecord(value, ['action', 'workflowId', 'attemptId', 'resourceKey', 'expectedHead']);
+      return { action: 'cleanup', workflowId: workflow, attemptId: workflowId(raw.attemptId),
+        resourceKey: workflowText(raw.resourceKey, 'resource key', 4096), expectedHead: workflowCommit(raw.expectedHead) };
     }
     default: return workflowInvalid('Unsupported workflow action.');
   }

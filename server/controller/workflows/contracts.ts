@@ -1,8 +1,11 @@
 import type { AutomationResult, AutomationStartInput, AutomationStartResult, AutomationStopResult,
   AutomationTurnKey, EffectiveAutomationInput } from '../../../common/automation.js';
-import type { WorkflowAttempt, WorkflowPlanTask, WorkflowManagedTarget, WorkflowRevocationKind } from '../../../common/workflows.js';
+import type { WorkflowAttempt, WorkflowPlan, WorkflowPlanTask, WorkflowManagedTarget, WorkflowRevocationKind } from '../../../common/workflows.js';
 import type { ManagedWorktreeSnapshot } from '../../../common/git-managed-worktrees.js';
-import type { CommitIdentity } from '../../../common/git-delivery.js';
+import type { CommitIdentity, IntegrateCommitsResult } from '../../../common/git-delivery.js';
+import type { GitExecutorScope } from '../../../common/git-execution.js';
+import type { WorkflowIntegrationManifest } from './integration-manifest.js';
+import type { WorkflowAdoptionCapture, WorkflowAdoptionObservation } from './adoption.js';
 
 export interface WorkflowAuthority {
   readonly key: string;
@@ -15,6 +18,9 @@ export interface WorkflowServiceOptions {
   readonly now?: () => string;
   readonly onInvalidated?: (workflowId: string, revision: number) => void;
   readonly onControl?: (workflowId: string, action: 'pause' | 'stop' | 'cancel' | 'activate') => void;
+  readonly observeAdoption?: (capture: WorkflowAdoptionCapture, signal: AbortSignal) => Promise<WorkflowAdoptionObservation>;
+  readonly recheckPublication?: (operationId: string, signal: AbortSignal) => Promise<void>;
+  readonly cleanup?: (operationId: string) => Promise<void>;
 }
 export interface WorkflowEffectFence {
   readonly revoked: boolean;
@@ -25,7 +31,7 @@ export interface WorkflowEffectFence {
 }
 
 export interface WorkflowDispatchPort {
-  available(task: WorkflowPlanTask): boolean;
+  available(task: WorkflowPlanTask, plan: WorkflowPlan): boolean;
   dispatch(attempt: WorkflowAttempt, fence: WorkflowEffectFence): Promise<void>;
   stop(attempt: WorkflowAttempt, kind: WorkflowRevocationKind): Promise<void>;
 }
@@ -49,7 +55,7 @@ export interface WorkflowChatPort {
 export interface WorkflowRepositoryPort {
   prepare(attempt: WorkflowAttempt, task: WorkflowPlanTask, fence: WorkflowEffectFence): Promise<
     | { kind: 'prepared'; resource: WorkflowManagedTarget }
-    | { kind: 'not-started' | 'unknown'; detail: string }
+    | { kind: 'not-started' | 'unknown' | 'held'; detail: string }
   >;
 }
 
@@ -72,4 +78,12 @@ export interface WorkflowOutputPort {
   // Capture is read-only. Commit atomically validates current inputs, holds, acceptance and live fences with evidence and resolution.
   capture(attempt: WorkflowAttempt, task: WorkflowPlanTask, result: AutomationResult,
     fence: WorkflowOutputFence, signal: AbortSignal): Promise<{ commit(): void }>;
+}
+
+export type WorkflowIntegrationResult = IntegrateCommitsResult & GitExecutorScope | { readonly kind: 'not-started'; readonly reason: string };
+export interface WorkflowIntegrationRepositoryPort {
+  prepare(manifest: WorkflowIntegrationManifest, shutdown: AbortSignal): Promise<{ run(): Promise<WorkflowIntegrationResult> }>;
+  inspect(resource: WorkflowManagedTarget, inputs: readonly string[], signal: AbortSignal): Promise<WorkflowRepositoryObservation & {
+    readonly lineage: readonly { readonly commit: string; readonly containsAncestor: boolean | null }[];
+  }>;
 }

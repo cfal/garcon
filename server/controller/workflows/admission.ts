@@ -61,7 +61,9 @@ export class WorkflowChatAdmission {
       const repository = await this.repositories.prepare(attempt, task, fence);
       if (repository.kind !== 'prepared') {
         new WorkflowResources(this.attempts.store, () => new Date().toISOString()).interruptPreparation(attempt.attemptId);
-        this.attempts.observe(attempt.attemptId, admissionObservation(repository.kind, repository.detail), fence);
+        this.attempts.observe(attempt.attemptId, repository.kind === 'held'
+          ? { ...admissionObservation('not-started', repository.detail), admissionHold: repository.detail }
+          : admissionObservation(repository.kind, repository.detail), fence);
         return;
       }
       assertAdmissionOpen(fence);
