@@ -78,6 +78,25 @@ test('WebKit smoke runs independently with bounded setup, tests and diagnostics'
   expect(upload.with.path).toContain('integration-tests/artifacts/webkit/');
 });
 
+test.each([
+  ['chromium-e2e-shard', 'chromium'],
+  ['webkit-e2e', 'webkit'],
+])('%s browser cache separates OS releases and architectures', (job, browser) => {
+  const steps = workflow.jobs[job].steps;
+  const cache = steps.find(step => step.uses === 'actions/cache@v4');
+  const os = steps.find(step => step.id === 'browser-cache-os');
+  expect(os).toBeDefined();
+  expect(steps.indexOf(os)).toBeLessThan(steps.indexOf(cache));
+  expect(os.run.trim()).toBe([
+    '. /etc/os-release',
+    'printf \'id=%s-%s\\n\' "$ID" "$VERSION_ID" >> "$GITHUB_OUTPUT"',
+  ].join('\n'));
+  expect(cache.with.key).toBe(
+    `playwright-${browser}-` + '${{ steps.browser-cache-os.outputs.id }}-${{ runner.arch }}-${{ hashFiles(\'integration-tests/bun.lock\') }}',
+  );
+  expect(cache.with['restore-keys']).toBeUndefined();
+});
+
 test('live lanes fail closed without configuration except on credential-free PRs', () => {
   const directory = mkdtempSync(join(tmpdir(), 'garcon-live-ci-contract-'));
   try {
