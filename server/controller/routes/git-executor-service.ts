@@ -80,6 +80,7 @@ export function createGitRouteService(resolve: GitServiceResolver, timeoutMs = G
     removeWorktree: (options) => invoke('removeWorktree', options),
     createManagedWorktree: (options) => invoke('createManagedWorktree', options),
     inspectManagedWorktree: (options) => invoke('inspectManagedWorktree', options),
+    removeManagedWorktree: (options) => invoke('removeManagedWorktree', options),
     inspectCommit: (options) => invoke('inspectCommit', options),
     fetchExactRef: (options) => invoke('fetchExactRef', options),
     pushExactRef: (options) => invoke('pushExactRef', options),

@@ -16,6 +16,13 @@ export interface InspectManagedWorktreeRequest {
   readonly managedResourceId: string;
 }
 
+export interface RemoveManagedWorktreeRequest extends InspectManagedWorktreeRequest {
+  readonly expectedRepositoryIdentity: string;
+  readonly expectedWorktreeIdentity: string;
+  readonly expectedHead: string;
+  readonly expectedBranch: string;
+}
+
 export interface ManagedWorktreeSnapshot {
   readonly operationId: string;
   readonly managedResourceId: string;

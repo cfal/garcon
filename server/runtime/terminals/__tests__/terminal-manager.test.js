@@ -81,6 +81,35 @@ afterEach(async () => {
 });
 
 describe("TerminalManager", () => {
+  it.each([false, true])('retains native exclusion until observed exit, including failed kill (%s)', async failedKill => {
+    const pty = new FakePty();
+    if (failedKill) pty.kill = () => { throw new Error('Synthetic kill failure'); };
+    const owner = principal('synthetic');
+    const manager = new TerminalManager({ projectBasePath: projectPath, spawnPty: () => pty });
+    try {
+      const created = await manager.create(owner, { requestId: 'created', requestedInitialWorkingDirectory: null });
+      await manager.terminate(owner, created.terminal.terminalId, 'terminated');
+      expect(manager.list(owner)).toEqual([]);
+      expect(() => manager.reserveEmpty()).toThrow();
+      pty.emitExit(0);
+      expect(() => manager.reserveEmpty()()).not.toThrow();
+    } finally { manager.shutdown(); }
+  });
+  it('excludes active and starting terminals from managed removal', async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ projectBasePath: projectPath, spawnPty: () => pty });
+    try {
+      const release = manager.reserveEmpty();
+      await expect(manager.create(principal('synthetic'), { requestId: 'blocked', requestedInitialWorkingDirectory: null })).rejects.toMatchObject({ code: 'terminal-unavailable' });
+      release();
+      const creating = manager.create(principal('synthetic'), { requestId: 'created', requestedInitialWorkingDirectory: null });
+      expect(() => manager.reserveEmpty()).toThrow();
+      await creating;
+      expect(() => manager.reserveEmpty()).toThrow();
+      pty.emitExit(0);
+      manager.reserveEmpty()();
+    } finally { manager.shutdown(); }
+  });
   it.each([undefined, "", "synthetic-connection-credential"])("blanks the controller credential in PTY environments (%s)", async (inherited) => {
     const previous = process.env.GARCON_CONTROLLER_URL;
     const environments = [];

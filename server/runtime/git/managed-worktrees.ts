@@ -230,5 +230,21 @@ export function createManagedWorktreeOperations() {
     return { managed: await observe(marker, input.worktreePath) };
   }
 
-  return { createManagedWorktree, inspectManagedWorktree };
+  async function removeManagedWorktree(input: GitOperationOptions<'removeManagedWorktree'>) {
+    const { managed } = await inspectManagedWorktree(input);
+    if (!managed || managed.repositoryIdentity !== input.expectedRepositoryIdentity
+      || managed.worktreeIdentity !== input.expectedWorktreeIdentity || managed.head !== input.expectedHead
+      || managed.branch !== input.expectedBranch || managed.dirty) conflict('Managed removal identity, head or cleanliness changed.');
+    input.signal?.throwIfAborted();
+    try {
+      // Retains the branch and marker so cleanup cannot discard the observed commit or reuse its ownership identity.
+      await runExactGit(input.projectPath, ['worktree', 'remove', '--', input.worktreePath]);
+      await absent(input.worktreePath);
+      const registered = (await gitValue(input.projectPath, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
+      if (registered.includes(`worktree ${input.worktreePath}`)) throw new Error('Managed worktree remains registered.');
+      return { success: true as const, removed: managed };
+    } catch { throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Managed removal could not be confirmed; never retry by path alone.'); }
+  }
+
+  return { createManagedWorktree, inspectManagedWorktree, removeManagedWorktree };
 }

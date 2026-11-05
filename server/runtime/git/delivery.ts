@@ -23,7 +23,7 @@ async function optionalValue(projectPath: string, args: string[]): Promise<strin
   }
 }
 
-async function remoteUrl(projectPath: string, remote: string, expected: string, direction: 'fetch' | 'push'): Promise<string> {
+export async function requireExactRemoteUrl(projectPath: string, remote: string, expected: string, direction: 'fetch' | 'push'): Promise<string> {
   assertSafeRemoteName(remote);
   if (!isCredentialFreeGitRemoteUrl(expected)) reject('Remote destinations must not contain embedded credentials.');
   const urls = await value(projectPath, ['remote', 'get-url', ...(direction === 'push' ? ['--push'] : []), '--all', remote]);
@@ -96,16 +96,16 @@ export function createDeliveryOperations() {
   async function fetchExactRef(input: GitOperationOptions<'fetchExactRef'>) {
     await requireCompleteGitHistory(input.projectPath);
     await exactRef(input.projectPath, input.ref);
-    const url = await remoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'fetch');
+    const url = await requireExactRemoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'fetch');
     if (await remoteCommit(input.projectPath, url, input.ref) !== input.commit) reject('Remote ref no longer names the expected commit.');
-    await remoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'fetch');
+    await requireExactRemoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'fetch');
     try {
       // An explicit source-only refspec supports advertised-ref servers without moving local refs.
       await runExactGit(input.projectPath, ['-c', 'fetch.bundleURI=', 'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules',
         '--refmap=', '--', url, input.ref]);
       await requireExactCommit(input.projectPath, input.commit);
       if (await remoteCommit(input.projectPath, url, input.ref) !== input.commit) reject('Remote ref changed during transfer.');
-      await remoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'fetch');
+      await requireExactRemoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'fetch');
       return { success: true as const, ref: input.ref, commit: input.commit };
     } catch {
       throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Exact fetch could not be confirmed. Inspect the expected commit before continuing.');
@@ -116,15 +116,15 @@ export function createDeliveryOperations() {
     await requireCompleteGitHistory(input.projectPath);
     await exactRef(input.projectPath, input.ref);
     await requireExactCommit(input.projectPath, input.commit);
-    const url = await remoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'push');
+    const url = await requireExactRemoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'push');
     if (await remoteCommit(input.projectPath, url, input.ref) !== input.expectedRemoteCommit) reject('Remote ref changed before push.');
-    await remoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'push');
+    await requireExactRemoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'push');
     try {
       await runExactGit(input.projectPath, ['-c', 'push.followTags=false', '-c', 'push.pushOption=', 'push', '--porcelain',
         '--recurse-submodules=no', `--force-with-lease=${input.ref}:${input.expectedRemoteCommit ?? ''}`,
         '--', input.remote, `${input.commit}:${input.ref}`]);
       if (await remoteCommit(input.projectPath, url, input.ref) !== input.commit) reject('Remote ref changed after push.');
-      await remoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'push');
+      await requireExactRemoteUrl(input.projectPath, input.remote, input.expectedRemoteUrl, 'push');
       return { success: true as const, ref: input.ref, commit: input.commit };
     } catch {
       throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Exact push could not be confirmed. Reconcile the destination ref without repeating the push.');

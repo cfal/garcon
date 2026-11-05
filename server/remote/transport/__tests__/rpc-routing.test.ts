@@ -17,7 +17,8 @@ test('bulk routing preserves quick summaries and primary lifecycle', () => {
 });
 
 test('only explicit small CLI controls use primary', () => {
-  const primary: CliOperation[] = ['GET /api/v1/chats/turn-receipt', 'POST /api/v1/chats/stop', 'POST /api/v1/chats/permissions/decision'];
+  const primary: CliOperation[] = ['GET /api/v1/chats/turn-receipt', 'POST /api/v1/chats/stop', 'POST /api/v1/chats/permissions/decision',
+    'POST /api/v1/workflows/pause', 'POST /api/v1/workflows/stop'];
   for (const [operation, policy] of Object.entries(CLI_OPERATIONS)) {
     expect(policy.lane).toBe(primary.includes(operation as CliOperation) ? 'primary' : 'bulk');
   }

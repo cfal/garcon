@@ -95,6 +95,25 @@ else if (command === 'api' && action === 'graphql') {
         pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull)) },
     } });
   }
+} else if (command === 'api' && args.some(arg => arg.includes('/git/ref/heads/'))) {
+  const name = decodeURIComponent(args.find(arg => arg.includes('/git/ref/heads/')).split('/git/ref/heads/')[1]);
+  print({ object: { sha: config.branches?.[name] ?? 'a'.repeat(40) } });
+} else if (command === 'api' && args.some(arg => /\/pulls(?:\?|$)/.test(arg))) {
+  const file = `${cwd}/gh-publications.json`;
+  const records = await Bun.file(file).exists() ? await Bun.file(file).json() : [];
+  if (args.includes('POST')) {
+    if (config.publicationRejection) fail(config.publicationRejection);
+    const input = JSON.parse(await Bun.stdin.text());
+    const number = records.length + 1;
+    const record = { number, title: input.title, body: input.body, draft: input.draft, state: 'open', merged_at: null,
+      html_url: `${repo.url}/pull/${number}`, user: { node_id: actor.id, login: actor.login },
+      head: { ref: input.head, sha: config.branches?.[input.head] ?? 'a'.repeat(40), repo: { full_name: repo.nameWithOwner } },
+      base: { ref: input.base, sha: config.branches?.[input.base] ?? 'a'.repeat(40), repo: { full_name: repo.nameWithOwner } } };
+    records.push(record);
+    await Bun.write(file, JSON.stringify(records));
+    if (config.publicationFailureAfterWrite) fail(config.publicationFailureAfterWrite);
+    print(config.publicationResponse ?? record);
+  } else print(config.publicationLookup ?? records);
 } else if (command === 'api' && args.includes('POST')) {
   if (config.commentRejection) fail(config.commentRejection);
   const number = Number(/issues\/(\d+)\/comments/.exec(args.find(arg => arg.includes('/issues/')) ?? '')?.[1]);

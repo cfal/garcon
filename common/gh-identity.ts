@@ -1,4 +1,4 @@
-import type { GhActorIdentity, GhRepositoryIdentity } from './gh.js';
+import type { GhActorIdentity, GhRepositoryIdentity, GhPublishedPullRequest, GhPublicationRequest } from './gh.js';
 import { isRecord } from './json.js';
 
 const REPOSITORY_NAME = /^[a-z0-9][a-z0-9-]*\/[a-z0-9_.-]+$/i;
@@ -31,4 +31,23 @@ export function ghRepositoryIdentity(repository: { nameWithOwner: string; url: s
 
 export function sameGhRepository(left: GhRepositoryIdentity, right: GhRepositoryIdentity): boolean {
   return left.host.toLowerCase() === right.host.toLowerCase() && left.nameWithOwner.toLowerCase() === right.nameWithOwner.toLowerCase();
+}
+
+export function ghRepositoryFromRemote(remote: string): GhRepositoryIdentity | null {
+  try {
+    const scp = /^git@([^:]+):([^\s]+)$/u.exec(remote);
+    const url = new URL(scp ? `ssh://git@${scp[1]}/${scp[2]}` : remote);
+    if (!['ssh:', 'https:'].includes(url.protocol) || url.password || url.port || url.search || url.hash
+      || url.username && (url.protocol !== 'ssh:' || url.username !== 'git')) return null;
+    const repository = { host: url.hostname.toLowerCase(), nameWithOwner: url.pathname.slice(1).replace(/\.git$/u, '').toLowerCase() };
+    return isGhRepositoryIdentity(repository) ? repository : null;
+  } catch { return null; }
+}
+
+export function matchesPublication(actual: GhPublishedPullRequest, expected: Pick<GhPublicationRequest,
+  'repository' | 'actor' | 'baseBranch' | 'baseCommit' | 'headBranch' | 'headCommit' | 'title' | 'body' | 'draft'>): boolean {
+  return sameGhRepository(actual.repository, expected.repository) && actual.actor.id === expected.actor.id
+    && actual.state === 'open' && actual.baseBranch === expected.baseBranch && actual.baseCommit === expected.baseCommit
+    && actual.headBranch === expected.headBranch && actual.headCommit === expected.headCommit
+    && actual.title === expected.title && actual.body === expected.body && actual.draft === expected.draft;
 }

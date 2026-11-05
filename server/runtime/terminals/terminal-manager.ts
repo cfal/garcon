@@ -151,6 +151,9 @@ export class TerminalManager {
   readonly #requestResultsPerPrincipal: number;
   readonly #requestResultsTotal: number;
   #requestResultCount = 0;
+  #pendingCreates = 0;
+  readonly #nativePtys = new Set<IPty>();
+  #maintenance = false;
   readonly #resultCleanupTimer: ReturnType<typeof setInterval>;
 
   constructor(options: TerminalManagerOptions) {
@@ -180,6 +183,14 @@ export class TerminalManager {
       .sort((left, right) => left.displaySequence - right.displaySequence);
   }
 
+  reserveEmpty(): () => void {
+    if (this.#stopped || this.#maintenance || this.#pendingCreates || this.#nativePtys.size) {
+      throw new TerminalManagerError('terminal-unavailable', 'Close active terminals before removing managed resources.', 503);
+    }
+    this.#maintenance = true;
+    return () => { this.#maintenance = false; };
+  }
+
   rename(
     principal: ServerPrincipal,
     terminalId: string,
@@ -195,7 +206,9 @@ export class TerminalManager {
     principal: ServerPrincipal,
     request: TerminalCreateRequest,
   ): Promise<TerminalCreateResponse> {
-    return this.#createLock.runExclusive(principal.key, async () => {
+    if (this.#maintenance) throw new TerminalManagerError('terminal-unavailable', 'Executor repository maintenance is in progress.', 503);
+    this.#pendingCreates++;
+    try { return await this.#createLock.runExclusive(principal.key, async () => {
       this.#assertRunning();
       if (request.expectedTerminalRuntimeId !== undefined && request.expectedTerminalRuntimeId !== this.terminalRuntimeId) {
         throw new TerminalManagerError('terminal-runtime-changed', 'Terminal executor restarted. Refresh its terminal list before creating a new shell.', 409);
@@ -281,6 +294,8 @@ export class TerminalManager {
         );
       }
 
+      this.#nativePtys.add(pty);
+      pty.onExit(() => { this.#nativePtys.delete(pty); });
       if (this.#stopped) {
         try { pty.kill(); } catch { /* Cleanup is best effort. */ }
         this.#assertRunning();
@@ -331,7 +346,7 @@ export class TerminalManager {
         `terminal created id=${terminalId} principal=${principal.key} sequence=${displaySequence}`,
       );
       return response;
-    });
+    }); } finally { this.#pendingCreates--; }
   }
 
   async terminate(
