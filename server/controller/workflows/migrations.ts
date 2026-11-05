@@ -1,8 +1,8 @@
 import type { Database } from 'bun:sqlite';
-import { WORKFLOW_SCHEMA } from './schema.js';
+import { WORKFLOW_SCHEMA, WORKFLOW_SCHEMA_VERSION } from './schema.js';
 
 export function validateWorkflowDatabase(database: Database): void {
-  if (database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version !== 1) {
+  if (database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version !== WORKFLOW_SCHEMA_VERSION) {
     throw new Error('Unsupported workflow schema.');
   }
   const expected = WORKFLOW_SCHEMA.filter(sql => sql.startsWith('CREATE ')).toSorted();

@@ -1,3 +1,5 @@
+export const WORKFLOW_SCHEMA_VERSION = 2;
+
 export const WORKFLOW_SCHEMA = [
 `CREATE TABLE workflow_metadata (
   singleton INTEGER PRIMARY KEY CHECK (singleton=1),
@@ -124,5 +126,5 @@ export const WORKFLOW_SCHEMA = [
   result_json TEXT,
   created_at TEXT NOT NULL
 ) STRICT`,
-`PRAGMA user_version=1`,
+`PRAGMA user_version=${WORKFLOW_SCHEMA_VERSION}`,
 ] as const;

@@ -19,7 +19,7 @@ export function workflowTerminalObservation(task: WorkflowPlanTask, terminal: Au
 }
 
 function classifyTerminal(task: WorkflowPlanTask, terminal: AutomationResult): WorkflowTerminalObservation {
-  const result = { commandOutcome: terminal.commandOutcome, receivedOutputCoverage: terminal.receivedOutputCoverage,
+  const result = { commandOutcome: terminal.commandOutcome, receivedOutputCoverage: terminal.receivedOutputCoverage, executionScope: terminal.executionScope,
     outputCaptured: false, certainty: 'unknown' as const, termination: 'unknown' as const, detail: '' };
   if (terminal.kind === 'unavailable') return { resolution: 'unknown', result: { ...result, detail: workflowResultDetail(terminal.reason) } };
   if (terminal.kind === 'interrupted') return { resolution: 'interrupted', result: { ...result,
@@ -36,7 +36,7 @@ function classifyTerminal(task: WorkflowPlanTask, terminal: AutomationResult): W
     const command = terminal.commandOutcome;
     if (command.outcome === 'interrupted') return { resolution: 'interrupted', result: { ...result,
       certainty: 'definite', termination: 'observed', detail: 'The command was interrupted.' } };
-    if (command.outcome === 'unknown' || command.exitCode === null) return {
+    if (command.outcome === 'unknown' || command.exitCode === null && command.signal === null) return {
       resolution: 'unknown', result: { ...result, detail: 'Command termination could not be established.' },
     };
     return { resolution: 'checking', result: { ...result, certainty: 'definite', termination: 'observed', detail: 'Command termination observed; evidence requires checking.' } };

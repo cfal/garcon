@@ -79,7 +79,7 @@ export class WorkflowChatAdmission {
       // Installs rejection handling immediately and persists observed terminals without waiting for start().
       terminal = this.chats.waitForTerminal(admission.turn.key, AbortSignal.any([observer.signal, fence.shutdown]))
         .catch((): AutomationResult => ({ kind: 'unavailable', reason: 'Terminal observation ended without a result.',
-          commandOutcome: null, receivedOutputCoverage: 'unknown' }))
+          commandOutcome: null, receivedOutputCoverage: 'unknown', executionScope: null }))
         .then(result => {
           if (result.kind !== 'unavailable') {
             if (timer) clearTimeout(timer);
@@ -205,9 +205,6 @@ export class WorkflowChatAdmission {
         return;
       }
       signal.throwIfAborted();
-      if (fence.outputGapped && !(task.spec.kind === 'command' && task.spec.outputRequirement === 'exit-status-only')) {
-        workflowConflict('Worker output coverage became incomplete before acceptance.');
-      }
       evidence.commit();
       if (this.attempts.get(attempt.attemptId).resolution === 'open') {
         this.attempts.holdOutput(attempt.attemptId, 'Required output evidence was not committed.', fence, fence.outputGapped);
@@ -229,7 +226,7 @@ function assertAdmissionOpen(fence: WorkflowEffectFence): void {
 function admissionObservation(kind: 'not-started' | 'unknown', detail: string): WorkflowTerminalObservation {
   return { resolution: kind, result: { certainty: kind, detail: workflowResultDetail(detail),
     termination: kind === 'not-started' ? 'not-started' : 'unknown', commandOutcome: null,
-    receivedOutputCoverage: 'unknown', outputCaptured: false } };
+    receivedOutputCoverage: 'unknown', outputCaptured: false, executionScope: null } };
 }
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : 'Workflow admission failed.'; }

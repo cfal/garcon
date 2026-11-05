@@ -22,6 +22,24 @@ const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptLedgerService', () => {
+  it('retains the terminal binding runtime only in ephemeral evidence, not transcript rows', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const producer = createProducerFixture();
+      const events = [];
+      ledger.subscribe(event => events.push(event));
+      const bindings = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, () => {});
+      const binding = await bindings.bind({ producers: producer.producers }, 'chat-1', lease);
+      producer.producers.scope.instanceId = 'replacement-runtime';
+      producer.emit(binding, { type: 'run-ended', runId: 'run-1', outcome: 'finished' });
+      await tick();
+      expect(events.at(-1).executionScope).toEqual({ executorId: binding.executorId, instanceId: binding.instanceId });
+      expect(events.at(-1).executionScope.instanceId).not.toBe('replacement-runtime');
+      expect(ledger.currentRows('chat-1')[0]).not.toHaveProperty('executionScope');
+    });
+  });
   it.each(['idle', 'successor'])('retains a late binding gap through %s output observation', async timing => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');

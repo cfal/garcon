@@ -392,6 +392,7 @@ export type TranscriptCommitEvent =
       readonly commandOutcome?: CommandOutcome | null;
       readonly failureCertainty?: ExecutionFailureCertainty;
       readonly receivedOutputCoverage?: 'complete' | 'gapped' | 'unknown';
+      readonly executionScope?: { readonly executorId: string; readonly instanceId: string } | null;
     }
   | {
       readonly type: 'view-replaced';

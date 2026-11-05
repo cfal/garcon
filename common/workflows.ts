@@ -2,7 +2,7 @@ import type { AgentSettingsEnvelope } from './agent-integration.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { CommandOutcome } from './command-output.js';
-import type { EffectiveAutomationInput } from './automation.js';
+import type { AutomationExecutionScope, EffectiveAutomationInput } from './automation.js';
 
 export const WORKFLOW_LIMITS = {
   tasks: 256, edges: 1024, planBytes: 768 * 1024, promptBytes: 64 * 1024,
@@ -16,6 +16,8 @@ export interface WorkflowRepositoryTarget {
   readonly projectPath: string;
   readonly repositoryId: string;
   readonly baseCommit: string;
+  readonly inputTaskId: string | null;
+  readonly worktreeRoot: string;
   readonly remote: { readonly name: string; readonly url: string } | null;
 }
 
@@ -28,6 +30,9 @@ export interface WorkflowManagedTarget {
   readonly worktreeIdentity: string;
   readonly branch: string;
   readonly head: string;
+  readonly baseTree: string;
+  readonly instanceId: string;
+  readonly sourceProjectPath: string;
 }
 
 export interface WorkflowAgentSelection {
@@ -149,6 +154,7 @@ export interface WorkflowAttempt extends WorkflowAttemptIdentity {
 }
 
 export interface WorkflowAttemptResult {
+  readonly executionScope: AutomationExecutionScope | null;
   readonly certainty: 'definite' | 'not-started' | 'unknown';
   readonly detail: string;
   readonly commandOutcome: CommandOutcome | null;
@@ -173,6 +179,19 @@ export interface WorkflowArtifact {
   readonly commandOutcome: CommandOutcome | null;
   readonly receivedOutputCoverage: 'complete' | 'gapped' | 'unknown';
   readonly observedAt: string;
+  readonly git: {
+    readonly scope: 'managed-worktree-endpoints';
+    readonly executionScope: AutomationExecutionScope | null;
+    readonly effectiveInputDigest: string;
+    readonly runtimeInstanceId: string;
+    readonly repositoryIdentity: string;
+    readonly worktreeIdentity: string;
+    readonly projectPath: string;
+    readonly inputCommit: string;
+    readonly inputTree: string;
+    readonly outputTree: string;
+    readonly containsInput: boolean | null;
+  } | null;
 }
 
 export interface WorkflowApprovalManifest {

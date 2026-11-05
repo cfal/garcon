@@ -46,13 +46,40 @@ export function validateWorkflowGraph(plan: WorkflowPlan): void {
       if (!referenced || !task.dependsOn.includes(id)) return workflowInvalid(`Unresolved input ${id} in ${task.id}.`);
       return referenced;
     };
+    if (task.spec.kind === 'agent' && (!task.spec.outputs.length || new Set(task.spec.outputs).size !== task.spec.outputs.length
+      || task.spec.outputs.includes('review') && task.spec.outputs.includes('commit'))) {
+      return workflowInvalid('Agent outputs must be distinct; a review cannot also produce a commit.');
+    }
+    if (task.spec.kind === 'agent' && task.spec.outputs.includes('review') && task.retry.repeatableFailure) {
+      return workflowInvalid('Independent reviews cannot automatically retry rejected inputs.');
+    }
+    if ('target' in task.spec && task.spec.target.inputTaskId !== null) {
+      if (task.spec.kind !== 'agent' && task.spec.kind !== 'command') return workflowInvalid('This task already has an explicit commit selector.');
+      const source = requireDependency(task.spec.target.inputTaskId);
+      requireCommitOutput(source);
+      if (!('target' in source.spec) || source.spec.target.repositoryId !== task.spec.target.repositoryId
+        || source.spec.target.baseCommit !== task.spec.target.baseCommit) {
+        return workflowInvalid('Repository input must share its approved logical repository and root commit.');
+      }
+    }
     for (const acceptance of task.acceptance) {
       if (acceptance.kind === 'artifact') {
         if (task.spec.kind !== 'agent' || !task.spec.outputs.includes(acceptance.output)) return workflowInvalid('Acceptance names an undeclared output.');
       } else {
+        if (task.spec.kind === 'integrate' || task.spec.kind === 'agent' && task.spec.outputs.includes('commit')) {
+          return workflowInvalid('Review and approval acceptance must inspect an existing input, not a future output.');
+        }
         const source = requireDependency(acceptance.taskId);
         if (acceptance.kind === 'approval' ? source.spec.kind !== 'approval'
           : source.spec.kind !== 'agent' || !source.spec.outputs.includes('review')) return workflowInvalid('Invalid acceptance dependency.');
+        if (acceptance.kind === 'independent-review') {
+          if (!('target' in task.spec) || !('target' in source.spec)
+            || task.spec.target.repositoryId !== source.spec.target.repositoryId
+            || task.spec.target.baseCommit !== source.spec.target.baseCommit
+            || (task.spec.kind === 'publish-pr' ? task.spec.sourceTaskId : task.spec.target.inputTaskId) !== source.spec.target.inputTaskId) {
+            return workflowInvalid('Independent review must select the same repository, approved root and input task.');
+          }
+        }
       }
     }
     if (task.spec.kind === 'integrate') {

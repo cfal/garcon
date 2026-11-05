@@ -9,7 +9,7 @@ import { fixture, managedTarget, plan, prepareManagedTarget } from './fixture.js
 const fixtures: ReturnType<typeof fixture>[] = [];
 const clear: WorkflowAttemptFence = { revoked: false, reason: null };
 const revoked: WorkflowAttemptFence = { revoked: true, reason: 'Manual steer.' };
-const observed: WorkflowAttemptResult = { certainty: 'definite', detail: 'Synthetic terminal.',
+const observed: WorkflowAttemptResult = { executionScope: null, certainty: 'definite', detail: 'Synthetic terminal.',
   commandOutcome: null, receivedOutputCoverage: 'complete', outputCaptured: false, termination: 'observed' };
 
 function setup(input: WorkflowPlan = plan()) {

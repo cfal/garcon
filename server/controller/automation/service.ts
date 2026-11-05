@@ -125,7 +125,7 @@ export class AutomationService {
     const privateRecord = await this.support.deps.ledger.getTurnRecord(key.chatId, key.turnId);
     if (privateRecord?.retainedPrivateTerminal && privateRecord.clientRequestId === key.clientRequestId) return {
       kind: 'failed', certainty: 'not-started', receipt: null, detail: privateRecord.error ?? 'Automation was not started',
-      commandOutcome: null, receivedOutputCoverage: 'unknown',
+      commandOutcome: null, receivedOutputCoverage: 'unknown', executionScope: null,
     };
     return automationTerminalResult(null);
   }

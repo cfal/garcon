@@ -4,6 +4,7 @@ import type { CommandLedgerRecord } from '../commands/command-ledger.js';
 
 export function automationTerminalResult(record: CommandLedgerRecord | null): AutomationResult {
   const evidence = {
+    executionScope: record?.executionEvidence?.executionScope ?? null,
     commandOutcome: record?.executionEvidence?.commandOutcome ?? null,
     receivedOutputCoverage: record?.executionEvidence?.receivedOutputCoverage ?? 'unknown',
   } as const;

@@ -49,10 +49,8 @@ import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-pla
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover/outcome.js';
-import type {
-  TranscriptLedgerService,
-  TranscriptProducerLease,
-} from '../ledger/service.js';
+import type { TranscriptLedgerService } from '../ledger/service.js';
+import type { TranscriptProducerLease } from '../ledger/producer-lease.js';
 import {
   dispatchFailureDetail,
   executionSetupFailure,

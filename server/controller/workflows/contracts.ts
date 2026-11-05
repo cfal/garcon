@@ -1,6 +1,8 @@
 import type { AutomationResult, AutomationStartInput, AutomationStartResult, AutomationStopResult,
   AutomationTurnKey, EffectiveAutomationInput } from '../../../common/automation.js';
 import type { WorkflowAttempt, WorkflowPlanTask, WorkflowManagedTarget, WorkflowRevocationKind } from '../../../common/workflows.js';
+import type { ManagedWorktreeSnapshot } from '../../../common/git-managed-worktrees.js';
+import type { CommitIdentity } from '../../../common/git-delivery.js';
 
 export interface WorkflowAuthority {
   readonly key: string;
@@ -53,6 +55,17 @@ export interface WorkflowRepositoryPort {
 
 export interface WorkflowOutputFence extends WorkflowEffectFence {
   readonly outputGapped: boolean;
+}
+
+export interface WorkflowRepositoryObservation {
+  readonly executorId: string;
+  readonly instanceId: string;
+  readonly managed: ManagedWorktreeSnapshot;
+  readonly commit: CommitIdentity;
+}
+
+export interface WorkflowEvidenceRepositoryPort {
+  inspect(resource: WorkflowManagedTarget, signal: AbortSignal): Promise<WorkflowRepositoryObservation>;
 }
 
 export interface WorkflowOutputPort {

@@ -5,7 +5,7 @@ import { workflowTerminalObservation } from '../terminal-observation.js';
 import { plan } from './fixture.js';
 
 const task = plan().tasks[0]!;
-const failed: AutomationResult = { kind: 'failed', certainty: 'definite', receipt: null, detail: 'Synthetic failure',
+const failed: AutomationResult = { executionScope: null, kind: 'failed', certainty: 'definite', receipt: null, detail: 'Synthetic failure',
   receivedOutputCoverage: 'complete', commandOutcome: { outcome: 'failed', exitCode: 7, signal: null,
     capture: 'complete', cwd: { kind: 'reported', path: '/synthetic/managed' } } };
 
