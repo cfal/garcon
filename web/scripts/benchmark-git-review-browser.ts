@@ -8,10 +8,23 @@ import { execFileSync } from 'node:child_process';
 import { CODEMIRROR_PACKAGES } from '../codemirror-packages.js';
 import assert from 'node:assert/strict';
 
+interface BenchmarkMeasurement {
+	highlighted: number;
+	plainReasons: string[];
+	renderedRows: number;
+	rowHeightBefore: number;
+	rowHeightAfter: number;
+}
+
 declare global {
 	interface Window {
 		reviewBenchmark: {
-			run(count: number, lines: number, split?: boolean, lineLength?: number): Promise<unknown>;
+			run(
+				count: number,
+				lines: number,
+				split?: boolean,
+				lineLength?: number,
+			): Promise<BenchmarkMeasurement>;
 			openReview(count: number, lines: number, split?: boolean): Promise<string>;
 			refreshReview(): Promise<boolean>;
 			inspect(): { documentId: string; loaded: string[]; highlighted: string[]; pending: string[] };
@@ -19,6 +32,9 @@ declare global {
 			clearColors(): Promise<void>;
 			color(): Promise<string>;
 			cancelProbe(): Promise<{ status: string; cancellationMs: number }>;
+			openPullRequest(): Promise<void>;
+			refreshPullRequest(): Promise<void>;
+			unicodeProbe(): Promise<{ expected: string; indexed: string; highlighted: string | null }>;
 		};
 	}
 }
@@ -100,9 +116,11 @@ try {
 		const page = await browser.newPage({ viewport });
 		const cdp = await page.context().newCDPSession(page);
 		await cdp.send('Performance.enable');
-		page.on('pageerror', (error) => console.error(error));
+		const pageErrors: string[] = [];
+		page.on('pageerror', (error) => pageErrors.push(error.message));
 		await page.goto(server.resolvedUrls!.local[0]);
 		await page.waitForFunction(() => 'reviewBenchmark' in window);
+		await page.evaluate(() => document.fonts.ready.then(() => undefined));
 		const workloads = [
 			[1, 1800, false, 0],
 			[1, 12000, false, 0],
@@ -110,26 +128,33 @@ try {
 			[1, 2, false, 24000],
 		] as const;
 		for (const [count, lines, split, lineLength] of verifyOnly ? [] : workloads) {
+			await page.reload();
+			await page.waitForFunction(() => 'reviewBenchmark' in window);
+			await page.evaluate(() => document.fonts.ready.then(() => undefined));
 			for (let run = 0; run < 2; run += 1) {
 				const metricsBefore = await cdp.send('Performance.getMetrics');
 				const result = await page.evaluate(
-					async ({ count, lines, split, lineLength }) => {
-						const harness = (
-							window as unknown as {
-								reviewBenchmark: {
-									run: (
-										count: number,
-										lines: number,
-										split: boolean,
-										lineLength: number,
-									) => Promise<unknown>;
-								};
-							}
-						).reviewBenchmark;
-						return harness.run(count, lines, split, lineLength);
-					},
+					({ count, lines, split, lineLength }) =>
+						window.reviewBenchmark.run(count, lines, split, lineLength),
 					{ count, lines, split, lineLength },
 				);
+				assert.ok(
+					result.renderedRows > 0 && result.renderedRows < 200,
+					'Rows must be rendered and virtualized',
+				);
+				assert.equal(
+					result.rowHeightAfter,
+					result.rowHeightBefore,
+					'Colors must not change row geometry',
+				);
+				if (!baseline) {
+					assert.equal(
+						result.highlighted,
+						lineLength ? 0 : count,
+						'Supported bounded files must highlight, including cold and warm large files',
+					);
+					if (lineLength) assert.deepEqual(result.plainReasons, ['character-limit']);
+				}
 				const metricsAfter = await cdp.send('Performance.getMetrics');
 				const metric = (metrics: typeof metricsAfter, name: string) =>
 					metrics.metrics.find((entry) => entry.name === name)?.value ?? 0;
@@ -243,6 +268,7 @@ try {
 				scrollTop: document.querySelector('[data-git-virtual-diff-root]')!.scrollTop,
 				height: document.querySelector('.code-highlight')!.getBoundingClientRect().height,
 			}));
+			assert.ok(before.selected.length > 0, 'Selection check must include text');
 			assert.deepEqual(
 				after,
 				before,
@@ -254,7 +280,7 @@ try {
 			});
 			const coloring = page.evaluate(() => window.reviewBenchmark.color());
 			const inputStarted = performance.now();
-			await page.getByLabel('Typing probe').fill('synthetic typed text');
+			await page.getByLabel('Typing probe').pressSequentially('synthetic typed text');
 			const typingMs = performance.now() - inputStarted;
 			await coloring;
 			assert.equal(await page.getByLabel('Typing probe').inputValue(), 'synthetic typed text');
@@ -316,6 +342,69 @@ try {
 				cancellation.cancellationMs < 100,
 				'Cancellation should not await synchronous Worker completion',
 			);
+			const unicode = await page.evaluate(() => window.reviewBenchmark.unicodeProbe());
+			assert.equal(unicode.indexed, unicode.expected);
+			assert.equal(unicode.highlighted, unicode.expected);
+			await page.evaluate(() => window.reviewBenchmark.openPullRequest());
+			await page.waitForFunction(() => document.querySelector('.cm-code-keyword'));
+			const metadataRefresh = await page.evaluate(async () => {
+				const scroller = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+				scroller.scrollTop = 100000;
+				let previous = '';
+				let stableFrames = 0;
+				const deadline = performance.now() + 2000;
+				while (stableFrames < 3) {
+					await new Promise(requestAnimationFrame);
+					const geometry = `${scroller.scrollTop}:${scroller.scrollHeight}`;
+					stableFrames = geometry === previous ? stableFrames + 1 : 0;
+					previous = geometry;
+					if (performance.now() > deadline) throw new Error('PR scroll did not settle');
+				}
+				const row = document.querySelector('[data-git-diff-review-row]')!;
+				const code = row.querySelector('.code-highlight')!;
+				const range = document.createRange();
+				range.selectNodeContents(code);
+				window.getSelection()!.removeAllRanges();
+				window.getSelection()!.addRange(range);
+				const snapshot = () => ({
+					selected: window.getSelection()!.toString(),
+					text: row.textContent,
+					scrollTop: scroller.scrollTop,
+					rowTop: row.getBoundingClientRect().top,
+				});
+				const before = snapshot();
+				await window.reviewBenchmark.refreshPullRequest();
+				await new Promise(requestAnimationFrame);
+				await new Promise(requestAnimationFrame);
+				return {
+					before,
+					after: snapshot(),
+					rowRetained: row === document.querySelector('[data-git-diff-review-row]'),
+				};
+			});
+			assert.ok(metadataRefresh.before.selected.length > 0);
+			assert.ok(metadataRefresh.before.scrollTop >= 100000);
+			assert.ok(metadataRefresh.rowRetained, 'Metadata refresh must not remount PR rows');
+			assert.deepEqual(metadataRefresh.after, metadataRefresh.before);
+			await page.screenshot({ path: resolve(output, `${viewport.width}-pr-refresh.png`) });
+			await page.evaluate(() => {
+				window.getSelection()?.removeAllRanges();
+				document.querySelector('[data-git-virtual-diff-root]')!.scrollTop = 0;
+			});
+			await page.getByRole('button', { name: 'Viewed', exact: true }).click();
+			await page.evaluate(() => window.reviewBenchmark.refreshPullRequest());
+			assert.equal(
+				await page
+					.getByRole('button', { name: 'Viewed', exact: true })
+					.getAttribute('aria-pressed'),
+				'true',
+			);
+			assert.equal(
+				await page
+					.getByRole('button', { name: /synthetic\/file-0.ts/ })
+					.getAttribute('aria-expanded'),
+				'false',
+			);
 			verification.push({
 				viewport,
 				builtWorker,
@@ -325,9 +414,13 @@ try {
 				refresh,
 				rapidSwitch: 'passed',
 				cancellation,
+				unicode,
+				metadataRefresh,
+				viewedAndCollapsed: 'preserved',
 			});
 			await page.screenshot({ path: resolve(output, `${viewport.width}-demand.png`) });
 		}
+		assert.deepEqual(pageErrors, [], 'Browser errors must fail verification');
 		await page.close();
 	}
 	if (!verifyOnly)

@@ -35,7 +35,7 @@ function document(documentId: string) {
 			},
 		]),
 	);
-	return { documentId, files, fileBodies };
+	return { reviewId: 'executor:repository:1', documentId, files, fileBodies };
 }
 function plainSyntax() {
 	return new GitDiffSyntaxController({
@@ -53,21 +53,46 @@ const indexed = (body: GitReviewFilePatchBody): GitReviewFileBody => ({
 describe('PR diff demand', () => {
 	it('preserves in-flight indexing and loaded bodies on an unchanged refresh', async () => {
 		const pending = Promise.withResolvers<GitReviewFileBody>();
-		const index = vi.fn((_body: GitReviewFilePatchBody, _signal?: AbortSignal) => pending.promise);
+		const index = vi.fn(async (body: GitReviewFilePatchBody, _signal?: AbortSignal) =>
+			indexed(body),
+		);
+		index.mockImplementationOnce(() => pending.promise);
 		const controller = new PullRequestDiffController(index, plainSyntax());
 		const original = document('same');
 		controller.open(original);
 		controller.handleDemand({ documentId: 'same', kind: 'viewport', filePaths: ['a.ts'] });
-		controller.open(structuredClone(original));
+		const refreshed = { ...structuredClone(original), documentId: 'metadata-refresh' };
+		controller.open(refreshed);
 		expect(index.mock.calls[0][1]?.aborted).toBe(false);
 		pending.resolve(indexed(original.fileBodies['a.ts']));
 		await vi.waitFor(() => expect(controller.fileBodies['a.ts']).toBeDefined());
 		const loaded = controller.fileBodies;
-		controller.open(structuredClone(original));
+		controller.open(structuredClone(refreshed));
 		expect(controller.fileBodies).toBe(loaded);
 		expect(index).toHaveBeenCalledOnce();
+		controller.handleDemand({ documentId: 'same', kind: 'viewport', filePaths: ['b.ts'] });
+		expect(index).toHaveBeenCalledTimes(2);
 		controller.close();
 	});
+	it.each(['other-executor:repository:1', 'executor:other-repository:1', 'executor:repository:2'])(
+		'fences unchanged bodies when the owning review changes to %s',
+		async (reviewId) => {
+			const pending = Promise.withResolvers<GitReviewFileBody>();
+			const index = vi.fn(
+				(_body: GitReviewFilePatchBody, _signal?: AbortSignal) => pending.promise,
+			);
+			const controller = new PullRequestDiffController(index, plainSyntax());
+			const original = document('same');
+			controller.open(original);
+			controller.handleDemand({ documentId: 'same', kind: 'viewport', filePaths: ['a.ts'] });
+			controller.open({ ...structuredClone(original), reviewId });
+			expect(index.mock.calls[0][1]?.aborted).toBe(true);
+			pending.resolve(indexed(original.fileBodies['a.ts']));
+			await Promise.resolve();
+			expect(controller.fileBodies).toEqual({});
+			controller.close();
+		},
+	);
 	it('fences changed patch digests even when document and fingerprint are unchanged', async () => {
 		const pending = Promise.withResolvers<GitReviewFileBody>();
 		const index = vi.fn((_body: GitReviewFilePatchBody, _signal?: AbortSignal) => pending.promise);

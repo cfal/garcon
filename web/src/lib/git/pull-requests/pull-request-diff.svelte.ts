@@ -6,10 +6,16 @@ import { GitDiffSyntaxController } from '$lib/git/review/git-diff-syntax-control
 import { decideGitReviewBodyBudget } from '$lib/git/review/git-review-body-budget.js';
 import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 
+type PullRequestDiffDocument = Pick<
+	PullRequestDetail,
+	'reviewId' | 'documentId' | 'files' | 'fileBodies'
+>;
+
 export class PullRequestDiffController {
 	fileBodies = $state.raw<Record<string, GitReviewFileBody>>({});
 	loadingBodies = $state.raw<Set<string>>(new Set());
-	private detail: Pick<PullRequestDetail, 'documentId' | 'files' | 'fileBodies'> | null = null;
+	private activeDocumentId = $state<string | null>(null);
+	private detail: PullRequestDiffDocument | null = null;
 	private scheduler: GitReviewBodyScheduler<GitReviewFileBody> | null = null;
 	private demanded = new Set<string>();
 
@@ -18,10 +24,14 @@ export class PullRequestDiffController {
 		readonly syntax = new GitDiffSyntaxController(),
 	) {}
 
-	open(detail: Pick<PullRequestDetail, 'documentId' | 'files' | 'fileBodies'>): void {
+	get documentId(): string | null {
+		return this.activeDocumentId;
+	}
+
+	open(detail: PullRequestDiffDocument): void {
 		const previous = this.detail;
 		if (
-			previous?.documentId === detail.documentId &&
+			previous?.reviewId === detail.reviewId &&
 			previous.files.length === detail.files.length &&
 			previous.files.every(
 				(file, index) =>
@@ -29,11 +39,13 @@ export class PullRequestDiffController {
 					sameFields(previous.fileBodies[file.path], detail.fileBodies[file.path]),
 			)
 		) {
+			// Metadata revisions retain the content document that owns rows and in-flight work.
 			this.detail = detail;
 			return;
 		}
 		this.close();
 		this.detail = detail;
+		this.activeDocumentId = detail.documentId;
 		this.syntax.open({ documentId: detail.documentId, files: detail.files }, {});
 		this.scheduler = new GitReviewBodyScheduler({
 			maxBatchFiles: 1,
@@ -92,7 +104,7 @@ export class PullRequestDiffController {
 	}
 
 	handleDemand(demand: GitReviewBodyDemand): void {
-		if (demand.documentId !== this.detail?.documentId) return;
+		if (demand.documentId !== this.activeDocumentId) return;
 		this.demanded = new Set(demand.filePaths);
 		this.scheduler?.retainVisible(this.demanded);
 		this.requestDemanded();
@@ -103,6 +115,7 @@ export class PullRequestDiffController {
 		const scheduler = this.scheduler;
 		this.scheduler = null;
 		this.detail = null;
+		this.activeDocumentId = null;
 		this.demanded.clear();
 		scheduler?.cancel();
 		this.fileBodies = {};

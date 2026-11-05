@@ -133,7 +133,14 @@ describe('PR refresh identity', () => {
 		const indexCalls = () =>
 			vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index').length;
 		expect(indexCalls()).toBe(1);
-		await rendered.rerender({ detail: structuredClone(original) });
+		await rendered.rerender({
+			detail: {
+				...structuredClone(original),
+				documentId: 'revision:2',
+				updatedAt: '2026-01-02',
+				title: 'Updated title',
+			},
+		});
 		expect(viewport.scrollTop).toBe(20000);
 		expect(rendered.container.querySelector('[data-git-diff-review-row]')).toBe(row);
 		expect(row?.textContent).toBe(text);

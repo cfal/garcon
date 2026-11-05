@@ -21,6 +21,7 @@
 		untrack(() => diff.open(current));
 	});
 	onDestroy(() => diff.close());
+	const documentId = $derived(diff.documentId ?? detail.documentId);
 
 	let viewedFiles = $state<Set<string>>(new Set());
 	let collapsedFiles = $state<Set<string>>(new Set());
@@ -52,7 +53,7 @@
 	const diffSource = $derived.by(() => {
 		const baseSource = buildGitVirtualReviewRowSource({
 			summary: {
-				documentId: detail.documentId,
+				documentId,
 				project: '',
 				context: 3,
 				files: detail.files,
@@ -141,7 +142,7 @@
 	</div>
 {:else}
 	<PullRequestVirtualDiffSurface
-		documentId={detail.documentId}
+		{documentId}
 		source={diffSource}
 		{viewedFiles}
 		{collapsedFiles}
