@@ -143,7 +143,7 @@ async function openChooser(remote) {
 async function hostShortcutChooser(key, shift = false) {
   const opened = await evaluate('return window.chooserOpenCount');
   await nativeRemoteKey(shift ? `ctrl+shift+${key}` : `ctrl+${key}`);
-  const action = key === 'r' ? 'Reload Server' : 'Open Server';
+  const action = key === 'r' ? 'Reload Server' : 'Open server';
   await until(() => evaluate(`return window.chooserOpenCount > arguments[1]
     && !document.querySelector('#cancel').hidden
     && !document.querySelector('#server-form button').disabled

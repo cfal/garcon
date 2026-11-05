@@ -46,7 +46,7 @@ connection attempt reserves that origin's mount, even if the server fails to loa
 Correcting an incorrect mount later requires a different hostname or resetting
 all app data, including credentials and drafts.
 
-On desktop, **Open Server** always creates a new window, even for a server that
+On desktop, **Open server** always creates a new window, even for a server that
 is already open. Other windows remain alive with their drafts and connections.
 An optional name is saved with the URL and used as `<name> — Garcon` in the new
 window's title. Without a name, the title is `<hostname> — Garcon`, excluding
@@ -201,7 +201,7 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   and mount. Linux supports the external links described below. Other platforms,
   same-window external navigation, and provider-login popups remain blocked.
   Mobile popup behavior still requires device validation.
-- The sidebar menu's **Open Server** action opens the host-owned chooser. The
+- The sidebar menu's **Open server** action opens the host-owned chooser. The
   Linux in-window menubar is removed and the Windows menubar is hidden. Existing host recovery accelerators
   (`Cmd/Ctrl+Shift+S` for the chooser and `Cmd/Ctrl+R` for reload) remain active even
   when the page is unavailable; these are not previous/next-server shortcuts.
@@ -211,10 +211,10 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   Cancel preserves all pages and returns focus to the requesting window when it
   is still open, otherwise to another server window.
 - Linux uses a compact, theme-aware GTK titlebar with native window controls and
-  an **Open Server** icon for pointer-accessible recovery. Windows/macOS retain
+  an **Open server** icon for pointer-accessible recovery. Windows/macOS retain
   their OS titlebars. Titlebar dimensions respect the system theme and scaling.
 - On desktop, the sidebar menu separates native actions from **Settings** and
-  includes a **Hide titlebar** checkbox below **Open Server**. It hides the current
+  includes a **Hide titlebar** checkbox below **Open server**. It hides the current
   server window's entire titlebar, including the drag area and window controls;
   unchecking restores them. Other windows are unaffected. The setting survives
   page and native reloads, but new windows and app restarts start with a titlebar.

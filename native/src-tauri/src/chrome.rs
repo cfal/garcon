@@ -94,7 +94,7 @@ pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
                     gtk::IconSize::Menu,
                 );
                 chooser.set_focus_on_click(false);
-                chooser.set_tooltip_text(Some("Open Server"));
+                chooser.set_tooltip_text(Some("Open server"));
                 chooser.connect_clicked(move |_| {
                     crate::host::request_host_chooser(
                         &handle,

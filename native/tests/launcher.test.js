@@ -200,7 +200,7 @@ test('named recents show their URL and reopen as a new window, including the cur
     expect(window.document.querySelector('#server-name').value).toBe('Work');
     expect(window.document.querySelector('#recent-servers small').textContent).toBe('https://a.test/');
     window.document.querySelector('#recent-servers button').click();
-    expect(window.document.querySelector('#server-form button').textContent).toBe('Open Server');
+    expect(window.document.querySelector('#server-form button').textContent).toBe('Open server');
     window.document.querySelector('#server-name').value = 'Personal';
     window.document.querySelector('form').requestSubmit();
     expect(commands).toEqual([['connect_server', { url: 'https://a.test/', name: 'Personal', generation: 4, acknowledged: false }]]);

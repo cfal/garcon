@@ -30,13 +30,13 @@ function installTitlebar(hidden = false) {
 	return { requestHidden, publish, listeners };
 }
 
-it('uses the shared checkbox under Open Server and restores hidden controls', async () => {
+it('uses the shared checkbox under Open server and restores hidden controls', async () => {
 	const native = installTitlebar();
 	render(Host);
 	await fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
 	const item = await screen.findByRole('menuitemcheckbox', { name: 'Hide titlebar' });
 	expect(item.dataset.slot).toBe('dropdown-menu-checkbox-item');
-	expect(item.previousElementSibling).toBe(screen.getByRole('menuitem', { name: 'Open Server' }));
+	expect(item.previousElementSibling).toBe(screen.getByRole('menuitem', { name: 'Open server' }));
 	expect(item.getAttribute('aria-checked')).toBe('false');
 	await fireEvent.click(item);
 	expect(native.requestHidden).toHaveBeenLastCalledWith(true);

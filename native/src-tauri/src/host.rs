@@ -358,7 +358,7 @@ pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let switch = MenuItem::with_id(
         app,
         "switch-server",
-        "Open Server...",
+        "Open server...",
         true,
         Some("CmdOrCtrl+Shift+S"),
     )?;

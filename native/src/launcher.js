@@ -90,7 +90,7 @@ export async function mountLauncher(document, invoke) {
       warning.hidden = !reload;
       acknowledgement.checked = false;
       acknowledgement.required = reload;
-      button.textContent = reload ? 'Reload Server' : 'Open Server';
+      button.textContent = reload ? 'Reload Server' : 'Open server';
       recents.hidden = reload;
       add.hidden = reload;
       recents.replaceChildren();
@@ -159,7 +159,7 @@ export async function mountLauncher(document, invoke) {
     updateEndpointWarning();
     name.value = '';
     acknowledgement.checked = false;
-    button.textContent = 'Open Server';
+    button.textContent = 'Open server';
     input.focus();
   });
   cancel.addEventListener('click', () => void run(() => invoke('cancel_chooser', { generation: choices.generation })));

@@ -33,7 +33,7 @@ test('only the bundled launcher receives narrowly enumerated native permissions'
   expect(read('../src-tauri/build.rs')).toContain('AppManifest::new().commands');
 });
 
-test('remote bridge only requests chooser navigation, without native command permission', () => {
+test('remote bridge uses host navigation requests, without native command permission', () => {
   const bridge = read('../src-tauri/bridge.js');
   expect(bridge).toContain("window.location.assign('garcon-host://switch-server/')");
   expect(bridge).not.toContain('invoke');
@@ -52,7 +52,7 @@ test('desktop chrome hides the window menu without removing recovery accelerator
   expect(chrome).toContain('window.hide_menu()?');
   expect(chrome).toContain('gtk_window.connect_key_press_event');
   expect(chrome).toContain('header.set_show_close_button(true)');
-  expect(chrome).toContain('"Open Server"');
+  expect(chrome).toContain('"Open server"');
   for (const owner of ['host.rs', 'lib.rs']) {
     expect(read(`../src-tauri/src/${owner}`)).toContain('chrome::show_initial(');
   }
