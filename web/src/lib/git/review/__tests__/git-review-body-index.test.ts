@@ -41,6 +41,7 @@ describe('createIndexedGitReviewFileBody', () => {
 
 		const indexed = await createIndexedGitReviewFileBody(body);
 
+		expect(indexed).toMatchObject(body);
 		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(
 			0,
 		);
@@ -64,6 +65,7 @@ describe('createIndexedGitReviewFileBody', () => {
 	});
 
 	it('preserves terminal body metadata without indexing', async () => {
+		const run = vi.spyOn(gitReviewWorker, 'run');
 		const body: GitReviewFilePatchBody = {
 			patchDigest: 'a'.repeat(64),
 			path: 'image.png',
@@ -83,5 +85,6 @@ describe('createIndexedGitReviewFileBody', () => {
 			...body,
 			patchIndex: null,
 		});
+		expect(run).not.toHaveBeenCalled();
 	});
 });

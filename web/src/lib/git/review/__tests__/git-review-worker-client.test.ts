@@ -58,6 +58,61 @@ describe('review Worker admission and lifetime', () => {
 		expect(structuredClone(await second).kind).toBe('index');
 		expect(workers).toHaveLength(1);
 	});
+	it('rejects pre-aborted demand without creating a Worker or reserving admission', async () => {
+		const { client, workers } = setup();
+		const abort = new AbortController();
+		abort.abort();
+		for (let attempt = 0; attempt < LIMITS.maxPendingRequests; attempt++) {
+			await expect(client.run(input, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+		}
+		expect(workers).toHaveLength(0);
+		const next = client.run(input);
+		workers[0].reply();
+		await expect(next).resolves.toMatchObject({ kind: 'index' });
+	});
+	it('ignores replies for another request on the current Worker', async () => {
+		const { client, workers } = setup();
+		const settled = vi.fn();
+		const result = client.run(input).then(settled);
+		workers[0].onmessage?.({
+			data: { id: 999, status: 'error', message: 'unrelated failure' },
+		} as MessageEvent<GitReviewWorkerReply>);
+		await Promise.resolve();
+		expect(settled).not.toHaveBeenCalled();
+		expect(workers[0].terminate).not.toHaveBeenCalled();
+		workers[0].reply();
+		await result;
+		expect(settled).toHaveBeenCalledWith(expect.objectContaining({ kind: 'index' }));
+	});
+	it.each(['messageerror', 'error-reply', 'wrong-kind'] as const)(
+		'retires a Worker after %s and completes queued demand on its replacement',
+		async (failure) => {
+			const { client, workers } = setup();
+			const failed = client.run(input).catch((error: Error) => error);
+			const next = client.run(input);
+			const worker = workers[0];
+			const id = worker.postMessage.mock.calls[0][0].id;
+			if (failure === 'messageerror') {
+				worker.onmessageerror?.(new MessageEvent('messageerror'));
+			} else {
+				const data: GitReviewWorkerReply =
+					failure === 'error-reply'
+						? { id, status: 'error', message: 'Synthetic Worker failure' }
+						: {
+								id,
+								status: 'ready',
+								timings: [],
+								output: { kind: 'highlight', attempt: { status: 'cancelled' } },
+							};
+				worker.onmessage?.({ data } as MessageEvent<GitReviewWorkerReply>);
+			}
+			expect(await failed).toBeInstanceOf(Error);
+			expect(worker.terminate).toHaveBeenCalledOnce();
+			expect(workers).toHaveLength(2);
+			workers[1].reply();
+			await expect(next).resolves.toMatchObject({ kind: 'index' });
+		},
+	);
 	it('terminates active synchronous work and fences its saved callback after replacement', async () => {
 		const { client, workers } = setup();
 		const abort = new AbortController();
@@ -110,6 +165,26 @@ describe('review Worker admission and lifetime', () => {
 		client.dispose();
 		await Promise.all([first, second]);
 	});
+	it('releases byte reservations on queued cancellation and disposal', async () => {
+		const { client, workers } = setup();
+		const large = { ...input, patch: 'x'.repeat(LIMITS.maxPatchCharacters) };
+		const abort = new AbortController();
+		const first = client.run(large).catch((error: Error) => error);
+		const queued = client.run(large, abort.signal).catch((error: Error) => error);
+		await expect(client.run(large)).rejects.toThrow('admission');
+		abort.abort();
+		expect(await queued).toMatchObject({ name: 'AbortError' });
+		const replacement = client.run(large).catch((error: Error) => error);
+		client.dispose();
+		expect(await first).toMatchObject({ name: 'AbortError' });
+		expect(await replacement).toMatchObject({ name: 'AbortError' });
+		expect(workers[0].terminate).toHaveBeenCalledOnce();
+		const reused = [client.run(large), client.run(large)].map((result) =>
+			result.catch((error: Error) => error),
+		);
+		client.dispose();
+		for (const result of reused) expect(await result).toMatchObject({ name: 'AbortError' });
+	});
 
 	it('recycles language memory after the bounded job lifetime', async () => {
 		const { client, workers } = setup();
@@ -146,6 +221,23 @@ describe('review Worker admission and lifetime', () => {
 		await vi.advanceTimersByTimeAsync(LIMITS.requestTimeoutMs);
 		expect((await result).message).toContain('deadline');
 		expect(workers[0].terminate).toHaveBeenCalledOnce();
+	});
+	it('includes queue wait in the deadline rather than restarting it on dispatch', async () => {
+		vi.useFakeTimers();
+		const { client, workers } = setup();
+		const first = client.run(input);
+		await vi.advanceTimersByTimeAsync(1_000);
+		const queued = client.run(input).catch((error: Error) => error);
+		await vi.advanceTimersByTimeAsync(3_000);
+		workers[0].reply();
+		await first;
+		expect(workers[0].postMessage).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(LIMITS.requestTimeoutMs - 3_000);
+		expect(await queued).toMatchObject({ message: 'Diff Worker deadline exceeded.' });
+		expect(workers[0].terminate).toHaveBeenCalledOnce();
+		const next = client.run(input);
+		workers[1].reply();
+		await expect(next).resolves.toMatchObject({ kind: 'index' });
 	});
 	it('retires idle language memory and restarts lazily', async () => {
 		vi.useFakeTimers();
