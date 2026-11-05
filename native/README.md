@@ -55,11 +55,14 @@ Windows for the same origin share login and browser storage, like browser tabs;
 they are not separate accounts. Different origins retain their own storage.
 
 Release builds require HTTPS with valid certificates. Debug builds additionally
-allow HTTP on `localhost`, `127.0.0.1`, and `::1` for local tests. A phone's
+allow HTTP on `localhost` or any IPv4/IPv6 address, including LAN and VPN addresses
+(for example `http://100.64.0.2:3001/`). Other hostnames still require HTTPS.
+HTTP itself is unencrypted; use it only over a trusted network or VPN. A phone's
 localhost is the phone, not the development machine. No release ATS exception,
 certificate bypass, native HTTP bridge, or controller CORS change is introduced.
 Android's upstream debug template permits cleartext subresources platform-wide;
-the launcher's loopback-only HTTP rule is not a network-wide restriction.
+the launcher's URL admission rule is not a network-wide restriction, and Android
+server connections remain disabled.
 
 ## Builds
 
@@ -145,6 +148,8 @@ sites. The smoke runner honors `CARGO_TARGET_DIR`, `GARCON_NATIVE_SMOKE_TMP`, an
 file-input assignment, multipart upload bytes, shared clipboard copy/paste, focus,
 OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count,
 both initially and after replacing a remote window.
+Set `GARCON_NATIVE_SMOKE_HOST` to an IPv4 address assigned to the test machine to
+exercise development HTTP on a non-loopback interface; fixtures still bind `0.0.0.0`.
 Open/cancel/reload shortcuts are exercised across eight further reloads
 for each root/mount fixture, requiring a fresh chooser-open event rather than
 accepting stale hidden-page controls. Linux registers its recovery handlers on

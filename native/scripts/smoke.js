@@ -299,7 +299,7 @@ function fixture(base, outsideUrl) {
     },
   });
   const client = {
-    url: `http://127.0.0.1:${server.port}${base}/`,
+    url: `http://${process.env.GARCON_NATIVE_SMOKE_HOST ?? '127.0.0.1'}:${server.port}${base}/`,
     connected: () => apiReceived && socketReceived && !!activeSocket,
     socketConnections: () => socketConnections,
     requests: () => requests,

@@ -1,10 +1,10 @@
-use url::Url;
+use url::{Host, Url};
 
 #[derive(Clone, Debug)]
 pub struct Deployment(Url);
 
 impl Deployment {
-    pub fn parse(input: &str, allow_loopback: bool) -> Result<Self, String> {
+    pub fn parse(input: &str, allow_development_http: bool) -> Result<Self, String> {
         let input = input.trim();
         if input.contains(['\\', '%'])
             || input.chars().any(char::is_control)
@@ -13,11 +13,17 @@ impl Deployment {
             return Err("Enter a valid HTTPS server URL.".into());
         }
         let mut url = Url::parse(input).map_err(|_| "Enter a complete HTTPS server URL.")?;
-        let loopback = url
-            .host_str()
-            .is_some_and(|host| host == "localhost" || host == "127.0.0.1" || host == "[::1]");
-        if url.scheme() != "https" && !(allow_loopback && loopback && url.scheme() == "http") {
-            return Err("Use HTTPS. Development builds also allow HTTP on loopback.".into());
+        let development_host = matches!(
+            url.host(),
+            Some(Host::Ipv4(_) | Host::Ipv6(_) | Host::Domain("localhost"))
+        );
+        if url.scheme() != "https"
+            && !(allow_development_http && development_host && url.scheme() == "http")
+        {
+            return Err(
+                "Use HTTPS. Development builds also allow HTTP on localhost or an IP address."
+                    .into(),
+            );
         }
         if url.host_str().is_none()
             || !url.username().is_empty()
@@ -94,13 +100,59 @@ mod tests {
     }
 
     #[test]
-    fn only_debug_loopback_may_use_http() {
-        for host in ["localhost", "127.0.0.1", "[::1]"] {
+    fn only_debug_localhost_and_ip_addresses_may_use_http() {
+        for host in [
+            "localhost",
+            "127.0.0.1",
+            "[::1]",
+            "192.168.1.2",
+            "10.20.30.40",
+            "100.64.0.2",
+            "203.0.113.8",
+            "[fd00::2]",
+            "[2001:db8::2]",
+        ] {
             let url = format!("http://{host}:3001");
-            assert!(Deployment::parse(&url, true).is_ok());
-            assert!(Deployment::parse(&url, false).is_err());
+            assert!(Deployment::parse(&url, true).is_ok(), "{url}");
+            assert!(Deployment::parse(&url, false).is_err(), "{url}");
+            assert!(Deployment::parse(&format!("https://{host}:3001"), false).is_ok());
         }
-        assert!(Deployment::parse("http://192.168.1.2", true).is_err());
+        for url in [
+            "http://example.test",
+            "http://localhost.example.test",
+            "ftp://192.168.1.2",
+        ] {
+            assert!(Deployment::parse(url, true).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn development_http_keeps_url_and_navigation_boundaries() {
+        for host in ["100.64.0.2", "[fd00::2]"] {
+            let origin = format!("http://{host}:3001");
+            let deployment = Deployment::parse(&format!("{origin}/garcon"), true).unwrap();
+            assert!(deployment.allows(&Url::parse(&format!("{origin}/garcon/chat/123")).unwrap()));
+            for target in [
+                format!("{origin}/other/"),
+                format!("{origin}/garcon-other/"),
+                format!("{origin}/garcon/%2fother"),
+                format!("http://{host}:3002/garcon/"),
+                "http://203.0.113.8:3001/garcon/".into(),
+            ] {
+                assert!(
+                    !deployment.allows(&Url::parse(&target).unwrap()),
+                    "{target}"
+                );
+            }
+            for input in [
+                format!("http://user:secret@{host}:3001/"),
+                format!("{origin}/?token=secret"),
+                format!("{origin}/#secret"),
+                format!("{origin}/a%2fb"),
+            ] {
+                assert!(Deployment::parse(&input, true).is_err(), "{input}");
+            }
+        }
     }
 
     #[test]
