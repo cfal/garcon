@@ -97,7 +97,8 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       for (;;) {
         try {
           const reloaded = await fixture.client.reloadChat(chatId);
-          expect(assistantContents(reloaded.messages)).toContain('Synthetic output while controller was disconnected');
+          const page = await fixture.client.getMessages(chatId, { transcriptViewId: reloaded.transcriptViewId, beforeOrdinal: reloaded.lastOrdinal + 1 });
+          expect(assistantContents(page.messages)).toContain('Synthetic output while controller was disconnected');
           break;
         } catch (error) {
           if (!(error instanceof GarconWsRequestError) || error.response.code !== 'HISTORY_LOAD_FAILED'

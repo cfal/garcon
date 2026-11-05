@@ -68,11 +68,11 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       }
       expect(await Bun.file(join(next, 'interrupt-ready')).exists()).toBe(true);
       const successor = 'printf replacement >> replacement.txt';
-      await client.enqueueNew(chatId, successor);
+      const queuedSubmission71 = await client.enqueueNew(chatId, successor);
       const interruptCursor = client.markEvents();
       expect((await client.interruptAndSend({ chatId, clientRequestId: crypto.randomUUID() })).outcome)
         .toBe('interrupt-requested');
-      const input = await client.waitForCommittedUserInput(chatId, successor, { afterIndex: interruptCursor });
+      const input = await client.waitForCommittedUserInput(chatId, queuedSubmission71.clientMessageId, { afterIndex: interruptCursor });
       expect((await client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: client.events().lastIndexOf(input) + 1,
       })).type).toBe('agent-run-finished');
@@ -83,9 +83,9 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       const noisy = await client.runChat({ chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
         command: "sleep 0.2; head -c 131072 /dev/zero | tr '\\0' x; printf tail; printf diagnostic >&2" });
       const tailCursor = client.markEvents();
-      await client.enqueueNew(chatId, 'printf after-tail > after-tail.txt');
+      const queuedSubmission86 = await client.enqueueNew(chatId, 'printf after-tail > after-tail.txt');
       expect((await client.waitForTurnTerminal(chatId, noisy.turnId)).type).toBe('agent-run-finished');
-      const tailInput = await client.waitForCommittedUserInput(chatId, 'printf after-tail > after-tail.txt', { afterIndex: tailCursor });
+      const tailInput = await client.waitForCommittedUserInput(chatId, queuedSubmission86.clientMessageId, { afterIndex: tailCursor });
       expect((await client.waitForTurnTerminal(chatId, undefined, {
         afterIndex: client.events().lastIndexOf(tailInput) + 1,
       })).type).toBe('agent-run-finished');

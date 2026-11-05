@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { displayRequest } from '../../support/transcript-display.js';
 import { appendFile, chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -263,17 +264,10 @@ describe('native transcript reload', () => {
       expect(sharedAfterReload).toEqual(sharedBeforeReload);
       expect(JSON.stringify(sharedAfterReload.snapshot.messages)).not.toContain(externalContent);
       for (const replaced of [beforeDrift, reloaded]) {
-        expect(await rejectionOf(fixture.client.subscribe(
-          chatId,
-          replaced.transcriptViewId,
-          replaced.lastOrdinal,
-        ))).toMatchObject({
-          response: {
-            requestType: 'chat-subscribe',
-            code: 'STALE_TRANSCRIPT_VIEW',
-            retryable: false,
-            chatId,
-          },
+        expect(await rejectionOf(fixture.client.openDisplay({
+          chatId, expectedTranscriptViewId: replaced.transcriptViewId, reason: 'reconnect', outstandingClientMessageIds: [],
+        }))).toMatchObject({
+          status: 409, body: { errorCode: 'STALE_TRANSCRIPT_VIEW' },
         });
       }
 
@@ -343,7 +337,7 @@ describe('native transcript reload', () => {
     });
   }, 30_000);
 
-  test('[TLV5-L08.03-SERVER-01] rejects a fixed-watermark replay continuation after native reload replaces its view', async () => {
+  test('[TLV5-L08.03-SERVER-01] rejects a certified display continuation after native reload replaces its view', async () => {
     const environment: Record<string, string> = {};
 
     await withIntegrationFixture('native-reload-replay-fence', async (fixture) => {
@@ -398,21 +392,12 @@ describe('native transcript reload', () => {
         },
       });
 
-      const firstPage = await fixture.client.subscribe(
-        chatId,
-        beforeInjection.transcriptViewId,
-        0,
-      );
-      expect(firstPage).toMatchObject({
-        transcriptViewId: beforeInjection.transcriptViewId,
-        hasMore: true,
-      });
-      const replay = firstPage as typeof firstPage & {
-        readonly nextAfterOrdinal: number;
-        readonly throughOrdinal: number;
-      };
-      expect(replay.nextAfterOrdinal).toBeGreaterThan(0);
-      expect(replay.nextAfterOrdinal).toBeLessThan(replay.throughOrdinal);
+      const open = await fixture.client.openDisplay({ chatId, reason: 'activate', outstandingClientMessageIds: [] });
+      const request = displayRequest(open);
+      const firstPage = await fixture.client.waitForDisplayWindow(request);
+      expect(firstPage.certificate.transcriptViewId).toBe(beforeInjection.transcriptViewId);
+      expect(firstPage.earlier.kind).toBe('more');
+      if (firstPage.earlier.kind !== 'more') throw new Error('Missing display continuation');
 
       const beforeReload = fixture.client.markEvents();
       await reloadFromNativeHistory(fixture, chatId);
@@ -428,18 +413,10 @@ describe('native transcript reload', () => {
       expect(reloadEvents.indexOf(progress.at(-1)!)).toBeLessThan(reloadEvents.indexOf(result!));
       const reloaded = await fixture.client.getMessages(chatId);
       expect(reloaded.transcriptViewId).not.toBe(beforeInjection.transcriptViewId);
-      expect(await rejectionOf(fixture.client.subscribe(
-        chatId,
-        beforeInjection.transcriptViewId,
-        replay.nextAfterOrdinal,
-        replay.throughOrdinal,
-      ))).toMatchObject({
-        response: {
-          requestType: 'chat-subscribe',
-          code: 'STALE_TRANSCRIPT_VIEW',
-          retryable: false,
-          chatId,
-        },
+      expect(await rejectionOf(fixture.client.displayWindow({ ...request,
+        anchor: { kind: 'before', cursor: firstPage.earlier.cursor }, requiredThrough: undefined,
+      }))).toMatchObject({
+        status: 409, body: { errorCode: 'STALE_TRANSCRIPT_VIEW' },
       });
       expect(JSON.stringify((await fixture.client.getMessages(chatId)).messages))
         .not.toContain('old-view-replay-');

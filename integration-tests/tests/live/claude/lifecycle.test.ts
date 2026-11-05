@@ -54,7 +54,7 @@ describe('live Claude lifecycle', () => {
 
       const queuedInput = await fixture.client.waitForCommittedUserInput(
         sourceChatId,
-        queuedPrompt,
+        queued.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
       const queuedInputIndex = fixture.client.events().lastIndexOf(queuedInput);

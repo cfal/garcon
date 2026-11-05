@@ -6,6 +6,8 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { appendDisplayRun, createDisplayChat } from '../../support/transcript-display-fixture.js';
+import { displayRequest } from '../../support/transcript-display.js';
 
 // 30,000 native rows. Before whole-history work moved into bounded steps and a
 // Worker, reloading a history this long held the server's event loop for over
@@ -42,6 +44,52 @@ test('a long chat reloads, forks, and renders a handoff artifact while the serve
     expect((await fixture.client.getMessages(fork.chat.id)).lastOrdinal).toBeGreaterThan(TURNS * 2);
     expect(artifact.sourceEntryCount).toBeGreaterThan(TURNS * 2);
     expect(artifact.budgetOmittedEntryCount).toBeGreaterThan(0);
+    expect(responsiveness.samples).toBeGreaterThan(10);
+    expect(responsiveness.maxRoundTripMs).toBeLessThan(MAX_PING_ROUND_TRIP_MS);
+  });
+}, 180_000);
+
+test('display preparation and a failed regex leave growing chats and ready reads responsive', async () => {
+  await withIntegrationFixture('display-preparation-responsiveness', async fixture => {
+    const healthy = [await createDisplayChat(fixture), await createDisplayChat(fixture)];
+    const cold = await createDisplayChat(fixture), pathological = await createDisplayChat(fixture);
+    await fixture.restartGarcon({ beforeStart: async () => {
+      await appendDisplayRun(fixture.dirs.workspace, cold, 40_000);
+      await appendDisplayRun(fixture.dirs.workspace, pathological, 16, `${'a'.repeat(8192)}!`);
+    } });
+    for (const chatId of healthy) {
+      const open = await fixture.client.openDisplay({ chatId, reason: 'activate', outstandingClientMessageIds: [] });
+      await fixture.client.waitForDisplayWindow(displayRequest(open));
+    }
+    const probe = startPingProbe(fixture);
+    let responsiveness;
+    try {
+      await fixture.client.updateSettings({ ui: { hiddenBashCommandPatterns: [{ pattern: '^(a+)+$', mode: 'regex' }] } });
+      const bad = await fixture.client.openDisplay({ chatId: pathological, reason: 'activate', outstandingClientMessageIds: [] });
+      const building = await fixture.client.openDisplay({ chatId: cold, reason: 'activate', outstandingClientMessageIds: [] });
+      const request = displayRequest(building);
+      // Publication and reader work run while the builder owns the pathological match.
+      for (let index = 0; index < 8; index++) {
+        const chatId = healthy[index % healthy.length];
+        const turn = await fixture.client.runDirectChat({ chatId, content: `Synthetic concurrent append ${index}`, agent: fixture.directAgents.openAi });
+        await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
+        const open = await fixture.client.openDisplay({ chatId, reason: 'reconnect', outstandingClientMessageIds: [] });
+        const current = await fixture.client.displayWindow(displayRequest(open, { requiredThrough: 1 }));
+        expect(current.kind).toBe('available');
+      }
+      const deadline = Date.now() + 15_000;
+      let failed = await fixture.client.displayWindow(displayRequest(bad));
+      while (failed.kind !== 'failed' && Date.now() < deadline) {
+        await Bun.sleep(100);
+        failed = await fixture.client.displayWindow(displayRequest(bad));
+      }
+      expect(failed).toMatchObject({ kind: 'failed', errorCode: 'DISPLAY_FILTER_TIMEOUT' });
+      expect((await fixture.client.waitForDisplayWindow(request, 90_000)).items.find(item => item.kind === 'tool-group')).toMatchObject({ count: 40_000 });
+      await fixture.client.updateSettings({ ui: { hiddenBashCommandPatterns: [] } });
+      const repaired = await fixture.client.openDisplay({ chatId: pathological, reason: 'reconnect', outstandingClientMessageIds: [] });
+      expect((await fixture.client.waitForDisplayWindow(displayRequest(repaired))).items.some(item => item.kind === 'tool-group')).toBe(true);
+    } finally { responsiveness = await probe.stop(); }
+    console.log(JSON.stringify({ displayPreparationHeartbeat: responsiveness }));
     expect(responsiveness.samples).toBeGreaterThan(10);
     expect(responsiveness.maxRoundTripMs).toBeLessThan(MAX_PING_ROUND_TRIP_MS);
   });

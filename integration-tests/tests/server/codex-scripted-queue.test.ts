@@ -64,7 +64,7 @@ describe('scripted Codex queue lifecycle', () => {
 
       const secondInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        secondPrompt,
+        queued.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -76,22 +76,21 @@ describe('scripted Codex queue lifecycle', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
 
+      const page = await fixture.client.getMessages(chatId);
+      const firstReplyEntry = page.messages.find((entry) =>
+        entry.message.type === 'assistant-message' && entry.message.content === firstReply);
+      expect(firstReplyEntry).toBeDefined();
       const queueEvents = fixture.client.eventsSince(queueCursor);
       const firstReplyEventIndex = queueEvents.findIndex((event) =>
-        event.type === 'chat-messages'
+        event.type === 'chat-transcript-head-updated'
         && event.chatId === chatId
-        && event.messages.some((entry) =>
-          entry.message.type === 'assistant-message'
-          && entry.message.content === firstReply));
+        && event.responseClassOrdinals.assistant >= firstReplyEntry!.ordinal);
       const firstTerminalIndex = queueEvents.findIndex((event) => event === firstTerminal);
       const secondInputIndex = queueEvents.findIndex((event) => event === secondInput);
       expect(firstReplyEventIndex).toBeGreaterThanOrEqual(0);
       expect(firstTerminalIndex).toBeGreaterThan(firstReplyEventIndex);
       expect(secondInputIndex).toBeGreaterThan(firstTerminalIndex);
 
-      const page = await fixture.client.getMessages(chatId);
-      const firstReplyEntry = page.messages.find((entry) =>
-        entry.message.type === 'assistant-message' && entry.message.content === firstReply);
       const secondInputEntry = page.messages.find((entry) =>
         entry.message.type === 'user-message' && entry.message.content === secondPrompt);
       if (!firstReplyEntry || !secondInputEntry) {

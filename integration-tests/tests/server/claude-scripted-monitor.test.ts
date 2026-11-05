@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
@@ -98,7 +97,7 @@ describe('scripted Claude Monitor', () => {
         else await writeFile(endGate, 'synthetic');
         await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId,
           marker: 'Synthetic watch ended', afterIndex: cursor });
-        const successor = await fixture.client.waitForCommittedUserInput(chatId, 'Synthetic successor input',
+        const successor = await fixture.client.waitForCommittedUserInput(chatId, queued.clientMessageId,
           { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS });
         expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
           afterIndex: fixture.client.events().lastIndexOf(successor) + 1, timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -221,9 +220,12 @@ async function waitForProcessExit(pid: number): Promise<void> {
   throw new Error('Synthetic Monitor process survived settlement or Stop.');
 }
 
-function waitForAssistant(fixture: IntegrationFixture, chatId: string, content: string, afterIndex: number): Promise<ChatMessagesMessage> {
-  return fixture.client.waitForEvent((event): event is ChatMessagesMessage => event.type === 'chat-messages'
-    && event.chatId === chatId && event.messages.some((entry) =>
+async function waitForAssistant(fixture: IntegrationFixture, chatId: string, content: string, afterIndex: number) {
+  const page = await fixture.client.waitForMessages(chatId,
+    (page) => page.messages.some((entry) =>
       entry.message.type === 'assistant-message' && entry.message.content === content),
-  'synthetic Monitor response', { afterIndex, timeoutMs: LIVE_TURN_TIMEOUT_MS });
+    { afterOrdinal: fixture.client.observedHead(chatId, afterIndex), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'synthetic Monitor response' },
+  );
+  const row = page.messages.find((entry) => entry.message.type === 'assistant-message' && entry.message.content === content)!;
+  return fixture.client.waitForHead(chatId, row.ordinal, { afterIndex, timeoutMs: LIVE_TURN_TIMEOUT_MS });
 }

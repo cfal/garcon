@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../../common/ws-events.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -91,7 +90,7 @@ describe('live Codex lifecycle', () => {
       })).type);
       const secondInput = await fixture.client.waitForCommittedUserInput(
         parentChatId,
-        secondPrompt,
+        queued.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
@@ -267,15 +266,11 @@ describe('live Codex lifecycle', () => {
       await waitForFile(interruptedStarted);
       // The interrupt must land after the tool row is committed, or the resend
       // scan folds the interrupted prompt into the successor.
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'bash-tool-use'
             && entry.message.command.includes('.codex-interrupt-started')),
-        'live Codex interrupted shell tool use',
-        { afterIndex: activeCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, activeCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'live Codex interrupted shell tool use' },
       );
       const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
       expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([successorPrompt]);
@@ -288,7 +283,7 @@ describe('live Codex lifecycle', () => {
       expect(interrupted.outcome).toBe('interrupt-requested');
       const successorInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        successorPrompt,
+        queued.clientMessageId,
         { afterIndex: interruptCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(
@@ -327,15 +322,11 @@ describe('live Codex lifecycle', () => {
         permissionMode: 'bypassPermissions',
       }));
       await waitForFile(stoppedStarted);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'bash-tool-use'
             && entry.message.command.includes('.codex-stop-started')),
-        'live Codex stopped shell tool use',
-        { afterIndex: stoppedCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, stoppedCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'live Codex stopped shell tool use' },
       );
       const stopCommandCursor = fixture.client.markEvents();
       const stopRequestId = crypto.randomUUID();
@@ -401,21 +392,12 @@ describe('live Codex lifecycle', () => {
         assistantContents(stoppedTranscript.messages),
         'CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE',
       );
-      const liveStoppedMessages = fixture.client.eventsSince(stoppedCursor).flatMap((event) =>
-        event.type === 'chat-messages' && event.chatId === chatId
-          ? event.messages.filter((message) => message.ordinal <= stoppedTranscript.lastOrdinal)
-          : []);
-      const stoppedRowsByOrdinal = new Map(
-        stoppedTranscript.messages.map((message) => [message.ordinal, message]),
-      );
-      expect(new Set(liveStoppedMessages.map((message) => message.ordinal)).size)
-        .toBe(liveStoppedMessages.length);
-      expect(liveStoppedMessages.filter((entry) =>
-        entry.message.type === 'user-message'
-        && entry.message.content === stoppedPrompt)).toHaveLength(1);
-      for (const message of liveStoppedMessages) {
-        expect(stoppedRowsByOrdinal.get(message.ordinal)).toEqual(message);
-      }
+      const stoppedInput = stoppedTranscript.messages.find(entry => entry.message.type === 'user-message' && entry.message.content === stoppedPrompt);
+      const inputId = stoppedInput?.message.type === 'user-message' ? stoppedInput.message.metadata?.clientMessageId : null;
+      if (!inputId) throw new Error('Stopped input omitted its submission identity');
+      const committed = await fixture.client.waitForCommittedUserInput(chatId, inputId, { afterIndex: stoppedCursor });
+      expect(committed).toMatchObject({ transcriptViewId: stoppedTranscript.transcriptViewId, ordinal: stoppedInput!.ordinal });
+      await fixture.client.waitForHead(chatId, stoppedTranscript.lastOrdinal, { afterIndex: stoppedCursor });
       expect(countUserContent(stoppedTranscript.messages, stoppedPrompt)).toBe(1);
 
       await fixture.restartGarcon();

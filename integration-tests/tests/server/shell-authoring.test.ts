@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
-import type { ChatMessagesMessage, ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
+import type { ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 import { executionBackend as selectedExecutionBackend } from '../../support/execution-backend.js';
@@ -100,8 +100,9 @@ test('Shell permits explicit title generation, prose refinement, and scheduled c
       target: { type: 'existing-chat', chatId, busyBehavior: 'queue' },
       prompt: '  printf "%s" {{chat_id}} > scheduled-id\n ',
     } });
-    await client.waitForCommittedUserInput(chatId, `  printf "%s" ${chatId} > scheduled-id\n `,
-      { afterIndex: cursor, timeoutMs: 90_000 });
+    await client.waitForMessages(chatId, page => page.messages.some(row => row.message.type === 'user-message'
+      && row.message.content === `  printf "%s" ${chatId} > scheduled-id\n `),
+      { afterOrdinal: client.observedHead(chatId, cursor), timeoutMs: 90_000 });
     await client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
     await client.waitForProcessing(chatId, false);
     expect(await readFile(join(fixture.executionDirs.project, 'scheduled-id'), 'utf8')).toBe(chatId);
@@ -119,12 +120,11 @@ test('agent commands can start and resume Shell tasks', async () => {
     await source.received;
     const acknowledgment = fixture.fakeProviders.openAi.holdNext({});
     source.releaseText('<garcon-start-agent ref="shell-task" async="true" agent="shell" model="sh" title="Synthetic task">printf started > automated-task</garcon-start-agent>');
-    const event = await client.waitForEvent(
-      (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
-        && event.messages.some(row => row.message.type === 'transcript-notice'
+    const event = await client.waitForMessages(parent,
+        (event) => event.messages.some(row => row.message.type === 'transcript-notice'
           && row.message.detail?.type === 'agent-start-outcome'),
-      'Shell child admission', { afterIndex: cursor },
-    );
+        { afterOrdinal: client.observedHead(parent, cursor), description: 'Shell child admission' },
+      );
     const notice = event.messages.map(row => row.message).find(message => message.type === 'transcript-notice'
       && message.detail?.type === 'agent-start-outcome');
     if (notice?.type !== 'transcript-notice' || notice.detail?.type !== 'agent-start-outcome'
@@ -159,12 +159,11 @@ test('agent commands can start and resume Shell tasks', async () => {
     // Control envelopes are admitted unchanged; the shell, not an origin gate, rejects invalid syntax.
     expect((await client.waitForTurnTerminal(child, undefined, { afterIndex: controlCursor })).type)
       .toBe('agent-run-failed');
-    const outcome = await client.waitForEvent(
-      (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === sender
-        && event.messages.some(row => row.message.type === 'transcript-notice'
+    const outcome = await client.waitForMessages(sender,
+        (event) => event.messages.some(row => row.message.type === 'transcript-notice'
           && row.message.detail?.type === 'inter-agent-message-outcome'),
-      'Shell control admission', { afterIndex: controlCursor },
-    );
+        { afterOrdinal: client.observedHead(sender, controlCursor), description: 'Shell control admission' },
+      );
     expect(JSON.stringify(outcome.messages)).toContain('"status":"queued"');
   });
 }, 60_000);

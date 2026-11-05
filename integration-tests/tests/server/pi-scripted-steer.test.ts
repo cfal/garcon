@@ -82,10 +82,10 @@ describe('scripted Pi steering', () => {
 
       const committedSteer = await fixture.client.waitForCommittedUserInput(
         chatId,
-        steerPrompt,
+        steerRequest.clientMessageId,
         { afterIndex: pendingCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expect(committedSteer.messages).toHaveLength(1);
+      expect(committedSteer.ordinal).toBeGreaterThan(0);
 
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {

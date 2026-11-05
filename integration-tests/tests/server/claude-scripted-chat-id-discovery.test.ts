@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -55,16 +54,13 @@ describe('scripted Claude chat ID discovery', () => {
           permissionMode: 'bypassPermissions',
         }));
 
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-            && event.chatId === chatId
-            && event.messages.some((entry) => (
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
             )),
-          `Claude chat ID disclosure for ${chatId}`,
-          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `Claude chat ID disclosure for ${chatId}` },
+      );
         await writeFile(releasePath, 'release', 'utf8');
 
         const steeredRequest = await continuation.requested;

@@ -15,6 +15,7 @@ import {
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
+import { ChatTranscriptHeadUpdatedMessage, emptyResponseClassOrdinals } from '../../../common/transcript-display-events.js';
 import { reusableListenPort } from '../../support/execution-backend.js';
 import { redactSensitiveEnvironmentText } from '../../support/garcon-process.js';
 import { fakeAnthropicRequestHeaders } from '../../support/anthropic-test-contract.js';
@@ -1382,34 +1383,20 @@ describe('integration support contracts', () => {
       redactSensitiveDiagnostics: true,
     });
     const received = client.waitForEvent(
-      (event) => event.type === 'chat-messages',
+      (event) => event.type === 'chat-transcript-head-updated',
       'redacted credential-backed event',
     );
 
-    socket!.receive(JSON.stringify({
-      type: 'chat-messages',
-      chatId: 'private-chat',
-      transcriptViewId: 'private-generation',
-      messages: [{
-        ordinal: 1,
-        message: {
-          type: 'assistant-message',
-          timestamp: '2026-07-26T00:00:00.000Z',
-          content: privateContent,
-        },
-      }],
-      firstOrdinal: 1,
-      lastOrdinal: 1,
-      resendCandidates: [],
-    }));
+    socket!.receive(JSON.stringify(new ChatTranscriptHeadUpdatedMessage(
+      'synthetic-instance', 'private-chat', 'private-generation', 1, '2026-07-26T00:00:00.000Z',
+      { ordinal: 1, timestamp: '2026-07-26T00:00:00.000Z', text: privateContent },
+      { ...emptyResponseClassOrdinals(), assistant: 1 }, 0, 0,
+    )));
 
     const event = await received;
-    expect(event.type).toBe('chat-messages');
-    if (event.type !== 'chat-messages') throw new Error('Expected a chat messages event.');
-    const message = event.messages[0]?.message;
-    expect(message?.type).toBe('assistant-message');
-    if (message?.type !== 'assistant-message') throw new Error('Expected an assistant message.');
-    expect(message.content).toBe(privateContent);
+    expect(event.type).toBe('chat-transcript-head-updated');
+    if (event.type !== 'chat-transcript-head-updated') throw new Error('Expected a transcript head event.');
+    expect(event.preview?.text).toBe(privateContent);
     expect(client.describeEvents()).not.toContain(privateContent);
     expect(JSON.stringify(client.eventRecords())).not.toContain(privateContent);
     expect(client.describeEvents()).toContain('[REDACTED]');

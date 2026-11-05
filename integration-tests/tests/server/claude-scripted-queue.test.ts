@@ -63,7 +63,7 @@ describe('scripted Claude queue lifecycle', () => {
 
       const secondInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        secondPrompt,
+        queued.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {

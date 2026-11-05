@@ -62,21 +62,16 @@ function expectVisibleResponseBeforeSettlement(input: {
   events: readonly ServerWsMessage[];
   chatId: string;
   turnId: string | undefined;
-  marker?: string;
+  responseOrdinal: number;
 }): void {
   const processingStarted = input.events.findIndex((event) =>
     event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
     && event.phase !== null);
   const assistantResponse = input.events.findIndex((event) =>
-    event.type === 'chat-messages'
+    event.type === 'chat-transcript-head-updated'
     && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'assistant-message'
-      && (
-        input.marker === undefined
-        || entry.message.content.includes(input.marker)
-      )));
+    && event.responseClassOrdinals.assistant >= input.responseOrdinal);
   const processingStopped = input.events.findIndex((event, index) =>
     index > assistantResponse
     && event.type === 'chat-processing-updated'
@@ -232,12 +227,14 @@ export async function waitForVisibleResponse(input: {
     input.turnId,
     { afterIndex: input.afterIndex, timeoutMs: LIVE_TURN_TIMEOUT_MS },
   )).type);
+  const page = await input.fixture.client.getMessages(input.chatId);
+  const response = page.messages.findLast((entry) => entry.message.type === 'assistant-message'
+    && (input.marker === undefined || entry.message.content.includes(input.marker)));
+  if (!response) throw new Error('Expected assistant response absent from committed HTTP history');
   const assistantResponse = input.fixture.client.eventsSince(input.afterIndex).findIndex((event) =>
-    event.type === 'chat-messages'
+    event.type === 'chat-transcript-head-updated'
     && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'assistant-message'
-      && (input.marker === undefined || entry.message.content.includes(input.marker))));
+    && event.responseClassOrdinals.assistant >= response.ordinal);
   await input.fixture.client.waitForProcessing(input.chatId, false, {
     afterIndex: input.afterIndex + Math.max(assistantResponse + 1, 0),
     timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -246,6 +243,6 @@ export async function waitForVisibleResponse(input: {
     events: input.fixture.client.eventsSince(input.afterIndex),
     chatId: input.chatId,
     turnId: input.turnId,
-    marker: input.marker,
+    responseOrdinal: response.ordinal,
   });
 }

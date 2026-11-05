@@ -28,12 +28,14 @@ test('fails an incomplete Codex response once after its visible output and resum
       expect(terminal.type).toBe('agent-run-failed');
       expect(terminal).toMatchObject({ error: expect.stringContaining('max_output_tokens') });
       expect(environment.model.requests()).toHaveLength(1);
-      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toContain(partial);
+      const transcript = await fixture.client.getMessages(chatId);
+      const partialRow = transcript.messages.find(entry => entry.message.type === 'assistant-message' && entry.message.content === partial);
+      expect(partialRow).toBeDefined();
 
       const events = fixture.client.eventsSince(cursor);
       const partialIndex = events.findIndex((event) => (
-        event.type === 'chat-messages' && event.chatId === chatId
-        && assistantContents(event.messages).includes(partial)
+        event.type === 'chat-transcript-head-updated' && event.chatId === chatId
+        && event.responseClassOrdinals.assistant >= partialRow!.ordinal
       ));
       const terminalIndex = events.indexOf(terminal);
       expect(partialIndex).toBeGreaterThanOrEqual(0);
@@ -83,9 +85,12 @@ test.each([
       const terminal = await fixture.client.waitForTurnTerminal(chatId, failed.turnId, { afterIndex: failureCursor });
       expect(terminal).toMatchObject({ type: 'agent-run-failed', error: message });
       expect(environment.model.requests()).toHaveLength(2);
+      const failedTranscript = await fixture.client.getMessages(chatId);
+      const errorRow = failedTranscript.messages.find(entry => entry.message.type === 'error' && entry.message.content === message);
+      expect(errorRow).toBeDefined();
       const events = fixture.client.eventsSince(failureCursor);
-      const errorIndex = events.findIndex((event) => event.type === 'chat-messages' && event.chatId === chatId
-        && event.messages.some((entry) => entry.message.type === 'error' && entry.message.content === message));
+      const errorIndex = events.findIndex((event) => event.type === 'chat-transcript-head-updated' && event.chatId === chatId
+        && event.sourceHead >= errorRow!.ordinal);
       expect(errorIndex).toBeGreaterThanOrEqual(0);
       expect(events.indexOf(terminal)).toBeGreaterThan(errorIndex);
 

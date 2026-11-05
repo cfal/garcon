@@ -1,7 +1,6 @@
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
@@ -358,14 +357,11 @@ describeOnLinux('scripted OpenCode permissions', () => {
         afterIndex: stopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) => entry.message.type === 'permission-cancelled'
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => entry.message.type === 'permission-cancelled'
             && entry.message.permissionOccurrenceId
               === permissionOccurrenceId),
-        'OpenCode question cancellation',
-        { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, stopCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'OpenCode question cancellation' },
       );
 
       const stopped = await fixture.client.getMessages(chatId);
@@ -963,9 +959,9 @@ describeOnLinux('scripted OpenCode permissions', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([]);
       expect(fixture.client.eventsSince(cursor).some((event) =>
-        event.type === 'chat-messages'
+        event.type === 'chat-transient-feed-mutation'
         && event.chatId === chatId
-        && event.messages.some((entry) => entry.message.type === 'permission-request')
+        && event.mutation.kind === 'upsert'
       )).toBe(false);
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
       testEnvironment.model.assertSettled();

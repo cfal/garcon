@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeModelInputText, claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
@@ -75,16 +74,13 @@ describe('scripted Claude inter-agent messaging', () => {
           command: sourcePrompt,
           permissionMode: 'bypassPermissions',
         }));
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-            && event.chatId === sourceChatId
-            && event.messages.some((entry) => (
+        await fixture.client.waitForMessages(sourceChatId,
+        (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'inter-agent-message-outcome'
             )),
-          'Claude source inter-agent outcome',
-          { afterIndex: sourceCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(sourceChatId, sourceCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'Claude source inter-agent outcome' },
+      );
 
         const sourceTranscript = await fixture.client.getMessages(sourceChatId);
         expect(messagesOfType(sourceTranscript.messages, 'transcript-notice')).toContainEqual(

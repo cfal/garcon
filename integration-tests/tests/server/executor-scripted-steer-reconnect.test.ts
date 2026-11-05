@@ -36,9 +36,10 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           permissionMode: 'bypassPermissions',
         }));
         if (!started.turnId) throw new Error('Scripted Claude start did not return a turn identity.');
+        const steerMessageId = crypto.randomUUID();
         expect(await client.steer({
           clientRequestId: crypto.randomUUID(),
-          clientMessageId: crypto.randomUUID(),
+          clientMessageId: steerMessageId,
           chatId,
           content: steer,
           whenTurnUnavailable: 'queue',
@@ -62,7 +63,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
 
         proxy!.acceptConnections();
         await waitForExecutorReconnect(fixture, outage);
-        await client.waitForCommittedUserInput(chatId, steer, { afterIndex: outage, timeoutMs: 20_000 });
+        await client.waitForCommittedUserInput(chatId, steerMessageId, { afterIndex: outage, timeoutMs: 20_000 });
         held.release();
         expectFinished((await client.waitForTurnTerminal(chatId, started.turnId, {
           afterIndex: cursor,

@@ -182,7 +182,7 @@ describe('scripted Claude interrupt lifecycle', () => {
 
       const successorInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        successorPrompt,
+        queued.clientMessageId,
         { afterIndex: interruptCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {

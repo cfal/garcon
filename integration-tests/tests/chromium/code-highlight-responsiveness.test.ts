@@ -1,9 +1,6 @@
 import { expect, test } from 'bun:test';
-import { expect as browserExpect, type WebSocketRoute } from 'playwright/test';
-import { AssistantMessage } from '../../../common/chat-types.js';
-import { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { Deferred } from '../../support/deferred.js';
 
 test('typing remains responsive while a large code fence is highlighted', async () => {
   await withChromiumFixture('code-highlight-responsiveness', async ({ page, integration, assertNoBrowserErrors }) => {
@@ -15,32 +12,21 @@ test('typing remains responsive while a large code fence is highlighted', async 
       agent: integration.directAgents.anthropic,
     });
     await integration.client.waitForTurnTerminal(chatId, started.turnId);
-    const history = await integration.client.getMessages(chatId);
-    const socket = new Deferred<WebSocketRoute>();
-    await page.routeWebSocket(/\/ws(?:\?|$)/, (route) => {
-      route.connectToServer();
-      socket.resolve(route);
-    });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     const editor = page.getByRole('textbox', { name: 'Formatted message' });
     await browserExpect(editor).toBeVisible();
     await editor.focus();
-    const connected = await socket.promise;
-    let ordinal = history.lastOrdinal;
-    const publishCode = (source: string) => {
-      ordinal += 1;
-      connected.send(JSON.stringify(new ChatMessagesMessage(
-        chatId,
-        history.transcriptViewId,
-        [{ ordinal, message: new AssistantMessage('2026-01-01T00:00:00.000Z', `\`\`\`typescript\n${source}\`\`\``) }],
-        ordinal,
-        ordinal,
-        [],
-      )));
+    let sequence = 0;
+    const publishCode = async (source: string) => {
+      const prompt = `Synthetic code sample ${++sequence}`;
+      const held = integration.fakeProviders.anthropic.holdNext({ lastUserText: prompt });
+      await integration.client.runDirectChat({ chatId, content: prompt, agent: integration.directAgents.anthropic });
+      await held.received;
+      held.releaseText(`\`\`\`typescript\n${source}\`\`\``);
     };
 
     // Loads the language module before measuring token publication and DOM work.
-    publishCode('const warmup = 1;\n');
+    await publishCode('const warmup = 1;\n');
     await browserExpect(page.locator('.cm-code-keyword')).not.toHaveCount(0);
     const source = 'const syntheticValue = { key: "value", count: 42 };\n'.repeat(2_000);
     const publishAtKeystroke = 5;
@@ -51,7 +37,7 @@ test('typing remains responsive while a large code fence is highlighted', async 
     const highlightedSpans = code.locator('span');
     let highlightedAtKeystroke: number | null = null;
     for (let index = 0; index < 200; index += 1) {
-      if (index === publishAtKeystroke) publishCode(source);
+      if (index === publishAtKeystroke) await publishCode(source);
       const start = performance.now();
       await page.keyboard.type('x');
       // Includes the span probe in the timing so highlight DOM publication cannot escape measurement.

@@ -81,22 +81,15 @@ describe('scripted Codex late subagent lifecycle', () => {
       expect(terminalIndex).toBeGreaterThanOrEqual(0);
 
       heldChild.release();
-      await fixture.client.waitForEvent(
-        (event): event is Extract<typeof event, { type: 'chat-messages' }> => (
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && completedActivities(event.messages).length > 0
-        ),
-        'late completed Codex child activity',
-        { afterIndex: cursor, timeoutMs: 30_000 },
+      const latePage = await fixture.client.waitForMessages(chatId,
+        (event) => completedActivities(event.messages).length > 0,
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: 30_000, description: 'late completed Codex child activity' },
       );
 
+      const lateRow = latePage.messages.find(entry => completedActivities([entry]).length > 0)!;
+      const lateHead = await fixture.client.waitForHead(chatId, lateRow.ordinal, { afterIndex: cursor });
       const events = fixture.client.eventsSince(cursor);
-      const lateIndex = events.findIndex((event) => (
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && completedActivities(event.messages).length > 0
-      ));
+      const lateIndex = events.indexOf(lateHead);
       expect(lateIndex).toBeGreaterThan(terminalIndex);
       const settled = await fixture.client.getMessages(chatId);
       const completed = completedActivities(settled.messages);
@@ -113,11 +106,9 @@ describe('scripted Codex late subagent lifecycle', () => {
         && event.chatId === chatId
         && event.turnId === started.turnId
       ))).toHaveLength(1);
-      expect(settledEvents.reduce((count, event) => (
-        event.type === 'chat-messages'
-          ? count + completedActivities(event.messages).length
-          : count
-      ), 0)).toBe(1);
+      const finalPage = await fixture.client.getMessages(chatId);
+      expect(finalPage.messages.filter(entry => completedActivities([entry]).length > 0).map(entry => entry.ordinal))
+        .toEqual([lateRow.ordinal]);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

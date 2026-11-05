@@ -172,15 +172,16 @@ describe('Direct native history persistence', () => {
       expect((await stat(currentPath)).isFile()).toBeTrue();
 
       const reloaded = await fixture.client.reloadChat(chatId);
-      expect(userContents(reloaded.messages)).toEqual([
+      const reloadedPage = await fixture.client.getMessages(chatId, { transcriptViewId: reloaded.transcriptViewId, beforeOrdinal: reloaded.lastOrdinal + 1 });
+      expect(userContents(reloadedPage.messages)).toEqual([
         'handoff-native-source',
         'handoff-native-target',
       ]);
-      expect(assistantContents(reloaded.messages)).toEqual([
+      expect(assistantContents(reloadedPage.messages)).toEqual([
         'echo:handoff-native-source',
         'handoff-native-target-answer',
       ]);
-      expect(JSON.stringify(reloaded.messages)).not.toContain('<carried-context');
+      expect(JSON.stringify(reloadedPage.messages)).not.toContain('<carried-context');
 
       expect(await fixture.client.deleteChat(chatId)).toEqual({ success: true });
       await waitForNativeCleanup(fixture, chatId);

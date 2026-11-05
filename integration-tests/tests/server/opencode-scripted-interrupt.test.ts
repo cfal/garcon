@@ -2,7 +2,6 @@ import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type {
-  ChatMessagesMessage,
   ChatSessionStoppedMessage,
 } from '../../../common/ws-events.js';
 import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
@@ -126,14 +125,6 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         afterIndex: recoveryCursor,
       });
 
-      // No late assistant output landed under the stopped turn.
-      expect(fixture.client.eventsSince(stopCursor).some((event) =>
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && event.messages.some((entry) =>
-          entry.message.type === 'assistant-message'
-          && entry.message.content.includes(stoppedReply))
-      )).toBe(false);
       expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
         .not.toContain(stoppedReply);
       testEnvironment.model.assertSettled();
@@ -203,15 +194,11 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       );
       await waitForAbortedAssistant(fixture, chatId);
       await waitForProcessesExit(processIdentities);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'bash-tool-use'
             && entry.message.command === command),
-        'OpenCode aborted tool publication',
-        { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, stopCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'OpenCode aborted tool publication' },
       );
       // Both the command shell and its active child died before the completion marker.
       expect(await rejectionOf(access(join(fixture.dirs.project, 'stop-completed.marker')))).toMatchObject({ code: 'ENOENT' });
@@ -516,9 +503,8 @@ function expectOpenCodeStoppedTurnEventOrder(
     && event.intent === 'stop'
     && event.outcome === 'interrupt-requested');
   const interruption = events.findIndex((event) =>
-    event.type === 'chat-messages'
-    && event.chatId === chatId
-    && event.turnId === turnId);
+    event.type === 'chat-transcript-head-updated'
+    && event.chatId === chatId);
 
   expect(interruption).toBeGreaterThanOrEqual(0);
   expect(stopped).toBeGreaterThan(interruption);

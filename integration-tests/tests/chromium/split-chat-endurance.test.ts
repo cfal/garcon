@@ -1,22 +1,20 @@
 import { expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { WebSocketRoute } from 'playwright';
 import { AssistantMessage, BashToolUseMessage, ToolResultMessage } from '../../../common/chat-types.js';
-import { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { canonicalWorkspaceSnapshot } from '../../../web/src/lib/workspace/canonical-layout.js';
 import { serializeWorkspaceLayout } from '../../../web/src/lib/workspace/layout-schema.js';
 import { reduceWorkspaceLayout } from '../../../web/src/lib/workspace/workspace-layout.svelte.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { Deferred } from '../../support/deferred.js';
 
 const TIMESTAMP = '2026-01-01T00:00:00.000Z';
 const OUTPUT = join(import.meta.dirname, '../../artifacts/chromium/split-chat-endurance');
 
-test('keeps split chats virtualized during sustained delivery and responsive through real turns', async () => {
+test('keeps split chats bounded through history growth and reconnect and responsive through real turns', async () => {
   await withChromiumFixture('split-chat-endurance', async (fixture, phase) => {
     const { page, integration } = fixture;
-    const chats = [];
+    const chats: { chatId: string; viewId: string; ordinal: number }[] = [];
     for (const label of ['left', 'right']) {
       const chatId = integration.newChatId();
       const started = await integration.client.startDirectChat({
@@ -36,11 +34,6 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
     await page.addInitScript((persisted) => {
       localStorage.setItem('workspace_layout_v2', JSON.stringify(persisted));
     }, serializeWorkspaceLayout(layout));
-    const socket = new Deferred<WebSocketRoute>();
-    await page.routeWebSocket(/\/ws(?:\?|$)/, (route) => {
-      route.connectToServer();
-      socket.resolve(route);
-    });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chats[0]!.chatId}`);
     await page.waitForFunction(() => document.querySelectorAll('[data-chat-scroll-viewport]').length === 2);
     const left = page.locator('[data-conversation-panel="chat-view:window-main"]');
@@ -78,47 +71,51 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
       const history = await integration.client.getMessages(chat.chatId);
       chat.ordinal = history.lastOrdinal;
     }
-    const connected = await socket.promise;
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
     await cdp.send('Profiler.enable');
-    const samples = [];
+    const samples: { rows: number; durationMs: number; metrics: Record<string, number>;
+      counters: { documents: number; nodes: number; jsEventListeners: number }; mountedRows: number }[] = [];
     await mkdir(OUTPUT, { recursive: true });
     for (const target of [300, 1500, 3000]) {
-      phase(`delivering ${target} synthetic rows per split chat`);
+      phase(`recovering ${target} synthetic rows per split chat`);
       await cdp.send('Profiler.start');
       const startedAt = performance.now();
-      const batchTimes = [];
-      for (let offset = samples.at(-1)?.rows ?? 0; offset < target; offset += 30) {
-        const batchStartedAt = performance.now();
-        for (const [index, chat] of chats.entries()) {
-          const firstOrdinal = chat.ordinal + 1;
-          const messages = Array.from({ length: 30 }, (_, position) => {
-            const ordinal = ++chat.ordinal;
-            const toolId = `synthetic-tool-${index}-${Math.floor((offset + position) / 3)}`;
-            const message = position % 3 === 0
-              ? new BashToolUseMessage(TIMESTAMP, toolId, 'printf synthetic-output')
-              : position % 3 === 1
-                ? new ToolResultMessage(TIMESTAMP, toolId, { raw: 'Synthetic tool output' }, false)
-                : new AssistantMessage(TIMESTAMP, `Synthetic response ${index} ${offset + position}`);
-            return { ordinal, message };
-          });
-          connected.send(JSON.stringify(new ChatMessagesMessage(
-            chat.chatId, chat.viewId, messages, firstOrdinal, chat.ordinal, [],
-          )));
-        }
-        await page.waitForFunction((offset) => [0, 1].every((index) =>
-          document.body.textContent?.includes(`Synthetic response ${index} ${offset + 29}`)), offset);
-        batchTimes.push(performance.now() - batchStartedAt);
-      }
+      await fixture.withExpectedConsoleErrors([
+        /^WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
+        /^WebSocket error: \{readyState: 3, visibilityState: visible, online: true\}$/,
+        /^Failed to load resource: net::ERR_CONNECTION_REFUSED$/,
+      ], async () => {
+        await integration.crashAndRestartGarcon({ reusePort: true, beforeStart: async () => {
+          const store = new TranscriptLedgerStore(join(integration.dirs.workspace, 'transcript-ledgers'));
+          try {
+            for (const [index, chat] of chats.entries()) {
+              const view = store.currentView(chat.chatId);
+              if (!view || view.viewId !== chat.viewId) throw new Error('Synthetic transcript view changed.');
+              for (let offset = samples.at(-1)?.rows ?? 0; offset < target; offset += 30) {
+                const rows = Array.from({ length: 30 }, (_, position) => {
+                  const toolId = `synthetic-tool-${index}-${Math.floor((offset + position) / 3)}`;
+                  const message = position % 3 === 0
+                    ? new BashToolUseMessage(TIMESTAMP, toolId, 'printf synthetic-output')
+                    : position % 3 === 1
+                      ? new ToolResultMessage(TIMESTAMP, toolId, { raw: 'Synthetic tool output' }, false)
+                      : new AssistantMessage(TIMESTAMP, `Synthetic response ${index} ${offset + position}`);
+                  return { kind: 'provider-row' as const, at: TIMESTAMP, message, providerMeta: null };
+                });
+                store.append(chat.chatId, view.viewId, rows);
+              }
+            }
+          } finally { store.close(); }
+        } });
+        await page.waitForFunction((target) => [0, 1].every((index) =>
+          document.body.textContent?.includes(`Synthetic response ${index} ${target - 1}`)), target);
+      });
       const profile = await cdp.send('Profiler.stop');
       await writeFile(join(OUTPUT, `cpu-${target}.json`), JSON.stringify(profile.profile));
       await cdp.send('HeapProfiler.collectGarbage');
       const metrics = await cdp.send('Performance.getMetrics');
       const counters = await cdp.send('Memory.getDOMCounters');
-      batchTimes.sort((a, b) => a - b);
       samples.push({ rows: target, durationMs: performance.now() - startedAt,
-        batchP95Ms: batchTimes[Math.floor(batchTimes.length * 0.95)],
         metrics: Object.fromEntries(metrics.metrics.map(({ name, value }) => [name, value])),
         counters, mountedRows: await page.locator('[data-chat-virtual-item]').count() });
       expect(samples.at(-1)!.mountedRows).toBeLessThan(100);

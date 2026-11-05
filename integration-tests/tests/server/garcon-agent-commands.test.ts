@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatRegistrySnapshot } from '../../../server/controller/chats/registry-contracts.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
@@ -11,11 +10,10 @@ import { withIntegrationFixture, type IntegrationFixture } from '../../support/i
 import { INTEGRATION_OPENAI_API_KEY } from '../../support/openai-test-contract.js';
 
 async function waitForOutcome(fixture: IntegrationFixture, chatId: string, type: 'agent-start-outcome' | 'agent-schedule-outcome', cursor: number) {
-  const event = await fixture.client.waitForEvent(
-    (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
-      && event.messages.some(({ message }) => message.type === 'transcript-notice' && message.detail?.type === type),
-    type, { afterIndex: cursor },
-  );
+  const event = await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some(({ message }) => message.type === 'transcript-notice' && message.detail?.type === type),
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), description: type },
+      );
   const notice = messagesOfType(event.messages, 'transcript-notice').find((message) => message.detail?.type === type);
   if (!notice?.detail || notice.detail.type !== type) throw new Error('Missing action outcome');
   return notice.detail;

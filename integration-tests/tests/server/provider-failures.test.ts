@@ -103,11 +103,9 @@ describe('provider failures', () => {
 
         const events = fixture.client.eventsSince(cursor);
         const userIndex = events.findIndex((event) =>
-          event.type === 'chat-messages'
+          event.type === 'chat-input-committed'
           && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'user-message'
-            && entry.message.content === failure.content));
+          && event.clientMessageId === clientMessageId);
         const terminalIndex = events.findIndex((event) =>
           event.type === 'agent-run-failed'
           && event.chatId === chatId
@@ -154,7 +152,7 @@ describe('provider failures', () => {
       });
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'failure-b');
-      await fixture.client.enqueueNew(chatId, 'failure-c');
+      const queuedSubmission157 = await fixture.client.enqueueNew(chatId, 'failure-c');
       fixture.fakeProviders.openAi.failNextHttp(
         { lastUserText: 'failure-b' },
         500,
@@ -201,7 +199,7 @@ describe('provider failures', () => {
       ]);
       const committedC = await fixture.client.waitForCommittedUserInput(
         chatId,
-        'failure-c',
+        queuedSubmission157.clientMessageId,
         { afterIndex: resumeCursor },
       );
       heldC.releaseEcho();
@@ -229,7 +227,7 @@ describe('provider failures', () => {
         agent: fixture.directAgents.openAi,
       });
       await failedTurn.received;
-      await fixture.client.enqueueNew(chatId, 'failure-fence-b');
+      const queuedSubmission232 = await fixture.client.enqueueNew(chatId, 'failure-fence-b');
       const successor = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-fence-b' });
       const cursor = fixture.client.markEvents();
 
@@ -244,7 +242,7 @@ describe('provider failures', () => {
       await successor.received;
       const committed = await fixture.client.waitForCommittedUserInput(
         chatId,
-        'failure-fence-b',
+        queuedSubmission232.clientMessageId,
         { afterIndex: cursor },
       );
       const events = fixture.client.eventsSince(cursor);
