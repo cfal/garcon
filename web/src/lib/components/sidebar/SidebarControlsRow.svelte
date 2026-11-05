@@ -19,6 +19,7 @@
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import Braces from '@lucide/svelte/icons/braces';
 	import ChartSpline from '@lucide/svelte/icons/chart-spline';
+	import Workflow from '@lucide/svelte/icons/workflow';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
@@ -67,6 +68,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowUsage: () => void;
+		onShowWorkflows?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -99,6 +101,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowUsage,
+		onShowWorkflows,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -307,6 +310,7 @@
 					<ChartSpline class="h-3.5 w-3.5" />
 					{m.workspace_surface_usage()}
 				</DropdownMenuItem>
+				{#if onShowWorkflows}<DropdownMenuItem onclick={onShowWorkflows}><Workflow class="h-3.5 w-3.5" />Workflows</DropdownMenuItem>{/if}
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.settings_title()}

@@ -33,6 +33,8 @@ export const LOCAL_STORAGE_PREFIXES = {
 } as const;
 
 export const SESSION_STORAGE_KEYS = {
+  workflowOperation: 'workflow_operation_v1',
+  workflowDismissedOperations: 'workflow_dismissed_operations_v1',
 	pendingChatId: 'pendingChatId',
 	terminalClientId: 'terminal_client_id_v1',
 	terminalLauncherDismissed: 'terminal_launcher_dismissed_v1',

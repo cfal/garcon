@@ -49,6 +49,7 @@
 		onComposerNoticeChange,
 		subagentToolbar,
 		chatActions = noopChatActions,
+		onCreateWorkflow,
 		transcriptCache: providedTranscriptCache,
 	}: {
 		isMobile: boolean;
@@ -63,6 +64,7 @@
 		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
+		onCreateWorkflow?: (chatId: string) => void;
 		transcriptCache?: ChatTranscriptCache;
 	} = $props();
 
@@ -161,6 +163,7 @@
 					onOpenChatMap={() => void workspace.focusMobileSingleton('chat-map')}
 					onOpenCanvas={() => void workspace.focusMobileSingleton('chat-canvas')}
 					onOpenPullRequests={() => void workspace.focusMobileSingleton('pull-requests')}
+					onCreateWorkflow={onCreateWorkflow && mobileToolbarChat ? () => onCreateWorkflow?.(mobileToolbarChat!.id) : undefined}
 					onRename={() => selectedChat && chatActions.requestRename(selectedChat)}
 					onDetails={() => selectedChat && chatActions.requestDetails(selectedChat)}
 					onReload={() => selectedChat && chatActions.reload(selectedChat)}

@@ -18,6 +18,7 @@ import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
+import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -547,6 +548,25 @@ describe('AppShell responsive workspace binding', () => {
 		expect(transientLayers.hasPendingMainInert).toBe(false);
 		expect(transientLayers.makesMainInert).toBe(true);
 		expect(transientLayers.ownsTopModalTarget(dialog)).toBe(true);
+	});
+
+	it('closes the mobile sidebar before opening Workflows', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current?.appShell as AppShellStore;
+		testContext.current!.remoteSettings = { snapshot: makeRemoteSettingsSnapshot({
+			features: { ...makeRemoteSettingsSnapshot().features, workflows: { enabled: true } },
+		}) };
+		const openSingleton = vi.fn<WorkspaceCoordinator['openSingleton']>(async () => {
+			expect(appShell.sidebarOpen).toBe(false);
+		});
+		Object.assign(workspace, { openSingleton });
+		appShell.sidebarOpen = true;
+		setViewportWidth(390, false);
+		render(AppShell);
+		await screen.findByRole('dialog', { name: 'Chats' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open workflows' }));
+		await waitFor(() => expect(openSingleton).toHaveBeenCalledExactlyOnceWith('workflows'));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
 	});
 
 	it('resets the sidebar search dialog cluster when the mobile drawer closes', async () => {
