@@ -7,7 +7,6 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 struct SavedSelection {
     last_url: Option<String>,
     mounts: BTreeMap<String, String>,
-    #[serde(default)]
     recents: Option<Vec<String>>,
     #[serde(default)]
     names: BTreeMap<String, String>,

@@ -35,11 +35,11 @@ fn destination(deployment: &Deployment, source: &str, target: &str) -> Option<Ur
 #[cfg(any(target_os = "linux", test))]
 fn page_destination(
     host: &crate::switcher::Switcher,
-    generation: u64,
+    window_id: u64,
     source: &str,
     target: &str,
 ) -> Option<Url> {
-    let window = host.windows.get(&generation)?;
+    let window = host.windows.get(&window_id)?;
     destination(&window.deployment, source, target)
 }
 
@@ -109,7 +109,7 @@ impl LaunchGate {
 }
 
 #[cfg(target_os = "linux")]
-pub fn install(window: &tauri::WebviewWindow, generation: u64) -> tauri::Result<()> {
+pub fn install(window: &tauri::WebviewWindow, window_id: u64) -> tauri::Result<()> {
     use gtk::prelude::*;
     use std::cell::RefCell;
     use tauri::Manager;
@@ -146,7 +146,7 @@ pub fn install(window: &tauri::WebviewWindow, generation: u64) -> tauri::Result<
             let (Some(source), Some(target)) = (view.uri(), request.uri()) else { return true };
             let host = handle.state::<crate::host::Host>();
             let Ok(host) = host.lock() else { return true };
-            let Some(url) = page_destination(&host, generation, &source, &target) else { return true };
+            let Some(url) = page_destination(&host, window_id, &source, &target) else { return true };
             drop(host);
             if !gate.borrow_mut().admit(Instant::now()) {
                 return true;
@@ -172,7 +172,7 @@ pub fn install(window: &tauri::WebviewWindow, generation: u64) -> tauri::Result<
 
 // Tauri's portable callbacks do not attest a user gesture. Other hosts stay fail-closed.
 #[cfg(not(target_os = "linux"))]
-pub fn install(_window: &tauri::WebviewWindow, _generation: u64) -> tauri::Result<()> {
+pub fn install(_window: &tauri::WebviewWindow, _window_id: u64) -> tauri::Result<()> {
     Ok(())
 }
 
@@ -188,14 +188,8 @@ mod tests {
     const SOURCE: &str = "https://selected.test/garcon/chat/synthetic";
 
     #[test]
-    fn fences_external_links_during_switches_and_from_replaced_pages() {
-        let directory = std::env::temp_dir().join(format!(
-            "garcon-native-link-generation-{}",
-            std::process::id()
-        ));
-        let selection =
-            crate::selection::ServerSelection::load(directory.join("servers.json")).unwrap();
-        let mut host = crate::switcher::Switcher::new(Ok(selection));
+    fn fences_external_links_by_window_identity_not_chooser_generation() {
+        let mut host = crate::switcher::Switcher::new(Err("Synthetic settings".into()));
         host.windows.insert(
             2,
             crate::switcher::ServerWindow {
@@ -208,14 +202,13 @@ mod tests {
         assert!(page_destination(&host, 2, SOURCE, target).is_some());
         assert!(page_destination(&host, 1, SOURCE, target).is_none());
         host.pending = true;
+        host.generation += 1;
         assert!(page_destination(&host, 2, SOURCE, target).is_some());
         host.pending = false;
         let window = host.windows.remove(&2).unwrap();
         host.windows.insert(3, window);
         assert!(page_destination(&host, 2, SOURCE, target).is_none());
         assert!(page_destination(&host, 3, SOURCE, target).is_some());
-        drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

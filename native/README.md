@@ -186,12 +186,10 @@ native client aborts after the self-signed certificate without completing its
 handshake. The app never disables certificate verification.
 
 These synthetic transport checks do not replace testing Garcon login and chat
-flows on each real platform. Android adds CI emulator fail-closed/callback-gap
-regressions; iOS adds an isolated simulator launch/relaunch gate. These additions
-remain unrun on this Linux VM and do not establish workflow correctness.
-Windows/macOS remain build-only outside host unit tests. Before distribution, verify real authenticated
-Garcon sessions, chat streaming, attachments, terminal input, background/resume,
-keyboard/safe areas, TLS failures, and server upgrades on those platforms.
+flows on each real platform. See the [platform matrix](PLATFORM_READINESS.md#platform-matrix)
+for Android emulator and iOS simulator gates, their coverage limits, and the
+remaining desktop/device workflow qualification. Linux results do not establish
+Windows, macOS, or mobile interaction correctness.
 
 ## Preview Boundaries
 
@@ -377,10 +375,9 @@ Desktop local-server bundling, native UX parity, signing/notarization, and store
 submission are separate milestones. A website wrapper can face App Store
 minimum-functionality review even after it is signed or its assets are bundled.
 
-Android remote loading requires a native guard installed before connection is
-enabled, with tests for document POST, method-preserving redirects, sibling-mount
-escape, and activity recreation. Injected JavaScript or stopping a page after it
-starts loading is not a substitute for a host-enforced request boundary.
+Android connections remain disabled until the
+[pre-network loading guard and regression requirements](PLATFORM_READINESS.md#android-loading-blocker)
+are met. JavaScript or stopping a page after load is not a request boundary.
 
 ## References
 

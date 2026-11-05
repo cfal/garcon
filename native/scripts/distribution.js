@@ -85,9 +85,14 @@ export async function validateArtifacts(target) {
   const version = (await Bun.file(resolve(root, '../package.json')).json()).version;
   const artifacts = [];
   for (const format of targets[target].formats) {
-    const pattern = format === 'apk' ? 'src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk'
-      : format === 'simulator' ? 'artifacts/Garcon-simulator.app.zip'
-      : `${relative(root, cargo).replaceAll('\\', '/')}/${target}/release/bundle/${format}/*.${extensions[format]}`;
+    let pattern;
+    if (format === 'apk') {
+      pattern = 'src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk';
+    } else if (format === 'simulator') {
+      pattern = 'artifacts/Garcon-simulator.app.zip';
+    } else {
+      pattern = `${relative(root, cargo).replaceAll('\\', '/')}/${target}/release/bundle/${format}/*.${extensions[format]}`;
+    }
     const files = [...new Bun.Glob(pattern).scanSync({ cwd: root, absolute: true })];
     if (files.length !== 1) throw new Error(`Expected exactly one ${format} artifact, found ${files.length}`);
     const artifact = await inspectArtifact(files[0], format);

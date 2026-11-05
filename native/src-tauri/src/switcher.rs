@@ -347,6 +347,32 @@ mod tests {
     }
 
     #[test]
+    fn failed_window_retirement_preserves_siblings_and_allows_retry() {
+        let (mut host, directory) = fixture("window-creation-failure");
+        let sibling = open(&mut host, "https://a.test/", None);
+        assert!(host.request_chooser(Some(sibling), ChooserAction::Open));
+        let deployment = Deployment::parse("https://b.test/").unwrap();
+        let (failed, _) = host
+            .begin(host.generation, deployment.clone(), None, false)
+            .unwrap();
+        let revision = host.generation;
+        assert!(!host.retire(failed));
+        assert!(host.pending);
+        assert_eq!(host.generation, revision);
+        assert!(!host.allows_navigation(failed, deployment.url()));
+        assert!(host.windows.contains_key(&sibling));
+        host.pending = false;
+        host.chooser_open = true;
+        let (retry, previous) = host.begin(revision, deployment, None, false).unwrap();
+        assert_ne!(retry, failed);
+        assert!(previous.is_none());
+        assert!(host.windows.contains_key(&sibling));
+        assert!(host.windows.contains_key(&retry));
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn failed_persistence_does_not_admit_or_retire_windows() {
         let (mut host, directory) = fixture("failed-open");
         let a = open(&mut host, "https://a.test/", None);

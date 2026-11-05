@@ -177,7 +177,7 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
         .ok_or("The server window was closed.")?;
     let title = server.title();
     let navigation_app = app.clone();
-    let built = tauri::WebviewWindowBuilder::new(
+    let window = tauri::WebviewWindowBuilder::new(
         app,
         window_label(id),
         tauri::WebviewUrl::External(server.deployment.url().clone()),
@@ -240,14 +240,8 @@ async fn open_remote(app: &tauri::AppHandle, id: u64, previous: Option<u64>) -> 
             let _ = crate::chrome::publish_titlebar_snapshot(&window, snapshot);
         }
     })
-    .build();
-    let window = match built {
-        Ok(window) => window,
-        Err(_) => {
-            locked(app.state::<Host>().inner())?.retire(id);
-            return Err("Unable to open the server page. Choose another server or retry.".into());
-        }
-    };
+    .build()
+    .map_err(|_| "Unable to open the server page. Choose another server or retry.")?;
     let handle = app.clone();
     #[cfg(not(target_os = "macos"))]
     let closing_window = window.clone();
@@ -315,7 +309,7 @@ fn request_titlebar_visibility(app: &tauri::AppHandle, id: u64, hidden: bool) {
 }
 
 #[cfg(desktop)]
-pub fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
+fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         window.unminimize()?;
