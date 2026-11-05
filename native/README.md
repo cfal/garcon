@@ -275,6 +275,9 @@ Windows, macOS, or mobile interaction correctness.
 Desktop Open server, managed Reload and Retry share one chooser-owned attempt.
 Existing windows remain usable; another request presents the existing attempt
 without replacing its target or silently queuing a reload.
+If the loading window loses focus, a ready candidate stays hidden until that
+window is focused again. This avoids activating a replacement over a sibling
+or another application; returning to the loading window resumes presentation.
 
 ```mermaid
 flowchart LR
@@ -297,6 +300,8 @@ available throughout. A 30-second deadline reports only that Garcon has not
 become ready, not an inferred network diagnosis. **Show page anyway** explicitly
 reveals an unverified page after that deadline, including older server UI that
 does not report readiness. TLS validation remains unchanged.
+If an engine error page reports a URL outside the selected deployment, showing
+it is rejected and Retry/Cancel remain available.
 
 Ordinary `location.reload()`, engine context-menu reload, other full navigations,
 and failures after successful reveal do not use this loading screen. They can
@@ -341,7 +346,7 @@ Local-only host commands:
 
 - `server_choices()` returns `{ generation, recents, lastUrl, currentUrl,
   canCancel, connection }`. `connection` is null or
-  `{ id, server, url, message, canRetry, canShow }`; it never exposes the current
+  `{ id, server, url, message, ready, canRetry, canShow }`; it never exposes the current
   route's query or fragment. Each recent is
   `{ url, name }`; `currentUrl` identifies the chooser's requesting window, not a
   global active server. The generation fences chooser snapshots independently of

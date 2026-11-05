@@ -60,6 +60,8 @@ test('desktop chrome keeps controls without custom recovery hotkeys or a reload 
   expect(host).not.toContain('reload-server');
   expect(host).not.toContain('acknowledged');
   expect(host).toContain('pub async fn connect_server(');
+  expect(host).toContain('.focused(cfg!(target_os = "linux"))');
+  expect(chrome).toContain('window.as_ref().set_focus()');
 });
 
 test('CI builds all five platform families without distribution secrets', () => {

@@ -5,7 +5,7 @@
  * @property {string | null} lastUrl
  * @property {string | null} currentUrl
  * @property {boolean} canCancel
- * @property {{id: number, server: string, url: string, message: string | null, canRetry: boolean, canShow: boolean} | null} connection
+ * @property {{id: number, server: string, url: string, message: string | null, ready: boolean, canRetry: boolean, canShow: boolean} | null} connection
  */
 export async function mountLauncher(document, invoke) {
   const form = document.querySelector('#server-form');
@@ -87,11 +87,15 @@ export async function mountLauncher(document, invoke) {
       selection.hidden = !!choices.connection;
       connection.hidden = !choices.connection;
       if (choices.connection) {
-        document.querySelector('#connection-heading').textContent = choices.connection.message ? 'Connection not ready' : 'Connecting';
+        let heading = 'Connecting';
+        if (choices.connection.ready) heading = 'Ready';
+        else if (choices.connection.message) heading = 'Connection not ready';
+        document.querySelector('#connection-heading').textContent = heading;
         document.querySelector('#connection-server').textContent = choices.connection.server;
         document.querySelector('#connection-url').textContent = choices.connection.url;
-        document.querySelector('#connection-status').textContent = choices.connection.message ?? 'Waiting for Garcon...';
+        document.querySelector('#connection-status').textContent = choices.connection.message ?? (choices.connection.ready ? 'Garcon is ready.' : 'Waiting for Garcon...');
         showConnection.hidden = !choices.connection.canShow;
+        showConnection.textContent = choices.connection.ready ? 'Show page' : 'Show page anyway';
       }
       input.value = choices.lastUrl ?? '';
       updateEndpointWarning();

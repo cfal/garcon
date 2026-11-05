@@ -241,7 +241,8 @@ pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String>
     .title(&title)
     .inner_size(1200.0, 800.0)
     .visible(false)
-    .focused(false)
+    // GTK needs initial focusability; other engines must not focus during hidden construction.
+    .focused(cfg!(target_os = "linux"))
     .background_color(tauri::window::Color(244, 246, 249, 255))
     .decorations(!server.titlebar_hidden)
     .disable_drag_drop_handler()
@@ -387,9 +388,8 @@ fn request_titlebar_visibility(app: &tauri::AppHandle, id: u64, hidden: bool) {
 #[cfg(desktop)]
 pub(crate) fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
-        window.show()?;
         window.unminimize()?;
-        window.set_focus()?;
+        crate::chrome::present(&window)?;
         window.eval("window.dispatchEvent(new Event('garcon-chooser-open'))")?;
     }
     Ok(())
@@ -416,9 +416,8 @@ pub fn request_host_chooser(app: &tauri::AppHandle, source: Option<u64>) {
     if refresh {
         let _ = present_chooser(app);
     } else if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
         let _ = window.unminimize();
-        let _ = window.set_focus();
+        let _ = crate::chrome::present(&window);
     }
 }
 
@@ -493,5 +492,41 @@ mod tests {
         dispatch_chooser_request(&host, 3, |_| panic!("duplicate presentation"));
         dispatch_chooser_request(&host, 2, |_| panic!("unknown page"));
         assert_eq!(presented, 1);
+    }
+
+    #[test]
+    fn sibling_requests_present_the_current_attempt_without_retargeting_it() {
+        let server = ServerWindow {
+            deployment: Deployment::parse("https://synthetic.test/").unwrap(),
+            name: Some("Original".into()),
+            titlebar_hidden: false,
+        };
+        let mut switcher = Switcher::new(Err("Synthetic settings".into()));
+        switcher.windows.insert(3, server.clone());
+        switcher.windows.insert(7, server.clone());
+        switcher.chooser_source = Some(3);
+        switcher.generation = 9;
+        switcher.attempt = Some(crate::connection::ConnectionAttempt::new(
+            8,
+            crate::connection::ConnectionTarget {
+                url: server.deployment.url().clone(),
+                server,
+                placement: None,
+            },
+            Some(3),
+        ));
+        let host = Mutex::new(switcher);
+        for _ in 0..2 {
+            let mut presented = false;
+            dispatch_chooser_request(&host, 7, |revision| {
+                let current = host.try_lock().expect("presentation must not deadlock");
+                assert_eq!(revision, 9);
+                assert_eq!(current.chooser_source, Some(3));
+                assert_eq!(current.attempt(8).unwrap().source, Some(3));
+                presented = true;
+            });
+            assert!(presented);
+        }
+        dispatch_chooser_request(&host, 99, |_| panic!("unknown page"));
     }
 }

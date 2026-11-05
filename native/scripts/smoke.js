@@ -510,6 +510,8 @@ try {
       await evaluate('document.querySelector("#server-url").value = "https://edited.test/";');
       await remote.run('window.__GARCON_NATIVE__.requestServerChooser();');
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://edited.test/', 'repeated requests must not reset chooser edits');
+      await remote.run('window.__GARCON_NATIVE__.lifecycle.reportReady();');
+      assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://edited.test/', 'readiness from an already-open page must not reset chooser edits');
       await evaluate('document.querySelector("#cancel").click();');
       assert.equal(await remote.run('return window.cancelSentinel'), 'synthetic-unsaved');
       const focusBeforeTitlebar = await remote.run('return document.activeElement.id');
@@ -634,12 +636,62 @@ try {
     await until(() => evaluate('return document.querySelector("#connection").hidden'), 'reload cancellation');
     assert.equal(await source.run('return window.cancelSentinel'), 'reload retained', 'cancel preserves the original document');
   } finally { releaseHtml(); await closeApp(); slow.stop(); }
+  const focusSource = fixture('');
+  const focusSibling = fixture('');
+  try {
+    await openApp();
+    await connect(focusSource.url, 'Synthetic Focus A');
+    const sourceHandle = await openedRemote();
+    await until(() => focusSource.connected(), 'focus source');
+    const source = focusSource.page();
+    await until(() => source.run('return document.hasFocus()'), 'initial reveal accepts keyboard focus');
+    await source.run('window.retainedSource = true;');
+    await openChooser(source);
+    await connect(focusSibling.url, 'Synthetic Focus B');
+    await openedRemote();
+    await until(() => focusSibling.connected(), 'focus sibling');
+    focusSource.setAutoReady(false);
+    const connections = focusSource.socketConnections();
+    await source.run('window.__GARCON_NATIVE__.lifecycle.requestReload();');
+    await until(() => focusSource.socketConnections() > connections, 'unready focus replacement');
+    let candidate = focusSource.page();
+    await focusNativeRemote('Synthetic Focus B \u2014 Garcon');
+    await until(() => focusSibling.run('return document.hasFocus()'), 'sibling has keyboard focus');
+    await candidate.run('window.__GARCON_NATIVE__.lifecycle.reportReady();');
+    await until(() => evaluate('return document.querySelector("#connection-heading").textContent === "Ready"'), 'background readiness remains in the chooser');
+    assert.equal(await focusSibling.run('return document.hasFocus()'), true, 'background completion does not activate the replacement');
+    assert.equal(await source.run('return window.retainedSource'), true, 'background completion retains the source');
+    const beforeReload = focusSource.socketConnections();
+    await candidate.run('setTimeout(() => location.reload(), 0);');
+    await until(() => focusSource.socketConnections() > beforeReload, 'background candidate document replacement');
+    candidate = focusSource.page();
+    await until(() => evaluate('return document.querySelector("#connection-heading").textContent !== "Ready" && document.querySelector("#show-connection").textContent === "Show page anyway"'), 'a new document invalidates the Ready presentation');
+    await focusNativeRemote('Garcon');
+    assert.equal(await source.run('return window.retainedSource'), true, 'returning before the new document is ready retains the source');
+    await focusNativeRemote('Synthetic Focus B \u2014 Garcon');
+    await until(() => focusSibling.run('return document.hasFocus()'), 'sibling focus after candidate navigation');
+    await candidate.run('window.__GARCON_NATIVE__.lifecycle.reportReady();');
+    await until(() => evaluate('return document.querySelector("#connection-heading").textContent === "Ready"'), 'replacement document reports readiness');
+    await focusNativeRemote('Garcon');
+    await until(async () => !(await webdriver(`/session/${session}/window/handles`)).includes(sourceHandle), 'returning to the chooser reveals the replacement');
+    await until(() => candidate.run('return document.hasFocus()'), 'revealed candidate accepts keyboard focus');
+  } finally { await closeApp(); focusSource.stop(); focusSibling.stop(); }
   await openApp();
   const unreachable = `http://127.0.0.1:${await unusedPort()}/`;
   await connect(unreachable);
   await until(() => evaluate('return document.querySelector("#connection-status").textContent.includes("not become ready")'), 'unreachable server stays in recovery', 45_000);
   await Bun.write(resolve(artifacts, 'chooser-recovery.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
-  await evaluate('document.querySelector("#cancel-connection").click();');
+  await evaluate('document.querySelector("#show-connection").click();');
+  await until(() => evaluate('return document.querySelector("#connection").hidden || !!document.querySelector("#connection-error").textContent'), 'explicit show of an engine error page');
+  if (await evaluate('return document.querySelector("#connection").hidden')) {
+    console.log('Explicit Show revealed the confined engine error page.');
+    await nativeTitlebarChooser();
+  } else {
+    assert.equal(await evaluate('return document.querySelector("#connection-error").textContent'), 'The loaded page is outside this server.');
+    console.log('Explicit Show rejected an engine error URL outside the deployment.');
+    assert.equal(await evaluate('return !document.querySelector("#retry-connection").disabled'), true, 'a rejected engine error URL leaves Retry available');
+    await evaluate('document.querySelector("#cancel-connection").click();');
+  }
   await until(() => evaluate('return document.querySelector("#connection").hidden'), 'cancel unreachable server');
   await connect('ftp://synthetic.test/');
   await until(() => evaluate('return document.querySelector("[role=alert]").textContent.includes("Use an HTTP or HTTPS")'), 'bad URL recovery');

@@ -34,6 +34,7 @@ pub struct ConnectionStatus {
     pub server: String,
     pub url: String,
     pub message: Option<String>,
+    pub ready: bool,
     pub can_retry: bool,
     pub can_show: bool,
 }
@@ -66,11 +67,12 @@ impl ConnectionAttempt {
             }),
             url: self.target.server.deployment.url().to_string(),
             message: self.failure.clone().or_else(|| {
-                self.timed_out
+                (self.timed_out && !self.can_reveal())
                     .then(|| "Garcon has not become ready.".into())
             }),
+            ready: self.can_reveal(),
             can_retry: self.prepared || self.failure.is_some(),
-            can_show: self.prepared && self.timed_out && self.failure.is_none(),
+            can_show: self.prepared && (self.ready || self.timed_out) && self.failure.is_none(),
         }
     }
 
@@ -144,5 +146,19 @@ mod tests {
         );
         attempt.failure = Some("Synthetic failure".into());
         assert!(!attempt.status().can_show);
+    }
+
+    #[test]
+    fn background_ready_status_does_not_claim_a_readiness_timeout() {
+        let mut attempt = attempt();
+        attempt.prepared = true;
+        attempt.ready = true;
+        attempt.timed_out = true;
+        assert!(attempt.status().ready);
+        assert!(attempt.status().can_show);
+        assert!(attempt.status().message.is_none());
+        attempt.document_started();
+        assert!(!attempt.status().ready);
+        assert!(attempt.status().message.is_some());
     }
 }

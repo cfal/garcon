@@ -68,6 +68,10 @@ pub fn run() {
                     .build()?;
             let handle = app.handle().clone();
             chooser.on_window_event(move |event| {
+                #[cfg(desktop)]
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    loading::chooser_focus_changed(&handle, *focused);
+                }
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     let host = handle.state::<host::Host>();
                     let Ok(host) = host.lock() else {

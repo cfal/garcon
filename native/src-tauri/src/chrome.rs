@@ -48,10 +48,29 @@ pub fn setup() -> Result<(), Box<dyn std::error::Error>> {
 pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
     let shown = window.clone();
     prepare(window, move |result| {
-        if result.is_ok() && shown.show().is_ok() {
-            let _ = shown.set_focus();
+        if result.is_ok() {
+            let _ = present(&shown);
         }
     })
+}
+
+#[cfg(desktop)]
+pub fn present(window: &WebviewWindow) -> tauri::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        // Mapping synchronously lets GTK accept focus before presentation.
+        let native = window.gtk_window()?;
+        native.show_all();
+        native.present();
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        window.show()?;
+        window.set_focus()?;
+        window.as_ref().set_focus()
+    }
 }
 
 #[cfg(desktop)]

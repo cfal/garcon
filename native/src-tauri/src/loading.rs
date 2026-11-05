@@ -103,20 +103,41 @@ pub fn prepared(app: &tauri::AppHandle, id: u64, result: tauri::Result<()>) {
 }
 
 pub fn document_started(app: &tauri::AppHandle, id: u64) {
-    if let Ok(mut host) = app.state::<Host>().lock()
-        && let Some(attempt) = host.attempt_mut(id)
     {
+        let binding = app.state::<Host>();
+        let Ok(mut host) = binding.lock() else { return };
+        let Some(attempt) = host.attempt_mut(id) else {
+            return;
+        };
         attempt.document_started();
     }
+    refresh(app);
 }
 
 pub fn ready(app: &tauri::AppHandle, id: u64) {
-    if let Ok(mut host) = app.state::<Host>().lock()
-        && let Some(attempt) = host.attempt_mut(id)
     {
+        let binding = app.state::<Host>();
+        let Ok(mut host) = binding.lock() else { return };
+        let Some(attempt) = host.attempt_mut(id) else {
+            return;
+        };
         attempt.ready = true;
     }
+    refresh(app);
     reveal_when_ready(app, id);
+}
+
+pub fn chooser_focus_changed(app: &tauri::AppHandle, focused: bool) {
+    let id = {
+        let binding = app.state::<Host>();
+        let Ok(mut host) = binding.lock() else { return };
+        // Tauri's events include WebView2 child focus; its window query does not.
+        host.chooser_focused = focused;
+        host.attempt.as_ref().map(|attempt| attempt.id)
+    };
+    if focused && let Some(id) = id {
+        reveal_when_ready(app, id);
+    }
 }
 
 fn reveal_when_ready(app: &tauri::AppHandle, id: u64) {
@@ -127,11 +148,14 @@ fn reveal_when_ready(app: &tauri::AppHandle, id: u64) {
     if let Some(document) = document {
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
-            let current = handle.state::<Host>().lock().is_ok_and(|host| {
-                host.attempt(id)
-                    .is_ok_and(|attempt| attempt.document == document && attempt.can_reveal())
+            let can_present = handle.state::<Host>().lock().is_ok_and(|host| {
+                host.chooser_focused
+                    && host
+                        .attempt(id)
+                        .is_ok_and(|attempt| attempt.document == document && attempt.can_reveal())
             });
-            if current && let Err(message) = reveal(&handle, id) {
+            // Showing a window activates it on Windows/macOS; background completion waits.
+            if can_present && let Err(message) = reveal(&handle, id) {
                 fail(&handle, id, message);
             }
         });
@@ -156,10 +180,7 @@ fn reveal(app: &tauri::AppHandle, id: u64) -> Result<(), String> {
     let chooser = app
         .get_webview_window("main")
         .ok_or("The server chooser was closed.")?;
-    let focus = chooser.is_focused().unwrap_or(false);
-    window
-        .show()
-        .map_err(|_| "Unable to show the server window.")?;
+    crate::chrome::present(&window).map_err(|_| "Unable to show the server window.")?;
     let source = locked(app.state::<Host>().inner())?.complete_attempt(id)?;
     if let Some(source) = source {
         locked(app.state::<Host>().inner())?.retire(source);
@@ -167,9 +188,6 @@ fn reveal(app: &tauri::AppHandle, id: u64) -> Result<(), String> {
     }
     let _ = chooser.hide();
     refresh(app);
-    if focus {
-        let _ = window.set_focus();
-    }
     Ok(())
 }
 

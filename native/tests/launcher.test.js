@@ -210,7 +210,7 @@ test('failed opens retain the attempted URL and name across queued host refreshe
 }));
 
 test('loading hides selection while Cancel and Retry remain independently actionable', () => withLauncherDocument(async window => {
-  let connection = { id: 8, server: 'Work', url: 'https://synthetic.test/', message: null, canRetry: false, canShow: false };
+  let connection = { id: 8, server: 'Work', url: 'https://synthetic.test/', message: null, ready: false, canRetry: false, canShow: false };
   const commands = [];
   await mountLauncher(window.document, async (command, args) => {
     if (command === 'server_choices') return choices({ connection });
@@ -240,6 +240,11 @@ test('loading hides selection while Cancel and Retry remain independently action
   expect(commands).toEqual([
     ['retry_connection', { id: 8 }], ['show_connection', { id: 8 }], ['cancel_connection', { id: 8 }],
   ]);
+  connection = { ...connection, ready: true, message: null };
+  window.dispatchEvent(new window.Event('garcon-chooser-open'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('#connection-heading').textContent).toBe('Ready');
+  expect(document.querySelector('#show-connection').textContent).toBe('Show page');
   connection = null;
   window.dispatchEvent(new window.Event('garcon-chooser-open'));
   await new Promise(resolve => setTimeout(resolve, 0));

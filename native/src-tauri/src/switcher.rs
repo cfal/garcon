@@ -56,6 +56,7 @@ pub struct Switcher {
     pub focused_window: Option<u64>,
     pub attempt: Option<ConnectionAttempt>,
     pub chooser_open: bool,
+    pub chooser_focused: bool,
 }
 
 impl Switcher {
@@ -69,6 +70,7 @@ impl Switcher {
             focused_window: None,
             attempt: None,
             chooser_open: true,
+            chooser_focused: false,
         }
     }
 
