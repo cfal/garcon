@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
+import { displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+
+vi.mock('$lib/api/transcript-display.js', () => ({ transcriptDisplayApi: { open: vi.fn() } }));
 
 import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
@@ -212,12 +216,17 @@ function createDeps(chat = createChat()) {
 		sessions,
 		chatState: {
 			activeChatId: chat.id,
-			entries: [
+			...{ entries: [
 				{
 					ordinal: 9,
 					message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'selected reply'),
 				},
-			] as TranscriptMessage[],
+			] as TranscriptMessage[] },
+			forkSelection: vi.fn((ordinal: number): { ordinal: number; transcriptViewId: string; clientMessageId: string | null } | null => {
+				const row = deps.chatState.entries.find(row => row.ordinal === ordinal);
+				return row ? { ordinal, transcriptViewId: cursor.transcriptViewId,
+					clientMessageId: row.message.type === 'user-message' ? row.message.metadata?.clientMessageId ?? null : null } : null;
+			}),
 			isUserScrolledUp: true,
 			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
@@ -1476,6 +1485,7 @@ describe('ConversationSlashCommandService', () => {
 				},
 			],
 			getCursor: () => ({ transcriptViewId: 'view-panel', lastOrdinal: 4 }),
+			forkSelection: (ordinal: number) => ({ ordinal, transcriptViewId: 'view-panel', clientMessageId: null }),
 		};
 
 		await new ConversationSlashCommandService(deps).forkChat('chat-1', 4, {
@@ -1517,6 +1527,7 @@ describe('ConversationSlashCommandService', () => {
 				},
 			];
 		});
+		vi.mocked(transcriptDisplayApi.open).mockResolvedValueOnce({ ...displayOpen('chat-1', 'view-2', 12), submissions: [{ clientMessageId: 'message-1', ordinal: 12 }] });
 
 		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
 

@@ -62,6 +62,7 @@ function makePermissionRequest(id: string, chatId: string | null = null): Pendin
 function makeExitPlanRequest(id: string): PendingPermissionRequest {
 	return {
 		permissionOccurrenceId: id,
+		planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 7 },
 		requestedTool: new ExitPlanModeToolUseMessage(
 			'2026-07-15T00:00:00.000Z',
 			`tool-${id}`,

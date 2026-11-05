@@ -19,6 +19,7 @@ import {
 	type TransientFeedApplyResult,
 } from '$lib/chat/transcript/transient-feed-state.js';
 import { untrack } from 'svelte';
+import type { PlanPresentationView } from './plan-presentation-controller.js';
 
 export type PendingPermissionRequestUpdate =
 	| PendingPermissionRequest[]
@@ -29,6 +30,8 @@ export interface ExecutionControlPruningOptions {
 }
 
 export interface ConversationUiPort {
+	planPresentationFor(chatId: string): PlanPresentationView | null;
+	setPlanPresentation(chatId: string, presentation: PlanPresentationView | null): void;
 	readonly pendingPermissionRequests: PendingPermissionRequest[];
 	pendingViewChat: PendingViewChat | null;
 	readonly previousPermissionMode: PermissionMode | null;
@@ -51,6 +54,7 @@ export interface ConversationUiPort {
 	markExecutionControlSocketDisconnected(): void;
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean;
+	acceptsTranscriptNotification(serverInstanceId: string): boolean;
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
 	removeExecutionControl(chatId: string): void;
@@ -63,6 +67,14 @@ export interface ConversationUiPort {
 }
 
 export class ConversationUiState implements ConversationUiPort {
+	#planPresentations = $state.raw<Record<string, PlanPresentationView>>({});
+	planPresentationFor(chatId: string): PlanPresentationView | null { return this.#planPresentations[chatId] ?? null; }
+	setPlanPresentation(chatId: string, presentation: PlanPresentationView | null): void {
+		const next = { ...this.#planPresentations };
+		if (presentation) next[chatId] = presentation;
+		else delete next[chatId];
+		this.#planPresentations = next;
+	}
 	pendingViewChat = $state<PendingViewChat | null>(null);
 	private executionControlByChatId = $state<Record<string, ChatExecutionControlState>>({});
 	private transientFeedByChatId = $state.raw<Record<string, ChatTransientFeedSnapshot>>({});
@@ -125,7 +137,7 @@ export class ConversationUiState implements ConversationUiPort {
 			return;
 		}
 		this.unassignedPendingPermissionRequests = this.unassignedPendingPermissionRequests.filter(
-			(request) => request.requestedTool.type === 'exit-plan-mode-tool-use',
+			(request) => request.planReference !== undefined,
 		);
 	}
 
@@ -146,7 +158,7 @@ export class ConversationUiState implements ConversationUiPort {
 
 	clearTurnPermissionRequestsForChat(chatId: string): void {
 		this.updatePendingPermissionsForChat(chatId, (requests) =>
-			requests.filter((request) => request.requestedTool.type === 'exit-plan-mode-tool-use'),
+			requests.filter((request) => request.planReference !== undefined),
 		);
 	}
 
@@ -203,6 +215,7 @@ export class ConversationUiState implements ConversationUiPort {
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void {
 		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId);
 		if (decision.kind === 'replace') {
+			this.#planPresentations = {};
 			this.executionControlByChatId = {};
 			this.transientFeedByChatId = {};
 			this.pendingPermissionRequestsByChatId = {};
@@ -214,6 +227,10 @@ export class ConversationUiState implements ConversationUiPort {
 
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean {
 		return this.executionControlAuthority.isSocketInstanceConfirmed(serverInstanceId);
+	}
+
+	acceptsTranscriptNotification(serverInstanceId: string): boolean {
+		return this.executionControlAuthority.acceptsNotification(serverInstanceId);
 	}
 
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void {
@@ -321,6 +338,7 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	removeTransientFeed(chatId: string): void {
+		this.setPlanPresentation(chatId, null);
 		if (chatId in this.transientFeedByChatId) {
 			const next = { ...this.transientFeedByChatId };
 			delete next[chatId];
@@ -361,7 +379,7 @@ export class ConversationUiState implements ConversationUiPort {
 		if (!snapshot) return;
 		const transientPermissions = pendingPermissionsFromTransientFeed(snapshot);
 		const exitPlanPermissions = this.pendingPermissionsFor(chatId).filter(
-			(request) => request.requestedTool.type === 'exit-plan-mode-tool-use',
+			(request) => request.planReference !== undefined,
 		);
 		this.#setPendingPermissionsForChat(
 			chatId,

@@ -1,439 +1,187 @@
-import { isToolUseMessage, ToolResultMessage } from '$shared/chat-types';
-import {
-	isHandoffSummaryNoticeDetail,
-	isInterAgentMessageOutcomeNoticeDetail,
-	isInterAgentMessageReceivedNoticeDetail,
-} from '$shared/transcript-notice-details';
+import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
+import { isHandoffSummaryNoticeDetail, isInterAgentMessageOutcomeNoticeDetail, isInterAgentMessageReceivedNoticeDetail } from '$shared/transcript-notice-details';
 import type { PendingPermissionRequest } from '$lib/types/chat';
-import {
-	conversationFeedItemLayout,
-	type ConversationFeedRenderItem,
-} from '$lib/chat/transcript/conversation-feed-items.js';
+import type { ConversationFeedRenderItem, ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+import type { ChatDisplayRow } from '$lib/chat/transcript/transcript-row-projection.js';
+import { descriptorLast, expansionFor, type DisplayWindowSnapshot } from '$lib/chat/transcript/display-window-controller.js';
 
 export type ConversationFeedSpacing = 'responsive-feed' | 'transcript' | 'none';
-
 export type ConversationEarlierBoundaryMode = 'hidden' | 'visible' | 'when-collapsed';
-
-export type TranscriptVirtualFeedItem = {
-	kind: 'transcript';
-	key: string;
-	item: ConversationFeedRenderItem;
-	spacingAfter: ConversationFeedSpacing;
-};
-
+export type TranscriptVirtualFeedItem = { kind: 'transcript'; key: string; item: ConversationFeedRenderItem; spacingAfter: ConversationFeedSpacing };
 export type ToolGroupVirtualFeedItem = {
-	kind: 'tool-group';
-	key: string;
-	anchorId: string;
-	members: readonly TranscriptVirtualFeedItem[];
-	expanded: boolean;
-	spacingAfter: ConversationFeedSpacing;
+	kind: 'tool-group'; key: string; anchorId: string; descriptor: GroupDescriptor; expanded: boolean; spacingAfter: ConversationFeedSpacing;
 };
-
 export type ConversationVirtualFeedItem =
-	| { kind: 'viewport-start-spacer'; key: string; spacingAfter: 'none' }
-	| { kind: 'refresh-error'; key: string; spacingAfter: 'none' }
-	| { kind: 'earlier-boundary'; key: string; spacingAfter: 'none' }
+	| { kind: 'viewport-start-spacer' | 'refresh-error' | 'earlier-boundary' | 'later-boundary' | 'retained-gap'; key: string; spacingAfter: 'none' }
 	| TranscriptVirtualFeedItem
 	| ToolGroupVirtualFeedItem
-	| { kind: 'later-boundary'; key: string; spacingAfter: 'none' }
-	| {
-			kind: 'permission';
-			key: string;
-			request: PendingPermissionRequest;
-			leadingSpacing: boolean;
-			spacingAfter: 'responsive-feed' | 'none';
-	  }
-	| {
-			kind: 'viewport-end-spacer';
-			key: string;
-			reserveComposerCapSpace: boolean;
-			spacingAfter: 'none';
-	  };
+	| { kind: 'member-boundary'; key: string; group: GroupDescriptor; anchor: MemberWindowRequest['anchor']; remaining: number; spacingAfter: 'none' }
+	| { kind: 'permission'; key: string; request: PendingPermissionRequest; leadingSpacing: boolean; spacingAfter: 'responsive-feed' | 'none' }
+	| { kind: 'viewport-end-spacer'; key: string; reserveComposerCapSpace: boolean; spacingAfter: 'none' };
 
-export interface ConversationVirtualTarget {
-	index: number;
-	innerRowId: string;
-}
-
+export interface ConversationVirtualTarget { index: number; innerRowId: string }
 export interface ConversationVirtualFeedModel {
 	items: ConversationVirtualFeedItem[];
+	transcriptViewId: string;
 	indexByKey: Map<string, number>;
 	indexByRowId: Map<string, number>;
 	targetByDomAnchorId: Map<string, ConversationVirtualTarget>;
-	memberRowIdByDomAnchorId: Map<string, string>;
 	representativeRowIdByKey: Map<string, string>;
-	collapsedGroupByMemberRowId: Map<string, ToolGroupVirtualFeedItem>;
 	transcriptStartIndex: number;
 	transcriptEndIndex: number;
 }
-
 export interface ConversationVirtualFeedInput {
 	showRefreshError: boolean;
 	earlierBoundary: ConversationEarlierBoundaryMode;
 	showLaterBoundary: boolean;
 	reserveComposerCapSpace: boolean;
 	surfaceIdentity: string;
-	transcriptItems: ConversationFeedRenderItem[];
 	transcriptViewId: string;
-	pendingPermissions: PendingPermissionRequest[];
-	combineToolUseMessages: boolean;
-	expandedToolMemberIds: ReadonlySet<string>;
-	protectedVirtualKeys: readonly string[];
+	display: DisplayWindowSnapshot;
+	renderModel: ConversationFeedRenderModel;
+	overlays: readonly ChatDisplayRow[];
+	optimisticAfterOrdinals: ReadonlyMap<string, number>;
+	pendingPermissions: readonly PendingPermissionRequest[];
 }
 
-function namespacedKey(surfaceIdentity: string, localKey: string): string {
-	return JSON.stringify([surfaceIdentity, localKey]);
+export function groupContainingRow(model: ConversationVirtualFeedModel, rowId: string): ToolGroupVirtualFeedItem | undefined {
+	const prefix = `${model.transcriptViewId}:`;
+	if (!rowId.startsWith(prefix)) return undefined;
+	const ordinal = Number(rowId.slice(prefix.length));
+	if (!Number.isSafeInteger(ordinal) || model.indexByRowId.has(rowId)) return undefined;
+	return model.items.find((item): item is ToolGroupVirtualFeedItem => item.kind === 'tool-group'
+		&& ordinal >= item.descriptor.firstMember && ordinal <= item.descriptor.lastMember);
 }
 
-function toolAnchorIds(item: ConversationFeedRenderItem): string[] {
-	if (item.kind !== 'message') return [];
-	if (isToolUseMessage(item.message)) {
-		return [`tool-input-${item.message.toolId}`];
-	}
-	if (item.message instanceof ToolResultMessage) {
-		return [`tool-result-${item.id}`];
-	}
-	return [];
-}
-
-function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSpacing {
-	return conversationFeedItemLayout(item) === 'hidden' ? 'none' : 'transcript';
-}
-
-function groupableToolInput(item: ConversationVirtualFeedItem): item is TranscriptVirtualFeedItem {
-	return (
-		item.kind === 'transcript' &&
-		item.item.kind === 'message' &&
-		isToolUseMessage(item.item.message) &&
-		item.item.message.type !== 'enter-plan-mode-tool-use' &&
-		conversationFeedItemLayout(item.item) === 'standard'
-	);
-}
-
-function groupToolRuns(
-	items: readonly ConversationVirtualFeedItem[],
-	key: (localKey: string) => string,
-	expandedMemberIds: ReadonlySet<string>,
-	protectedVirtualKeys: ReadonlySet<string>,
-): ConversationVirtualFeedItem[] {
-	const grouped: ConversationVirtualFeedItem[] = [];
-	let run: TranscriptVirtualFeedItem[] = [];
-	const flush = () => {
-		if (run.length === 0) return;
-		const first = run[0].item;
-		const expanded = run.some(
-			(member) => expandedMemberIds.has(member.item.id) || protectedVirtualKeys.has(member.key),
-		);
-		grouped.push({
-			kind: 'tool-group',
-			key: key(`tool-group:${first.id}`),
-			anchorId: `tool-group:${first.id}`,
-			members: run,
-			expanded,
-			spacingAfter: expanded ? 'none' : run[run.length - 1].spacingAfter,
-		});
-		if (expanded) grouped.push(...run);
-		run = [];
-	};
-	for (const item of items) {
-		if (groupableToolInput(item)) run.push(item);
-		else {
-			flush();
-			grouped.push(item);
-		}
-	}
-	flush();
-	return grouped;
-}
-
-// Consumes the requests anchored to this row so a later row cannot claim them again.
-function takeAnchoredPermissions(
-	permissionsByAnchor: Map<number, PendingPermissionRequest[]>,
-	item: ConversationFeedRenderItem,
-): PendingPermissionRequest[] {
-	if (item.kind !== 'message' || item.ordinal === undefined) return [];
-	const anchored = permissionsByAnchor.get(item.ordinal) ?? [];
-	permissionsByAnchor.delete(item.ordinal);
-	return anchored;
-}
-
-export function buildConversationVirtualFeedModel(
-	input: ConversationVirtualFeedInput,
-): ConversationVirtualFeedModel {
+export function buildConversationVirtualFeedModel(input: ConversationVirtualFeedInput): ConversationVirtualFeedModel {
 	const items: ConversationVirtualFeedItem[] = [];
-	const key = (localKey: string): string => namespacedKey(input.surfaceIdentity, localKey);
-	items.push({
-		kind: 'viewport-start-spacer',
-		key: key('prefix:viewport-start-spacer'),
-		spacingAfter: 'none',
-	});
-
-	if (input.showRefreshError) {
-		items.push({
-			kind: 'refresh-error',
-			key: key('prefix:refresh-error'),
-			spacingAfter: 'none',
-		});
-	}
-	// A permission request renders after the row it was raised against, so it stays put as
-	// the transcript grows. Requests whose anchor belongs to another view, or to a row this
-	// window has not loaded, fall through to the end of the feed.
-	const permissionsByAnchor = new Map<number, PendingPermissionRequest[]>();
-	const detachedPermissions: PendingPermissionRequest[] = [];
-	for (const permission of input.pendingPermissions) {
-		const anchor = permission.transcript;
-		if (!anchor || anchor.transcriptViewId !== input.transcriptViewId) {
-			detachedPermissions.push(permission);
-			continue;
+	const key = (local: string) => JSON.stringify([input.surfaceIdentity, local]);
+	const rowId = (ordinal: number) => `${input.transcriptViewId}:${ordinal}`;
+	const window = input.display.window;
+	const renderByOrdinal = new Map(input.renderModel.items.flatMap(item => item.kind === 'message' && item.ordinal !== undefined ? [[item.ordinal, item] as const] : []));
+	const rendered = new Set<string>();
+	const pushRow = (item: ConversationFeedRenderItem) => {
+		if (rendered.has(item.id)) return;
+		rendered.add(item.id);
+		items.push({ kind: 'transcript', key: key(`transcript:${item.id}`), item, spacingAfter: 'transcript' });
+	};
+	const retained = input.display.protectedRows.map(row => renderByOrdinal.get(row.detail.ordinal)).filter((row): row is NonNullable<typeof row> => !!row).sort((a, b) => a.ordinal! - b.ordinal!);
+	const insertRetained = (through: number) => {
+		for (const row of retained) {
+			if (row.ordinal! > through || rendered.has(row.id)) continue;
+			// Retained islands have no completeness certificate for their intervening spans.
+			if (items.at(-1)?.kind !== 'retained-gap') items.push({ kind: 'retained-gap', key: key(`retained:before:${row.id}`), spacingAfter: 'none' });
+			pushRow(row);
+			items.push({ kind: 'retained-gap', key: key(`retained:after:${row.id}`), spacingAfter: 'none' });
 		}
-		const anchored = permissionsByAnchor.get(anchor.afterOrdinal) ?? [];
-		anchored.push(permission);
-		permissionsByAnchor.set(anchor.afterOrdinal, anchored);
-	}
-
-	const body: ConversationVirtualFeedItem[] = [];
-	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
-		const anchored = takeAnchoredPermissions(permissionsByAnchor, item);
-		const isLastItem = transcriptIndex === input.transcriptItems.length - 1;
-		body.push({
-			kind: 'transcript',
-			key: key(`transcript:${item.id}`),
-			item,
-			spacingAfter: anchored.length > 0 ? 'none' : transcriptSpacing(item),
-		});
-		for (const [permissionIndex, request] of anchored.entries()) {
-			const isLastAnchored = permissionIndex === anchored.length - 1;
-			body.push(
-				permissionItem(key, request, permissionIndex === 0, !(isLastAnchored && isLastItem)),
-			);
-		}
-	}
-	for (const permissions of permissionsByAnchor.values()) detachedPermissions.push(...permissions);
-	const transcriptKeys = new Set<string>();
-	for (const item of body) {
-		if (item.kind !== 'transcript') continue;
-		if (transcriptKeys.has(item.key)) {
-			throw new Error(`Duplicate conversation feed key: ${item.key}`);
-		}
-		transcriptKeys.add(item.key);
-	}
-	const presentedBody = input.combineToolUseMessages
-		? groupToolRuns(body, key, input.expandedToolMemberIds, new Set(input.protectedVirtualKeys))
-		: body;
-	const hasCollapsedToolGroup = presentedBody.some(
-		(item) => item.kind === 'tool-group' && !item.expanded,
-	);
-	if (
-		input.earlierBoundary === 'visible' ||
-		(input.earlierBoundary === 'when-collapsed' && hasCollapsedToolGroup)
-	) {
-		items.push({
-			kind: 'earlier-boundary',
-			key: key('prefix:earlier-boundary'),
-			spacingAfter: 'none',
-		});
+	};
+	items.push({ kind: 'viewport-start-spacer', key: key('prefix:viewport-start-spacer'), spacingAfter: 'none' });
+	if (input.showRefreshError) items.push({ kind: 'refresh-error', key: key('prefix:refresh-error'), spacingAfter: 'none' });
+	if (window) insertRetained(window.interval.after);
+	if (input.earlierBoundary === 'visible' || input.earlierBoundary === 'when-collapsed'
+		&& window?.items.some(item => item.kind === 'tool-group' && !expansionFor(item, input.display.expansions))) {
+		items.push({ kind: 'earlier-boundary', key: key('prefix:earlier-boundary'), spacingAfter: 'none' });
 	}
 	const transcriptStartIndex = items.length;
-	items.push(...presentedBody);
-	const transcriptEndIndex = items.length;
-
-	if (input.showLaterBoundary) {
-		items.push({
-			kind: 'later-boundary',
-			key: key('suffix:later-boundary'),
-			spacingAfter: 'none',
-		});
-	}
-	for (const [permissionIndex, request] of detachedPermissions.entries()) {
-		items.push(
-			permissionItem(
-				key,
-				request,
-				permissionIndex === 0,
-				permissionIndex < detachedPermissions.length - 1,
-			),
-		);
-	}
-	items.push({
-		kind: 'viewport-end-spacer',
-		key: key('suffix:viewport-end-spacer'),
-		reserveComposerCapSpace: input.reserveComposerCapSpace,
-		spacingAfter: 'none',
+	const represented = new Set(window?.items.flatMap(item => item.kind === 'row' && item.permissionOccurrenceId && renderByOrdinal.has(item.ordinal) ? [item.permissionOccurrenceId] : []) ?? []);
+	const permissions = input.pendingPermissions.filter(request => {
+		if (represented.has(request.permissionOccurrenceId)) return false;
+		const plan = request.planReference;
+		return !plan || plan.serverInstanceId !== window?.certificate.serverInstanceId
+			|| plan.chatId !== window.certificate.chatId || plan.transcriptViewId !== input.transcriptViewId
+			|| !window.items.some(item => item.kind === 'row' && item.ordinal === plan.ordinal && renderByOrdinal.has(item.ordinal));
 	});
-
-	const indexByKey = new Map<string, number>();
-	const indexByRowId = new Map<string, number>();
-	const targetByDomAnchorId = new Map<string, ConversationVirtualTarget>();
-	const memberRowIdByDomAnchorId = new Map<string, string>();
-	const representativeRowIdByKey = new Map<string, string>();
-	const collapsedGroupByMemberRowId = new Map<string, ToolGroupVirtualFeedItem>();
-	for (const [index, virtualItem] of items.entries()) {
-		if (indexByKey.has(virtualItem.key)) {
-			throw new Error(`Duplicate conversation feed key: ${virtualItem.key}`);
+	const overlays = input.overlays.filter(row => row.kind === 'message');
+	const inserted = new Set<string>();
+	const placements = new Map(window?.cutPlacements.map(cut => [cut.id, cut.placement]));
+	const insertOverlays = (through: number) => {
+		for (const overlay of overlays) {
+			if (inserted.has(overlay.id) || placements.get(overlay.id) !== 'inline') continue;
+			const ordinal = input.optimisticAfterOrdinals.get(overlay.id.slice('optimistic:'.length));
+			if (ordinal === undefined || ordinal > through) continue;
+			pushRow({ ...overlay, index: items.length, layout: 'standard' });
+			inserted.add(overlay.id);
 		}
-		indexByKey.set(virtualItem.key, index);
-		if (virtualItem.kind === 'tool-group') {
-			representativeRowIdByKey.set(virtualItem.key, virtualItem.members[0].item.id);
-			if (virtualItem.expanded) continue;
-			for (const member of virtualItem.members) {
-				collapsedGroupByMemberRowId.set(member.item.id, virtualItem);
-				indexByRowId.set(member.item.id, index);
-				targetByDomAnchorId.set(member.item.id, {
-					index,
-					innerRowId: virtualItem.anchorId,
-				});
-				memberRowIdByDomAnchorId.set(member.item.id, member.item.id);
-				for (const anchorId of toolAnchorIds(member.item)) {
-					targetByDomAnchorId.set(anchorId, {
-						index,
-						innerRowId: virtualItem.anchorId,
-					});
-					memberRowIdByDomAnchorId.set(anchorId, member.item.id);
-				}
-			}
-		} else if (virtualItem.kind === 'transcript') {
-			representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
-			indexByRowId.set(virtualItem.item.id, index);
-			targetByDomAnchorId.set(virtualItem.item.id, {
-				index,
-				innerRowId: virtualItem.item.id,
-			});
-			memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
-			for (const anchorId of toolAnchorIds(virtualItem.item)) {
-				targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
-				memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
+		for (const permission of permissions) {
+			const id = `permission:${permission.permissionOccurrenceId}`;
+			if (inserted.has(id) || placements.get(id) !== 'inline' || (permission.transcript?.afterOrdinal ?? Infinity) > through) continue;
+			items.push({ kind: 'permission', key: key(id), request: permission, leadingSpacing: true, spacingAfter: 'responsive-feed' });
+			inserted.add(id);
+		}
+	};
+	if (window) insertOverlays(window.interval.after);
+	for (const descriptor of window?.items ?? []) {
+		insertRetained(descriptor.kind === 'row' ? descriptor.ordinal - 1 : descriptor.firstMember - 1);
+		if (descriptor.kind === 'row') {
+			const item = renderByOrdinal.get(descriptor.ordinal);
+			if (item) pushRow(item);
+		} else {
+			const expansion = expansionFor(descriptor, input.display.expansions);
+			const anchorId = `tool-group:${rowId(descriptor.firstMember)}`;
+			items.push({ kind: 'tool-group', key: key(`${window!.certificate.profileKey}:${window!.certificate.cutsKey}:${anchorId}`), anchorId,
+				descriptor, expanded: !!expansion, spacingAfter: expansion ? 'none' : 'transcript' });
+			if (expansion) {
+				const page = expansion.page;
+				insertRetained((page.ordinals[0] ?? descriptor.firstMember) - 1);
+				if (page.earlier) items.push({ kind: 'member-boundary', key: key(`${anchorId}:earlier`), group: descriptor,
+					anchor: { kind: 'before', ordinal: page.earlier.beforeOrdinal }, remaining: page.earlier.remaining, spacingAfter: 'none' });
+				for (const ordinal of page.ordinals) { insertRetained(ordinal); const item = renderByOrdinal.get(ordinal); if (item) pushRow(item); }
+				if (page.later) items.push({ kind: 'member-boundary', key: key(`${anchorId}:later`), group: descriptor,
+					anchor: { kind: 'after', ordinal: page.later.afterOrdinal }, remaining: page.later.remaining, spacingAfter: 'none' });
 			}
 		}
+		insertRetained(descriptorLast(descriptor));
+		insertOverlays(descriptor.kind === 'tool-group' ? descriptor.fragment.through : descriptorLast(descriptor));
 	}
-
-	return {
-		items,
-		indexByKey,
-		indexByRowId,
-		targetByDomAnchorId,
-		memberRowIdByDomAnchorId,
-		representativeRowIdByKey,
-		collapsedGroupByMemberRowId,
-		transcriptStartIndex,
-		transcriptEndIndex,
-	};
-}
-
-export function appendConversationVirtualTranscriptTail(
-	model: ConversationVirtualFeedModel,
-	surfaceIdentity: string,
-	appendedItems: ConversationFeedRenderItem[],
-): ConversationVirtualFeedModel | null {
-	if (appendedItems.length === 0) return null;
-	const insertIndex = model.transcriptEndIndex;
-	const appendedVirtualItems = appendedItems.map((item): ConversationVirtualFeedItem => ({
-		kind: 'transcript',
-		key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
-		item,
-		spacingAfter: transcriptSpacing(item),
-	}));
-	if (appendedVirtualItems.some((item) => model.indexByKey.has(item.key))) return null;
-
-	const items = model.items.slice();
-	items.splice(insertIndex, 0, ...appendedVirtualItems);
-
-	const indexByKey = new Map(model.indexByKey);
-	const indexByRowId = new Map(model.indexByRowId);
-	const targetByDomAnchorId = new Map(model.targetByDomAnchorId);
-	const memberRowIdByDomAnchorId = new Map(model.memberRowIdByDomAnchorId);
-	const representativeRowIdByKey = new Map(model.representativeRowIdByKey);
-	for (let index = insertIndex; index < items.length; index += 1) {
-		indexByKey.set(items[index].key, index);
+	const transcriptEndIndex = items.length;
+	if (input.showLaterBoundary) items.push({ kind: 'later-boundary', key: key('suffix:later-boundary'), spacingAfter: 'none' });
+	insertRetained(Infinity);
+	for (const overlay of overlays) if (!inserted.has(overlay.id)) pushRow({ ...overlay, index: items.length, layout: 'standard' });
+	for (const notice of input.overlays) if (notice.kind === 'local-notice') pushRow({ kind: 'local-notice', id: notice.id, notice, index: items.length });
+	const detached = permissions.filter(request => !inserted.has(`permission:${request.permissionOccurrenceId}`));
+	for (const [index, request] of detached.entries()) {
+		const id = `permission:${request.permissionOccurrenceId}`;
+		items.push({ kind: 'permission', key: key(id), request, leadingSpacing: index === 0,
+			spacingAfter: index < detached.length - 1 ? 'responsive-feed' : 'none' });
 	}
-	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
-		if (virtualItem.kind !== 'transcript') continue;
-		const index = insertIndex + offset;
-		representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
-		indexByRowId.set(virtualItem.item.id, index);
-		targetByDomAnchorId.set(virtualItem.item.id, {
-			index,
-			innerRowId: virtualItem.item.id,
-		});
-		memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
-		for (const anchorId of toolAnchorIds(virtualItem.item)) {
-			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
-			memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
+	items.push({ kind: 'viewport-end-spacer', key: key('suffix:viewport-end-spacer'), reserveComposerCapSpace: input.reserveComposerCapSpace, spacingAfter: 'none' });
+	const model: ConversationVirtualFeedModel = { items, transcriptViewId: input.transcriptViewId, indexByKey: new Map(), indexByRowId: new Map(),
+		targetByDomAnchorId: new Map(), representativeRowIdByKey: new Map(), transcriptStartIndex, transcriptEndIndex };
+	for (const [index, item] of items.entries()) {
+		if (model.indexByKey.has(item.key)) throw new Error('Duplicate display key');
+		model.indexByKey.set(item.key, index);
+		if (item.kind === 'tool-group') {
+			model.representativeRowIdByKey.set(item.key, rowId(item.descriptor.firstMember));
+			model.targetByDomAnchorId.set(item.anchorId, { index, innerRowId: item.anchorId });
+		} else if (item.kind === 'transcript') {
+			model.representativeRowIdByKey.set(item.key, item.item.id);
+			model.indexByRowId.set(item.item.id, index);
+			model.targetByDomAnchorId.set(item.item.id, { index, innerRowId: item.item.id });
 		}
 	}
-
-	return {
-		...model,
-		items,
-		indexByKey,
-		indexByRowId,
-		targetByDomAnchorId,
-		memberRowIdByDomAnchorId,
-		representativeRowIdByKey,
-		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
-	};
+	return model;
 }
 
-export function estimateConversationFeedItemSize(
-	item: ConversationVirtualFeedItem | undefined,
-): number {
+export function estimateConversationFeedItemSize(item: ConversationVirtualFeedItem | undefined): number {
 	if (!item) return 120;
 	if (item.kind === 'viewport-start-spacer') return 16;
 	if (item.kind === 'viewport-end-spacer') return item.reserveComposerCapSpace ? 56 : 16;
-	if (
-		item.kind === 'refresh-error' ||
-		item.kind === 'earlier-boundary' ||
-		item.kind === 'later-boundary'
-	) {
-		return 44;
+	if (item.kind === 'permission') return 240 + (item.leadingSpacing ? 8 : 0) + (item.spacingAfter === 'responsive-feed' ? 12 : 0);
+	if (item.kind === 'tool-group') return item.expanded ? 24 : 36;
+	if (item.kind === 'retained-gap') return 24;
+	if (item.kind !== 'transcript') return 44;
+	if (item.item.kind === 'local-notice') return 64;
+	if (item.item.layout === 'permission') return 252;
+	const message = item.item.message;
+	switch (message.type) {
+		case 'transcript-notice':
+			if (isInterAgentMessageOutcomeNoticeDetail(message.detail)) return 242 + Math.max(0, message.detail.results.length - 1) * 26;
+			if (isInterAgentMessageReceivedNoticeDetail(message.detail) || isHandoffSummaryNoticeDetail(message.detail)) return 242;
+			return 64;
+		case 'user-message': return message.presentation?.style ? 156 : 124;
+		case 'assistant-message': return 192;
+		case 'thinking': return 172;
+		case 'cli-row': return 124;
+		default: return 108;
 	}
-	if (item.kind === 'permission') {
-		const leadingSpacing = item.leadingSpacing ? 8 : 0;
-		const trailingSpacing = item.spacingAfter === 'responsive-feed' ? 12 : 0;
-		return 240 + leadingSpacing + trailingSpacing;
-	}
-	if (item.kind === 'tool-group') {
-		return 24 + (item.spacingAfter === 'transcript' ? 12 : 0);
-	}
-
-	const renderItem = item.item;
-	const spacing = item.spacingAfter === 'transcript' ? 12 : 0;
-	const layout = conversationFeedItemLayout(renderItem);
-	if (layout === 'hidden') return 0;
-	if (layout === 'permission') return 240 + spacing;
-	if (renderItem.kind === 'local-notice') return 52 + spacing;
-	if (renderItem.message.type === 'transcript-notice') {
-		if (isInterAgentMessageOutcomeNoticeDetail(renderItem.message.detail)) {
-			const additionalRecipients = Math.max(0, renderItem.message.detail.results.length - 1);
-			return 230 + additionalRecipients * 26 + spacing;
-		}
-		if (isInterAgentMessageReceivedNoticeDetail(renderItem.message.detail)) {
-			return 230 + spacing;
-		}
-		// The collapsed handoff body is clamp-bounded, so its default height is stable
-		// enough to estimate even though expansion is measured after render.
-		return (isHandoffSummaryNoticeDetail(renderItem.message.detail) ? 230 : 52) + spacing;
-	}
-	if (renderItem.message.type === 'user-message') {
-		return (renderItem.message.presentation?.style ? 144 : 112) + spacing;
-	}
-	if (renderItem.message.type === 'assistant-message') return 180 + spacing;
-	if (renderItem.message.type === 'thinking') return 160 + spacing;
-	if (renderItem.message.type === 'cli-row') return 112 + spacing;
-	return 96 + spacing;
-}
-
-function permissionItem(
-	key: (localKey: string) => string,
-	request: PendingPermissionRequest,
-	leadingSpacing: boolean,
-	trailingSpacing: boolean,
-): ConversationVirtualFeedItem {
-	return {
-		kind: 'permission',
-		key: key(`permission:${request.permissionOccurrenceId}`),
-		request,
-		leadingSpacing,
-		spacingAfter: trailingSpacing ? 'responsive-feed' : 'none',
-	};
 }

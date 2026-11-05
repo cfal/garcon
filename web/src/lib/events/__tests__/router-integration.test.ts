@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
+import { BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import RouterIntegrationHost from './RouterIntegrationHost.svelte';
 import type { EventRouterStores } from '../router.svelte';
-import type { WsConnection } from '$lib/ws/connection.svelte';
+import { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import { ChatTranscriptHeadUpdatedMessage, ChatInputCommittedMessage, ChatDisplayStateUpdatedMessage, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
+import { displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 
 vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/chats.js')>()),
@@ -74,8 +79,9 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	};
 }
 
-function rawMessage(ordinal: number, message: Record<string, unknown>) {
-	return { ordinal, message };
+function head(chatId = 'chat-a', ordinal = 2, preview: string | null = 'hi', view = 'generation-current') {
+	return { ...new ChatTranscriptHeadUpdatedMessage('server-instance-1', chatId, view, ordinal, TS,
+		preview === null ? null : { ordinal, text: preview, timestamp: TS }, { ...emptyResponseClassOrdinals(), assistant: ordinal }, 0, 0) };
 }
 
 function transientFeed(transcriptViewId: string, transientRevision = 0) {
@@ -91,7 +97,7 @@ function transientFeed(transcriptViewId: string, transientRevision = 0) {
 function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
 	return {
 		observedAt: TS,
-		messageLimit: 1,
+		messageLimit: 0,
 		chat: {
 			id: 'chat-a',
 			title: 'Chat A',
@@ -130,7 +136,10 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 				transcriptViewId: 'generation-current',
 				lastOrdinal: 1,
 			})),
-			applyChatMessages: vi.fn((): 'applied' => 'applied'),
+			observeHead: vi.fn(),
+			acknowledgeInput: vi.fn(),
+			displayReady: vi.fn(),
+			observeOpenSnapshots: vi.fn(() => () => {}),
 			reloadChatTranscript: vi.fn(),
 			isRenderedChat: vi.fn(() => false),
 			loadRenderedChat: vi.fn(),
@@ -140,7 +149,6 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			loadMessages: vi.fn().mockResolvedValue([]),
 			removeChatTranscript: vi.fn(),
 			markChatTranscriptStale: vi.fn(),
-			markChatTranscriptValidated: vi.fn(),
 		},
 		lifecycle: {
 			currentChatId: () => 'chat-a',
@@ -192,7 +200,7 @@ function renderRouterWithRawMessages(
 	rawMessages: Array<Record<string, unknown>>,
 	stores: EventRouterStores,
 ) {
-	const connection = { messageVersion: 1 } as WsConnection;
+	const connection = new WsConnection();
 	let drained = false;
 	const drainHandle: DrainHandle = {
 		drain: () => {
@@ -209,6 +217,64 @@ function renderRouterWithRawMessages(
 describe('event router integration', () => {
 	afterEach(() => {
 		vi.mocked(getChatSnapshot).mockReset();
+	});
+
+	it.each(['replacement', 'instance'] as const)('clears background permission waiting status on %s without another open', async reason => {
+		const stores = createStores();
+		const lifecycle = new ConversationLifecycleState();
+		stores.lifecycle.pushLoadingStatus = (_chatId, entry) => lifecycle.pushLoadingStatus(entry);
+		stores.lifecycle.popLoadingStatus = (_chatId, id) => lifecycle.popLoadingStatus(id);
+		stores.conversationUi.confirmExecutionControlSocketInstance('server-instance-1');
+		stores.conversationUi.setTransientFeedFromSnapshot({ serverInstanceId: 'server-instance-1', chatId: 'chat-b',
+			transcriptViewId: 'generation-current', transientRevision: 1, rows: [{ permissionOccurrenceId: 'permission-1', runId: 'run-1', displayOrder: 0,
+				transcript: { transcriptViewId: 'generation-current', afterOrdinal: 1 },
+				message: new PermissionRequestMessage(TS, 'permission-1', new BashToolUseMessage(TS, 'tool-1', 'pwd')) }] });
+		renderRouterWithRawMessages([], stores);
+		flushSync();
+		expect(lifecycle.loadingStatusStack).toHaveLength(1);
+		if (reason === 'instance') stores.conversationUi.confirmExecutionControlSocketInstance('server-instance-2');
+		else stores.conversationUi.removeTransientFeed('chat-b');
+		flushSync();
+		expect(lifecycle.loadingStatusStack).toEqual([]);
+		expect(stores.chatState.loadRenderedChat).not.toHaveBeenCalled();
+	});
+
+	it('observes retained opens once without subscribing to plan presentation writes', () => {
+		const stores = createStores();
+		const snapshot = displayOpen('chat-a', 'generation-current');
+		stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+		const unsubscribe = vi.fn();
+		const observe = vi.spyOn(stores.chatState, 'observeOpenSnapshots').mockImplementation(listener => {
+			listener(snapshot);
+			return unsubscribe;
+		});
+		const publish = vi.spyOn(stores.conversationUi, 'setPlanPresentation');
+		const { unmount } = render(RouterIntegrationHost, {
+			connection: new WsConnection(),
+			drainHandle: { drain: () => [], cleanup: vi.fn() },
+			stores,
+		});
+		expect(observe).toHaveBeenCalledTimes(1);
+		expect(publish).toHaveBeenCalled();
+		expect(unsubscribe).not.toHaveBeenCalled();
+		unmount();
+		expect(unsubscribe).toHaveBeenCalledTimes(1);
+	});
+
+	it('enters live plan mode from a background head without opening its transcript', async () => {
+		const stores = createStores();
+		stores.conversationUi.confirmExecutionControlSocketInstance('server-instance-1');
+		const plan = vi.spyOn(transcriptDisplayApi, 'plan').mockResolvedValue({
+			serverInstanceId: 'server-instance-1', chatId: 'chat-b', transcriptViewId: 'generation-current',
+			revision: 1, latestEnterOrdinal: 2, pendingExitCount: 0, exits: [], nextAfterOrdinal: null,
+		});
+		try {
+			renderRouterWithRawMessages([{ ...new ChatTranscriptHeadUpdatedMessage('server-instance-1', 'chat-b',
+				'generation-current', 2, null, null, emptyResponseClassOrdinals(), 1, 0) }], stores);
+			await vi.waitFor(() => expect(stores.agentSettings.setPermissionMode).toHaveBeenCalledWith('chat-b', 'plan'));
+			expect(stores.chatState.loadRenderedChat).not.toHaveBeenCalled();
+			expect(stores.chatState.loadMessages).not.toHaveBeenCalled();
+		} finally { plan.mockRestore(); }
 	});
 
 	it.each([
@@ -352,128 +418,36 @@ describe('event router integration', () => {
 		});
 	});
 
-	it('applies selected chat messages and patches the sidebar preview', () => {
+	it('applies selected compact heads and patches the sidebar preview', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-a',
-					transcriptViewId: 'generation-current',
-					firstOrdinal: 2,
-					lastOrdinal: 2,
-					resendCandidates: [],
-					clientRequestId: 'req-1',
-					upstreamRequestId: 'cursor-req-1',
-					messages: [
-						rawMessage(2, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'hi\nthere',
-						}),
-					],
-				},
-			],
-			stores,
-		);
-
+		renderRouterWithRawMessages([head()], stores);
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 2, { ...emptyResponseClassOrdinals(), assistant: 2 });
+		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
 		expect(stores.sessions.applyProcessingEvent).not.toHaveBeenCalled();
-		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
-			'chat-a',
-			'generation-current',
-			expect.arrayContaining([expect.objectContaining({ ordinal: 2 })]),
-			2,
-			2,
-			[],
-		);
-		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 	});
 
-	it('advances activity and read receipts for thinking without replacing the preview', () => {
-		const newestTimestamp = '2026-05-14T00:00:02.000Z';
+	it('advances thinking activity and visible read receipts without replacing the preview', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-a',
-					transcriptViewId: 'generation-current',
-					firstOrdinal: 2,
-					lastOrdinal: 3,
-					resendCandidates: [],
-					clientRequestId: 'req-thinking',
-					upstreamRequestId: 'cursor-thinking',
-					messages: [
-						rawMessage(2, {
-							type: 'thinking-message',
-							timestamp: newestTimestamp,
-							content: 'newer activity',
-						}),
-						rawMessage(3, {
-							type: 'thinking-message',
-							timestamp: TS,
-							content: 'later ordinal with older timestamp',
-						}),
-					],
-				},
-			],
-			stores,
-		);
-
+		renderRouterWithRawMessages([{ ...head('chat-a', 3, null), responseClassOrdinals: { ...emptyResponseClassOrdinals(), thinking: 3 } }], stores);
 		expect(stores.sessions.patchPreview).not.toHaveBeenCalled();
-		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-a', newestTimestamp);
-		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', newestTimestamp);
+		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-a', TS);
+		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', TS);
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 3, { ...emptyResponseClassOrdinals(), thinking: 3 });
 	});
 
-	it('keeps background plan and permission batches isolated from selected-chat ports', () => {
+	it('recovers background transient controls without admitting a display index', async () => {
 		const stores = createStores();
-
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-b',
-					transcriptViewId: 'generation-b',
-					firstOrdinal: 1,
-					lastOrdinal: 2,
-					resendCandidates: [],
-					clientRequestId: 'req-background',
-					upstreamRequestId: 'cursor-background',
-					messages: [
-						rawMessage(1, {
-							type: 'enter-plan-mode-tool-use',
-							timestamp: TS,
-							toolId: 'plan-background',
-						}),
-						rawMessage(2, {
-							type: 'permission-request',
-							timestamp: TS,
-							permissionOccurrenceId: 'permission-background',
-							requestedTool: {
-								type: 'bash-tool-use',
-								timestamp: TS,
-								toolId: 'tool-background',
-								command: 'true',
-							},
-						}),
-					],
-				},
-			],
-			stores,
-		);
-
-		expect(stores.agentSettings.permissionMode).toHaveBeenCalledWith('chat-b');
-		expect(stores.agentSettings.setPermissionMode).toHaveBeenCalledWith('chat-b', 'plan');
-		expect(stores.lifecycle.markTurnRunning).toHaveBeenCalledWith('chat-b');
-		expect(stores.lifecycle.pushLoadingStatus).toHaveBeenCalledWith(
-			'chat-b',
-			expect.objectContaining({ id: 'WAITING_FOR_PERMISSION' }),
-		);
-		expect(stores.conversationUi.pendingPermissionsFor('chat-b')).toHaveLength(1);
-		expect(stores.conversationUi.pendingPermissionsFor('chat-a')).toHaveLength(0);
-		expect(stores.conversationUi.previousPermissionModeFor('chat-b')).toBe('default');
-		expect(stores.conversationUi.previousPermissionModeFor('chat-a')).toBeNull();
+		const open = vi.spyOn(transcriptDisplayApi, 'open');
+		vi.mocked(getChatSnapshot).mockResolvedValue({ ...chatSnapshot('generation-current'),
+			transientFeed: { ...transientFeed('generation-current'), chatId: 'chat-b' } });
+		renderRouterWithRawMessages([{ type: 'chat-transient-feed-mutation', ...transientFeed('generation-current', 2),
+			chatId: 'chat-b', mutation: { kind: 'clear-run', runId: 'run-b' } }], stores);
+		await vi.waitFor(() => expect(stores.conversationUi.getTransientFeed('chat-b')).not.toBeNull());
+		expect(getChatSnapshot).toHaveBeenCalledWith('chat-b', 0);
+		expect(open).not.toHaveBeenCalled();
+		expect(stores.conversationUi.pendingPermissionsFor('chat-a')).toEqual([]);
+		open.mockRestore();
 	});
 
 	it('leaves processing events to the synchronous WebSocket reconciler', () => {
@@ -488,80 +462,38 @@ describe('event router integration', () => {
 		expect(stores.sessions.applyProcessingEvent).not.toHaveBeenCalled();
 	});
 
-	it('reloads the selected chat when live messages expose a seq gap', () => {
-		const defaults = createStores();
-		const stores = createStores({
-			chatState: {
-				...defaults.chatState,
-				applyChatMessages: vi.fn((): 'gap-detected' => 'gap-detected'),
-				reloadChatTranscript: vi.fn(),
-			},
-		});
-
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-a',
-					transcriptViewId: 'generation-current',
-					firstOrdinal: 3,
-					lastOrdinal: 3,
-					resendCandidates: [],
-					messages: [
-						rawMessage(3, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'later',
-						}),
-					],
-				},
-			],
-			stores,
-		);
-
-		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
-			'chat-a',
-			'generation-current',
-			expect.arrayContaining([expect.objectContaining({ ordinal: 3 })]),
-			3,
-			3,
-			[],
-		);
-		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
+	it.each(['chat-a', 'chat-b'])('accepts coalesced head jumps for %s without raw replay', chatId => {
+		const stores = createStores();
+		renderRouterWithRawMessages([head(chatId, 400, 'current preview')], stores);
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith(chatId, 'generation-current', 400, { ...emptyResponseClassOrdinals(), assistant: 400 });
+		expect(stores.sessions.patchPreview).toHaveBeenCalledWith(chatId, 'current preview', TS);
+		expect(stores.chatState.reloadChatTranscript).not.toHaveBeenCalled();
+		expect(stores.chatState.loadMessages).not.toHaveBeenCalled();
+		if (chatId === 'chat-b') expect(stores.readState.enqueueReadReceipt).not.toHaveBeenCalled();
 	});
 
-	it('patches sidebar previews and applies background transcript batches', () => {
+	it('rejects retired-instance heads, acknowledgements and readiness before side effects', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-b',
-					transcriptViewId: 'generation-b',
-					firstOrdinal: 1,
-					lastOrdinal: 1,
-					resendCandidates: [],
-					messages: [
-						rawMessage(1, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'background',
-						}),
-					],
-				},
-			],
-			stores,
-		);
+		stores.conversationUi.confirmExecutionControlSocketInstance('server-new');
+		renderRouterWithRawMessages([head(),
+			{ ...new ChatInputCommittedMessage('server-instance-1', 'chat-a', 'generation-current', 'input-1', 2) },
+			{ ...new ChatDisplayStateUpdatedMessage('server-instance-1', 'chat-a', 'generation-current', 1, 'patterns', 2, 'available', null) }], stores);
+		expect(stores.chatState.observeHead).not.toHaveBeenCalled();
+		expect(stores.chatState.acknowledgeInput).not.toHaveBeenCalled();
+		expect(stores.chatState.displayReady).not.toHaveBeenCalled();
+		expect(stores.sessions.patchPreview).not.toHaveBeenCalled();
+		expect(stores.readState.enqueueReadReceipt).not.toHaveBeenCalled();
+	});
 
-		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-b', 'background', TS);
-		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
-			'chat-b',
-			'generation-b',
-			expect.arrayContaining([expect.objectContaining({ ordinal: 1 })]),
-			1,
-			1,
-			[],
-		);
+	it('routes exact submission acknowledgements and readiness independently of source heads', () => {
+		const stores = createStores();
+		const ready = new ChatDisplayStateUpdatedMessage('server-instance-1', 'chat-a', 'generation-current', 1, 'patterns', 2, 'available', null);
+		renderRouterWithRawMessages([
+			{ ...new ChatInputCommittedMessage('server-instance-1', 'chat-a', 'generation-current', 'input-1', 2) },
+			{ ...ready }], stores);
+		expect(stores.chatState.acknowledgeInput).toHaveBeenCalledWith('chat-a', 'generation-current', 'input-1', 2);
+		expect(stores.chatState.displayReady).toHaveBeenCalledWith(ready);
+		expect(stores.chatState.observeHead).not.toHaveBeenCalled();
 	});
 
 	it('does not let a retained old-socket control demote the confirmed instance', () => {
@@ -593,129 +525,24 @@ describe('event router integration', () => {
 		warn.mockRestore();
 	});
 
-	it('applies rendered background panels through the same transcript path', () => {
-		const defaults = createStores();
-		const stores = createStores({
-			chatState: {
-				...defaults.chatState,
-				isRenderedChat: vi.fn((chatId) => chatId === 'chat-b'),
-			},
-		});
-
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-b',
-					transcriptViewId: 'generation-b',
-					firstOrdinal: 1,
-					lastOrdinal: 1,
-					resendCandidates: [],
-					messages: [
-						rawMessage(1, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'visible split',
-						}),
-					],
-				},
-			],
-			stores,
-		);
-
-		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
-			'chat-b',
-			'generation-b',
-			expect.arrayContaining([expect.objectContaining({ ordinal: 1 })]),
-			1,
-			1,
-			[],
-		);
+	it('applies rendered background heads through the same path without changing selection', () => {
+		const stores = createStores();
+		vi.mocked(stores.chatState.isRenderedChat).mockReturnValue(true);
+		renderRouterWithRawMessages([head('chat-b')], stores);
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-b', 'generation-current', 2, expect.any(Object));
+		expect(stores.navigation.navigateToChat).not.toHaveBeenCalled();
 	});
 
-	it('reloads a background transcript when live application detects a gap', () => {
-		const defaults = createStores();
-		const stores = createStores({
-			chatState: {
-				...defaults.chatState,
-				applyChatMessages: vi.fn((): 'gap-detected' => 'gap-detected'),
-				reloadChatTranscript: vi.fn(),
-			},
-		});
-
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-b',
-					transcriptViewId: 'generation-b',
-					firstOrdinal: 3,
-					lastOrdinal: 3,
-					resendCandidates: [],
-					messages: [
-						rawMessage(3, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'gap',
-						}),
-					],
-				},
-			],
-			stores,
-		);
-
-		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-b');
-	});
-
-	it('flushes queued messages before handling selected transcript-view replacement', () => {
-		const calls: string[] = [];
-		const defaults = createStores();
-		const stores = createStores({
-			chatState: {
-				...defaults.chatState,
-				getCursor: () => ({ transcriptViewId: 'generation-old', lastOrdinal: 1 }),
-				getChatCursor: () => ({ transcriptViewId: 'generation-old', lastOrdinal: 1 }),
-				applyChatMessages: vi.fn((): 'applied' => {
-					calls.push('apply');
-					return 'applied';
-				}),
-				reloadChatTranscript: vi.fn(() => {
-					calls.push('reload');
-				}),
-			},
-		});
-
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-a',
-					transcriptViewId: 'generation-old',
-					firstOrdinal: 2,
-					lastOrdinal: 2,
-					resendCandidates: [],
-					messages: [
-						rawMessage(2, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'streamed',
-						}),
-					],
-				},
-				{
-					type: 'chat-transcript-replaced',
-					chatId: 'chat-a',
-					previousTranscriptViewId: 'generation-old',
-					transcriptViewId: 'generation-new',
-					lastOrdinal: 0,
-				},
-			],
-			stores,
-		);
-
-		expect(calls).toEqual(['apply', 'reload']);
+	it('processes heads and acknowledgements before same-drain replacement', () => {
+		const stores = createStores(), order: string[] = [];
+		vi.mocked(stores.chatState.observeHead).mockImplementation(() => { order.push('head'); });
+		vi.mocked(stores.chatState.acknowledgeInput).mockImplementation(() => { order.push('ack'); });
+		vi.mocked(stores.chatState.markChatTranscriptStale).mockImplementation(() => { order.push('replacement'); });
+		renderRouterWithRawMessages([head(),
+			{ ...new ChatInputCommittedMessage('server-instance-1', 'chat-a', 'generation-current', 'input-1', 2) },
+			{ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'generation-current', transcriptViewId: 'generation-new', lastOrdinal: 0 }], stores);
+		expect(order).toEqual(['head', 'ack', 'replacement']);
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
-		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('marks background transcripts stale on transcript replacement', () => {
@@ -794,7 +621,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 1));
+		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 0));
 		expect(stores.conversationUi.getTransientFeed('chat-a')).toBeNull();
 
 		resolveSnapshot(chatSnapshot('generation-old'));
@@ -833,7 +660,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 1));
+		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 0));
 		expect(
 			stores.conversationUi.setTransientFeedFromSnapshot({
 				...transientFeed('generation-current'),
@@ -858,58 +685,12 @@ describe('event router integration', () => {
 		});
 	});
 
-	it('preserves streamed output order before same-drain stop messages', () => {
-		let currentRows: Array<{ noticeType?: LocalNoticeType; content: string }> = [];
-		const defaults = createStores();
-		const stores = createStores({
-			chatState: {
-				...defaults.chatState,
-				applyChatMessages: (_chatId, _transcriptViewId, messages) => {
-					currentRows = [
-						...currentRows,
-						...messages.map((entry) => ({
-							content: 'content' in entry.message ? String(entry.message.content) : '',
-						})),
-					];
-					return 'applied';
-				},
-				appendLocalNotice: (noticeType, content) => {
-					currentRows = [...currentRows, { noticeType, content }];
-				},
-			},
-		});
-
-		renderRouterWithRawMessages(
-			[
-				{
-					type: 'chat-messages',
-					chatId: 'chat-a',
-					transcriptViewId: 'generation-current',
-					firstOrdinal: 2,
-					lastOrdinal: 2,
-					resendCandidates: [],
-					messages: [
-						rawMessage(2, {
-							type: 'assistant-message',
-							timestamp: TS,
-							content: 'streamed',
-						}),
-					],
-				},
-				{
-					type: 'chat-session-stopped',
-					chatId: 'chat-a',
-					outcome: 'interrupt-requested',
-					intent: 'stop',
-				},
-			],
-			stores,
-		);
-
-		expect(currentRows).toEqual([
-			{ content: 'streamed' },
-			{ noticeType: 'warning', content: 'Chat interrupted by user.' },
-		]);
+	it('preserves compact publication order before same-drain stop messages', () => {
+		const stores = createStores(), order: string[] = [];
+		vi.mocked(stores.chatState.observeHead).mockImplementation(() => { order.push('head'); });
+		vi.mocked(stores.chatState.appendLocalNotice).mockImplementation(() => { order.push('stop'); });
+		renderRouterWithRawMessages([head(), { type: 'chat-session-stopped', chatId: 'chat-a', outcome: 'interrupt-requested', intent: 'stop' }], stores);
+		expect(order).toEqual(['head', 'stop']);
 	});
 
 	it('does not flash an interruption notice before an interrupt-and-send input', () => {

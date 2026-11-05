@@ -236,7 +236,9 @@
 
 	$effect(() => {
 		const viewport = conversationViewport;
-		if (viewport) panel.resumePendingRestore();
+		const registration = panel;
+		void registration.transcript.feedMutationClock.dataRevision;
+		if (viewport) untrack(() => registration.resumePendingRestore());
 	});
 
 	$effect(() => {

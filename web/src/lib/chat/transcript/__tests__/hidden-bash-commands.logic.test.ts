@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-	compileHiddenBashCommandPatterns,
-	createHiddenBashCommandMatcherCache,
 	HIDDEN_BASH_COMMAND_PATTERN_PRESETS,
-	isHiddenBashToolUse,
 	validateHiddenBashCommandPattern,
 } from '$lib/chat/transcript/hidden-bash-commands.js';
 import { BashToolUseMessage, ReadToolUseMessage } from '$shared/chat-types';
+import { compileHiddenBashCommandPatterns } from '$shared/transcript-display-matcher.js';
+import { isHiddenBashToolUse } from './reference/conversation-feed-items.js';
 
 describe('compileHiddenBashCommandPatterns', () => {
 	it('matches Garcon-Amp launcher commands without matching embedded paths', () => {
@@ -98,58 +97,6 @@ describe('validateHiddenBashCommandPattern', () => {
 	it('accepts valid patterns per mode', () => {
 		expect(validateHiddenBashCommandPattern('git *', 'glob')).toBe('ok');
 		expect(validateHiddenBashCommandPattern('^git', 'regex')).toBe('ok');
-	});
-});
-
-describe('createHiddenBashCommandMatcherCache', () => {
-	it('reuses a matcher for value-identical lists', () => {
-		const matcherFor = createHiddenBashCommandMatcherCache();
-		const first = matcherFor([{ pattern: 'git *', mode: 'glob' }]);
-		const second = matcherFor([{ pattern: 'git *', mode: 'glob' }]);
-
-		expect(first).not.toBeNull();
-		expect(second).toBe(first);
-	});
-
-	it('creates a new matcher for each semantic list change', () => {
-		const matcherFor = createHiddenBashCommandMatcherCache();
-		const base = matcherFor([
-			{ pattern: 'git *', mode: 'glob' },
-			{ pattern: '^cargo', mode: 'regex' },
-		]);
-		const changes = [
-			[
-				{ pattern: 'git *', mode: 'regex' as const },
-				{ pattern: '^cargo', mode: 'regex' as const },
-			],
-			[
-				{ pattern: 'git ?', mode: 'glob' as const },
-				{ pattern: '^cargo', mode: 'regex' as const },
-			],
-			[
-				{ pattern: '^cargo', mode: 'regex' as const },
-				{ pattern: 'git *', mode: 'glob' as const },
-			],
-			[{ pattern: 'git *', mode: 'glob' as const }],
-			[
-				{ pattern: 'git *', mode: 'glob' as const },
-				{ pattern: '^cargo', mode: 'regex' as const },
-				{ pattern: 'bun *', mode: 'glob' as const },
-			],
-		];
-
-		for (const patterns of changes) {
-			expect(matcherFor(patterns)).not.toBe(base);
-		}
-	});
-
-	it('does not reuse a matcher after the caller mutates the prior input', () => {
-		const matcherFor = createHiddenBashCommandMatcherCache();
-		const patterns = [{ pattern: 'git *', mode: 'glob' as const }];
-		const first = matcherFor(patterns);
-		patterns[0].pattern = 'cargo *';
-
-		expect(matcherFor(patterns)).not.toBe(first);
 	});
 });
 

@@ -9,7 +9,6 @@ import { describe, expect, test } from 'vitest';
 const MAX_LINES = 1000;
 
 const GRANDFATHER: Record<string, number> = {
-	'src/lib/chat/tools/tool-display-registry.ts': 1075,
 };
 
 // paraglide is generated; it is not hand-written production code.

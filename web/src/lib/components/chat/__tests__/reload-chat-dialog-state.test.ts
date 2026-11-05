@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChatReloadOptions, ChatReloadOutcome } from '$lib/chat/conversation/reload-chat.js';
 import { ReloadChatDialogState } from '../reload-chat-dialog-state.svelte.js';
 
-const CANDIDATES = [{ ordinal: 3, content: 'unsent', attachmentNames: [] }];
+const CANDIDATES = [{ ordinal: 3, preview: 'unsent', timestamp: '2026-01-01T00:00:00.000Z', attachmentCount: 0 }];
 
 describe('ReloadChatDialogState', () => {
 	it('settles a dismissed confirmation without running a reload', async () => {

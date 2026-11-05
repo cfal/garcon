@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildRouterStores,
 	type ConversationRouterStoreDeps,
@@ -13,10 +13,13 @@ import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
 import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '../conversation-panel-registry.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
-import { getChatMessages } from '$lib/api/chats.js';
+import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
+import { displayOpen, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 
-vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
+let api: ReturnType<typeof mockDisplayApi>;
+const owned: ConversationRouterStoreDeps[] = [];
+afterEach(() => { for (const deps of owned.splice(0)) deps.panels.destroy(); vi.restoreAllMocks(); });
 
 vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
@@ -69,7 +72,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		discardChat: vi.fn(),
 	});
 	const panels = new ConversationPanelRegistry({
-		cache: chatState.transcriptCache,
+		bodies: new DisplayBodyStore(),
 		overlays: new ConversationTranscriptOverlayStore(),
 		lifecycle: {
 			forChat: lifecycleForChat,
@@ -78,7 +81,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		getComposerAnchorSurfaceId: () => null,
 		getSelectedChatId: () => selectedChat?.id ?? null,
 	});
-	return {
+	const deps: ConversationRouterStoreDeps = {
 		sessions: {
 			byId: selectedChat ? { [selectedChat.id]: selectedChat } : {},
 			selectedChat,
@@ -109,6 +112,8 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		panels,
 		clearDeletedChat: vi.fn(),
 	};
+	owned.push(deps);
+	return deps;
 }
 
 function entry(ordinal: number, content: string): TranscriptMessage {
@@ -118,19 +123,12 @@ function entry(ordinal: number, content: string): TranscriptMessage {
 	};
 }
 
-function page(transcriptViewId: string) {
-	return {
-		chatId: 'chat-1', historyState: { kind: 'complete' as const }, transcriptViewId,
-		messages: [entry(1, transcriptViewId)], lastOrdinal: 1, pageOldestOrdinal: 1,
-		pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false, limit: 50,
-		resendCandidates: [],
-	};
-}
+function page(view: string) { return displayOpen('chat-1', view, 1); }
 
 describe('buildRouterStores', () => {
 	beforeEach(() => {
 		localStorage.clear();
-		vi.mocked(getChatMessages).mockReset();
+		api = mockDisplayApi([entry(1, 'Synthetic prompt')], page('view-1'));
 	});
 
 	it('returns the selected chat record directly for router consumers', () => {
@@ -168,64 +166,26 @@ describe('buildRouterStores', () => {
 		expect(deps.lifecycles.get('chat-1')?.loadingStatus).toBeNull();
 	});
 
-	it('applies background transcripts through the shared transcript cache', () => {
-		const deps = depsFor(chatRecord());
-		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1, null);
-		const stores = buildRouterStores(deps);
-
-		const applied = stores.chatState.applyChatMessages(
-			'chat-2',
-			'generation-2',
-			[entry(2, 'two')],
-			2,
-			2,
-			[],
-		);
-
-		expect(applied).toBe('applied');
-		expect(
-			deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal),
-		).toEqual([1, 2]);
-		deps.panels.destroy();
-		deps.chatState.transcriptCache.flush();
+	it('records compact background heads without hydrating unrendered history', () => {
+		const deps = depsFor(chatRecord()), stores = buildRouterStores(deps);
+		stores.chatState.observeHead('chat-2', 'generation-2', 2, { assistant: 2, 'command-output': 0, 'command-result': 0, thinking: 0, error: 0, permission: 0, tool: 0 });
+		expect(stores.chatState.getChatCursor('chat-2')).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 2 });
+		expect(api.window).not.toHaveBeenCalled();
+		expect(deps.panels.bodyStore.count).toBe(0);
 	});
 
-	it('reads a selected but unrendered chat cursor from the shared panel cache', () => {
-		const deps = depsFor(chatRecord());
-		deps.chatState.transcriptCache.replace(
-			'chat-1',
-			'generation-cached',
-			[entry(1, 'cached')],
-			1,
-			null,
-		);
-		const stores = buildRouterStores(deps);
-
-		expect(stores.chatState.getChatCursor('chat-1')).toMatchObject({
-			transcriptViewId: 'generation-cached',
-			lastOrdinal: 1,
-		});
-		deps.panels.destroy();
-		deps.chatState.transcriptCache.flush();
+	it('retains a selected unrendered source head without pretending it has received bodies', () => {
+		const deps = depsFor(chatRecord()), stores = buildRouterStores(deps);
+		deps.panels.observeHead('chat-1', 'generation-cached', 40);
+		expect(stores.chatState.getChatCursor('chat-1')).toEqual({ transcriptViewId: 'generation-cached', lastOrdinal: 40 });
+		expect(deps.chatState.entries).toEqual([]);
 	});
 
-	it('does not create tail-only background transcripts before a rendered-panel recovery', () => {
-		const deps = depsFor(chatRecord());
-		const stores = buildRouterStores(deps);
-
-		const applied = stores.chatState.applyChatMessages(
-			'chat-2',
-			'generation-2',
-			[entry(4, 'tail')],
-			4,
-			4,
-			[],
-		);
-
-		expect(applied).toBe('gap-detected');
-		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
-		deps.panels.destroy();
-		deps.chatState.transcriptCache.flush();
+	it('does not treat an acknowledgement for another chat as selected optimistic delivery', () => {
+		const deps = depsFor(chatRecord()), stores = buildRouterStores(deps);
+		deps.panels.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'input-1', content: 'Pending', createdAt: '', delivery: 'pending' });
+		stores.chatState.acknowledgeInput('chat-2', 'view-2', 'input-1', 4);
+		expect(deps.panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(1);
 	});
 
 	it('passes preview timestamps through to the sessions store', () => {
@@ -255,24 +215,24 @@ describe('buildRouterStores', () => {
 
 	it.each(['rendered', 'not-yet-rendered'])('fences fallback activation before recovering a %s replacement view', async (presentation) => {
 		const deps = depsFor(chatRecord());
-		const cache = deps.panels.transcriptCache;
 		deps.chatState = new CurrentConversationPanelTranscript({
 			panels: deps.panels,
 			getSelectedChatId: () => 'chat-1',
 		});
-		cache.replace('chat-1', 'view-1', page('view-1').messages, 1, null);
 		deps.chatState.activateChat('chat-1');
 		let resolve!: (response: ReturnType<typeof page>) => void;
-		vi.mocked(getChatMessages).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+		api.open.mockReturnValueOnce(new Promise(done => { resolve = done; }));
 		const stores = buildRouterStores(deps);
 		try {
 			const activation = stores.chatState.loadMessages('chat-1', { purpose: 'activation' });
+			await vi.waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
 			const panels: ConversationPanelDescriptor[] = [{
 				surfaceId: 'chat-view:window-left', chatId: 'chat-1', presentation: 'window-left',
 				windowId: 'window-left', snapshotAdmission: 'admitted',
 			}];
 			if (presentation === 'rendered') deps.panels.reconcile(panels);
-			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
+			api.replace([entry(1, 'view-2')], page('view-2'));
+			api.open.mockResolvedValueOnce(page('view-2'));
 			if (presentation === 'rendered') {
 				stores.chatState.markRenderedChatStale('chat-1');
 			} else {
@@ -285,22 +245,18 @@ describe('buildRouterStores', () => {
 			resolve(page('view-1'));
 			await activation;
 			expect(panel.transcript.transcriptViewId).toBe('view-2');
-			expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
-			expect(panel.transcript.entries).toEqual(page('view-2').messages);
+			expect(panel.transcript.entries).toEqual([entry(1, 'view-2')]);
 		} finally {
 			deps.panels.destroy();
-			cache.flush();
 		}
 	});
 
 	it('clears rejected optimistic input after replacement while its panel is unmounted', async () => {
 		const deps = depsFor(chatRecord());
-		const cache = deps.panels.transcriptCache;
 		deps.chatState = new CurrentConversationPanelTranscript({
 			panels: deps.panels,
 			getSelectedChatId: () => deps.sessions.selectedChatId,
 		});
-		cache.replace('chat-1', 'view-1', page('view-1').messages, 1, null);
 		const panels: ConversationPanelDescriptor[] = [{
 			surfaceId: 'chat-view:window-left', chatId: 'chat-1', presentation: 'window-left',
 			windowId: 'window-left', snapshotAdmission: 'admitted',
@@ -317,7 +273,8 @@ describe('buildRouterStores', () => {
 			deps.chatState.activateChat(null);
 			stores.chatState.markChatTranscriptStale('chat-1');
 			deps.chatState.clearOptimisticUserInput('input-1');
-			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
+			api.replace([entry(1, 'view-2')], page('view-2'));
+			api.open.mockResolvedValueOnce(page('view-2'));
 			deps.panels.reconcile(panels);
 			await stores.chatState.loadRenderedChat('chat-1');
 			const panel = deps.panels.panel('chat-view:window-left')!;
@@ -326,7 +283,6 @@ describe('buildRouterStores', () => {
 			expect(deps.panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(0);
 		} finally {
 			deps.panels.destroy();
-			cache.flush();
 		}
 	});
 

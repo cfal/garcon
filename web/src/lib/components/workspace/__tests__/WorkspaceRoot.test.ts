@@ -27,7 +27,7 @@ import type {
 	ConversationPanelPresentationPort,
 	ConversationPanelRegistry,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
-import type { ChatMessagesRequest } from '$lib/api/chats.js';
+import { mockDisplayApi, displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import type { ProjectTarget } from '$shared/project-resolution';
 import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
@@ -39,7 +39,7 @@ import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.sve
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
-const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
+let displayApi: ReturnType<typeof mockDisplayApi>;
 
 vi.mock('$lib/context', () => ({
 	getAuth: () => ({ token: null }),
@@ -86,13 +86,6 @@ vi.mock('$lib/components/chat/ConversationPanel.svelte', async () => ({
 vi.mock('$lib/components/workspace/PortableSurfaceContent.svelte', async () => ({
 	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
-vi.mock('$lib/api/chats.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('$lib/api/chats.js')>();
-	return {
-		...actual,
-		getChatMessages: chatApiMocks.getChatMessages,
-	};
-});
 
 const WorkspaceRoot = (await import('../WorkspaceRoot.svelte')).default;
 
@@ -128,21 +121,6 @@ function chat(
 	};
 }
 
-function emptyChatHistory(request: ChatMessagesRequest) {
-	return {
-		historyState: { kind: 'complete' as const },
-		chatId: request.chatId,
-		transcriptViewId: `view-${request.chatId}`,
-		messages: [],
-		lastOrdinal: 0,
-		pageOldestOrdinal: 0,
-		pageNewestOrdinal: 0,
-		nextBeforeOrdinal: null,
-		hasMore: false,
-		limit: request.limit ?? 50,
-		resendCandidates: [],
-	};
-}
 
 function installContext({ composerStatusBarGitProjects = false }: { composerStatusBarGitProjects?: boolean } = {}) {
 	const initial = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
@@ -559,10 +537,8 @@ describe('WorkspaceRoot', () => {
 	beforeEach(() => {
 		localStorage.clear();
 		vi.clearAllMocks();
-		chatApiMocks.getChatMessages.mockReset();
-		chatApiMocks.getChatMessages.mockImplementation(async (request: ChatMessagesRequest) =>
-			emptyChatHistory(request),
-		);
+		displayApi = mockDisplayApi([], displayOpen('chat-a', 'view-chat-a'));
+		displayApi.replace([], displayOpen('chat-b', 'view-chat-b'));
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
 
@@ -694,13 +670,13 @@ describe('WorkspaceRoot', () => {
 		});
 		sessions.selectedChat = draft;
 		sessions.byId['chat-a'] = draft;
-		chatApiMocks.getChatMessages.mockRejectedValue(new Error('Session not found'));
+		displayApi.open.mockRejectedValue(new Error('Session not found'));
 
 		renderRoot();
 		await tick();
 
 		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
-		expect(chatApiMocks.getChatMessages).not.toHaveBeenCalled();
+		expect(displayApi.open).not.toHaveBeenCalled();
 	});
 
 	it('keeps visible project resolution stable across chat record updates', async () => {

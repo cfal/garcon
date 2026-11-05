@@ -1,411 +1,172 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
-import type { TranscriptMessage } from '$shared/chat-view';
-import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
-import {
-	UserMessageNavigatorController,
-	type UserMessageNavigatorOptions,
-	type UserMessageNavigatorTarget,
-} from '../user-message-navigator-controller.svelte.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
+import type { UserRowPage } from '$shared/transcript-display-auxiliary';
+import { UserMessageNavigatorController, type UserMessageNavigatorOptions } from '../user-message-navigator-controller.svelte.js';
 
-const TS = '2026-07-22T00:00:00.000Z';
-
-function entry(ordinal: number, message: ChatMessage): TranscriptMessage {
-	return { ordinal, message };
+const controllers: UserMessageNavigatorController[] = [];
+afterEach(() => { for (const controller of controllers.splice(0)) controller.close(); vi.useRealTimers(); });
+function page(ordinals = [9, 5], nextBeforeOrdinal: number | null = null): UserRowPage {
+	return { kind: 'available', chatId: 'chat-1', transcriptViewId: 'view-1', serverInstanceId: 'instance-1', watermark: 10, sourceHead: 10,
+		rows: ordinals.map(ordinal => ({ ordinal, preview: `Prompt ${ordinal}`, timestamp: '2026-01-01T00:00:00.000Z', attachmentCount: 0 })), nextBeforeOrdinal };
 }
-
-function user(
-	content: string,
-	timestamp = TS,
-	images?: ConstructorParameters<typeof UserMessage>[2],
-) {
-	return new UserMessage(timestamp, content, images);
+function setup() {
+	const transcript = { activeChatId: 'chat-1', transcriptViewId: 'view-1', lastOrdinal: 10, serverInstanceId: 'instance-1' };
+	let selected: string | null = 'chat-1';
+	const api = { userRows: vi.fn<TranscriptDisplayApi['userRows']>(async () => page()) };
+	const reloadTranscript = vi.fn<UserMessageNavigatorOptions['reloadTranscript']>(async () => {});
+	const jumpToRow = vi.fn<UserMessageNavigatorOptions['jumpToRow']>(async () => 'completed');
+	const controller = new UserMessageNavigatorController({ transcript, getSelectedChatId: () => selected, reloadTranscript, jumpToRow, api });
+	controllers.push(controller);
+	return { transcript, api, reloadTranscript, jumpToRow, controller, selectChat(chatId: string | null) { selected = chatId; } };
 }
-
-function assistant(content: string) {
-	return new AssistantMessage(TS, content);
-}
-
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
-		resolve = resolvePromise;
-	});
-	return { promise, resolve };
-}
-
-function setup(messages: TranscriptMessage[] = [entry(1, user('first'))]) {
-	const transcript = new ActiveTranscriptState();
-	transcript.replaceGeneration('chat-1', 'generation-1', messages, {
-		lastOrdinal: messages.at(-1)?.ordinal ?? 0,
-		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
-		pageNewestOrdinal: messages.at(-1)?.ordinal ?? 0,
-		nextBeforeOrdinal: null,
-		hasMore: false,
-	});
-	let selectedChatId: string | null = 'chat-1';
-	const reloadTranscript = vi.fn(async () => undefined);
-	const restoreLatestTranscript = vi.fn(async () => true);
-	const loadOlderMessages = vi.fn<UserMessageNavigatorOptions['loadOlderMessages']>(
-		async () => 'loaded',
-	);
-	const jumpToRow = vi.fn<UserMessageNavigatorOptions['jumpToRow']>(
-		async (_target: UserMessageNavigatorTarget) => 'completed',
-	);
-	const controller = new UserMessageNavigatorController({
-		transcript,
-		getSelectedChatId: () => selectedChatId,
-		reloadTranscript,
-		restoreLatestTranscript,
-		loadOlderMessages,
-		jumpToRow,
-	});
-	return {
-		controller,
-		transcript,
-		reloadTranscript,
-		restoreLatestTranscript,
-		loadOlderMessages,
-		jumpToRow,
-		selectChat(chatId: string | null) {
-			selectedChatId = chatId;
-		},
-	};
-}
-
 describe('UserMessageNavigatorController', () => {
-	beforeEach(() => {
-		localStorage.clear();
+	it('reads independent canonical user summaries without growing or moving the feed', async () => {
+		const { controller, api, transcript, reloadTranscript } = setup();
+		await controller.openForActiveChat();
+		expect(api.userRows).toHaveBeenCalledWith({ chatId: 'chat-1', transcriptViewId: 'view-1', atWatermark: 10, limit: 50, mode: 'navigation' }, expect.any(AbortSignal));
+		expect(controller.items.map(row => row.id)).toEqual(['view-1:9', 'view-1:5']);
+		expect(transcript.lastOrdinal).toBe(10);
+		expect(reloadTranscript).not.toHaveBeenCalled();
 	});
 
-	it('lists canonical user rows newest first and excludes other row kinds', () => {
-		const { controller, transcript } = setup([
-			entry(1, user('first', '2026-07-22T00:00:01.000Z')),
-			entry(2, assistant('response')),
-			entry(3, user('second', '2026-07-22T00:00:03.000Z')),
-		]);
-		transcript.appendLocalNotice('progress', 'local notice');
-		controller.openForActiveChat();
-
-		expect(controller.items).toEqual([
-			expect.objectContaining({ id: 'generation-1:3', ordinal: 3, content: 'second' }),
-			expect.objectContaining({ id: 'generation-1:1', ordinal: 1, content: 'first' }),
-		]);
+	it('preserves attachment summaries without hydrating their bodies', async () => {
+		const { controller, api } = setup();
+		api.userRows.mockResolvedValueOnce({ ...page(), rows: [{ ordinal: 9, preview: '', timestamp: '2026-01-01T00:00:00.000Z', attachmentCount: 2 }] });
+		await controller.openForActiveChat();
+		expect(controller.items[0]).toMatchObject({ content: '', attachmentCount: 2 });
 	});
 
-	it('restores the latest bounded suffix before opening from the detached initial window', async () => {
-		const pendingRestore = deferred<boolean>();
-		const { controller, transcript, restoreLatestTranscript } = setup([
-			entry(1, user('early prompt')),
-		]);
+	it('pages at the captured watermark while the live head grows', async () => {
+		const { controller, api, transcript } = setup();
+		api.userRows.mockResolvedValueOnce(page([9, 5], 5)).mockResolvedValueOnce(page([2]));
+		await controller.openForActiveChat();
 		transcript.lastOrdinal = 100;
-		transcript.hasLaterMessages = true;
-		restoreLatestTranscript.mockImplementationOnce(async () => {
-			const restored = await pendingRestore.promise;
-			if (restored) {
-				transcript.entries = [
-					entry(99, user('recent prompt')),
-					entry(100, assistant('recent response')),
-				];
-				transcript.hasEarlierMessages = true;
-			}
-			return restored;
-		});
-
-		const open = controller.openForActiveChat();
-		expect(controller.open).toBe(false);
-		pendingRestore.resolve(true);
-		await open;
-
-		expect(restoreLatestTranscript).toHaveBeenCalledWith('chat-1');
-		expect(controller.open).toBe(true);
-		expect(controller.items.map((item) => item.content)).toEqual(['recent prompt']);
-	});
-
-	it('includes optimistic user rows with attachment metadata', () => {
-		const { controller, transcript } = setup();
-		transcript.upsertOptimisticUserInput({
-			chatId: 'chat-1',
-			clientMessageId: 'message-1',
-			content: '',
-			createdAt: '2026-07-22T00:00:02.000Z',
-			delivery: 'pending',
-			images: [{ name: 'context.pdf', mimeType: 'application/pdf', data: '' }],
-		});
-		controller.openForActiveChat();
-
-		expect(controller.items[0]).toMatchObject({
-			id: 'optimistic:message-1',
-			content: '',
-			attachmentCount: 1,
-		});
-	});
-
-	it('appends user rows from older prepended history at the list bottom', async () => {
-		const { controller, transcript, loadOlderMessages } = setup([entry(3, user('recent'))]);
-		transcript.hasEarlierMessages = true;
-		loadOlderMessages.mockImplementationOnce(async () => {
-			transcript.entries = [
-				entry(1, user('oldest')),
-				entry(2, assistant('older reply')),
-				...transcript.entries,
-			];
-			transcript.hasEarlierMessages = false;
-			return 'loaded' as const;
-		});
-		controller.openForActiveChat();
-
 		await controller.loadOlder();
-
-		expect(controller.items.map((item) => item.content)).toEqual(['recent', 'oldest']);
+		expect(api.userRows.mock.calls[1][0]).toMatchObject({ beforeOrdinal: 5, atWatermark: 10 });
+		expect(controller.items.map(row => row.ordinal)).toEqual([9, 5, 2]);
+		expect(controller.hasMore).toBe(false);
 	});
 
-	it('coalesces concurrent load requests and exposes a typed retryable failure', async () => {
-		const pendingLoad = deferred<'failed'>();
-		const { controller, transcript, loadOlderMessages } = setup();
-		transcript.hasEarlierMessages = true;
-		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
-		controller.openForActiveChat();
-
-		const firstLoad = controller.loadOlder();
-		const duplicateLoad = controller.loadOlder();
-		expect(loadOlderMessages).toHaveBeenCalledOnce();
-		pendingLoad.resolve('failed');
-		await Promise.all([firstLoad, duplicateLoad]);
-
+	it('coalesces in-flight reads and preserves a failed continuation for retry', async () => {
+		const { controller, api } = setup();
+		api.userRows.mockResolvedValueOnce(page([9], 9));
+		await controller.openForActiveChat();
+		const held = Promise.withResolvers<UserRowPage>();
+		api.userRows.mockImplementationOnce(() => held.promise);
+		const loading = controller.loadOlder();
+		await controller.loadOlder();
+		expect(api.userRows).toHaveBeenCalledTimes(2);
+		held.reject(new Error('offline'));
+		await loading;
 		expect(controller.loadError).toBe('older-page-failed');
-		await controller.retryLoadOlder();
-		expect(loadOlderMessages).toHaveBeenCalledTimes(2);
-		expect(controller.loadError).toBeNull();
-	});
-
-	it('does not report an invalidated older-page request as a failure', async () => {
-		const { controller, transcript, loadOlderMessages } = setup();
-		transcript.hasEarlierMessages = true;
-		loadOlderMessages.mockResolvedValueOnce('invalidated');
-		controller.openForActiveChat();
-
-		await controller.loadOlder();
-
-		expect(controller.loadError).toBeNull();
-		expect(controller.isLoadingOlder).toBe(false);
-	});
-
-	it('ignores a late page result after the active chat changes', async () => {
-		const pendingLoad = deferred<'invalidated'>();
-		const { controller, transcript, loadOlderMessages, selectChat } = setup();
-		transcript.hasEarlierMessages = true;
-		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise);
-		controller.openForActiveChat();
-		const load = controller.loadOlder();
-
-		selectChat('chat-2');
-		transcript.activateChat('chat-2');
-		controller.reconcileActiveTranscript('chat-2', '');
-		pendingLoad.resolve('invalidated');
-		await load;
-
-		expect(controller.open).toBe(false);
-		expect(controller.loadError).toBeNull();
-	});
-
-	it('opens during initial loading and adopts the first generation for the chat', () => {
-		const transcript = new ActiveTranscriptState();
-		transcript.activateChat('chat-1');
-		transcript.beginSnapshotLoad();
-		const controller = new UserMessageNavigatorController({
-			transcript,
-			getSelectedChatId: () => 'chat-1',
-			reloadTranscript: vi.fn(async () => undefined),
-			restoreLatestTranscript: vi.fn(async () => true),
-			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow: vi.fn(async () => 'unavailable' as const),
-		});
-
-		controller.openForActiveChat();
-		expect(controller.isInitialLoading).toBe(true);
-		transcript.replaceGeneration('chat-1', 'generation-1', [], {
-			lastOrdinal: 0,
-			pageOldestOrdinal: 0,
-			pageNewestOrdinal: 0,
-			nextBeforeOrdinal: null,
-			hasMore: false,
-		});
-		controller.reconcileActiveTranscript('chat-1', 'generation-1');
-
-		expect(controller.openedTranscriptViewId).toBe('generation-1');
-		expect(controller.isInitialLoading).toBe(false);
-	});
-
-	it('shows an empty draft without waiting for a transcript generation', () => {
-		const transcript = new ActiveTranscriptState();
-		transcript.activateChat('chat-1');
-		const controller = new UserMessageNavigatorController({
-			transcript,
-			getSelectedChatId: () => 'chat-1',
-			reloadTranscript: vi.fn(async () => undefined),
-			restoreLatestTranscript: vi.fn(async () => true),
-			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow: vi.fn(async () => 'unavailable' as const),
-		});
-
-		controller.openForActiveChat();
-
-		expect(controller.isInitialLoading).toBe(false);
-		expect(controller.initialLoadError).toBeNull();
-		expect(controller.items).toEqual([]);
-	});
-
-	it('jumps to an optimistic input before a transcript view is established', async () => {
-		const transcript = new ActiveTranscriptState();
-		transcript.activateChat('chat-1');
-		transcript.upsertOptimisticUserInput({
-			chatId: 'chat-1',
-			clientMessageId: 'message-1',
-			content: 'First message',
-			createdAt: TS,
-			delivery: 'pending',
-		});
-		const jumpToRow = vi.fn(async () => 'completed' as const);
-		const controller = new UserMessageNavigatorController({
-			transcript,
-			getSelectedChatId: () => 'chat-1',
-			reloadTranscript: vi.fn(async () => undefined),
-			restoreLatestTranscript: vi.fn(async () => true),
-			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow,
-		});
-		controller.openForActiveChat();
-
-		await controller.select(controller.items[0]);
-
-		expect(jumpToRow).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			transcriptViewId: '',
-			rowId: 'optimistic:message-1',
-		});
-		expect(controller.open).toBe(false);
-	});
-
-	it('exposes an initial load failure and retries the active chat', async () => {
-		const transcript = new ActiveTranscriptState();
-		transcript.activateChat('chat-1');
-		transcript.loadStatus = 'error';
-		const reloadTranscript = vi.fn(async () => undefined);
-		const controller = new UserMessageNavigatorController({
-			transcript,
-			getSelectedChatId: () => 'chat-1',
-			reloadTranscript,
-			restoreLatestTranscript: vi.fn(async () => true),
-			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow: vi.fn(async () => 'unavailable' as const),
-		});
-		controller.openForActiveChat();
-
-		expect(controller.initialLoadError).toBe('initial-load-failed');
-		await controller.retryInitialLoad();
-
-		expect(reloadTranscript).toHaveBeenCalledWith('chat-1');
-	});
-
-	it('keeps established rows visible during background revalidation', () => {
-		const { controller, transcript } = setup();
-		transcript.beginSnapshotLoad();
-
-		controller.openForActiveChat();
-
-		expect(controller.openedTranscriptViewId).toBe('generation-1');
-		expect(controller.isInitialLoading).toBe(false);
 		expect(controller.items).toHaveLength(1);
+		api.userRows.mockResolvedValueOnce(page([5]));
+		await controller.retryLoadOlder();
+		expect(controller.loadError).toBeNull();
+		expect(controller.items).toHaveLength(2);
 	});
 
-	it('reveals loaded rows before jumping and clears identity after success', async () => {
-		const { controller, transcript, jumpToRow } = setup();
-		const reveal = vi.spyOn(transcript, 'revealAllLoadedMessages');
-		jumpToRow.mockImplementationOnce(async () => {
-			expect(reveal).toHaveBeenCalledOnce();
-			return 'completed' as const;
-		});
-		controller.openForActiveChat();
+	it('keeps preparation pending and retries without claiming empty history', async () => {
+		vi.useFakeTimers();
+		const { controller, api } = setup();
+		api.userRows.mockResolvedValueOnce({ ...page(), kind: 'preparing', errorCode: null });
+		await controller.openForActiveChat();
+		expect(controller.isInitialLoading).toBe(true);
+		expect(controller.initialLoadError).toBeNull();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(controller.items).toHaveLength(2);
+		expect(controller.isInitialLoading).toBe(false);
+	});
 
+	it('adopts a missing view through the ordinary snapshot owner', async () => {
+		const { controller, transcript, reloadTranscript } = setup();
+		transcript.transcriptViewId = '';
+		reloadTranscript.mockImplementationOnce(async () => { transcript.transcriptViewId = 'view-1'; });
+		await controller.openForActiveChat();
+		expect(reloadTranscript).toHaveBeenCalledWith('chat-1');
+		expect(controller.openedTranscriptViewId).toBe('view-1');
+		expect(controller.items).toHaveLength(2);
+	});
+
+	it('rejects foreign views, instances, and watermark responses', async () => {
+		for (const changed of [{ transcriptViewId: 'other' }, { serverInstanceId: 'other' }, { watermark: 9 }]) {
+			const { controller, api } = setup();
+			api.userRows.mockResolvedValueOnce({ ...page(), ...changed });
+			await controller.openForActiveChat();
+			expect(controller.initialLoadError).toBe('initial-load-failed');
+			expect(controller.items).toEqual([]);
+		}
+	});
+
+	it('ignores late pages after chat or view replacement', async () => {
+		const { controller, api, selectChat } = setup();
+		const held = Promise.withResolvers<UserRowPage>();
+		api.userRows.mockImplementationOnce(() => held.promise);
+		const opening = controller.openForActiveChat();
+		selectChat('chat-2');
+		controller.reconcileActiveTranscript('chat-2', 'view-2');
+		held.resolve(page());
+		await opening;
+		expect(controller.open).toBe(false);
+		expect(controller.items).toEqual([]);
+		expect(controller.initialLoadError).toBeNull();
+	});
+
+	it('selects a canonical occurrence then clears dialog identity', async () => {
+		const { controller, jumpToRow } = setup();
+		await controller.openForActiveChat();
 		await controller.select(controller.items[0]);
-
-		expect(jumpToRow).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			transcriptViewId: 'generation-1',
-			rowId: 'generation-1:1',
-		});
+		expect(jumpToRow).toHaveBeenCalledWith({ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:9', ordinal: 9 });
 		expect(controller.open).toBe(false);
 		expect(controller.openedChatId).toBeNull();
 	});
 
-	it('reopens with an error when the target remains active but cannot be found', async () => {
+	it('reopens an unavailable target but closes a cancelled navigation', async () => {
 		const { controller, jumpToRow } = setup();
+		await controller.openForActiveChat();
 		jumpToRow.mockResolvedValueOnce('unavailable');
-		controller.openForActiveChat();
-
 		await controller.select(controller.items[0]);
-
 		expect(controller.open).toBe(true);
 		expect(controller.selectionError).toBe('target-unavailable');
-	});
-
-	it('closes without an error when user intent cancels the jump', async () => {
-		const { controller, jumpToRow } = setup();
 		jumpToRow.mockResolvedValueOnce('cancelled');
-		controller.openForActiveChat();
-
 		await controller.select(controller.items[0]);
-
 		expect(controller.open).toBe(false);
 		expect(controller.selectionError).toBeNull();
-		expect(controller.openedChatId).toBeNull();
 	});
 
-	it('does not let a stale selection result overwrite a newly opened lifecycle', async () => {
-		const pendingJump = deferred<'completed'>();
+	it('does not let late selection completion close a new dialog lifecycle', async () => {
 		const { controller, jumpToRow } = setup();
-		jumpToRow.mockReturnValueOnce(pendingJump.promise);
-		controller.openForActiveChat();
-		const selection = controller.select(controller.items[0]);
-		controller.openForActiveChat();
-
-		pendingJump.resolve('completed');
-		await selection;
-
+		await controller.openForActiveChat();
+		const held = Promise.withResolvers<'completed'>();
+		jumpToRow.mockImplementationOnce(() => held.promise);
+		const selecting = controller.select(controller.items[0]);
+		await controller.openForActiveChat();
+		held.resolve('completed'); await selecting;
 		expect(controller.open).toBe(true);
-		expect(controller.selectionError).toBeNull();
 	});
 
-	it('does not retain an older-page loading state when a failed jump reopens', async () => {
-		const pendingLoad = deferred<'invalidated'>();
-		const { controller, transcript, loadOlderMessages, jumpToRow } = setup();
-		transcript.hasEarlierMessages = true;
-		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
+	it('retires an older page before selection and permits retry after a failed jump', async () => {
+		const { controller, api, jumpToRow } = setup();
+		api.userRows.mockResolvedValueOnce(page([9], 9));
+		await controller.openForActiveChat();
+		const held = Promise.withResolvers<UserRowPage>();
+		api.userRows.mockImplementationOnce(() => held.promise);
+		const loading = controller.loadOlder();
 		jumpToRow.mockResolvedValueOnce('unavailable');
-		controller.openForActiveChat();
-		const load = controller.loadOlder();
-
 		await controller.select(controller.items[0]);
-
-		expect(controller.open).toBe(true);
 		expect(controller.isLoadingOlder).toBe(false);
-		pendingLoad.resolve('invalidated');
-		await load;
-		expect(controller.loadError).toBeNull();
-		expect(controller.isLoadingOlder).toBe(false);
-
+		api.userRows.mockResolvedValueOnce(page([5]));
 		await controller.loadOlder();
-		expect(loadOlderMessages).toHaveBeenCalledTimes(2);
+		held.resolve(page([6]));
+		await loading;
+		expect(controller.items.map(row => row.ordinal)).toEqual([9, 5]);
 	});
 
-	it('closes when an established transcript view changes', () => {
-		const { controller } = setup();
-		controller.openForActiveChat();
-
-		controller.reconcileActiveTranscript('chat-1', 'generation-2');
-
+	it('does not open without an active selected transcript', async () => {
+		const { controller, selectChat, api } = setup();
+		selectChat(null);
+		await controller.openForActiveChat();
 		expect(controller.open).toBe(false);
-		expect(controller.openedTranscriptViewId).toBeNull();
+		expect(api.userRows).not.toHaveBeenCalled();
 	});
 });

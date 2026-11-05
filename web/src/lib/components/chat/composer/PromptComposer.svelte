@@ -80,6 +80,7 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
+	import TranscriptSummaryPager from '../transcript/TranscriptSummaryPager.svelte';
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
@@ -96,7 +97,9 @@
 		onThinkingModeChange,
 		onAgentSettingChange,
 		resendCandidates = [],
-		recallPrompts = [],
+		resendPaging,
+		recallSource = null,
+		onRecallError = () => {},
 		recallIdentity = null,
 		onExcludeResendCandidate,
 		directAdmissionPending = false,
@@ -148,23 +151,15 @@
 	const markdown = new PromptComposerMarkdownController({
 		ui,
 		composer: composerState,
-		get chatId() {
-			return sessions.selectedChatId;
-		},
-		get textarea() {
-			return textarea;
-		},
-		get canFormat() {
-			return canFormat;
-		},
+		get chatId() { return sessions.selectedChatId; },
+		get textarea() { return textarea; },
+		get canFormat() { return canFormat; },
 		get sourcePaletteOpen() {
 			return fileMenuVisible || slashMenuVisible || ui.snippetPalette.isOpen;
 		},
 		get acceptsMarkdown() { return markdownInput; },
 		get preferredMode() { return localSettings.composerInputMode; },
-		get interactionGeneration() {
-			return workspaceShortcuts.userInteractionGeneration;
-		},
+		get interactionGeneration() { return workspaceShortcuts.userInteractionGeneration; },
 		get snippetTrigger() { return conversationInput ? localSettings.snippetTrigger : ''; },
 		onChange: updateDraft,
 		onSourceCaret: updateTriggers,
@@ -174,8 +169,10 @@
 	});
 	const promptRecall = new PromptComposerRecallController({
 		getIdentity: () => recallIdentity,
-		getPrompts: () => recallPrompts,
+		getSource: () => recallSource,
+		onError: message => onRecallError(message),
 		getText: () => composerState.inputText,
+		getDraftRevision: () => composerState.contentRevision,
 		getTextarea: () => textarea,
 		canRecall: () => !isDisabled && isVisible,
 		setText: updateDraft,
@@ -183,6 +180,7 @@
 	$effect(() => {
 		void recallIdentity;
 		promptRecall.reset();
+		return () => promptRecall.reset();
 	});
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
@@ -209,12 +207,8 @@
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
 	);
 	const projectState = new PromptComposerProjectState({
-		get selectedChat() {
-			return sessions.selectedChat;
-		},
-		get completionDemand() {
-			return (filesAvailable && ui.showFileMenu) || ui.showSlashMenu;
-		},
+		get selectedChat() { return sessions.selectedChat; },
+		get completionDemand() { return (filesAvailable && ui.showFileMenu) || ui.showSlashMenu; },
 		projectResolution,
 		get executionTarget() {
 			return {
@@ -849,6 +843,11 @@
 					candidates={resendCandidates}
 					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
 				/>
+				{#if resendPaging}
+					<div class:sr-only={resendCandidates.length === 0 && !resendPaging.error && !resendPaging.stale && !resendPaging.hasPrevious && !resendPaging.hasNext}>
+						<TranscriptSummaryPager paging={resendPaging} />
+					</div>
+				{/if}
 			{/if}
 			<ComposerAttachmentList
 				files={composerState.images}

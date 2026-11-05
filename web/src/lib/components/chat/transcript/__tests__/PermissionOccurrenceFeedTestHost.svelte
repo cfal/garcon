@@ -6,6 +6,7 @@
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte.js';
 	import { buildConversationVirtualFeedModel } from '../conversation-feed-virtual-items.js';
+	import { certifiedFeed } from './display-feed-fixtures.js';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import { AskUserQuestionToolUseMessage, PermissionRequestMessage, type AskUserQuestionPrompt } from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -30,19 +31,9 @@
 		permissionRequest('occurrence-one', 'First'),
 		permissionRequest('occurrence-two', 'Second'),
 	]);
-	const model = $derived(buildConversationVirtualFeedModel({
-		combineToolUseMessages: false,
-		expandedToolMemberIds: new Set(),
-		protectedVirtualKeys: [],
-		showRefreshError: false,
-		earlierBoundary: 'hidden',
-		showLaterBoundary: false,
-		reserveComposerCapSpace: false,
-		transcriptViewId: 'view-1',
-		surfaceIdentity: 'chat-1:view-1',
-		transcriptItems: [],
-		pendingPermissions: requests,
-	}));
+	const model = $derived(buildConversationVirtualFeedModel(certifiedFeed([], {
+		input: { surfaceIdentity: 'chat-1:view-1', pendingPermissions: requests },
+	})));
 	const permissionItems = $derived(model.items.filter((item) => item.kind === 'permission'));
 
 	setChatSessions({

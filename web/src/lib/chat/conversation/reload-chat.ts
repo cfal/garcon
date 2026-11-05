@@ -70,13 +70,9 @@ export async function reloadChatFromNative(
 		throw new Error('Unexpected chat reload response');
 	}
 
-	chatState.replaceGeneration(chatId, message.transcriptViewId, message.messages, {
-		lastOrdinal: message.lastOrdinal,
-		pageOldestOrdinal: message.pageOldestOrdinal,
-		pageNewestOrdinal: message.pageNewestOrdinal,
-		nextBeforeOrdinal: message.nextBeforeOrdinal,
-		hasMore: message.hasMore,
-	});
-	chatState.transcriptCache.markValidated(chatId);
+	if (chatState.activeChatId === chatId) {
+		chatState.clearMessages();
+		await chatState.loadMessages(chatId);
+	}
 	return 'reloaded';
 }

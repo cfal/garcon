@@ -1,10 +1,11 @@
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
-import type { ResendCandidate } from '$shared/chat-view';
+import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 import type { JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
-import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
+import type { PromptRecallSource } from '$lib/chat/composer/prompt-recall';
+import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
 
 export interface PromptComposerProps {
 	onsubmit: () => void;
@@ -14,8 +15,10 @@ export interface PromptComposerProps {
 	onPermissionModeChange?: (mode: PermissionMode) => void;
 	onThinkingModeChange?: (mode: ThinkingMode) => void;
 	onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
-	resendCandidates?: readonly ResendCandidate[];
-	recallPrompts?: readonly RecallPrompt[];
+	resendCandidates?: readonly UserRowSummary[];
+	resendPaging?: DisplaySummaryPaging;
+	recallSource?: PromptRecallSource | null;
+	onRecallError?: (message: string) => void;
 	recallIdentity?: string | null;
 	onExcludeResendCandidate?: (ordinal: number) => void;
 	directAdmissionPending?: boolean;

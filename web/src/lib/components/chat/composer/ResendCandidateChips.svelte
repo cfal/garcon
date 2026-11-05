@@ -1,19 +1,19 @@
 <script lang="ts">
-	import type { ResendCandidate } from '$shared/chat-view';
+	import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
-		candidates: readonly ResendCandidate[];
+		candidates: readonly UserRowSummary[];
 		onExclude: (ordinal: number) => void;
 	}
 
 	let { candidates, onExclude }: Props = $props();
 
-	function label(candidate: ResendCandidate): string {
-		const content = candidate.content.trim();
+	function label(candidate: UserRowSummary): string {
+		const content = candidate.preview.trim();
 		if (content) return content;
-		return candidate.attachmentNames.join(', ');
+		return `${candidate.attachmentCount} attachments`;
 	}
 </script>
 

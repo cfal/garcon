@@ -21,17 +21,16 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		onNavigateToChat: vi.fn(),
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
-		markChatTranscriptValidated: vi.fn(),
 		notifyCompletion: vi.fn(),
 		...overrides,
 	};
 }
 
 describe('handleAgentComplete', () => {
-	it('marks transcript validated instead of deleting on successful completion', () => {
+	it('settles processing independently of display readiness on successful completion', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
-		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
+		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('notifies on successful completion', () => {
@@ -41,10 +40,10 @@ describe('handleAgentComplete', () => {
 		expect(ctx.notifyCompletion).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('does not notify or mark validated when exitCode is 1', () => {
+	it('does not notify when exitCode is 1', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 1), ctx);
-		expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
+		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
 		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
@@ -53,7 +52,7 @@ describe('handleAgentComplete', () => {
 		(exitCode) => {
 			const ctx = createCtx();
 			handleAgentComplete(new AgentRunFinishedMessage('chat-1', exitCode), ctx);
-			expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
+			expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
 			expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 		},
 	);
@@ -65,7 +64,7 @@ describe('handleAgentComplete', () => {
 			ctx,
 		);
 
-		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
+		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
 		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
@@ -138,7 +137,8 @@ describe('handleAgentError', () => {
 
 		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
 		expect(ctx.appendServerNotice).toHaveBeenCalledWith('chat-1', 'error', 'Something broke');
-		expect(ctx.conversationUi.clearPendingPermissionsForChat).toHaveBeenCalledWith('chat-1');
+		expect(ctx.conversationUi.clearTurnPermissionRequestsForChat).toHaveBeenCalledWith('chat-1');
+		expect(ctx.conversationUi.clearPendingPermissionsForChat).not.toHaveBeenCalled();
 	});
 
 	it('preserves successor-turn metadata and permission requests', () => {
@@ -151,18 +151,18 @@ describe('handleAgentError', () => {
 	});
 
 	it('clears only the failed chat permissions when another chat is current', () => {
-		const clearPendingPermissionsForChat = vi.fn();
+		const clearTurnPermissionRequestsForChat = vi.fn();
 		const ctx = createCtx({
 			getCurrentChatId: () => 'chat-current',
 			conversationUi: {
-				clearPendingPermissionsForChat,
-				clearTurnPermissionRequestsForChat: vi.fn(),
+				clearPendingPermissionsForChat: vi.fn(),
+				clearTurnPermissionRequestsForChat,
 			},
 		});
 
 		handleAgentError(new AgentRunFailedMessage('chat-failed', 'Something broke'), ctx);
 
-		expect(clearPendingPermissionsForChat).toHaveBeenCalledWith('chat-failed');
-		expect(clearPendingPermissionsForChat).not.toHaveBeenCalledWith('chat-current');
+		expect(clearTurnPermissionRequestsForChat).toHaveBeenCalledWith('chat-failed');
+		expect(clearTurnPermissionRequestsForChat).not.toHaveBeenCalledWith('chat-current');
 	});
 });

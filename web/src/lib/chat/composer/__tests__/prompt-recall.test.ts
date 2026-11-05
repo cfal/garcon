@@ -1,44 +1,65 @@
-import { describe, expect, it } from 'vitest';
-import { AssistantMessage, UserMessage } from '$shared/chat-types';
-import { PromptRecallController, recentRecallPrompts } from '../prompt-recall';
+import { describe, expect, it, vi } from 'vitest';
+import { PromptRecallController, type PromptRecallSource } from '../prompt-recall';
 
-const prompts = [
-	{ ordinal: 3, content: 'latest' },
-	{ ordinal: 1, content: 'earlier' },
-];
+function source(count = 2) {
+	return {
+		list: vi.fn(async (_signal: AbortSignal) => Array.from({ length: count }, (_, index) => ({ ordinal: count - index }))),
+		load: vi.fn(async (ordinal: number, _signal: AbortSignal) => `Prompt ${ordinal}`),
+	} satisfies PromptRecallSource;
+}
 
 describe('prompt recall', () => {
-	it('takes at most 100 nonempty user prompts newest first', () => {
-		const entries = Array.from({ length: 110 }, (_, ordinal) => ({
-			ordinal,
-			message: new UserMessage('synthetic-time', `Synthetic prompt ${ordinal}`),
-		}));
-		entries.push({ ordinal: 110, message: new UserMessage('synthetic-time', ' ') });
-		const history = recentRecallPrompts([
-			...entries,
-			{ ordinal: 111, message: new AssistantMessage('synthetic-time', 'Synthetic answer') },
-		]);
-		expect(history).toHaveLength(100);
-		expect(history[0]).toEqual({ ordinal: 109, content: 'Synthetic prompt 109' });
+	it('captures at most 100 references and fetches only the selected prompt', async () => {
+		const recall = new PromptRecallController(), history = source(110);
+		expect(recall.canNavigate('ArrowUp', 'chat:view', '')).toBe(true);
+		for (let index = 0; index < 101; index++) await recall.navigate('ArrowUp', 'chat:view', history);
+		expect(history.list).toHaveBeenCalledTimes(1);
+		expect(history.load).toHaveBeenLastCalledWith(11, expect.any(AbortSignal));
 	});
-	it('snapshots history while browsing and returns to an empty draft', () => {
-		const recall = new PromptRecallController();
-		expect(recall.navigate('ArrowDown', 'chat:view', '', prompts)).toBeNull();
-		expect(recall.navigate('ArrowUp', 'chat:view', '', prompts)).toBe('latest');
-		expect(recall.navigate('ArrowUp', 'chat:view', 'latest', [])).toBe('earlier');
-		expect(recall.navigate('ArrowUp', 'chat:view', 'earlier', [])).toBe('earlier');
-		expect(recall.navigate('ArrowDown', 'chat:view', 'earlier', [])).toBe('latest');
-		expect(recall.navigate('ArrowDown', 'chat:view', 'latest', [])).toBe('');
+
+	it('snapshots references while browsing and returns to an empty draft', async () => {
+		const recall = new PromptRecallController(), history = source();
+		expect(recall.canNavigate('ArrowDown', 'chat:view', '')).toBe(false);
+		expect(recall.canNavigate('ArrowUp', 'chat:view', '')).toBe(true);
+		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBe('Prompt 2');
+		expect(recall.canNavigate('ArrowUp', 'chat:view', 'Prompt 2')).toBe(true);
+		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBe('Prompt 1');
+		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBe('Prompt 1');
+		expect(await recall.navigate('ArrowDown', 'chat:view', history)).toBe('Prompt 2');
+		expect(await recall.navigate('ArrowDown', 'chat:view', history)).toBe('');
+		expect(history.list).toHaveBeenCalledTimes(1);
 	});
-	it('preserves typed drafts, resets on transcript identity change, and has no cross-chat retention', () => {
-		const recall = new PromptRecallController();
-		expect(recall.navigate('ArrowUp', 'a:view', 'draft', prompts)).toBeNull();
-		expect(recall.navigate('ArrowUp', 'a:view', '', prompts)).toBe('latest');
-		expect(recall.navigate('ArrowUp', 'a:new-view', 'latest', prompts)).toBeNull();
-		expect(recall.navigate('ArrowUp', 'b:view', '', [{ ordinal: 1, content: 'other' }])).toBe(
-			'other',
-		);
+
+	it('preserves drafts and resets on chat or view changes', async () => {
+		const recall = new PromptRecallController(), history = source();
+		expect(recall.canNavigate('ArrowUp', 'a:view', 'draft')).toBe(false);
+		expect(recall.canNavigate('ArrowUp', 'a:view', '')).toBe(true);
+		await recall.navigate('ArrowUp', 'a:view', history);
+		expect(recall.canNavigate('ArrowUp', 'a:replacement', 'Prompt 2')).toBe(false);
+		expect(recall.canNavigate('ArrowUp', 'b:view', '')).toBe(true);
+		expect(await recall.navigate('ArrowUp', 'b:view', source(1))).toBe('Prompt 1');
 		recall.reset();
-		expect(recall.navigate('ArrowUp', null, '', prompts)).toBeNull();
+		expect(recall.canNavigate('ArrowUp', null, '')).toBe(false);
+	});
+
+	it('rejects late body completion after reset', async () => {
+		const recall = new PromptRecallController(), pending = Promise.withResolvers<string>();
+		const history = source();
+		history.load.mockImplementation(() => pending.promise);
+		expect(recall.canNavigate('ArrowUp', 'chat:view', '')).toBe(true);
+		const reading = recall.navigate('ArrowUp', 'chat:view', history);
+		await Promise.resolve();
+		recall.reset();
+		pending.resolve('stale text');
+		expect(await reading).toBeNull();
+		expect(history.load.mock.calls[0][1].aborted).toBe(true);
+	});
+
+	it('keeps selection retryable after a failed body read', async () => {
+		const recall = new PromptRecallController(), history = source();
+		history.load.mockRejectedValueOnce(new Error('offline'));
+		expect(recall.canNavigate('ArrowUp', 'chat:view', '')).toBe(true);
+		await expect(recall.navigate('ArrowUp', 'chat:view', history)).rejects.toThrow('offline');
+		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBe('Prompt 2');
 	});
 });

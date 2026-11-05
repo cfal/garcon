@@ -13,8 +13,6 @@
 	import ConversationWorkspace from './ConversationWorkspace.svelte';
 	import SubagentManagementControl from './SubagentManagementControl.svelte';
 	import CurrentChatMenu from '$lib/components/layout/CurrentChatMenu.svelte';
-	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import type {
 		UserMessageNavigatorCommand,
@@ -49,7 +47,6 @@
 		onComposerNoticeChange,
 		subagentToolbar,
 		chatActions = noopChatActions,
-		transcriptCache: providedTranscriptCache,
 	}: {
 		isMobile: boolean;
 		isVisible: boolean;
@@ -63,7 +60,6 @@
 		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
-		transcriptCache?: ChatTranscriptCache;
 	} = $props();
 
 	const sessions = getChatSessions();
@@ -72,9 +68,6 @@
 	const gitViews = getGitViewLauncher();
 	const executors = getExecutors();
 	const workspace = getWorkspaceCoordinator();
-	const transcriptCache =
-		untrack(() => providedTranscriptCache) ??
-		new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let prepareConversationHide: (() => void) | null = $state(null);
 
@@ -137,6 +130,7 @@
 				{#if toolbarModel}
 					<SubagentManagementControl
 						model={toolbarModel}
+						paging={subagentToolbar.paging}
 						onJumpToTool={(anchorId) => subagentToolbar.jumpToTool(anchorId)}
 					/>
 				{/if}
@@ -196,7 +190,6 @@
 			{onRegisterPanelActions}
 			{onComposerHeightChange}
 			{onComposerNoticeChange}
-			{transcriptCache}
 			{reserveMobileToolbar}
 			isVisible={conversationWorkspaceVisible}
 			onChooseProjectFolder={(chatId) => {

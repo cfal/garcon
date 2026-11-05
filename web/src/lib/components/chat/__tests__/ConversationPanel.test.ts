@@ -1,14 +1,17 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import { AsyncQuestionController } from '$lib/chat/conversation/async-question-controller.svelte.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
-import type {
-	ConversationPanelPresentationPort,
-	ConversationPanelRegistration,
+import {
+	ConversationPanelRegistry,
+	type ConversationPanelDescriptor,
+	type ConversationPanelPresentationPort,
+	type ConversationPanelRegistration,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationPanelActions } from '../conversation-panel-actions.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
@@ -17,6 +20,9 @@ import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import type { GitRepositoryClassification } from '$lib/git/surface/git-quick-summary.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
+import { displayOpen, displayRow, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+import { displayProfileKey } from '$shared/transcript-display-contract';
+import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { localExecutor } from '$lib/executors/__tests__/fixtures.js';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
@@ -152,7 +158,7 @@ function gitSummary(): GitQuickSummaryReady {
 }
 
 function makePanel() {
-	const transcript = new ActiveTranscriptState(new ChatTranscriptCache({ limit: 50 }));
+	const transcript = new ActiveTranscriptState();
 	transcript.activateChat('chat-1');
 	const lifecycle = new ConversationLifecycleState();
 	lifecycle.beginTurn('chat-1');
@@ -164,6 +170,7 @@ function makePanel() {
 		getQueueContainer: () => presentation?.getQueueContainer(),
 		chatState: transcript,
 		getChatId: () => 'chat-1',
+		onUserScrollIntent: vi.fn(),
 	});
 	const prepareForInteractionLoss = vi.fn();
 	const panel: ConversationPanelRegistration = {
@@ -414,22 +421,9 @@ describe('ConversationPanel', () => {
 	it('leaves remount scroll restoration to the panel registry', async () => {
 		runtime.autoScrollToBottom = true;
 		const { panel } = makePanel();
-		panel.transcript.replaceGeneration(
-			'chat-1',
-			'view-1',
-			[
-				{
-					ordinal: 1,
-					message: new UserMessage('2026-08-31T00:00:00.000Z', 'Existing message'),
-				},
-			],
-			{
-				lastOrdinal: 1,
-				pageOldestOrdinal: 1,
-				nextBeforeOrdinal: null,
-				hasMore: false,
-			},
-		);
+		mockDisplayApi([{ ordinal: 1, message: new UserMessage('2026-08-31T00:00:00.000Z', 'Existing message') }]);
+		panel.transcript.installOpen(displayOpen('chat-1', 'view-1', 1));
+		await panel.transcript.controller.refresh();
 		const restoreLatest = vi.spyOn(panel.scroll, 'scrollToLatestAndFill');
 
 		render(ConversationPanel, {
@@ -443,6 +437,74 @@ describe('ConversationPanel', () => {
 		await Promise.resolve();
 
 		expect(restoreLatest).not.toHaveBeenCalled();
+	});
+
+	it.each(['row', 'group-summary'] as const)('resumes a cold %s restore when its display window becomes available', async (kind) => {
+		const api = mockDisplayApi(Array.from({ length: 200 }, (_, index) => displayRow(index + 1)));
+		const surfaceId = 'chat-view:window-panel-test';
+		const descriptor: ConversationPanelDescriptor = {
+			surfaceId, chatId: 'chat-1', windowId: 'window-panel-test',
+			presentation: 'window-panel-test', snapshotAdmission: 'admitted',
+		};
+		const registry = new ConversationPanelRegistry({
+			bodies: new DisplayBodyStore(), overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
+			getComposerAnchorSurfaceId: () => surfaceId, getSelectedChatId: () => 'chat-1',
+			retainInactiveWindows: () => false,
+		});
+		const held = Promise.withResolvers<DisplayOpenResponse>();
+		try {
+			registry.reconcile([descriptor]);
+			await registry.loadChatSnapshot('chat-1');
+			registry.panel(surfaceId)!.attachPresentation({
+				getScrollContainer: () => null, getViewport: () => null, getQueueContainer: () => undefined,
+				captureRestoreTarget: () => ({ kind, transcriptViewId: 'view-1', ordinal: 89, viewportOffset: -12 }),
+				closeTransients: () => {},
+			});
+			registry.prepareForReconcile([]);
+			registry.reconcile([]);
+			api.window.mockClear();
+			api.open.mockReturnValueOnce(held.promise);
+			api.window.mockImplementationOnce(async (request) => ({
+				kind: 'preparing', chatId: request.chatId, transcriptViewId: request.transcriptViewId,
+				serverInstanceId: 'instance-1', policyRevision: request.policyRevision,
+				profileKey: displayProfileKey(request.profile), bashRevision: request.profile.bashRevision,
+				sourceHead: 200, preparedThrough: 0, errorCode: null, retryAfterMs: 1500,
+			}));
+			registry.reconcile([descriptor]);
+			const panel = registry.panel(surfaceId)!;
+			const attach = vi.spyOn(panel, 'attachPresentation');
+			const rendered = render(ConversationPanel, {
+				surfaceId, chat: chat(), panel, isCommandOwner: true, ownsComposer: true, actions: makeActions(),
+			});
+			await waitFor(() => expect(attach.mock.calls[0]?.[0].getViewport()).toBeTruthy());
+			const viewport = attach.mock.calls[0][0].getViewport()!;
+			const positioned = vi.fn();
+			const jump = vi.spyOn(viewport, 'scrollToTarget').mockImplementation(async (target, options) => {
+				if (!panel.transcript.entries.some(row => row.ordinal === 89)) return 'target-missing';
+				positioned(target, options);
+				return 'completed';
+			});
+			held.resolve(displayOpen('chat-1', 'view-1', 200));
+			await registry.loadChatSnapshot('chat-1');
+			await waitFor(() => expect(jump).toHaveBeenCalled());
+			expect(panel.transcript.display.phase).toBe('preparing');
+			expect(positioned).not.toHaveBeenCalled();
+			panel.transcript.controller.ready();
+			await waitFor(() => expect(panel.transcript.display.phase).toBe('available'));
+			await waitFor(() => expect(positioned).toHaveBeenCalledWith(
+				{ kind: kind === 'group-summary' ? 'presentation-row' : 'row', id: 'view-1:89' },
+				{ viewportOffset: -12 },
+			));
+			expect(panel.scroll.isPinnedToBottom).toBe(false);
+			expect(api.window.mock.calls.every(([request]) => request.anchor.kind === 'around' && request.anchor.ordinal === 89)).toBe(true);
+			expect(api.resolve).not.toHaveBeenCalled();
+			rendered.unmount();
+		} finally {
+			held.resolve(displayOpen('chat-1', 'view-1', 200));
+			registry.destroy();
+			vi.restoreAllMocks();
+		}
 	});
 
 	it('retains the feed restore target when the child presentation detaches first', async () => {

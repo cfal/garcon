@@ -2,7 +2,8 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onDestroy } from 'svelte';
 	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
-	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items';
+	import { certifiedFeed } from './display-feed-fixtures.js';
+	import { displayCertificate, displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings, setNotifications } from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -24,7 +25,16 @@
 	}
 
 	let { rows, pendingPermissionRequests = [], onPermissionDecision }: Props = $props();
-	const renderModel = $derived(buildConversationFeedRenderModel(rows));
+	const renderModel = $derived.by(() => {
+		const canonical = rows.flatMap(row => row.kind === 'message' && row.ordinal !== undefined ? [{ ordinal: row.ordinal, message: row.message }] : []);
+		const model = certifiedFeed(canonical, {
+			certificate: displayCertificate(displayOpen('chat-1', 'generation-1', canonical.at(-1)?.ordinal ?? 0)),
+		}).renderModel;
+		for (const row of rows) {
+			if (row.kind === 'message' && row.ordinal === undefined) model.items.push({ ...row, index: model.items.length });
+		}
+		return model;
+	});
 	setCanonicalWorkspaceLayout();
 	setNotifications(createNotificationsStore());
 	setExecutorsTestContext();

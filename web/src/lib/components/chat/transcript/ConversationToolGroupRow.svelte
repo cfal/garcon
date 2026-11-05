@@ -1,32 +1,22 @@
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import type { ConversationFeedMessageRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
-	import { summarizeToolUses } from '$lib/chat/tools/tool-use-summary.js';
+	import type { GroupDescriptor } from '$shared/transcript-display-contract';
+	import { summarizeToolCounts } from '$lib/chat/tools/tool-use-summary.js';
 	import { cn } from '$lib/utils/cn';
 	import type { ToolGroupVirtualFeedItem } from './conversation-feed-virtual-items.js';
 
 	interface Props {
 		item: ToolGroupVirtualFeedItem;
-		onToggle: (memberIds: readonly string[], expanded: boolean) => void;
-	}
-
-	function messageMembers(group: ToolGroupVirtualFeedItem): ConversationFeedMessageRenderItem[] {
-		const messages: ConversationFeedMessageRenderItem[] = [];
-		for (const member of group.members) {
-			if (member.item.kind === 'message') messages.push(member.item);
-		}
-		return messages;
+		onToggle: (group: GroupDescriptor, expanded: boolean) => void;
 	}
 
 	let { item, onToggle }: Props = $props();
 	let button: HTMLButtonElement;
-	const toolMessages = $derived(messageMembers(item));
-	const memberIds = $derived(item.members.map((member) => member.item.id));
-	const summary = $derived(summarizeToolUses(toolMessages));
+	const summary = $derived(summarizeToolCounts(item.descriptor.count, item.descriptor.totals, item.descriptor.categoryOrder));
 
 	function toggleGroup(): void {
 		if (item.expanded) button.focus({ preventScroll: true });
-		onToggle(memberIds, !item.expanded);
+		onToggle(item.descriptor, !item.expanded);
 	}
 </script>
 

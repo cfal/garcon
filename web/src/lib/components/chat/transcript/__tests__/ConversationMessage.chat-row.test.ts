@@ -9,7 +9,7 @@ import {
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
-import { mergeRowsWithOptimisticInputs } from '$lib/chat/transcript/transcript-row-projection.js';
+import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 
 const AT = '2026-08-18T12:00:00.000Z';
 const SOURCE_CHAT_ID = '1788090107980900';
@@ -40,11 +40,16 @@ describe('ConversationMessage chat rows', () => {
 
 	it.each(['pending', 'delivered'] as const)('renders %s optimistic literal input without Markdown', (delivery) => {
 		const content = '# command\n  printf "**literal**"\n';
-		const [row] = mergeRowsWithOptimisticInputs([], [{
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat(SOURCE_CHAT_ID);
+		transcript.upsertOptimisticUserInput({
 			clientMessageId: 'command-1', chatId: SOURCE_CHAT_ID, content, contentMode: 'literal',
 			createdAt: AT, delivery,
-		}], new Map());
+		});
+		const row = transcript.overlayRows[0];
+		if (row.kind !== 'message') throw new Error('Expected optimistic user input');
 		const { container } = render(ConversationMessageHost, { message: row.message });
+		transcript.dispose();
 		expect(container.querySelector('pre')?.textContent).toBe(content);
 		expect(container.querySelector('h1')).toBeNull();
 		expect(container.querySelector('strong')).toBeNull();

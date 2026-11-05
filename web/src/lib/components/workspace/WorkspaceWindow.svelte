@@ -305,6 +305,7 @@
 		{#snippet auxiliaryActions()}
 			{#if activeChatIsLive && subagentToolbar.model}
 				<SubagentManagementControl
+					paging={subagentToolbar.paging}
 					model={subagentToolbar.model}
 					sizing={{
 						controlHeightPx: titlebarMetrics.controlSizePx + 4,

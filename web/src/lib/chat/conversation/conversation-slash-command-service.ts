@@ -44,7 +44,6 @@ import {
 } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import {
 	remapForkAtMessage,
-	selectForkAtMessage,
 	type ForkAtMessageSelection,
 } from '$lib/chat/actions/fork-at-message-action.js';
 import {
@@ -53,7 +52,7 @@ import {
 	requestChatFork,
 } from '$lib/chat/actions/fork-chat-request.js';
 import type { ForkChatResponse } from '$shared/chat-command-contracts';
-import type { TranscriptMessage } from '$shared/chat-view';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
@@ -80,7 +79,7 @@ interface SlashCommandSessions {
 
 interface SlashCommandChatState {
 	activeChatId: string | null;
-	entries: readonly TranscriptMessage[];
+	forkSelection(ordinal: number): ForkAtMessageSelection | null;
 	isUserScrolledUp: boolean;
 	getCursor(): { transcriptViewId: string; lastOrdinal: number };
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
@@ -90,7 +89,7 @@ interface SlashCommandChatState {
 }
 
 export interface ConversationForkSource {
-	readonly transcript: Pick<SlashCommandChatState, 'entries' | 'getCursor'>;
+	readonly transcript: Pick<SlashCommandChatState, 'forkSelection' | 'getCursor'>;
 	readonly refetchTranscript?: () => Promise<void>;
 }
 
@@ -793,11 +792,7 @@ export class ConversationSlashCommandService {
 		const selection =
 			upToOrdinal === undefined
 				? null
-				: selectForkAtMessage(
-						sourceTranscript.entries,
-						sourceTranscript.getCursor().transcriptViewId,
-						upToOrdinal,
-					);
+				: sourceTranscript.forkSelection(upToOrdinal);
 		if (upToOrdinal !== undefined && !selection) {
 			throw new Error(m.chat_notice_fork_message_no_longer_available());
 		}
@@ -819,11 +814,10 @@ export class ConversationSlashCommandService {
 			} catch {
 				throw error;
 			}
-			const remapped = remapForkAtMessage(
-				sourceTranscript.entries,
-				sourceTranscript.getCursor().transcriptViewId,
-				selection,
-			);
+			if (!selection.clientMessageId) throw error;
+			const open = await transcriptDisplayApi.open({ chatId: sourceChatId,
+				reason: 'reconnect', outstandingClientMessageIds: [selection.clientMessageId] });
+			const remapped = remapForkAtMessage(open, selection);
 			if (!remapped) throw error;
 			result = await requestChatFork(
 				{ sourceChatId, chatId, ...forkPointParams(remapped) },

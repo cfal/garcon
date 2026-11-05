@@ -4,7 +4,6 @@ import {
 	AgentRunFinishedMessage,
 	ChatTranscriptReplacedMessage,
 	ChatListRefreshRequestedMessage,
-	ChatMessagesMessage,
 	ChatProcessingUpdatedMessage,
 	ChatProjectPathUpdatedMessage,
 	ChatReadUpdatedV1Message,
@@ -13,7 +12,6 @@ import {
 	ChatSessionCreatedMessage,
 	ChatSessionDeletedWsMessage,
 	ChatSessionStoppedMessage,
-	ChatSubscribedMessage,
 	ChatTransientFeedMutationMessage,
 	ClientRequestErrorMessage,
 	ReconnectStateMessage,
@@ -28,13 +26,14 @@ import {
 import {
 	ChatReloadCancelRequest,
 	ChatReloadRequest,
-	ChatSubscribeRequest,
 	ReconnectStateQueryRequest,
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
-import { CHAT_STOP_OUTCOMES, ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, ErrorMessage, PermissionRequestMessage } from '$shared/chat-types';
+import { CHAT_STOP_OUTCOMES, ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import { ChatTranscriptHeadUpdatedMessage, ChatInputCommittedMessage, ChatDisplayStateUpdatedMessage, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
+import { parseBodyDependencyResponse } from '$shared/transcript-display-contract';
 
 const chatViewMessage = {
 	ordinal: 1,
@@ -104,143 +103,47 @@ function makeSettingsSnapshot(
 }
 
 describe('parseServerWsMessage', () => {
-	it('receives Claude discovery, Monitor calls, and nested permissions as typed messages', () => {
+	it('hydrates Claude discovery, Monitor calls, and nested permissions as typed display bodies', () => {
 		const search = new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1);
 		const monitor = new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
 			undefined, 'ws://synthetic.invalid/events', ['', 'synthetic-events'], true, ['synthetic.invalid']);
-		const messages = [search, monitor, new PermissionRequestMessage('', 'permission-synthetic', monitor)]
-			.map((message, index) => ({ ordinal: index + 1, message }));
-		const parsed = parseServerWsMessage(JSON.parse(JSON.stringify({
-			type: 'chat-messages', chatId: 'synthetic-chat', transcriptViewId: 'synthetic-view',
-			messages, firstOrdinal: 1, lastOrdinal: 3, resendCandidates: [],
+		const bodies = [search, monitor, new PermissionRequestMessage('', 'permission-synthetic', monitor)]
+			.map((message, index) => ({ ordinal: index + 1, message, submissionClientMessageId: null }));
+		const parsed = parseBodyDependencyResponse(JSON.parse(JSON.stringify({
+			certificate: { serverInstanceId: 'instance-1', chatId: 'synthetic-chat', transcriptViewId: 'synthetic-view',
+				policyRevision: 1, profileKey: 'profile', bashRevision: 'patterns', cutsKey: 'cuts', watermark: 3 },
+			bodies, details: [], deferredOrdinals: [], nonRenderedOrdinals: [], oversizedOrdinal: null,
 		})));
-		expect(parsed).toBeInstanceOf(ChatMessagesMessage);
-		if (parsed?.type !== 'chat-messages') throw new Error('Expected typed chat messages');
-		expect(parsed.messages).toEqual(messages);
-		expect(parsed.messages[0].message).toBeInstanceOf(ClaudeToolSearchToolUseMessage);
-		expect(parsed.messages[1].message).toBeInstanceOf(ClaudeMonitorToolUseMessage);
-		const permission = parsed.messages[2].message;
+		expect(parsed.bodies).toEqual(bodies);
+		expect(parsed.bodies[0].message).toBeInstanceOf(ClaudeToolSearchToolUseMessage);
+		expect(parsed.bodies[1].message).toBeInstanceOf(ClaudeMonitorToolUseMessage);
+		const permission = parsed.bodies[2].message;
 		expect(permission).toBeInstanceOf(PermissionRequestMessage);
 		if (permission.type !== 'permission-request') throw new Error('Expected typed permission');
 		expect(permission.requestedTool).toBeInstanceOf(ClaudeMonitorToolUseMessage);
 		expect(permission.requestedTool).toMatchObject({ persistent: true, allowedDomains: ['synthetic.invalid'] });
 	});
 
-	it('parses chat-messages', () => {
-		const msg = parseServerWsMessage({
-			type: 'chat-messages',
-			chatId: 'c-1',
-			transcriptViewId: 'generation-1',
-			messages: [chatViewMessage],
-			firstOrdinal: 1,
-			lastOrdinal: 1,
-			resendCandidates: [],
-			turnId: 'turn-1',
-			clientRequestId: 'req-1',
-			upstreamRequestId: 'cursor-req-1',
-		});
-
-		expect(msg).toBeInstanceOf(ChatMessagesMessage);
-		expect((msg as ChatMessagesMessage).chatId).toBe('c-1');
-		expect((msg as ChatMessagesMessage).transcriptViewId).toBe('generation-1');
-		expect((msg as ChatMessagesMessage).messages).toHaveLength(1);
-		expect((msg as ChatMessagesMessage).turnId).toBe('turn-1');
-		expect((msg as ChatMessagesMessage).clientRequestId).toBe('req-1');
-		expect((msg as ChatMessagesMessage).upstreamRequestId).toBe('cursor-req-1');
+	it('parses compact transcript heads, exact input acknowledgements, and readiness without bodies', () => {
+		const head = new ChatTranscriptHeadUpdatedMessage('instance-1', 'c-1', 'generation-1', 9,
+			'2026-01-01T00:00:00.000Z', { ordinal: 8, text: 'Synthetic preview', timestamp: '2026-01-01T00:00:00.000Z' },
+			{ ...emptyResponseClassOrdinals(), assistant: 8 }, 1, 9);
+		const acknowledgement = new ChatInputCommittedMessage('instance-1', 'c-1', 'generation-1', 'input-1', 7);
+		const ready = new ChatDisplayStateUpdatedMessage('instance-1', 'c-1', 'generation-1', 1, 'patterns', 9, 'available', null);
+		for (const event of [head, acknowledgement, ready]) {
+			expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+			expect(event).not.toHaveProperty('messages');
+		}
+		for (const patch of [{ transcriptViewId: null }, { serverInstanceId: '' }, { sourceHead: -1 },
+			{ responseClassOrdinals: { ...emptyResponseClassOrdinals(), assistant: 10 } }]) {
+			expect(parseServerWsMessage({ ...head, ...patch })).toBeNull();
+		}
 	});
 
-	it('rejects a chat message batch when any envelope is malformed', () => {
-		expect(
-			parseServerWsMessage({
-				type: 'chat-messages',
-				chatId: 'c-1',
-				transcriptViewId: 'generation-1',
-				firstOrdinal: 1,
-				lastOrdinal: 1,
-				messages: [
-					{
-						ordinal: 0,
-						message: { type: 'user-message', timestamp: '2025-01-01T00:00:00Z', content: 'bad' },
-					},
-				],
-			}),
-		).toBeNull();
-
-		expect(
-			parseServerWsMessage({
-				type: 'chat-messages',
-				chatId: 'c-1',
-				transcriptViewId: 'generation-1',
-				messages: [chatViewMessage, { ...chatViewMessage, ordinal: 1 }],
-				firstOrdinal: 1,
-				lastOrdinal: 1,
-			}),
-		).toBeNull();
-	});
-
-	it('keeps unknown inner messages as error placeholders inside a valid envelope', () => {
-		const msg = parseServerWsMessage({
-			type: 'chat-messages',
-			chatId: 'c-1',
-			transcriptViewId: 'generation-1',
-			firstOrdinal: 1,
-			lastOrdinal: 1,
-			messages: [
-				{
-					ordinal: 1,
-					message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z', payload: {} },
-				},
-			],
-			resendCandidates: [],
-		});
-
-		expect(msg).toBeInstanceOf(ChatMessagesMessage);
-		expect((msg as ChatMessagesMessage).messages[0].message).toBeInstanceOf(ErrorMessage);
-	});
-
-	it('parses chat-subscribed replay responses', () => {
-		const msg = parseServerWsMessage({
-			type: 'chat-subscribed',
-			clientRequestId: 'req-subscribe',
-			chatId: 'c-1',
-			transcriptViewId: 'generation-1',
-			messages: [chatViewMessage],
-			firstOrdinal: 1,
-			lastOrdinal: 1,
-			nextAfterOrdinal: 1,
-			throughOrdinal: 1,
-			hasMore: false,
-			resendCandidates: [],
-			transientFeed: transientFeed(),
-		});
-
-		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
-		expect((msg as ChatSubscribedMessage).transcriptViewId).toBe('generation-1');
-		expect((msg as ChatSubscribedMessage).messages).toEqual([chatViewMessage]);
-	});
-
-	it('rejects chat-subscribe transient state for another chat or transcript view', () => {
-		const response = {
-			type: 'chat-subscribed',
-			clientRequestId: 'req-subscribe',
-			chatId: 'c-1',
-			transcriptViewId: 'generation-1',
-			messages: [],
-			firstOrdinal: 1,
-			lastOrdinal: 0,
-			nextAfterOrdinal: 0,
-			throughOrdinal: 0,
-			hasMore: false,
-			resendCandidates: [],
-		};
-		expect(parseServerWsMessage({
-			...response,
-			transientFeed: { ...transientFeed(), chatId: 'c-2' },
-		})).toBeNull();
-		expect(parseServerWsMessage({
-			...response,
-			transientFeed: transientFeed('generation-2'),
-		})).toBeNull();
+	it.each(['chat-messages', 'chat-subscribed'])('rejects the retired %s body stream', type => {
+		expect(parseServerWsMessage({ type, chatId: 'c-1', transcriptViewId: 'generation-1',
+			clientRequestId: 'req-1', firstOrdinal: 1, lastOrdinal: 1, nextAfterOrdinal: 1, throughOrdinal: 1,
+			hasMore: false, messages: [chatViewMessage], resendCandidates: [], transientFeed: transientFeed() })).toBeNull();
 	});
 
 	it('parses ordered transient mutations', () => {
@@ -251,67 +154,6 @@ describe('parseServerWsMessage', () => {
 			mutation: { kind: 'remove', permissionOccurrenceId: 'one' },
 		});
 		expect(mutation).toBeInstanceOf(ChatTransientFeedMutationMessage);
-	});
-
-	it('rejects chat-subscribe responses without a transient-feed snapshot', () => {
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				transcriptViewId: 'generation-1',
-				messages: [],
-				firstOrdinal: 1,
-				lastOrdinal: 0,
-				nextAfterOrdinal: 0,
-				throughOrdinal: 0,
-				hasMore: false,
-				resendCandidates: [],
-			}),
-		).toBeNull();
-	});
-
-	it('rejects missing or null transcript view IDs', () => {
-		expect(
-			parseServerWsMessage({
-				type: 'chat-messages',
-				chatId: 'c-1',
-				messages: [],
-				firstOrdinal: 1,
-				lastOrdinal: 0,
-			}),
-		).toBeNull();
-
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				messages: [],
-				firstOrdinal: 1,
-				lastOrdinal: 0,
-				nextAfterOrdinal: 0,
-				throughOrdinal: 0,
-				hasMore: false,
-				transientFeed: transientFeed(),
-			}),
-		).toBeNull();
-
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				transcriptViewId: null,
-				messages: [],
-				firstOrdinal: 1,
-				lastOrdinal: 0,
-				nextAfterOrdinal: 0,
-				throughOrdinal: 0,
-				hasMore: false,
-				transientFeed: transientFeed(),
-			}),
-		).toBeNull();
 	});
 
 	it('parses transcript replacement messages', () => {
@@ -328,24 +170,11 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatTranscriptReplacedMessage).lastOrdinal).toBe(2);
 	});
 
-	it('parses chat-reloaded responses with request correlation', () => {
-		const msg = parseServerWsMessage({
-			type: 'chat-reloaded',
-			clientRequestId: 'req-reload',
-			chatId: 'c-1',
-			transcriptViewId: 'generation-2',
-			messages: [{ ...chatViewMessage, ordinal: 51 }],
-			lastOrdinal: 100,
-			pageOldestOrdinal: 51,
-			pageNewestOrdinal: 100,
-			nextBeforeOrdinal: 51,
-			hasMore: true,
-		});
-
-		expect(msg).toBeInstanceOf(ChatReloadedMessage);
-		expect((msg as ChatReloadedMessage).clientRequestId).toBe('req-reload');
-		expect((msg as ChatReloadedMessage).transcriptViewId).toBe('generation-2');
-		expect((msg as ChatReloadedMessage).nextBeforeOrdinal).toBe(51);
+	it('parses body-free chat-reloaded responses with request correlation', () => {
+		const event = new ChatReloadedMessage('req-reload', 'c-1', 'generation-2', 100);
+		const parsed = parseServerWsMessage(JSON.parse(JSON.stringify(event)));
+		expect(parsed).toEqual(event);
+		expect(parsed).not.toHaveProperty('messages');
 	});
 
 	it('parses correlated chat-reload-progress frames', () => {
@@ -367,25 +196,10 @@ describe('parseServerWsMessage', () => {
 	});
 
 	it.each([
-		['non-boolean hasMore', { hasMore: 'false' }],
-		['oldest ordinal that does not match the first message', { pageOldestOrdinal: 0 }],
-		['newest ordinal that does not match the current tail', { pageNewestOrdinal: 0 }],
-		['last ordinal behind the newest page', { lastOrdinal: 0 }],
-		['message outside the declared page', { pageOldestOrdinal: 2 }],
-	])('rejects chat-reloaded responses with invalid %s', (_name, patch) => {
-		expect(parseServerWsMessage({
-			type: 'chat-reloaded',
-			clientRequestId: 'req-reload',
-			chatId: 'c-1',
-			transcriptViewId: 'generation-2',
-			messages: [chatViewMessage],
-			lastOrdinal: 1,
-			pageOldestOrdinal: 1,
-			pageNewestOrdinal: 1,
-			nextBeforeOrdinal: null,
-			hasMore: false,
-			...patch,
-		})).toBeNull();
+		{ clientRequestId: '' }, { chatId: null }, { transcriptViewId: null },
+		{ lastOrdinal: -1 }, { lastOrdinal: 1.5 }, { lastOrdinal: '1' },
+	])('rejects malformed reload identity or head: %j', patch => {
+		expect(parseServerWsMessage({ ...new ChatReloadedMessage('req-reload', 'c-1', 'generation-2', 1), ...patch })).toBeNull();
 	});
 
 	it('rejects legacy event-log payloads', () => {
@@ -894,9 +708,7 @@ describe('parseClientWsMessage', () => {
 			transcriptViewId: 'generation-1',
 			afterOrdinal: 7,
 		});
-		expect(subscribe).toBeInstanceOf(ChatSubscribeRequest);
-		expect((subscribe as ChatSubscribeRequest).transcriptViewId).toBe('generation-1');
-		expect((subscribe as ChatSubscribeRequest).afterOrdinal).toBe(7);
+		expect(subscribe).toBeNull();
 
 		expect(
 			parseClientWsMessage({
@@ -923,7 +735,7 @@ describe('parseClientWsMessage', () => {
 		expect((ping as WsPingRequest).sentAt).toBe(1234);
 	});
 
-	it('rejects malformed subscribe cursors', () => {
+	it('rejects retired subscribe requests even with malformed cursors', () => {
 		const subscribe = parseClientWsMessage({
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',

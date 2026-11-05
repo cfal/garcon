@@ -1,513 +1,143 @@
 import { describe, expect, it } from 'vitest';
-import {
-	BashToolUseMessage,
-	CommandOutputMessage,
-	CommandResultMessage,
-	GlobToolUseMessage,
-	ToolResultMessage,
-	TranscriptNoticeMessage,
-	UserMessage,
-} from '$shared/chat-types';
+import { BashToolUseMessage, CommandOutputMessage, ExitPlanModeToolUseMessage, TranscriptNoticeMessage, UserMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
-import type { ConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
-import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
-import { ConversationFeedRenderModelController } from '$lib/chat/transcript/conversation-feed-render-model.js';
-import {
-	appendConversationVirtualTranscriptTail,
-	buildConversationVirtualFeedModel,
-	estimateConversationFeedItemSize,
-	type ConversationEarlierBoundaryMode,
-} from '../conversation-feed-virtual-items.js';
+import { displayCertificate, displayDetail, displayRow } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+import { buildConversationVirtualFeedModel, estimateConversationFeedItemSize, groupContainingRow } from '../conversation-feed-virtual-items.js';
+import { certifiedFeed, displayGroup } from './display-feed-fixtures.js';
 
-function userItem(index: number): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
-	const rowId = `generation-1:${index}`;
-	return {
-		kind: 'message',
-		id: rowId,
-		message: new UserMessage('2026-08-03T00:00:00.000Z', `message ${index}`),
-		index,
-		ordinal: index,
-	};
-}
+const user = (ordinal: number) => displayRow(ordinal, new UserMessage('', `Message ${ordinal}`));
+const bash = (ordinal: number) => displayRow(ordinal, new BashToolUseMessage('', 'reused-tool-id', 'true'));
+const permission = (id: string): PendingPermissionRequest => ({ chatId: 'chat-1', permissionOccurrenceId: id,
+	requestedTool: new BashToolUseMessage('', 'tool-1', 'true') });
+const build = (input: ReturnType<typeof certifiedFeed>) => buildConversationVirtualFeedModel(input);
 
-function bashItem(
-	index: number,
-	toolId = `tool-${index}`,
-): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
-	return {
-		kind: 'message',
-		id: `generation-1:${index}`,
-		message: new BashToolUseMessage('2026-08-03T00:00:00.000Z', toolId, 'pwd'),
-		index,
-		ordinal: index,
-	};
-}
-
-function build(
-	transcriptItems: ConversationFeedRenderItem[],
-	options: {
-		combineToolUseMessages?: boolean;
-		earlierBoundary?: ConversationEarlierBoundaryMode;
-		expandedToolMemberIds?: ReadonlySet<string>;
-		protectedVirtualKeys?: readonly string[];
-		pendingPermissions?: PendingPermissionRequest[];
-	} = {},
-) {
-	return buildConversationVirtualFeedModel({
-		showRefreshError: false,
-		earlierBoundary: options.earlierBoundary ?? 'hidden',
-		showLaterBoundary: false,
-		reserveComposerCapSpace: false,
-		transcriptViewId: 'view-1',
-		surfaceIdentity: 'chat-1:generation-1',
-		combineToolUseMessages: options.combineToolUseMessages ?? false,
-		expandedToolMemberIds: options.expandedToolMemberIds ?? new Set(),
-		protectedVirtualKeys: options.protectedVirtualKeys ?? [],
-		transcriptItems,
-		pendingPermissions: options.pendingPermissions ?? [],
+describe('certified virtual feed', () => {
+	it('renders a selected plan occurrence once when resident and floats it when absent', () => {
+		const message = new ExitPlanModeToolUseMessage('', 'reused-plan', 'Synthetic plan');
+		const request: PendingPermissionRequest = { chatId: 'chat-1', permissionOccurrenceId: 'plan:view-1:2', requestedTool: message,
+			planReference: { serverInstanceId: 'instance-1', chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 2 } };
+		const input = certifiedFeed([displayRow(2, message)], { input: { pendingPermissions: [request] } });
+		expect(build(input).items.filter(item => item.kind === 'transcript')).toHaveLength(1);
+		expect(build(input).items.filter(item => item.kind === 'permission')).toHaveLength(0);
+		expect(build({ ...input, display: { ...input.display, window: null } }).items.filter(item => item.kind === 'permission')).toHaveLength(1);
 	});
-}
-
-describe('conversation virtual feed model', () => {
-	it('routes each command output search target to its own visible row', () => {
-		const rows = [1, 2].map(index => ({ ...userItem(index), message: new CommandOutputMessage(
-			'2026-08-03T00:00:00.000Z', 'command-1', 'stdout', 'plain', `part ${index}`,
-			{ executorId: 'local', projectPath: '/project' }, (index - 1) * 'part 1'.length,
-		) }));
-		const rendered = buildConversationFeedRenderModel(rows).items;
-		const model = build(rendered);
-		expect(model.indexByRowId.get('generation-1:2')).not.toBe(model.indexByRowId.get('generation-1:1'));
-		expect(model.targetByDomAnchorId.get('generation-1:2')?.innerRowId).toBe('generation-1:2');
+	it('represents 40,000 collapsed members with one descriptor and no per-member indexes', () => {
+		const group = displayGroup(2, 40001, 40000);
+		const input = certifiedFeed([user(1)], { items: [{ kind: 'row', ordinal: 1, messageType: 'user-message', layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }, group] });
+		const model = build(input);
+		expect(model.items).toHaveLength(4);
+		expect(model.items[2]).toMatchObject({ kind: 'tool-group', descriptor: { count: 40000 }, expanded: false });
+		expect(model.indexByRowId.size).toBe(1);
+		expect(groupContainingRow(model, 'view-1:20000')).toBe(model.items[2]);
+		expect(groupContainingRow(model, 'different-view:20000')).toBeUndefined();
+		expect(estimateConversationFeedItemSize(model.items[2])).toBe(36);
 	});
 
-	it('rebuilds output when a result arrives without more stdout', () => {
-		const output = { ...userItem(1), message: new CommandOutputMessage(
-			'', 'command-1', 'stdout', 'markdown', '# heading', { executorId: 'local', projectPath: '/project' },
-		) };
-		const terminal = { ...userItem(2), message: new CommandResultMessage('', 'command-1', {
-			outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
-			cwd: { kind: 'reported', path: '/project' },
-		}) };
-		const controller = new ConversationFeedRenderModelController();
-		const initial = controller.reconcile('chat-1:generation-1', [output]);
-		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
-		const completed = controller.reconcileDetailed('chat-1:generation-1', [output, terminal]);
-		expect(completed.change.kind).toBe('rebuilt');
-		expect(completed.model.items[0]).toMatchObject({ message: { format: 'markdown' } });
+	it('flattens a bounded member page with exact directional boundaries and a stable header', () => {
+		const group = displayGroup(1, 1000, 1000);
+		const input = certifiedFeed([bash(500), bash(501)], { items: [group] });
+		const collapsed = build(input);
+		const expandedInput = certifiedFeed([bash(500), bash(501)], { items: [group], display: { expansions: [{ anchorOrdinal: 500, openedAt: 1,
+			page: { certificate: input.display.window!.certificate, base: group.base, fragment: group.fragment, ordinals: [500, 501],
+				earlier: { beforeOrdinal: 500, remaining: 499 }, later: { afterOrdinal: 501, remaining: 499 } } }] } });
+		const expanded = build(expandedInput);
+		expect(expanded.items.slice(1, -1).map(item => item.kind)).toEqual(['tool-group', 'member-boundary', 'transcript', 'transcript', 'member-boundary']);
+		expect(expanded.items[1].key).toBe(collapsed.items[1].key);
+		expect(expanded.indexByRowId.get('view-1:500')).toBe(3);
+		expect(groupContainingRow(expanded, 'view-1:500')).toBeUndefined();
+		expect(expanded.indexByRowId.size).toBe(2);
 	});
 
-	it('combines two ordinary tool inputs and indexes each hidden member to the summary', () => {
-		const model = build([bashItem(1), bashItem(2, 'reused')], {
-			combineToolUseMessages: true,
-		});
-		const group = model.items[1];
-		expect(group).toMatchObject({ kind: 'tool-group', expanded: false });
-		if (group?.kind !== 'tool-group') throw new Error('Expected a tool group');
-		expect(group.members.map(({ item }) => item.id)).toEqual(['generation-1:1', 'generation-1:2']);
-		expect(model.items).toHaveLength(3);
-		expect(model.indexByRowId.get('generation-1:1')).toBe(1);
-		expect(model.indexByRowId.get('generation-1:2')).toBe(1);
-		expect(model.targetByDomAnchorId.get('tool-input-reused')).toEqual({
-			index: 1,
-			innerRowId: group.anchorId,
-		});
-		expect(model.memberRowIdByDomAnchorId.get('tool-input-reused')).toBe('generation-1:2');
-		expect(model.representativeRowIdByKey.get(group.key)).toBe('generation-1:1');
-		expect(estimateConversationFeedItemSize(group)).toBe(36);
+	it('trusts certified singleton groups and does not regroup across ordinary rows', () => {
+		const row = certifiedFeed([user(2)]).display.window!.items[0];
+		const model = build(certifiedFeed([user(2)], { items: [displayGroup(1, 1, 1), row, displayGroup(3, 3, 1)] }));
+		expect(model.items.slice(1, -1).map(item => item.kind)).toEqual(['tool-group', 'transcript', 'tool-group']);
 	});
 
-	it('presents singleton tools as groups without crossing visible boundaries', () => {
-		const model = build([bashItem(1), userItem(2), bashItem(3)], {
-			combineToolUseMessages: true,
-		});
-		expect(model.items.filter((item) => item.kind === 'tool-group')).toHaveLength(2);
-		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'tool-group',
-			'transcript',
-			'tool-group',
-		]);
-		expect(model.indexByRowId.get('generation-1:1')).toBe(1);
-		expect(model.indexByRowId.get('generation-1:3')).toBe(3);
+	it('renders optional compressed paging only when a collapsed group is represented', () => {
+		const ordinary = build(certifiedFeed([user(1)], { input: { earlierBoundary: 'when-collapsed' } }));
+		const collapsed = build(certifiedFeed([], { items: [displayGroup(1, 10, 10)], input: { earlierBoundary: 'when-collapsed' } }));
+		expect(ordinary.items.some(item => item.kind === 'earlier-boundary')).toBe(false);
+		expect(collapsed.items.some(item => item.kind === 'earlier-boundary')).toBe(true);
 	});
 
-	it('shows compressed-history paging only for a collapsed tool group', () => {
-		const ordinary = build([userItem(1)], {
-			combineToolUseMessages: true,
-			earlierBoundary: 'when-collapsed',
-		});
-		const collapsed = build([bashItem(1)], {
-			combineToolUseMessages: true,
-			earlierBoundary: 'when-collapsed',
-		});
-		const expanded = build([bashItem(1)], {
-			combineToolUseMessages: true,
-			earlierBoundary: 'when-collapsed',
-			expandedToolMemberIds: new Set(['generation-1:1']),
-		});
-
-		expect(ordinary.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
-		expect(collapsed.items.some((item) => item.kind === 'earlier-boundary')).toBe(true);
-		expect(expanded.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
+	it('places off-window protected islands outside page boundaries with explicit gaps', () => {
+		const input = certifiedFeed([user(20), user(40), user(500), user(700), user(900)], { items: certifiedFeed([user(500)]).display.window!.items,
+			display: { protectedRows: [20, 40, 700, 900].map(ordinal => ({ certificate: displayCertificate(), detail: displayDetail(ordinal), layout: 'standard' })) },
+			input: { earlierBoundary: 'visible', showLaterBoundary: true } });
+		input.display = { ...input.display, window: { ...input.display.window!, interval: { after: 499, through: 500 } } };
+		const model = build(input);
+		const earlier = model.items.findIndex(item => item.kind === 'earlier-boundary');
+		const later = model.items.findIndex(item => item.kind === 'later-boundary');
+		expect(model.indexByRowId.get('view-1:40')).toBeLessThan(earlier);
+		expect(model.indexByRowId.get('view-1:700')).toBeGreaterThan(later);
+		for (const ordinal of [20, 40, 700, 900]) {
+			const index = model.indexByRowId.get(`view-1:${ordinal}`)!;
+			expect(model.items[index - 1].kind).toBe('retained-gap');
+			expect(model.items[index + 1].kind).toBe('retained-gap');
+		}
 	});
 
-	it('reveals members as individually virtualized rows while retaining a stable header', () => {
-		const collapsed = build([bashItem(1), bashItem(2), bashItem(3)], {
-			combineToolUseMessages: true,
-		});
-		const expanded = build([bashItem(1), bashItem(2), bashItem(3)], {
-			combineToolUseMessages: true,
-			expandedToolMemberIds: new Set(['generation-1:2']),
-		});
-		expect(expanded.items[1]?.key).toBe(collapsed.items[1]?.key);
-		expect(expanded.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'tool-group',
-			'transcript',
-			'transcript',
-			'transcript',
-		]);
-		expect(expanded.indexByRowId.get('generation-1:2')).toBe(3);
-		expect(expanded.collapsedGroupByMemberRowId.size).toBe(0);
+	it('places retained members beyond the bounded child-page edges, not inside its completeness claim', () => {
+		const group = displayGroup(1, 1000, 1000);
+		const input = certifiedFeed([bash(20), bash(40), bash(500), bash(700), bash(900)], { items: [group], display: {
+			protectedRows: [20, 40, 700, 900].map(ordinal => ({ certificate: displayCertificate(), detail: displayDetail(ordinal), layout: 'standard' })),
+			expansions: [{ anchorOrdinal: 500, openedAt: 1, page: { certificate: displayCertificate(), base: group.base, fragment: group.fragment, ordinals: [500],
+				earlier: { beforeOrdinal: 500, remaining: 499 }, later: { afterOrdinal: 500, remaining: 500 } } }],
+		} });
+		const model = build(input);
+		const edges = model.items.flatMap((item, index) => item.kind === 'member-boundary' ? [index] : []);
+		expect(model.indexByRowId.get('view-1:40')).toBeLessThan(edges[0]);
+		expect(model.indexByRowId.get('view-1:500')).toBeGreaterThan(edges[0]);
+		expect(model.indexByRowId.get('view-1:500')).toBeLessThan(edges[1]);
+		expect(model.indexByRowId.get('view-1:700')).toBeGreaterThan(edges[1]);
 	});
 
-	it('keeps anchored permission UI between tool runs', () => {
-		const permission: PendingPermissionRequest = {
-			chatId: 'chat-1',
-			permissionOccurrenceId: 'permission-1',
-			requestedTool: new BashToolUseMessage('', 'tool-2', 'pwd'),
-			transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
-		};
-		const model = build([bashItem(1), bashItem(2), bashItem(3), bashItem(4)], {
-			combineToolUseMessages: true,
-			pendingPermissions: [permission],
-		});
-		expect(model.items.slice(1, -1).map((item) => item.kind)).toEqual([
-			'tool-group',
-			'permission',
-			'tool-group',
-		]);
+	it('uses server cut placements for permission and optimistic rows between group fragments', () => {
+		const request = { ...permission('permission-1'), transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 } };
+		const input = certifiedFeed([], { items: [displayGroup(1, 2, 2), displayGroup(3, 4, 2)], input: { pendingPermissions: [request] } });
+		input.display = { ...input.display, window: { ...input.display.window!, cutPlacements: [{ id: 'permission:permission-1', placement: 'inline' }] } };
+		expect(build(input).items.slice(1, -1).map(item => item.kind)).toEqual(['tool-group', 'permission', 'tool-group']);
 	});
 
-	it('rejects duplicate member keys even when a collapsed group hides them', () => {
-		const duplicate = { ...bashItem(2), id: 'generation-1:1' };
-		expect(() => build([bashItem(1), duplicate], { combineToolUseMessages: true })).toThrow(
-			'Duplicate conversation feed key',
-		);
-	});
-	it('builds stable key, row, and target indexes for 20,000 rows', () => {
-		const model = build(Array.from({ length: 20_000 }, (_, index) => userItem(index + 1)));
-
-		expect(model.items).toHaveLength(20_002);
-		expect(model.indexByKey.size).toBe(20_002);
-		expect(model.indexByRowId.size).toBe(20_000);
-		expect(model.targetByDomAnchorId.size).toBe(20_000);
-		expect(model.indexByRowId.get('generation-1:20000')).toBe(20_000);
-		expect(model.targetByDomAnchorId.get('generation-1:20000')).toEqual({
-			index: 20_000,
-			innerRowId: 'generation-1:20000',
-		});
-	});
-
-	it('namespaces virtual identity separately from durable row identity', () => {
-		const item = userItem(1);
-		const first = build([item]);
-		const second = buildConversationVirtualFeedModel({
-			showRefreshError: false,
-			earlierBoundary: 'hidden',
-			showLaterBoundary: false,
-			reserveComposerCapSpace: false,
-			transcriptViewId: 'view-1',
-			surfaceIdentity: 'chat-2:generation-1',
-			combineToolUseMessages: false,
-			expandedToolMemberIds: new Set(),
-			protectedVirtualKeys: [],
-			transcriptItems: [item],
-			pendingPermissions: [],
-		});
-
-		expect(first.items[0]?.key).not.toBe(second.items[0]?.key);
-		expect(first.indexByRowId.get('generation-1:1')).toBe(1);
-		expect(second.indexByRowId.get('generation-1:1')).toBe(1);
-	});
-
-	it('rejects duplicate virtual keys before measurement state can be shared', () => {
-		const duplicate = { ...userItem(2), id: userItem(1).id };
-		expect(() => build([userItem(1), duplicate])).toThrow('Duplicate conversation feed key');
-	});
-
-	it('indexes each exact tool result occurrence in its own virtual row', () => {
-		const toolRowId = 'generation-1:10';
-		const resultRowId = 'generation-1:11';
-		const toolItem: ConversationFeedRenderItem = {
-			kind: 'message',
-			id: toolRowId,
-			message: new BashToolUseMessage('', 'reused-provider-id', 'pwd'),
-			index: 10,
-			ordinal: 10,
-		};
-		const resultItem: ConversationFeedRenderItem = {
-			kind: 'message',
-			id: resultRowId,
-			message: new ToolResultMessage('', 'reused-provider-id', { raw: '/tmp' }, false),
-			index: 11,
-			ordinal: 11,
-		};
-		const model = buildConversationVirtualFeedModel({
-			showRefreshError: false,
-			earlierBoundary: 'hidden',
-			showLaterBoundary: false,
-			reserveComposerCapSpace: false,
-			transcriptViewId: 'view-1',
-			surfaceIdentity: 'chat-1:generation-1',
-			combineToolUseMessages: false,
-			expandedToolMemberIds: new Set(),
-			protectedVirtualKeys: [],
-			transcriptItems: [toolItem, resultItem],
-			pendingPermissions: [],
-		});
-
-		expect(model.targetByDomAnchorId.get(`tool-result-${resultRowId}`)).toEqual({
-			index: 2,
-			innerRowId: resultRowId,
-		});
-		expect(model.items[2]).toMatchObject({ spacingAfter: 'none' });
-		expect(estimateConversationFeedItemSize(model.items[2])).toBe(0);
-	});
-
-	it('gives visible collapsible tool results their own estimated geometry', () => {
-		const tool = new GlobToolUseMessage('', 'glob-1', '**/*.ts');
-		const result = new ToolResultMessage('', 'glob-1', { filenames: ['a.ts'] }, false);
-		const renderModel = buildConversationFeedRenderModel([
-			{ kind: 'message', id: 'generation-1:10', ordinal: 10, message: tool },
-			{ kind: 'message', id: 'generation-1:11', ordinal: 11, message: result },
-		]);
-		const model = build(renderModel.items);
-
-		expect(model.items[2]).toMatchObject({ spacingAfter: 'transcript' });
-		expect(estimateConversationFeedItemSize(model.items[2])).toBeGreaterThan(0);
-	});
-
-	it('keeps transcript and feed controls in one unscaled coordinate system', () => {
-		const transcript = build([userItem(1)]).items[1];
-		const boundary = buildConversationVirtualFeedModel({
-			showRefreshError: false,
-			earlierBoundary: 'visible',
-			showLaterBoundary: false,
-			reserveComposerCapSpace: false,
-			transcriptViewId: 'view-1',
-			surfaceIdentity: 'chat-1:generation-1',
-			combineToolUseMessages: false,
-			expandedToolMemberIds: new Set(),
-			protectedVirtualKeys: [],
-			transcriptItems: [],
-			pendingPermissions: [],
-		}).items[1];
-
-		expect(estimateConversationFeedItemSize(transcript)).toBe(124);
-		expect(estimateConversationFeedItemSize(boundary)).toBe(44);
-	});
-
-	it('reserves header geometry for presented user messages', () => {
-		const ordinary = build([userItem(1)]).items[1]!;
-		const collapsibleItem = userItem(2);
-		collapsibleItem.message = new UserMessage(
-			'2026-08-03T00:00:00.000Z',
-			'message 2',
-			undefined,
-			undefined,
-			{ origin: 'cli', disclosure: 'collapsed' },
-		);
-		const collapsible = build([collapsibleItem]).items[1]!;
-		const presentedItem = userItem(2);
-		presentedItem.message = new UserMessage(
-			'2026-08-03T00:00:00.000Z',
-			'message 2',
-			undefined,
-			undefined,
-			{ origin: 'cli', style: 'info' },
-		);
-		const presented = build([presentedItem]).items[1]!;
-
-		expect(estimateConversationFeedItemSize(ordinary)).toBe(124);
-		expect(estimateConversationFeedItemSize(collapsible)).toBe(124);
-		expect(estimateConversationFeedItemSize(presented)).toBe(156);
-	});
-
-	it('bounds collapsed handoff notices while plain notices stay compact', () => {
-		const plain = new TranscriptNoticeMessage(
-			'2026-08-03T00:00:00.000Z',
-			'Earlier chat history was small enough to carry over as context.',
-			undefined,
-			'History carried without compaction',
-		);
-		const handoff = new TranscriptNoticeMessage(
-			'2026-08-03T00:00:00.000Z',
-			'# Summary\n\nCarried context.',
-			{ type: 'handoff-summary' },
-			'Handoff summary',
-		);
-		const model = build([
-			{ kind: 'message', id: 'generation-1:1', index: 1, ordinal: 1, message: plain },
-			{ kind: 'message', id: 'generation-1:2', index: 2, ordinal: 2, message: handoff },
-		]);
-
-		expect(estimateConversationFeedItemSize(model.items[1])).toBe(64);
-		expect(estimateConversationFeedItemSize(model.items[2])).toBe(242);
-	});
-
-	it('reserves compact Markdown geometry for sent and received inter-agent messages', () => {
-		const sent = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Message body.', {
-			type: 'inter-agent-message-outcome',
-			results: [{ chatId: '1788090107980901', status: 'delivered' }],
-		});
-		const received = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Message body.', {
-			type: 'inter-agent-message-received',
-			fromChatId: '1788090107980900',
-		});
-		const model = build([
-			{ kind: 'message', id: 'generation-1:1', index: 1, ordinal: 1, message: sent },
-			{ kind: 'message', id: 'generation-1:2', index: 2, ordinal: 2, message: received },
-		]);
-
-		expect(estimateConversationFeedItemSize(model.items[1])).toBe(242);
-		expect(estimateConversationFeedItemSize(model.items[2])).toBe(242);
-	});
-
-	it('reserves one compact row per recipient for multi-target messages', () => {
-		const sent = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Message body.', {
-			type: 'inter-agent-message-outcome',
-			results: [
-				{ chatId: '1788090107980901', status: 'delivered' },
-				{ chatId: '1788090107980902', status: 'failed', reason: 'target-not-found' },
-				{ chatId: '1788090107980903', status: 'failed', reason: 'delivery-failed' },
-			],
-		});
-		const model = build([
-			{ kind: 'message', id: 'generation-1:1', index: 1, ordinal: 1, message: sent },
-		]);
-
-		expect(estimateConversationFeedItemSize(model.items[1])).toBe(294);
-	});
-
-	it('includes viewport geometry and established floating permission spacing', () => {
-		const permission: PendingPermissionRequest = {
-			chatId: 'chat-1',
-			permissionOccurrenceId: 'incarnation-1',
-			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
-		};
-		const model = buildConversationVirtualFeedModel({
-			showRefreshError: false,
-			earlierBoundary: 'hidden',
-			showLaterBoundary: false,
-			reserveComposerCapSpace: true,
-			transcriptViewId: 'view-1',
-			surfaceIdentity: 'chat-1:generation-1',
-			combineToolUseMessages: false,
-			expandedToolMemberIds: new Set(),
-			protectedVirtualKeys: [],
-			transcriptItems: [userItem(1)],
-			pendingPermissions: [
-				permission,
-				{
-					...permission,
-					permissionOccurrenceId: 'incarnation-2',
-				},
-			],
-		});
-
-		expect(model.items.map((item) => item.kind)).toEqual([
-			'viewport-start-spacer',
-			'transcript',
-			'permission',
-			'permission',
-			'viewport-end-spacer',
-		]);
-		expect(model.items[2]).toMatchObject({ leadingSpacing: true, spacingAfter: 'responsive-feed' });
-		expect(model.items[3]).toMatchObject({ leadingSpacing: false, spacingAfter: 'none' });
+	it('keeps distinct detached permission capabilities reachable without a prepared window', () => {
+		const input = certifiedFeed([], { display: { window: null, phase: 'failed' }, input: { pendingPermissions: [permission('one'), permission('two')], reserveComposerCapSpace: true } });
+		const model = build(input);
+		expect(model.items.map(item => item.kind)).toEqual(['viewport-start-spacer', 'permission', 'permission', 'viewport-end-spacer']);
+		expect(model.items[1]).toMatchObject({ leadingSpacing: true, spacingAfter: 'responsive-feed' });
+		expect(model.items[2]).toMatchObject({ leadingSpacing: false, spacingAfter: 'none' });
+		expect(new Set(model.items.map(item => item.key)).size).toBe(model.items.length);
 		expect(estimateConversationFeedItemSize(model.items.at(-1))).toBe(56);
 	});
 
-	it('gives permission occurrences distinct virtual identities', () => {
-		const first = {
-			chatId: 'chat-1',
-			permissionOccurrenceId: 'occurrence-1',
-			requestedTool: new BashToolUseMessage('', 'tool-1', 'printf first'),
-		} satisfies PendingPermissionRequest;
-		const second = {
-			...first,
-			permissionOccurrenceId: 'occurrence-2',
-			requestedTool: new BashToolUseMessage('', 'tool-2', 'printf second'),
-		} satisfies PendingPermissionRequest;
-
-		const model = buildConversationVirtualFeedModel({
-			showRefreshError: false,
-			earlierBoundary: 'hidden',
-			showLaterBoundary: false,
-			reserveComposerCapSpace: false,
-			transcriptViewId: 'view-1',
-			surfaceIdentity: 'chat-1:generation-1',
-			combineToolUseMessages: false,
-			expandedToolMemberIds: new Set(),
-			protectedVirtualKeys: [],
-			transcriptItems: [],
-			pendingPermissions: [first, second],
-		});
-		const permissions = model.items.filter((item) => item.kind === 'permission');
-
-		expect(permissions).toHaveLength(2);
-		expect(new Set(permissions.map((item) => item.key)).size).toBe(2);
-		expect(
-			permissions.map((item) => item.kind === 'permission' && item.request.permissionOccurrenceId),
-		).toEqual(['occurrence-1', 'occurrence-2']);
+	it('indexes canonical occurrences rather than reused tool IDs and keeps surface keys independent', () => {
+		const input = certifiedFeed([bash(1), bash(2)]);
+		const model = build(input), other = build({ ...input, surfaceIdentity: 'surface-2' });
+		expect(model.targetByDomAnchorId.get('view-1:2')).toEqual({ index: 2, innerRowId: 'view-1:2' });
+		expect(model.targetByDomAnchorId.has('tool-input-reused-tool-id')).toBe(false);
+		expect(model.items[2].key).not.toBe(other.items[2].key);
+		expect(other.indexByRowId.get('view-1:2')).toBe(2);
 	});
 
-	it('updates suffix indexes when transcript items append incrementally', () => {
-		const permission: PendingPermissionRequest = {
-			chatId: 'chat-1',
-			permissionOccurrenceId: 'incarnation-1',
-			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
-		};
-		const model = buildConversationVirtualFeedModel({
-			showRefreshError: false,
-			earlierBoundary: 'hidden',
-			showLaterBoundary: true,
-			reserveComposerCapSpace: false,
-			transcriptViewId: 'view-1',
-			surfaceIdentity: 'chat-1:generation-1',
-			combineToolUseMessages: false,
-			expandedToolMemberIds: new Set(),
-			protectedVirtualKeys: [],
-			transcriptItems: [userItem(1)],
-			pendingPermissions: [permission],
-		});
-		const priorEndKey = model.items.at(-1)!.key;
-		const priorEndIndex = model.items.length - 1;
-		const priorTranscriptTail = model.items[1];
+	it('routes command output fragments to their exact canonical rows', () => {
+		const model = build(certifiedFeed([1, 2].map(ordinal => displayRow(ordinal, new CommandOutputMessage('', 'command-1', 'stdout', 'plain', `Part ${ordinal}`, null, ordinal - 1)))));
+		expect(model.indexByRowId.get('view-1:1')).toBe(1);
+		expect(model.indexByRowId.get('view-1:2')).toBe(2);
+	});
 
-		const appended = appendConversationVirtualTranscriptTail(model, 'chat-1:generation-1', [
-			userItem(2),
-		]);
-
-		expect(appended?.items.map((item) => item.kind)).toEqual([
-			'viewport-start-spacer',
-			'transcript',
-			'transcript',
-			'later-boundary',
-			'permission',
-			'viewport-end-spacer',
-		]);
-		expect(appended?.items[1]).toMatchObject({ spacingAfter: 'transcript' });
-		expect(appended?.items[1]).toBe(priorTranscriptTail);
-		expect(appended?.items[2]).toMatchObject({ spacingAfter: 'transcript' });
-		expect(appended?.indexByKey).not.toBe(model.indexByKey);
-		expect(appended?.indexByRowId).not.toBe(model.indexByRowId);
-		expect(appended?.targetByDomAnchorId).not.toBe(model.targetByDomAnchorId);
-		expect(model.indexByRowId.has('generation-1:2')).toBe(false);
-		expect(model.targetByDomAnchorId.has('generation-1:2')).toBe(false);
-		expect(model.indexByKey.get(priorEndKey)).toBe(priorEndIndex);
-		expect(appended?.indexByKey.get(priorEndKey)).toBe(priorEndIndex + 1);
-		expect(appended?.indexByRowId.get('generation-1:2')).toBe(2);
-		for (const [index, item] of appended?.items.entries() ?? []) {
-			expect(appended?.indexByKey.get(item.key)).toBe(index);
-		}
+	it('retains established notice and presented-user geometry estimates', () => {
+		const messages = [
+			new UserMessage('', 'Ordinary'),
+			new UserMessage('', 'Presented', undefined, undefined, { origin: 'cli', style: 'info' }),
+			new TranscriptNoticeMessage('', 'Plain notice'),
+			new TranscriptNoticeMessage('', 'Generic summary', { type: 'handoff-summary' }),
+			new TranscriptNoticeMessage('', 'Generic message', { type: 'inter-agent-message-received', fromChatId: '1000000000000001' }),
+			new TranscriptNoticeMessage('', 'Generic message', { type: 'inter-agent-message-outcome', results: [
+				{ chatId: '1000000000000001', status: 'delivered' }, { chatId: '1000000000000002', status: 'failed', reason: 'target-not-found' },
+				{ chatId: '1000000000000003', status: 'failed', reason: 'delivery-failed' },
+			] }),
+		];
+		const model = build(certifiedFeed(messages.map((message, index) => displayRow(index + 1, message))));
+		expect(model.items.slice(1, -1).map(estimateConversationFeedItemSize)).toEqual([124, 156, 64, 242, 242, 294]);
 	});
 });
