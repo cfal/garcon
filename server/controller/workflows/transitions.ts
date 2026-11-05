@@ -11,6 +11,9 @@ export function invalidatedWorkflowTasks(previous: WorkflowPlan | null, next: Wo
   if (workflowDigest(previous.policy) !== workflowDigest(next.policy)) next.tasks.forEach(task => changed.add(task.id));
   const removed = previous.tasks.filter(task => !next.tasks.some(candidate => candidate.id === task.id));
   removed.forEach(task => changed.add(task.id));
+  for (const task of [...previous.tasks, ...next.tasks]) {
+    if (changed.has(task.id) && task.spec.kind === 'publish-pr') changed.add(task.spec.approvalTaskId);
+  }
   return workflowDescendants(next, workflowDescendants(previous, changed));
 }
 
@@ -18,8 +21,11 @@ export type WorkflowAttemptStatus = Pick<WorkflowAttempt, 'attemptId' | 'taskId'
   | 'resolution' | 'dispatchPhase' | 'controlState'> & { readonly result: Pick<WorkflowAttemptResult, 'certainty' | 'termination'> | null };
 export interface WorkflowRetryCounts { readonly executions: number; readonly admissions: number }
 export type WorkflowProjectedTask<A extends WorkflowAttemptStatus> = Omit<WorkflowTaskView, 'attempt'> & { readonly attempt: A | null };
+export type WorkflowTaskProjectionInput = Pick<WorkflowPlanTask, 'id' | 'dependsOn' | 'retry'> & {
+  readonly spec: Pick<WorkflowPlanTask['spec'], 'kind'>;
+};
 
-export function projectWorkflowTasks<A extends WorkflowAttemptStatus>(workflow: WorkflowRecord, plan: WorkflowPlan | null,
+export function projectWorkflowTasks<A extends WorkflowAttemptStatus>(workflow: WorkflowRecord, plan: { readonly tasks: readonly WorkflowTaskProjectionInput[] } | null,
   tasks: readonly WorkflowTaskRecord[], attempts: readonly A[], admissionEpoch: number,
   retries: ReadonlyMap<string, WorkflowRetryCounts>): WorkflowProjectedTask<A>[] {
   const byId = new Map(tasks.map(task => [task.id, task]));
@@ -54,14 +60,14 @@ export function projectWorkflowTasks<A extends WorkflowAttemptStatus>(workflow: 
   });
 }
 
-export function automaticRetryAllowed(task: WorkflowPlanTask, latest: WorkflowAttemptStatus, executions: number): boolean {
-  if (!latest || !task.retry.repeatableFailure || latest.resolution !== 'failed'
+export function automaticRetryAllowed(task: WorkflowTaskProjectionInput, latest: WorkflowAttemptStatus, executions: number): boolean {
+  if (!latest || ['integrate', 'approval', 'publish-pr'].includes(task.spec.kind) || !task.retry.repeatableFailure || latest.resolution !== 'failed'
     || latest.result?.certainty !== 'definite' || latest.result.termination === 'unknown'
     || latest.controlState === 'revoked') return false;
   return executions < task.retry.maxAttempts;
 }
 
-export function workflowOutcome(plan: WorkflowPlan | null, tasks: readonly Pick<WorkflowTaskView, 'id' | 'phase'>[]): WorkflowOutcome {
+export function workflowOutcome(plan: Pick<WorkflowPlan, 'goal'> | null, tasks: readonly Pick<WorkflowTaskView, 'id' | 'phase'>[]): WorkflowOutcome {
   if (!plan) return 'pending';
   if (tasks.some(task => task.phase === 'outcome-unknown' || task.phase === 'awaiting-approval' || task.phase === 'interrupted')) return 'needs-attention';
   if (plan.goal.taskIds.every(id => tasks.some(task => task.id === id && task.phase === 'succeeded'))) return 'succeeded';

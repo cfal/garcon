@@ -210,11 +210,13 @@ export type AgentCommandSettingKey = typeof AGENT_COMMAND_SETTING_KEYS[number];
 export type AgentCommandsFeatureSettings = Record<AgentCommandSettingKey, boolean>;
 
 export interface RemoteFeatureSettings {
+  workflows: { enabled: boolean };
   transcriptSearch: TranscriptSearchFeatureSettings;
   agentCommands: AgentCommandsFeatureSettings;
 }
 
 export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
+  workflows: { enabled: false },
   transcriptSearch: { enabled: false },
   agentCommands: {
     enabled: true,
@@ -603,6 +605,7 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
 
 export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
   const raw = asRecord(value);
+  const workflows = asRecord(raw?.workflows);
   const transcriptSearch = asRecord(raw?.transcriptSearch);
   const agentCommands = asRecord(raw?.agentCommands);
   const legacyChatIdDiscovery = asRecord(raw?.chatIdDiscovery);
@@ -610,6 +613,7 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
     ? agentCommands.chatIdDiscovery
     : legacyChatIdDiscovery?.enabled;
   return {
+    workflows: { enabled: workflows?.enabled === true },
     transcriptSearch: {
       enabled: typeof transcriptSearch?.enabled === 'boolean'
         ? transcriptSearch.enabled

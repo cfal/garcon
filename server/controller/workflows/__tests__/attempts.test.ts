@@ -273,6 +273,23 @@ test('late finalization cannot release abandoned resource risk without terminati
   expect(f.claims(attempt.attemptId)).toMatchObject([{ quarantined: 1, retained: 0, risk_released: 0 }]);
 });
 
+test.each(['abandon', 'not-started'] as const)('resolves a removed historical task as %s without changing its replacement', resolution => {
+  const f = setup(); const attempt = f.dispatched();
+  f.store.transaction(db => db.query("UPDATE attempts SET resolution='unknown',dispatch_phase='settled',control_state='revoked' WHERE id=?").run(attempt.attemptId));
+  const replacement = { ...plan(), tasks: [{ ...plan().tasks[0]!, id: 'replacement' }], goal: { kind: 'artifacts' as const, taskIds: ['replacement'] } };
+  f.write({ action: 'plan', workflowId: f.id, expectedPlanRevision: 1, plan: replacement });
+  f.activate(f.id);
+  f.write({ action: 'pause', workflowId: f.id });
+  f.write({ action: 'archive', workflowId: f.id });
+  const before = f.service.detail(f.id).tasks;
+  f.write({ action: 'resolve', workflowId: f.id, taskId: 'check', attemptId: attempt.attemptId,
+    generation: 1, resolution, releaseRisk: false, evidence: 'Synthetic historical evidence.', commit: null });
+  expect(f.service.detail(f.id).tasks).toEqual(before);
+  expect(f.service.inspectAttempt(f.id, attempt.attemptId).attempt.resolution).toBe(resolution === 'abandon' ? 'abandoned' : 'not-started');
+  expect(f.claims(attempt.attemptId)).toMatchObject([resolution === 'abandon'
+    ? { quarantined: 1, risk_released: 0 } : { retained: 1, quarantined: 0 }]);
+});
+
 test('a queued Stop after released success leaves the result and task hold intact', () => {
   const f = setup(); const attempt = f.dispatched();
   f.store.transaction(db => db.query("UPDATE attempts SET resolution='succeeded',dispatch_phase='settled',control_state='released',result_json=? WHERE id=?")
@@ -282,4 +299,34 @@ test('a queued Stop after released success leaves the result and task hold intac
   f.attempts.releaseControl(attempt.attemptId, revoked);
   expect(f.service.detail(f.id).workflow.revision).toBe(revision);
   expect(f.service.detail(f.id).tasks[0]).toMatchObject({ phase: 'succeeded', hold: 'none' });
+});
+
+test('disabled browser recovery clears a settled admission hold without changing history', () => {
+  const f = setup();
+  const attempt = f.attempts.reserve(f.id, 'check')!;
+  f.attempts.beginPreparation(attempt.attemptId);
+  f.attempts.observe(attempt.attemptId, { resolution: 'not-started', admissionHold: 'Retained source changed.',
+    result: { ...observed, certainty: 'not-started', termination: 'not-started' } }, clear);
+  const before = f.attempts.get(attempt.attemptId);
+  expect(before.admissionFailure).toBe(false);
+  f.controls.enabled = false;
+  f.write({ action: 'clear-hold', workflowId: f.id, taskId: 'check', generation: 1, evidence: 'Source independently restored.' });
+  expect(f.service.detail(f.id).tasks[0]?.hold).toBe('none');
+  expect(f.attempts.get(attempt.attemptId)).toEqual(before);
+  expect(f.service.activity(f.id)[0]).toMatchObject({ action: 'clear-hold', detail: 'Source independently restored.' });
+});
+
+test('clearing a hold cannot bypass unknown execution, quarantined resources or a changed generation', () => {
+  for (const blocker of ['unknown', 'resource', 'generation'] as const) {
+    const f = setup(); const attempt = f.dispatched();
+    f.attempts.observe(attempt.attemptId, { resolution: 'unknown', result: { ...observed, certainty: 'unknown', termination: 'unknown' } }, clear);
+    if (blocker !== 'unknown') f.store.transaction(db => db.query("UPDATE attempts SET resolution='abandoned' WHERE id=?").run(attempt.attemptId));
+    if (blocker === 'generation') f.store.transaction(db => {
+      db.query('DELETE FROM resource_claims WHERE attempt_id=?').run(attempt.attemptId);
+      db.query('UPDATE tasks SET generation=2 WHERE workflow_id=?').run(f.id);
+    });
+    expect(() => f.write({ action: 'clear-hold', workflowId: f.id, taskId: 'check', generation: 1,
+      evidence: 'Operator recovery.' })).toThrow('Resolve unsettled');
+    expect(f.service.detail(f.id).tasks[0]?.hold).not.toBe('none');
+  }
 });

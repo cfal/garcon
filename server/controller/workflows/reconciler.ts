@@ -14,6 +14,7 @@ export class WorkflowReconciler {
   readonly #running = new Map<string, { attempt: WorkflowAttempt; task: Promise<void>;
     revocation: AbortController; kind: WorkflowRevocationKind | null }>();
   readonly #stops = new Map<string, Promise<void>>();
+  readonly #approvals = new Map<string, Promise<void>>();
   readonly #shutdown = new AbortController();
   #admitting = false;
   #failed = false;
@@ -27,6 +28,7 @@ export class WorkflowReconciler {
       readonly now: () => string;
       readonly onFailure: (error: unknown) => void;
       readonly yield?: () => Promise<void>;
+      readonly prepareApprovals?: (workflowId: string, signal: AbortSignal) => Promise<void> | void;
     }) {}
 
   start(): void {
@@ -105,7 +107,7 @@ export class WorkflowReconciler {
   async flush(): Promise<void> { while (this.#pass) await this.#pass; }
   async waitForSettlements(): Promise<void> {
     await this.flush();
-    await Promise.all([...this.#running.values()].map(item => item.task).concat([...this.#stops.values()]));
+    await Promise.all([...this.#running.values()].map(item => item.task).concat([...this.#stops.values()], [...this.#approvals.values()]));
   }
 
   async #reconcile(): Promise<void> {
@@ -137,6 +139,12 @@ export class WorkflowReconciler {
 
   async #admitWorkflow(workflowId: string): Promise<void> {
     if (!this.#admitting || this.#running.size >= WORKFLOW_LIMITS.globalAttempts) return;
+    if (this.options.prepareApprovals && !this.#approvals.has(workflowId) && this.#approvals.size < WORKFLOW_LIMITS.globalAttempts) {
+      const preparation = Promise.resolve().then(() => this.options.prepareApprovals!(workflowId, this.#shutdown.signal))
+        .catch(error => { if (!this.#shutdown.signal.aborted) logger.warn('Workflow approval preparation remains unavailable.', { workflowId, error }); })
+        .finally(() => this.#approvals.delete(workflowId));
+      this.#approvals.set(workflowId, preparation);
+    }
     const detail = this.store.read(db => readWorkflowSchedule(db, workflowId));
     if (!detail.active || detail.workflow.desired !== 'active' || detail.workflow.archived) return;
     let capacity = this.store.read(readWorkflowCapacity);
@@ -156,7 +164,7 @@ export class WorkflowReconciler {
       const executorId = spec.spec.target.executorId;
       if (capacity.filter(row => row.executorId === executorId).length >= WORKFLOW_LIMITS.executorAttempts) continue;
       if ([...this.#running.values()].some(({ attempt }) => attempt.workflowId === workflowId && attempt.taskId === task.id)) continue;
-      if (!this.port.available(spec)) continue;
+      if (!this.port.available(spec, detail.active.plan)) continue;
       try {
         const attempt = this.attempts.reserve(workflowId, task.id);
         if (attempt) {

@@ -28,6 +28,7 @@ describe('generation settings contracts', () => {
   it('defaults agent commands to enabled and normalizes partial command settings', () => {
     expect(normalizeRemoteFeatureSettings(undefined)).toEqual({
       transcriptSearch: { enabled: false },
+      workflows: { enabled: false },
       agentCommands: {
         enabled: true,
         chatIdDiscovery: true,
@@ -49,6 +50,13 @@ describe('generation settings contracts', () => {
       schedule: true,
       tickets: true,
     });
+  });
+
+  it('enables workflows only through an explicit boolean setting', () => {
+    for (const enabled of [undefined, null, 'true', 1, false, true]) {
+      expect(normalizeRemoteFeatureSettings({ workflows: { enabled } }).workflows)
+        .toEqual({ enabled: enabled === true });
+    }
   });
 
   it('migrates legacy discovery only when the agent command object is absent or invalid', () => {

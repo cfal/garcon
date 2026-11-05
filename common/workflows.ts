@@ -3,12 +3,13 @@ import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { CommandOutcome } from './command-output.js';
 import type { AutomationExecutionScope, EffectiveAutomationInput } from './automation.js';
+import type { GhActorIdentity, GhRepositoryIdentity } from './gh.js';
 
 export const WORKFLOW_LIMITS = {
   tasks: 256, edges: 1024, planBytes: 768 * 1024, promptBytes: 64 * 1024,
   evidenceBytes: 64 * 1024, resultBytes: 16 * 1024, pageBytes: 2 * 1024 * 1024, pageSize: 200,
   globalAttempts: 4, workflowAttempts: 2, executorAttempts: 2, admissionAttempts: 3,
-  resourceOperations: 32, workflowResourceBytes: 4 * 1024 * 1024,
+  resourceOperations: 32, integrationInputs: 15, workflowResourceBytes: 4 * 1024 * 1024,
 } as const;
 
 export interface WorkflowRepositoryTarget {
@@ -90,6 +91,7 @@ export type WorkflowDesired = 'draft' | 'active' | 'paused' | 'canceled';
 export type WorkflowOutcome = 'pending' | 'succeeded' | 'failed' | 'needs-attention';
 export type WorkflowTaskPhase = 'blocked' | 'ready' | 'preparing' | 'running' | 'checking'
   | 'awaiting-approval' | 'succeeded' | 'failed' | 'interrupted' | 'outcome-unknown' | 'superseded' | 'canceled';
+export const WORKFLOW_ATTENTION_PHASES: readonly WorkflowTaskPhase[] = ['awaiting-approval', 'failed', 'outcome-unknown', 'interrupted', 'superseded'];
 export type WorkflowDispatchPhase = 'planned' | 'preparing' | 'prepared' | 'dispatching' | 'observed-running' | 'settled';
 export type WorkflowResolution = 'open' | 'succeeded' | 'failed' | 'interrupted' | 'not-started' | 'unknown' | 'abandoned';
 export type WorkflowHold = 'none' | 'intervention' | 'output-unknown';
@@ -163,6 +165,25 @@ export interface WorkflowAttemptResult {
   readonly termination: 'observed' | 'not-started' | 'unknown';
 }
 
+export interface WorkflowCommitInput {
+  readonly taskId: string;
+  readonly attemptId: string;
+  readonly artifactId: string;
+  readonly digest: string;
+  readonly commit: string;
+}
+
+interface WorkflowGitObservation {
+  readonly runtimeInstanceId: string;
+  readonly repositoryIdentity: string;
+  readonly worktreeIdentity: string;
+  readonly projectPath: string;
+  readonly inputCommit: string;
+  readonly inputTree: string;
+  readonly outputTree: string;
+  readonly containsInput: boolean | null;
+}
+
 export interface WorkflowArtifact {
   readonly id: string;
   readonly attempt: WorkflowAttemptIdentity;
@@ -179,19 +200,25 @@ export interface WorkflowArtifact {
   readonly commandOutcome: CommandOutcome | null;
   readonly receivedOutputCoverage: 'complete' | 'gapped' | 'unknown';
   readonly observedAt: string;
-  readonly git: {
+  readonly git: WorkflowGitObservation & ({
     readonly scope: 'managed-worktree-endpoints';
     readonly executionScope: AutomationExecutionScope | null;
     readonly effectiveInputDigest: string;
-    readonly runtimeInstanceId: string;
-    readonly repositoryIdentity: string;
-    readonly worktreeIdentity: string;
-    readonly projectPath: string;
-    readonly inputCommit: string;
-    readonly inputTree: string;
-    readonly outputTree: string;
-    readonly containsInput: boolean | null;
-  } | null;
+  } | {
+    readonly scope: 'managed-integration';
+    readonly operationId: string;
+    readonly manifestDigest: string;
+    readonly inputs: readonly WorkflowCommitInput[];
+  } | {
+    readonly scope: 'managed-publication';
+    readonly operationId: string;
+    readonly manifestDigest: string;
+  } | {
+    readonly scope: 'operator-adopted';
+    readonly operationId: string;
+    readonly actor: string;
+    readonly evidenceDigest: string;
+  }) | null;
 }
 
 export interface WorkflowApprovalManifest {
@@ -203,7 +230,9 @@ export interface WorkflowApprovalManifest {
   readonly artifacts: readonly { readonly id: string; readonly digest: string }[];
   readonly publication: {
     readonly executorId: string; readonly repositoryId: string; readonly remoteUrl: string;
-    readonly actor: string; readonly baseBranch: string; readonly headBranch: string;
+    readonly actor: GhActorIdentity; readonly repository: GhRepositoryIdentity;
+    readonly runtimeInstanceId: string; readonly projectPath: string;
+    readonly baseCommit: string; readonly baseBranch: string; readonly headBranch: string;
     readonly headCommit: string; readonly title: string; readonly body: string;
     readonly draft: boolean; readonly operationId: string;
   } | null;
@@ -239,6 +268,11 @@ export interface WorkflowResourceClaim {
   readonly retained: boolean;
 }
 
+export interface WorkflowOperationView extends Omit<WorkflowOperationIntent, 'payload' | 'result'> {
+  readonly stage: string | null;
+  readonly detail: string | null;
+}
+
 export interface WorkflowActivity {
   readonly sequence: number;
   readonly workflowId: string;
@@ -251,8 +285,13 @@ export interface WorkflowActivity {
 export interface WorkflowTaskView extends WorkflowTaskRecord {
   readonly phase: WorkflowTaskPhase;
   readonly blockedReason: string | null;
-  readonly attempt: WorkflowAttempt | null;
+  readonly attempt: WorkflowAttemptSummary | null;
 }
+
+export type WorkflowAttemptSummary = Pick<WorkflowAttempt, 'workflowId' | 'taskId' | 'attemptId' | 'generation' | 'inputDigest'
+  | 'planRevision' | 'dispatchPhase' | 'resolution' | 'controlState' | 'chatId' | 'createdAt'> & {
+  readonly result: Pick<WorkflowAttemptResult, 'certainty' | 'termination' | 'detail'> | null;
+};
 
 export interface WorkflowDetail {
   readonly workflow: WorkflowRecord;
@@ -265,6 +304,40 @@ export interface WorkflowDetail {
   readonly outcome: WorkflowOutcome;
   readonly activationManifest: WorkflowApprovalManifest;
   readonly activationDigest: string;
+  readonly operations: readonly WorkflowOperationView[];
+  readonly resources: readonly WorkflowResourceClaim[];
+}
+
+export interface WorkflowCatalogEntry extends WorkflowRecord {
+  readonly goal: WorkflowPlan['goal']['kind'];
+  readonly completedTasks: number;
+  readonly totalTasks: number;
+  readonly attentionTasks: number;
+  readonly attentionOperations: number;
+  readonly executorIds: readonly string[];
+}
+
+export interface WorkflowAttemptInspection {
+  readonly attempt: WorkflowAttempt;
+  readonly task: WorkflowPlanTask;
+  readonly artifacts: readonly WorkflowArtifact[];
+  readonly operations: readonly WorkflowOperationView[];
+  readonly resources: readonly WorkflowResourceClaim[];
+}
+
+export type WorkflowOverview = Omit<WorkflowDetail, 'draft' | 'active' | 'artifacts' | 'approvals'> & {
+  readonly draft: Omit<WorkflowPlanRevision, 'plan'>;
+  readonly active: Omit<WorkflowPlanRevision, 'plan'> | null;
+};
+export type WorkflowEvidenceSummary = Pick<WorkflowArtifact, 'id' | 'digest' | 'kind' | 'outcome' | 'provenance' | 'summary'
+  | 'commit' | 'receivedOutputCoverage'> & {
+  readonly summaryTruncated: boolean;
+  readonly commandOutcome: Pick<CommandOutcome, 'outcome' | 'exitCode' | 'capture'> | null;
+};
+export interface WorkflowGateInspection {
+  readonly manifest: WorkflowApprovalManifest;
+  readonly digest: string;
+  readonly evidence: readonly WorkflowEvidenceSummary[];
 }
 
 export type WorkflowMutation =
@@ -274,6 +347,9 @@ export type WorkflowMutation =
   | { readonly action: 'pause' | 'stop' | 'cancel' | 'archive'; readonly workflowId: string }
   | { readonly action: 'resume'; readonly workflowId: string; readonly controlEpoch: number; readonly planRevision: number }
   | { readonly action: 'retry'; readonly workflowId: string; readonly taskId: string; readonly generation: number; readonly attemptId: string }
+  | { readonly action: 'clear-hold'; readonly workflowId: string; readonly taskId: string; readonly generation: number; readonly evidence: string }
+  | { readonly action: 'recheck-publication'; readonly workflowId: string; readonly attemptId: string; readonly publicationOperationId: string }
+  | { readonly action: 'cleanup'; readonly workflowId: string; readonly attemptId: string; readonly resourceKey: string; readonly expectedHead: string }
   | { readonly action: 'approve'; readonly workflowId: string; readonly gateId: string; readonly manifestDigest: string; readonly decision: 'approve' | 'reject' }
   | { readonly action: 'resolve'; readonly workflowId: string; readonly taskId: string; readonly generation: number;
       readonly attemptId: string; readonly resolution: 'not-started' | 'abandon' | 'adopt';

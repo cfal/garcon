@@ -1,21 +1,20 @@
-import { AgentCallError, type ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import { GIT_OPERATION_TIMEOUT_MS } from '../../../../common/git-execution.js';
-import { GitServiceError } from '../../../../common/git-error.js';
 import type { WorkflowManagedTarget } from '../../../../common/workflows.js';
 import type { WorkflowEvidenceRepositoryPort, WorkflowRepositoryPort } from '../contracts.js';
 import { workflowConflict } from '../errors.js';
 import { workflowDigest } from '../inputs.js';
 import { managedTargetRequest } from '../managed-target.js';
 import type { WorkflowResources } from '../resources.js';
+import { definitelyNotDispatched, inspectWorkflowRepository, type WorkflowRuntimeResolver } from './repository-runtime.js';
+import { prepareWorkflowInputs } from './transfers.js';
 
 export function createWorkflowRepositoryPort(resources: WorkflowResources,
-  resolve: (executorId: string) => Promise<Pick<ExecutionRuntimeApi,
-    'getGitService' | 'getProjectService'>>): WorkflowRepositoryPort & WorkflowEvidenceRepositoryPort {
+  resolve: WorkflowRuntimeResolver): WorkflowRepositoryPort & WorkflowEvidenceRepositoryPort {
   return {
     async prepare(attempt, task, fence) {
       const target = attempt.target;
       if (!target || !('target' in task.spec)) return workflowConflict('Repository preparation requires an exact target.');
-      if (resources.store.read(db => db.query("SELECT 1 FROM operation_intents WHERE attempt_id=? AND kind='worktree' LIMIT 1")
+      if (resources.store.read(db => db.query('SELECT 1 FROM operation_intents WHERE attempt_id=? LIMIT 1')
         .get(attempt.attemptId))) return workflowConflict('An attempt cannot repeat managed creation.');
       const signal = AbortSignal.any([fence.shutdown, fence.revokedSignal]);
       const options = { signal, timeoutMs: GIT_OPERATION_TIMEOUT_MS };
@@ -36,6 +35,9 @@ export function createWorkflowRepositoryPort(resources: WorkflowResources,
       if (root.executorId !== target.executorId || root.instanceId !== repo.instanceId || root.isGitRepository) {
         return workflowConflict('Managed worktree root must be outside every checkout on the selected runtime.');
       }
+      const inputs = await prepareWorkflowInputs(resources, resolve, attempt, task,
+        { executorId: repo.executorId, instanceId: repo.instanceId, projectPath: repo.currentWorktreePath, git }, fence);
+      if (inputs.kind !== 'available') return inputs;
       const base = await git.inspectCommit({ projectPath: repo.currentWorktreePath, commit: target.baseCommit,
         ancestor: task.spec.target.baseCommit }, options);
       if (base.executorId !== target.executorId || base.instanceId !== repo.instanceId || base.containsAncestor !== true) {
@@ -52,7 +54,7 @@ export function createWorkflowRepositoryPort(resources: WorkflowResources,
       resources.begin(operationId, fence);
       try {
         const created = await git.createManagedWorktree({ projectPath: repo.currentWorktreePath, worktreePath,
-          managedResourceId, operationId, branch, baseCommit: target.baseCommit }, options);
+          managedResourceId, operationId, branch, baseCommit: target.baseCommit }, { ...options, signal: fence.shutdown, instanceId: repo.instanceId });
         const managed = created.managed;
         if (created.executorId !== target.executorId || created.instanceId !== repo.instanceId || managed.operationId !== operationId
           || managed.managedResourceId !== managedResourceId || managed.branch !== branch || managed.baseCommit !== target.baseCommit
@@ -73,33 +75,6 @@ export function createWorkflowRepositoryPort(resources: WorkflowResources,
         return { kind, detail };
       }
     },
-    async inspect(resource, signal) {
-      const runtime = await resolve(resource.target.executorId);
-      const git = await runtime.getGitService({ signal });
-      const request = { projectPath: resource.sourceProjectPath, worktreePath: resource.target.projectPath,
-        managedResourceId: resource.managedResourceId, operationId: resource.operationId };
-      const options = { signal, timeoutMs: GIT_OPERATION_TIMEOUT_MS };
-      signal.throwIfAborted();
-      const before = await git.inspectManagedWorktree(request, options);
-      if (!before.managed || before.executorId !== resource.target.executorId || before.instanceId !== resource.instanceId) {
-        return workflowConflict('Managed output is unavailable on its prepared runtime.');
-      }
-      const commit = await git.inspectCommit({ projectPath: resource.target.projectPath,
-        commit: before.managed.head, ancestor: resource.head }, options);
-      const after = await git.inspectManagedWorktree(request, options);
-      signal.throwIfAborted();
-      if (commit.executorId !== before.executorId || commit.instanceId !== before.instanceId
-        || after.executorId !== before.executorId || after.instanceId !== before.instanceId
-        || !after.managed || workflowDigest(after.managed) !== workflowDigest(before.managed)) {
-        return workflowConflict('Managed output changed during observation.');
-      }
-      return { executorId: after.executorId, instanceId: after.instanceId, managed: after.managed,
-        commit: { commit: commit.commit, tree: commit.tree, parents: commit.parents, containsAncestor: commit.containsAncestor } };
-    },
+    inspect: (resource, signal) => inspectWorkflowRepository(resolve, resource, signal),
   };
-}
-
-function definitelyNotDispatched(error: unknown): boolean {
-  return error instanceof AgentCallError && error.outcome === 'not-dispatched'
-    || error instanceof GitServiceError && ['GIT_INVALID_INPUT', 'GIT_SERVICE_BUSY', 'GIT_OUTSIDE_BASE', 'GIT_UNAVAILABLE'].includes(error.code);
 }

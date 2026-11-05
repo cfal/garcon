@@ -92,6 +92,16 @@ test('observes instant completion before dispatch and retains the lease through 
   expect(f.service.detail(f.attempt.workflowId).tasks[0]?.hold).toBe('output-unknown');
 });
 
+test('held repository preparation requests resolution without starting chat or spending retries', async () => {
+  const f = setup();
+  f.repositories.prepare.mockResolvedValueOnce({ kind: 'held', detail: 'Synthetic source drift.' });
+  await f.run();
+  expect(f.attempts.get(f.attempt.attemptId)).toMatchObject({ resolution: 'not-started', admissionFailure: false });
+  expect(f.service.detail(f.attempt.workflowId).tasks[0]).toMatchObject({ hold: 'output-unknown', holdReason: 'Synthetic source drift.' });
+  expect(f.chats.prepare).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled();
+  expect(f.failures).toEqual([]);
+});
+
 test('accepted evidence releases durable control and capacity before restart', async () => {
   const f = setup();
   f.output.capture.mockResolvedValueOnce({ commit() {

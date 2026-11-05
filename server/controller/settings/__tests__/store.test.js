@@ -904,6 +904,7 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings).toEqual({
         features: {
+          workflows: { enabled: false },
           transcriptSearch: { enabled: false },
           agentCommands: {
             enabled: true,
@@ -1615,6 +1616,7 @@ describe('settings store', () => {
         },
       });
       expect(store.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: false },
         agentCommands: {
           enabled: false,
@@ -1628,6 +1630,7 @@ describe('settings store', () => {
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: false },
         agentCommands: {
           enabled: false,
@@ -1676,6 +1679,7 @@ describe('settings store', () => {
       store.onRemoteSettingsChanged(() => events.push('changed'));
       await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
       expect(store.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: true },
         agentCommands: {
           enabled: true,
@@ -1693,6 +1697,7 @@ describe('settings store', () => {
       const reloaded = new SettingsStore(tmpDir);
       await reloaded.init();
       expect(reloaded.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: true },
         agentCommands: {
           enabled: true,
@@ -1722,6 +1727,7 @@ describe('settings store', () => {
       });
 
       expect(store.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: false },
         agentCommands: {
           enabled: true,

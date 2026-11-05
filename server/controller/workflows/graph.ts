@@ -1,5 +1,6 @@
 import { WORKFLOW_LIMITS, type WorkflowPlan, type WorkflowPlanTask } from '../../../common/workflows.js';
 import { workflowInvalid } from '../../../common/workflow-validation.js';
+import { workflowCommitInputIds, workflowNeedsTransfer } from './inputs.js';
 
 export function workflowOrder(plan: WorkflowPlan): readonly string[] {
   const byId = new Map(plan.tasks.map(task => [task.id, task]));
@@ -55,16 +56,24 @@ export function validateWorkflowGraph(plan: WorkflowPlan): void {
     }
     if ('target' in task.spec && task.spec.target.inputTaskId !== null) {
       if (task.spec.kind !== 'agent' && task.spec.kind !== 'command') return workflowInvalid('This task already has an explicit commit selector.');
-      const source = requireDependency(task.spec.target.inputTaskId);
+    }
+    for (const id of workflowCommitInputIds(task)) {
+      const source = requireDependency(id);
       requireCommitOutput(source);
-      if (!('target' in source.spec) || source.spec.target.repositoryId !== task.spec.target.repositoryId
+      if (!('target' in task.spec) || !('target' in source.spec) || source.spec.target.repositoryId !== task.spec.target.repositoryId
         || source.spec.target.baseCommit !== task.spec.target.baseCommit) {
         return workflowInvalid('Repository input must share its approved logical repository and root commit.');
+      }
+      if (workflowNeedsTransfer(source.spec.target, task.spec.target)
+        && (!plan.policy.allowRemoteWrites || !source.spec.target.remote || !task.spec.target.remote
+          || source.spec.target.remote.url !== task.spec.target.remote.url)) {
+        return workflowInvalid('Cross-clone inputs require an explicitly shared approved remote.');
       }
     }
     for (const acceptance of task.acceptance) {
       if (acceptance.kind === 'artifact') {
-        if (task.spec.kind !== 'agent' || !task.spec.outputs.includes(acceptance.output)) return workflowInvalid('Acceptance names an undeclared output.');
+        if (task.spec.kind === 'integrate' ? acceptance.output !== 'commit'
+          : task.spec.kind !== 'agent' || !task.spec.outputs.includes(acceptance.output)) return workflowInvalid('Acceptance names an undeclared output.');
       } else {
         if (task.spec.kind === 'integrate' || task.spec.kind === 'agent' && task.spec.outputs.includes('commit')) {
           return workflowInvalid('Review and approval acceptance must inspect an existing input, not a future output.');
@@ -83,17 +92,25 @@ export function validateWorkflowGraph(plan: WorkflowPlan): void {
       }
     }
     if (task.spec.kind === 'integrate') {
-      if (!task.spec.inputs.length) return workflowInvalid('Integration requires commits.');
-      task.spec.inputs.forEach(id => requireCommitOutput(requireDependency(id)));
+      if (!task.spec.inputs.length || task.spec.inputs.length > WORKFLOW_LIMITS.integrationInputs) {
+        return workflowInvalid('Integration requires between 1 and 15 commit inputs.');
+      }
+      if (task.retry.maxAttempts !== 1 || task.retry.repeatableFailure) return workflowInvalid('Integration cannot automatically retry.');
     }
-    if (task.spec.kind === 'approval') task.spec.requirements.forEach(requireDependency);
+    if (task.spec.kind === 'approval') {
+      task.spec.requirements.forEach(requireDependency);
+      if (task.retry.maxAttempts !== 1 || task.retry.repeatableFailure) return workflowInvalid('Human decisions cannot automatically retry.');
+    }
     if (task.spec.kind === 'publish-pr') {
+      const approvalTaskId = task.spec.approvalTaskId;
+      if (Buffer.byteLength(task.spec.body) > 16 * 1024) return workflowInvalid('Publication bodies are limited to 16 KiB.');
       if (!plan.policy.allowRemoteWrites || !task.spec.target.remote) return workflowInvalid('Publication requires approved remote writes.');
-      requireCommitOutput(requireDependency(task.spec.sourceTaskId));
       const gate = requireDependency(task.spec.approvalTaskId);
       if (gate.spec.kind !== 'approval' || gate.spec.purpose !== 'publication'
         || !gate.dependsOn.includes(task.spec.sourceTaskId)) return workflowInvalid('Publication requires a gate over its source commit.');
-      if (task.retry.maxAttempts !== 1) return workflowInvalid('Publication is reconciled, never automatically repeated.');
+      if (task.retry.maxAttempts !== 1 || task.retry.repeatableFailure) return workflowInvalid('Publication is reconciled, never automatically repeated.');
+      if (plan.tasks.filter(candidate => candidate.spec.kind === 'publish-pr' && candidate.spec.approvalTaskId === approvalTaskId).length !== 1)
+        return workflowInvalid('Each publication requires its own approval gate.');
     }
     if ('target' in task.spec) {
       for (const id of task.dependsOn) {

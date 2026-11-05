@@ -10,11 +10,16 @@ import type { WorkflowStore } from './store.js';
 import { managedTargetRequest, parseManagedTarget } from './managed-target.js';
 import { workflowResultDetail } from './terminal-observation.js';
 import { requireWorkflowGates } from './acceptance.js';
+import { requireIntegrationOperation } from './integration-manifest.js';
+import { requireResourceDispatch } from './resource-dispatch.js';
+import { requirePublicationApproval, requirePublicationOperation } from './publication-manifest.js';
+import type { WorkflowEffectFence } from './contracts.js';
 
 export interface WorkflowTerminalObservation {
   readonly resolution: 'checking' | 'failed' | 'interrupted' | 'not-started' | 'unknown';
   readonly result: WorkflowAttemptResult;
   readonly admissionFailure?: boolean;
+  readonly admissionHold?: string;
   readonly retainControl?: boolean;
 }
 
@@ -145,6 +150,40 @@ export class WorkflowAttempts {
     });
   }
 
+  bindIntegrationPrepared(attemptId: string, operationId: string): WorkflowAttempt {
+    return this.#update(attemptId, 'integration-prepared', (db, attempt) => {
+      requirePhase(attempt, 'preparing');
+      requireWorkflowDispatch(db, attempt);
+      const { operation } = requireIntegrationOperation(db, attempt, operationId);
+      if (operation.status !== 'planned') workflowConflict('Integration was already dispatched.');
+      db.query("UPDATE attempts SET dispatch_phase='prepared' WHERE id=?").run(attemptId);
+    });
+  }
+
+  markIntegrationDispatching(attemptId: string, operationId: string, fence: WorkflowEffectFence): WorkflowAttempt {
+    return this.#update(attemptId, 'integration-dispatching', (db, attempt) => {
+      requirePhase(attempt, 'prepared');
+      requireWorkflowDispatch(db, attempt);
+      const { operation } = requireIntegrationOperation(db, attempt, operationId);
+      requireResourceDispatch(db, operation, fence);
+      db.query("UPDATE attempts SET dispatch_phase='dispatching' WHERE id=?").run(attemptId);
+      db.query("UPDATE operation_intents SET status='dispatching' WHERE id=?").run(operationId);
+    });
+  }
+
+  markPublicationDispatching(attemptId: string, pushId: string, createId: string, fence: WorkflowEffectFence): WorkflowAttempt {
+    return this.#update(attemptId, 'publication-dispatching', (db, attempt) => {
+      requirePhase(attempt, 'preparing');
+      requireWorkflowDispatch(db, attempt);
+      const push = requirePublicationOperation(db, attempt, pushId, 'push');
+      const create = requirePublicationOperation(db, attempt, createId, 'create');
+      if (create.status !== 'planned') workflowConflict('Publication was already dispatched.');
+      requireResourceDispatch(db, push, fence);
+      db.query("UPDATE attempts SET dispatch_phase='dispatching' WHERE id=?").run(attemptId);
+      db.query("UPDATE operation_intents SET status='dispatching' WHERE id=?").run(pushId);
+    });
+  }
+
   observe(attemptId: string, observation: WorkflowTerminalObservation, fence: WorkflowAttemptFence): WorkflowAttempt {
     if (Buffer.byteLength(JSON.stringify(observation.result)) > WORKFLOW_LIMITS.resultBytes) workflowConflict('Attempt result exceeds its bound.');
     if (observation.result.outputCaptured || observation.resolution === 'checking'
@@ -166,7 +205,7 @@ export class WorkflowAttempts {
         : attempt.revocationKind ?? (current ? null : 'superseded');
       const resolution = observation.resolution === 'checking' ? revoked ? 'unknown' : 'open' : observation.resolution;
       const workflow = requireWorkflow(db, attempt.workflowId);
-      const admissionFailure = resolution === 'not-started' && observation.admissionFailure !== false && !revoked
+      const admissionFailure = resolution === 'not-started' && !observation.admissionHold && observation.admissionFailure !== false && !revoked
         && workflow.desired === 'active' && workflow.admissionEpoch === workflowEpoch(db);
       // A terminal can precede start settlement; revocation does not release that admission owner.
       db.query(`UPDATE attempts SET result_json=?,resolution=?,dispatch_phase=?,control_state=?,revocation_reason=?,revocation_kind=?,admission_failure=? WHERE id=?`)
@@ -178,6 +217,8 @@ export class WorkflowAttempts {
         holdTask(db, attempt, 'intervention', fence.reason ?? 'Attempt control was interrupted.');
       } else if (resolution === 'unknown' || observation.result.termination === 'unknown') {
         holdTask(db, attempt, 'output-unknown', observation.result.detail);
+      } else if (current && resolution === 'not-started' && observation.admissionHold) {
+        holdTask(db, attempt, 'output-unknown', observation.admissionHold);
       }
       if (resolution !== 'open') {
         if (observation.result.termination !== 'unknown' && resolution !== 'unknown') {
@@ -279,6 +320,11 @@ export function requireWorkflowInputs(db: Database, attempt: WorkflowAttempt): v
     || task?.hold !== 'none') {
     workflowConflict('Workflow admission or attempt generation changed.');
   }
+  requireCurrentAttemptInputs(db, attempt);
+}
+
+export function requireCurrentAttemptInputs(db: Database, attempt: WorkflowAttempt): void {
+  if (!currentGeneration(db, attempt)) workflowConflict('Attempt generation changed.');
   const spec = readPlan(db, attempt.workflowId, attempt.planRevision).plan.tasks.find(task => task.id === attempt.taskId)!;
   for (const id of spec.dependsOn) {
     if (!db.query(`SELECT 1 FROM tasks t JOIN attempts a ON a.workflow_id=t.workflow_id AND a.task_id=t.id
@@ -294,6 +340,7 @@ export function requireWorkflowInputs(db: Database, attempt: WorkflowAttempt): v
     workflowConflict('Dependency artifacts changed after reservation.');
   }
   if (attempt.target) requireWorkflowGates(db, attempt, spec, attempt.target.baseCommit);
+  if (spec.spec.kind === 'publish-pr') requirePublicationApproval(db, attempt);
 }
 
 export function holdTask(db: Database, attempt: WorkflowAttempt, hold: 'intervention' | 'output-unknown', reason: string): void {

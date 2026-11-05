@@ -21,8 +21,12 @@ test.each(['matching', 'unapproved', 'rejected', 'generation', 'artifacts'] as c
   const manifestDigest = workflowDigest(manifest);
   f.store.transaction(db => db.query('INSERT INTO gate_manifests VALUES (?,?,?,?)')
     .run(workflowId, gate.id, manifestDigest, JSON.stringify(manifest)));
-  if (kind !== 'unapproved') f.write({ action: 'approve', workflowId, gateId: gate.id, manifestDigest,
-    decision: kind === 'rejected' ? 'reject' : 'approve' });
+  if (kind !== 'unapproved') {
+    const approve = () => f.write({ action: 'approve', workflowId, gateId: gate.id, manifestDigest,
+      decision: kind === 'rejected' ? 'reject' : 'approve' });
+    if (kind === 'generation' || kind === 'artifacts') expect(approve).toThrow('Approval inputs changed');
+    else approve();
+  }
   const target = check.spec.target;
   const verify = () => f.store.read(db => requireWorkflowGates(db, { workflowId, target }, check, target.baseCommit));
   if (kind === 'matching') expect(verify).not.toThrow();
