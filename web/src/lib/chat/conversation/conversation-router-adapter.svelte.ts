@@ -16,6 +16,7 @@ import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordina
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import type { ResendCandidate } from '$shared/chat-view';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+import { committedBatchApplyStatus } from './committed-transcript-batch.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
 
@@ -93,7 +94,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				lastOrdinal,
 				resendCandidates: ResendCandidate[],
 			) => {
-				const result = deps.panels.applyCommittedBatch({
+				return committedBatchApplyStatus(deps.panels.applyCommittedBatch({
 					chatId,
 					transcriptViewId,
 					messages,
@@ -101,11 +102,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					lastOrdinal,
 					resendCandidates,
 					noticeRevision: deps.panels.noticeRevisionFor(chatId),
-				});
-				if (result.kind === 'applied') {
-					return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
-				}
-				return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
+				}));
 			},
 			reloadChatTranscript: (chatId) => {
 				void deps.panels.loadChatSnapshot(chatId).catch(() => {});

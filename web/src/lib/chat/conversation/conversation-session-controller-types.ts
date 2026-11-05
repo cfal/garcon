@@ -3,6 +3,8 @@ import type {
 	ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { CachedTranscriptResumeResult } from '$lib/chat/transcript/cached-transcript-resume.js';
+import type { TranscriptReadPurpose } from '$shared/chat-view';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
@@ -32,6 +34,11 @@ type SessionTranscriptState = Pick<
 	| 'clearResendExclusions'
 > & {
 	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+	// Null means no cached window can be resumed, so activation loads a snapshot.
+	resumeCachedTranscript(
+		chatId: string,
+		options: { purpose?: TranscriptReadPurpose },
+	): Promise<CachedTranscriptResumeResult> | null;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
 	getKnownHeadForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;

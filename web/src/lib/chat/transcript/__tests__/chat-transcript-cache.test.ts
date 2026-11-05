@@ -133,7 +133,7 @@ describe('ChatTranscriptCache', () => {
 		expect(cache.get('chat-1')?.stale).toBe(true);
 	});
 
-	it('detects ordinal gaps without advancing the cursor', () => {
+	it('[TLV5-REPLAY.09-WEB-UNIT-01] discards a gapped batch and keeps the contiguous prefix resumable', () => {
 		const cache = new ChatTranscriptCache({ limit: 100 });
 		cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
 
@@ -149,7 +149,15 @@ describe('ChatTranscriptCache', () => {
 			receivedOrdinal: 3,
 		});
 		expect(cache.get('chat-1')?.lastOrdinal).toBe(1);
-		expect(cache.get('chat-1')?.stale).toBe(true);
+		expect(cache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([1]);
+		expect(cache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'generation-1',
+			lastOrdinal: 1,
+			stale: false,
+		});
+		expect(cache.listCursors()).toEqual([
+			{ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 1 },
+		]);
 	});
 
 	it('advances the cursor across hidden ledger rows', () => {

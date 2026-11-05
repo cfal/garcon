@@ -608,12 +608,9 @@ describe('Chromium preambles', () => {
         const targetPage = await fixture.integration.client.get<CompleteChatHistoryResponse>(
           `/api/v1/chats/messages?chatId=${encodeURIComponent(targetChatId)}&limit=50`,
         );
-        const targetHistoryResponse = new Deferred<void>();
-        let targetHistoryRequestCount = 0;
         await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
           const url = new URL(route.request().url());
           if (url.searchParams.get('chatId') === targetChatId) {
-            targetHistoryRequestCount += 1;
             await route.fulfill({
               json: {
                 ...targetPage,
@@ -622,19 +619,12 @@ describe('Chromium preambles', () => {
                 resendCandidates: [],
               },
             });
-            targetHistoryResponse.resolve(undefined);
             return;
           }
           await route.continue();
         });
         await targetRow.locator('button').first().click();
         await fixture.page.waitForURL(new RegExp(`/chat/${targetChatId}$`));
-        await withTimeout(
-          targetHistoryResponse.promise,
-          10_000,
-          () => 'Timed out waiting for the empty target-history response.',
-        );
-        expect(targetHistoryRequestCount).toBeGreaterThan(0);
         const notice = fixture.page
           .locator('[data-chat-message-type="transcript-notice"]')
           .filter({ hasText: 'Preambles applied' });

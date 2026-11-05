@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 41 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 42 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -55,12 +55,17 @@ replies were lost with a session, and runs whole-view staging, copying, and
 deletion in bounded steps. Neither revision adds inventory IDs; the inventory
 has been unchanged since PR #691.
 
+Revision 42 resumes cached transcript windows on activation through one
+bounded replay page from the cache's applied ordinal and adds TLV5-REPLAY.08
+with five inventory IDs. TLV5-REPLAY.09 adds four more: a gapped live row
+leaves the cached prefix valid for that catch-up instead of invalidating it.
+
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 41, SHA-256
-  `4a9cd1beb0e3ed680b2ac0e2465279da4751f3c3413935fcbc8925f4d6d599a3`
+- `docs/transcript-ledger-v5-design.md`, revision 42, SHA-256
+  `507f131fd931788901f9e00f3e0d5ecbc5a3ac14af07759c71df4c5a0a370829`
 
-Current inventory: 419 discovered stable IDs, validated by
+Current inventory: 429 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -573,6 +578,8 @@ bounded inactive combined-tool windows, and cold bounded-cache restoration.
 | TLV5-REPLAY.05 | Live rows beyond the watermark apply exactly once after fixed replay.                       | State unit, server black-box, Chromium |
 | TLV5-REPLAY.06 | Disconnect abandons partial replay and a later reconnect restarts safely.                   | State unit, Chromium                   |
 | TLV5-REPLAY.07 | View replacement during replay cannot cross views.                                          | Contract, server black-box, Chromium   |
+| TLV5-REPLAY.08 | Warm activation resumes a cached window from its applied ordinal with one bounded replay page, holds live rows behind it, and falls back to the newest snapshot when the server cannot prove the delta contiguous. | Contract, state unit, server black-box, Chromium |
+| TLV5-REPLAY.09 | A live row that does not continue a cached window is discarded with every later row; the cache, panels, and parked windows keep their unmarked contiguous prefix, a rendered chat recovers through one follow-up catch-up, and an offscreen chat recovers at its next activation. | State unit, Chromium |
 
 ### OpenCode V1 Context Exhaustion
 
@@ -822,6 +829,8 @@ becomes a separate environment requirement rather than another semantic test.
 | TLV5-REPLAY.05 | Coordinator, server, and Chromium live-during-replay cases.                                      | Covered |
 | TLV5-REPLAY.06 | Coordinator restart unit plus compact Chromium disconnect after one applied page with the continuation held. | Covered |
 | TLV5-REPLAY.07 | Contract, server stale-view, and Chromium fallback cases.                                        | Covered |
+| TLV5-REPLAY.08 | Activation-purpose contract, resume and registry units, controller activation, server drift-probe, and Chromium warm-switch and withheld-row cases. | Covered |
+| TLV5-REPLAY.09 | Cache prefix, follow-up queue, registry offscreen/rendered/held-gap, router no-reload, and Chromium offscreen and rendered gap cases. | Covered |
 
 The 50,000-row server case and strict Chromium reconnect cases are the primary
 acceptance evidence. Future CTS reporting records maximum frame rows and bytes,
@@ -922,7 +931,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L11.05-RELOAD-CORE-UNIT-01 | `server/controller/ledger/__tests__/reload.test.js`: `reconciles an ambiguously committed cutover`                                                                    | L11.05, L08.02              |
 | TLV5-L11.06-STORE-UNIT-01      | `server/controller/ledger/__tests__/store.test.js`: `does not fence an evicted chat after a passive checkpoint failure`                                                | L11.06                      |
 | TLV5-L11.06-STORE-UNIT-02      | `server/controller/ledger/__tests__/store.test.js`: `completes chat deletion after a passive checkpoint failure`                                                       | L11.06                      |
-| TLV5-L09.03-CORE-STATIC-01     | `server/controller/ledger/__tests__/native-activity-page-reader.test.js`: production scheduling has exactly one activation-history call site and no runtime pre-resume hook | L09.03 |
+| TLV5-L09.03-CORE-STATIC-01     | `server/controller/ledger/__tests__/native-activity-page-reader.test.js`: production scheduling is confined to the activation readers, newest history and the first catch-up replay page, with no runtime pre-resume hook | L09.03 |
 | TLV5-L09.03-CORE-UNIT-01       | `server/controller/ledger/__tests__/native-activity-page-reader.test.js`: newest history returns before its advisory probe is scheduled | L09.03 |
 | TLV5-L09.03-CORE-UNIT-02       | `server/controller/ledger/__tests__/native-activity-page-reader.test.js`: earlier, background, and failed history reads schedule nothing | L09.03 |
 | TLV5-L09.03-ROUTE-UNIT-01      | `server/controller/routes/__tests__/chats-messages.test.js`: only a newest-history request may carry activation and earlier activation is rejected | L09.03 |
@@ -1055,6 +1064,15 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.11-CHROMIUM-REPLAY-01  | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: `keeps an expanded detached reading interval through bounded reconnect replay`    | REPLAY.05, UX.11            |
 | TLV5-REPLAY.06-WEB-UNIT-01     | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: `abandons a partial replay on disconnect and restarts with a fresh watermark`                   | REPLAY.06                   |
 | TLV5-REPLAY.06-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: an expanded detached compact transcript closes with its continuation held, restarts at the applied cursor with a fresh watermark, and applies every addressed row once without HTTP snapshot fallback | REPLAY.06, UX.11 |
+| TLV5-REPLAY.08-CONTRACT-01     | `common/__tests__/ws-transcript-replay.test.js`: an activation purpose is accepted only on a first replay page                                           | REPLAY.08, L09              |
+| TLV5-REPLAY.08-WEB-UNIT-01     | `web/src/lib/chat/transcript/__tests__/cached-transcript-resume.logic.test.ts`: a catch-up requests only rows after the cursor and applies them once; companion cases cover stale, gap, oversized, rejected, unchanged, and superseded catch-ups | REPLAY.08 |
+| TLV5-REPLAY.08-WEB-UNIT-02     | `web/src/lib/chat/conversation/__tests__/conversation-panel-registry.test.ts`: a restored panel catches up from its cached cursor without recent history | REPLAY.08, UX.11 |
+| TLV5-REPLAY.08-WEB-UNIT-03     | `web/src/lib/chat/conversation/__tests__/conversation-session-controller.test.ts`: activation resumes a cached transcript without a history or snapshot read | REPLAY.08 |
+| TLV5-REPLAY.09-WEB-UNIT-01     | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: a gapped batch is discarded and the contiguous prefix stays unmarked and listed | REPLAY.09 |
+| TLV5-REPLAY.09-WEB-UNIT-02     | `web/src/lib/chat/transcript/__tests__/cached-transcript-resume.logic.test.ts`: one follow-up catch-up starts from the advanced cursor after a pending catch-up | REPLAY.09 |
+| TLV5-REPLAY.09-WEB-UNIT-03     | `web/src/lib/chat/conversation/__tests__/conversation-panel-registry.test.ts`: an offscreen prefix survives a gapped live row and only the delta is fetched on return; rendered and held-gap companions recover without a snapshot | REPLAY.09, UX.11 |
+| TLV5-REPLAY.09-CHROMIUM-01     | `integration-tests/tests/chromium/warm-chat-activation.test.ts`: an offscreen and then a rendered chat each recover a dropped live batch through one replay from the prefix, with no HTTP history read and every row once in order | REPLAY.09, UX.11 |
+| TLV5-REPLAY.08-CHROMIUM-01     | `integration-tests/tests/chromium/warm-chat-activation.test.ts`: a warm A to B to A switch reads no history over HTTP, and a chat whose live rows were withheld receives exactly the missed rows, including an agent switch, in order | REPLAY.08, UX.11 |
 | TLV5-PAGE.08-SERVER-UNIT-01    | `server/controller/ledger/__tests__/view-reader.test.js`: one request performs one clamped raw scan and returns its visible fold plus raw continuation               | PAGE.08                     |
 | TLV5-PAGE.08-SERVER-UNIT-02    | `server/controller/ledger/__tests__/view-reader.test.js`: an ordinal-one boundary performs one empty raw scan and reports ceiling zero with no continuation          | PAGE.08                     |
 | TLV5-PAGE.08-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: a request beyond the watermark accepts the clamped raw ceiling and exact continuation                 | PAGE.08                     |

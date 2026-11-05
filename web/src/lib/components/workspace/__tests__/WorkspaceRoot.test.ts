@@ -28,6 +28,7 @@ import type {
 	ConversationPanelRegistry,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ChatMessagesRequest } from '$lib/api/chats.js';
+import type { TranscriptReplayRequest } from '$lib/chat/transcript/cached-transcript-resume.js';
 import type { ProjectTarget } from '$shared/project-resolution';
 import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
@@ -65,6 +66,7 @@ vi.mock('$lib/context', () => ({
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
 	getWorkspaceHostGeometry: () => testContext.current?.hostGeometry,
 	getWorkspaceWindowDnd: () => testContext.current?.windowDnd,
+	getWs: () => ({}),
 	getOptionalTransientLayers: () => null,
 	setConversationUi: (value: unknown) => {
 		if (testContext.current) testContext.current.conversationUi = value;
@@ -86,6 +88,13 @@ vi.mock('$lib/components/chat/ConversationPanel.svelte', async () => ({
 vi.mock('$lib/components/workspace/PortableSurfaceContent.svelte', async () => ({
 	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
+vi.mock('$lib/ws/transcript-replay-request.js', async () => {
+	const { currentTranscriptReplayReader } = await import('../../../../test/transcript-replay.js');
+	return {
+		requestTranscriptReplayPage: (_ws: unknown, request: TranscriptReplayRequest) =>
+			currentTranscriptReplayReader(request),
+	};
+});
 vi.mock('$lib/api/chats.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/chats.js')>();
 	return {

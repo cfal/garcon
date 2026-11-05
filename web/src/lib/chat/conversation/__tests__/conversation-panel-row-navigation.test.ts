@@ -8,6 +8,7 @@ import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/convers
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
+import { currentTranscriptReplayReader } from '../../../../test/transcript-replay.js';
 
 vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
 const chatId = '1000000000000001';
@@ -62,6 +63,7 @@ function fixture() {
 		lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
 		getComposerAnchorSurfaceId: () => 'chat-view:window-one',
 		getSelectedChatId: () => chatId,
+		readTranscriptReplayPage: currentTranscriptReplayReader,
 	});
 	cleanup.push(() => registry.destroy());
 	registry.reconcile([

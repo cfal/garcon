@@ -1,5 +1,6 @@
 import type { ChatMessage } from '$shared/chat-types';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage, TranscriptReadPurpose } from '$shared/chat-view';
+import type { CachedTranscriptResumeResult } from '$lib/chat/transcript/cached-transcript-resume.js';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import {
 	ActiveTranscriptState,
@@ -11,6 +12,7 @@ import {
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import { echoedClientMessageIds } from '$lib/chat/transcript/transcript-row-projection.js';
+import { committedBatchApplyStatus } from './committed-transcript-batch.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
 export class CurrentConversationPanelTranscript implements ActiveTranscriptPort {
@@ -143,9 +145,8 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 					this.#optimisticChatIds.delete(clientMessageId);
 				}
 			}
-			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
 		}
-		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
+		return committedBatchApplyStatus(result);
 	}
 
 	setResendCandidates(candidates: readonly ResendCandidate[]): void {
@@ -161,6 +162,21 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	clearResendExclusions(): void {
 		const chatId = this.options.getSelectedChatId();
 		if (chatId) this.options.panels.clearResendExclusions(chatId);
+	}
+
+	resumeCachedTranscript(
+		chatId: string,
+		options: { purpose?: TranscriptReadPurpose } = {},
+	): Promise<CachedTranscriptResumeResult> | null {
+		const resume = this.options.panels.resumeCachedChat(chatId, options);
+		if (!resume) return null;
+		return resume.then((result) => {
+			// The unrendered fallback holds no reader position, so it republishes the caught-up cache.
+			if (result.kind === 'resumed' && !this.#current() && this.#fallback.activeChatId === chatId) {
+				this.#fallback.activateChat(chatId);
+			}
+			return result;
+		});
 	}
 
 	async loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]> {

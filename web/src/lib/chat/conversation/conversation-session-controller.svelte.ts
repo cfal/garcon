@@ -58,6 +58,7 @@ import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 import { isClearCommand, isControllerSlashCommand } from '$lib/chat/composer/slash-commands.js';
+import type { CachedTranscriptResumeResult } from '$lib/chat/transcript/cached-transcript-resume.js';
 import type {
 	SessionControllerDeps,
 	SessionTranscriptLoadTarget,
@@ -344,19 +345,66 @@ export class ConversationSessionController {
 		deps.lifecycle.applyProcessingPhase(chatId, deps.sessions.processingPhase(chatId));
 		deps.composerState.restoreDraft(chatId);
 		void this.#queue.startControlRefresh(chatId);
+		this.#markChatRead(chatId);
 
-		if (
-			selected.lastActivityAt &&
-			(!selected.lastReadAt || selected.lastReadAt < selected.lastActivityAt)
-		) {
-			deps.readReceiptOutbox.enqueue(chatId, selected.lastActivityAt);
-			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
-		}
-
-		this.loadChat(chatId, {
+		this.#activateTranscript(chatId, {
 			minimumMessageLimit: restored?.count ?? 0,
 			restoreBottom: !preservesMountedPresentation,
 		});
+	}
+
+	// Resumes a cached window from its ledger cursor; only a window the server cannot
+	// prove contiguous pays for the recent-history snapshot.
+	#activateTranscript(
+		chatId: string,
+		options: { minimumMessageLimit: number; restoreBottom: boolean },
+	): void {
+		const resume = this.deps.chatState.resumeCachedTranscript(chatId, { purpose: 'activation' });
+		if (!resume) {
+			void this.loadChat(chatId, options);
+			return;
+		}
+		void resume.then(
+			(result) => this.#finishTranscriptResume(chatId, options, result),
+			() => this.#loadSelectedChat(chatId, options),
+		);
+	}
+
+	async #finishTranscriptResume(
+		chatId: string,
+		options: { minimumMessageLimit: number; restoreBottom: boolean },
+		result: CachedTranscriptResumeResult,
+	): Promise<void> {
+		if (result.kind === 'superseded') return;
+		if (result.kind === 'snapshot-required') {
+			await this.#loadSelectedChat(chatId, options);
+			return;
+		}
+		const { deps } = this;
+		if (deps.sessions.selectedChatId !== chatId) return;
+		if (options.restoreBottom) this.#requestBottomRestore(chatId);
+		this.#markChatRead(chatId);
+		deps.conversationUi.setTransientFeedFromSnapshot(result.transientFeed);
+	}
+
+	// A chat the user already left keeps its stale mark, so its next activation reloads.
+	async #loadSelectedChat(
+		chatId: string,
+		options: { minimumMessageLimit: number; restoreBottom: boolean },
+	): Promise<void> {
+		if (this.deps.sessions.selectedChatId !== chatId) return;
+		await this.loadChat(chatId, options);
+	}
+
+	#markChatRead(chatId: string): void {
+		const record = this.deps.sessions.byId[chatId];
+		if (
+			record?.lastActivityAt &&
+			(!record.lastReadAt || record.lastReadAt < record.lastActivityAt)
+		) {
+			this.deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
+			this.deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
+		}
 	}
 
 	async loadChat(
@@ -419,15 +467,7 @@ export class ConversationSessionController {
 		if (deps.sessions.selectedChatId !== chatId) return;
 
 		if (options.restoreBottom !== false) this.#requestBottomRestore(chatId);
-
-		const record = deps.sessions.byId[chatId];
-		if (
-			record?.lastActivityAt &&
-			(!record.lastReadAt || record.lastReadAt < record.lastActivityAt)
-		) {
-			deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
-			deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
-		}
+		this.#markChatRead(chatId);
 
 		const initialSnapshot = await initialSnapshotPromise;
 		const loadedCursor = transcript.transcriptCache.readAppliedCursor(chatId);

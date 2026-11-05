@@ -79,6 +79,46 @@ describe('bounded transcript replay WebSocket contract', () => {
     }
   });
 
+  it('[TLV5-REPLAY.08-CONTRACT-01] carries an activation purpose only on a first replay page', () => {
+    expect(parseClientWsMessage({
+      type: 'chat-subscribe',
+      clientRequestId: 'request-3',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 220,
+      purpose: 'activation',
+    })).toMatchObject({ afterOrdinal: 220, throughOrdinal: undefined, purpose: 'activation' });
+    expect(parseClientWsMessage({
+      type: 'chat-subscribe',
+      clientRequestId: 'request-3',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 220,
+    })).toMatchObject({ purpose: undefined });
+  });
+
+  it('rejects unknown purposes and activation continuations', () => {
+    for (const purpose of [null, '', 'background', 1]) {
+      expect(parseClientWsMessage({
+        type: 'chat-subscribe',
+        clientRequestId: 'request-3',
+        chatId: 'chat-1',
+        transcriptViewId: 'view-1',
+        afterOrdinal: 220,
+        purpose,
+      })).toBeNull();
+    }
+    expect(parseClientWsMessage({
+      type: 'chat-subscribe',
+      clientRequestId: 'request-3',
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 220,
+      throughOrdinal: 500,
+      purpose: 'activation',
+    })).toBeNull();
+  });
+
   it('[TLV5-REPLAY.01-CONTRACT-01] preserves the fixed watermark and next cursor on replay responses', () => {
     expect(parseServerWsMessage(replayResponse())).toMatchObject({
       nextAfterOrdinal: 220,

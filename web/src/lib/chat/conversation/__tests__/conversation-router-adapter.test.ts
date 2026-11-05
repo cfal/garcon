@@ -12,6 +12,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
 import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '../conversation-panel-registry.svelte.js';
+import { currentTranscriptReplayReader } from '../../../../test/transcript-replay.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { getChatMessages } from '$lib/api/chats.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
@@ -77,6 +78,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		},
 		getComposerAnchorSurfaceId: () => null,
 		getSelectedChatId: () => selectedChat?.id ?? null,
+		readTranscriptReplayPage: currentTranscriptReplayReader,
 	});
 	return {
 		sessions: {
@@ -186,6 +188,31 @@ describe('buildRouterStores', () => {
 		expect(
 			deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal),
 		).toEqual([1, 2]);
+		deps.panels.destroy();
+		deps.chatState.transcriptCache.flush();
+	});
+
+	it('leaves a gapped background batch to the retained cache prefix without a reload', () => {
+		const deps = depsFor(chatRecord());
+		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1, null);
+		const stores = buildRouterStores(deps);
+
+		const applied = stores.chatState.applyChatMessages(
+			'chat-2',
+			'generation-2',
+			[entry(3, 'three')],
+			3,
+			3,
+			[],
+		);
+
+		expect(applied).toBe('applied');
+		expect(deps.chatState.transcriptCache.readAppliedCursor('chat-2')).toEqual({
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 1,
+			stale: false,
+		});
+		expect(getChatMessages).not.toHaveBeenCalled();
 		deps.panels.destroy();
 		deps.chatState.transcriptCache.flush();
 	});
