@@ -38,7 +38,8 @@ export class PullRequestsStore implements PortableSingletonController {
 	#visible = false;
 	#detailController: AbortController | null = null;
 	#detailVersion: string | null = null;
-	#detailIdentity: string | null = null;
+	#detailOwner: string | null = null;
+	#detailHead: string | null = null;
 	#runsController: AbortController | null = null;
 	#runController: AbortController | null = null;
 	#runsVersion: number | null = null;
@@ -143,7 +144,8 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.#runController?.abort();
 		this.#detailController = null;
 		this.#detailVersion = null;
-		this.#detailIdentity = null;
+		this.#detailOwner = null;
+		this.#detailHead = null;
 		this.#runsController = null;
 		this.#runController = null;
 		this.#runsVersion = null;
@@ -222,10 +224,13 @@ export class PullRequestsStore implements PortableSingletonController {
 		const entry = this.selectedEntry;
 		const repository = this.selectedRepository;
 		if (!entry || !repository) return;
-		const identity = this.#selectedDetailIdentity();
-		// Keeps mounted review state during metadata reads, never across owners or heads.
-		if (identity !== this.#detailIdentity) this.detail = null;
-		this.#detailIdentity = identity;
+		const owner = this.#selectedDetailOwner();
+		const head = entry.pull.headRefOid;
+		// Live detail can reach the next head before the inbox catches up.
+		const headChanged = head !== this.#detailHead && head !== this.detail?.headRefOid;
+		if (owner !== this.#detailOwner || headChanged) this.detail = null;
+		this.#detailOwner = owner;
+		this.#detailHead = head;
 		const version = this.#selectedDetailVersion();
 		this.#detailVersion = version;
 		this.#detailController?.abort();
@@ -261,7 +266,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		}
 	}
 
-	#selectedDetailIdentity(): string | null {
+	#selectedDetailOwner(): string | null {
 		const entry = this.selectedEntry;
 		const repository = this.selectedRepository;
 		if (!entry || !repository) return null;
@@ -272,16 +277,16 @@ export class PullRequestsStore implements PortableSingletonController {
 			repository.target.projectPath,
 			repository.nameWithOwner,
 			repository.url,
-			entry.pull.headRefOid,
 		]);
 	}
 
 	#selectedDetailVersion(): string | null {
 		const entry = this.selectedEntry;
-		const identity = this.#selectedDetailIdentity();
-		if (!entry || !identity) return null;
+		const owner = this.#selectedDetailOwner();
+		if (!entry || !owner) return null;
 		return JSON.stringify([
-			identity,
+			owner,
+			entry.pull.headRefOid,
 			entry.pull.updatedAt,
 			entry.pull.checksState,
 			entry.pull.reviewDecision,

@@ -175,6 +175,7 @@
 				pullRequest = true;
 				await tick();
 			},
+			advancePullRequestHead: () => pullRequestPanel!.advanceLiveHead(),
 			beginPullRequestRefresh: () => pullRequestPanel!.beginRefresh(),
 			finishPullRequestRefresh: () => pullRequestPanel!.finishRefresh(),
 			refreshPullRequest: async () => {

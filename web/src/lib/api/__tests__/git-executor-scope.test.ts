@@ -21,43 +21,47 @@ afterEach(() => {
 });
 
 describe('Git executor response boundaries', () => {
-	it('awaits browser indexing without changing executor-qualified metadata or selection proof', async () => {
-		const patch = '@@ -0,0 +1 @@\n+const synthetic = true;\n';
-		const index = createGitPatchIndex(patch);
-		const run = vi.spyOn(gitReviewWorker, 'run').mockResolvedValue({
-			kind: 'index',
-			index: index.toData(),
-			split: getGitSplitPatchIndex(index).toData(),
-		});
-		fetchMock.mockResolvedValue(
-			response({
-				...scope,
-				documentId: document.documentId,
-				status: 'ready',
-				errors: {},
-				files: {
-					'file.ts': {
-						path: 'file.ts',
-						bodyFingerprint: 'synthetic',
-						patchDigest: 'a'.repeat(64),
-						bodyState: 'loaded',
-						category: 'normal',
-						isBinary: false,
-						isTooLarge: false,
-						patch,
-						patchBytes: patch.length,
-						renderedRowCount: 2,
+	it.each(['file.ts', 'constructor', 'toString', '__proto__'])(
+		'indexes %s without changing executor-qualified metadata or selection proof',
+		async (path) => {
+			const patch = '@@ -0,0 +1 @@\n+const synthetic = true;\n';
+			const index = createGitPatchIndex(patch);
+			const run = vi.spyOn(gitReviewWorker, 'run').mockResolvedValue({
+				kind: 'index',
+				index: index.toData(),
+				split: getGitSplitPatchIndex(index).toData(),
+			});
+			fetchMock.mockResolvedValue(
+				response({
+					...scope,
+					documentId: document.documentId,
+					status: 'ready',
+					errors: {},
+					files: {
+						[path]: {
+							path,
+							bodyFingerprint: 'synthetic',
+							patchDigest: 'a'.repeat(64),
+							bodyState: 'loaded',
+							category: 'normal',
+							isBinary: false,
+							isTooLarge: false,
+							patch,
+							patchBytes: patch.length,
+							renderedRowCount: 2,
+						},
 					},
-				},
-			}),
-		);
-		const result = await getGitReviewDocumentFileBodies(target, document, ['file.ts'], 'visible');
-		expect(result.documentId).toContain('remote-executor');
-		if (result.status !== 'ready') throw new Error('Expected ready result');
-		expect(result.files['file.ts'].patchDigest).toBe('a'.repeat(64));
-		expect(result.files['file.ts'].patchIndex?.rowAt(1).text).toBe('const synthetic = true;');
-		expect(run).toHaveBeenCalledOnce();
-	});
+				}),
+			);
+			const result = await getGitReviewDocumentFileBodies(target, document, [path], 'visible');
+			expect(result.documentId).toContain('remote-executor');
+			if (result.status !== 'ready') throw new Error('Expected ready result');
+			expect(Object.hasOwn(result.files, path)).toBe(true);
+			expect(result.files[path].patchDigest).toBe('a'.repeat(64));
+			expect(result.files[path].patchIndex?.rowAt(1).text).toBe('const synthetic = true;');
+			expect(run).toHaveBeenCalledOnce();
+		},
+	);
 
 	it('surfaces indexing failures as per-file errors, not empty loaded bodies', async () => {
 		vi.spyOn(gitReviewWorker, 'run').mockRejectedValue(new Error('Synthetic indexing deadline'));

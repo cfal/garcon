@@ -40,6 +40,7 @@ declare global {
 			color(): Promise<string>;
 			cancelProbe(): Promise<{ status: string; cancellationMs: number }>;
 			openPullRequest(): Promise<void>;
+			advancePullRequestHead(): Promise<void>;
 			beginPullRequestRefresh(): Promise<void>;
 			finishPullRequestRefresh(): Promise<void>;
 			refreshPullRequest(): Promise<void>;
@@ -360,6 +361,7 @@ try {
 			assert.equal(unicode.indexed, unicode.expected);
 			assert.equal(unicode.highlighted, unicode.expected);
 			await page.evaluate(() => window.reviewBenchmark.openPullRequest());
+			await page.evaluate(() => window.reviewBenchmark.advancePullRequestHead());
 			await page.waitForFunction(() => document.querySelector('.cm-code-keyword'));
 			const metadataRefresh = await page.evaluate(async () => {
 				const scroller = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
@@ -440,6 +442,7 @@ try {
 				cancellation,
 				unicode,
 				metadataRefresh,
+				inboxHeadCatchUp: 'preserved',
 				viewedAndCollapsed: 'preserved',
 			});
 			await page.screenshot({ path: resolve(output, `${viewport.width}-demand.png`) });

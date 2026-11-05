@@ -57,6 +57,24 @@ const indexed = (body: GitReviewFilePatchBody): GitReviewFileBody => ({
 });
 
 describe('PR diff demand', () => {
+	it.each(['constructor', 'toString', '__proto__'])(
+		'treats %s as a file path, not an inherited cached body',
+		async (path) => {
+			const index = vi.fn(async (body: GitReviewFilePatchBody) => indexed(body));
+			const controller = new PullRequestDiffController(index, plainSyntax());
+			controller.open(document('prototype-path', [path]));
+			controller.handleDemand({
+				documentId: 'prototype-path',
+				kind: 'viewport',
+				filePaths: [path],
+			});
+			expect(index).toHaveBeenCalledOnce();
+			await vi.waitFor(() => expect(Object.hasOwn(controller.fileBodies, path)).toBe(true));
+			expect(controller.fileBodies[path].patchIndex?.rowCount).toBe(2);
+			controller.close();
+			expect(Object.getPrototypeOf(controller.fileBodies)).toBeNull();
+		},
+	);
 	it('trims the oldest unpinned bodies while retaining demanded paths', async () => {
 		const paths = Array.from({ length: 130 }, (_, index) => `file-${index}.ts`);
 		const index = vi.fn(async (body: GitReviewFilePatchBody) => indexed(body));

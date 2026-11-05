@@ -98,6 +98,14 @@
 	controller.select(snapshot.inbox[0]);
 	onDestroy(() => controller.dispose());
 
+	export async function advanceLiveHead(): Promise<void> {
+		detail = { ...detail, headRefOid: 'b'.repeat(40), documentId: 'revision:live-head' };
+		await controller.loadDetail();
+		await tick();
+		if (controller.selectedEntry?.pull.headRefOid === controller.detail?.headRefOid)
+			throw new Error('Live detail must advance before the inbox');
+	}
+
 	export async function beginRefresh(): Promise<void> {
 		if (pending) throw new Error('Refresh already pending');
 		pending = Promise.withResolvers<PullRequestDetail>();
@@ -107,7 +115,9 @@
 		reviews.apply({
 			...snapshot,
 			revision,
-			inbox: [{ ...snapshot.inbox[0], pull: { ...pull, updatedAt } }],
+			inbox: [
+				{ ...snapshot.inbox[0], pull: { ...pull, headRefOid: detail.headRefOid, updatedAt } },
+			],
 		});
 		await tick();
 		await new Promise(requestAnimationFrame);

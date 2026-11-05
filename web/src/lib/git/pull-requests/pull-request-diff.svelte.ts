@@ -14,7 +14,7 @@ type PullRequestDiffDocument = Pick<
 const MAX_CACHED_BODIES = 128;
 
 export class PullRequestDiffController {
-	fileBodies = $state.raw<Record<string, GitReviewFileBody>>({});
+	fileBodies = $state.raw<Record<string, GitReviewFileBody>>(Object.create(null));
 	loadingBodies = $state.raw<Set<string>>(new Set());
 	private activeDocumentId = $state<string | null>(null);
 	private detail: PullRequestDiffDocument | null = null;
@@ -49,7 +49,10 @@ export class PullRequestDiffController {
 				this.failedIndexBodies.has(this.fileBodies[path]),
 			);
 			if (previous !== detail && failedPaths.length > 0) {
-				const next = { ...this.fileBodies };
+				const next: Record<string, GitReviewFileBody> = Object.assign(
+					Object.create(null),
+					this.fileBodies,
+				);
 				for (const path of failedPaths) delete next[path];
 				this.replaceBodies(next);
 				this.requestDemanded();
@@ -87,7 +90,10 @@ export class PullRequestDiffController {
 					this.demanded,
 					DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
 				);
-				const next = { ...this.fileBodies };
+				const next: Record<string, GitReviewFileBody> = Object.assign(
+					Object.create(null),
+					this.fileBodies,
+				);
 				for (const path of budget.evictedPaths) delete next[path];
 				if (budget.accept) next[body.path] = body;
 				else
@@ -136,7 +142,7 @@ export class PullRequestDiffController {
 		this.activeDocumentId = null;
 		this.demanded.clear();
 		scheduler?.cancel();
-		this.fileBodies = {};
+		this.fileBodies = Object.create(null);
 		this.loadingBodies = new Set();
 		this.syntax.close();
 	}

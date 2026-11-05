@@ -81,6 +81,25 @@ afterEach(() => {
 });
 
 describe('PR refresh identity', () => {
+	it.each(['constructor', 'toString', '__proto__'])(
+		'indexes and renders the valid root filename %s',
+		async (path) => {
+			const original = detail();
+			const file = { ...original.files[0], path };
+			original.files = [file];
+			original.fileBodies = Object.fromEntries([
+				[path, { ...original.fileBodies['synthetic.ts'], path }],
+			]);
+			const rendered = render(PullRequestChangesTab, { detail: original });
+			await waitFor(() =>
+				expect(rendered.container.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+			);
+			expect(rendered.container.textContent).toContain('const synthetic0 = true;');
+			expect(
+				vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index'),
+			).toHaveLength(1);
+		},
+	);
 	it.each(['executor:repository:2', 'executor:other-repository:1', 'other-executor:repository:1'])(
 		'preserves progress across metadata refresh but resets for %s',
 		async (reviewId) => {

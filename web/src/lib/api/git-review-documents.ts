@@ -104,7 +104,7 @@ export async function getGitReviewDocumentFileBodies(
 	}
 	markGitReviewBodyReady(gitDocumentKey(document), purpose);
 	if (response.status !== 'ready') return { ...response, documentId: gitDocumentKey(document) };
-	const indexed: Record<string, GitReviewFileBody> = {};
+	const indexed: Record<string, GitReviewFileBody> = Object.create(null);
 	for (const [path, body] of Object.entries(response.files)) {
 		try {
 			indexed[path] = await createIndexedGitReviewFileBody(body, options?.signal ?? undefined);

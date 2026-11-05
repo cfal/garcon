@@ -369,6 +369,7 @@ describe('PullRequestsPanel', () => {
 		it('fences a head replacement learned from live detail before the inbox changes', async () => {
 			const original = diffDetail();
 			const replacement = Promise.withResolvers<PullRequestDetail>();
+			const catchUp = Promise.withResolvers<PullRequestDetail>();
 			const oldIndex = Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
 			const newIndex = Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
 			vi.mocked(gitReviewWorker.run)
@@ -377,7 +378,8 @@ describe('PullRequestsPanel', () => {
 			const getDetail = vi
 				.fn<() => Promise<PullRequestDetail>>()
 				.mockResolvedValueOnce(original)
-				.mockReturnValue(replacement.promise);
+				.mockReturnValueOnce(replacement.promise)
+				.mockReturnValue(catchUp.promise);
 			const { controller } = setup({ getDetail });
 			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
 			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
@@ -394,6 +396,13 @@ describe('PullRequestsPanel', () => {
 			expect(controller.selectedEntry?.pull.headRefOid).toBe(HEAD);
 			expect(oldSignal?.aborted).toBe(true);
 			await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledTimes(2));
+			const newSignal = vi.mocked(gitReviewWorker.run).mock.calls[1][1];
+			const viewport = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+			controller.reviews.apply(refreshedSnapshot(2, { headRefOid: 'b'.repeat(40) }));
+			await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(3));
+			await tick();
+			expect(newSignal?.aborted).toBe(false);
+			expect(document.querySelector('[data-git-virtual-diff-root]')).toBe(viewport);
 			const index = createGitPatchIndex(original.fileBodies['synthetic.ts'].patch!, 3001);
 			const output = {
 				kind: 'index' as const,
@@ -410,6 +419,34 @@ describe('PullRequestsPanel', () => {
 			expect(
 				document.querySelector('[data-git-virtual-row]')?.getAttribute('data-git-virtual-row-id'),
 			).toContain('revision:head-b');
+			await fireEvent.click(screen.getByRole('button', { name: 'Viewed' }));
+			await fireEvent.click(screen.getByRole('button', { name: /synthetic.ts/ }));
+			viewport.scrollTop = 20000;
+			await fireEvent.scroll(viewport);
+			await waitFor(() =>
+				expect(
+					Number(document.querySelector<HTMLElement>('[data-git-virtual-row]')?.dataset.index),
+				).toBeGreaterThan(500),
+			);
+			const row = document.querySelector('[data-git-diff-review-row]');
+			catchUp.resolve({
+				...structuredClone(original),
+				headRefOid: 'b'.repeat(40),
+				documentId: 'revision:catch-up',
+			});
+			await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+			expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
+			expect(viewport.scrollTop).toBe(20000);
+			expect(
+				vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index'),
+			).toHaveLength(2);
+			viewport.scrollTop = 0;
+			await fireEvent.scroll(viewport);
+			await waitFor(() =>
+				expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe(
+					'true',
+				),
+			);
 			controller.dispose();
 		});
 
