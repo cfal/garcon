@@ -11,6 +11,7 @@ import {
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
 interface LoadingSample {
+  origin: 'add-action-start' | 'scroll';
   startedAt: number;
   firstVisibleDomMs: number | null;
   visibleReadyMs: number | null;
@@ -25,6 +26,7 @@ async function beginSample(page: Page, selector: string, scrollFraction?: number
     ({ selector, scrollFraction }) => {
       const started = performance.now();
       const sample: LoadingSample = {
+        origin: scrollFraction === undefined ? 'add-action-start' : 'scroll',
         startedAt: started,
         firstVisibleDomMs: null,
         visibleReadyMs: null,
@@ -85,6 +87,8 @@ async function finishSample(
       .gitLoadingSample;
     return sample?.visibleReadyMs != null && sample.firstVisibleSyntaxMs != null;
   });
+  // Includes requests dispatched after the first visible content becomes ready.
+  await page.waitForLoadState('networkidle');
   return page.evaluate((requests) => {
     const sample = (window as typeof window & { gitLoadingSample: LoadingSample }).gitLoadingSample;
     return {
@@ -106,6 +110,14 @@ async function finishSample(
         }),
     };
   }, requests);
+}
+
+function expectBoundedRequests(sample: LoadingSample): void {
+  const paths = sample.requests.flatMap((request) => request.files);
+  // The fixed viewport fits at most ten one-line files plus two bootstrap neighbors.
+  expect(paths.length).toBeLessThanOrEqual(12);
+  expect(new Set(paths).size).toBe(paths.length);
+  expect(sample.requests.every((request) => request.files.length <= 4)).toBe(true);
 }
 
 for (const executionBackend of [
@@ -187,7 +199,7 @@ for (const executionBackend of [
           const sample = await finishSample(page, requests);
           samples.push({ surface, phase: 'open', sample });
           expect(sample.requests[0]?.files).toEqual([paths[0]]);
-          expect(sample.requests.every((request) => request.files.length <= 4)).toBe(true);
+          expectBoundedRequests(sample);
           expect(
             sample.requests
               .filter((request) => request.purpose === 'prefetch')
@@ -204,6 +216,8 @@ for (const executionBackend of [
           await beginSample(page, selector, 0.75);
           const deep = await finishSample(page, requests);
           samples.push({ surface, phase: 'deep-scroll', sample: deep });
+          expectBoundedRequests(deep);
+          expect(deep.requests.length).toBeGreaterThan(0);
           expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(1_000);
           expect(deep.mountedRows).toBeLessThan(200);
           const selected = await viewport.evaluate((element) => {
@@ -232,10 +246,12 @@ for (const executionBackend of [
           requests.length = 0;
           await page.evaluate(() => performance.clearResourceTimings());
           await beginSample(page, selector, 0);
+          const warm = await finishSample(page, requests);
+          expect(warm.requests).toEqual([]);
           samples.push({
             surface,
             phase: 'warm-return',
-            sample: await finishSample(page, requests),
+            sample: warm,
           });
         }
         console.log(
