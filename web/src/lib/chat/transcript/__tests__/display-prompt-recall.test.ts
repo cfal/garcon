@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { UserMessage } from '$shared/chat-types';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { displayPromptRecall } from '../display-prompt-recall.js';
 import { PromptRecallController } from '$lib/chat/composer/prompt-recall.js';
@@ -74,4 +74,28 @@ it.each(['preparing', 'lagging', 'busy'] as const)('does not report %s prompt hy
 	const source = displayPromptRecall(open, () => displayProfile.bashRevision, api);
 	expect(await source.load({ ordinal: 1, watermark: 5 }, new AbortController().signal)).toBeNull();
 	expect(api.bodies).not.toHaveBeenCalled();
+});
+
+it.each(['list-instance', 'list-view', 'window-instance', 'window-view', 'watermark', 'non-user'] as const)('rejects %s recall evidence', async defect => {
+	const open = displayOpen('chat-1', 'view-1', 10);
+	const api = {
+		userRows: vi.fn<TranscriptDisplayApi['userRows']>(async () => ({ kind: 'available',
+			serverInstanceId: defect === 'list-instance' ? 'foreign' : open.serverInstanceId, chatId: open.chat.id,
+			transcriptViewId: defect === 'list-view' ? 'foreign' : open.transcriptViewId, watermark: 10, sourceHead: 10,
+			rows: [{ ordinal: 1, preview: 'Synthetic prompt', timestamp: DISPLAY_TIME, attachmentCount: 0 }], nextBeforeOrdinal: null })),
+		window: vi.fn<TranscriptDisplayApi['window']>(async request => displayWindow([], {
+			...displayCertificate(open, request.profile), serverInstanceId: defect === 'window-instance' ? 'foreign' : open.serverInstanceId,
+			transcriptViewId: defect === 'window-view' ? 'foreign' : open.transcriptViewId, watermark: defect === 'watermark' ? 9 : 10,
+		})),
+		bodies: vi.fn<TranscriptDisplayApi['bodies']>(async request => ({ certificate: request.certificate, details: [displayDetail(1)],
+			bodies: [{ ordinal: 1, message: new AssistantMessage(DISPLAY_TIME, 'Not a user prompt'), submissionClientMessageId: null }],
+			deferredOrdinals: [], oversizedOrdinal: null, nonRenderedOrdinals: [] })),
+	} satisfies Pick<TranscriptDisplayApi, 'userRows' | 'window' | 'bodies'>;
+	const source = displayPromptRecall(open, () => 'patterns', api), signal = new AbortController().signal;
+	if (defect.startsWith('list')) await expect(source.list(signal)).rejects.toThrow('Transcript changed');
+	else {
+		const [prompt] = await source.list(signal);
+		await expect(source.load(prompt, signal)).rejects.toThrow(defect === 'non-user' ? 'Prompt unavailable' : 'Transcript changed');
+	}
+	if (defect !== 'non-user') expect(api.bodies).not.toHaveBeenCalled();
 });
