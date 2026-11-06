@@ -86,7 +86,7 @@
 	</label>
 	<fieldset class="min-w-0">
 		<legend class="mb-2 text-sm font-medium">{m.sidebar_chats_sort_order_heading()}</legend>
-		<div class="flex h-10 rounded-md border border-input p-1">
+		<div class="flex min-h-10 rounded-md border border-input p-1">
 			{#each sortOptions as option (option.value)}
 				<label
 					class="flex min-w-0 flex-1 cursor-pointer items-center justify-center rounded-sm px-2 text-sm has-checked:bg-accent has-checked:text-accent-foreground has-focus-visible:ring-2 has-focus-visible:ring-ring"

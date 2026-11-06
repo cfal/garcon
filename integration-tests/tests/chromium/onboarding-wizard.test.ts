@@ -9,6 +9,7 @@ async function expectUsableWorkspace(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await browserExpect(page.getByRole('menuitem', { name: 'Settings', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
+  await browserExpect(page.getByRole('menuitem', { name: 'Settings', exact: true })).toBeHidden();
   await browserExpect(page.getByRole('dialog')).toHaveCount(0);
 }
 
@@ -55,9 +56,24 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
           expect(bounds.y + bounds.height).toBeLessThanOrEqual(height + 1);
           expect(await wizard.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+          expect(await body.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
           await browserExpect(nextButton).toBeInViewport();
           await page.screenshot({ path: join(artifacts, `setup-${index}-${width}.png`) });
         }
+
+        await page.setViewportSize({ width: 320, height: 256 });
+        await wizard.hover();
+        await page.mouse.wheel(0, 1000);
+        await browserExpect(nextButton).toBeInViewport({ ratio: 1 });
+        expect(await body.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        if (isDonePage) {
+          await browserExpect(wizard.getByRole('button', { name: 'Set up API providers', exact: true })).toBeInViewport({ ratio: 1 });
+          expect(await wizard.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        }
+        await page.screenshot({ path: join(artifacts, `setup-${index}-short.png`) });
+        await page.setViewportSize({ width: 320, height: 568 });
+        await browserExpect.poll(() => wizard.evaluate(element => element.scrollTop)).toBe(0);
+
         if (title === 'Chat list layout') {
           const grouping = wizard.getByRole('combobox', { name: 'Chat grouping' });
           await browserExpect(grouping).toHaveValue('none');
@@ -65,6 +81,28 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await browserExpect(wizard.getByRole('radio', { name: 'Recent activity', exact: true })).toBeChecked();
           await grouping.selectOption('project');
           await wizard.getByText('Manual', { exact: true }).click();
+          for (const width of [320, 1440]) {
+            await page.setViewportSize({ width, height: 568 });
+            for (const fontSize of [18, 20]) {
+              await page.evaluate(size => {
+                document.documentElement.style.setProperty('--interface-font-scale', String(size / 14));
+              }, fontSize);
+              for (const name of ['Recent activity', 'Manual']) {
+                expect(await wizard.getByRole('radio', { name, exact: true }).evaluate(input => {
+                  const label = input.closest('label')!;
+                  const text = [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())!;
+                  const range = document.createRange();
+                  range.selectNodeContents(text);
+                  const bounds = label.getBoundingClientRect();
+                  return [...range.getClientRects()].every(rect =>
+                    rect.top >= bounds.top && rect.bottom <= bounds.bottom
+                    && rect.left >= bounds.left && rect.right <= bounds.right);
+                })).toBe(true);
+              }
+            }
+          }
+          await page.evaluate(() => document.documentElement.style.setProperty('--interface-font-scale', '1'));
+          await page.setViewportSize({ width: 320, height: 568 });
         }
         if (title === 'Writing preferences') {
           await wizard.getByText('Source', { exact: true }).click();

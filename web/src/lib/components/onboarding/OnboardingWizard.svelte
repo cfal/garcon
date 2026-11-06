@@ -30,6 +30,7 @@
 
 	let pageTitleElement = $state<HTMLElement | null>(null);
 	let pageBodyElement = $state<HTMLDivElement | null>(null);
+	let dialogElement = $state<HTMLDivElement | null>(null);
 
 	function handleOpenAutoFocus(event: Event): void {
 		event.preventDefault();
@@ -40,6 +41,7 @@
 	// technology announces the new page; focus otherwise stays on Continue.
 	$effect(() => {
 		wizard.pageIndex;
+		if (dialogElement) dialogElement.scrollTop = 0;
 		if (pageBodyElement) pageBodyElement.scrollTop = 0;
 		pageTitleElement?.focus();
 	});
@@ -72,7 +74,8 @@
 
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="flex h-[38rem] max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
+		bind:ref={dialogElement}
+		class="flex h-[38rem] max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
 	>
@@ -90,7 +93,10 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<div bind:this={pageBodyElement} class="min-h-0 flex-1 overflow-y-auto px-6 py-2">
+		<div
+			bind:this={pageBodyElement}
+			class="relative min-h-0 flex-1 overflow-y-auto px-6 py-2 [@media(max-height:30rem)]:overflow-visible"
+		>
 			{#if wizard.pageId === 'theme'}
 				<OnboardingThemePage onSelect={(preference) => ls.set('themePreference', preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
