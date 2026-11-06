@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PromptRecallController, type PromptRecallSource } from '../prompt-recall';
+import { PromptRecallController, type PromptRecallSource, type RecallPrompt } from '../prompt-recall';
 
 function source(count = 2) {
 	return {
-		list: vi.fn(async (_signal: AbortSignal) => Array.from({ length: count }, (_, index) => ({ ordinal: count - index }))),
-		load: vi.fn(async (ordinal: number, _signal: AbortSignal) => `Prompt ${ordinal}`),
+		list: vi.fn(async (_signal: AbortSignal) => Array.from({ length: count }, (_, index) => ({ ordinal: count - index, watermark: count }))),
+		load: vi.fn(async ({ ordinal }: RecallPrompt, _signal: AbortSignal): Promise<string | null> => `Prompt ${ordinal}`),
 	} satisfies PromptRecallSource;
 }
 
@@ -14,7 +14,7 @@ describe('prompt recall', () => {
 		expect(recall.canNavigate('ArrowUp', 'chat:view', '')).toBe(true);
 		for (let index = 0; index < 101; index++) await recall.navigate('ArrowUp', 'chat:view', history);
 		expect(history.list).toHaveBeenCalledTimes(1);
-		expect(history.load).toHaveBeenLastCalledWith(11, expect.any(AbortSignal));
+		expect(history.load).toHaveBeenLastCalledWith({ ordinal: 11, watermark: 110 }, expect.any(AbortSignal));
 	});
 
 	it('snapshots references while browsing and returns to an empty draft', async () => {
@@ -61,5 +61,15 @@ describe('prompt recall', () => {
 		expect(recall.canNavigate('ArrowUp', 'chat:view', '')).toBe(true);
 		await expect(recall.navigate('ArrowUp', 'chat:view', history)).rejects.toThrow('offline');
 		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBe('Prompt 2');
+	});
+
+	it('does not advance the recall index while the selected body is preparing', async () => {
+		const recall = new PromptRecallController(), history = source();
+		history.load.mockResolvedValueOnce(null);
+		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBeNull();
+		expect(await recall.navigate('ArrowUp', 'chat:view', history)).toBe('Prompt 2');
+		expect(history.load.mock.calls.map(([prompt]) => prompt)).toEqual([
+			{ ordinal: 2, watermark: 2 }, { ordinal: 2, watermark: 2 },
+		]);
 	});
 });

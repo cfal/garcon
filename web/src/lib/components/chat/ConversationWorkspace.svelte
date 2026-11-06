@@ -255,7 +255,7 @@
 	function promptRecallSource() {
 		const transcript = currentPanel()?.transcript;
 		const open = transcript?.openSnapshot;
-		return transcript && open ? displayPromptRecall(open, transcript.lastOrdinal,
+		return transcript && open ? displayPromptRecall(open,
 			() => transcript.controller.profile?.bashRevision ?? open.display.bashRevision) : null;
 	}
 

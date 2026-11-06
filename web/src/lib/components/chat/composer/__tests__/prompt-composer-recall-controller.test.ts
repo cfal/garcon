@@ -6,7 +6,7 @@ function fixture() {
 	let text = '', revision = 0, identity = 'chat:view', visible = true;
 	let complete!: (text: string) => void;
 	const source: PromptRecallSource = {
-		list: async () => [{ ordinal: 1 }],
+		list: async () => [{ ordinal: 1, watermark: 1 }],
 		load: () => new Promise(resolve => { complete = resolve; }),
 	};
 	const setText = vi.fn((next: string) => { text = next; revision++; });
