@@ -254,9 +254,11 @@ describe('GitReviewBodyScheduler', () => {
 		const batch = deferred<Result>();
 		const results: string[][] = [];
 		const calls: string[][] = [];
+		const loading = new Set<string>();
+		const unowned: string[][] = [];
 		const onError = vi.fn();
 		let publishBatch!: (result: Result, paths: string[]) => void;
-		const scheduler = new GitReviewBodyScheduler<Result>({
+		const scheduler: GitReviewBodyScheduler<Result> = new GitReviewBodyScheduler<Result>({
 			maxBatchFiles: 4,
 			load: (paths, _purpose, _signal, publish) => {
 				calls.push(paths);
@@ -268,7 +270,14 @@ describe('GitReviewBodyScheduler', () => {
 			},
 			deferredPaths: (result) => result.deferred,
 			onResult: (_result, paths) => results.push(paths),
-			onLoadingChange: vi.fn(),
+			onLoadingChange: (paths, isLoading) => {
+				for (const path of paths) {
+					if (isLoading) loading.add(path);
+					else loading.delete(path);
+				}
+				const lost = unownedGitReviewLoadingPaths(loading, (path) => scheduler.hasPending(path));
+				if (lost.length > 0) unowned.push(lost);
+			},
 			onError,
 		});
 		scheduler.requestVisible(['a', 'b', 'c', 'obsolete']);
@@ -279,6 +288,8 @@ describe('GitReviewBodyScheduler', () => {
 		await vi.waitFor(() => expect(results).toEqual([['a'], ['b'], ['c']]));
 		expect(calls).toEqual([['a', 'b', 'c', 'obsolete'], ['b'], ['c']]);
 		expect(onError).not.toHaveBeenCalled();
+		expect(unowned).toEqual([]);
+		expect(loading.size).toBe(0);
 	});
 
 	it('fences partial callbacks after cancellation and recovers demand renewed before settlement', async () => {

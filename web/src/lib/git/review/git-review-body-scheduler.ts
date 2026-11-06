@@ -237,7 +237,7 @@ export class GitReviewBodyScheduler<T> {
 							(lane.retained.has(path) || this.navigationPaths.has(path)) && !this.hasPending(path),
 					);
 					for (const path of retry) this.singletonPaths.add(path);
-					if (retry.length > 0) this.enqueue(queue, retry, true);
+					queue.unshift(...retry);
 				}
 				this.pump(purpose);
 				if (!controller.signal.aborted) {
