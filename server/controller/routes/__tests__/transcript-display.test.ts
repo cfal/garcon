@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, ExitPlanModeToolUseMessage } from '../../../../common/chat-types.js';
 import { parseDisplayOpenResponse, parsePlanPresentationSnapshot } from '../../../../common/transcript-display-open.js';
+import { parseSubagentSummaryPage } from '../../../../common/transcript-display-auxiliary.js';
 import { TranscriptLedgerStore } from '../../ledger/store.js';
 import { TranscriptLedgerService } from '../../ledger/service.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
@@ -105,4 +106,18 @@ test('rejects malformed requests and replaced views without false-empty success'
   expect((await post('window', { ...input, limit: 201 })).response.status).toBe(400);
   expect((await post('window', { ...input, chatId: 'missing' })).response.status).toBe(404);
   expect((await post('window', { ...input, profile: { ...input.profile, bashRevision: 'old' } })).response.status).toBe(409);
+});
+
+test('subagent admission preserves its response limit independently of user recall', async () => {
+  const opened = parseDisplayOpenResponse((await post('open', opening())).body);
+  const input = { chatId, transcriptViewId: opened.transcriptViewId, mode: 'recall', limit: 50 };
+  const accepted = await post('subagents', input);
+  expect(accepted.response.status).toBe(200);
+  expect(() => parseSubagentSummaryPage(accepted.body)).not.toThrow();
+  for (const limit of [51, 100]) {
+    const rejected = await post('subagents', { ...input, limit });
+    expect(rejected.response.status).toBe(400);
+    expect(rejected.body.errorCode).toBe('VALIDATION_FAILED');
+  }
+  expect((await post('user-rows', { ...input, limit: 100 })).response.status).toBe(200);
 });
