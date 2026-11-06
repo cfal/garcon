@@ -25,6 +25,8 @@ import type { CoverageOutcome } from './display-coverage.js';
 import type { TranscriptPageApplicationGate } from './transcript-page-progress.js';
 import { ApiError } from '$lib/api/client.js';
 
+const RETRYABLE_DISPLAY_ERRORS = new Set(['DISPLAY_BUSY', 'DISPLAY_TIMEOUT', 'DISPLAY_UNAVAILABLE', 'DISPLAY_PREPARING', 'DISPLAY_SUPERSEDED']);
+
 export interface DisplayExpansion {
 	readonly anchorOrdinal: number;
 	readonly openedAt: number;
@@ -212,9 +214,9 @@ export class DisplayWindowController {
 		return this.#loadWindow(anchor, 'replace');
 	}
 
-	loadInitialWindow(): Promise<CoverageOutcome> {
-		if (this.#navigationEpoch !== null) return Promise.resolve('blocked');
-		return this.#loadWindow({ kind: 'around', ordinal: 1 }, 'replace', undefined, undefined, this.#head);
+	async navigateWindow(target: 'initial' | 'latest'): Promise<CoverageOutcome> {
+		const result = await this.#navigate(target);
+		return result === 'loaded' ? 'loaded' : this.#snapshot.phase === 'failed' ? 'failed' : 'blocked';
 	}
 
 	load(direction: 'earlier' | 'later', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
@@ -231,6 +233,11 @@ export class DisplayWindowController {
 	}
 
 	async navigate(ordinal: number, signal?: AbortSignal, ownsNavigation: () => boolean = () => true): Promise<DisplayNavigationResolution | null> {
+		const result = await this.#navigate(ordinal, signal, ownsNavigation);
+		return result === 'loaded' ? null : result;
+	}
+
+	async #navigate(target: number | 'initial' | 'latest', signal?: AbortSignal, ownsNavigation: () => boolean = () => true): Promise<DisplayNavigationResolution | 'loaded' | null> {
 		this.cancel();
 		this.#readingAnchorHold = null;
 		const epoch = this.#epoch;
@@ -248,6 +255,22 @@ export class DisplayWindowController {
 		try {
 			if (!current()) return null;
 			this.#navigationAnchor = navigationAnchor;
+			if (typeof target !== 'number') {
+				this.#anchor = target === 'initial' ? 1 : null;
+				this.#pinned = target === 'latest';
+				const anchor: WindowAnchor = target === 'initial' ? { kind: 'around', ordinal: 1 } : { kind: 'newest' };
+				const requiredThrough = target === 'initial' ? Math.min(1, this.#head) : this.#head;
+				const result = await this.#navigationRequest(() => this.#loadWindow(anchor, 'replace', gate, undefined, requiredThrough), current);
+				completed = current() && result === 'loaded';
+				if (completed) this.#navigationAnchor = null;
+				return completed ? 'loaded' : null;
+			}
+			const ordinal = target;
+			if (ordinal > this.#head) {
+				await this.#reopenMetadata(signal, epoch);
+				if (!current()) return null;
+				if (ordinal > this.#head) return { kind: 'missing', ordinal, landedOrdinal: null };
+			}
 			this.#anchor = ordinal;
 			this.#pinned = false;
 			if (await this.#navigationRequest(() => this.#loadWindow({ kind: 'around', ordinal }, 'replace', gate, undefined, ordinal), current) !== 'loaded') {
@@ -256,7 +279,15 @@ export class DisplayWindowController {
 			let window = this.#snapshot.window;
 			const profile = this.#profile;
 			if (!window || !profile || !current()) return null;
-			const resolution = await this.api.resolve({ certificate: window.certificate, profile, cuts: this.#cuts, ordinal }, signal);
+			let resolution: DisplayTargetResolution;
+			while (true) {
+				const revision = this.#readinessRevision;
+				resolution = await this.api.resolve({ certificate: window.certificate, profile, cuts: this.#cuts, ordinal }, signal);
+				if (!current()) return null;
+				if (resolution.kind !== 'preparing') break;
+				await this.#waitForNavigationReadiness(revision);
+				if (!current()) return null;
+			}
 			if (!current()) return null;
 			const landed = resolution.landedOrdinal;
 			if (landed !== null && (resolution.kind === 'group-member' || resolution.kind === 'attached-detail' || resolution.kind === 'filtered')) {
@@ -274,13 +305,19 @@ export class DisplayWindowController {
 			return completed ? resolution : null;
 		} catch (error) {
 			if (!current()) return null;
-			if (error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW') return { kind: 'stale-view', ordinal, landedOrdinal: null };
+			if (error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW') return typeof target === 'number'
+				? { kind: 'stale-view', ordinal: target, landedOrdinal: null } : null;
 			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
 				let changed: boolean;
-				try { changed = await this.#reopenRevision(signal, epoch); }
+				try { changed = await this.#reopenMetadata(signal, epoch); }
 				catch (reopenError) { if (!current()) return null; throw reopenError; }
 				if (!current()) return null;
-				if (changed) return this.navigate(ordinal, signal, ownsNavigation);
+				if (!changed) await this.#waitForNavigationReadiness(this.#readinessRevision);
+				return current() ? this.#navigate(target, signal, ownsNavigation) : null;
+			}
+			if (error instanceof ApiError && RETRYABLE_DISPLAY_ERRORS.has(error.errorCode ?? '')) {
+				await this.#waitForNavigationReadiness(this.#readinessRevision);
+				return current() ? this.#navigate(target, signal, ownsNavigation) : null;
 			}
 			throw error;
 		} finally {
@@ -301,18 +338,22 @@ export class DisplayWindowController {
 			const revision = this.#readinessRevision;
 			const result = await request();
 			if (!current() || result !== 'blocked' || !['preparing', 'lagging', 'busy'].includes(this.#snapshot.phase)) return result;
-			if (revision !== this.#readinessRevision) continue;
-			await new Promise<void>(resolve => {
-				const wake = () => {
-					clearTimeout(timer);
-					if (this.#wakeNavigation === wake) this.#wakeNavigation = null;
-					resolve();
-				};
-				const timer = setTimeout(wake, 1500);
-				this.#wakeNavigation = wake;
-			});
+			await this.#waitForNavigationReadiness(revision);
 		}
 		return 'blocked';
+	}
+
+	async #waitForNavigationReadiness(revision: number): Promise<void> {
+		if (revision !== this.#readinessRevision) return;
+		await new Promise<void>(resolve => {
+			const wake = () => {
+				clearTimeout(timer);
+				if (this.#wakeNavigation === wake) this.#wakeNavigation = null;
+				resolve();
+			};
+			const timer = setTimeout(wake, 1500);
+			this.#wakeNavigation = wake;
+		});
 	}
 
 	expand(group: GroupDescriptor, anchor: MemberWindowRequest['anchor'] = { kind: 'first' }): Promise<CoverageOutcome> {
@@ -603,7 +644,7 @@ export class DisplayWindowController {
 		if (epoch !== this.#epoch || this.#disposed) throw new DOMException('Display request superseded', 'AbortError');
 	}
 
-	async #reopenRevision(signal: AbortSignal | undefined, epoch: number): Promise<boolean> {
+	async #reopenMetadata(signal: AbortSignal | undefined, epoch: number): Promise<boolean> {
 		const identity = this.#identity!;
 		const open = await this.api.open({ chatId: identity.chatId, expectedTranscriptViewId: identity.transcriptViewId,
 			reason: 'reconnect', outstandingClientMessageIds: [] }, signal);
@@ -630,6 +671,11 @@ export class DisplayWindowController {
 	}
 
 	#commit(snapshot: DisplayWindowSnapshot): void {
+		if (snapshot.phase === 'failed') {
+			if (this.#refreshTimer !== null) clearTimeout(this.#refreshTimer);
+			this.#refreshTimer = null;
+			this.#refreshPending = false;
+		}
 		this.#snapshot = { ...snapshot, revision: this.#snapshot.revision + 1 };
 		this.publish(this.#snapshot);
 	}
@@ -640,12 +686,12 @@ export class DisplayWindowController {
 		const epoch = this.#epoch, abort = new AbortController();
 		this.#errorCode = null;
 		this.#abort = abort;
-		this.#commit({ ...this.#snapshot, phase: mode === 'details' ? 'available' : 'requesting', error: null });
+		this.#commit({ ...this.#snapshot, phase: mode === 'details' ? 'available' : 'requesting' });
 		const request = work(abort.signal, epoch).catch(async (error: unknown): Promise<CoverageOutcome> => {
 			if (abort.signal.aborted || epoch !== this.#epoch || error instanceof DOMException && error.name === 'AbortError') return 'blocked';
 			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
 				try {
-					const changed = await this.#reopenRevision(abort.signal, epoch);
+					const changed = await this.#reopenMetadata(abort.signal, epoch);
 					this.#commit({ ...this.#snapshot, phase: 'busy', error: null });
 					this.#scheduleRefresh(changed ? 0 : 1500);
 					return 'blocked';
@@ -653,7 +699,7 @@ export class DisplayWindowController {
 				if (abort.signal.aborted || epoch !== this.#epoch || error instanceof DOMException && error.name === 'AbortError') return 'blocked';
 			}
 			this.#errorCode = error instanceof ApiError ? error.errorCode ?? null : null;
-			if (error instanceof ApiError && ['DISPLAY_BUSY', 'DISPLAY_TIMEOUT', 'DISPLAY_UNAVAILABLE', 'DISPLAY_PREPARING', 'DISPLAY_SUPERSEDED'].includes(error.errorCode ?? '')) {
+			if (error instanceof ApiError && RETRYABLE_DISPLAY_ERRORS.has(error.errorCode ?? '')) {
 				this.#commit({ ...this.#snapshot, phase: mode === 'details' ? 'available' : 'busy', error: null });
 				this.#scheduleRefresh(1500);
 				return 'blocked';

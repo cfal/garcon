@@ -1,11 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { UserMessage, BashToolUseMessage } from '$shared/chat-types';
+import { UserMessage, BashToolUseMessage, CommandOutputMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, type ChatMessage } from '$shared/chat-types';
 import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, type AvailableDisplayWindow, type DisplayCertificate, type DisplayProfile, type GroupDescriptor } from '$shared/transcript-display-contract';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ApiError } from '$lib/api/client.js';
 import { DisplayBodyStore } from '../display-body-store.js';
 import { DisplayWindowController, type DisplayWindowSnapshot } from '../display-window-controller.js';
 import { displayOpen } from './display-fixtures.js';
+import { displayRenderModel } from '../display-render-model.js';
 
 const profile: DisplayProfile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'patterns' };
 const certificate: DisplayCertificate = { serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
@@ -157,7 +158,7 @@ it('defers automatic catch-up through a held resolver and its attached-detail wi
 			items: [{ kind: 'row', ordinal, messageType: 'user-message', layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }],
 			interval: { after: ordinal - 1, through: ordinal } };
 	});
-	const { controller } = setup({ window: read, resolve: resolving });
+	const { controller } = setup({ open: async () => displayOpen('chat', 'view', 50000, 'instance'), window: read, resolve: resolving });
 	const navigating = controller.navigate(50000);
 	await vi.advanceTimersByTimeAsync(1);
 	expect(resolving).toHaveBeenCalledOnce();
@@ -509,28 +510,55 @@ it('re-arms a canceled profile replacement and allows member expansion', async (
 
 it('[TLV5-DISPLAY.02-WEB-UNIT-01] refreshes detached result, permission and command evidence without moving descriptors or members', async () => {
 	vi.useFakeTimers();
-	const read = vi.fn<TranscriptDisplayApi['window']>().mockImplementation(async request => ({ ...window(),
-		certificate: { ...certificate, watermark: request.requiredThrough ?? certificate.watermark },
-		later: { kind: 'more', cursor: { certificate, boundaryOrdinal: 40001 } } }));
-	const details = vi.fn<TranscriptDisplayApi['bodies']>().mockImplementation(async request => ({ certificate: request.certificate,
-		details: request.seedOrdinals.map(ordinal => ({ ordinal, pairedUse: null,
-			pairedResult: request.certificate.watermark > 40002 ? 40003 : null,
-			permissionTerminal: request.certificate.watermark > 40002 ? 40004 : null,
-			commandFormat: request.certificate.watermark > 40002 ? 'plain' : 'markdown', questionWrapper: null })),
-		bodies: [], deferredOrdinals: [], nonRenderedOrdinals: [], oversizedOrdinal: null }));
-	const { controller } = setup({ window: read, bodies: details });
+	const time = '2026-01-01T00:00:00.000Z';
+	const tool = new BashToolUseMessage(time, 'tool-2', 'true');
+	const messages = new Map<number, ChatMessage>([
+		[1, new CommandOutputMessage(time, 'command', 'stdout', 'markdown', 'Synthetic output', null)],
+		[40002, new PermissionRequestMessage(time, 'permission', tool)],
+		[50001, new ToolResultMessage(time, 'tool-2', { text: 'Synthetic result' }, false)],
+		[50002, new PermissionResolvedMessage(time, 'permission', true)],
+	]);
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockImplementation(async request => {
+		const current = { ...certificate, watermark: Math.max(50000, request.requiredThrough ?? 0) };
+		return { ...window(), certificate: current, sourceHead: current.watermark, interval: { after: 0, through: 40002 },
+			items: [{ kind: 'row', ordinal: 1, messageType: 'command-output', layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }, group,
+				{ kind: 'row', ordinal: 40002, messageType: 'permission-request', layout: 'permission', estimatedBodyBytes: 100, permissionOccurrenceId: 'permission' }],
+			later: { kind: 'more', cursor: { certificate: current, boundaryOrdinal: 40002 } } };
+	});
+	const details = vi.fn<TranscriptDisplayApi['bodies']>().mockImplementation(async request => {
+		const advanced = request.certificate.watermark > 50000;
+		const evidence = request.seedOrdinals.map(ordinal => ({ ordinal, pairedUse: null,
+			pairedResult: advanced && ordinal === 2 ? 50001 : null,
+			permissionTerminal: advanced && ordinal === 40002 ? 50002 : null,
+			commandFormat: ordinal === 1 ? advanced ? 'plain' as const : 'markdown' as const : null, questionWrapper: null }));
+		const ordinals = [...new Set(evidence.flatMap(row => [row.ordinal, row.pairedResult, row.permissionTerminal].filter((value): value is number => value !== null)))];
+		return { certificate: request.certificate, details: evidence,
+			bodies: ordinals.filter(ordinal => !request.residentOrdinals.includes(ordinal)).map(ordinal => ({ ordinal, submissionClientMessageId: null,
+				message: messages.get(ordinal) ?? new BashToolUseMessage(time, `tool-${ordinal}`, 'true') })),
+			deferredOrdinals: [], nonRenderedOrdinals: [], oversizedOrdinal: null };
+	});
+	const { controller, store } = setup({ window: read, bodies: details });
 	await controller.refresh(); await controller.expand(group);
 	controller.protect([2]); controller.collapse(group);
 	controller.setReadingAnchor(1, false);
 	const geometry = controller.snapshot.window, expansions = controller.snapshot.expansions;
-	controller.observeHead('view', 40004);
+	controller.observeHead('view', 50002);
 	await vi.advanceTimersByTimeAsync(250);
 	expect(controller.snapshot.window).toBe(geometry);
 	expect(controller.snapshot.expansions).toBe(expansions);
-	expect(controller.snapshot.details.get(1)).toMatchObject({ pairedResult: 40003, permissionTerminal: 40004, commandFormat: 'plain' });
-	expect(controller.snapshot.protectedRows[0]).toMatchObject({ certificate: { watermark: 40004 }, detail: { ordinal: 2, pairedResult: 40003 } });
-	expect(details.mock.calls.at(-1)?.[0].seedOrdinals).toEqual([1, 2]);
+	expect(controller.snapshot.details.get(1)).toMatchObject({ commandFormat: 'plain' });
+	expect(controller.snapshot.protectedRows[0]).toMatchObject({ certificate: { watermark: 50002 }, detail: { ordinal: 2, pairedResult: 50001 } });
+	expect(details.mock.calls.at(-1)?.[0].seedOrdinals).toEqual([1, 40002, 2]);
 	expect(read.mock.calls.at(-1)?.[0].limit).toBe(1);
+	const model = displayRenderModel(controller.snapshot, store);
+	expect(model.items.find(item => item.id === 'view:1')).toMatchObject({ message: { format: 'plain', content: 'Synthetic output' } });
+	expect(model.toolResultByUseRowId.get('view:2')).toBe(messages.get(50001));
+	expect(model.permissionTerminalByOccurrence.get('permission')).toEqual({ permissionOccurrenceId: 'permission', state: 'resolved', allowed: true });
+	expect(store.count).toBe(5);
+	controller.protect([]);
+	expect(store.count).toBe(3);
+	expect(store.get(certificate, 2)).toBeUndefined();
+	expect(store.get(certificate, 50001)).toBeUndefined();
 });
 
 it('does not let a protected row shadow fresh result details', async () => {
@@ -736,7 +764,8 @@ it('loads an attached result owner outside the target window at the same waterma
 			? { ...result, items: [{ kind: 'row', ordinal: 50000, messageType: 'assistant-message', layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }] }
 			: result;
 	});
-	const { controller } = setup({ window: read, resolve: async request => ({ kind: 'attached-detail', ordinal: request.ordinal, landedOrdinal: 2 }) });
+	const { controller } = setup({ open: async () => displayOpen('chat', 'view', 50000, 'instance'),
+		window: read, resolve: async request => ({ kind: 'attached-detail', ordinal: request.ordinal, landedOrdinal: 2 }) });
 	expect(await controller.navigate(50000)).toEqual({ kind: 'attached-detail', ordinal: 50000, landedOrdinal: 2 });
 	expect(read.mock.calls.map(([request]) => request.anchor)).toEqual([{ kind: 'around', ordinal: 50000 }, { kind: 'around', ordinal: 2 }]);
 	expect(read.mock.calls[1][0].atWatermark).toBe(50000);
