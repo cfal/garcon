@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, parseBodyDependencyResponse,
-  parseDisplayDescriptor, parseDisplayWindowRequest, parseDisplayWindowResponse, parseMemberWindowRequest } from '../transcript-display-contract.ts';
+  parseDisplayDescriptor, parseDisplayWindowRequest, parseDisplayWindowResponse, parseMemberWindowRequest,
+  parseMemberWindowResponse } from '../transcript-display-contract.ts';
 import { parseSubagentSummaryPage } from '../transcript-display-auxiliary.ts';
 
 const profile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'revision' };
@@ -46,6 +47,30 @@ test('bounds member requests inside the certified fragment', () => {
   expect(parseMemberWindowRequest(members)).toEqual(members);
   expect(() => parseMemberWindowRequest({ ...members, fragment: { after: 0, through: 11 } })).toThrow(TypeError);
   expect(() => parseMemberWindowRequest({ ...members, anchor: { kind: 'around', ordinal: 12 } })).toThrow(TypeError);
+  const individualProfile = { ...profile, combine: false };
+  expect(() => parseMemberWindowRequest({ ...members, profile: individualProfile,
+    certificate: { ...certificate, profileKey: displayProfileKey(individualProfile) } })).toThrow(TypeError);
+});
+
+test('rejects malformed member pages rather than accepting ambiguous pagination', () => {
+  const members = { certificate, base: group.base, fragment: group.fragment, ordinals: [3, 5, 7],
+    earlier: { beforeOrdinal: 3, remaining: 1 }, later: { afterOrdinal: 7, remaining: 2 } };
+  expect(parseMemberWindowResponse(JSON.parse(JSON.stringify(members)))).toEqual(members);
+  for (const changed of [
+    { ordinals: [3, 3, 7] },
+    { ordinals: [7, 5, 3], earlier: { beforeOrdinal: 7, remaining: 1 }, later: { afterOrdinal: 3, remaining: 2 } },
+    { ordinals: [0, 5, 7], earlier: null }, { ordinals: [3, 5, 11], later: null },
+    { fragment: { after: 3, through: 10 }, earlier: null }, { fragment: { after: 0, through: 6 }, later: null },
+    { earlier: { beforeOrdinal: 2, remaining: 1 } }, { later: { afterOrdinal: 8, remaining: 2 } },
+    { earlier: { beforeOrdinal: 3, remaining: 0 } },
+    { fragment: { after: 0, through: 11 } }, { certificate: { ...certificate, watermark: 9 } },
+  ]) {
+    expect(() => parseMemberWindowResponse({ ...members, ...changed })).toThrow(TypeError);
+  }
+  const exhausted = { ...members, ordinals: [], earlier: null, later: null };
+  expect(parseMemberWindowResponse(exhausted)).toEqual(exhausted);
+  expect(() => parseMemberWindowResponse({ ...exhausted, earlier: members.earlier })).toThrow(TypeError);
+  expect(() => parseMemberWindowResponse({ ...exhausted, later: members.later })).toThrow(TypeError);
 });
 
 test('bounds hydration addresses and rejects future evidence and conflicting outcomes', () => {

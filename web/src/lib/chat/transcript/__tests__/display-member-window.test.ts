@@ -99,6 +99,120 @@ it('preserves no-op configuration identity and clears expansions on view replace
 	expect(f.bodies.count).toBe(0);
 });
 
+it('extends both member boundaries and reloads trimmed members without duplicates or lost cursors', async () => {
+	const whole = group(1, 200), f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole, { kind: 'around', ordinal: 100 });
+	await f.controller.extendMembers(whole, { kind: 'after', ordinal: 124 });
+	await f.controller.extendMembers(whole, { kind: 'before', ordinal: 75 });
+	expect(f.controller.snapshot.expansions[0].page).toMatchObject({
+		ordinals: Array.from({ length: 150 }, (_, index) => 25 + index),
+		earlier: { beforeOrdinal: 25, remaining: 24 }, later: { afterOrdinal: 174, remaining: 26 },
+	});
+	expect(f.bodies.count).toBe(150);
+	f.controller.trim(1, 200, [95, 96]);
+	expect(f.controller.snapshot.expansions[0].page).toMatchObject({
+		ordinals: Array.from({ length: 52 }, (_, index) => 70 + index),
+		earlier: { beforeOrdinal: 70, remaining: 69 }, later: { afterOrdinal: 121, remaining: 79 },
+	});
+	expect(f.bodies.count).toBe(52);
+	await f.controller.extendMembers(whole, { kind: 'before', ordinal: 70 });
+	await f.controller.extendMembers(whole, { kind: 'after', ordinal: 121 });
+	expect(f.controller.snapshot.expansions[0].page).toMatchObject({
+		ordinals: Array.from({ length: 152 }, (_, index) => 20 + index),
+		earlier: { beforeOrdinal: 20, remaining: 19 }, later: { afterOrdinal: 171, remaining: 29 },
+	});
+	expect(f.bodies.count).toBe(152);
+	expect(f.api.members.mock.calls.map(([request]) => request.anchor)).toEqual([
+		{ kind: 'around', ordinal: 100 }, { kind: 'after', ordinal: 124 }, { kind: 'before', ordinal: 75 },
+		{ kind: 'before', ordinal: 70 }, { kind: 'after', ordinal: 121 },
+	]);
+});
+
+it.each(['collapse', 'replace-view', 'dispose'] as const)('ignores held member replies after %s without retaining bodies', async action => {
+	const whole = group(1, 1000), f = fixture([whole]);
+	await f.controller.refresh();
+	const requested = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
+	const members = f.api.members.getMockImplementation()!;
+	f.api.members.mockImplementationOnce(async (...args) => {
+		requested.resolve();
+		await released.promise;
+		return members(...args);
+	});
+	const expanding = f.controller.expand(whole);
+	await requested.promise;
+	try {
+		if (action === 'collapse') f.controller.collapse(whole);
+		else if (action === 'replace-view') f.controller.installOpen(displayOpen('chat-1', 'view-2', 40_000), displayProfile);
+		else f.controller.dispose();
+	} finally { released.resolve(); }
+	expect(await expanding).toBe('blocked');
+	expect(f.controller.snapshot.expansions).toEqual([]);
+	expect(f.controller.snapshot.details.size).toBe(0);
+	expect(f.api.bodies).not.toHaveBeenCalled();
+	expect(f.bodies.count).toBe(0);
+
+	if (action === 'collapse') {
+		expect(await f.controller.expand(whole)).toBe('loaded');
+		expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
+		expect(f.bodies.count).toBe(50);
+	}
+});
+
+it('publishes an expansion only after deferred member bodies finish loading', async () => {
+	const whole = group(1, 1000), f = fixture([whole]);
+	await f.controller.refresh();
+	const priorWindow = f.controller.snapshot.window;
+	const requested = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
+	const bodies = f.api.bodies.getMockImplementation()!;
+	f.api.bodies.mockImplementationOnce(async (...args) => {
+		const response = await bodies(...args);
+		return { ...response, bodies: response.bodies.slice(0, 25), deferredOrdinals: response.bodies.slice(25).map(row => row.ordinal) };
+	}).mockImplementationOnce(async (...args) => {
+		requested.resolve();
+		await released.promise;
+		return bodies(...args);
+	});
+	const expanding = f.controller.expand(whole);
+	await requested.promise;
+	try {
+		expect(f.controller.snapshot.window).toBe(priorWindow);
+		expect(f.controller.snapshot.expansions).toEqual([]);
+		expect(f.controller.snapshot.details.size).toBe(0);
+		expect(f.bodies.count).toBe(25);
+		expect(f.api.bodies.mock.calls[1][0].residentOrdinals).toEqual(Array.from({ length: 25 }, (_, index) => index + 1));
+	} finally { released.resolve(); }
+	expect(await expanding).toBe('loaded');
+	expect(f.api.bodies).toHaveBeenCalledTimes(2);
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toEqual(Array.from({ length: 50 }, (_, index) => index + 1));
+	expect(f.controller.snapshot.details.size).toBe(50);
+	expect(f.bodies.count).toBe(50);
+	f.controller.collapse(whole);
+	expect(f.bodies.count).toBe(0);
+});
+
+it('stops non-progressing hydration, releases staged bodies and allows a later expansion', async () => {
+	const whole = group(1, 1000), f = fixture([whole]);
+	await f.controller.refresh();
+	const priorWindow = f.controller.snapshot.window;
+	const bodies = f.api.bodies.getMockImplementation()!;
+	f.api.bodies.mockImplementation(async (...args) => {
+		const response = await bodies(...args);
+		return { ...response, bodies: response.bodies.filter(row => row.ordinal <= 25),
+			deferredOrdinals: args[0].seedOrdinals.filter(ordinal => ordinal > 25) };
+	});
+	expect(await f.controller.expand(whole)).toBe('failed');
+	expect(f.api.bodies).toHaveBeenCalledTimes(2);
+	expect(f.controller.snapshot.window).toBe(priorWindow);
+	expect(f.controller.snapshot.expansions).toEqual([]);
+	expect(f.controller.snapshot.details.size).toBe(0);
+	expect(f.controller.snapshot.error).toBe('Display hydration made no progress');
+	expect(f.bodies.count).toBe(0);
+	f.api.bodies.mockImplementation(bodies);
+	expect(await f.controller.expand(whole)).toBe('loaded');
+	expect(f.bodies.count).toBe(50);
+});
+
 it('trims root-budget overscan while preserving focused children and releases their exception', async () => {
 	const whole = group(1, 1000), f = fixture([whole], { count: 5, bytes: 4096 });
 	await f.controller.refresh(); await f.controller.expand(whole);

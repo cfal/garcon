@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AssistantMessage, AskUserQuestionToolUseMessage, BashToolUseMessage, GlobToolUseMessage, PermissionRequestMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
 import type { ChatMessage } from '../../../../common/chat-types.js';
-import type { DisplayProfile, DisplayWindowRequest } from '../../../../common/transcript-display-contract.js';
-import { parseDisplayWindowResponse } from '../../../../common/transcript-display-contract.js';
+import type { DisplayProfile, DisplayWindowRequest, MemberWindowRequest } from '../../../../common/transcript-display-contract.js';
+import { parseDisplayWindowResponse, parseMemberWindowResponse } from '../../../../common/transcript-display-contract.js';
 import { DISPLAY_POLICY_REVISION } from '../../../../common/transcript-display-policy.js';
 import { encodeLedgerDraft, type StoredLedgerRow } from '../../ledger/codec.js';
 import { DisplayStore } from '../store.js';
@@ -177,8 +177,91 @@ describe('persistent transcript display read model', () => {
     if (group.kind !== 'tool-group') throw new Error('Expected group');
     const response = new DisplayQuery(store, profile, 1000, [], false).memberWindow({ certificate: window.certificate,
       profile, cuts: [], base: group.base, fragment: group.fragment, anchor: { kind: 'around', ordinal: 500 }, limit: 50 });
-    expect(response.ordinals).toHaveLength(50);
-    expect(response.ordinals).toContain(500);
-    expect(response.earlier!.remaining + response.later!.remaining + response.ordinals.length).toBe(1000);
+    expect(response.ordinals).toEqual(Array.from({ length: 50 }, (_, index) => 475 + index));
+    expect(response.earlier).toEqual({ beforeOrdinal: 475, remaining: 474 });
+    expect(response.later).toEqual({ afterOrdinal: 524, remaining: 476 });
+  });
+
+  test('filtered uses land on surrounding context while non-combined uses keep their exact address', () => {
+    const store = create();
+    const rows = stored([new BashToolUseMessage(at, 'first', 'true'), new AssistantMessage(at, 'Generic context'),
+      new BashToolUseMessage(at, 'second', 'true')]);
+    appendDisplayFrame(store, rows, rows.length, 'server');
+    const filtered = new DisplayQuery(store, { ...profile, hiddenToolGroups: ['bash'] }, 3, [], false);
+    expect(filtered.resolve(1, 3)).toEqual({ kind: 'filtered', ordinal: 1, landedOrdinal: 2 });
+    expect(filtered.resolve(3, 3)).toEqual({ kind: 'filtered', ordinal: 3, landedOrdinal: 2 });
+    expect(filtered.resolve(4, 3)).toEqual({ kind: 'missing', ordinal: 4, landedOrdinal: null });
+    expect(new DisplayQuery(store, { ...profile, combine: false }, 3, [], false).resolve(3, 3))
+      .toEqual({ kind: 'visible-row', ordinal: 3, landedOrdinal: 3 });
+  });
+
+  test('hiding all Bash rows certifies exhaustion without waiting for Bash classification', () => {
+    const store = create();
+    const rows = stored([new BashToolUseMessage(at, 'tool', 'true'), new ToolResultMessage(at, 'tool', 'Generic result')]);
+    appendDisplayFrame(store, rows, rows.length, 'server');
+    const input: DisplayWindowRequest = { chatId: 'chat', transcriptViewId: 'view', policyRevision: DISPLAY_POLICY_REVISION,
+      profile: { ...profile, hiddenToolGroups: ['bash'] }, cuts: [], anchor: { kind: 'newest' }, limit: 50 };
+    const certificate = displayCertificate('server', input, 2);
+    const read = () => new DisplayQuery(store, input.profile, 2, [], true).window(input, certificate, 2, 2);
+    const unclassified = parseDisplayWindowResponse(read());
+    expect(unclassified).toMatchObject({ kind: 'available', certificate, items: [],
+      earlier: { kind: 'exhausted-through-watermark' }, later: { kind: 'exhausted-through-watermark' } });
+    while (prepareBashFrame(store, profile.bashRevision, [{ mode: 'glob', pattern: '*' }], 2) < 2) {}
+    expect(read()).toEqual(unclassified);
+  });
+
+  test.each(['earlier', 'later'] as const)('traverses sparse filtered members %s without gaps, duplicates or crossing overlay cuts', direction => {
+    const store = create();
+    const messages: ChatMessage[] = [new UserMessage(at, 'Generic prompt')];
+    const eligible: number[] = [];
+    for (let index = 0; index < 137; index++) {
+      if (index % 3 !== 0) eligible.push(messages.length + 1);
+      messages.push(new BashToolUseMessage(at, `tool-${index}`, index % 3 === 0 ? 'skip' : 'keep'),
+        new ToolResultMessage(at, `tool-${index}`, 'Generic result'));
+    }
+    messages.push(new AssistantMessage(at, 'Generic answer'));
+    const rows = stored(messages);
+    for (let offset = 0; offset < rows.length; offset += 17) {
+      appendDisplayFrame(store, rows.slice(offset, offset + 17), rows.length, 'server');
+    }
+    const patterns = [{ mode: 'glob' as const, pattern: 'skip' }];
+    while (prepareBashFrame(store, profile.bashRevision, patterns, rows.length) < rows.length) {}
+    const cuts = [{ id: 'notice', afterOrdinal: 132, anchorRule: 'raw-position' as const }];
+    const engine = new DisplayQuery(store, profile, rows.length, cuts, true);
+    const request: DisplayWindowRequest = { chatId: 'chat', transcriptViewId: 'view', policyRevision: DISPLAY_POLICY_REVISION,
+      profile, cuts, anchor: { kind: 'newest' }, limit: 50 };
+    const certificate = displayCertificate('server', request, rows.length);
+    const window = engine.window(request, certificate, rows.length, rows.length);
+    const groups = window.items.filter(item => item.kind === 'tool-group');
+    expect(groups).toHaveLength(2);
+    expect(groups.map(group => group.count)).toEqual([44, 47]);
+
+    for (const group of groups) {
+      const expected = eligible.filter(ordinal => ordinal > group.fragment.after && ordinal <= group.fragment.through);
+      const collected: number[] = [];
+      let anchor: MemberWindowRequest['anchor'] = direction === 'later'
+        ? { kind: 'first' } : { kind: 'around', ordinal: group.lastMember };
+      let exhausted = false;
+      for (let pages = 0; pages <= expected.length; pages++) {
+        const page = parseMemberWindowResponse(engine.memberWindow({ certificate, profile, cuts,
+          base: group.base, fragment: group.fragment, anchor, limit: 7 }));
+        expect(page.certificate).toEqual(certificate);
+        expect(page.ordinals.length).toBeGreaterThan(0);
+        expect(page.ordinals.length).toBeLessThanOrEqual(7);
+        const start = expected.indexOf(page.ordinals[0]);
+        expect(start).toBeGreaterThanOrEqual(0);
+        expect(page.ordinals).toEqual(expected.slice(start, start + page.ordinals.length));
+        expect(page.earlier).toEqual(start === 0 ? null : { beforeOrdinal: page.ordinals[0], remaining: start });
+        const remaining = expected.length - start - page.ordinals.length;
+        expect(page.later).toEqual(remaining === 0 ? null : { afterOrdinal: page.ordinals.at(-1), remaining });
+        if (direction === 'later') collected.push(...page.ordinals);
+        else collected.unshift(...page.ordinals);
+        if (direction === 'later' && page.later) anchor = { kind: 'after', ordinal: page.later.afterOrdinal };
+        else if (direction === 'earlier' && page.earlier) anchor = { kind: 'before', ordinal: page.earlier.beforeOrdinal };
+        else { exhausted = true; break; }
+      }
+      expect(exhausted).toBe(true);
+      expect(collected).toEqual(expected);
+    }
   });
 });

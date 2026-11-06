@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import { parseBodyDependencyResponse } from '../../../common/transcript-display-contract.js';
+import { parseBodyDependencyResponse, parseMemberWindowResponse } from '../../../common/transcript-display-contract.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { appendDisplayRun, createDisplayChat } from '../../support/transcript-display-fixture.js';
@@ -34,8 +34,14 @@ test('long member paging, collapse and chat switching keep retained browser memo
       await page.waitForURL(url => url.pathname === `/chat/${chat.chatId}`);
       await waitForDisplayIdle(page);
       await browserExpect(group).toHaveAttribute('data-chat-tool-group-count', '40000');
-      await group.click();
+      const firstMembers = page.waitForResponse(response => response.url().endsWith('/transcript-display/members')
+        && response.status() === 200 && response.request().postDataJSON().certificate.chatId === chat.chatId);
+      const [firstResponse] = await Promise.all([firstMembers, group.click()]);
+      const firstPage = parseMemberWindowResponse(await firstResponse.json());
+      expect(firstPage.ordinals).toHaveLength(50);
+      expect(firstPage.later).not.toBeNull();
       await waitForDisplayIdle(page);
+      let afterOrdinal = firstPage.ordinals.at(-1)!;
       for (let step = 0; step < 3; step++) {
         await feed.evaluate(element => {
           element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1000 }));
@@ -43,8 +49,28 @@ test('long member paging, collapse and chat switching keep retained browser memo
           element.dispatchEvent(new Event('scroll', { bubbles: true }));
         });
         await waitForDisplayIdle(page);
+        const nextMembers = page.waitForResponse(response => {
+          if (!response.url().endsWith('/transcript-display/members') || response.status() !== 200) return false;
+          const request = response.request().postDataJSON();
+          return request.certificate.chatId === chat.chatId && request.anchor.kind === 'after'
+            && request.anchor.ordinal === afterOrdinal;
+        });
+        const [nextResponse] = await Promise.all([nextMembers, feed.getByRole('button', { name: /later actions$/ }).click()]);
+        const nextPage = parseMemberWindowResponse(await nextResponse.json());
+        expect(nextPage.ordinals).toEqual(Array.from({ length: 50 }, (_, index) => afterOrdinal + (index + 1) * 2));
+        afterOrdinal = nextPage.ordinals.at(-1)!;
+        await waitForDisplayIdle(page);
         expect(await page.locator('[data-chat-virtual-item]').count()).toBeLessThan(110);
       }
+      const lastInitialOrdinal = firstPage.ordinals.at(-1)!;
+      await browserExpect.poll(() => feed.evaluate((element, ordinal) => {
+        const viewport = element.getBoundingClientRect();
+        return [...element.querySelectorAll('[data-chat-row-id][data-chat-message-type="bash-tool-use"]')].some(row => {
+          const rect = row.getBoundingClientRect();
+          return Number(row.getAttribute('data-chat-row-id')?.split(':').at(-1)) > ordinal
+            && rect.bottom > viewport.top && rect.top < viewport.bottom;
+        });
+      }, lastInitialOrdinal)).toBe(true);
       await feed.evaluate(element => {
         element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 }));
         element.scrollTop = 0;

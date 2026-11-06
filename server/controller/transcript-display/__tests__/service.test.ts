@@ -79,6 +79,15 @@ test('real workers prepare bounded windows, hydrate selected details and reuse a
   const restored = await ready(request('chat', view.viewId));
   expect(restored.items).toEqual(initial.items);
   expect(restored.certificate.serverInstanceId).toBe('server-b');
+  expect(display.metrics.rows).toBe(0);
+  const producer = ledger.openProducer('chat', 'synthetic');
+  try {
+    producer.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Generic later response') }] });
+    const extended = await ready(request('chat', view.viewId));
+    expect(extended.certificate.watermark).toBe(initial.certificate.watermark + 1);
+    expect(extended.items.slice(0, -1)).toEqual(initial.items);
+    expect(display.metrics.rows).toBe(1);
+  } finally { producer.close(); }
 });
 
 test('lost frame acknowledgements reconcile the persisted checkpoint on retry', async () => {
