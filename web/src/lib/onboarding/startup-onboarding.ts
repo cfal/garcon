@@ -7,7 +7,13 @@ interface StartupOnboardingInput {
 	hadSavedSettingsOnLoad: boolean;
 }
 
-export function resolveStartupOnboarding(input: StartupOnboardingInput): StartupOnboardingDecision {
-	if (!input.isAuthenticated || input.isPublicRoute || input.logoutPending) return 'wait';
-	return input.hadSavedSettingsOnLoad ? 'ignore' : 'open';
+export class StartupOnboardingState {
+	#resolved = false;
+
+	resolve(input: StartupOnboardingInput): StartupOnboardingDecision {
+		if (this.#resolved) return 'ignore';
+		if (!input.isAuthenticated || input.isPublicRoute || input.logoutPending) return 'wait';
+		this.#resolved = true;
+		return input.hadSavedSettingsOnLoad ? 'ignore' : 'open';
+	}
 }

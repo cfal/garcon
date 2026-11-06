@@ -45,7 +45,7 @@
 	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 	import { PullRequestReviewsRouter } from '$lib/events/pull-request-reviews-router.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
-	import { resolveStartupOnboarding } from '$lib/onboarding/startup-onboarding.js';
+	import { StartupOnboardingState } from '$lib/onboarding/startup-onboarding.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -584,18 +584,14 @@
 		}
 	});
 
-	// Decides once per load, after authentication and public-route navigation settle.
-	let startupOnboardingResolved = $state(false);
+	const startupOnboarding = new StartupOnboardingState();
 	$effect(() => {
-		if (startupOnboardingResolved) return;
-		const decision = resolveStartupOnboarding({
+		const decision = startupOnboarding.resolve({
 			isAuthenticated: auth.isAuthenticated,
 			isPublicRoute,
 			logoutPending: auth.logoutPending,
 			hadSavedSettingsOnLoad: localSettings.hadSavedSettingsOnLoad,
 		});
-		if (decision === 'wait') return;
-		startupOnboardingResolved = true;
 		if (decision === 'open') {
 			appShell.openOnboardingWizard();
 		}
