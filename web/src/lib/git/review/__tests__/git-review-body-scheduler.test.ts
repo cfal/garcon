@@ -10,6 +10,98 @@ function deferred<T>() {
 }
 
 describe('GitReviewBodyScheduler', () => {
+	it('publishes cancellation once while an aborted lane is still settling', async () => {
+		const held = deferred<string>();
+		const onLoadingChange = vi.fn();
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: () => held.promise,
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange,
+		});
+		scheduler.requestVisible(['a']);
+		scheduler.retainVisible(new Set());
+		scheduler.retainVisible(new Set());
+		expect(onLoadingChange.mock.calls).toEqual([
+			[['a'], true],
+			[['a'], false],
+		]);
+		held.resolve('late');
+		await held.promise;
+	});
+
+	it('keeps navigation ahead of subsequent viewport demand', async () => {
+		const held = deferred<string>();
+		const calls: string[][] = [];
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (paths) => {
+				calls.push(paths);
+				return calls.length === 1 ? held.promise : Promise.resolve('ready');
+			},
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestVisible(['old']);
+		scheduler.requestNavigation(['target']);
+		scheduler.requestVisible(['target', 'neighbor']);
+		held.resolve('ready');
+		await vi.waitFor(() => expect(scheduler.hasPending('neighbor')).toBe(false));
+		expect(calls).toEqual([['old'], ['target'], ['neighbor']]);
+	});
+
+	it('retains navigation learned after the active batch lost viewport demand', async () => {
+		const held = deferred<string[]>();
+		const calls: string[][] = [];
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (paths) => {
+				calls.push(paths);
+				return calls.length === 1 ? held.promise : Promise.resolve([]);
+			},
+			deferredPaths: (result) => result,
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestVisible(['a', 'target']);
+		scheduler.retainVisible(new Set(['a']));
+		scheduler.requestNavigation(['target']);
+		held.resolve(['target']);
+		await vi.waitFor(() => expect(scheduler.hasPending('target')).toBe(false));
+		expect(calls).toEqual([['a', 'target'], ['target']]);
+	});
+
+	it('promotes navigation out of a cancelled hidden prefetch batch', async () => {
+		const held = deferred<string>();
+		const calls: Array<{ paths: string[]; purpose: string }> = [];
+		const onResult = vi.fn();
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (paths, purpose) => {
+				calls.push({ paths, purpose });
+				return purpose === 'prefetch' ? held.promise : Promise.resolve('current');
+			},
+			onResult,
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestPrefetch(['neighbor', 'target']);
+		scheduler.requestNavigation(['target']);
+		scheduler.retainVisible(new Set());
+		scheduler.cancelPrefetch();
+		held.resolve('late');
+		await vi.waitFor(() =>
+			expect(onResult).toHaveBeenCalledExactlyOnceWith('current', ['target'], 'visible'),
+		);
+		expect(calls).toEqual([
+			{ paths: ['neighbor', 'target'], purpose: 'prefetch' },
+			{ paths: ['target'], purpose: 'visible' },
+		]);
+	});
+
 	it('keeps selected work while dropping obsolete visible queues and hidden speculation', async () => {
 		const held = deferred<string>();
 		const calls: Array<{ paths: string[]; signal: AbortSignal }> = [];

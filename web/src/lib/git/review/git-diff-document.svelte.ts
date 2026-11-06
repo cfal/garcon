@@ -253,8 +253,8 @@ export class GitDiffDocumentController {
 		});
 		const [priority, ...prefetch] = snapshot.firstBodyCandidates;
 		if (priority) this.requestNavigationBodies([priority]);
-		this.demandReconciler.markReadinessChanged();
 		this.requestBodies(prefetch.slice(0, 2), 'prefetch');
+		this.demandReconciler.markReadinessChanged();
 	}
 
 	setDisplayOptions(diffMode: DiffMode, contextLines: number): void {

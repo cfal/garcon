@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
 import { createGitPatchIndex } from '../git-patch-index.js';
-import { commitFileToReviewFile, GitDiffDocumentController } from '../git-diff-document.svelte.js';
+import {
+	commitFileToReviewFile,
+	GitDiffDocumentController,
+	type GitDiffDocumentBodyLoader,
+} from '../git-diff-document.svelte.js';
 import { GitDiffSyntaxController } from '../git-diff-syntax-controller.svelte.js';
 import {
 	gitDiffSyntaxCacheKey,
@@ -120,6 +124,142 @@ function addedSyntaxSegments(controller: GitDiffDocumentController) {
 }
 
 describe('GitDiffDocumentController', () => {
+	it.each(['viewport', 'navigation'] as const)(
+		'recovers %s demand after an incremental prefetch exceeds its budget',
+		async (kind) => {
+			const controller = new GitDiffDocumentController();
+			const held = deferred<ReturnType<typeof bodyResponse>>();
+			let publish!: Parameters<GitDiffDocumentBodyLoader>[4];
+			let prefetchSignal!: AbortSignal;
+			const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(
+				async (_snapshot, paths, purpose, signal, partial) => {
+					if (purpose === 'prefetch') {
+						publish = partial;
+						prefetchSignal = signal;
+						return held.promise;
+					}
+					return bodyResponse(
+						'doc',
+						paths.map((file) => file.path),
+					);
+				},
+			);
+			try {
+				controller.open(
+					{
+						project: '/project',
+						documentId: 'doc',
+						files: ['initial.ts', 'blocked.ts', 'wanted.ts'].map(file),
+						limits: { ...limits, maxLoadedRows: 6 },
+						firstBodyCandidates: ['initial.ts', 'blocked.ts', 'wanted.ts'],
+					},
+					{
+						contextLines: 5,
+						diffMode: 'unified',
+						loadBodies,
+						onError: vi.fn(),
+						commentSource: testCommentSource(),
+					},
+				);
+				await vi.waitFor(() => expect(controller.fileBodies['initial.ts']).toBeDefined());
+				controller.handleBodyDemand({ kind, documentId: 'doc', filePaths: ['wanted.ts'] });
+				publish(bodyResponse('doc', ['blocked.ts']), ['blocked.ts']);
+				expect(prefetchSignal.aborted).toBe(true);
+				expect(controller.loadingBodies.has('blocked.ts')).toBe(false);
+				expect(controller.loadingBodies.has('wanted.ts')).toBe(true);
+				held.resolve(bodyResponse('doc', ['blocked.ts', 'wanted.ts']));
+				await vi.waitFor(() =>
+					expect(controller.fileBodies['wanted.ts']?.bodyState).toBe('loaded'),
+				);
+				expect(controller.fileBodies['blocked.ts']).toBeUndefined();
+				expect(controller.aggregateLimit).toBeNull();
+				expect(loadBodies.mock.calls.at(-1)?.[2]).toBe('visible');
+			} finally {
+				controller.clear();
+			}
+		},
+	);
+
+	it('publishes a newly selected prefetched body with the visible budget', async () => {
+		const controller = new GitDiffDocumentController();
+		const held = deferred<ReturnType<typeof bodyResponse>>();
+		let publish!: Parameters<GitDiffDocumentBodyLoader>[4];
+		try {
+			controller.open(
+				{
+					project: '/project',
+					documentId: 'doc',
+					files: ['initial.ts', 'wanted.ts'].map(file),
+					limits: { ...limits, maxLoadedRows: 6 },
+					firstBodyCandidates: ['initial.ts', 'wanted.ts'],
+				},
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+					loadBodies: async (_snapshot, paths, purpose, _signal, partial) => {
+						if (purpose === 'visible')
+							return bodyResponse(
+								'doc',
+								paths.map((file) => file.path),
+							);
+						publish = partial;
+						return held.promise;
+					},
+				},
+			);
+			await vi.waitFor(() => expect(controller.fileBodies['initial.ts']).toBeDefined());
+			controller.focusFile('wanted.ts');
+			publish(bodyResponse('doc', ['wanted.ts']), ['wanted.ts']);
+			held.resolve(bodyResponse('doc', ['wanted.ts']));
+			await vi.waitFor(() => expect(controller.fileBodies['wanted.ts']?.bodyState).toBe('loaded'));
+			expect(controller.aggregateLimit).toBeNull();
+		} finally {
+			controller.clear();
+		}
+	});
+
+	it('cancels bootstrap neighbors when a same-document refresh settles while hidden', async () => {
+		const controller = new GitDiffDocumentController();
+		const held = deferred<ReturnType<typeof bodyResponse>>();
+		const signals: AbortSignal[] = [];
+		const snapshot = {
+			project: '/project',
+			documentId: 'doc',
+			files: ['a.ts', 'b.ts'].map(file),
+			limits,
+			firstBodyCandidates: ['a.ts', 'b.ts'],
+		};
+		const loadBodies: GitDiffDocumentBodyLoader = async (_snapshot, paths, purpose, signal) => {
+			if (purpose === 'visible')
+				return bodyResponse(
+					'doc',
+					paths.map((file) => file.path),
+				);
+			signals.push(signal);
+			return held.promise;
+		};
+		const options = {
+			contextLines: 5,
+			diffMode: 'unified' as const,
+			loadBodies,
+			onError: vi.fn(),
+			commentSource: testCommentSource(),
+		};
+		try {
+			controller.open(snapshot, options);
+			await vi.waitFor(() => expect(controller.fileBodies['a.ts']).toBeDefined());
+			controller.handleBodyDemand({ kind: 'viewport', documentId: 'doc', filePaths: [] });
+			controller.open(snapshot, options);
+			expect(signals).toHaveLength(2);
+			expect(signals.every((signal) => signal.aborted)).toBe(true);
+		} finally {
+			controller.clear();
+			held.resolve(bodyResponse('doc', ['b.ts']));
+		}
+	});
+
 	it('preserves both lanes during incremental publication and fences a replaced document', async () => {
 		const controller = new GitDiffDocumentController();
 		const held = deferred<ReturnType<typeof bodyResponse>>();

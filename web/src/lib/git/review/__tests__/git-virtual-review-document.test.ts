@@ -323,6 +323,53 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		}
 	});
 
+	it.each(['viewport', 'navigation'] as const)(
+		'recovers %s workbench demand after cancelling incremental prefetch',
+		async (kind) => {
+			const paths = ['initial.ts', 'blocked.ts', 'wanted.ts'];
+			const ready = (requested: string[]) => ({
+				status: 'ready' as const,
+				documentId: 'doc',
+				files: Object.fromEntries(requested.map((path) => [path, makeBody(path)])),
+				errors: {},
+				deferredFiles: [],
+			});
+			const held = Promise.withResolvers<ReturnType<typeof ready>>();
+			let publish!: NonNullable<
+				NonNullable<Parameters<typeof gitApi.getGitReviewFileBodies>[5]>['onIndexedBodies']
+			>;
+			const load = vi
+				.spyOn(gitApi, 'getGitReviewFileBodies')
+				.mockImplementation(async (_target, _document, files, _tab, _context, options) => {
+					if (options?.purpose !== 'prefetch') return ready(files);
+					publish = options.onIndexedBodies!;
+					return held.promise;
+				});
+			const controller = new GitVirtualReviewDocumentController({
+				...documentDeps(() => paths),
+				targetProjectPath: () => '/project',
+			});
+			try {
+				const summary = makeSummary(paths.map((path) => makeFile(path)));
+				summary.limits.maxLoadedRows = 2;
+				controller.applySummary(summary, paths);
+				await vi.waitFor(() => expect(controller.fileBodies['initial.ts']).toBeDefined());
+				controller.handleBodyDemand({ kind, documentId: 'doc', filePaths: ['wanted.ts'] });
+				publish(ready(['blocked.ts']), ['blocked.ts']);
+				held.resolve(ready(['blocked.ts', 'wanted.ts']));
+				await vi.waitFor(() =>
+					expect(controller.fileBodies['wanted.ts']?.bodyState).toBe('loaded'),
+				);
+				expect(controller.fileBodies['blocked.ts']).toBeUndefined();
+				expect(controller.aggregateLimit).toBeNull();
+				expect(load.mock.calls.at(-1)?.[5]?.purpose).toBe('visible');
+			} finally {
+				controller.reset();
+				load.mockRestore();
+			}
+		},
+	);
+
 	it('batches visible files and continues after an oversized file', async () => {
 		const paths = ['large.ts', 'a.ts', 'b.ts'];
 		const oversized: GitReviewFileBody = {
