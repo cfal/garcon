@@ -4,6 +4,7 @@
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import '../app.css';
 	import { onMount, onDestroy, untrack } from 'svelte';
+	import { purgeLegacyTranscriptSnapshots } from '$lib/utils/local-storage-cache-recovery';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { appPathname } from '$lib/deployment/paths';
@@ -382,6 +383,7 @@
 		},
 	});
 	onMount(() => {
+		purgeLegacyTranscriptSnapshots();
 		browserNotifications.start();
 		return ws.onConnectionChange((connected) => {
 			if (!connected) browserNotificationsRouter.clearPermissions();

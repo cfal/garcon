@@ -2,11 +2,24 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	CHAT_TRANSCRIPT_INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX,
+	purgeLegacyTranscriptSnapshots,
 	setLocalStorageWithCacheRecovery,
 } from '../local-storage-cache-recovery';
 
 describe('setLocalStorageWithCacheRecovery', () => {
 	beforeEach(() => localStorage.clear());
+
+	it('purges every retired raw snapshot and index without deleting settings or drafts', () => {
+		localStorage.setItem(`${CHAT_TRANSCRIPT_SNAPSHOT_PREFIX}deleted-chat`, 'Synthetic private transcript');
+		localStorage.setItem(`${CHAT_TRANSCRIPT_SNAPSHOT_PREFIX}orphan`, 'Synthetic orphaned transcript');
+		localStorage.setItem(CHAT_TRANSCRIPT_INDEX_KEY, 'malformed index');
+		localStorage.setItem('chat_draft_current', 'Synthetic draft');
+		localStorage.setItem('workspace_layout_v2', '{"version":2}');
+		expect(purgeLegacyTranscriptSnapshots()).toBe(true);
+		expect(Object.keys(localStorage).sort()).toEqual(['chat_draft_current', 'workspace_layout_v2']);
+		expect(localStorage.getItem('chat_draft_current')).toBe('Synthetic draft');
+		expect(purgeLegacyTranscriptSnapshots()).toBe(true);
+	});
 
 	it('evicts the oldest transcript cache entry before retrying durable state', () => {
 		localStorage.setItem(`${CHAT_TRANSCRIPT_SNAPSHOT_PREFIX}old`, 'old transcript');
