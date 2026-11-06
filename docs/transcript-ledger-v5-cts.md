@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 41 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 42 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -53,14 +53,14 @@ delivery is bounded and ordered. Revision 41 resumes remote producer bindings
 across an executor disconnect within a bounded grace, settles launches whose
 replies were lost with a session, and runs whole-view staging, copying, and
 deletion in bounded steps. Neither revision adds inventory IDs; the inventory
-has been unchanged since PR #691.
+was unchanged from PR #691 through revision 41.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 41, SHA-256
-  `4a9cd1beb0e3ed680b2ac0e2465279da4751f3c3413935fcbc8925f4d6d599a3`
+- `docs/transcript-ledger-v5-design.md`, revision 42, SHA-256
+  `2792e714b89bce975b5184684a7c64015062d7d7247cf326615ca1fbb61dcda0`
 
-Current inventory: 419 discovered stable IDs, validated by
+Current inventory: 423 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -68,6 +68,28 @@ anchored by their owning merge commits or are present on the current branch.
 
 Coverage state records whether an oracle exists; it does not claim that
 production already satisfies an intentional-red case.
+
+
+### Revision 42 Inventory Migration
+
+The browser no longer scans or replays raw history. These cases are explicitly
+retired, not reassigned to superficially similar tests. Raw HTTP and source-range
+reads retain their own obligations. Historical revision-41 coverage below does
+not establish release acceptance for the display cutover.
+
+| Retired case IDs | Reason and replacement |
+| --- | --- |
+| `TLV5-L11.01-WS-CONTRACT-01` | Removed replay error envelope. L11.01 still requires per-chat source fencing on raw and display HTTP reads. |
+| `TLV5-PAGE.09-WEB-BACKGROUND-01`, `WEB-STORAGE-01`, `WEB-UNIT-01` through `WEB-UNIT-04`, `WEB-WINDOW-PREVIEW-01`, `WEB-STATIC-01` | Removed browser raw scanner/cache and aggregation of hidden pages. DISPLAY.01/.03/.04 cover certified aggregates, persistent coverage and bounded parking. Prefixes in this row are `TLV5-PAGE.09-`. |
+| `TLV5-PAGE.10-WEB-UNIT-01` | Removed raw scanner progress loop. Raw HTTP parser cases remain; certified page validation is PAGE.03. |
+| `TLV5-REPLAY.01-CONTRACT-01`, `TLV5-REPLAY.02-CONTRACT-01`, `TLV5-REPLAY.03-SERVER-01`, `TLV5-REPLAY.05-CHROMIUM-01`, `TLV5-REPLAY.05-WEB-UNIT-01`, `TLV5-REPLAY.06-COMPACT-CHROMIUM-01`, `TLV5-REPLAY.06-WEB-UNIT-01`, `TLV5-REPLAY.07-WEB-UNIT-01` | Removed raw browser replay. DISPLAY.07 tests independent certified recovery, stale response rejection and actual wire bounds. |
+| `TLV5-REPLAY.04-CORE-UNIT-01` | Preserved source-range read assertion under `TLV5-PAGE.11-CORE-UNIT-01`; it does not exercise a browser replay protocol. |
+| `TLV5-UX.05-WEB-UNIT-01` | No-active-trimming rule superseded by settled working-region retention and protected islands (DISPLAY.04). |
+| `TLV5-UX.11-CHROMIUM-REPLAY-01` | Detached anchor obligation retained in `TLV5-UX.11-CHROMIUM-DISPLAY-01`, using real HTTP recovery and compact events. |
+
+A07, L02.03, L08.01, L09.03, PAGE.03/.06 and UX.01/.02/.03/.17
+retain their stable IDs with assertions against the new engine. Their underlying
+obligations remain, while raw interval continuity is no longer a browser claim.
 
 ## Purpose
 
@@ -209,7 +231,7 @@ case that skips remains uncovered for that run.
 
 Every asynchronous case establishes an explicit barrier before releasing its
 interleaving. Examples include a held HTTP request, a provider control file
-acknowledgement, a fixed replay continuation, a committed ordinal, a terminal
+acknowledgement, a held certified response, a committed ordinal, a terminal
 event, or a mounted row key.
 
 One unchanged count poll, an arbitrary sleep, or a brief quiet period is not
@@ -377,9 +399,9 @@ routine local testing.
 
 | ID          | Obligation                                                                         | Required evidence                   |
 | ----------- | ---------------------------------------------------------------------------------- | ----------------------------------- |
-| TLV5-L08.01 | Pages, replay, events, search results, and cursors are qualified by view ID.       | Contract, server black-box          |
+| TLV5-L08.01 | Pages, certified windows, events, search results, and cursors are qualified by view ID.       | Contract, server black-box          |
 | TLV5-L08.02 | Requests against a replaced view receive typed stale-view failure before mutation. | Contract, server black-box, browser |
-| TLV5-L08.03 | A held old-view page or replay continuation cannot enter the replacement view.     | Server black-box, browser geometry  |
+| TLV5-L08.03 | A held old-view page or display response cannot enter the replacement view.     | Server black-box, browser geometry  |
 | TLV5-L08.04 | Shares remain independent snapshot artifacts.                                      | Server black-box                    |
 
 ### L9 Advisory Native Drift
@@ -388,7 +410,7 @@ routine local testing.
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
 | TLV5-L09.01 | Every supported probe performs a bounded tail read and excludes housekeeping.                                                  | Provider fixture unit  |
 | TLV5-L09.02 | Reported relevant timestamps satisfy the provider timestamp obligation or the probe returns `unavailable`.                     | Provider fixture unit  |
-| TLV5-L09.03 | Only a successful active newest-history load schedules a probe after returning; earlier, replay, background, preview, failed-read, dispatch, timer, and startup paths do not. | Core, route, web unit |
+| TLV5-L09.03 | Only a successful activating open schedules a probe after returning; paging, reconnect, background, preview, failed-read, dispatch, timer, and startup paths do not. | Core, route, web unit |
 | TLV5-L09.04 | Equal pending eligibility coalesces; every changed agent, view, session row/ref, provider ordinal/timestamp, ownership, timeout, failure, unavailability, or abort fences stale output. | Store and core unit |
 | TLV5-L09.05 | A strictly newer idle tail sends only a repeatable process-lifetime operational warning, appends no ledger row, and never gates use; manual Reload alone reconciles. | Core unit, server black-box |
 
@@ -534,25 +556,27 @@ routine local testing.
 
 ### Active Transcript and Browser Geometry
 
-Revision 39 L7 and section 4.4 distinguish untrimmed active intervals,
-bounded inactive combined-tool windows, and cold bounded-cache restoration.
+Revision 42 L7 and section 4.4 require certified display intervals, settled
+working-region retention with protected islands, bounded parking, and cold
+certified restoration. Paging merges preserve the opposite edge until an
+independent settled retention decision.
 
 | ID         | Obligation                                                                                                               | Required evidence                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| TLV5-UX.01 | The selected transcript holds one ascending, unique loaded presentation interval backed by a hole-free loaded raw range. | State unit, Chromium              |
-| TLV5-UX.02 | Detached live append extends the later edge without removing either reading neighborhood.                                | State unit, Chromium              |
+| TLV5-UX.01 | The selected transcript holds ascending unique descriptors under one certificate; member islands disclose unloaded boundaries. | State unit, Chromium              |
+| TLV5-UX.02 | Detached live append preserves historical geometry while resident detail evidence revalidates.                                | State unit, Chromium              |
 | TLV5-UX.03 | Earlier paging prepends without removing the later edge.                                                                 | State unit, Chromium              |
 | TLV5-UX.04 | Later paging appends without removing the earlier edge.                                                                  | State unit, Chromium              |
-| TLV5-UX.05 | Mutation-time retention never trims expanded active history.                                                             | State unit, static                |
+| TLV5-UX.05 | Retired by revision 42; DISPLAY.04 specifies bounded retention with protected interaction islands. | See DISPLAY.04 |
 | TLV5-UX.06 | Page publication preserves an address-keyed reading anchor on every sampled frame.                                       | Chromium geometry                 |
 | TLV5-UX.07 | Directional intent, error retry, reversal, and programmatic ownership cannot cause runaway or unauthorized paging.       | Controller unit, browser behavior |
 | TLV5-UX.08 | Every message retains its distinct view-qualified ordinal address and exact order; a collapsed combined-tool summary represents its member interval without changing the ledger. | Logic unit, Chromium |
 | TLV5-UX.09 | The final conversational message, or its containing collapsed summary, is mounted and visible at the live edge.         | Chromium geometry, release replay |
 | TLV5-UX.11 | Chat switch, reconnect, reload, visibility change, and navigation cannot apply stale work or move a detached reader.     | State unit, Chromium              |
-| TLV5-UX.17 | Active mutations and the retired 180-second boundary never trim under a reader; cold restoration uses the bounded cache and raw continuation. | State, controller, static, Chromium |
-| TLV5-UX.18 | Combined-tool switching restores an eligible parked interval and reading target without refetching it; whole-window limits, invalidation, and background replay preserve a bounded fallback to the cold cache. Non-combined switching is unchanged. | Store, registry, reconnect, Chromium |
+| TLV5-UX.17 | Active mutations preserve protected reading context; no timer owns compaction. Cold restoration uses a bounded certified window and continuation. | State, controller, static, Chromium |
+| TLV5-UX.18 | Switching restores eligible parked descriptors and reading targets; background notifications mark dirty without hydrating. Both modes use bounded certified restoration. | Store, registry, reconnect, Chromium |
 
-### Paging and Reconnect Replay
+### Paging and Certified Recovery
 
 | ID             | Obligation                                                                                  | Required evidence                      |
 | -------------- | ------------------------------------------------------------------------------------------- | -------------------------------------- |
@@ -564,15 +588,28 @@ bounded inactive combined-tool windows, and cold bounded-cache restoration.
 | TLV5-PAGE.06   | Page errors require explicit retry and cannot tight-loop.                                   | State and controller unit              |
 | TLV5-PAGE.07   | Normal paging is automatic and exposes no ordinary boundary button.                         | Component, browser behavior            |
 | TLV5-PAGE.08   | One request performs one bounded raw query and returns the exact clamped interval ceiling and continuation. | Store static, server and web contract |
-| TLV5-PAGE.09   | Client-owned earlier, later, and newest visible demand advances across sparse raw budgets; newest active/background/split loads share the demand helper, and raw continuation survives cache switch and hydration. | Contract, server and web unit |
-| TLV5-PAGE.10   | Malformed or stalled raw continuation is rejected before mutation and cannot loop.          | Contract and web unit                  |
-| TLV5-REPLAY.01 | The first replay page captures a fixed high watermark.                                      | Contract, server black-box             |
-| TLV5-REPLAY.02 | Every continuation repeats the watermark and advances raw ordinal coverage.                 | Contract, server black-box             |
-| TLV5-REPLAY.03 | Every frame remains within row and serialized-byte bounds.                                  | Server black-box                       |
-| TLV5-REPLAY.04 | Hidden-only ranges advance without inventing presented rows.                                | Unit, server black-box                 |
-| TLV5-REPLAY.05 | Live rows beyond the watermark apply exactly once after fixed replay.                       | State unit, server black-box, Chromium |
-| TLV5-REPLAY.06 | Disconnect abandons partial replay and a later reconnect restarts safely.                   | State unit, Chromium                   |
-| TLV5-REPLAY.07 | View replacement during replay cannot cross views.                                          | Contract, server black-box, Chromium   |
+| TLV5-PAGE.09   | The independent raw HTTP endpoint returns hidden-only pages with strict raw continuation; the browser feed instead uses DISPLAY.01/.03. | Contract, server and web unit |
+| TLV5-PAGE.10   | Malformed or stalled raw HTTP continuation is rejected by its parsers; the browser display engine does not scan raw pages.          | Contract and web unit                  |
+
+
+### Display Read Model
+
+| ID | Obligation | Executable evidence |
+| --- | --- | --- |
+| TLV5-DISPLAY.01 | Complete-prefix certified aggregates never enumerate collapsed members; deep targets use bounded member reads. | Common contract; backend read-model; browser window-controller; static single-engine guard; real-route server suite. |
+| TLV5-DISPLAY.02 | FIFO dependencies and mutable details use W-qualified evidence; detached geometry remains stable. | Backend read-model and browser window-controller detail regressions. |
+| TLV5-DISPLAY.03 | Persistent measured coverage survives held work with no lifetime demand cap; preparing work retains a finite goal. | Coverage and window-controller units. |
+| TLV5-DISPLAY.04 | Settled trimming bounds children independently of header spans; protection and parked leases retain separate budgets. | Member trimming, body-store and registry parking units. |
+| TLV5-DISPLAY.05 | Expansion follows its anchor through splits; merges preserve protected intent and release redundant leases. | Member-window split/merge units. |
+| TLV5-DISPLAY.06 | Committed optimistic text survives replacement and index lag independently on each surface. | Registry multi-surface acknowledgement regression. |
+| TLV5-DISPLAY.07 | Compact notifications replace raw replay; HTTP discovery, independent recovery and stale-response fencing retain authority. | Common protocol rejection, registry and reconnect units, Chromium held-open/reconnect/replacement suite. |
+| TLV5-DISPLAY.08 | Retired auxiliary generations keep the visible page and history until explicit Refresh. | Summary-controller generation regression. |
+| TLV5-DISPLAY.09 | Disposable indexes validate the recovered source prefix before reuse after restart. | Service rollback/regrowth regression and process recovery integration. |
+
+The `DISPLAY` case suffixes name the owning boundary. The exact declarations
+are emitted by `bun run test:transcript-inventory -- --list`; no separate case
+JSON is maintained. Browser and process release results are recorded in
+`../TRANSCRIPT_DISPLAY_READ_MODEL_DESIGN.md`, separately from test discovery.
 
 ### OpenCode V1 Context Exhaustion
 
@@ -610,7 +647,7 @@ The status below describes test coverage, not implementation completion.
 | R8 serial handoff recovery                    | TLV5-HANDOFF.05                                       | Unit and repeated-handoff server integration                                                        | Covered |
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
-| R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay including exact mid-replay disconnect               | Covered |
+| R11 unbounded reconnect transfer | TLV5-DISPLAY.07 | Compact notification contracts, controller epochs, actual HTTP/WS recovery | Release verification in progress |
 | R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Bounded server, contract, multi-budget state, cache, and held-page browser cases                     | Covered |
 | R13 LRU failure attribution                   | TLV5-L11.04, TLV5-L11.06                              | Store and close-recovery units                                                                      | Covered |
 | R14 duplicate prepared input                  | TLV5-L04.04                                           | Ledger, coordinator, and handler units                                                              | Covered |
@@ -782,7 +819,7 @@ the input and geometry paths without multiplying every dimension blindly.
 | return after eviction, invalidation, or with combination off   | State unit          | State unit          | Covered, layout-independent    |
 | chat switch during page load                                   | Chromium            | Chromium            | Covered                        |
 | idle detached native reload                                    | Chromium            | Chromium            | Covered                        |
-| reconnect replay while detached                                | Chromium            | Chromium            | Covered across separate cases  |
+| certified reconnect while detached                                | Chromium            | Chromium            | Covered across separate cases  |
 | final assistant after tool tail and compaction                 | Chromium            | Chromium            | Covered                        |
 | user rows with intervening assistant/tool rows near loaded top | Chromium            | Chromium            | Covered                        |
 
@@ -801,7 +838,7 @@ If Safari is a supported production browser, compact Chromium touch emulation
 is not sufficient evidence for Safari event ordering. A WebKit smoke tier then
 becomes a separate environment requirement rather than another semantic test.
 
-## Page and Replay Coverage
+## Page and Display Coverage
 
 | ID             | Current evidence                                                                                 | State   |
 | -------------- | ------------------------------------------------------------------------------------------------ | ------- |
@@ -813,19 +850,13 @@ becomes a separate environment requirement rather than another semantic test.
 | TLV5-PAGE.06   | Explicit error retry and no-tight-loop controller cases.                                         | Covered |
 | TLV5-PAGE.07   | Component error retry plus Lightpanda and Chromium absence assertions.                           | Covered |
 | TLV5-PAGE.08   | One-query static, bounded server, ordinal-one, and clamped web-contract cases are green. | Covered |
-| TLV5-PAGE.09   | Hidden server/contract, multi-budget delivery, switch-resume, and cache-hydration cases are green. | Covered |
-| TLV5-PAGE.10   | Shared relation, web rejection, and state-level stalled-cursor cases are green. | Covered |
-| TLV5-REPLAY.01 | Shared contract, server WebSocket, and 50,000-row integration case.                              | Covered |
-| TLV5-REPLAY.02 | Shared continuation validation and server integration case.                                      | Covered |
-| TLV5-REPLAY.03 | Server row/byte bounds and oversized-row rejection cases.                                        | Covered |
-| TLV5-REPLAY.04 | View-reader, coordinator, and server hidden-range cases.                                         | Covered |
-| TLV5-REPLAY.05 | Coordinator, server, and Chromium live-during-replay cases.                                      | Covered |
-| TLV5-REPLAY.06 | Coordinator restart unit plus compact Chromium disconnect after one applied page with the continuation held. | Covered |
-| TLV5-REPLAY.07 | Contract, server stale-view, and Chromium fallback cases.                                        | Covered |
+| TLV5-PAGE.09 | Hidden-only raw HTTP server and parser tests; browser scanner cases retired. | Covered at raw HTTP boundary |
+| TLV5-PAGE.10 | Raw HTTP continuation parser rejection; browser loop retired. | Covered at raw HTTP boundary |
 
-The 50,000-row server case and strict Chromium reconnect cases are the primary
-acceptance evidence. Future CTS reporting records maximum frame rows and bytes,
-not merely that the final transcript matched.
+The revision-41 50,000-row replay case is retired. Display acceptance measures
+actual HTTP/WS bytes and bounded descriptor/member/body reads at 600, 1,500 and
+40,000 pairs, plus the separate 200,000-pair scale gate. Executable inventory
+discovery alone is not evidence that these release gates passed.
 
 ## OpenCode V1 Compaction Coverage
 
@@ -928,9 +959,9 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.03-ROUTE-UNIT-01      | `server/controller/routes/__tests__/chats-messages.test.js`: only a newest-history request may carry activation and earlier activation is rejected | L09.03 |
 | TLV5-L09.03-RUNTIME-UNIT-01    | `server/controller/agents/__tests__/runtime-router-seed.test.js`: native resume has no native-activity scheduling dependency | L09.03 |
 | TLV5-L09.03-SNAPSHOT-ROUTE-UNIT-01 | `server/controller/routes/__tests__/chat-snapshot.test.js`: bounded background snapshots do not activate the probe | L09.03 |
-| TLV5-L09.03-WEB-BACKGROUND-01  | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | L09.03 |
-| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | L09.03 |
-| TLV5-L09.03-WEB-UNIT-01        | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: only active newest visible demand is marked across hidden raw budgets | L09.03 |
+| TLV5-L09.03-WEB-BACKGROUND-01  | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `keeps rendered background and preview opens non-activating` | L09.03 |
+| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `keeps rendered background and preview opens non-activating` | L09.03 |
+| TLV5-L09.03-WEB-UNIT-01        | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: activating open occurs once; paging and refresh never reopen | L09.03 |
 | TLV5-L09.04-CORE-UNIT-01       | `server/controller/ledger/__tests__/native-activity.test.js`: every changed agent, view, session ordinal/ref, or provider ordinal/timestamp supersedes and fences the old attempt | L09.04 |
 | TLV5-L09.04-CORE-UNIT-02       | `server/controller/ledger/__tests__/native-activity.test.js`: ineligible, failed, execution-owned, invalid, unavailable, and timed-out probes emit nothing | L09.04 |
 | TLV5-L09.04-STORE-UNIT-01      | `server/controller/ledger/__tests__/native-activity.test.js`: the provider watermark is qualified by both ordinal and timestamp | L09.04 |
@@ -1049,27 +1080,13 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L11.01-STORE-UNIT-02      | `server/controller/ledger/__tests__/store.test.js`: `read-fences a query failure raised inside a write workflow`                                                      | L11.01                      |
 | TLV5-L11.01-STORE-UNIT-03      | `server/controller/ledger/__tests__/store.test.js`: `preserves a read fence across LRU eviction`                                                                       | L11.01                      |
 | TLV5-L11.01-VIEW-READER-UNIT-01 | `server/controller/ledger/__tests__/view-reader.test.js`: paging, replay, and rendering snapshots translate a ledger fence to one fixed non-retryable degraded-history error | L11.01 |
-| TLV5-L11.01-WS-CONTRACT-01     | `server/controller/ws/__tests__/chat-contracts.test.js`: replay serializes a fixed non-retryable fence response without the underlying cause | L11.01 |
 | TLV5-L11.01-SHARE-ROUTE-UNIT-01 | `server/controller/routes/__tests__/shares.test.js`: share capture returns a fixed safe domain response when rendering-snapshot access is fenced | L11.01 |
-| TLV5-REPLAY.01-SERVER-01       | `integration-tests/tests/server/reconnect-transcript.test.ts`: `replays fifty thousand mixed rows in bounded fixed-watermark pages`                       | REPLAY.01 through REPLAY.05 |
-| TLV5-UX.11-CHROMIUM-REPLAY-01  | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: `keeps an expanded detached reading interval through bounded reconnect replay`    | REPLAY.05, UX.11            |
-| TLV5-REPLAY.06-WEB-UNIT-01     | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: `abandons a partial replay on disconnect and restarts with a fresh watermark`                   | REPLAY.06                   |
-| TLV5-REPLAY.06-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/reconnect-transcript-replay.test.ts`: an expanded detached compact transcript closes with its continuation held, restarts at the applied cursor with a fresh watermark, and applies every addressed row once without HTTP snapshot fallback | REPLAY.06, UX.11 |
 | TLV5-PAGE.08-SERVER-UNIT-01    | `server/controller/ledger/__tests__/view-reader.test.js`: one request performs one clamped raw scan and returns its visible fold plus raw continuation               | PAGE.08                     |
 | TLV5-PAGE.08-SERVER-UNIT-02    | `server/controller/ledger/__tests__/view-reader.test.js`: an ordinal-one boundary performs one empty raw scan and reports ceiling zero with no continuation          | PAGE.08                     |
 | TLV5-PAGE.08-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: a request beyond the watermark accepts the clamped raw ceiling and exact continuation                 | PAGE.08                     |
 | TLV5-PAGE.09-SERVER-UNIT-01    | `server/controller/ledger/__tests__/view-reader.test.js`: one hidden-only raw page returns no messages and advances without a presentation scan loop                 | PAGE.09                     |
-| TLV5-PAGE.09-WEB-BACKGROUND-01 | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | PAGE.09 |
 | TLV5-PAGE.09-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: the client contract accepts an empty presented page with a strict raw continuation                    | PAGE.09                     |
-| TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01 | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | PAGE.09                  |
-| TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: `routes rendered-panel snapshots through visible-demand paging` | PAGE.09, supplementary |
-| TLV5-PAGE.09-WEB-STORAGE-01    | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: cache hydration preserves the raw earlier continuation independently of visible rows | PAGE.09                  |
-| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one earlier action aggregates fifty sparse bounded pages before one interval mutation with the exact cursor | PAGE.09 |
-| TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch invalidation restores the bounded tail and resumes from its raw cursor      | PAGE.09, UX.17              |
-| TLV5-PAGE.09-WEB-UNIT-03       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one later action fills its sparse visible target by raw ceiling before one interval mutation | PAGE.09 |
-| TLV5-PAGE.09-WEB-UNIT-04       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: active newest loading crosses two trailing hidden raw budgets before installing the visible target | PAGE.09 |
 | TLV5-PAGE.10-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: null, zero, stalled, and hasMore-inconsistent raw continuations reject                               | PAGE.10                     |
-| TLV5-PAGE.10-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: a stalled hidden continuation fails before changing the loaded interval           | PAGE.10                     |
 | TLV5-UX.01-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `preserves virtual transcript geometry across paging, appends, and workspace resizing` | R4                          |
 | TLV5-UX.06-COMPACT-TOUCH-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact touch prepend cases                                                         | R4                          |
 | TLV5-UX.06-WIDE-TOUCH-01       | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide touch prepend cases                                                            | R4                          |
@@ -1082,10 +1099,9 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: direct cold activation restores the exact bounded tail with earlier paging available | R4 cold restoration |
 | TLV5-UX.18-WEB-STORE-01       | `web/src/lib/chat/transcript/__tests__/inactive-transcript-window-store.test.ts`: whole-window count, message, payload, and stale-view limits | UX.18 memory bounds |
 | TLV5-UX.18-WEB-REGISTRY-01    | `web/src/lib/chat/conversation/__tests__/conversation-panel-registry.test.ts`: rapid warm switching restores the expanded interval, while invalidation and combination-off use the cold cache | UX.18 restoration |
-| TLV5-UX.18-WEB-REPLAY-01      | `web/src/lib/ws/__tests__/reconnect-coordinator.test.ts`: parked windows receive ordered replay and buffer concurrent live rows | UX.18 replay |
 | TLV5-UX.18-CHROMIUM-01        | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: cold compressed history fills, then repeated warm returns show context without earlier-page requests | UX.18 browser |
-| TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact live-edge expansion survives the retired delay and later growth in canonical order with the final row visible | R4 compact geometry |
-| TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide live-edge expansion survives the retired delay and later growth in canonical order with the final row visible    | R4 wide geometry    |
+| TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: complete canonical traversal with bounded compact residency; the retired delay preserves source history, live following and final-row visibility | R4 compact geometry |
+| TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: complete canonical traversal with bounded wide residency; the retired delay preserves source history, live following and final-row visibility    | R4 wide geometry    |
 | TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: threshold compaction shows a boundary and pins native markers              | OPENCODE.01                 |
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: compaction stays enabled with no plugin or session-latest route | OPENCODE.02              |
 | TLV5-PAGE.07-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
