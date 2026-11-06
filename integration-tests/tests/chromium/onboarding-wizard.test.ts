@@ -26,11 +26,23 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await browserExpect(page.getByRole('dialog')).toHaveCount(0);
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
       const wizard = page.getByRole('dialog');
+      const body = wizard.locator('div.overflow-y-auto');
       await browserExpect(wizard.getByRole('heading', { name: 'Choose your theme' })).toBeVisible();
-      const titles = ['Choose your theme', 'Chat list layout', 'Chat display', 'Writing preferences', "You're all set"];
+      const titles = [
+        'Choose your theme',
+        'Chat list layout',
+        'Chat display',
+        'Writing preferences',
+        "You're all set",
+      ];
       for (const [index, title] of titles.entries()) {
         phase(title);
         await browserExpect(wizard.getByRole('heading', { name: title })).toBeFocused();
+        const isDonePage = index === titles.length - 1;
+        const nextButton = wizard.getByRole('button', {
+          name: isDonePage ? 'Start using Garcon' : 'Continue',
+          exact: true,
+        });
         for (const [width, height] of [[1440, 900], [900, 500], [390, 844], [320, 568]]) {
           await page.setViewportSize({ width, height });
           await browserExpect.poll(async () => {
@@ -43,27 +55,29 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
           expect(bounds.y + bounds.height).toBeLessThanOrEqual(height + 1);
           expect(await wizard.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-          const next = wizard.getByRole('button', { name: index === titles.length - 1 ? 'Start using Garcon' : 'Continue', exact: true });
-          await browserExpect(next).toBeInViewport();
+          await browserExpect(nextButton).toBeInViewport();
           await page.screenshot({ path: join(artifacts, `setup-${index}-${width}.png`) });
         }
-        if (index === 1) {
+        if (title === 'Chat list layout') {
           const grouping = wizard.getByRole('combobox', { name: 'Chat grouping' });
           await browserExpect(grouping).toHaveValue('none');
           expect(await grouping.evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
           await browserExpect(wizard.getByRole('radio', { name: 'Recent activity', exact: true })).toBeChecked();
-          await wizard.getByRole('combobox', { name: 'Chat grouping' }).selectOption('project');
+          await grouping.selectOption('project');
           await wizard.getByText('Manual', { exact: true }).click();
         }
-        if (index === 3) {
+        if (title === 'Writing preferences') {
           await wizard.getByText('Source', { exact: true }).click();
           await wizard.getByRole('switch', { name: 'Reduce motion', exact: true }).click();
         }
-        const body = wizard.locator('div.overflow-y-auto');
-        await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
-        if (index === 0) expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
-        await wizard.getByRole('button', { name: index === titles.length - 1 ? 'Start using Garcon' : 'Continue', exact: true }).click();
-        if (index < titles.length - 1) {
+        await body.evaluate(element => {
+          element.scrollTop = element.scrollHeight;
+        });
+        if (title === 'Choose your theme') {
+          expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        }
+        await nextButton.click();
+        if (!isDonePage) {
           await browserExpect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
         }
       }
@@ -72,7 +86,10 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await page.reload();
       await expectUsableWorkspace(page);
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pref_local_settings')!))).toMatchObject({
-        sidebarGrouping: 'project', sidebarSortMode: 'manual', composerInputMode: 'source', reduceMotion: true,
+        sidebarGrouping: 'project',
+        sidebarSortMode: 'manual',
+        composerInputMode: 'source',
+        reduceMotion: true,
       });
 
       phase('manual restart');
@@ -87,7 +104,12 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await expectUsableWorkspace(page);
 
       phase('existing preferences and cleared storage');
-      await page.evaluate(() => localStorage.setItem('pref_local_settings', JSON.stringify({ sidebarGrouping: 'status', sidebarSortMode: 'manual' })));
+      await page.evaluate(() => {
+        localStorage.setItem('pref_local_settings', JSON.stringify({
+          sidebarGrouping: 'status',
+          sidebarSortMode: 'manual',
+        }));
+      });
       await page.reload();
       await expectUsableWorkspace(page);
       await page.evaluate(() => localStorage.removeItem('pref_local_settings'));

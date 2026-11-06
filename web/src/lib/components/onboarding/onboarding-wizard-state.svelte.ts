@@ -1,10 +1,6 @@
-// Page flow and option selection for the first-run onboarding wizard.
-// Selections write straight to local settings so every page applies live
-// behind the dialog. The wizard is remounted on each open, so page state
-// does not need an explicit reset.
+// Remounting the wizard on each open resets its page flow.
 
-import type { ChatMaxWidth, LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-import type { ThemePreference } from '$lib/theme/themes.js';
+import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 export const ONBOARDING_PAGE_IDS = [
 	'theme',
@@ -51,22 +47,6 @@ export class OnboardingWizardState {
 
 	back(): void {
 		if (this.pageIndex > 0) this.pageIndex -= 1;
-	}
-
-	selectTheme(preference: ThemePreference): void {
-		this.#deps.localSettings.set('themePreference', preference);
-	}
-
-	selectChatMaxWidth(chatMaxWidth: ChatMaxWidth): void {
-		this.#deps.localSettings.set('chatMaxWidth', chatMaxWidth);
-	}
-
-	toggleShowThinking(): void {
-		this.#deps.localSettings.toggle('showThinking');
-	}
-
-	toggleAutoExpandTools(): void {
-		this.#deps.localSettings.toggle('autoExpandTools');
 	}
 
 	finish(): void {

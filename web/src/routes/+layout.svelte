@@ -585,9 +585,9 @@
 	});
 
 	// Decides once per load, after authentication and public-route navigation settle.
-	let onboardingAutoOpened = $state(false);
+	let startupOnboardingResolved = $state(false);
 	$effect(() => {
-		if (onboardingAutoOpened) return;
+		if (startupOnboardingResolved) return;
 		const decision = resolveStartupOnboarding({
 			isAuthenticated: auth.isAuthenticated,
 			isPublicRoute,
@@ -595,7 +595,7 @@
 			hadSavedSettingsOnLoad: localSettings.hadSavedSettingsOnLoad,
 		});
 		if (decision === 'wait') return;
-		onboardingAutoOpened = true;
+		startupOnboardingResolved = true;
 		if (decision === 'open') {
 			appShell.openOnboardingWizard();
 		}

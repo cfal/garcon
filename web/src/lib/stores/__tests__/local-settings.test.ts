@@ -56,6 +56,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ showQuickCommitTray: false }),
 		);
 		const store = createLocalSettingsStore();
+		expect(store.hadSavedSettingsOnLoad).toBe(true);
 		expect(store.composerStatusBarGitProjects).toBe(true);
 		expect(store.composerStatusBarNonGitProjects).toBe(false);
 		store.set('composerStatusBarGitProjects', true);

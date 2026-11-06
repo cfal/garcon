@@ -4,6 +4,7 @@
 	import {
 		SIDEBAR_CHAT_GROUPING_VALUES,
 		type SidebarChatGrouping,
+		type SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ONBOARDING_OPTION_CARD_CLASS } from './onboarding-option-card.js';
@@ -34,6 +35,10 @@
 		activity: m.settings_sidebar_group_by_activity,
 		status: m.settings_sidebar_group_by_status,
 	};
+	const sortOptions: Array<{ value: SidebarSortMode; label: () => string }> = [
+		{ value: 'recent', label: m.sidebar_chats_sort_recent_active },
+		{ value: 'manual', label: m.sidebar_chats_sort_order_manual },
+	];
 </script>
 
 <fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -82,7 +87,7 @@
 	<fieldset class="min-w-0">
 		<legend class="mb-2 text-sm font-medium">{m.sidebar_chats_sort_order_heading()}</legend>
 		<div class="flex h-10 rounded-md border border-input p-1">
-			{#each ['recent', 'manual'] as sortMode (sortMode)}
+			{#each sortOptions as option (option.value)}
 				<label
 					class="flex min-w-0 flex-1 cursor-pointer items-center justify-center rounded-sm px-2 text-sm has-checked:bg-accent has-checked:text-accent-foreground has-focus-visible:ring-2 has-focus-visible:ring-ring"
 				>
@@ -90,13 +95,11 @@
 						type="radio"
 						class="sr-only"
 						name="onboarding-sort"
-						value={sortMode}
-						checked={ls.sidebarSortMode === sortMode}
-						onchange={() => ls.set('sidebarSortMode', sortMode === 'recent' ? 'recent' : 'manual')}
+						value={option.value}
+						checked={ls.sidebarSortMode === option.value}
+						onchange={() => ls.set('sidebarSortMode', option.value)}
 					/>
-					{sortMode === 'recent'
-						? m.sidebar_chats_sort_recent_active()
-						: m.sidebar_chats_sort_order_manual()}
+					{option.label()}
 				</label>
 			{/each}
 		</div>

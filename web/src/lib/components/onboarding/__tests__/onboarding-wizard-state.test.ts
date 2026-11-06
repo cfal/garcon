@@ -43,31 +43,6 @@ describe('OnboardingWizardState', () => {
 		expect(wizard.pageId).toBe('writing');
 	});
 
-	it('writes each selection to its local setting', () => {
-		const { wizard, localSettings } = createWizard();
-
-		wizard.selectTheme({ mode: 'fixed', themeId: 'classic-dark' });
-		wizard.selectChatMaxWidth('medium');
-
-		expect(localSettings.themePreference).toEqual({
-			mode: 'fixed',
-			themeId: 'classic-dark',
-		});
-		expect(localSettings.chatMaxWidth).toBe('medium');
-	});
-
-	it('toggles the chat display switches', () => {
-		const { wizard, localSettings } = createWizard();
-		const showThinking = localSettings.showThinking;
-		const autoExpandTools = localSettings.autoExpandTools;
-
-		wizard.toggleShowThinking();
-		wizard.toggleAutoExpandTools();
-
-		expect(localSettings.showThinking).toBe(!showThinking);
-		expect(localSettings.autoExpandTools).toBe(!autoExpandTools);
-	});
-
 	it('finishes by closing, or closes and opens providers', () => {
 		const { wizard, localSettings, onClose, onOpenProviders } = createWizard();
 

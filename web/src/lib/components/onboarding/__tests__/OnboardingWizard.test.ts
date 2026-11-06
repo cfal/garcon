@@ -82,6 +82,15 @@ describe('OnboardingWizard', () => {
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('radio', { name: /Medium/ }));
 		expect(localSettings.chatMaxWidth).toBe('medium');
+
+		const showThinking = localSettings.showThinking;
+		const autoExpandTools = localSettings.autoExpandTools;
+		await fireEvent.click(screen.getByRole('switch', { name: 'Show thinking' }));
+		expect(localSettings.showThinking).toBe(!showThinking);
+		expect(localSettings.autoExpandTools).toBe(autoExpandTools);
+		await fireEvent.click(screen.getByRole('switch', { name: 'Always expand tool calls' }));
+		expect(localSettings.showThinking).toBe(!showThinking);
+		expect(localSettings.autoExpandTools).toBe(!autoExpandTools);
 	});
 
 	it('limits System slots to compatible concrete themes', async () => {

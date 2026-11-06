@@ -584,25 +584,23 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	};
 }
 
-// Reads the persisted local settings snapshot.
 function readPersistedLocalSettings(): LocalSettingsSnapshot | null {
 	try {
 		const raw = getLocalStorageItem(LOCAL_STORAGE_KEYS.localSettings);
-		if (raw) {
-			const parsed = JSON.parse(raw);
-			if (
-				parsed &&
-				typeof parsed === 'object' &&
-				!Array.isArray(parsed) &&
-				Object.keys(parsed).length > 0
-			) {
-				return parseFromRaw(parsed);
-			}
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		if (
+			!parsed ||
+			typeof parsed !== 'object' ||
+			Array.isArray(parsed) ||
+			Object.keys(parsed).length === 0
+		) {
+			return null;
 		}
+		return parseFromRaw(parsed);
 	} catch {
-		// Corrupt storage
+		return null;
 	}
-	return null;
 }
 
 function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {

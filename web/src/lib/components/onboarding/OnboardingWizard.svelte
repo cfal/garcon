@@ -44,19 +44,18 @@
 		pageTitleElement?.focus();
 	});
 
-	const pageTitles: Record<OnboardingPageId, () => string> = {
-		theme: m.onboarding_theme_title,
-		'chat-layout': m.onboarding_layout_title,
-		'chat-display': m.onboarding_chat_display_title,
-		writing: m.onboarding_writing_title,
-		done: m.onboarding_done_title,
-	};
-	const pageDescriptions: Record<OnboardingPageId, () => string> = {
-		theme: m.onboarding_theme_description,
-		'chat-layout': m.onboarding_layout_description,
-		'chat-display': m.onboarding_chat_display_description,
-		writing: m.onboarding_writing_description,
-		done: m.onboarding_done_description,
+	const pageText: Record<OnboardingPageId, { title: () => string; description: () => string }> = {
+		theme: { title: m.onboarding_theme_title, description: m.onboarding_theme_description },
+		'chat-layout': {
+			title: m.onboarding_layout_title,
+			description: m.onboarding_layout_description,
+		},
+		'chat-display': {
+			title: m.onboarding_chat_display_title,
+			description: m.onboarding_chat_display_description,
+		},
+		writing: { title: m.onboarding_writing_title, description: m.onboarding_writing_description },
+		done: { title: m.onboarding_done_title, description: m.onboarding_done_description },
 	};
 
 	const chatMaxWidthOptions: Array<{
@@ -84,16 +83,16 @@
 			<Dialog.Title
 				bind:ref={pageTitleElement}
 				tabindex={-1}
-				class="text-xl font-semibold outline-none">{pageTitles[wizard.pageId]()}</Dialog.Title
+				class="text-xl font-semibold outline-none">{pageText[wizard.pageId].title()}</Dialog.Title
 			>
 			<Dialog.Description id="onboarding-description">
-				{pageDescriptions[wizard.pageId]()}
+				{pageText[wizard.pageId].description()}
 			</Dialog.Description>
 		</Dialog.Header>
 
 		<div bind:this={pageBodyElement} class="min-h-0 flex-1 overflow-y-auto px-6 py-2">
 			{#if wizard.pageId === 'theme'}
-				<OnboardingThemePage onSelect={(preference) => wizard.selectTheme(preference)} />
+				<OnboardingThemePage onSelect={(preference) => ls.set('themePreference', preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
 				<OnboardingSidebarPage />
 			{:else if wizard.pageId === 'chat-display'}
@@ -110,7 +109,7 @@
 									name="onboarding-chat-max-width"
 									value={option.value}
 									checked={ls.chatMaxWidth === option.value}
-									onchange={() => wizard.selectChatMaxWidth(option.value)}
+									onchange={() => ls.set('chatMaxWidth', option.value)}
 								/>
 								<span
 									class="flex h-8 w-full items-center justify-center rounded-md bg-muted/60 px-1"
@@ -131,7 +130,7 @@
 						</span>
 						<Switch
 							checked={ls.showThinking}
-							onCheckedChange={() => wizard.toggleShowThinking()}
+							onCheckedChange={() => ls.toggle('showThinking')}
 							aria-label={m.settings_chat_show_thinking()}
 						/>
 					</div>
@@ -141,7 +140,7 @@
 						</span>
 						<Switch
 							checked={ls.autoExpandTools}
-							onCheckedChange={() => wizard.toggleAutoExpandTools()}
+							onCheckedChange={() => ls.toggle('autoExpandTools')}
 							aria-label={m.settings_chat_auto_expand_tools()}
 						/>
 					</div>
