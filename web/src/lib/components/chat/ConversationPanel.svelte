@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { getAsyncQuestionController, setAsyncQuestionPanel } from '$lib/chat/conversation/async-question-context.js';
 	import ConversationFeed from './transcript/ConversationFeed.svelte';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
@@ -78,6 +79,41 @@
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
 	const executors = getExecutors();
+	const asyncQuestions = getAsyncQuestionController();
+	const questionTarget = $derived({
+		chatId: chat.id,
+		transcriptViewId: panel.transcript.transcriptViewId,
+		expectedAgentId: chat.agentId,
+		expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch ?? '',
+	});
+	const lastOwnershipBoundary = $derived(panel.transcript.entries.reduce((last, entry) =>
+		entry.message.type === 'agent-switch' ? entry.ordinal : last, 0));
+	const recordedQuestionAnswers = $derived.by(() => {
+		const answers = new Map<string, string>();
+		for (const entry of panel.transcript.entries) {
+			const reply = entry.message.type === 'user-message' ? entry.message.metadata?.questionReply : undefined;
+			if (reply?.source?.chatId === chat.id && reply.source.transcriptViewId === panel.transcript.transcriptViewId) {
+				answers.set(JSON.stringify([reply.source.ordinal, reply.questionId]), reply.answer);
+			}
+		}
+		return answers;
+	});
+	function canReplyToQuestion(ordinal: number): boolean {
+		return Boolean(chat.agentOwnershipEpoch && panel.transcript.transcriptViewId
+			&& !panel.transcript.hasLaterMessages && ordinal > lastOwnershipBoundary);
+	}
+	setAsyncQuestionPanel({
+		controller: asyncQuestions,
+		get identity() { return questionTarget; },
+		canReply: canReplyToQuestion,
+		canSubmit: (ordinal) => canReplyToQuestion(ordinal)
+			&& executors.isReady(chat.executorId ?? 'local') && modelCatalog.isValidated,
+		recordedAnswer: (ordinal, questionId) => recordedQuestionAnswers.get(JSON.stringify([ordinal, questionId])),
+	});
+	$effect(() => {
+		const { chatId, transcriptViewId } = questionTarget;
+		if (transcriptViewId) untrack(() => asyncQuestions.retainView(chatId, transcriptViewId));
+	});
 
 	const chatId = $derived(chat.id);
 	const availabilityNotice = $derived(
