@@ -57,7 +57,8 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(transcript.lastOrdinal).toBe(40000);
 		expect(transcript.loadedThroughOrdinal).toBe(3);
 		expect(transcript.entries).toHaveLength(3);
-		expect(transcript.hasLaterMessages).toBe(true);
+		expect(transcript.hasLaterMessages).toBe(false);
+		expect(transcript.isDisplayBehindHead).toBe(true);
 		expect(api.bodies).toHaveBeenCalledTimes(1);
 		expect(transcript.responseClassOrdinals.tool).toBe(40000);
 		transcript.observeHead('old-view', 50000);
@@ -119,6 +120,22 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(await paging).toBe('invalidated');
 		expect(transcript.display.window).toBe(window);
 		expect(transcript.isLoadingMessages).toBe(false);
+	});
+
+	it('supersedes a held initial navigation with latest without retaining its anchor', async () => {
+		const { transcript, api } = setup(200);
+		await transcript.loadMessages('chat-1');
+		const read = api.window.getMockImplementation()!;
+		const held = Promise.withResolvers<void>();
+		api.window.mockImplementationOnce(async (...args) => { await held.promise; return read(...args); });
+		const initial = transcript.navigateToWindow('chat-1', 'initial');
+		try {
+			expect(await transcript.navigateToWindow('chat-1', 'latest')).toBe('loaded');
+			expect(api.window.mock.calls.at(-1)?.[0].anchor).toEqual({ kind: 'newest' });
+			expect(transcript.entries.at(-1)?.ordinal).toBe(200);
+		} finally { held.resolve(); }
+		expect(await initial).toBe('invalidated');
+		expect(transcript.entries.at(-1)?.ordinal).toBe(200);
 	});
 
 	it('fences a held old page status across view replacement and new paging', async () => {

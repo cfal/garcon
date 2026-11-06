@@ -44,6 +44,7 @@ function scrollState(
 		feedMutationClock: mutationClock(),
 		transcriptViewId: 'generation-1',
 		hasLaterMessages: false,
+		isDisplayBehindHead: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
 		invalidatePendingHistoryLoad: vi.fn(),
@@ -232,11 +233,18 @@ describe('ConversationScrollController', () => {
 		expect(viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
 	});
 
-	it('keeps explicit live following through a head notification ahead of display readiness', () => {
-		const { controller, state, scroller } = controllerFixture();
+	it('keeps explicit live following through a head notification ahead of display readiness', async () => {
+		const chatState = expandedTranscriptState();
+		const loadLater = vi.spyOn(chatState, 'loadLaterPage');
+		const { controller, state, scroller, viewport } = controllerFixture({
+			chatState,
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+		});
 		controller.noteUserScrollIntent('earlier');
 		controller.scrollToBottom();
-		state.hasLaterMessages = true;
+		viewport.scrollToEnd.mockClear();
+		chatState.observeHead('generation-1', 400);
+		expect(chatState.isDisplayBehindHead).toBe(true);
 		scroller.scrollTop += 58;
 		controller.handleScroll();
 		expect(controller.isPinnedToBottom).toBe(true);
@@ -244,11 +252,15 @@ describe('ConversationScrollController', () => {
 		controller.noteUserScrollIntent('later');
 		scroller.scrollTop += 20;
 		controller.handleScroll();
+		await Promise.resolve();
 		expect(controller.isPinnedToBottom).toBe(true);
+		expect(loadLater).not.toHaveBeenCalled();
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 		controller.noteUserScrollIntent('earlier');
 		scroller.scrollTop -= 20;
 		controller.handleScroll();
 		expect(controller.isPinnedToBottom).toBe(false);
+		chatState.dispose();
 	});
 
 	it('does not treat layout movement after an unscrolled press as user scrolling', () => {
@@ -1147,6 +1159,36 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToTarget).not.toHaveBeenCalled();
 	});
 
+	it.each(['row', 'dom'])('keeps a %s target at the end of a historical window detached', async target => {
+		const { controller, state } = controllerFixture({
+			state: { hasLaterMessages: true, isUserScrolledUp: true },
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+		});
+		controller.setPinnedToBottom(false);
+		if (target === 'row') {
+			expect(await controller.jumpToMessageRow({ chatId: 'chat-1', transcriptViewId: 'generation-1', rowId: 'generation-1:7' })).toBe('completed');
+		} else {
+			expect(await controller.jumpToDomAnchor('tool-input-9')).toBe(true);
+		}
+		expect(controller.isPinnedToBottom).toBe(false);
+		expect(state.isUserScrolledUp).toBe(true);
+	});
+
+	it.each(['row', 'dom'])('follows a %s target at the end of a lagging live window', async target => {
+		const { controller, state } = controllerFixture({
+			state: { hasLaterMessages: false, isDisplayBehindHead: true, isUserScrolledUp: true },
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),
+		});
+		controller.setPinnedToBottom(false);
+		if (target === 'row') {
+			expect(await controller.jumpToMessageRow({ chatId: 'chat-1', transcriptViewId: 'generation-1', rowId: 'generation-1:7' })).toBe('completed');
+		} else {
+			expect(await controller.jumpToDomAnchor('tool-input-9')).toBe(true);
+		}
+		expect(controller.isPinnedToBottom).toBe(true);
+		expect(state.isUserScrolledUp).toBe(false);
+	});
+
 	it('reports user-cancelled target navigation without treating it as missing', async () => {
 		const viewport = fakeViewport({
 			scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(async () => 'cancelled'),
@@ -1617,11 +1659,15 @@ describe('ConversationScrollController', () => {
 		expect(fixture.viewport.scrollToStart).toHaveBeenCalledOnce();
 	});
 
-	it('navigates to latest without trimming the expanded interval', async () => {
+	it.each(['historical', 'lagging'])('navigates to latest from a %s window without trimming the expanded interval', async kind => {
 		const chatState = expandedTranscriptState();
-		chatState.display = { ...chatState.display, window: { ...chatState.display.window!, later: {
-			kind: 'more', cursor: { certificate: chatState.display.window!.certificate, boundaryOrdinal: 250 },
-		} } };
+		if (kind === 'historical') {
+			chatState.display = { ...chatState.display, window: { ...chatState.display.window!, later: {
+				kind: 'more', cursor: { certificate: chatState.display.window!.certificate, boundaryOrdinal: 250 },
+			} } };
+		} else {
+			chatState.observeHead('generation-1', 400);
+		}
 		const expectedOrdinals = chatState.entries.map((entry) => entry.ordinal);
 		const navigateToWindow = vi
 			.spyOn(chatState, 'navigateToWindow')

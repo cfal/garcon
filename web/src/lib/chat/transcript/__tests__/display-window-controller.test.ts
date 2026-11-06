@@ -3,7 +3,7 @@ import { UserMessage, BashToolUseMessage } from '$shared/chat-types';
 import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, type AvailableDisplayWindow, type DisplayCertificate, type DisplayProfile, type GroupDescriptor } from '$shared/transcript-display-contract';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DisplayBodyStore } from '../display-body-store.js';
-import { DisplayWindowController } from '../display-window-controller.js';
+import { DisplayWindowController, type DisplayWindowSnapshot } from '../display-window-controller.js';
 
 const profile: DisplayProfile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'patterns' };
 const certificate: DisplayCertificate = { serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
@@ -19,7 +19,8 @@ function window(): AvailableDisplayWindow {
 }
 const controllers: DisplayWindowController[] = [];
 afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose(); vi.useRealTimers(); });
-function setup(overrides: Partial<Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>> = {}) {
+function setup(overrides: Partial<Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>> = {},
+	publish: (snapshot: DisplayWindowSnapshot) => void = () => undefined) {
 	const requested: number[] = [], store = new DisplayBodyStore();
 	const api = {
 		window: async () => window(),
@@ -43,11 +44,11 @@ function setup(overrides: Partial<Pick<TranscriptDisplayApi, 'window' | 'members
 		retry: async () => ({ success: true }),
 		...overrides,
 	} satisfies Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
-	const controller = new DisplayWindowController(store, () => undefined, api);
+	const controller = new DisplayWindowController(store, publish, api);
 	controller.installOpen({ serverInstanceId: 'instance', chat: { id: 'chat' }, transcriptViewId: 'view', sourceHead: certificate.watermark,
 		display: { policyRevision: 1, bashRevision: 'patterns', preparedThrough: certificate.watermark, phase: 'available', errorCode: null } }, profile);
 	controllers.push(controller);
-	return { controller, store, requested };
+	return { controller, store, requested, api };
 }
 
 it('[TLV5-DISPLAY.01-WEB-UNIT-01] ships no collapsed member bodies and resolves a deep member with one bounded page', async () => {
@@ -457,6 +458,128 @@ it('[TLV5-DISPLAY.04-WEB-UNIT-01] trims members by child rows even when the full
 	expect(controller.snapshot.expansions[0].page.ordinals).toHaveLength(56);
 	expect(controller.snapshot.protectedRows.map(row => row.detail.ordinal)).toEqual([2]);
 	expect(store.count).toBe(58);
+});
+
+it.each([false, true])('retains the pinned tail when the visible range trails behind, pressured=%s', async pressured => {
+	const items = Array.from({ length: 100 }, (_, index) => ({ kind: 'row' as const, ordinal: index + 1,
+		messageType: 'user-message' as const, layout: 'standard' as const, estimatedBodyBytes: 100, permissionOccurrenceId: null }));
+	const { controller, store } = setup({ window: async () => ({ ...window(), items }) });
+	await controller.refresh();
+	const pressure = vi.spyOn(store, 'activeOverBudget', 'get').mockReturnValue(pressured);
+	try {
+		controller.setReadingAnchor(null, true);
+		controller.trim(30, 40);
+		expect(controller.snapshot.window?.items.at(-1)).toEqual(items.at(-1));
+		expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
+		expect(controller.snapshot.window?.earlier.kind).toBe('more');
+		controller.setReadingAnchor(30, false);
+		controller.trim(30, 40);
+		expect(controller.snapshot.window?.items.at(-1)).toEqual(items[pressured ? 39 : 49]);
+		expect(controller.snapshot.window?.later.kind).toBe('more');
+	} finally { pressure.mockRestore(); }
+});
+
+it.each(['window', 'bodies', 'gate'])('never publishes an anchored refresh after follow resumes during its held %s', async stage => {
+	vi.useFakeTimers();
+	const received = Promise.withResolvers<void>();
+	const released = Promise.withResolvers<void>();
+	const hold = async () => { received.resolve(); await released.promise; };
+	const newest: AvailableDisplayWindow = { ...window(), certificate: { ...certificate, watermark: 50000 },
+		sourceHead: 50000, interval: { after: 0, through: 50000 } };
+	const historical: AvailableDisplayWindow = { ...newest, items: [window().items[0]], interval: { after: 0, through: 1 },
+		later: { kind: 'more', cursor: { certificate: newest.certificate, boundaryOrdinal: 1 } } };
+	const read = vi.fn<TranscriptDisplayApi['window']>()
+		.mockResolvedValueOnce(window())
+		.mockImplementationOnce(async () => { if (stage === 'window') await hold(); return historical; })
+		.mockResolvedValue(newest);
+	let following = false;
+	const publications: DisplayWindowSnapshot[] = [];
+	const { controller, api } = setup({ window: read }, snapshot => { if (following) publications.push(snapshot); });
+	await controller.refresh();
+	const prior = controller.snapshot.window;
+	controller.setReadingAnchor(1, false);
+	controller.observeHead('view', 50000);
+	if (stage === 'bodies') {
+		const hydrate = api.bodies;
+		api.bodies = async request => { await hold(); return hydrate(request); };
+	}
+	if (stage === 'gate') controller.setApplicationGate(async () => { await hold(); return 'apply'; });
+	const refresh = controller.refresh();
+	try {
+		await received.promise;
+		following = true;
+		controller.setReadingAnchor(null, true);
+		released.resolve();
+		expect(await refresh).toBe('blocked');
+		expect(controller.snapshot.window).toBe(prior);
+		await vi.advanceTimersByTimeAsync(250);
+		expect(read.mock.calls.map(([request]) => request.anchor)).toEqual([
+			{ kind: 'newest' }, { kind: 'around', ordinal: 1 }, { kind: 'newest' },
+		]);
+		expect(controller.snapshot.window?.certificate.watermark).toBe(50000);
+		expect(publications.length).toBeGreaterThan(0);
+		expect(publications.every(snapshot => snapshot.window?.later.kind === 'exhausted-through-watermark')).toBe(true);
+	} finally { released.resolve(); await refresh; }
+});
+
+it('does not install a historical window when following resumes after the gate decision', async () => {
+	vi.useFakeTimers();
+	const historical: AvailableDisplayWindow = { ...window(), items: [window().items[0]], interval: { after: 0, through: 1 },
+		later: { kind: 'more', cursor: { certificate, boundaryOrdinal: 1 } } };
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce(window())
+		.mockResolvedValueOnce(historical).mockResolvedValue(window());
+	let following = false;
+	let previous: AvailableDisplayWindow | null = null;
+	const installedWhileFollowing: AvailableDisplayWindow[] = [];
+	const { controller } = setup({ window: read }, snapshot => {
+		if (following && snapshot.window && snapshot.window !== previous) installedWhileFollowing.push(snapshot.window);
+		previous = snapshot.window;
+	});
+	await controller.refresh();
+	controller.setReadingAnchor(1, false);
+	controller.setApplicationGate(async () => {
+		void Promise.resolve().then(() => Promise.resolve().then(() => {
+			following = true;
+			controller.setReadingAnchor(null, true);
+		}));
+		return 'apply';
+	});
+	await controller.refresh();
+	await vi.advanceTimersByTimeAsync(250);
+	expect(following).toBe(true);
+	expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
+	expect(installedWhileFollowing.length).toBeGreaterThan(0);
+	expect(installedWhileFollowing.every(value => value.later.kind === 'exhausted-through-watermark')).toBe(true);
+});
+
+it('applies an anchored refresh when the reader remains detached through its gate', async () => {
+	const historical: AvailableDisplayWindow = { ...window(), items: [window().items[0]], interval: { after: 0, through: 1 },
+		later: { kind: 'more', cursor: { certificate, boundaryOrdinal: 1 } } };
+	const { controller } = setup({ window: async () => historical });
+	const received = Promise.withResolvers<void>(), released = Promise.withResolvers<'apply'>();
+	controller.setReadingAnchor(1, false);
+	controller.setApplicationGate(() => { received.resolve(); return released.promise; });
+	const refresh = controller.refresh();
+	await received.promise;
+	released.resolve('apply');
+	expect(await refresh).toBe('loaded');
+	expect(controller.snapshot.window).toBe(historical);
+});
+
+it('requests newest when following resumes from a current-watermark historical window', async () => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>()
+		.mockResolvedValueOnce({ ...window(), later: { kind: 'more', cursor: { certificate, boundaryOrdinal: 40001 } } })
+		.mockResolvedValue(window());
+	const { controller } = setup({ window: read });
+	controller.setReadingAnchor(1, false);
+	await controller.refresh();
+	await vi.advanceTimersByTimeAsync(250);
+	expect(read).toHaveBeenCalledOnce();
+	controller.setReadingAnchor(null, true);
+	await vi.advanceTimersByTimeAsync(0);
+	expect(read.mock.calls.at(-1)?.[0].anchor).toEqual({ kind: 'newest' });
+	expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
 });
 
 it('loads an attached result owner outside the target window at the same watermark', async () => {

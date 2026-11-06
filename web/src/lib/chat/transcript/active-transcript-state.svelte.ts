@@ -101,7 +101,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	get feedMutationClock() { return this.#mutations.clock; }
 	get loadedThroughOrdinal(): number { return this.display.window?.certificate.watermark ?? 0; }
 	get hasEarlierMessages(): boolean { return this.display.window?.earlier.kind === 'more'; }
-	get hasLaterMessages(): boolean { return this.display.window?.later.kind === 'more' || (this.display.window !== null && this.loadedThroughOrdinal < this.lastOrdinal); }
+	get hasLaterMessages(): boolean { return this.display.window?.later.kind === 'more'; }
+	get isDisplayBehindHead(): boolean { return this.display.window !== null && this.loadedThroughOrdinal < this.lastOrdinal; }
 	get canLoadEarlier(): boolean { return this.hasEarlierMessages; }
 	get isLoadingMessages(): boolean { return this.#opening || ['requesting', 'preparing', 'lagging', 'busy'].includes(this.display.phase); }
 	get loadError(): string | null { return this.#openError ?? this.display.error; }
@@ -267,7 +268,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#navigating = true;
 		try {
 			this.controller.setReadingAnchor(target === 'initial' ? 1 : null, target === 'latest');
-			const result = await this.controller.refresh();
+			const result = await (target === 'initial' ? this.controller.loadInitialWindow() : this.controller.refresh());
 			if (epoch !== this.#navigationEpoch) return 'invalidated';
 			if (result === 'loaded') {
 				this.#mutations.record('replacement');
