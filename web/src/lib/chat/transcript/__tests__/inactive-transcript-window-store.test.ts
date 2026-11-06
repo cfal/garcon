@@ -62,8 +62,10 @@ describe('InactiveTranscriptWindowStore', () => {
 		const store = new InactiveTranscriptWindowStore();
 		const window = await transcript('chat-1');
 		const stringify = vi.spyOn(JSON, 'stringify');
+		const usage = vi.spyOn(window.bodyStore, 'usage');
 		await park(store, 'left', 'chat-1', window);
-		expect(stringify.mock.calls.some(([value]) => value && typeof value === 'object' && 'message' in value)).toBe(false);
+		expect(usage).toHaveBeenCalledWith(window.controller);
+		expect(stringify.mock.results.every(result => result.type === 'return' && !result.value.includes('"content"'))).toBe(true);
 		expect(store.size).toBe(1);
 	});
 
