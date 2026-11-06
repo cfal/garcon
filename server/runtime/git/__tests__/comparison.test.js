@@ -30,6 +30,51 @@ function mutateDuringComparisonValidations(filePath, contents) {
 }
 
 describe("comparison operations", () => {
+  it("reuses resolved immutable summaries but refreshes aliases, candidates and moved refs", async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), "garcon-comparison-cache-"));
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["branch", "base"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "changed\n");
+      await fs.writeFile(path.join(projectPath, "b.ts"), "export const value = 1;\n");
+      await runGitCommand(projectPath, ["add", "."]);
+      await runGitCommand(projectPath, ["commit", "-qm", "target"]);
+      await runGitCommand(projectPath, ["branch", "alias"]);
+      const git = createGitOperations();
+      const input = { projectPath, from: { kind: "revision", revision: "base" },
+        to: { kind: "revision", revision: "HEAD" }, mode: "direct", context: 3 };
+      const trace = [];
+      const first = await git.getComparisonSnapshot({ ...input, trace, bodyCandidateCount: 1 });
+      expect(trace.filter(({ args }) => args[0] === "diff")).toHaveLength(2);
+      trace.length = 0;
+      const alias = await git.getComparisonSnapshot({ ...input, trace,
+        to: { kind: "revision", revision: "alias" }, bodyCandidateCount: 2 });
+      expect(alias.documentId).toBe(first.documentId);
+      expect(alias.to.requestedRevision).toBe("alias");
+      expect(alias.firstBodyCandidates).toHaveLength(2);
+      expect(alias.files).toEqual(first.files);
+      expect(trace.some(({ args }) => args[0] === "rev-parse")).toBe(true);
+      expect(trace.filter(({ args }) => args[0] === "diff")).toEqual([]);
+      alias.files[0].additions = 999;
+      expect((await git.getComparisonSnapshot(input)).files).toEqual(first.files);
+      for (const changed of [{ context: 5 }, { mode: "merge-base" }]) {
+        trace.length = 0;
+        const replacement = await git.getComparisonSnapshot({ ...input, ...changed, trace });
+        expect(replacement.documentId).not.toBe(first.documentId);
+        expect(trace.filter(({ args }) => args[0] === "diff")).toHaveLength(2);
+      }
+      await fs.writeFile(path.join(projectPath, "a.txt"), "changed again\nnew line\n");
+      await runGitCommand(projectPath, ["commit", "-qam", "advance"]);
+      trace.length = 0;
+      const moved = await git.getComparisonSnapshot({ ...input, trace });
+      expect(moved.documentId).not.toBe(first.documentId);
+      expect(moved.to.hash).not.toBe(first.to.hash);
+      expect(trace.filter(({ args }) => args[0] === "diff")).toHaveLength(2);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("distinguishes a missing revision from a repository failure", () => {
     expect(isUnresolvedRevision({ code: 1 })).toBe(true);
     expect(isUnresolvedRevision({ code: 128 })).toBe(false);
