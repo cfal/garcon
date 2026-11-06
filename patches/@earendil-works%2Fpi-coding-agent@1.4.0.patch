@@ -1,0 +1,11 @@
+diff --git a/dist/bundle/cli.js b/dist/bundle/cli.js
+--- a/dist/bundle/cli.js
++++ b/dist/bundle/cli.js
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env node
+-import { createRequire, enableCompileCache } from "node:module";
++import { enableCompileCache } from "node:module";
+ 
+ enableCompileCache();
+-createRequire(import.meta.url)("./cli-runtime.js");
++await import("../cli.js");

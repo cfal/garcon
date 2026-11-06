@@ -8,7 +8,10 @@ import {
   CommandResultMessage,
   UserMessage,
 } from '../../../../common/chat-types.ts';
-import createShareRoutes from '../shares.ts';
+import createShareRoutes, {
+  SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS,
+  SHARED_CHAT_RATE_LIMIT_WINDOW_MS,
+} from '../shares.ts';
 import { isNoAuthHandler, wrapRoutes } from '../../lib/http-route.ts';
 import { ShareStore } from '../../chats/shares/store.ts';
 import { inlineTranscriptRendering } from '../../chats/transcript-rendering/__tests__/inline-transcript-rendering.ts';
@@ -18,6 +21,7 @@ import { decodeStoredLedgerRow } from '../../ledger/codec.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
 import { storedProviderRows, storedSnapshotReader } from '../../ledger/__tests__/stored-rows.ts';
 import { TranscriptViewReader } from '../../ledger/view-reader.ts';
+import { createRateLimiter } from '../../lib/rate-limit.ts';
 
 const textDirectory = mkdtempSync(path.join(os.tmpdir(), 'garcon-share-routes-'));
 afterAll(() => rmSync(textDirectory, { recursive: true, force: true }));
@@ -118,6 +122,8 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
     },
     { getChatMetadata: mock(() => null) },
     transcripts,
+    // Unrelated tests share one unaddressed client, so only rate-limit tests opt into a limiter.
+    { sharedChatLimiter: 'sharedChatLimiter' in overrides ? overrides.sharedChatLimiter : { check: () => null } },
   );
   return { routes, shareStore, capture };
 }
@@ -427,6 +433,107 @@ describe('public share responses', () => {
       expect(snapshot.messages[2].result.cwd).toEqual({ kind: 'withheld' });
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('public share lookup', () => {
+  const lookups = ['', '?token=', '?token=..%2F..%2Fetc%2Fpasswd', '?token=__proto__', '?token=has%20space%00',
+    `?token=${'x'.repeat(4096)}`, '?token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'];
+  const serverFor = (address) => ({ requestIP: () => ({ address }) });
+  const fetchShared = (routes, search = '', server, headers) => {
+    const href = `http://localhost/api/v1/shared${search}`;
+    return routes['/api/v1/shared'].GET(new Request(href, { headers }), new URL(href), server);
+  };
+  async function observable(response) {
+    const headers = Object.fromEntries(response.headers);
+    return { status: response.status, headers, body: await response.text() };
+  }
+
+  it('answers missing, malformed, and unknown tokens identically through the real store', async () => {
+    const workspace = mkdtempSync(path.join(os.tmpdir(), 'garcon-share-lookup-'));
+    try {
+      const store = new ShareStore(workspace, { rendering: inlineTranscriptRendering });
+      await store.init();
+      const rows = storedProviderRows([new UserMessage('2025-01-02T03:04:05.000Z', 'synthetic prompt')]);
+      const routes = createShareRoutes(
+        store,
+        { getChat: mock(() => ({ agentId: 'shell', model: 'sh', projectPath: '/synthetic' })) },
+        { getChatName: mock(() => null), getUiSettings: mock(() => ({})), getRemoteSettingsVersion: mock(() => 0) },
+        { getChatMetadata: mock(() => null) },
+        storedSnapshotReader(async () => ({ rows, transcriptViewId: 'view-1', lastOrdinal: rows.length })),
+        { sharedChatLimiter: { check: () => null } },
+      );
+      const created = await (await routes['/api/v1/chats/share'].POST(new Request('http://localhost/api/v1/chats/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId: '123' }),
+      }), new URL('http://localhost/api/v1/chats/share'))).json();
+
+      const observed = await Promise.all(lookups.map(async (search) => observable(await fetchShared(routes, search))));
+      for (const response of observed) expect(response).toEqual(observed[0]);
+      expect(observed[0].status).toBe(404);
+      expect(JSON.parse(observed[0].body)).toEqual({
+        success: false, error: 'Share not found', errorCode: 'VALIDATION_FAILED', retryable: false,
+      });
+      expect((await fetchShared(routes, `?token=${created.shareToken}`)).status).toBe(200);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('consults the store for a missing token as for an unknown one', async () => {
+    const { routes, shareStore } = createRoutes();
+    await fetchShared(routes);
+    await fetchShared(routes, '?token=missing-token');
+    expect(shareStore.getMessages.mock.calls.map(([token]) => token)).toEqual(['', 'missing-token']);
+  });
+
+  it('serves the production limiter with 429 and Retry-After after the configured misses', async () => {
+    const { routes, shareStore } = createRoutes(undefined, null, { sharedChatLimiter: undefined });
+    const served = wrapRoutes(routes);
+    const client = serverFor('192.0.2.1');
+    const request = (search) => served['/api/v1/shared'].GET(new Request(`http://localhost/api/v1/shared${search}`), client);
+
+    for (let attempt = 0; attempt < SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS; attempt++) {
+      expect((await request(`?token=missing-${attempt}`)).status).toBe(404);
+    }
+    const lookupsBeforeLimit = shareStore.getMessages.mock.calls.length;
+    for (const search of ['?token=missing', '', '?token=share-token']) {
+      const limited = await request(search);
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get('retry-after')).toBe(String(SHARED_CHAT_RATE_LIMIT_WINDOW_MS / 1_000));
+      expect(limited.headers.get('cache-control')).toBe('no-cache, no-store, must-revalidate');
+      expect(limited.headers.get('x-robots-tag')).toBe('noindex, nofollow, noarchive');
+      expect(await limited.json()).toEqual({
+        success: false, error: 'Too many requests. Please try again later.', errorCode: 'RATE_LIMITED', retryable: true,
+      });
+    }
+    expect(shareStore.getMessages.mock.calls.length).toBe(lookupsBeforeLimit);
+    expect((await served['/api/v1/shared'].GET(
+      new Request('http://localhost/api/v1/shared?token=share-token'), serverFor('192.0.2.2'),
+    )).status).toBe(200);
+  });
+
+  it('keys clients by forwarded address only when the proxy is trusted', async () => {
+    const original = process.env.GARCON_TRUST_PROXY;
+    const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1 });
+    const { routes } = createRoutes(undefined, null, { sharedChatLimiter: limiter });
+    const statusFor = async (forwarded) => (
+      await fetchShared(routes, '?token=missing', serverFor('192.0.2.3'), { 'x-forwarded-for': forwarded })
+    ).status;
+    try {
+      process.env.GARCON_TRUST_PROXY = 'true';
+      expect(await statusFor('198.51.100.1')).toBe(404);
+      expect(await statusFor('198.51.100.2')).toBe(404);
+      expect(await statusFor('198.51.100.1')).toBe(429);
+      delete process.env.GARCON_TRUST_PROXY;
+      expect(await statusFor('198.51.100.3')).toBe(404);
+      expect(await statusFor('198.51.100.4')).toBe(429);
+    } finally {
+      limiter.dispose();
+      if (original === undefined) delete process.env.GARCON_TRUST_PROXY;
+      else process.env.GARCON_TRUST_PROXY = original;
     }
   });
 });
