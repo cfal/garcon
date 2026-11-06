@@ -158,8 +158,8 @@
 
 	let composerNotice = $state.raw<ComposerAvailabilityNoticePresentation | null>(null);
 	const recallSource: PromptRecallSource = {
-		list: async () => recallPrompts.map(({ ordinal }) => ({ ordinal })),
-		load: async ordinal => {
+		list: async () => recallPrompts.map(({ ordinal }) => ({ ordinal, watermark: ordinal })),
+		load: async ({ ordinal }) => {
 			const prompt = recallPrompts.find(candidate => candidate.ordinal === ordinal);
 			if (!prompt) throw new Error('Prompt unavailable');
 			return prompt.content;

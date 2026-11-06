@@ -2,7 +2,8 @@ import { expect, it, vi } from 'vitest';
 import { UserMessage } from '$shared/chat-types';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { displayPromptRecall } from '../display-prompt-recall.js';
-import { displayOpen, displayCertificate, displayWindow, displayDetail, DISPLAY_TIME } from './display-fixtures.js';
+import { PromptRecallController } from '$lib/chat/composer/prompt-recall.js';
+import { displayOpen, displayCertificate, displayWindow, displayDetail, displayProfile, DISPLAY_TIME } from './display-fixtures.js';
 
 it('reads recalled bodies using the live Bash revision rather than the activation snapshot', async () => {
 	const open = displayOpen('chat-1', 'view-1', 10);
@@ -16,11 +17,61 @@ it('reads recalled bodies using the live Bash revision rather than the activatio
 			details: [displayDetail(1)], bodies: [{ ordinal: 1, message: new UserMessage(DISPLAY_TIME, 'Synthetic prompt'), submissionClientMessageId: null }],
 			deferredOrdinals: [], oversizedOrdinal: null, nonRenderedOrdinals: [] })),
 	} satisfies Pick<TranscriptDisplayApi, 'userRows' | 'window' | 'bodies'>;
-	const source = displayPromptRecall(open, 10, () => revision, api);
+	const source = displayPromptRecall(open, () => revision, api);
 	const signal = new AbortController().signal;
-	await source.list(signal);
+	const [prompt] = await source.list(signal);
 	revision = 'updated-patterns';
-	expect(await source.load(1, signal)).toBe('Synthetic prompt');
+	expect(await source.load(prompt, signal)).toBe('Synthetic prompt');
 	expect(api.bodies.mock.calls[0][0].profile.bashRevision).toBe('updated-patterns');
 	expect(api.window.mock.calls[0][0].profile.bashRevision).toBe('updated-patterns');
+});
+
+it('keeps cached prompt references at their certified list watermark across new source objects', async () => {
+	const open = displayOpen('chat-1', 'view-1', 10);
+	const api = {
+		userRows: vi.fn<TranscriptDisplayApi['userRows']>(async () => ({ kind: 'available', serverInstanceId: open.serverInstanceId,
+			chatId: open.chat.id, transcriptViewId: open.transcriptViewId, watermark: 5, sourceHead: 10,
+			rows: [2, 1].map(ordinal => ({ ordinal, preview: `Prompt ${ordinal}`, timestamp: DISPLAY_TIME, attachmentCount: 0 })), nextBeforeOrdinal: null })),
+		window: vi.fn<TranscriptDisplayApi['window']>(async request => displayWindow([], {
+			...displayCertificate(open, request.profile), watermark: request.atWatermark!,
+		})),
+		bodies: vi.fn<TranscriptDisplayApi['bodies']>(async request => ({ certificate: request.certificate,
+			details: request.seedOrdinals.map(ordinal => displayDetail(ordinal)),
+			bodies: request.seedOrdinals.map(ordinal => ({ ordinal, message: new UserMessage(DISPLAY_TIME, `Prompt ${ordinal}`), submissionClientMessageId: null })),
+			deferredOrdinals: [], oversizedOrdinal: null, nonRenderedOrdinals: [] })),
+	} satisfies Pick<TranscriptDisplayApi, 'userRows' | 'window' | 'bodies'>;
+	const history = new PromptRecallController();
+	expect(await history.navigate('ArrowUp', 'chat:view', displayPromptRecall(open, () => 'patterns', api))).toBe('Prompt 2');
+	expect(await history.navigate('ArrowUp', 'chat:view', displayPromptRecall({ ...open, sourceHead: 20 }, () => 'patterns', api))).toBe('Prompt 1');
+	expect(api.userRows.mock.calls[0][0]).not.toHaveProperty('atWatermark');
+	expect(api.window.mock.calls.map(([request]) => request.atWatermark)).toEqual([5, 5]);
+});
+
+it('treats preparing recall as a quiet, retryable no-op', async () => {
+	const open = displayOpen('chat-1', 'view-1', 10);
+	const api = {
+		userRows: vi.fn<TranscriptDisplayApi['userRows']>().mockResolvedValueOnce({ kind: 'preparing', serverInstanceId: open.serverInstanceId,
+			chatId: open.chat.id, transcriptViewId: open.transcriptViewId, watermark: 0, sourceHead: 10, errorCode: null })
+			.mockResolvedValue({ kind: 'available', serverInstanceId: open.serverInstanceId,
+				chatId: open.chat.id, transcriptViewId: open.transcriptViewId, watermark: 5, sourceHead: 10,
+				rows: [{ ordinal: 1, preview: 'Prompt', timestamp: DISPLAY_TIME, attachmentCount: 0 }], nextBeforeOrdinal: null }),
+		window: vi.fn<TranscriptDisplayApi['window']>(), bodies: vi.fn<TranscriptDisplayApi['bodies']>(),
+	} satisfies Pick<TranscriptDisplayApi, 'userRows' | 'window' | 'bodies'>;
+	const source = displayPromptRecall(open, () => 'patterns', api), signal = new AbortController().signal;
+	expect(await source.list(signal)).toEqual([]);
+	expect(await source.list(signal)).toMatchObject([{ ordinal: 1 }]);
+	expect(api.window).not.toHaveBeenCalled();
+});
+
+it.each(['preparing', 'lagging', 'busy'] as const)('does not report %s prompt hydration as an error', async kind => {
+	const open = displayOpen('chat-1', 'view-1', 10);
+	const api = {
+		userRows: vi.fn<TranscriptDisplayApi['userRows']>(),
+		window: vi.fn<TranscriptDisplayApi['window']>(async request => ({ kind,
+			...displayCertificate(open, request.profile), sourceHead: 10, preparedThrough: 0, errorCode: null, retryAfterMs: 1500 })),
+		bodies: vi.fn<TranscriptDisplayApi['bodies']>(),
+	} satisfies Pick<TranscriptDisplayApi, 'userRows' | 'window' | 'bodies'>;
+	const source = displayPromptRecall(open, () => displayProfile.bashRevision, api);
+	expect(await source.load({ ordinal: 1, watermark: 5 }, new AbortController().signal)).toBeNull();
+	expect(api.bodies).not.toHaveBeenCalled();
 });

@@ -1,7 +1,7 @@
-export interface RecallPrompt { readonly ordinal: number }
+export interface RecallPrompt { readonly ordinal: number; readonly watermark: number }
 export interface PromptRecallSource {
 	list(signal: AbortSignal): Promise<readonly RecallPrompt[]>;
-	load(ordinal: number, signal: AbortSignal): Promise<string>;
+	load(prompt: RecallPrompt, signal: AbortSignal): Promise<string | null>;
 }
 
 export class PromptRecallController {
@@ -39,8 +39,8 @@ export class PromptRecallController {
 			}
 			if (!this.#prompts.length) return null;
 			const index = key === 'ArrowUp' ? Math.min(this.#index + 1, this.#prompts.length - 1) : this.#index - 1;
-			const text = index < 0 ? '' : await source.load(this.#prompts[index].ordinal, abort.signal);
-			if (abort.signal.aborted || epoch !== this.#epoch) return null;
+			const text = index < 0 ? '' : await source.load(this.#prompts[index], abort.signal);
+			if (text === null || abort.signal.aborted || epoch !== this.#epoch) return null;
 			this.#index = index;
 			this.#text = text;
 			return text;
