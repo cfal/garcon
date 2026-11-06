@@ -6,6 +6,7 @@ import path from 'node:path';
 import { AssistantMessage, BashToolUseMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
 import { parseBodyDependencyResponse, parseDisplayWindowResponse, type AvailableDisplayWindow, type DisplayWindowRequest } from '../../../../common/transcript-display-contract.js';
 import { DISPLAY_POLICY_REVISION } from '../../../../common/transcript-display-policy.js';
+import type { HiddenBashCommandPattern } from '../../../../common/hidden-bash-command-patterns.js';
 import { TranscriptLedgerStore } from '../../ledger/store.js';
 import { TranscriptLedgerService } from '../../ledger/service.js';
 import { TranscriptDisplayService } from '../service.js';
@@ -15,6 +16,7 @@ import * as fs from 'node:fs/promises';
 
 const at = '2026-01-01T00:00:00.000Z';
 let root: string, store: TranscriptLedgerStore, ledger: TranscriptLedgerService, display: TranscriptDisplayService;
+let patterns: HiddenBashCommandPattern[];
 const registry = new Set<string>();
 beforeEach(async () => {
   await mkdir(path.join(homedir(), 'tmp'), { recursive: true });
@@ -22,12 +24,13 @@ beforeEach(async () => {
   store = new TranscriptLedgerStore(path.join(root, 'ledger'));
   ledger = new TranscriptLedgerService(store);
   registry.clear();
+  patterns = [];
   display = service('server-a');
 });
 afterEach(async () => { await display.close(); ledger.close(); await rm(root, { recursive: true, force: true }); });
 function service(instance: string) {
   return new TranscriptDisplayService({ workspaceDirectory: root, serverInstanceId: instance, ledger,
-    hasChat: id => registry.has(id), patterns: () => [], freeSpaceReserve: 0,
+    hasChat: id => registry.has(id), patterns: () => patterns, freeSpaceReserve: 0,
     adoption: { ensure: async id => ledger.currentView(id) ?? ledger.initializeChat(id) } });
 }
 function seed(chatId: string, count: number) {
@@ -89,6 +92,53 @@ test('real workers prepare bounded windows, hydrate selected details and reuse a
     expect(display.metrics.rows).toBe(1);
   } finally { producer.close(); }
 });
+
+test('Bash timeouts fail only the matching profile, retry explicitly and retire obsolete revisions', async () => {
+  patterns = [{ mode: 'regex', pattern: '^(a+)+$' }];
+  display.settingsChanged();
+  registry.add('chat');
+  const view = ledger.initializeChat('chat');
+  const producer = ledger.openProducer('chat', 'synthetic');
+  producer.sink.publish({ type: 'rows', rows: [
+    ...Array.from({ length: 64 }, (_, index) => ({
+      message: new BashToolUseMessage(at, `slow-tool-${index}`, `${'a'.repeat(100 + index)}!`),
+    })),
+    { message: new AssistantMessage(at, 'Generic response') },
+  ] });
+  producer.close();
+  const input = request('chat', view.viewId), failedRevision = display.bashRevision;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request');
+  const waitForFailure = async () => {
+    const deadline = Date.now() + 10_000;
+    let status;
+    do {
+      status = (await display.open('chat')).display;
+      if (status.phase === 'failed') break;
+      await Bun.sleep(10);
+    } while (Date.now() < deadline);
+    expect(status).toMatchObject({ phase: 'failed', errorCode: 'DISPLAY_FILTER_TIMEOUT' });
+  };
+  try {
+    await waitForFailure();
+    expect(await display.window(input)).toMatchObject({ kind: 'failed', errorCode: 'DISPLAY_FILTER_TIMEOUT' });
+    const hidden = await ready({ ...input, profile: { ...input.profile, hiddenToolGroups: ['bash'] } });
+    expect(hidden.items).toMatchObject([{ kind: 'row', ordinal: 65 }]);
+    await display.retry('chat');
+    expect((await display.open('chat')).display.phase).toBe('preparing');
+    await waitForFailure();
+    expect(worker.mock.calls.filter(([task]) => task.kind === 'bash' && task.revision === failedRevision)).toHaveLength(2);
+    for (const pattern of ['safe-one', 'safe-two']) {
+      patterns = [{ mode: 'glob', pattern }];
+      display.settingsChanged();
+      expect((await ready(request('chat', view.viewId))).items.map(item => item.kind)).toEqual(['tool-group', 'row']);
+    }
+    const database = new Database(await sidecar(), { readonly: true });
+    try {
+      expect(database.query('SELECT revision FROM bash_revision WHERE revision = ?').get(failedRevision)).toBeNull();
+      expect(database.query('SELECT revision FROM bash_revision').all()).toHaveLength(2);
+    } finally { database.close(); }
+  } finally { worker.mockRestore(); }
+}, 20_000);
 
 test('lost frame acknowledgements reconcile the persisted checkpoint on retry', async () => {
   const original = DisplayWorkerClient.prototype.request;
