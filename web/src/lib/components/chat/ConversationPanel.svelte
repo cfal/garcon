@@ -106,6 +106,7 @@
 	setAsyncQuestionPanel({
 		controller: asyncQuestions,
 		get identity() { return questionTarget; },
+		get excludedResendOrdinals() { return panel.transcript.excludedResendOrdinals; },
 		canReply: canReplyToQuestion,
 		canSubmit: (ordinal) => canReplyToQuestion(ordinal)
 			&& executors.isReady(chat.executorId ?? 'local') && modelCatalog.isValidated,

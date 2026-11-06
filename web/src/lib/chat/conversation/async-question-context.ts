@@ -7,6 +7,7 @@ export const [getAsyncQuestionController, setAsyncQuestionController] = createCo
 export interface AsyncQuestionPanelPort {
 	readonly controller: AsyncQuestionController;
 	readonly identity: AsyncQuestionTarget;
+	readonly excludedResendOrdinals: readonly number[];
 	canReply(ordinal: number): boolean;
 	canSubmit(ordinal: number): boolean;
 	recordedAnswer(ordinal: number, questionId: string): string | undefined;

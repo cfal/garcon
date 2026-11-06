@@ -14,7 +14,7 @@ const key = asyncQuestionDraftKey(target, 3, question.id);
 function fixture() {
 	const send = vi.fn().mockResolvedValue('steer' as const);
 	const controller = new AsyncQuestionController(send);
-	const panel = { controller, identity: target, canReply: (): boolean => true, canSubmit: (): boolean => true, recordedAnswer: () => undefined } satisfies AsyncQuestionPanelPort;
+	const panel = { controller, identity: target, excludedResendOrdinals: [2], canReply: (): boolean => true, canSubmit: (): boolean => true, recordedAnswer: () => undefined } satisfies AsyncQuestionPanelPort;
 	return { send, controller, panel };
 }
 
@@ -27,7 +27,7 @@ it('preselects but never auto-submits and sends one independent answer', async (
 	expect(send).not.toHaveBeenCalled();
 	await fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
 	await tick();
-	expect(send).toHaveBeenCalledWith(target, { questionId: 'q1', question: question.prompt, answer: 'Staging', source: { chatId: 'chat', transcriptViewId: 'view', ordinal: 3 } });
+	expect(send).toHaveBeenCalledWith(target, { questionId: 'q1', question: question.prompt, answer: 'Staging', source: { chatId: 'chat', transcriptViewId: 'view', ordinal: 3 } }, [2]);
 	expect(screen.getByText('Sent to active turn')).toBeTruthy();
 	expect(screen.getByRole('button', { name: 'Reply again' })).toBeTruthy();
 });
@@ -138,4 +138,44 @@ it('bounds draft retention and prunes replaced views and deleted chats', () => {
 	controller.edit(key, target, { selectedQuestionOptions: {} });
 	controller.prune(new Set());
 	expect(controller.get(key)).toBeUndefined();
+});
+
+it('retains the sending fence under draft eviction pressure', async () => {
+	const { controller, send } = fixture();
+	const delivery = Promise.withResolvers<'steer'>();
+	send.mockReturnValue(delivery.promise);
+	const pending = controller.submit(target, 3, question, 'Staging');
+	for (let ordinal = 4; ordinal <= 204; ordinal++) {
+		controller.edit(asyncQuestionDraftKey(target, ordinal, 'q1'), target, { selectedQuestionOptions: {} });
+	}
+	expect(controller.get(key)?.status).toBe('sending');
+	controller.edit(key, target, { selectedQuestionOptions: {} });
+	controller.dismiss(key, target, { selectedQuestionOptions: {} });
+	expect(controller.get(key)?.status).toBe('sending');
+	void controller.submit(target, 3, question, 'Staging');
+	expect(send).toHaveBeenCalledTimes(1);
+	delivery.resolve('steer');
+	await pending;
+	expect(controller.get(key)?.status).toBe('sent');
+});
+
+it('bounds in-flight retention and reopens admission when a pending answer settles', async () => {
+	const { controller, send, panel } = fixture();
+	const delivery = Promise.withResolvers<'steer'>();
+	send.mockReturnValue(delivery.promise);
+	const pending = Array.from({ length: 200 }, (_, index) => controller.submit(target, index + 4, question, 'Staging'));
+	render(AsyncQuestionPrompt, { question, ordinal: 3, panel });
+	expect(controller.canRetain(key)).toBe(false);
+	expect(screen.getByText(/Waiting for pending answers/)).toBeTruthy();
+	expect(screen.queryByRole('button', { name: 'Send answer' })).toBeNull();
+	controller.edit(key, target, { selectedQuestionOptions: {} });
+	await controller.submit(target, 3, question, 'Staging');
+	expect(controller.get(key)).toBeUndefined();
+	expect(send).toHaveBeenCalledTimes(200);
+	delivery.resolve('steer');
+	await Promise.all(pending);
+	await tick();
+	expect(controller.canRetain(key)).toBe(true);
+	await fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+	expect(send).toHaveBeenCalledTimes(201);
 });
