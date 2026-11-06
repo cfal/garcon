@@ -93,8 +93,6 @@ const EXIT_PLAN_MODE_RULE: ToolVisualRule = {
 			content: String(input.plan ?? '').replace(/\\n/g, '\n') || String(input.plan ?? ''),
 		}),
 	},
-	result: {
-	},
 };
 
 const WEB_SEARCH_RULE: ToolVisualRule = {
@@ -280,8 +278,6 @@ function codexSubagentMarkdown(input: Record<string, unknown>): string {
 const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 	'bash-tool-use': {
 		input: {},
-		result: {
-		},
 	},
 
 	'exec-tool-use': {
@@ -296,15 +292,11 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 			style: 'terminal',
 			wrapText: true,
 		},
-		result: {
-		},
 	},
 
 	'wait-tool-use': {
 		input: {
 			label: 'Wait',
-		},
-		result: {
 		},
 	},
 
@@ -320,8 +312,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				border: 'border-border',
 			},
 		},
-		result: {
-		},
 	},
 
 	'list-tool-use': {
@@ -334,8 +324,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				background: '',
 				border: 'border-border',
 			},
-		},
-		result: {
 		},
 	},
 
@@ -370,8 +358,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				return diffProps(input, 'Edit', 'gray');
 			},
 		},
-		result: {
-		},
 	},
 
 	'write-tool-use': {
@@ -388,8 +374,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				badge: m.chat_tool_badge_new(),
 				badgeColor: 'green',
 			}),
-		},
-		result: {
 		},
 	},
 
@@ -414,8 +398,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				}
 				return diffProps(input, m.chat_tool_badge_patch(), 'gray');
 			},
-		},
-		result: {
 		},
 	},
 
@@ -607,8 +589,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 		input: {
 			label: 'EnterPlanMode',
 		},
-		result: {
-		},
 	},
 
 	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
@@ -617,15 +597,11 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 		input: {
 			label: 'Question',
 		},
-		result: {
-		},
 	},
 
 	'cursor-create-plan-tool-use': {
 		input: {
 			label: 'Plan',
-		},
-		result: {
 		},
 	},
 
@@ -636,8 +612,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 	'write-stdin-tool-use': {
 		input: {
 			label: 'WriteStdin',
-		},
-		result: {
 		},
 	},
 
@@ -747,8 +721,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				border: 'border-status-info-border',
 			},
 		},
-		result: {
-		},
 	},
 
 	'amp-mermaid-tool-use': {
@@ -761,8 +733,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				border: 'border-status-neutral-border',
 			},
 		},
-		result: {
-		},
 	},
 
 	'amp-handoff-tool-use': {
@@ -774,8 +744,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				primary: 'text-foreground',
 				border: 'border-status-info-border',
 			},
-		},
-		result: {
 		},
 	},
 
@@ -792,8 +760,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				primary: 'text-foreground',
 				border: 'border-border',
 			},
-		},
-		result: {
 		},
 	},
 
@@ -886,8 +852,6 @@ const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 				content: JSON.stringify(input, null, 2),
 				format: 'code',
 			}),
-		},
-		result: {
 		},
 	},
 

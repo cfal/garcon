@@ -124,14 +124,12 @@ function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	const selectedChat = chatRecord();
-	const backgroundChat = chatRecord({ id: 'chat-b', title: 'Chat B' });
 	return {
 		agentSettings: {
 			permissionMode: vi.fn((_chatId: string) => 'default' as const),
 			setPermissionMode: vi.fn(),
 		},
 		chatState: {
-			getCursor: vi.fn(() => ({ transcriptViewId: 'generation-current', lastOrdinal: 1 })),
 			getChatCursor: vi.fn(() => ({
 				transcriptViewId: 'generation-current',
 				lastOrdinal: 1,
@@ -146,36 +144,26 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			markRenderedChatStale: vi.fn(),
 			appendLocalNotice: vi.fn(),
 			appendServerNotice: vi.fn(),
-			loadMessages: vi.fn().mockResolvedValue([]),
 			removeChatTranscript: vi.fn(),
 			markChatTranscriptStale: vi.fn(),
 		},
 		lifecycle: {
 			currentChatId: () => 'chat-a',
 			setCurrentChatId: vi.fn(),
-			markTurnRunning: vi.fn(),
 			clearTurnStatus: vi.fn(),
-			setLoadingStatus: vi.fn(),
 			pushLoadingStatus: vi.fn(),
 			popLoadingStatus: vi.fn(),
 			setIsSystemChatChange: vi.fn(),
 		},
 		conversationUi: new ConversationUiState(),
 		sessions: {
-			byId: {
-				[selectedChat.id]: selectedChat,
-				[backgroundChat.id]: backgroundChat,
-			},
 			selectedChat,
-			setSelectedChatId: vi.fn(),
 			patchPreview: vi.fn(),
 			patchActivity: vi.fn(),
 			quietRefreshChats: vi.fn(),
 			removeChat: vi.fn(),
 			patchChat: vi.fn(),
-			reconcileProcessing: vi.fn(),
 			isChatProcessing: vi.fn(() => selectedChat.isProcessing),
-			applyProcessingEvent: vi.fn(),
 			patchLastReadAt: vi.fn(),
 		},
 		navigation: {
@@ -273,7 +261,7 @@ describe('event router integration', () => {
 				'generation-current', 2, null, null, emptyResponseClassOrdinals(), 1, 0) }], stores);
 			await vi.waitFor(() => expect(stores.agentSettings.setPermissionMode).toHaveBeenCalledWith('chat-b', 'plan'));
 			expect(stores.chatState.loadRenderedChat).not.toHaveBeenCalled();
-			expect(stores.chatState.loadMessages).not.toHaveBeenCalled();
+			expect(stores.chatState.reloadChatTranscript).not.toHaveBeenCalled();
 		} finally { plan.mockRestore(); }
 	});
 
@@ -423,8 +411,6 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages([head()], stores);
 		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 2, { ...emptyResponseClassOrdinals(), assistant: 2 });
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
-		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
-		expect(stores.sessions.applyProcessingEvent).not.toHaveBeenCalled();
 	});
 
 	it('advances thinking activity and visible read receipts without replacing the preview', () => {
@@ -458,8 +444,6 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
-		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
-		expect(stores.sessions.applyProcessingEvent).not.toHaveBeenCalled();
 	});
 
 	it.each(['chat-a', 'chat-b'])('accepts coalesced head jumps for %s without raw replay', chatId => {
@@ -468,7 +452,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.observeHead).toHaveBeenCalledWith(chatId, 'generation-current', 400, { ...emptyResponseClassOrdinals(), assistant: 400 });
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith(chatId, 'current preview', TS);
 		expect(stores.chatState.reloadChatTranscript).not.toHaveBeenCalled();
-		expect(stores.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(stores.chatState.loadRenderedChat).not.toHaveBeenCalled();
 		if (chatId === 'chat-b') expect(stores.readState.enqueueReadReceipt).not.toHaveBeenCalled();
 	});
 

@@ -24,7 +24,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	) {
 		this.#fallback = new ActiveTranscriptState();
 	}
-	get bodyStore() { return this.#transcript().bodyStore; }
 	get serverInstanceId(): string { return this.openSnapshot?.serverInstanceId ?? ''; }
 
 	get activeChatId(): string | null {
@@ -224,7 +223,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		const chatId = this.activeChatId;
 		return this.#current()?.transcript.openSnapshot ?? (chatId ? this.options.panels.openSnapshot(chatId) : null);
 	}
-	get bodyCertificate() { return this.#transcript().display.window?.certificate ?? null; }
 	destroy(): void { this.#fallback.dispose(); this.#optimisticChatIds.clear(); }
 
 	#current() {

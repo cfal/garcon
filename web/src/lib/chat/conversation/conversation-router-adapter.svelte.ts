@@ -32,8 +32,6 @@ export interface ConversationRouterStoreDeps {
 		| 'removeChat'
 		| 'setSelectedChatId'
 		| 'isChatProcessing'
-		| 'applyProcessingEvent'
-		| 'reconcileProcessing'
 		| 'quietRefreshChats'
 	>;
 	chatState: ActiveTranscriptPort & { discardChat(chatId: string): void };
@@ -42,11 +40,7 @@ export interface ConversationRouterStoreDeps {
 		ConversationLifecycleState,
 		| 'currentChatId'
 		| 'setCurrentChatId'
-		| 'markTurnRunning'
 		| 'clearTurnStatus'
-		| 'setLoadingStatus'
-		| 'pushLoadingStatus'
-		| 'popLoadingStatus'
 		| 'setIsSystemChatChange'
 	>;
 	lifecycles: Pick<ConversationLifecyclePort, 'forChat' | 'get'>;
@@ -81,7 +75,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			},
 		},
 		chatState: {
-			getCursor: () => deps.chatState.getCursor(),
 			getChatCursor: (chatId) => deps.panels.knownHead(chatId),
 			observeHead: (chatId, view, ordinal, types) => deps.panels.observeHead(chatId, view, ordinal, types),
 			acknowledgeInput: (chatId, view, id, ordinal) => deps.panels.acknowledgeInput(chatId, view, id, ordinal),
@@ -113,7 +106,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			},
 			appendServerNotice: (chatId, noticeType, content) =>
 				deps.panels.appendServerNotice(chatId, noticeType, content),
-			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 			removeChatTranscript: (chatId) => {
 				deps.chatState.discardChat(chatId);
 				deps.panels.removeChat(chatId);
@@ -127,9 +119,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
-			markTurnRunning: (chatId) => deps.lifecycle.markTurnRunning(chatId),
 			clearTurnStatus: (chatId) => deps.lifecycle.clearTurnStatus(chatId),
-			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
 			pushLoadingStatus: (chatId, entry) =>
 				deps.lifecycles.forChat(chatId).pushLoadingStatus(entry),
 			popLoadingStatus: (chatId, id) => deps.lifecycles.get(chatId)?.popLoadingStatus(id),

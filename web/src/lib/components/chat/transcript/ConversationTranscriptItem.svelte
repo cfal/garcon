@@ -28,7 +28,6 @@
 	interface Props {
 		item: ConversationFeedRenderItem;
 		renderModel: ConversationFeedRenderModel;
-		showThinking?: boolean;
 		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		onPermissionDecision?: (
@@ -52,7 +51,6 @@
 	let {
 		item,
 		renderModel,
-		showThinking = true,
 		pendingPermissionRequests = [],
 		chatContext = null,
 		onPermissionDecision,
@@ -131,7 +129,6 @@
 			{onExitPlanMode}
 			onDismissPlan={pendingPlan && onExitPlanMode
 				? () => onExitPlanMode?.(pendingPlan!.permissionOccurrenceId, 'dismiss', '') : undefined}
-			{showThinking}
 			{chatContext}
 			{onForkChat}
 			{onClearBefore}

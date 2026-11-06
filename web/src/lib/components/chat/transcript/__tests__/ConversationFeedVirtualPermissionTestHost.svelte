@@ -82,7 +82,6 @@
 <ConversationFeedVirtualItem
 	{item}
 	renderModel={certifiedFeed([]).renderModel}
-	showThinking={true}
 	pendingPermissionRequests={[request]}
 	chatContext={{ chatId: SOURCE_CHAT_ID, projectPath: '/workspace/project' }}
 	earlierPageState={{ status: 'idle', error: null }}

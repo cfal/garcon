@@ -18,7 +18,6 @@ export interface ConversationFeedMessageRenderItem {
 	ordinal?: number;
 	awaitingDelivery?: boolean;
 	pairedToolUse?: ToolUseChatMessage;
-	permissionWrapperRowId?: string;
 	layout?: 'standard' | 'permission';
 }
 
@@ -29,7 +28,6 @@ export type ConversationFeedRenderItem =
 			id: string;
 			notice: LocalNoticeRow;
 			index: number;
-			duplicateOfRowId?: string;
 	  };
 
 export interface ConversationFeedRenderModel {

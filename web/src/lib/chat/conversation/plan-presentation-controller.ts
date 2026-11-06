@@ -36,20 +36,22 @@ export class PlanPresentationController {
 	refresh(request: PlanPresentationRequest, revision: number, knownThrough: number | null = null): void {
 		if (!this.port.isCurrent(request)) return;
 		const previous = this.#chats.get(request.chatId);
-		if (previous?.identity === this.#identity(request) && previous.revision >= revision) return;
-		if (previous?.identity === this.#identity(request)) request = { ...request, afterOrdinal: previous.request.afterOrdinal };
+		const sameIdentity = previous?.identity === this.#identity(request);
+		if (sameIdentity && previous.revision >= revision) return;
+		if (sameIdentity) request = { ...request, afterOrdinal: previous.request.afterOrdinal };
 		const refresh = this.#begin(request, revision, knownThrough);
 		void this.#read(request, refresh);
 	}
 	install(snapshot: PlanPresentationSnapshot): void {
 		if (!this.port.isCurrent(snapshot)) return;
 		const previous = this.#chats.get(snapshot.chatId);
-		if (previous?.identity === this.#identity(snapshot) && previous.revision > snapshot.revision) return;
-		if (previous?.identity === this.#identity(snapshot) && previous.revision === snapshot.revision && previous.snapshot) {
+		const sameIdentity = previous?.identity === this.#identity(snapshot);
+		if (sameIdentity && previous.revision > snapshot.revision) return;
+		if (sameIdentity && previous.revision === snapshot.revision && previous.snapshot) {
 			if (!previous.loading) void this.#select(snapshot.chatId, previous);
 			return;
 		}
-		if (previous?.identity === this.#identity(snapshot) && previous.request.afterOrdinal) {
+		if (sameIdentity && previous.request.afterOrdinal) {
 			this.refresh(previous.request, snapshot.revision);
 			return;
 		}

@@ -70,17 +70,13 @@ export interface EventRouterAgentSettings {
 
 export type EventRouterSessionsStore = Pick<
 	ChatSessionsPort,
-	| 'byId'
 	| 'selectedChat'
-	| 'setSelectedChatId'
 	| 'patchPreview'
 	| 'patchActivity'
 	| 'quietRefreshChats'
 	| 'removeChat'
 	| 'patchChat'
-	| 'reconcileProcessing'
 	| 'isChatProcessing'
-	| 'applyProcessingEvent'
 	| 'patchLastReadAt'
 >;
 
@@ -91,7 +87,7 @@ export interface EventRouterNavigation {
 
 export type EventRouterChatStateStore = Pick<
 	ActiveTranscriptPort,
-	'getCursor' | 'appendLocalNotice' | 'appendServerNotice' | 'loadMessages'
+	'appendLocalNotice' | 'appendServerNotice'
 > & {
 	getChatCursor: (chatId: string) => { transcriptViewId: string; lastOrdinal: number } | null;
 	reloadChatTranscript: (chatId: string) => void;
@@ -109,11 +105,7 @@ export type EventRouterChatStateStore = Pick<
 export interface EventRouterLifecycleStore {
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	markTurnRunning: (chatId?: string | null) => void;
 	clearTurnStatus: (chatId: string) => void;
-	setLoadingStatus: (
-		status: { text: string; tokens: number; can_interrupt: boolean } | null,
-	) => void;
 	pushLoadingStatus: (
 		chatId: string,
 		entry: import('$lib/chat/conversation/conversation-lifecycle-state.svelte.js').LoadingStatusEntry,
@@ -281,12 +273,12 @@ function buildDispatch(
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
-						handleAgentComplete(msg, lifecycleCtx);
+				handleAgentComplete(msg, lifecycleCtx);
 			}
 		},
 		'agent-run-failed': (msg) => {
 			if (msg instanceof AgentRunFailedMessage) {
-						handleAgentError(msg, lifecycleCtx);
+				handleAgentError(msg, lifecycleCtx);
 			}
 		},
 
@@ -295,7 +287,7 @@ function buildDispatch(
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {
-						handleChatAborted(msg, chatEventCtx);
+				handleChatAborted(msg, chatEventCtx);
 			}
 		},
 
@@ -314,7 +306,7 @@ function buildDispatch(
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {
-						handleWsError(msg, chatEventCtx);
+				handleWsError(msg, chatEventCtx);
 			}
 		},
 
@@ -433,6 +425,6 @@ export function createEventRouter(
 				if (handler) handler(event.message);
 			}
 
-			});
+		});
 	});
 }

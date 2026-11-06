@@ -27,7 +27,6 @@
 		controller: ConversationFeedVirtualController;
 		retention: ConversationFeedRetentionState;
 		renderModel: ConversationFeedRenderModel;
-		showThinking: boolean;
 		pendingPermissionRequests: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		earlierPageState: TranscriptPageState;
@@ -54,7 +53,6 @@
 		controller,
 		retention,
 		renderModel,
-		showThinking,
 		pendingPermissionRequests,
 		chatContext = null,
 		earlierPageState,
@@ -107,7 +105,6 @@
 		<ConversationFeedVirtualItem
 			{item}
 			{renderModel}
-			{showThinking}
 			{pendingPermissionRequests}
 			{chatContext}
 			{earlierPageState}

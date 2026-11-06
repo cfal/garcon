@@ -31,7 +31,6 @@ export type ReconnectConversationUiState = Pick<
 	| 'setExecutionControlFromRefresh'
 	| 'markExecutionControlSocketDisconnected'
 	| 'confirmExecutionControlSocketInstance'
-	| 'setTransientFeedFromSnapshot'
 >;
 
 export interface ChatReconnectCoordinatorOptions {

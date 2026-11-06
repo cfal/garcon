@@ -31,8 +31,7 @@ export function displayRenderModel(snapshot: DisplayWindowSnapshot, bodies: Disp
 		const use = message(detail.pairedUse), result = message(detail.pairedResult);
 		const item: ConversationFeedMessageRenderItem = { kind: 'message', id: id(ordinal), ordinal, message: body, index: model.items.length,
 			layout: retained?.layout ?? descriptors.get(ordinal)?.layout ?? 'standard',
-			...(use && isToolUseMessage(use) ? { pairedToolUse: use } : {}),
-			...(detail.questionWrapper !== null ? { permissionWrapperRowId: id(detail.questionWrapper) } : {}) };
+			...(use && isToolUseMessage(use) ? { pairedToolUse: use } : {}) };
 		model.items.push(item);
 		if (result instanceof ToolResultMessage) {
 			model.toolResultByUseRowId.set(item.id, result);

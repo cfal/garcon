@@ -99,7 +99,6 @@
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		onDismissPlan?: () => void;
-		showThinking?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
@@ -131,7 +130,6 @@
 		onPermissionDecision,
 		onExitPlanMode,
 		onDismissPlan,
-		showThinking = true,
 		chatContext = null,
 		onForkChat,
 		onClearBefore,
@@ -163,7 +161,9 @@
 		};
 	});
 	const executorId = $derived(
-		(message.type === 'command-output' ? message.context?.executorId : activeChatContext?.executorId) ??
+		(message.type === 'command-output'
+			? message.context?.executorId
+			: activeChatContext?.executorId) ??
 			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.executorId : null) ??
 			'local',
 	);
@@ -178,8 +178,6 @@
 	});
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
-
-	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
 	function getCssType(msg: ChatMessage): string {
 		if (isToolUseMessage(msg)) return 'tool';
@@ -238,7 +236,11 @@
 	const showNonAssistantHeader = $derived(Boolean(asError));
 
 	function getFormattedContent(): string {
-		if (message instanceof AssistantMessage || message instanceof ErrorMessage || message.type === 'command-output') {
+		if (
+			message instanceof AssistantMessage ||
+			message instanceof ErrorMessage ||
+			message.type === 'command-output'
+		) {
 			return String(message.content || '');
 		}
 		return '';
@@ -490,7 +492,9 @@
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
 		if (!filesAvailable) {
-			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
+			notifications.error(m.file_command_executor_unavailable(), {
+				key: 'file-executor-unavailable',
+			});
 			return true;
 		}
 		if (!projectBasePath) {
@@ -572,57 +576,56 @@
 	</button>
 {/snippet}
 
-{#if !shouldHideThinking}
-	<div
-		class={messageClass}
-		data-chat-row-id={rowId}
-		data-chat-anchor-id={anchorId}
-		data-chat-message-type={message.type}
-	>
-		{#if asUser}
-			<div
-				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
-				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
-				style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
-				style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
-			>
-				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
-					<ContextMenuTrigger
-						bind:ref={messageMenuTriggerRef}
-						oncontextmenucapture={captureMessageSelection}
-						class={cn(
-							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
-							!userMessagePresentation?.style &&
-								'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
-							userMessageSurfaceClass,
-						)}
-						data-user-message-presentation={userMessagePresentation?.style}
-					>
-						<div>
-							{#if userMessagePresentation?.style}
-								<CliPresentationHeader
-									style={userMessagePresentation.style}
-									title={userMessagePresentation.title}
-								/>
-							{/if}
-							<CollapsibleBody
-								disclosure={userMessageDisclosure}
-								previewHeight={userMessagePresentation?.style ? 'default' : 'tall'}
-								alwaysExpanded={Boolean(userMessagePresentation) &&
-									localSettings.alwaysExpandCliMessages}
-								expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}
-								onExpandedChange={disclosureState
-									? (expanded) =>
-											disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
-									: undefined}
+<div
+	class={messageClass}
+	data-chat-row-id={rowId}
+	data-chat-anchor-id={anchorId}
+	data-chat-message-type={message.type}
+>
+	{#if asUser}
+		<div
+			class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
+			data-message-menu-open={messageMenuOpen ? 'true' : undefined}
+			style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
+			style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
+		>
+			<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
+				<ContextMenuTrigger
+					bind:ref={messageMenuTriggerRef}
+					oncontextmenucapture={captureMessageSelection}
+					class={cn(
+						'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
+						!userMessagePresentation?.style &&
+							'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
+						userMessageSurfaceClass,
+					)}
+					data-user-message-presentation={userMessagePresentation?.style}
+				>
+					<div>
+						{#if userMessagePresentation?.style}
+							<CliPresentationHeader
+								style={userMessagePresentation.style}
+								title={userMessagePresentation.title}
+							/>
+						{/if}
+						<CollapsibleBody
+							disclosure={userMessageDisclosure}
+							previewHeight={userMessagePresentation?.style ? 'default' : 'tall'}
+							alwaysExpanded={Boolean(userMessagePresentation) &&
+								localSettings.alwaysExpandCliMessages}
+							expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}
+							onExpandedChange={disclosureState
+								? (expanded) =>
+										disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
+								: undefined}
+						>
+							<div
+								class={['typography-chat-prose text-sm', userMessagePresentation?.style && 'mt-1']}
 							>
-								<div
-									class={['typography-chat-prose text-sm', userMessagePresentation?.style && 'mt-1']}
-								>
-									{#if isPlainTextInput(asUser)}
-										<pre
-											class="typography-chat-plain whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
-									{:else}
+								{#if isPlainTextInput(asUser)}
+									<pre
+										class="typography-chat-plain whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
+								{:else}
 									<Markdown
 										source={asUser.content}
 										variant={userMessagePresentation?.style ? 'presented' : 'user'}
@@ -633,204 +636,207 @@
 										chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
 										{acquireTransientActivity}
 									/>
-									{/if}
-								</div>
-							</CollapsibleBody>
-							{#if asUser.images && asUser.images.length > 0}
-								<div class="mt-2 grid grid-cols-2 gap-2">
-									{#each asUser.images as img, idx (idx)}
-										{#if isImageAttachment(img)}
-											<img
-												src={img.data}
-												alt={img.name}
-												class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+								{/if}
+							</div>
+						</CollapsibleBody>
+						{#if asUser.images && asUser.images.length > 0}
+							<div class="mt-2 grid grid-cols-2 gap-2">
+								{#each asUser.images as img, idx (idx)}
+									{#if isImageAttachment(img)}
+										<img
+											src={img.data}
+											alt={img.name}
+											class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+										/>
+									{:else}
+										<div
+											class="user-message-attachment flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-foreground"
+										>
+											<FileText
+												class="h-4 w-4 flex-shrink-0 text-muted-foreground"
+												aria-hidden="true"
 											/>
-										{:else}
-											<div
-												class="user-message-attachment flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-foreground"
-											>
-												<FileText
-													class="h-4 w-4 flex-shrink-0 text-muted-foreground"
-													aria-hidden="true"
-												/>
-												<span class="truncate text-xs">{img.name}</span>
-											</div>
-										{/if}
-									{/each}
+											<span class="truncate text-xs">{img.name}</span>
+										</div>
+									{/if}
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</ContextMenuTrigger>
+				<ContextMenuContent
+					bind:ref={messageMenuContentRef}
+					onInteractOutside={closeMessageMenuFromInteractOutside}
+				>
+					<MessageActionMenu
+						hasSelection={hasMessageSelection}
+						canFork={Boolean(onForkChat && forkUpToSeq)}
+						onClearBefore={onClearBefore && forkUpToSeq !== undefined
+							? () => onClearBefore?.(forkUpToSeq!)
+							: undefined}
+						canForkNow={canForkAtMessageNow}
+						onFork={handleFork}
+						onCopy={copyText}
+						onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
+						onSendToNewSession={sendToNewSession}
+						onSelectText={openSelectTextDialog}
+						onGenerateTitleFromMessage={canGenerateTitleFromMessage
+							? generateTitleFromCurrentMessage
+							: undefined}
+					/>
+				</ContextMenuContent>
+			</ContextMenu>
+			<div
+				class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
+			>
+				{#if awaitingDelivery}
+					<LoaderCircle
+						class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
+						aria-label={m.chat_message_delivery_sending()}
+					/>
+				{:else}
+					{@render floatingMessageMenuButton('bottom-0 right-0')}
+				{/if}
+			</div>
+		</div>
+	{:else}
+		<div class="w-full">
+			{#if showNonAssistantHeader}
+				<div class="flex items-center space-x-3 mb-2">
+					<div
+						class="w-8 h-8 bg-status-error rounded-full flex items-center justify-center text-status-error-foreground text-sm flex-shrink-0"
+					>
+						!
+					</div>
+					<div class="text-sm font-medium text-foreground">
+						{m.chat_message_error()}
+					</div>
+				</div>
+			{/if}
+
+			<div class="w-full">
+				{#if asToolUse && asToolUse.type === 'enter-plan-mode-tool-use'}
+					<ChatEventCard variant="info" compact>
+						{#snippet body()}
+							<span class="text-xs font-medium">
+								{m.chat_message_entered_plan_mode()}
+							</span>
+						{/snippet}
+					</ChatEventCard>
+				{:else if exitPlanPermissionRequest}
+					<PermissionRequestRow
+						request={exitPlanPermissionRequest}
+						terminal={permissionTerminal}
+						actionable={permissionActionable}
+						onDecision={onPermissionDecision ?? ignorePermissionDecision}
+						{onExitPlanMode}
+						{onDismissPlan}
+						{chatContext}
+						draft={permissionDraft?.(exitPlanPermissionRequest.permissionOccurrenceId)}
+						{acquireTransientActivity}
+						onDraftChange={onPermissionDraftChange
+							? (draft) =>
+									onPermissionDraftChange(exitPlanPermissionRequest.permissionOccurrenceId, draft)
+							: undefined}
+					/>
+				{:else if historicalQuestion}
+					<PermissionRequestRow
+						request={historicalQuestion.request}
+						terminal={historicalQuestion.terminal}
+						onDecision={ignorePermissionDecision}
+						{chatContext}
+						{acquireTransientActivity}
+					/>
+				{:else if asToolUse}
+					<ChatToolEventRenderer
+						toolMessage={asToolUse}
+						toolResult={toolResult
+							? { content: toolResult.content, isError: toolResult.isError }
+							: undefined}
+						mode="input"
+						resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
+						autoExpandTools={localSettings.autoExpandTools}
+						onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
+						{resolveImageFile}
+						{projectBasePath}
+						{chatProjectPath}
+						{resolveChatReference}
+						{disclosureState}
+						{acquireTransientActivity}
+					/>
+					{#if toolResult && disclosureState?.open('tool-result', 'attached', false)}
+						<ChatToolExpandableEvent
+							toolName=""
+							title={m.chat_tool_result()}
+							toolId={`attached-${rowId}`}
+							open={true}
+							onOpenChange={(open) =>
+								disclosureState?.setOpen('tool-result', 'attached', open, false)}
+						>
+							<CodeBlock text={extractContentString(toolResult.content)} />
+						</ChatToolExpandableEvent>
+					{/if}
+				{:else if asToolResult && pairedToolUse}
+					<ChatToolEventRenderer
+						toolMessage={pairedToolUse}
+						toolResult={{ content: asToolResult.content, isError: asToolResult.isError }}
+						mode="result"
+						resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
+						autoExpandTools={localSettings.autoExpandTools}
+						onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
+						{resolveImageFile}
+						{projectBasePath}
+						{chatProjectPath}
+						{resolveChatReference}
+						{disclosureState}
+						{acquireTransientActivity}
+					/>
+				{:else if asThinking}
+					<ChatEventCard variant="thinking" compact>
+						{#snippet body()}
+							<button
+								type="button"
+								class="flex w-full items-center gap-2 text-left cursor-pointer"
+								onclick={toggleThinking}
+								aria-expanded={thinkingOpen}
+							>
+								<span class="text-xs font-medium text-muted-foreground"
+									>{m.chat_message_thinking()}</span
+								>
+								<ChevronRight
+									class="ml-auto w-3 h-3 transition-transform {thinkingOpen ? 'rotate-90' : ''}"
+								/>
+							</button>
+							{#if thinkingOpen}
+								<div class="typography-chat-prose mt-0.5 text-sm text-foreground/90">
+									<Markdown
+										source={asThinking.content}
+										variant="thinking"
+										fileLinkBasePath={projectBasePath}
+										onLinkNavigate={handleLinkNavigate}
+										{resolveImageFile}
+										{resolveChatReference}
+										chatReferencePolicy="explicit"
+										{acquireTransientActivity}
+									/>
 								</div>
 							{/if}
-						</div>
-					</ContextMenuTrigger>
-					<ContextMenuContent
-						bind:ref={messageMenuContentRef}
-						onInteractOutside={closeMessageMenuFromInteractOutside}
-					>
-						<MessageActionMenu
-							hasSelection={hasMessageSelection}
-							canFork={Boolean(onForkChat && forkUpToSeq)}
-							onClearBefore={onClearBefore && forkUpToSeq !== undefined ? () => onClearBefore?.(forkUpToSeq!) : undefined}
-							canForkNow={canForkAtMessageNow}
-							onFork={handleFork}
-							onCopy={copyText}
-							onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
-							onSendToNewSession={sendToNewSession}
-							onSelectText={openSelectTextDialog}
-							onGenerateTitleFromMessage={canGenerateTitleFromMessage
-								? generateTitleFromCurrentMessage
-								: undefined}
-						/>
-					</ContextMenuContent>
-				</ContextMenu>
-				<div
-					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
-				>
-					{#if awaitingDelivery}
-						<LoaderCircle
-							class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
-							aria-label={m.chat_message_delivery_sending()}
-						/>
-					{:else}
-						{@render floatingMessageMenuButton('bottom-0 right-0')}
-					{/if}
-				</div>
-			</div>
-		{:else}
-			<div class="w-full">
-				{#if showNonAssistantHeader}
-					<div class="flex items-center space-x-3 mb-2">
-						<div
-							class="w-8 h-8 bg-status-error rounded-full flex items-center justify-center text-status-error-foreground text-sm flex-shrink-0"
+						{/snippet}
+					</ChatEventCard>
+				{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
+					<CommandStatusRow {message} />
+				{:else if asAssistant || asCommandOutput}
+					<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
+						<ContextMenuTrigger
+							bind:ref={messageMenuTriggerRef}
+							oncontextmenucapture={captureMessageSelection}
+							class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
 						>
-							!
-						</div>
-						<div class="text-sm font-medium text-foreground">
-							{m.chat_message_error()}
-						</div>
-					</div>
-				{/if}
-
-				<div class="w-full">
-					{#if asToolUse && asToolUse.type === 'enter-plan-mode-tool-use'}
-						<ChatEventCard variant="info" compact>
-							{#snippet body()}
-								<span class="text-xs font-medium">
-									{m.chat_message_entered_plan_mode()}
-								</span>
-							{/snippet}
-						</ChatEventCard>
-					{:else if exitPlanPermissionRequest}
-						<PermissionRequestRow
-							request={exitPlanPermissionRequest}
-							terminal={permissionTerminal}
-							actionable={permissionActionable}
-							onDecision={onPermissionDecision ?? ignorePermissionDecision}
-							{onExitPlanMode}
-							{onDismissPlan}
-							{chatContext}
-							draft={permissionDraft?.(exitPlanPermissionRequest.permissionOccurrenceId)}
-							{acquireTransientActivity}
-							onDraftChange={onPermissionDraftChange
-								? (draft) =>
-										onPermissionDraftChange(exitPlanPermissionRequest.permissionOccurrenceId, draft)
-								: undefined}
-						/>
-					{:else if historicalQuestion}
-						<PermissionRequestRow
-							request={historicalQuestion.request}
-							terminal={historicalQuestion.terminal}
-							onDecision={ignorePermissionDecision}
-							{chatContext}
-							{acquireTransientActivity}
-						/>
-					{:else if asToolUse}
-						<ChatToolEventRenderer
-							toolMessage={asToolUse}
-							toolResult={toolResult
-								? { content: toolResult.content, isError: toolResult.isError }
-								: undefined}
-							mode="input"
-							resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
-							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
-							{resolveImageFile}
-							{projectBasePath}
-							{chatProjectPath}
-							{resolveChatReference}
-							{disclosureState}
-							{acquireTransientActivity}
-						/>
-						{#if toolResult && disclosureState?.open('tool-result', 'attached', false)}
-							<ChatToolExpandableEvent
-								toolName=""
-								title={m.chat_tool_result()}
-								toolId={`attached-${rowId}`}
-								open={true}
-								onOpenChange={open => disclosureState?.setOpen('tool-result', 'attached', open, false)}
-							>
-								<CodeBlock text={extractContentString(toolResult.content)} />
-							</ChatToolExpandableEvent>
-						{/if}
-					{:else if asToolResult && pairedToolUse}
-						<ChatToolEventRenderer
-							toolMessage={pairedToolUse}
-							toolResult={{ content: asToolResult.content, isError: asToolResult.isError }}
-							mode="result"
-							resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
-							autoExpandTools={localSettings.autoExpandTools}
-							onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
-							{resolveImageFile}
-							{projectBasePath}
-							{chatProjectPath}
-							{resolveChatReference}
-							{disclosureState}
-							{acquireTransientActivity}
-						/>
-					{:else if asThinking}
-						<ChatEventCard variant="thinking" compact>
-							{#snippet body()}
-								<button
-									type="button"
-									class="flex w-full items-center gap-2 text-left cursor-pointer"
-									onclick={toggleThinking}
-									aria-expanded={thinkingOpen}
-								>
-									<span class="text-xs font-medium text-muted-foreground"
-										>{m.chat_message_thinking()}</span
-									>
-									<ChevronRight
-										class="ml-auto w-3 h-3 transition-transform {thinkingOpen ? 'rotate-90' : ''}"
-									/>
-								</button>
-								{#if thinkingOpen}
-									<div class="typography-chat-prose mt-0.5 text-sm text-foreground/90">
-										<Markdown
-											source={asThinking.content}
-											variant="thinking"
-											fileLinkBasePath={projectBasePath}
-											onLinkNavigate={handleLinkNavigate}
-											{resolveImageFile}
-											{resolveChatReference}
-											chatReferencePolicy="explicit"
-											{acquireTransientActivity}
-										/>
-									</div>
-								{/if}
-							{/snippet}
-						</ChatEventCard>
-					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
-						<CommandStatusRow {message} />
-					{:else if asAssistant || asCommandOutput}
-						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
-							<ContextMenuTrigger
-								bind:ref={messageMenuTriggerRef}
-								oncontextmenucapture={captureMessageSelection}
-								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
-							>
-								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
-									<div class="typography-chat-prose px-px text-sm text-foreground">
-										{#if plainResponse}
-											<CodeBlock text={formattedContent} />
-										{:else}
+							<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
+								<div class="typography-chat-prose px-px text-sm text-foreground">
+									{#if plainResponse}
+										<CodeBlock text={formattedContent} />
+									{:else}
 										<Markdown
 											source={formattedContent}
 											variant="assistant"
@@ -841,98 +847,97 @@
 											chatReferencePolicy="explicit-and-bare"
 											{acquireTransientActivity}
 										/>
-										{/if}
-									</div>
-									{@render floatingMessageMenuButton('-bottom-1 right-1')}
+									{/if}
 								</div>
-							</ContextMenuTrigger>
-							<ContextMenuContent
-								bind:ref={messageMenuContentRef}
-								onInteractOutside={closeMessageMenuFromInteractOutside}
-							>
-								<MessageActionMenu
-									hasSelection={hasMessageSelection}
-									canFork={Boolean(onForkChat && forkUpToSeq)}
-									canForkNow={canForkAtMessageNow}
-									onFork={handleFork}
-									onCopy={copyText}
-									onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
-									onSendToNewSession={sendToNewSession}
-									onSelectText={openSelectTextDialog}
-									onGenerateTitleFromMessage={canGenerateTitleFromMessage
-										? generateTitleFromCurrentMessage
-										: undefined}
-								/>
-							</ContextMenuContent>
-						</ContextMenu>
-					{:else if asCliRow}
-						<CliRow
-							message={asCliRow}
-							fileLinkBasePath={projectBasePath}
-							onLinkNavigate={handleLinkNavigate}
-							{resolveImageFile}
-							{resolveChatReference}
-							{acquireTransientActivity}
-							alwaysExpanded={localSettings.alwaysExpandCliMessages}
-							{disclosureState}
-						/>
-					{:else if asNotice}
-						<TranscriptNoticeRow
-							message={asNotice}
-							onOpenTicket={(id) => workspace.openTicket(id)}
-							fileLinkBasePath={projectBasePath}
-							onLinkNavigate={handleLinkNavigate}
-							{resolveImageFile}
-							{acquireTransientActivity}
-							{disclosureState}
-							{resolveChatReference}
-						/>
-					{:else if asError}
-						<ChatEventCard variant="error">
-							{#snippet body()}
-								<div class="typography-chat-prose text-sm whitespace-pre-wrap break-words">
-									{formattedContent}
-								</div>
-							{/snippet}
-						</ChatEventCard>
-					{:else if asCompaction}
-						<CompactionRow
-							message={asCompaction}
-							{projectBasePath}
-							onLinkNavigate={handleLinkNavigate}
-							{resolveImageFile}
-							{resolveChatReference}
-							{acquireTransientActivity}
-							open={disclosureState?.open('compaction', 'compaction', false)}
-							onOpenChange={disclosureState
-								? (open) => disclosureState.setOpen('compaction', 'compaction', open, false)
-								: undefined}
-						/>
-					{:else if asAgentSwitch}
-						<AgentSwitchRow message={asAgentSwitch} />
-					{:else if asPermissionRequest}
-						<PermissionRequestRow
-							request={asPermissionRequest}
-							terminal={permissionTerminal}
-							actionable={permissionActionable}
-							onDecision={onPermissionDecision ?? ignorePermissionDecision}
-							{onExitPlanMode}
-							{chatContext}
-							draft={permissionDraft?.(asPermissionRequest.permissionOccurrenceId)}
-							{acquireTransientActivity}
-							onDraftChange={onPermissionDraftChange
-								? (draft) =>
-										onPermissionDraftChange(asPermissionRequest.permissionOccurrenceId, draft)
-								: undefined}
-						/>
-					{/if}
-				</div>
+								{@render floatingMessageMenuButton('-bottom-1 right-1')}
+							</div>
+						</ContextMenuTrigger>
+						<ContextMenuContent
+							bind:ref={messageMenuContentRef}
+							onInteractOutside={closeMessageMenuFromInteractOutside}
+						>
+							<MessageActionMenu
+								hasSelection={hasMessageSelection}
+								canFork={Boolean(onForkChat && forkUpToSeq)}
+								canForkNow={canForkAtMessageNow}
+								onFork={handleFork}
+								onCopy={copyText}
+								onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
+								onSendToNewSession={sendToNewSession}
+								onSelectText={openSelectTextDialog}
+								onGenerateTitleFromMessage={canGenerateTitleFromMessage
+									? generateTitleFromCurrentMessage
+									: undefined}
+							/>
+						</ContextMenuContent>
+					</ContextMenu>
+				{:else if asCliRow}
+					<CliRow
+						message={asCliRow}
+						fileLinkBasePath={projectBasePath}
+						onLinkNavigate={handleLinkNavigate}
+						{resolveImageFile}
+						{resolveChatReference}
+						{acquireTransientActivity}
+						alwaysExpanded={localSettings.alwaysExpandCliMessages}
+						{disclosureState}
+					/>
+				{:else if asNotice}
+					<TranscriptNoticeRow
+						message={asNotice}
+						onOpenTicket={(id) => workspace.openTicket(id)}
+						fileLinkBasePath={projectBasePath}
+						onLinkNavigate={handleLinkNavigate}
+						{resolveImageFile}
+						{acquireTransientActivity}
+						{disclosureState}
+						{resolveChatReference}
+					/>
+				{:else if asError}
+					<ChatEventCard variant="error">
+						{#snippet body()}
+							<div class="typography-chat-prose text-sm whitespace-pre-wrap break-words">
+								{formattedContent}
+							</div>
+						{/snippet}
+					</ChatEventCard>
+				{:else if asCompaction}
+					<CompactionRow
+						message={asCompaction}
+						{projectBasePath}
+						onLinkNavigate={handleLinkNavigate}
+						{resolveImageFile}
+						{resolveChatReference}
+						{acquireTransientActivity}
+						open={disclosureState?.open('compaction', 'compaction', false)}
+						onOpenChange={disclosureState
+							? (open) => disclosureState.setOpen('compaction', 'compaction', open, false)
+							: undefined}
+					/>
+				{:else if asAgentSwitch}
+					<AgentSwitchRow message={asAgentSwitch} />
+				{:else if asPermissionRequest}
+					<PermissionRequestRow
+						request={asPermissionRequest}
+						terminal={permissionTerminal}
+						actionable={permissionActionable}
+						onDecision={onPermissionDecision ?? ignorePermissionDecision}
+						{onExitPlanMode}
+						{chatContext}
+						draft={permissionDraft?.(asPermissionRequest.permissionOccurrenceId)}
+						{acquireTransientActivity}
+						onDraftChange={onPermissionDraftChange
+							? (draft) =>
+									onPermissionDraftChange(asPermissionRequest.permissionOccurrenceId, draft)
+							: undefined}
+					/>
+				{/if}
 			</div>
-		{/if}
-	</div>
-{/if}
+		</div>
+	{/if}
+</div>
 
-{#if !shouldHideThinking && messageMenuText}
+{#if messageMenuText}
 	<MessageTextSelectionDialog
 		open={selectTextDialogOpen}
 		text={messageMenuText}
