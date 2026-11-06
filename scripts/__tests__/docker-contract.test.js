@@ -77,6 +77,10 @@ describe('Docker contract', () => {
     }
   });
 
+  test('excludes native client tooling from the server image install', () => {
+    expect(dockerfile).toContain("RUN bun install --frozen-lockfile --filter '!garcon-native'");
+  });
+
   test('installs the HTTP CLI independently of container working directory', async () => {
     expect(dockerfile).toContain('COPY cli/ cli/');
     expect(dockerfile).toContain('COPY --from=build /app/cli/ cli/');
