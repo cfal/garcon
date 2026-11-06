@@ -86,9 +86,16 @@ function appendFeature(store: DisplayStore, row: LedgerRow, message: ChatMessage
   }
   const tool = message && isToolUseMessage(message) ? message : null;
   const type = tool?.type ?? paired?.tool_type;
-  const id = role === 'hidden' ? null : classId({ role, group: type ? toolHideGroup(type) : null,
-    category: role === 'member' && tool ? toolSummaryCategory(tool.type) : null,
-    thinking: message?.type === 'thinking', bash: type === 'bash-tool-use' });
+  let id: number | null = null;
+  if (role !== 'hidden') {
+    id = classId({
+      role,
+      group: type ? toolHideGroup(type) : null,
+      category: role === 'member' && tool ? toolSummaryCategory(tool.type) : null,
+      thinking: message?.type === 'thinking',
+      bash: type === 'bash-tool-use',
+    });
+  }
   store.run('INSERT INTO feature VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', ordinal, role, id, message?.type ?? null,
     message && 'permissionOccurrenceId' in message ? message.permissionOccurrenceId : null,
     message && 'commandId' in message ? message.commandId : null,

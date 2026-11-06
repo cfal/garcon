@@ -104,4 +104,38 @@ describe('transcript event fanout', () => {
     expect(JSON.stringify(sent[100]).length).toBeLessThan(1024);
     expect(sent[100]).not.toHaveProperty('messages');
   });
+
+  it.each([
+    ['increasing timestamps', [at, '2026-08-12T00:00:01.000Z'], '2026-08-12T00:00:01.000Z'],
+    ['decreasing timestamps', ['2026-08-12T00:00:01.000Z', at], '2026-08-12T00:00:01.000Z'],
+    ['equal timestamps', [at, at], at],
+    ['private rows around a public row', [null, at, null], at],
+    ['only private rows', [null, null], null],
+  ])('retains the latest presented activity across %s', (_name, timestamps, expected) => {
+    const broadcast = mock(() => undefined);
+    const fanout = createTranscriptEventFanout({
+      serverInstanceId: 'server-1', chatExists: () => true,
+      schedule: (_chatId, task) => task(), broadcast,
+      updateMetadata: () => {}, replaceMetadata: async () => {},
+      planRevision: () => 0, auxiliaryRevision: () => 0,
+    });
+    try {
+      for (const [index, timestamp] of timestamps.entries()) {
+        const row = timestamp === null
+          ? { kind: 'notice', message: 'Synthetic private notice', detail: { type: 'chat-id-request' } }
+          : { kind: 'provider-row', message: new AssistantMessage(timestamp, 'Synthetic response') };
+        fanout({ type: 'rows', chatId: 'chat-1', viewId: transcriptViewId('view-1'),
+          rows: [{ ...row, ordinal: index + 1, at, providerMeta: null }] });
+      }
+      expect(broadcast).not.toHaveBeenCalled();
+      fanout.flushAll();
+      expect(broadcast).toHaveBeenCalledTimes(1);
+      expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
+        sourceHead: timestamps.length,
+        presentedActivityAt: expected,
+      }));
+    } finally {
+      fanout.forget('chat-1');
+    }
+  });
 });

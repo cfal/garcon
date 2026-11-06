@@ -1,3 +1,6 @@
+import { isErrorCode } from '../../../common/error-codes.js';
+import { UNDECODABLE_LEDGER_ROW } from '../ledger/errors.js';
+
 export function displayErrorCode(error: unknown): string {
   const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : '';
   if (code === 'SQLITE_FULL' || code === 'ENOSPC') return 'DISPLAY_DISK_FULL';
@@ -13,6 +16,3 @@ export function transientDisplayFailure(code: string): boolean {
 export function invalidDisplayStore(message: string): Error {
   return Object.assign(new Error(message), { code: 'DISPLAY_STORE_INVALID' });
 }
-import { isErrorCode } from '../../../common/error-codes.js';
-import { UNDECODABLE_LEDGER_ROW } from '../ledger/errors.js';
-

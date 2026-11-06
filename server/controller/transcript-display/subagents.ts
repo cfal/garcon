@@ -37,9 +37,7 @@ export function prepareSubagentFrame(store: DisplayStore, goal: number): number 
     }
     const generation = control.building, port = reductionPort(store, generation);
     const facts = readFacts(store, control.cursor, generation);
-    let bytes = 0, processed = 0;
     for (const fact of facts) {
-      if (processed && bytes + fact.payload_json.length * 2 > 256 * 1024) break;
       const message = parseChatMessage(JSON.parse(fact.payload_json));
       if (!(message instanceof CodexSubagentToolUseMessage)) throw new Error('Invalid subagent fact');
       if (control.phase === 'aliases') {
@@ -47,7 +45,7 @@ export function prepareSubagentFrame(store: DisplayStore, goal: number): number 
           store.run('INSERT OR IGNORE INTO auxiliary_known_alias VALUES (?, ?)', generation, alias);
         }
       } else control.event_order = reduceSubagentMessage(port, message, fact.ordinal, control.event_order);
-      control.cursor = fact.ordinal; bytes += fact.payload_json.length * 2; processed++;
+      control.cursor = fact.ordinal;
     }
     if (!store.get('SELECT ordinal FROM auxiliary_fact INDEXED BY auxiliary_kind WHERE kind = ? AND ordinal > ? AND ordinal <= ? ORDER BY ordinal LIMIT 1', 'use', control.cursor, generation)) {
       control.cursor = 0;
@@ -67,6 +65,7 @@ function readFacts(store: DisplayStore, after: number, through: number): Fact[] 
   let bytes = 0;
   try {
     for (const fact of query.iterate('use', after, through)) {
+      if (facts.length && bytes + fact.payload_json.length * 2 > 256 * 1024) break;
       facts.push(fact); bytes += fact.payload_json.length * 2;
       if (bytes >= 256 * 1024) break;
     }

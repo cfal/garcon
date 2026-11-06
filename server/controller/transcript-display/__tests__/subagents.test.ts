@@ -49,6 +49,28 @@ test('an oversized fact cannot publish an incomplete auxiliary prefix', () => {
   } finally { store.close(); }
 });
 
+test.each([256 * 1024, 256 * 1024 - 2])('a %i-byte prefix respects the auxiliary budget in both passes', firstBytes => {
+  const store = new DisplayStore(':memory:');
+  try {
+    store.initialize('chat', 'view', 'server');
+    const first = new CodexSubagentToolUseMessage(at, 'first', 'spawn_agent', { taskName: 'first', message: '' });
+    first.details.message = 'x'.repeat(firstBytes / 2 - JSON.stringify(first).length);
+    expect(JSON.stringify(first).length * 2).toBe(firstBytes);
+    appendSubagentFact(store, 1, first);
+    appendSubagentFact(store, 2, new CodexSubagentToolUseMessage(at, 'second', 'spawn_agent', { taskName: 'second' }));
+
+    expect(prepareSubagentFrame(store, 2)).toBe(0);
+    expect(store.get('SELECT phase, cursor FROM auxiliary_control')).toEqual({ phase: 'aliases', cursor: 1 });
+    expect(prepareSubagentFrame(store, 2)).toBe(0);
+    expect(store.get('SELECT phase, cursor FROM auxiliary_control')).toEqual({ phase: 'reduce', cursor: 0 });
+    expect(prepareSubagentFrame(store, 2)).toBe(0);
+    expect(store.get('SELECT phase, cursor FROM auxiliary_control')).toEqual({ phase: 'reduce', cursor: 1 });
+    expect(prepareSubagentFrame(store, 2)).toBe(2);
+    expect(store.get('SELECT phase, cursor FROM auxiliary_control')).toEqual({ phase: 'idle', cursor: 0 });
+    expect(store.all('SELECT * FROM auxiliary_entry WHERE generation = 2')).toHaveLength(2);
+  } finally { store.close(); }
+});
+
 test('unrelated appends advance auxiliary coverage without rebuilding its published generation', () => {
   const store = new DisplayStore(':memory:');
   try {
