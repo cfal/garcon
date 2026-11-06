@@ -31,14 +31,18 @@ beforeEach(() => {
 afterEach(() => { chat.dispose(); vi.restoreAllMocks(); });
 
 describe('reloadChatFromNative', () => {
-	it('opens the replacement through the display API and keeps certified earlier pages reachable', async () => {
+	it('leaves replacement projection to the registry rather than reopening a single transcript', async () => {
 		const ws = wsWithResponse(replacement);
-		await expect(reloadChatFromNative(ws, chat, 'chat-1', options())).resolves.toBe('reloaded');
+		await chat.loadMessages('chat-1');
+		api.open.mockClear();
+		const clear = vi.spyOn(chat, 'clearMessages');
+		await expect(reloadChatFromNative(ws, 'chat-1', options())).resolves.toBe('reloaded');
 		expect(ws.sendProgressRequest).toHaveBeenCalledWith(
 			{ type: 'chat-reload', chatId: 'chat-1' },
 			expect.objectContaining({ type: 'chat-reload-progress', idleTimeoutMs: 30_000 }),
 		);
-		expect(api.open).toHaveBeenCalledOnce();
+		expect(api.open).not.toHaveBeenCalled();
+		expect(clear).not.toHaveBeenCalled();
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 100 });
 		expect(chat.entries.map(row => row.ordinal)).toEqual(Array.from({ length: 50 }, (_, index) => index + 51));
 		expect(chat.hasEarlierMessages).toBe(true);
@@ -55,14 +59,14 @@ describe('reloadChatFromNative', () => {
 		{ ...replacement, transcriptViewId: '' },
 	])('keeps the admitted view when reload identity is malformed or unrelated', async response => {
 		chat.installOpen(displayOpen('chat-1', 'generation-1', 10));
-		await expect(reloadChatFromNative(wsWithResponse(response), chat, 'chat-1', options())).rejects.toThrow('Unexpected chat reload response');
+		await expect(reloadChatFromNative(wsWithResponse(response), 'chat-1', options())).rejects.toThrow('Unexpected chat reload response');
 		expect(chat.transcriptViewId).toBe('generation-1');
 		expect(api.open).not.toHaveBeenCalled();
 	});
 
 	it('does not retarget a replacement after switching chats', async () => {
 		const response = Promise.withResolvers<Record<string, unknown>>();
-		const reloading = reloadChatFromNative(wsWithResponse(response.promise), chat, 'chat-1', options());
+		const reloading = reloadChatFromNative(wsWithResponse(response.promise), 'chat-1', options());
 		chat.activateChat('chat-2');
 		response.resolve(replacement);
 		await expect(reloading).resolves.toBe('reloaded');
@@ -74,7 +78,7 @@ describe('reloadChatFromNative', () => {
 		const response = Promise.withResolvers<Record<string, unknown>>();
 		const ws = wsWithResponse(response.promise);
 		const onProgress = vi.fn();
-		const reloading = reloadChatFromNative(ws, chat, 'chat-1', options({ onProgress }));
+		const reloading = reloadChatFromNative(ws, 'chat-1', options({ onProgress }));
 		for (const [chatId, phase, rows] of [['chat-1', 'reading', 1200], ['chat-2', 'saving', 5], ['chat-1', 'unknown', 5]]) {
 			ws.progress().onProgress({ type: 'chat-reload-progress', clientRequestId: 'req-1', chatId, phase, rows });
 		}
@@ -87,7 +91,7 @@ describe('reloadChatFromNative', () => {
 		const response = Promise.withResolvers<Record<string, unknown>>();
 		const ws = wsWithResponse(response.promise);
 		const cancellation = new AbortController();
-		const reloading = reloadChatFromNative(ws, chat, 'chat-1', options({ signal: cancellation.signal }));
+		const reloading = reloadChatFromNative(ws, 'chat-1', options({ signal: cancellation.signal }));
 		cancellation.abort();
 		expect(ws.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
 			type: 'chat-reload-cancel', chatId: 'chat-1', reloadRequestId: 'req-1',
@@ -97,13 +101,12 @@ describe('reloadChatFromNative', () => {
 		expect(api.open).not.toHaveBeenCalled();
 	});
 
-	it('opens a reload that completed despite a late cancellation', async () => {
+	it('reports a reload that completed despite a late cancellation without a second open', async () => {
 		const response = Promise.withResolvers<Record<string, unknown>>();
 		const cancellation = new AbortController();
-		const reloading = reloadChatFromNative(wsWithResponse(response.promise), chat, 'chat-1', options({ signal: cancellation.signal }));
+		const reloading = reloadChatFromNative(wsWithResponse(response.promise), 'chat-1', options({ signal: cancellation.signal }));
 		cancellation.abort(); response.resolve(replacement);
 		await expect(reloading).resolves.toBe('reloaded');
-		expect(chat.transcriptViewId).toBe('generation-2');
-		expect(api.open).toHaveBeenCalledOnce();
+		expect(api.open).not.toHaveBeenCalled();
 	});
 });

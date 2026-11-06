@@ -1,7 +1,32 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { ConversationClearController } from '../conversation-clear-controller.svelte.js';
+import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
+import { displayOpen, DISPLAY_TIME } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it.each([false, true])('uses the authoritative view to reconcile an uncertain Clear, committed=%s', async committed => {
+	const chatId = '1780000000000001';
+	const open = displayOpen(chatId, committed ? 'replacement' : 'view-1', 3);
+	const legacy = { ...open, observedAt: DISPLAY_TIME, messageLimit: 0,
+		transcript: { availability: 'not-requested' }, transientFeed: { ...open.transientFeed, transcriptViewId: 'pending:epoch-1' },
+	} satisfies ChatSnapshotResponse;
+	const fetchMock = vi.fn<typeof fetch>(async url => String(url).endsWith('/clear')
+		? new Response('{', { status: 500 }) : Response.json(String(url).includes('/snapshot?') ? legacy : open));
+	vi.stubGlobal('fetch', fetchMock);
+	const deps = {
+		chatState: { getKnownHeadForChat: () => ({ transcriptViewId: 'view-1', lastOrdinal: 3 }),
+			appendLocalNoticeForChat: vi.fn(), recoverViewReplacement: vi.fn(async () => {}) },
+		composerState: { draftRevision: () => 1, clearAfterSubmit: vi.fn() },
+		sessions: { quietRefreshChats: vi.fn(async () => {}) },
+	} satisfies ConstructorParameters<typeof ConversationClearController>[0];
+	const controller = new ConversationClearController(deps);
+	controller.request(chatId, true);
+	await controller.confirm();
+	expect(deps.chatState.recoverViewReplacement).toHaveBeenCalledTimes(committed ? 1 : 0);
+	expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/chats/transcript-display/open');
+	expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+});
 
 it('captures a panel target without reading global selection or clearing any draft', async () => {
 	const requests: unknown[] = [];
@@ -34,8 +59,8 @@ it('captures a panel target without reading global selection or clearing any dra
 });
 
 it.each([400, 403, 409])('disarms a malformed HTTP %s reply and reconciles without retrying Clear', async status => {
-	const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
-		if (init?.method === 'POST') return new Response('{', { status });
+	const fetchMock = vi.fn<typeof fetch>(async url => {
+		if (String(url).endsWith('/clear')) return new Response('{', { status });
 		throw new TypeError('Synthetic offline reconciliation');
 	});
 	vi.stubGlobal('fetch', fetchMock);
@@ -54,7 +79,7 @@ it.each([400, 403, 409])('disarms a malformed HTTP %s reply and reconciles witho
 	await controller.confirm();
 	expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
 		['/api/v1/chats/clear', 'POST'],
-		['/api/v1/chats/snapshot?chatId=1780000000000001&limit=0', 'GET'],
+		['/api/v1/chats/transcript-display/open', 'POST'],
 	]);
 	expect(controller.isOpen).toBe(false);
 	expect(controller.error).toBeNull();

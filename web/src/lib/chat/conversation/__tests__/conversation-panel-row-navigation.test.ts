@@ -256,6 +256,52 @@ it('navigates after a failed initial open has been retried successfully', async 
 	expect(f.viewport.scrollToTarget).toHaveBeenCalledOnce();
 });
 
+it('preserves a saved reading target until the first successful open', async () => {
+	const f = await fixture(); f.attach();
+	const saved = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 100, viewportOffset: -12 };
+	f.api.open.mockRejectedValueOnce(new Error('Synthetic snapshot failure'));
+	await expect(f.panel.restore(saved)).rejects.toThrow('Synthetic snapshot failure');
+	expect(f.panel.captureRestoreTarget()).toEqual(saved);
+	expect(f.panel.scroll.isPinnedToBottom).toBe(false);
+	await f.registry.loadChatSnapshot(chatId);
+	f.panel.resumePendingRestore();
+	await vi.waitFor(() => expect(f.viewport.scrollToTarget).toHaveBeenCalled());
+	expect(f.viewport.scrollToEnd).not.toHaveBeenCalled();
+});
+
+it('navigates without waiting for a same-chat sibling projection', async () => {
+	const f = await fixture(); f.attach();
+	f.registry.reconcile((['window-one', 'window-two'] as const).map(windowId => ({
+		surfaceId: `chat-view:${windowId}` as const, windowId, presentation: windowId,
+		chatId, snapshotAdmission: 'admitted' as const,
+	})));
+	await f.registry.loadChatSnapshot(chatId);
+	const sibling = f.registry.panel('chat-view:window-two')!;
+	const gate = Promise.withResolvers<'apply'>();
+	sibling.transcript.setDisplayApplicationGate(() => gate.promise);
+	const refreshing = f.registry.loadChatSnapshot(chatId);
+	await vi.waitFor(() => expect(f.panel.transcript.controller.busy).toBe(false));
+	const navigating = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
+	try {
+		await vi.waitFor(() => expect(f.viewport.scrollToTarget).toHaveBeenCalledOnce());
+		expect(await navigating).toBe('completed');
+	} finally {
+		gate.resolve('apply');
+		await refreshing;
+	}
+});
+
+it('does not cancel an HTTP row navigation when the socket disconnects', async () => {
+	const f = await fixture(); f.attach();
+	const targetPage = held<AvailableDisplayWindow>();
+	f.api.window.mockReturnValueOnce(targetPage.promise);
+	const navigating = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
+	await vi.waitFor(() => expect(f.api.window).toHaveBeenCalledOnce());
+	f.registry.cancelRefreshes();
+	targetPage.release(page());
+	expect(await navigating).toBe('completed');
+});
+
 it('waits for a current reload open and reports the replaced view', async () => {
 	const f = await fixture(); f.attach();
 	const snapshot = held<DisplayOpenResponse>();
@@ -284,7 +330,7 @@ it('waits through a purpose-qualified successor open before loading its target',
 	expect(await work).toBe('completed');
 });
 
-it.each(['view-1', 'view-2'])('waits for an open in %s that supersedes the target request', async view => {
+it.each(['view-1', 'view-2'])('preserves a target through a same-view open and fences a replacement in %s', async view => {
 	const f = await fixture(); f.attach();
 	const targetPage = held<AvailableDisplayWindow>(), snapshot = held<DisplayOpenResponse>();
 	f.api.window.mockReturnValueOnce(targetPage.promise);
@@ -296,7 +342,7 @@ it.each(['view-1', 'view-2'])('waits for an open in %s that supersedes the targe
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
 	f.api.replace(rows, snapshotPage(view));
 	snapshot.release(snapshotPage(view)); await reload;
-	expect(await work).toBe(view === 'view-2' ? 'view-changed' : 'cancelled');
+	expect(await work).toBe(view === 'view-2' ? 'view-changed' : 'completed');
 });
 
 it.each(['completed', 'unavailable', 'view-changed'] as const)(

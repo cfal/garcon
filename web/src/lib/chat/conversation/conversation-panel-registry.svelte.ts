@@ -83,6 +83,7 @@ interface PendingSurfaceTransfer extends StoredRestoreTarget {
 
 interface SnapshotLoad {
 	readonly purpose: ChatLoadMessagesOptions['purpose'];
+	readonly metadata: Promise<boolean>;
 	readonly promise: Promise<boolean>;
 	readonly abort: AbortController;
 	snapshot: DisplayOpenResponse | null;
@@ -116,7 +117,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
 		overlays: ConversationTranscriptOverlayStore,
 		private readonly snapshots: {
-			load(options: ChatLoadMessagesOptions): Promise<boolean>;
+			load(options: ChatLoadMessagesOptions, signal: AbortSignal): Promise<void>;
 			wait(signal: AbortSignal): Promise<void>;
 			represented(view: string, clientMessageId: string, ordinal: number): void;
 		},
@@ -205,7 +206,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		this.transcript.activateChat(this.chatId);
 		const restoreEpoch = this.#beginRestore(target);
 		try {
-			await this.snapshots.load({});
+			await this.snapshots.load({}, this.#lifetime.signal);
 		} finally { await this.#finishRestore(restoreEpoch); }
 	}
 
@@ -213,7 +214,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		if (this.#destroyed) return;
 		const restoreEpoch = this.#beginRestore(target);
 		this.transcript.controller.activate();
-		try { await this.snapshots.load({ purpose: 'activation' }); }
+		try { await this.snapshots.load({ purpose: 'activation' }, this.#lifetime.signal); }
 		finally { await this.#finishRestore(restoreEpoch); }
 	}
 
@@ -275,7 +276,11 @@ class PanelRegistration implements ConversationPanelRegistration {
 					if (!isCurrent()) return 'cancelled';
 					await this.snapshots.wait(combined);
 					if (!isCurrent()) return 'cancelled';
-					return this.transcript.navigateToRow(target, combined, isCurrent);
+					const result = await this.transcript.navigateToRow(target, combined, isCurrent);
+					await this.snapshots.wait(combined);
+					if (!isCurrent()) return 'cancelled';
+					if (this.transcript.transcriptViewId !== target.transcriptViewId) return 'view-changed';
+					return result;
 				},
 				current,
 			);
@@ -324,6 +329,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 			this.#prepareInitialBottomRestore();
 			return;
 		}
+		if (!this.transcript.transcriptViewId) return;
 		if (this.#lastTarget.transcriptViewId !== this.transcript.transcriptViewId) {
 			this.#lastTarget = { kind: 'end' };
 			this.#prepareInitialBottomRestore();
@@ -432,8 +438,15 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
 	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
 	#onOpen = (snapshot: DisplayOpenResponse): void => {
-		this.#opens.set(snapshot.chat.id, snapshot);
 		const previous = this.#heads.get(snapshot.chat.id);
+		if (previous && previous.transcriptViewId !== snapshot.transcriptViewId) {
+			const committed = new Map(snapshot.submissions.flatMap(input => input.ordinal === null ? [] : [[input.clientMessageId, input.ordinal] as const]));
+			const carried = this.options.overlays.viewFor(snapshot.chat.id)?.optimisticInputs.filter(input => committed.has(input.clientMessageId)) ?? [];
+			this.#resetViewPresentation(snapshot.chat.id);
+			for (const input of carried) this.options.overlays.upsertOptimisticInput(snapshot.chat.id,
+				{ ...input, delivery: 'delivered' }, committed.get(input.clientMessageId)! - 1);
+		}
+		this.#opens.set(snapshot.chat.id, snapshot);
 		this.#heads.set(snapshot.chat.id, { transcriptViewId: snapshot.transcriptViewId,
 			lastOrdinal: previous?.transcriptViewId === snapshot.transcriptViewId ? Math.max(previous.lastOrdinal, snapshot.sourceHead) : snapshot.sourceHead });
 		for (const submission of snapshot.submissions) if (submission.ordinal !== null) {
@@ -557,7 +570,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 			const transfer = this.#pendingSurfaceTransfers.get(item.surfaceId);
 			const retained = retainedForIncoming.get(item.surfaceId) ?? null;
-			const panel = new PanelRegistration(
+			const panel: PanelRegistration = new PanelRegistration(
 				item.surfaceId,
 				item.chatId,
 				item.snapshotAdmission,
@@ -565,8 +578,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.lifecycle,
 				this.options.overlays,
 				{
-					load: (options) => this.loadChatSnapshot(item.chatId, options),
-					wait: (signal) => this.#waitForChatSnapshot(item.chatId, signal),
+					load: (options, signal) => {
+						void this.loadChatSnapshot(item.chatId, options).catch(() => {});
+						return this.#waitForChatSnapshot(item.chatId, panel, signal);
+					},
+					wait: (signal) => this.#waitForChatSnapshot(item.chatId, panel, signal),
 					// A retained transcript must not capture this scope's retired panel.
 					represented: this.acknowledgeInput.bind(this, item.chatId),
 				},
@@ -638,14 +654,31 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			this.#projectSnapshot(chatId, pending);
 			const purposeCovered = options.purpose === undefined || pending.purpose === options.purpose;
 			if (purposeCovered) return pending.promise;
-			return pending.promise.then(() => this.loadChatSnapshot(chatId, options));
+			return pending.metadata.then(() => {
+				if (this.#snapshotLoads.get(chatId) === pending) {
+					pending.abort.abort();
+					this.#snapshotLoads.delete(chatId);
+				}
+				return this.loadChatSnapshot(chatId, options);
+			});
 		}
+		const metadata = Promise.resolve().then(() => this.#performChatSnapshotLoad(chatId, options, operation));
 		const operation: SnapshotLoad = {
 			purpose: options.purpose,
+			metadata,
 			abort: new AbortController(),
 			snapshot: null,
 			projections: new Map(),
-			promise: Promise.resolve().then(() => this.#performChatSnapshotLoad(chatId, options, operation)).finally(() => {
+			promise: metadata.then(async opened => {
+				if (!opened) return false;
+				let projectedCount: number;
+				do {
+					this.#projectSnapshot(chatId, operation);
+					projectedCount = operation.projections.size;
+					await Promise.all(operation.projections.values());
+				} while (this.#snapshotLoads.get(chatId) === operation && projectedCount !== operation.projections.size);
+				return this.#snapshotLoads.get(chatId) === operation && !operation.abort.signal.aborted;
+			}).finally(() => {
 				if (this.#snapshotLoads.get(chatId) === operation) this.#snapshotLoads.delete(chatId);
 			}),
 		};
@@ -653,13 +686,22 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return operation.promise;
 	}
 
-	async #waitForChatSnapshot(chatId: string, signal: AbortSignal): Promise<void> {
+	async #waitForChatSnapshot(chatId: string, panel: ConversationPanelRegistration, signal: AbortSignal): Promise<void> {
 		signal.throwIfAborted();
 		let pending = this.#snapshotLoads.get(chatId);
 		while (pending) {
-			await waitForSnapshot(pending.promise, signal);
+			const waiting = AbortSignal.any([signal, pending.abort.signal]);
+			try {
+				await waitForSnapshot(pending.metadata, waiting);
+				const projection = pending.projections.get(panel);
+				if (projection) await waitForSnapshot(projection, waiting);
+			} catch (error) {
+				if (!pending.abort.signal.aborted) throw error;
+			}
 			signal.throwIfAborted();
-			pending = this.#snapshotLoads.get(chatId);
+			const next = this.#snapshotLoads.get(chatId);
+			if (next === pending) return;
+			pending = next;
 		}
 	}
 
@@ -685,12 +727,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			this.#adoptServerInstance(snapshot.serverInstanceId, chatId);
 			this.#onOpen(snapshot);
 			operation.snapshot = snapshot;
-			let projectedCount: number;
-			do {
-				this.#projectSnapshot(chatId, operation);
-				projectedCount = operation.projections.size;
-				await Promise.all(operation.projections.values());
-			} while (isCurrent() && projectedCount !== operation.projections.size);
+			this.#projectSnapshot(chatId, operation);
 			return isCurrent();
 		} catch (error) {
 			if (!isCurrent()) return false;
@@ -738,7 +775,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	cancelRefreshes(): void {
 		for (const operation of this.#snapshotLoads.values()) operation.abort.abort();
 		this.#snapshotLoads.clear();
-		for (const panel of this.#panels.values()) panel.transcript.invalidatePendingLoads();
+		for (const panel of this.#panels.values()) panel.transcript.cancelOpen();
 	}
 
 	resetServerInstance(serverInstanceId: string): void {
@@ -757,7 +794,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		this.#inactiveWindows.clear();
 		this.#opens.clear();
-		this.#heads.clear();
+		// Retains view identity for replacement cleanup without trusting the previous process's frontier.
+		for (const [chatId, head] of this.#heads) this.#heads.set(chatId, { ...head, lastOrdinal: 0 });
 		for (const panel of this.#panels.values()) panel.transcript.clearMessages();
 		if (openingChatId) for (const chatId of this.visibleChatIds()) {
 			if (chatId !== openingChatId) void this.loadChatSnapshot(chatId).catch(() => this.markChatStale(chatId));
@@ -847,12 +885,16 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.#snapshotLoads.delete(chatId);
 		this.#heads.delete(chatId);
 		this.#opens.delete(chatId);
+		this.#resetViewPresentation(chatId);
+		void this.loadChatSnapshot(chatId).catch(() => this.markChatStale(chatId));
+	}
+
+	#resetViewPresentation(chatId: string): void {
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.clearMessages();
 		this.#inactiveWindows.removeChat(chatId);
 		this.markChatDirty(chatId);
 		this.#applyOverlayMutation(chatId, this.options.overlays.resetForTranscriptReplacement(chatId));
 		this.#deleteStoredSurfaceStateForChat(chatId);
-		void this.loadChatSnapshot(chatId).catch(() => this.markChatStale(chatId));
 	}
 
 	removeChat(chatId: string): void {

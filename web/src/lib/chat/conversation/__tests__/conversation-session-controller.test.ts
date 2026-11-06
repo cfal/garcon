@@ -896,7 +896,7 @@ describe('ConversationSessionController', () => {
 				vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'replacement-view' });
 			} else {
 				vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
-				mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0, 'replacement-view')));
+				vi.spyOn(transcriptDisplayApi, 'open').mockResolvedValue(displayOpen('chat-1', 'replacement-view', 0));
 			}
 			const calls: string[] = [];
 			deps.chatState.recoverViewReplacement.mockImplementation(async () => {
@@ -922,9 +922,9 @@ describe('ConversationSessionController', () => {
 		const { deps } = createClearDeps();
 		deps.composerState.inputText = '/clear';
 		vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
-		const snapshot = chatSnapshot(transientFeed([], 0, viewId));
-		if (viewId === 'unavailable') mockGetChatSnapshot.mockRejectedValue(new Error('offline'));
-		else mockGetChatSnapshot.mockResolvedValue(snapshot);
+		const open = vi.spyOn(transcriptDisplayApi, 'open');
+		if (viewId === 'unavailable') open.mockRejectedValue(new Error('offline'));
+		else open.mockResolvedValue(displayOpen('chat-1', viewId, 0));
 		const controller = new ConversationSessionController(deps);
 		await controller.submitForChat('chat-1');
 		deps.composerState.inputText = 'New draft';
@@ -932,7 +932,7 @@ describe('ConversationSessionController', () => {
 		await controller.clearHistory.confirm();
 		await controller.clearHistory.confirm();
 		expect(clearChat).toHaveBeenCalledTimes(1);
-		expect(mockGetChatSnapshot).toHaveBeenCalledWith('chat-1', 0);
+		expect(open).toHaveBeenCalledWith({ chatId: 'chat-1', reason: 'reconnect', outstandingClientMessageIds: [] });
 		expect(controller.clearHistory.isOpen).toBe(false);
 		expect(deps.composerState.inputText).toBe('New draft');
 		if (viewId === 'replacement-view') {
@@ -947,7 +947,7 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/clear';
 		const pending = deferred<Awaited<ReturnType<typeof clearChat>>>();
 		vi.mocked(clearChat).mockReturnValue(pending.promise);
-		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0, 'replacement-view')));
+		vi.spyOn(transcriptDisplayApi, 'open').mockResolvedValue(displayOpen('chat-1', 'replacement-view', 0));
 		const controller = new ConversationSessionController(deps);
 		await controller.submitForChat('chat-1');
 		const confirmation = controller.clearHistory.confirm();
@@ -3501,6 +3501,57 @@ describe('ConversationSessionController', () => {
 		expect(deps.conversationUi.finishPlanModeForChat).not.toHaveBeenCalled();
 		expect(deps.agentState.permissionMode).toBe('plan');
 		if (fails) expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', 'Synthetic dismissal failure');
+	});
+
+	it.each([false, true])('fences a held plan dismissal by server authority, restarted=%s', async restarted => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		const conversationUi = new ConversationUiState();
+		conversationUi.confirmExecutionControlSocketInstance('server-instance-test');
+		conversationUi.setExecutionControlFromRefresh('chat-1', openSnapshot(transientFeed([], 1)).control);
+		conversationUi.activateTransientFeed('chat-1');
+		conversationUi.updatePendingPermissionsForChat('chat-1', [{
+			permissionOccurrenceId: 'plan-exit-1',
+			planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 },
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		}]);
+		const held = deferred<ReturnType<typeof openSnapshot>['plan']>();
+		vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockReturnValue(held.promise);
+		deps.agentState.permissionMode = 'plan';
+		const controller = new ConversationSessionController({ ...deps, conversationUi });
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'bypass', 'Synthetic plan');
+		conversationUi.markExecutionControlSocketDisconnected();
+		if (restarted) conversationUi.confirmExecutionControlSocketInstance('replacement-instance');
+		held.resolve(openSnapshot(transientFeed([], 1)).plan);
+		await flushPromises();
+		expect(deps.agentState.permissionMode).toBe(restarted ? 'plan' : 'bypassPermissions');
+		expect(mockRunChat).toHaveBeenCalledTimes(restarted ? 0 : 1);
+	});
+
+	it('single-flights concurrent choices for the same plan occurrence and allows dismissal retry', async () => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		deps.conversationUi.pendingPermissionRequests = [{
+			permissionOccurrenceId: 'plan-exit-1',
+			planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 },
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		}];
+		const held = deferred<ReturnType<typeof openSnapshot>['plan']>();
+		const dismiss = vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockReturnValue(held.promise);
+		const controller = new ConversationSessionController(deps);
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'bypass-new', 'Synthetic plan');
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'approve-edits', 'Synthetic plan');
+		expect(dismiss).toHaveBeenCalledOnce();
+		held.reject(new Error('Synthetic dismissal failure'));
+		await flushPromises();
+		expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(1);
+		expect(deps.appShell.openNewChatDialog).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		dismiss.mockResolvedValue(openSnapshot(transientFeed([], 1)).plan);
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'bypass-new', 'Synthetic plan');
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'approve-edits', 'Synthetic plan');
+		await flushPromises();
+		expect(dismiss).toHaveBeenCalledTimes(2);
+		expect(deps.appShell.openNewChatDialog).toHaveBeenCalledOnce();
+		expect(mockRunChat).not.toHaveBeenCalled();
 	});
 
 	it('resumes approved plans with the target chat settings', async () => {
