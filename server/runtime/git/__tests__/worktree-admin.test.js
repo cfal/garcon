@@ -229,6 +229,28 @@ describe("worktree admin metadata", () => {
     ).toBeNull();
   });
 
+  it("accepts only an empty regular worktree config", async () => {
+    const { repositoryPath, commonDir } = await createFixture();
+    const layout = { worktreeRoot: repositoryPath, commonDir, refFormat: "files" };
+    const expected = await readAdminWorktreeRecords(layout);
+    const configPath = path.join(commonDir, "config.worktree");
+    await fs.writeFile(configPath, "");
+    expect(await readAdminWorktreeRecords(layout)).toEqual(expected);
+
+    await fs.writeFile(configPath, " \n");
+    expect(await readAdminWorktreeRecords(layout)).toBeNull();
+
+    await fs.rm(configPath);
+    const emptyPath = path.join(commonDir, "empty-config");
+    await fs.writeFile(emptyPath, "");
+    await fs.symlink(emptyPath, configPath);
+    expect(await readAdminWorktreeRecords(layout)).toBeNull();
+
+    await fs.rm(configPath);
+    await fs.mkdir(configPath);
+    expect(await readAdminWorktreeRecords(layout)).toBeNull();
+  });
+
   it("resolves chained HEAD symrefs", async () => {
     const { repositoryPath, commonDir } = await createFixture();
     const customRefs = path.join(commonDir, "refs", "custom");
