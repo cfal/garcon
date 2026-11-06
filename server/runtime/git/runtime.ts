@@ -156,12 +156,14 @@ export class GitRuntime {
 
   async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
+    const mutation = isGitMutation(method);
     try {
-      return await this.#admit(method, isGitMutation(method), options, async (callOptions) => {
+      return await this.#admit(method, mutation, options, async (callOptions) => {
         const projectPath = await this.#repository(request.projectPath, callOptions);
         const execute = async () => {
           this.#available(callOptions);
-          if (await this.#repository(request.projectPath, callOptions) !== projectPath) throw new GitServiceError('GIT_INVALID_INPUT', 'Repository path changed');
+          // Mutations may have waited for the repository lock since admission.
+          if (mutation && await this.#repository(request.projectPath, callOptions) !== projectPath) throw new GitServiceError('GIT_INVALID_INPUT', 'Repository path changed');
           const trace: GitCommandTrace[] = [];
           const metrics: GitReviewRouteMetrics = { phases: [] };
           const input = { ...request, projectPath, signal: callOptions.signal, trace, metrics };
@@ -174,15 +176,15 @@ export class GitRuntime {
           const result = await this.#operations[method](input as GitOperationOptions<K>);
           const diagnostics = { ...metrics, phases: metrics.phases.slice(0, 128), commands: trace.slice(0, 128).map(({ args, durationMs, stdoutBytes, stderrBytes }) => ({ command: args[0], durationMs, stdoutBytes, stderrBytes })) };
           const response = { ...portableResult(result), executorId: this.configuration.executorId, instanceId: this.configuration.instanceId, diagnostics,
-            ...(isGitMutation(method) && gitOutputTruncated() ? { outputTruncated: true } : {}) };
+            ...(mutation && gitOutputTruncated() ? { outputTruncated: true } : {}) };
           try { validateGitResult(method, response, this.configuration); }
           catch (error) {
-            if (isGitMutation(method)) throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation could not be confirmed. Inspect the repository before trying again.');
+            if (mutation) throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation could not be confirmed. Inspect the repository before trying again.');
             throw error;
           }
           return response;
         };
-        return isGitMutation(method) ? withRepositoryMutation(projectPath, execute) : execute();
+        return mutation ? withRepositoryMutation(projectPath, execute) : execute();
       });
     } catch (error) {
       const failure = gitServiceError(error);

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -48,6 +48,36 @@ async function expectSummaryAndBodyFingerprintsMatch(
 }
 
 describe("getWorkbenchSnapshot", () => {
+  it("reads HEAD entries only for deleted working files", async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), "garcon-head-fingerprints-"));
+    let spawn;
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "modified\n");
+      const git = createGitOperations();
+      spawn = spyOn(Bun, "spawn");
+      const treeCommands = () => spawn.mock.calls
+        .map(([command]) => Array.isArray(command) ? command : command.cmd)
+        .filter((command) => command[0] === "git" && command[1] === "ls-tree");
+
+      await expectSummaryAndBodyFingerprintsMatch(git, projectPath);
+      expect(treeCommands()).toEqual([]);
+      await runGitCommand(projectPath, ["add", "a.txt"]);
+      await expectSummaryAndBodyFingerprintsMatch(git, projectPath, { mode: "staged" });
+      expect(treeCommands()).toEqual([]);
+
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await expectSummaryAndBodyFingerprintsMatch(git, projectPath);
+      expect(treeCommands()).toEqual([["git", "ls-tree", "-rz", "HEAD", "--", "a.txt"]]);
+      await runGitCommand(projectPath, ["add", "-u"]);
+      await expectSummaryAndBodyFingerprintsMatch(git, projectPath, { mode: "staged" });
+      expect(treeCommands()).toHaveLength(1);
+    } finally {
+      spawn?.mockRestore();
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("records git command duration and byte counts when trace is provided", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-trace-"),

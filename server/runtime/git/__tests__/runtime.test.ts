@@ -138,6 +138,22 @@ test('rejects an ancestor repository outside the executor base and escaping file
   await expect(git.stagePaths({ projectPath, paths: ['../outside.txt'], mode: 'stage' })).rejects.toMatchObject({ code: 'GIT_OUTSIDE_BASE' });
 });
 
+test('validates every read once and revalidates mutations after locking', async () => {
+  const { git, projectPath } = await fixture();
+  const stat = spyOn(fs, 'stat');
+  const repositoryChecks = () => stat.mock.calls.filter(([target]) => target === projectPath).length;
+  try {
+    await git.getRepoInfo({ projectPath });
+    expect(repositoryChecks()).toBe(1);
+    await git.getRepoInfo({ projectPath });
+    expect(repositoryChecks()).toBe(2);
+    await git.createBranch({ projectPath, branch: 'validated' });
+    expect(repositoryChecks()).toBe(4);
+  } finally {
+    stat.mockRestore();
+  }
+});
+
 test('filters forbidden sibling worktrees and validates missing creation destinations', async () => {
   const { root, projectPath, git } = await fixture();
   await expect(git.createWorktree({ projectPath, worktreePath: '../../outside/missing', branch: 'other' })).rejects.toMatchObject({ code: 'GIT_OUTSIDE_BASE' });
