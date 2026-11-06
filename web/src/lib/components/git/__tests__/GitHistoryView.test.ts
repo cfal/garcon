@@ -174,6 +174,7 @@ function bodiesForPaths(paths: string[]) {
 		documentId: 'doc-abc',
 		files: Object.fromEntries(paths.map((path) => [path, bodyForPath(path)])),
 		errors: {},
+		deferredFiles: [],
 	};
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as gitApi from '$lib/api/git.js';
+import type { GitReviewBodyFetchOptions } from '$lib/api/git-review-documents.js';
 import type {
 	GitReviewDocumentSummary,
 	GitReviewFileBody,
@@ -285,7 +286,84 @@ describe('buildVirtualRows', () => {
 });
 
 describe('GitVirtualReviewDocumentController syntax', () => {
-	it('loads one file per request and continues after an oversized file', async () => {
+	function ready(requested: string[]) {
+		return {
+			status: 'ready' as const,
+			documentId: 'doc',
+			files: Object.fromEntries(requested.map((path) => [path, makeBody(path)])),
+			errors: {},
+			deferredFiles: [],
+		};
+	}
+
+	it('publishes indexed bodies while the rest of the batch is held and fences reset callbacks', async () => {
+		const paths = ['a.ts', 'b.ts'];
+		const held = Promise.withResolvers<ReturnType<typeof ready>>();
+		let publish!: NonNullable<GitReviewBodyFetchOptions['onIndexedBodies']>;
+		const load = vi
+			.spyOn(gitApi, 'getGitReviewFileBodies')
+			.mockImplementation((_target, _document, _files, _tab, _context, options) => {
+				publish = options!.onIndexedBodies!;
+				return held.promise;
+			});
+		const controller = new GitVirtualReviewDocumentController(documentDeps(() => paths));
+		try {
+			controller.applySummary(makeSummary(paths.map((path) => makeFile(path))));
+			controller.requestBodies('/project', paths);
+			publish(ready(['a.ts']), ['a.ts']);
+			expect(controller.fileBodies['a.ts']).toBeDefined();
+			expect(controller.loadingBodies.has('a.ts')).toBe(false);
+			expect(controller.loadingBodies.has('b.ts')).toBe(true);
+			controller.reset();
+			publish(ready(['b.ts']), ['b.ts']);
+			held.resolve(ready(paths));
+			await held.promise;
+			expect(controller.fileBodies).toEqual({});
+		} finally {
+			controller.reset();
+			load.mockRestore();
+		}
+	});
+
+	it.each(['viewport', 'navigation'] as const)(
+		'recovers %s workbench demand after cancelling incremental prefetch',
+		async (kind) => {
+			const paths = ['initial.ts', 'blocked.ts', 'wanted.ts'];
+			const held = Promise.withResolvers<ReturnType<typeof ready>>();
+			let publish!: NonNullable<GitReviewBodyFetchOptions['onIndexedBodies']>;
+			const load = vi
+				.spyOn(gitApi, 'getGitReviewFileBodies')
+				.mockImplementation(async (_target, _document, files, _tab, _context, options) => {
+					if (options?.purpose !== 'prefetch') return ready(files);
+					publish = options.onIndexedBodies!;
+					return held.promise;
+				});
+			const controller = new GitVirtualReviewDocumentController({
+				...documentDeps(() => paths),
+				targetProjectPath: () => '/project',
+			});
+			try {
+				const summary = makeSummary(paths.map((path) => makeFile(path)));
+				summary.limits.maxLoadedRows = 2;
+				controller.applySummary(summary, paths);
+				await vi.waitFor(() => expect(controller.fileBodies['initial.ts']).toBeDefined());
+				controller.handleBodyDemand({ kind, documentId: 'doc', filePaths: ['wanted.ts'] });
+				publish(ready(['blocked.ts']), ['blocked.ts']);
+				held.resolve(ready(['blocked.ts', 'wanted.ts']));
+				await vi.waitFor(() =>
+					expect(controller.fileBodies['wanted.ts']?.bodyState).toBe('loaded'),
+				);
+				expect(controller.fileBodies['blocked.ts']).toBeUndefined();
+				expect(controller.aggregateLimit).toBeNull();
+				expect(load.mock.calls.at(-1)?.[5]?.purpose).toBe('visible');
+			} finally {
+				controller.reset();
+				load.mockRestore();
+			}
+		},
+	);
+
+	it('batches visible files and continues after an oversized file', async () => {
 		const paths = ['large.ts', 'a.ts', 'b.ts'];
 		const oversized: GitReviewFileBody = {
 			...makeBody('large.ts'),
@@ -307,6 +385,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 					requested.map((path) => [path, path === 'large.ts' ? oversized : makeBody(path)]),
 				),
 				errors: {},
+				deferredFiles: [],
 			}));
 		const controller = new GitVirtualReviewDocumentController(documentDeps(() => paths));
 		try {
@@ -315,9 +394,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			await vi.waitFor(() => expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded'));
 			expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded');
 			expect(controller.fileBodies['large.ts']?.limitReason).toBe('file-too-many-bytes');
-			expect(load.mock.calls.map(([, , requested]) => requested)).toEqual(
-				paths.map((path) => [path]),
-			);
+			expect(load.mock.calls.map(([, , requested]) => requested)).toEqual([paths]);
 			expect(controller.aggregateLimit).toBeNull();
 		} finally {
 			controller.reset();
@@ -344,6 +421,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 					documentId: first.documentId,
 					files: { 'a.ts': makeBody('a.ts') },
 					errors: {},
+					deferredFiles: [],
 				})
 				.mockReturnValueOnce(refreshed.promise);
 			const controller = new GitVirtualReviewDocumentController(documentDeps(() => ['a.ts']));
@@ -366,6 +444,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 					documentId: next.documentId,
 					files: { 'a.ts': { ...makeBody('a.ts'), patchDigest: 'b'.repeat(64) } },
 					errors: {},
+					deferredFiles: [],
 				});
 				await vi.waitFor(() =>
 					expect(controller.fileBodies['a.ts']?.patchDigest).toBe('b'.repeat(64)),

@@ -7,6 +7,38 @@ import { RemoteGitServices } from '../client/remote-git.js';
 import type { RemoteSessions } from '../client/executor-client.js';
 import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 
+for (const lane of ['local', 'controller', 'worker'] as const) {
+  test(`large review batches defer without exceeding the result cap on ${lane}`, async () => {
+    const fixture = await gitRpcFixture(lane === 'local' ? 'controller' : lane);
+    try {
+      const git = await (lane === 'local' ? fixture.local : fixture.executor).getGitService();
+      const paths = ['quoted-".ts', 'unicode-\u00e9.ts'];
+      const content = ('const value = "\\\\\u00e9";'.repeat(100) + '\n').repeat(900);
+      for (const file of paths) await fs.writeFile(path.join(fixture.projectPath, file), content);
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath: fixture.projectPath, mode: 'working', context: 3 });
+      if (snapshot.status !== 'ready') throw new Error('Expected snapshot');
+      const document = { executorId: snapshot.executorId, instanceId: snapshot.instanceId, documentId: snapshot.reviewSummary.documentId };
+      const request = { projectPath: fixture.projectPath, document, purpose: 'visible' as const };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await git.getReviewDocumentFileBodies({ ...request, files: paths });
+        if (response.status !== 'ready') throw new Error('Expected bodies');
+        expect(Object.keys(response.files)).toHaveLength(1);
+        expect(response.deferredFiles).toHaveLength(1);
+        expect(new Set([...Object.keys(response.files), ...response.deferredFiles])).toEqual(new Set(paths));
+        expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(GIT_MAX_RESULT_BYTES);
+        const continuation = await git.getReviewDocumentFileBodies({ ...request, files: response.deferredFiles });
+        if (continuation.status !== 'ready') throw new Error('Expected continuation');
+        expect(continuation.deferredFiles).toEqual([]);
+        const body = Object.values(continuation.files)[0];
+        expect(body.bodyState).toBe('loaded');
+        expect(body.patchDigest).toMatch(/^[a-f0-9]{64}$/);
+      }
+      await fs.writeFile(path.join(fixture.projectPath, paths[1]), 'replaced\n');
+      expect((await git.getReviewDocumentFileBodies({ ...request, files: [paths[1]] })).status).toBe('stale');
+    } finally { await fixture.dispose(); }
+  }, 30_000);
+}
+
 for (const dialer of ['controller', 'worker'] as const) {
   test(`incomplete review summaries fail at the remote boundary with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);

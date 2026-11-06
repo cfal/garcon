@@ -1,22 +1,24 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createGitOperations } from '../server/runtime/git/git-service.js';
+import { gzipSync } from 'node:zlib';
+import { GitRuntime } from '../server/runtime/git/runtime.js';
+import type { GitReviewDocumentFileBodiesReady } from '../common/git.js';
 
 export type GitReviewBenchmarkScenario =
-  | 'revision-24'
-  | 'working-tree-many'
-  | 'large-file';
+  'revision-24' | 'revision-many' | 'working-tree-many' | 'workbench-many' | 'large-file';
 
 export interface GitReviewBenchmarkOptions {
   scenario: GitReviewBenchmarkScenario;
   iterations: number;
+  batchFiles: number;
 }
 
 interface BenchmarkFixture {
   projectPath: string;
   fromRevision: string;
   to: { kind: 'revision'; revision: string } | { kind: 'working-tree' };
+  surface: 'comparison' | 'workbench';
 }
 
 interface IterationResult {
@@ -24,20 +26,31 @@ interface IterationResult {
   visibleBodyMs: number;
   prefetchBodyMs: number;
   totalMs: number;
-  commandCount: number;
+  warmSnapshotMs: number;
+  tracedCommandCount: number;
+  warmTracedCommandCount: number;
+  snapshotBytes: number;
+  snapshotGzipBytes: number;
+  bodyRequests: number;
+  bodyBytes: number;
+  bodyGzipBytes: number;
+  fileCount: number;
   rowCount: number;
   patchBytes: number;
 }
 
 const SCENARIOS = new Set<GitReviewBenchmarkScenario>([
   'revision-24',
+  'revision-many',
   'working-tree-many',
+  'workbench-many',
   'large-file',
 ]);
 
 export function parseGitReviewBenchmarkOptions(args: string[]): GitReviewBenchmarkOptions {
   let scenario: GitReviewBenchmarkScenario = 'revision-24';
   let iterations = 10;
+  let batchFiles = 4;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--scenario') {
@@ -50,21 +63,27 @@ export function parseGitReviewBenchmarkOptions(args: string[]): GitReviewBenchma
         throw new Error('Iterations must be an integer between 1 and 100.');
       }
       iterations = value;
+    } else if (argument === '--batch-files') {
+      const value = Number(args[++index]);
+      if (!Number.isInteger(value) || value < 1 || value > 24) {
+        throw new Error('Batch files must be an integer between 1 and 24.');
+      }
+      batchFiles = value;
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }
   }
-  return { scenario, iterations };
+  return { scenario, iterations, batchFiles };
 }
 
-export function benchmarkScenarioFileNames(
-  scenario: GitReviewBenchmarkScenario,
-): string[] {
-  const count = scenario === 'working-tree-many' ? 240 : scenario === 'revision-24' ? 24 : 1;
+export function benchmarkScenarioFileNames(scenario: GitReviewBenchmarkScenario): string[] {
+  let count = 1;
+  if (scenario === 'working-tree-many') count = 240;
+  else if (scenario === 'revision-24') count = 24;
+  else if (scenario === 'revision-many' || scenario === 'workbench-many') count = 1_000;
   return Array.from({ length: count }, (_, index) =>
-    scenario === 'large-file'
-      ? 'large.txt'
-      : `src/file-${String(index).padStart(3, '0')}.txt`);
+    scenario === 'large-file' ? 'large.ts' : `src/file-${String(index).padStart(4, '0')}.ts`,
+  );
 }
 
 async function runGit(projectPath: string, args: string[]): Promise<string> {
@@ -88,25 +107,41 @@ function fileContents(
   lineCount = 40,
   changeEveryLine = false,
 ): string {
-  return Array.from(
-    { length: lineCount },
-    (_, line) =>
-      `${changed && (changeEveryLine || line === lineCount - 1) ? 'changed' : 'base'} ${index}:${line}`,
-  ).join('\n') + '\n';
+  return (
+    Array.from(
+      { length: lineCount },
+      (_, line) =>
+        `export const line${line} = '${changed && (changeEveryLine || line === lineCount - 1) ? 'changed' : 'base'} ${index}:${line}';`,
+    ).join('\n') + '\n'
+  );
 }
 
-async function createFixture(
+export async function createFixture(
   scenario: GitReviewBenchmarkScenario,
 ): Promise<BenchmarkFixture> {
-  const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-review-bench-'));
+  const temporary = process.env.TMPDIR ?? path.join(os.homedir(), 'tmp');
+  await fs.mkdir(temporary, { recursive: true });
+  const projectPath = await fs.mkdtemp(path.join(temporary, 'garcon-git-review-bench-'));
+  try {
+    return await initializeFixture(projectPath, scenario);
+  } catch (error) {
+    await fs.rm(projectPath, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function initializeFixture(
+  projectPath: string,
+  scenario: GitReviewBenchmarkScenario,
+): Promise<BenchmarkFixture> {
   await runGit(projectPath, ['init', '-q']);
   await runGit(projectPath, ['config', 'user.email', 'benchmark@example.com']);
   await runGit(projectPath, ['config', 'user.name', 'Benchmark']);
   const files = benchmarkScenarioFileNames(scenario);
+  const lineCount = scenario === 'large-file' ? 20_000 : 40;
   for (let index = 0; index < files.length; index += 1) {
     const filePath = path.join(projectPath, files[index]);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    const lineCount = scenario === 'large-file' ? 20_000 : 40;
     await fs.writeFile(filePath, fileContents(index, false, lineCount));
   }
   await runGit(projectPath, ['add', '.']);
@@ -114,87 +149,138 @@ async function createFixture(
   const fromRevision = await runGit(projectPath, ['rev-parse', 'HEAD']);
 
   for (let index = 0; index < files.length; index += 1) {
-    const lineCount = scenario === 'large-file' ? 20_000 : 40;
     await fs.writeFile(
       path.join(projectPath, files[index]),
       fileContents(index, true, lineCount, scenario === 'large-file'),
     );
   }
-  if (scenario === 'working-tree-many') {
-    return { projectPath, fromRevision, to: { kind: 'working-tree' } };
+  if (scenario === 'working-tree-many' || scenario === 'workbench-many') {
+    return {
+      projectPath,
+      fromRevision,
+      to: { kind: 'working-tree' },
+      surface: scenario === 'workbench-many' ? 'workbench' : 'comparison',
+    };
   }
   await runGit(projectPath, ['add', '.']);
   await runGit(projectPath, ['commit', '-q', '-m', 'target']);
   return {
     projectPath,
     fromRevision,
-    to: { kind: 'revision', revision: await runGit(projectPath, ['rev-parse', 'HEAD']) },
+    surface: 'comparison',
+    to: {
+      kind: 'revision',
+      revision: await runGit(projectPath, ['rev-parse', 'HEAD']),
+    },
   };
 }
 
-async function runIteration(fixture: BenchmarkFixture): Promise<IterationResult> {
-  const service = createGitOperations();
-  const trace = [];
-  const startedAt = performance.now();
-  const snapshotStartedAt = performance.now();
-  const snapshot = await service.getComparisonSnapshot({
-    projectPath: fixture.projectPath,
-    from: { kind: 'revision', revision: fixture.fromRevision },
-    to: fixture.to,
-    mode: 'direct',
-    context: 3,
-    bodyCandidateCount: 24,
-    trace,
+export async function runIteration(
+  fixture: BenchmarkFixture,
+  batchFiles: number,
+): Promise<IterationResult> {
+  const runtime = new GitRuntime({
+    projectBasePath: fixture.projectPath,
+    executorId: 'local',
+    instanceId: 'benchmark',
+    assertAvailable() {},
   });
-  const snapshotMs = performance.now() - snapshotStartedAt;
-  if (snapshot.status !== 'ready') throw new Error(`Snapshot failed with ${snapshot.status}.`);
-  const [visiblePath, ...prefetchPaths] = snapshot.firstBodyCandidates;
-  if (!visiblePath) throw new Error('Benchmark fixture produced no reviewable files.');
-
-  const visibleStartedAt = performance.now();
-  const visiblePromise = service.getReviewDocumentFileBodies({
-    projectPath: fixture.projectPath,
-    documentId: snapshot.documentId,
-    files: [visiblePath],
-    purpose: 'visible',
-    trace,
-  }).then((response) => ({
-    response,
-    durationMs: performance.now() - visibleStartedAt,
-  }));
-  const prefetchStartedAt = performance.now();
-  const prefetchPromise = prefetchPaths.length > 0
-    ? service.getReviewDocumentFileBodies({
+  try {
+    const service = runtime.git;
+    const loadSnapshot = () =>
+      fixture.surface === 'workbench'
+        ? service.getWorkbenchSnapshot({
+            projectPath: fixture.projectPath,
+            mode: 'working',
+            context: 3,
+            bodyCandidateCount: 8,
+          })
+        : service.getComparisonSnapshot({
+            projectPath: fixture.projectPath,
+            from: { kind: 'revision', revision: fixture.fromRevision },
+            to: fixture.to,
+            mode: 'direct',
+            context: 3,
+            bodyCandidateCount: 8,
+          });
+    const startedAt = performance.now();
+    const snapshotStartedAt = performance.now();
+    const snapshot = await loadSnapshot();
+    const snapshotMs = performance.now() - snapshotStartedAt;
+    if (snapshot.status !== 'ready') throw new Error(`Snapshot failed with ${snapshot.status}.`);
+    const summary = 'reviewSummary' in snapshot ? snapshot.reviewSummary : snapshot;
+    const document = {
+      executorId: snapshot.executorId,
+      instanceId: snapshot.instanceId,
+      documentId: summary.documentId,
+    };
+    let tracedCommandCount = snapshot.diagnostics?.commands?.length ?? 0;
+    const bodyResponses: GitReviewDocumentFileBodiesReady[] = [];
+    const loadBodies = async (
+      files: string[],
+      purpose: 'visible' | 'prefetch',
+    ): Promise<void> => {
+      const response = await service.getReviewDocumentFileBodies({
         projectPath: fixture.projectPath,
-        documentId: snapshot.documentId,
-        files: prefetchPaths,
-        purpose: 'prefetch',
-        trace,
-      }).then((response) => ({
-        response,
-        durationMs: performance.now() - prefetchStartedAt,
-      }))
-    : Promise.resolve({ response: null, durationMs: 0 });
-  const [visible, prefetch] = await Promise.all([visiblePromise, prefetchPromise]);
-  if (visible.response.status !== 'ready') {
-    throw new Error(`Visible body failed with ${visible.response.status}.`);
+        document,
+        files,
+        purpose,
+      });
+      if (response.status !== 'ready') throw new Error(`Body failed with ${response.status}.`);
+      const { diagnostics: _, ...wire } = response;
+      bodyResponses.push(wire);
+      tracedCommandCount += response.diagnostics?.commands?.length ?? 0;
+      for (const file of response.deferredFiles) {
+        if (files.length === 1) throw new Error('A singleton body was deferred.');
+        await loadBodies([file], purpose);
+      }
+    };
+    const [visiblePath, ...prefetchPaths] = snapshot.firstBodyCandidates;
+    if (!visiblePath) throw new Error('Benchmark fixture produced no reviewable files.');
+
+    const visibleStartedAt = performance.now();
+    const visiblePromise = loadBodies([visiblePath], 'visible').then(
+      () => performance.now() - visibleStartedAt,
+    );
+    const prefetchStartedAt = performance.now();
+    const prefetchPromise = (async () => {
+      for (let index = 0; index < prefetchPaths.length; index += batchFiles) {
+        await loadBodies(prefetchPaths.slice(index, index + batchFiles), 'prefetch');
+      }
+      return performance.now() - prefetchStartedAt;
+    })();
+    const [visibleBodyMs, prefetchBodyMs] = await Promise.all([visiblePromise, prefetchPromise]);
+    const bodies = bodyResponses.flatMap((response) => Object.values(response.files));
+    const totalMs = performance.now() - startedAt;
+    const repeatStarted = performance.now();
+    const warmSnapshot = await loadSnapshot();
+    const warmSnapshotMs = performance.now() - repeatStarted;
+    if (warmSnapshot.status !== 'ready') {
+      throw new Error(`Warm snapshot failed with ${warmSnapshot.status}.`);
+    }
+    const bodyJson = bodyResponses.map(response => JSON.stringify(response));
+    const { diagnostics: _, ...wire } = snapshot;
+    const json = JSON.stringify(wire);
+    return {
+      snapshotMs,
+      visibleBodyMs,
+      prefetchBodyMs,
+      totalMs,
+      warmSnapshotMs,
+      tracedCommandCount,
+      warmTracedCommandCount: warmSnapshot.diagnostics?.commands?.length ?? 0,
+      snapshotBytes: Buffer.byteLength(json),
+      snapshotGzipBytes: gzipSync(json).byteLength,
+      bodyRequests: bodyResponses.length,
+      bodyBytes: bodyJson.reduce((total, body) => total + Buffer.byteLength(body), 0),
+      bodyGzipBytes: bodyJson.reduce((total, body) => total + gzipSync(body).byteLength, 0),
+      fileCount: summary.files.length,
+      rowCount: bodies.reduce((total, body) => total + body.renderedRowCount, 0),
+      patchBytes: bodies.reduce((total, body) => total + body.patchBytes, 0),
+    };
+  } finally {
+    runtime.dispose();
   }
-  if (prefetch.response && prefetch.response.status !== 'ready') {
-    throw new Error(`Prefetch body failed with ${prefetch.response.status}.`);
-  }
-  const bodies = [
-    ...Object.values(visible.response.files),
-    ...(prefetch.response?.status === 'ready' ? Object.values(prefetch.response.files) : []),
-  ];
-  return {
-    snapshotMs,
-    visibleBodyMs: visible.durationMs,
-    prefetchBodyMs: prefetch.durationMs,
-    totalMs: performance.now() - startedAt,
-    commandCount: trace.length,
-    rowCount: bodies.reduce((total, body) => total + body.renderedRowCount, 0),
-    patchBytes: bodies.reduce((total, body) => total + body.patchBytes, 0),
-  };
 }
 
 function percentile(values: number[], ratio: number): number {
@@ -208,14 +294,20 @@ function summarize(results: IterationResult[]) {
     'visibleBodyMs',
     'prefetchBodyMs',
     'totalMs',
+    'warmSnapshotMs',
   ] as const;
-  return Object.fromEntries(timingKeys.map((key) => {
-    const values = results.map((result) => result[key]);
-    return [key, {
-      median: Number(percentile(values, 0.5).toFixed(2)),
-      p95: Number(percentile(values, 0.95).toFixed(2)),
-    }];
-  }));
+  return Object.fromEntries(
+    timingKeys.map((key) => {
+      const values = results.map((result) => result[key]);
+      return [
+        key,
+        {
+          median: Number(percentile(values, 0.5).toFixed(2)),
+          p95: Number(percentile(values, 0.95).toFixed(2)),
+        },
+      ];
+    }),
+  );
 }
 
 async function main(): Promise<void> {
@@ -224,16 +316,29 @@ async function main(): Promise<void> {
   try {
     const results: IterationResult[] = [];
     for (let iteration = 0; iteration < options.iterations; iteration += 1) {
-      results.push(await runIteration(fixture));
+      results.push(await runIteration(fixture, options.batchFiles));
     }
-    console.log(JSON.stringify({
-      scenario: options.scenario,
-      iterations: options.iterations,
-      timings: summarize(results),
-      commandCount: results.map((result) => result.commandCount),
-      rowCount: results[0]?.rowCount ?? 0,
-      patchBytes: results[0]?.patchBytes ?? 0,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          scenario: options.scenario,
+          iterations: options.iterations,
+          batchFiles: options.batchFiles,
+          scope:
+            'Validating runtime; cold document registry, warm filesystem; no HTTP or browser. Up to one selected body plus seven queued bodies. Gzip sizes are estimates, not wire measurements.',
+          timings: summarize(results),
+          tracedCommandCount: results.map((result) => result.tracedCommandCount),
+          fileCount: results[0]?.fileCount ?? 0,
+          snapshotBytes: results[0]?.snapshotBytes ?? 0,
+          snapshotGzipBytes: results[0]?.snapshotGzipBytes ?? 0,
+          samples: results,
+          rowCount: results[0]?.rowCount ?? 0,
+          patchBytes: results[0]?.patchBytes ?? 0,
+        },
+        null,
+        2,
+      ),
+    );
   } finally {
     await fs.rm(fixture.projectPath, { recursive: true, force: true });
   }

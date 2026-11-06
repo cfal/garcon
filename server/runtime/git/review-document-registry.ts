@@ -152,7 +152,7 @@ function contentKey(input: RegisterGitReviewDocumentInput): string {
     input.sourceCacheKey,
     input.context,
     JSON.stringify(input.source),
-    ...input.files.map((file) => `${file.path}\0${file.bodyFingerprint}`),
+    ...input.files.map((file) => JSON.stringify(file)),
   ].join('\x1f');
 }
 

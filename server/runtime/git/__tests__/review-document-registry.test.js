@@ -51,6 +51,47 @@ function patchBody(path = 'src/file.ts') {
 }
 
 describe('GitReviewDocumentRegistry', () => {
+  it.each([
+    ['statistics', { additions: 2, estimatedRows: 4 }],
+    [
+      'status',
+      { change: { kind: 'tree-diff', status: 'added', rawStatus: 'A' } },
+    ],
+    ['binary state', { isBinary: true, bodyState: 'binary' }],
+    [
+      'limit',
+      {
+        isTooLarge: true,
+        bodyState: 'too-large',
+        limitReason: 'file-too-many-bytes',
+        limitMessage: 'Too large.',
+      },
+    ],
+  ])(
+    'supersedes changed %s without carrying bodies or digests forward',
+    (_name, metadata) => {
+      const registry = new GitReviewDocumentRegistry();
+      const first = registry.register(registration());
+      const lease = registry.acquire('/repo', first.id);
+      lease.setBodies([patchBody()]);
+      expect(first.patchDigests.size).toBe(1);
+
+      const input = registration([
+        { ...reviewFile('src/file.ts'), ...metadata },
+      ]);
+      const changed = registry.register(input);
+      expect(changed.id).not.toBe(first.id);
+      expect(changed.generation).toBe(2);
+      expect(changed.patchDigests.size).toBe(0);
+      expect(registry.acquire('/repo', first.id)).toBeNull();
+      const replacementLease = registry.acquire('/repo', changed.id);
+      expect(replacementLease.getBody('src/file.ts')).toBeNull();
+      expect(registry.register(input).id).toBe(changed.id);
+      replacementLease.release();
+      lease.release();
+    },
+  );
+
   it('reuses identical content and supersedes changed content', () => {
     const registry = new GitReviewDocumentRegistry();
     const first = registry.register(registration());

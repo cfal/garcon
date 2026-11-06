@@ -213,10 +213,8 @@ describe('Git review documents', () => {
     });
     expect(first.status).toBe('ready');
     if (first.status !== 'ready') return;
-    expect(first.files['c.txt']).toMatchObject({
-      bodyState: 'too-large',
-      limitReason: 'collection-too-many-rows',
-    });
+    expect(first.files['c.txt']).toBeUndefined();
+    expect(first.deferredFiles).toEqual(['c.txt', 'd.txt']);
     expect(first.files['d.txt']).toBeUndefined();
 
     const retryTrace = [];
@@ -242,10 +240,8 @@ describe('Git review documents', () => {
     });
     expect(cached.status).toBe('ready');
     if (cached.status !== 'ready') return;
-    expect(cached.files['c.txt']).toMatchObject({
-      bodyState: 'too-large',
-      limitReason: 'collection-too-many-rows',
-    });
+    expect(cached.files['c.txt']).toBeUndefined();
+    expect(cached.deferredFiles).toEqual(['c.txt']);
     expect(cachedTrace.filter((entry) => entry.args[0] === 'diff')).toHaveLength(0);
   });
 

@@ -115,6 +115,8 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
         && shape(v.reviewSummary, { documentId: str, project: str, mode, context: num, files: array(reviewFile, 10_000), limits })
         && shape(v, { selectedFile: nullable(str), firstBodyCandidates: array(str, 24), snapshotId: str, workbenchFingerprint: str }));
     case 'getReviewDocumentFileBodies': return str(v.documentId) && (v.status === 'ready' ? map(isGitPatchBody, 24)(v.files) && map(str, 24)(v.errors)
+      && array(str, 24)(v.deferredFiles) && uniqueBy('path')(v.deferredFiles)
+      && (v.deferredFiles as string[]).every(path => !Object.hasOwn(v.files as object, path))
       : v.status === 'document-expired' ? str(v.message) : v.status === 'stale' && array(str)(v.changedPaths) && str(v.message));
     case 'getCommitSnapshot': return str(v.project) && (v.status === 'not-found' ? str(v.commit) && str(v.message)
       : v.status === 'ready' && commitDocument(v) && commit(v.commit) && shape(v.commit, { body: str }) && nullable(str)(v.selectedParent)

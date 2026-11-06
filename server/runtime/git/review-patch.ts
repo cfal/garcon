@@ -202,7 +202,7 @@ export function errorPatchFileBody(
     renderedRowCount: 0,
     patchBytes: 0,
     patch: null,
-    error: message,
+    error: message.slice(0, 16_384),
   };
 }
 

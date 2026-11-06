@@ -18,7 +18,6 @@ import type { GitWorkbenchLoadGuard } from '$lib/git/workbench/git-workbench-typ
 import { gitDocumentKey, type GitReviewDocumentRef } from '$lib/api/git-client.js';
 import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
 import {
-	collectionLimitDecisionFromGitReviewBody,
 	decideGitReviewBodyBudget,
 	type GitReviewBodyBudgetDecision,
 } from './git-review-body-budget.js';
@@ -209,7 +208,10 @@ export class GitVirtualReviewDocumentController {
 		this.demandReconciler = new GitReviewDemandReconciler({
 			currentDocumentId: () => this.summary?.documentId ?? null,
 			requestViewportPaths: (filePaths) => this.requestDemandPaths(filePaths),
-			requestNavigationPaths: (filePaths) => this.requestDemandPaths(filePaths),
+			requestNavigationPaths: (filePaths) => {
+				const projectPath = this.deps.targetProjectPath();
+				return projectPath ? this.requestNavigationBodies(projectPath, filePaths) : 'not-ready';
+			},
 			reportOutcome: (demand, outcome) => {
 				traceGitReviewDemand({
 					stage: 'controller',
@@ -230,7 +232,7 @@ export class GitVirtualReviewDocumentController {
 		return this.summary?.files.find((file) => file.path === filePath) ?? null;
 	}
 
-	applySummary(summary: GitReviewDocumentSummary | null): void {
+	applySummary(summary: GitReviewDocumentSummary | null, firstBodyCandidates: string[] = []): void {
 		this.suspended = false;
 		this.deps.invalidateSelections();
 		const nextBodies = summary ? this.retainedBodiesForSummary(summary) : {};
@@ -248,6 +250,8 @@ export class GitVirtualReviewDocumentController {
 			this.fileBodies = {};
 			this.syntax.close({ preserveCache: true });
 		}
+		const projectPath = this.deps.targetProjectPath();
+		if (projectPath && summary) this.requestInitialBodies(projectPath, firstBodyCandidates);
 		this.demandReconciler.markReadinessChanged();
 	}
 
@@ -290,13 +294,13 @@ export class GitVirtualReviewDocumentController {
 	requestInitialBodies(projectPath: string, filePaths: string[]): void {
 		const [priority, ...prefetch] = unique(filePaths);
 		if (priority) this.requestNavigationBodies(projectPath, [priority]);
-		this.requestBodies(projectPath, prefetch, 'prefetch');
+		this.requestBodies(projectPath, prefetch.slice(0, 2), 'prefetch');
 	}
 
 	requestBodies(
 		projectPath: string,
 		filePaths: readonly string[],
-		purpose: GitReviewBodyPurpose = 'visible',
+		purpose: GitReviewBodyPurpose | 'navigation' = 'visible',
 	): GitReviewDemandOutcome {
 		if (!this.summary || this.suspended) return 'not-ready';
 		if (this.aggregateLimit) return 'limited';
@@ -305,7 +309,7 @@ export class GitVirtualReviewDocumentController {
 		this.ensureBodyScheduler(projectPath, guard);
 		if (!this.bodyScheduler) return 'not-ready';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
-		this.seedCachedBodies(uniquePaths, purpose, guard);
+		this.seedCachedBodies(uniquePaths, purpose === 'navigation' ? 'visible' : purpose, guard);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
 		const pending = uniquePaths.filter(
@@ -314,10 +318,12 @@ export class GitVirtualReviewDocumentController {
 				this.summaryForFile(filePath)?.bodyState === 'unloaded' &&
 				!this.fileBodies[filePath],
 		);
-		const scheduled =
-			purpose === 'visible'
-				? this.bodyScheduler.requestVisible([...toFetch, ...pending])
-				: this.bodyScheduler.requestPrefetch(toFetch);
+		let scheduled: boolean;
+		if (purpose === 'navigation')
+			scheduled = this.bodyScheduler.requestNavigation([...toFetch, ...pending]);
+		else if (purpose === 'visible')
+			scheduled = this.bodyScheduler.requestVisible([...toFetch, ...pending]);
+		else scheduled = this.bodyScheduler.requestPrefetch(toFetch);
 		return scheduled ? 'scheduled' : 'already-satisfied';
 	}
 
@@ -408,6 +414,8 @@ export class GitVirtualReviewDocumentController {
 	}
 
 	private requestDemandPaths(filePaths: readonly string[]): GitReviewDemandOutcome {
+		this.bodyScheduler?.retainVisible(new Set(filePaths));
+		if (filePaths.length === 0) this.bodyScheduler?.cancelPrefetch();
 		const projectPath = this.deps.targetProjectPath();
 		if (!projectPath) return 'not-ready';
 		return this.requestBodies(projectPath, filePaths, 'visible');
@@ -425,7 +433,7 @@ export class GitVirtualReviewDocumentController {
 				filePaths,
 			});
 		}
-		return this.requestBodies(projectPath, filePaths, 'visible');
+		return this.requestBodies(projectPath, filePaths, 'navigation');
 	}
 
 	private createLoadGuard(projectPath: string): GitWorkbenchLoadGuard {
@@ -522,15 +530,16 @@ export class GitVirtualReviewDocumentController {
 		if (this.bodyScheduler || !this.summary) return;
 		const summary = this.summary;
 		this.bodyScheduler = new GitReviewBodyScheduler({
-			maxBatchFiles: 1,
-			load: (paths, purpose, signal) =>
+			maxBatchFiles: 4,
+			deferredPaths: (result) => (result.status === 'ready' ? result.deferredFiles : []),
+			load: (paths, purpose, signal, publish) =>
 				getGitReviewFileBodies(
 					{ executorId: summary.document.executorId, projectPath },
 					summary.document,
 					paths,
 					guard.tab,
 					guard.contextLines,
-					{ purpose, signal },
+					{ purpose, signal, onIndexedBodies: publish },
 				),
 			onResult: (result, paths, purpose) => this.applyBodyResult(result, paths, purpose, guard),
 			onError: (error) => {
@@ -578,12 +587,6 @@ export class GitVirtualReviewDocumentController {
 			if (body.bodyFingerprint !== file.bodyFingerprint) {
 				this.deps.markExternallyStale();
 				continue;
-			}
-			const serverLimit = collectionLimitDecisionFromGitReviewBody(body, next);
-			if (serverLimit) {
-				next[filePath] = body;
-				this.setAggregateLimit(serverLimit, Object.keys(next).length, body.limitMessage);
-				break;
 			}
 			const effectivePurpose =
 				purpose === 'prefetch' && this.demandReconciler.demandsPath(summary.documentId, filePath)
@@ -633,16 +636,12 @@ export class GitVirtualReviewDocumentController {
 		};
 	}
 
-	private setAggregateLimit(
-		decision: GitReviewBodyBudgetDecision,
-		visibleFiles: number,
-		message = this.aggregateLimitMessage(decision),
-	): void {
+	private setAggregateLimit(decision: GitReviewBodyBudgetDecision, visibleFiles: number): void {
 		this.bodyScheduler?.cancel();
 		this.loadingBodies = new Set();
 		this.aggregateLimit = {
 			reason: decision.reason ?? 'collection-too-many-rows',
-			message,
+			message: this.aggregateLimitMessage(decision),
 			visibleFiles,
 			totalFilesKnown: this.summary?.files.length ?? 0,
 		};
