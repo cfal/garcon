@@ -1,0 +1,48 @@
+:root {
+  color-scheme: light dark;
+  --background: #f4f6f9;
+  --foreground: #20262d;
+  --border: #c5cbd2;
+  --accent: #096b4b;
+  --accent-foreground: #ffffff;
+  --danger: #ae2838;
+  --input: #ffffff;
+  font: 16px system-ui, sans-serif;
+  letter-spacing: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --background: #141719; --foreground: #edf0f3; --border: #50585e; --input: #20262a; --accent: #82d8b0; --accent-foreground: #10271e; --danger: #ff9ca8; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 520px; margin: 0 auto; padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
+h1 { font-size: 24px; font-weight: 650; margin: 0; }
+label { display: block; margin-bottom: 8px; }
+#server-url { margin-bottom: 16px; }
+#insecure-endpoint { color: var(--danger); font-size: 14px; line-height: 1.5; margin: -8px 0 16px; }
+#recent-servers small { display: block; font-weight: 400; overflow-wrap: anywhere; }
+input, button { width: 100%; min-height: 48px; border-radius: 6px; font: inherit; }
+input { padding: 10px 12px; border: 1px solid var(--border); background: var(--input); color: var(--foreground); }
+button { border: 0; padding: 10px 16px; background: var(--accent); color: var(--accent-foreground); font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+#connection-error { color: var(--danger); min-height: 24px; margin: 12px 0; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+#current-server { overflow-wrap: anywhere; }
+#recent-servers { padding: 0; list-style: none; max-height: 200px; overflow-y: auto; }
+#recent-servers li { display: flex; gap: 8px; margin-bottom: 8px; }
+#recent-servers button { text-align: left; background: var(--input); color: var(--foreground); border: 1px solid var(--border); overflow-wrap: anywhere; min-width: 0; }
+#recent-servers button:last-child { flex: 0 0 48px; text-align: center; }
+#recent-servers [aria-current] { border-color: var(--accent); }
+#add-server, #cancel { background: var(--input); color: var(--foreground); border: 1px solid var(--border); margin-bottom: 20px; }
+#cancel { margin-top: 12px; }
+#server-form button { margin-top: 20px; }
+#connection h2 { font-size: 20px; }
+#connection-server { font-weight: 600; overflow-wrap: anywhere; }
+#connection-url { overflow-wrap: anywhere; }
+#connection-status { min-height: 48px; line-height: 1.5; }
+#connection button { margin-top: 12px; }
+#show-connection, #cancel-connection { background: var(--input); color: var(--foreground); border: 1px solid var(--border); }

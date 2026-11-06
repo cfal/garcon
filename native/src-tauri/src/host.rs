@@ -1,0 +1,549 @@
+#[cfg(desktop)]
+use crate::switcher::{CHOOSER_REQUEST, READY_REQUEST, RELOAD_REQUEST, window_label};
+use crate::{
+    deployment::Deployment,
+    platform::{ConnectionMode, connection_mode},
+    switcher::{ServerChoices, Switcher},
+};
+use std::sync::{Mutex, MutexGuard};
+use tauri::{Manager, WebviewWindow};
+
+pub type Host = Mutex<Switcher>;
+
+pub(crate) fn locked(host: &Host) -> Result<MutexGuard<'_, Switcher>, String> {
+    host.lock()
+        .map_err(|_| "Server settings are unavailable.".into())
+}
+
+#[cfg(any(desktop, test))]
+fn dispatch_chooser_request(host: &Host, id: u64, dispatch: impl FnOnce(u64, bool)) {
+    let presentation = host.lock().ok().and_then(|mut host| {
+        if !host.windows.contains_key(&id) {
+            return None;
+        }
+        let opened = host.request_chooser(Some(id));
+        host.chooser_open.then_some((host.generation, opened))
+    });
+    // Tauri may execute a main-thread dispatch synchronously.
+    if let Some((revision, opened)) = presentation {
+        dispatch(revision, opened);
+    }
+}
+
+fn launcher(window: &WebviewWindow) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Only the host chooser can open servers.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn server_choices(
+    window: WebviewWindow,
+    host: tauri::State<'_, Host>,
+) -> Result<ServerChoices, String> {
+    launcher(&window)?;
+    locked(host.inner())?.choices()
+}
+
+#[tauri::command]
+pub fn remove_recent(
+    url: String,
+    generation: u64,
+    window: WebviewWindow,
+    host: tauri::State<'_, Host>,
+) -> Result<(), String> {
+    launcher(&window)?;
+    let mut host = locked(host.inner())?;
+    host.check_generation(generation)?;
+    host.selection
+        .as_mut()
+        .map_err(|error| error.clone())?
+        .remove_recent(&url)
+}
+
+#[tauri::command]
+pub fn cancel_chooser(
+    generation: u64,
+    window: WebviewWindow,
+    host: tauri::State<'_, Host>,
+) -> Result<(), String> {
+    launcher(&window)?;
+    let target = locked(host.inner())?.cancel_chooser(generation)?;
+    window.hide().map_err(|_| "Unable to close the chooser.")?;
+    if let Some(remote) = window
+        .app_handle()
+        .get_webview_window(&crate::switcher::window_label(target))
+    {
+        #[cfg(desktop)]
+        let _ = remote.unminimize();
+        let _ = remote.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+// Windows WebView creation must not run in a synchronous IPC command.
+pub async fn connect_server(
+    url: String,
+    name: Option<String>,
+    generation: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    let mode = connection_mode(std::env::consts::OS);
+    if mode == ConnectionMode::Disabled {
+        return Err("Server connections are unavailable in the Android build-only preview.".into());
+    }
+    let deployment = Deployment::parse(&url)?;
+    let id = locked(app.state::<Host>().inner())?.begin(generation, deployment.clone(), name)?;
+    if mode == ConnectionMode::SingleWebview {
+        let result = window
+            .navigate(deployment.url().clone())
+            .map_err(|_| "Unable to open the server.".to_string());
+        locked(app.state::<Host>().inner())?.complete_attempt(id)?;
+        return result;
+    }
+    #[cfg(desktop)]
+    {
+        crate::loading::refresh(&app);
+        crate::loading::start(&app, id);
+        Ok(())
+    }
+    #[cfg(mobile)]
+    {
+        let _ = id;
+        Err("The desktop server chooser is unavailable on this platform.".into())
+    }
+}
+
+#[tauri::command]
+pub fn retry_connection(
+    id: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    #[cfg(desktop)]
+    return crate::loading::retry(&app, id);
+    #[cfg(mobile)]
+    {
+        let _ = (id, app);
+        Err("Desktop connections are unavailable.".into())
+    }
+}
+
+#[tauri::command]
+pub fn cancel_connection(
+    id: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    #[cfg(desktop)]
+    return crate::loading::cancel(&app, id);
+    #[cfg(mobile)]
+    {
+        let _ = (id, app);
+        Err("Desktop connections are unavailable.".into())
+    }
+}
+
+#[tauri::command]
+pub fn show_connection(
+    id: u64,
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    launcher(&window)?;
+    #[cfg(desktop)]
+    return crate::loading::show(&app, id);
+    #[cfg(mobile)]
+    {
+        let _ = (id, app);
+        Err("Desktop connections are unavailable.".into())
+    }
+}
+
+#[cfg(desktop)]
+fn request_reload(app: &tauri::AppHandle, source: u64) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let capture = (|| -> Result<Option<u64>, String> {
+            let server = {
+                let binding = handle.state::<Host>();
+                let host = locked(binding.inner())?;
+                let server = host
+                    .windows
+                    .get(&source)
+                    .ok_or("The server window was closed.")?;
+                if host.chooser_open || host.attempt.is_some() {
+                    return Ok(None);
+                }
+                server.clone()
+            };
+            let window = handle
+                .get_webview_window(&window_label(source))
+                .ok_or("The server window was closed.")?;
+            let target = crate::connection::ConnectionTarget {
+                server,
+                url: window.url().map_err(|_| "Unable to read the server URL.")?,
+                placement: Some(crate::connection::WindowPlacement {
+                    size: window
+                        .inner_size()
+                        .map_err(|_| "Unable to read window size.")?,
+                    position: window.outer_position().ok(),
+                    maximized: window.is_maximized().unwrap_or(false),
+                }),
+            };
+            locked(handle.state::<Host>().inner())?
+                .begin_reload(source, target)
+                .map(Some)
+        })();
+        match capture {
+            Ok(Some(id)) => {
+                if present_chooser(&handle).is_err() {
+                    let _ = crate::loading::cancel(&handle, id);
+                    return;
+                }
+                crate::loading::start(&handle, id);
+            }
+            Ok(None) | Err(_) => request_host_chooser(&handle, Some(source)),
+        }
+    });
+}
+
+#[cfg(desktop)]
+pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String> {
+    let target = locked(app.state::<Host>().inner())?
+        .attempt(id)?
+        .target
+        .clone();
+    let server = target.server;
+    let title = server.title();
+    let navigation_app = app.clone();
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        window_label(id),
+        tauri::WebviewUrl::External(target.url),
+    )
+    .title(&title)
+    .inner_size(1200.0, 800.0)
+    .visible(false)
+    // GTK needs initial focusability; other engines must not focus during hidden construction.
+    .focused(cfg!(target_os = "linux"))
+    .background_color(tauri::window::Color(244, 246, 249, 255))
+    .decorations(!server.titlebar_hidden)
+    .disable_drag_drop_handler()
+    .initialization_script(format!(
+        "{}({});",
+        include_str!("../bridge.js"),
+        server.titlebar_hidden
+    ))
+    .on_navigation(move |destination| {
+        if destination.as_str() == READY_REQUEST {
+            crate::loading::ready(&navigation_app, id);
+            return false;
+        }
+        if destination.as_str() == RELOAD_REQUEST {
+            request_reload(&navigation_app, id);
+            return false;
+        }
+        if let Some(hidden) = crate::chrome::requested_titlebar_hidden(destination) {
+            request_titlebar_visibility(&navigation_app, id, hidden);
+            return false;
+        }
+        let host = navigation_app.state::<Host>();
+        if destination.as_str() == CHOOSER_REQUEST {
+            dispatch_chooser_request(&host, id, |revision, opened| {
+                let handle = navigation_app.clone();
+                let _ = navigation_app.run_on_main_thread(move || {
+                    let current = handle.state::<Host>().lock().is_ok_and(|host| {
+                        host.generation == revision
+                            && host.windows.contains_key(&id)
+                            && host.chooser_open
+                    });
+                    if current {
+                        if opened {
+                            let _ = present_chooser(&handle);
+                        } else {
+                            let _ = focus_chooser(&handle);
+                        }
+                    }
+                });
+            });
+            return false;
+        }
+        host.lock()
+            .is_ok_and(|host| host.allows_navigation(id, destination))
+    })
+    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+    .on_page_load(move |window, payload| {
+        if payload.event() == tauri::webview::PageLoadEvent::Started {
+            crate::loading::document_started(window.app_handle(), id);
+        }
+        if payload.event() != tauri::webview::PageLoadEvent::Finished {
+            return;
+        }
+        let snapshot = window
+            .app_handle()
+            .state::<Host>()
+            .lock()
+            .ok()
+            .and_then(|host| {
+                host.windows
+                    .get(&id)
+                    .map(|server| crate::chrome::TitlebarSnapshot {
+                        hidden: server.titlebar_hidden,
+                        failed: false,
+                    })
+            });
+        if let Some(snapshot) = snapshot {
+            let _ = crate::chrome::publish_titlebar_snapshot(&window, snapshot);
+        }
+    })
+    .build()
+    .map_err(|_| "Unable to open the server page. Choose another server or retry.")?;
+    if locked(app.state::<Host>().inner())?.attempt(id).is_err() {
+        crate::loading::destroy(app, id);
+        return Ok(());
+    }
+    let handle = app.clone();
+    #[cfg(not(target_os = "macos"))]
+    let closing_window = window.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::Focused(true) => {
+            if let Ok(mut host) = handle.state::<Host>().lock()
+                && host.windows.contains_key(&id)
+            {
+                host.focused_window = Some(id);
+            }
+        }
+        tauri::WindowEvent::CloseRequested { .. } => {
+            #[cfg(not(target_os = "macos"))]
+            let _ = closing_window.remove_menu();
+        }
+        tauri::WindowEvent::Destroyed => {
+            let (show, was_open, loading) = {
+                let binding = handle.state::<Host>();
+                let Ok(mut host) = binding.lock() else { return };
+                let was_open = host.chooser_open;
+                (host.retire(id), was_open, host.attempt.is_some())
+            };
+            if show && !was_open {
+                let _ = present_chooser(&handle);
+            } else {
+                if show {
+                    let _ = focus_chooser(&handle);
+                }
+                if show || loading {
+                    crate::loading::refresh(&handle);
+                }
+            }
+        }
+        _ => {}
+    });
+    crate::external_links::install(&window, id)
+        .map_err(|_| "Unable to install native link handling. Choose another server or retry.")?;
+    let handle = app.clone();
+    crate::chrome::prepare(&window, move |result| {
+        crate::loading::prepared(&handle, id, result)
+    })
+    .map_err(|_| "Unable to prepare the server window. Retry or choose another server.")?;
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn request_titlebar_visibility(app: &tauri::AppHandle, id: u64, hidden: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let current = handle
+            .state::<Host>()
+            .lock()
+            .is_ok_and(|host| host.windows.contains_key(&id));
+        if !current {
+            return;
+        }
+        let Some(window) = handle.get_webview_window(&window_label(id)) else {
+            return;
+        };
+        let failed = window.set_decorations(!hidden).is_err();
+        let snapshot = {
+            let host = handle.state::<Host>();
+            let Ok(mut host) = host.lock() else { return };
+            let Some(server) = host.windows.get_mut(&id) else {
+                return;
+            };
+            if !failed {
+                server.titlebar_hidden = hidden;
+            }
+            crate::chrome::TitlebarSnapshot {
+                hidden: server.titlebar_hidden,
+                failed,
+            }
+        };
+        let _ = crate::chrome::publish_titlebar_snapshot(&window, snapshot);
+    });
+}
+
+#[cfg(desktop)]
+pub(crate) fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
+    focus_chooser(app)?;
+    if let Some(window) = app.get_webview_window("main") {
+        window.eval("window.dispatchEvent(new Event('garcon-chooser-open'))")?;
+    }
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn focus_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.unminimize()?;
+        crate::chrome::present(&window)?;
+    }
+    Ok(())
+}
+
+#[cfg(desktop)]
+pub fn request_host_chooser(app: &tauri::AppHandle, source: Option<u64>) {
+    let refresh = {
+        let Ok(mut host) = app.state::<Host>().inner().lock() else {
+            return;
+        };
+        if source.is_some_and(|id| !host.windows.contains_key(&id)) {
+            return;
+        }
+        if host.chooser_open {
+            false
+        } else {
+            if !host.request_chooser(source) {
+                return;
+            }
+            true
+        }
+    };
+    if refresh {
+        let _ = present_chooser(app);
+    } else {
+        let _ = focus_chooser(app);
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let switch = MenuItem::with_id(app, "switch-server", "Open server...", true, None::<&str>)?;
+    let quit = PredefinedMenuItem::quit(app, None)?;
+    let server = Submenu::with_items(
+        app,
+        if cfg!(target_os = "macos") {
+            "Garcon"
+        } else {
+            "Server"
+        },
+        true,
+        &[&switch, &quit],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    app.set_menu(Menu::with_items(app, &[&server, &edit])?)?;
+    app.on_menu_event(|app, event| {
+        if event.id().as_ref() != "switch-server" {
+            return;
+        }
+        let source = app
+            .state::<Host>()
+            .lock()
+            .ok()
+            .and_then(|host| host.focused_window);
+        request_host_chooser(app, source);
+    });
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::switcher::ServerWindow;
+
+    #[test]
+    fn chooser_dispatch_releases_its_lock_before_synchronous_presentation() {
+        let mut switcher = Switcher::new(Err("Synthetic settings".into()));
+        switcher.chooser_open = false;
+        switcher.windows.insert(
+            3,
+            ServerWindow {
+                deployment: Deployment::parse("https://synthetic.test/").unwrap(),
+                name: None,
+                titlebar_hidden: false,
+            },
+        );
+        let host = Mutex::new(switcher);
+        let mut presented = 0;
+        dispatch_chooser_request(&host, 3, |revision, opened| {
+            let current = host.try_lock().expect("presentation must not deadlock");
+            assert_eq!(current.generation, revision);
+            assert!(current.chooser_open);
+            assert!(opened);
+            presented += 1;
+        });
+        dispatch_chooser_request(&host, 3, |revision, opened| {
+            let current = host.try_lock().expect("presentation must not deadlock");
+            assert_eq!(current.generation, revision);
+            assert_eq!(current.chooser_source, Some(3));
+            assert!(!opened);
+            presented += 1;
+        });
+        dispatch_chooser_request(&host, 2, |_, _| panic!("unknown page"));
+        assert_eq!(presented, 2);
+    }
+
+    #[test]
+    fn sibling_requests_present_the_current_attempt_without_retargeting_it() {
+        let server = ServerWindow {
+            deployment: Deployment::parse("https://synthetic.test/").unwrap(),
+            name: Some("Original".into()),
+            titlebar_hidden: false,
+        };
+        let mut switcher = Switcher::new(Err("Synthetic settings".into()));
+        switcher.windows.insert(3, server.clone());
+        switcher.windows.insert(7, server.clone());
+        switcher.chooser_source = Some(3);
+        switcher.generation = 9;
+        switcher.attempt = Some(crate::connection::ConnectionAttempt::new(
+            8,
+            crate::connection::ConnectionTarget {
+                url: server.deployment.url().clone(),
+                server,
+                placement: None,
+            },
+            Some(3),
+        ));
+        let host = Mutex::new(switcher);
+        for _ in 0..2 {
+            let mut presented = false;
+            dispatch_chooser_request(&host, 7, |revision, opened| {
+                let current = host.try_lock().expect("presentation must not deadlock");
+                assert_eq!(revision, 9);
+                assert_eq!(current.chooser_source, Some(3));
+                assert_eq!(current.attempt(8).unwrap().source, Some(3));
+                assert!(!opened);
+                presented = true;
+            });
+            assert!(presented);
+        }
+        dispatch_chooser_request(&host, 99, |_, _| panic!("unknown page"));
+    }
+}

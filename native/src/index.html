@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>Garcon</title>
+    <link rel="stylesheet" href="./launcher.css">
+    <script type="module" src="./launcher.js"></script>
+  </head>
+  <body>
+    <main>
+      <header><img src="./icon.png" width="48" height="48" alt=""><h1>Garcon</h1></header>
+      <section id="server-selection">
+      <p id="current-server"></p>
+      <ul id="recent-servers" aria-label="Recent servers"></ul>
+      <button id="add-server" type="button" disabled>Add Server</button>
+      <form id="server-form">
+        <label for="server-url">Server URL</label>
+        <input id="server-url" name="server-url" type="url" placeholder="https://garcon.example.com/" required autocapitalize="none" autocomplete="url" spellcheck="false" aria-describedby="insecure-endpoint connection-error">
+        <p id="insecure-endpoint" role="status" hidden>This endpoint is unencrypted. Use HTTPS, or connect only over a trusted network or VPN.</p>
+        <label for="server-name">Name (optional)</label>
+        <input id="server-name" name="server-name" type="text" maxlength="120" autocomplete="off" placeholder="Work">
+        <button type="submit" disabled>Open server</button>
+      </form>
+      <button id="cancel" type="button" hidden>Cancel</button>
+      </section>
+      <section id="connection" hidden aria-labelledby="connection-heading">
+        <h2 id="connection-heading">Connecting</h2>
+        <p id="connection-server"></p>
+        <p id="connection-url"></p>
+        <p id="connection-status" role="status"></p>
+        <button id="retry-connection" type="button">Retry</button>
+        <button id="show-connection" type="button" hidden>Show page anyway</button>
+        <button id="cancel-connection" type="button">Cancel</button>
+      </section>
+      <p id="connection-error" role="alert"></p>
+    </main>
+  </body>
+</html>

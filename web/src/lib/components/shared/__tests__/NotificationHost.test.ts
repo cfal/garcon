@@ -71,4 +71,12 @@ describe('NotificationHost', () => {
 			'sm:start-[var(--notification-inline-start-desktop)]',
 		);
 	});
+
+	it('allows long server addresses to wrap inside the notification', () => {
+		const notifications = new NotificationsStore();
+		const message = `Connected to server.test/${'synthetic-mount-'.repeat(8)}`;
+		notifications.info(message);
+		render(NotificationHost, { notifications });
+		expect(screen.getByText(message).classList).toContain('break-words');
+	});
 });
