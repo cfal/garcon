@@ -78,7 +78,11 @@ export function createTranscriptDisplayRoutes(deps: DisplayRouteDeps): RouteMap 
     }) },
   };
   for (const kind of ['user-rows', 'resend', 'subagents'] as const) routes[`/api/v1/chats/transcript-display/${kind}`] = {
-    POST: post((body, request) => display.auxiliary(kind, parseDisplayAuxiliaryRequest(body), request.signal)),
+    POST: post((body, request) => {
+      const input = parseDisplayAuxiliaryRequest(body);
+      if (kind === 'subagents' && input.limit > 50) throw new TypeError('Subagent summary limit exceeds 50');
+      return display.auxiliary(kind, input, request.signal);
+    }),
   };
   return routes;
 }

@@ -44,6 +44,22 @@ test('streams bounded undecoded frames with consumer backpressure and resumes fr
   expect(framesRead).toBe(1);
 });
 
+test('bounds frame payload estimates and isolates oversized rows', async () => {
+  const view = store.initializeCurrentView('large', { contentStartOrdinal: 1, rows: [
+    row('a'.repeat(600_000)), row('b'.repeat(600_000)), row(),
+    row('c'.repeat(1_100_000)), row(),
+  ] });
+  const framesRead = [];
+  await store.withStoredRowFrames('large', { viewId: view.viewId, ordinal: 5 }, 1, async frames => {
+    for await (const frame of frames) {
+      framesRead.push(frame.map(entry => entry.ordinal));
+      const estimatedBytes = frame.reduce((bytes, entry) => bytes + entry.payload_json.length * 2, 0);
+      if (estimatedBytes > 2 * 1024 * 1024) expect(frame).toHaveLength(1);
+    }
+  });
+  expect(framesRead).toEqual([[1], [2, 3], [4], [5]]);
+});
+
 test('revalidates the view even when a consumer exits after its first frame', async () => {
   const staged = await store.stageView('source', { viewId: transcriptViewId('replacement'), contentStartOrdinal: 1, rows: [] });
   await expect(store.withStoredRowFrames('source', watermark, 1, async frames => {

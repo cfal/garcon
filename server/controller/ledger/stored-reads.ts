@@ -32,8 +32,9 @@ export class StoredLedgerReads {
   async withFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
     consume: (frames: AsyncIterable<readonly StoredLedgerRow[]>) => Promise<T>, signal?: AbortSignal): Promise<T> {
     const assertActive = this.port.captureGuard(chatId);
+    // The stored-page limit counts code units; display frames estimate two bytes per unit.
     const read: PageReader<StoredLedgerRow> = (database, viewId, after, through) =>
-      readBoundedStoredPage(database, viewId, after, through, { rows: 256, bytes: 2 * 1024 * 1024 });
+      readBoundedStoredPage(database, viewId, after, through, { rows: 256, bytes: 1024 * 1024 });
     return this.#consume(chatId, watermark, assertActive, () => consume(this.streamPages(chatId, watermark, read, signal, fromOrdinal)), signal);
   }
 
