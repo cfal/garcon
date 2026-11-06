@@ -124,6 +124,69 @@ function addedSyntaxSegments(controller: GitDiffDocumentController) {
 }
 
 describe('GitDiffDocumentController', () => {
+	it('retries an incrementally published error before the original batch settles', async () => {
+		const controller = new GitDiffDocumentController();
+		const held = deferred<ReturnType<typeof bodyResponse>>();
+		let publish!: Parameters<GitDiffDocumentBodyLoader>[4];
+		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(
+			async (_snapshot, paths, _purpose, _signal, partial) => {
+				if (paths.length > 1) {
+					publish = partial;
+					return held.promise;
+				}
+				return bodyResponse(
+					'doc',
+					paths.map((file) => file.path),
+				);
+			},
+		);
+		try {
+			controller.open(
+				{
+					project: '/project',
+					documentId: 'doc',
+					files: ['a.ts', 'b.ts'].map(file),
+					limits: { ...limits, maxLoadedRows: 100 },
+					firstBodyCandidates: [],
+				},
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					loadBodies,
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+				},
+			);
+			controller.handleBodyDemand({
+				kind: 'viewport',
+				documentId: 'doc',
+				filePaths: ['a.ts', 'b.ts'],
+			});
+			const failedBody: GitReviewFileBody = {
+				...body('a.ts'),
+				bodyState: 'error',
+				patch: null,
+				patchIndex: null,
+				renderedRowCount: 0,
+				patchBytes: 0,
+				error: 'Transient diff failure',
+			};
+			publish({ ...bodyResponse('doc', []), files: { 'a.ts': failedBody } }, ['a.ts']);
+			expect(controller.fileBodies['a.ts']?.bodyState).toBe('error');
+			controller.focusFile('a.ts');
+			expect(controller.loadingBodies.has('a.ts')).toBe(true);
+			held.resolve(bodyResponse('doc', ['a.ts', 'b.ts']));
+			await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded'));
+			expect(loadBodies.mock.calls.map(([, paths]) => paths.map((file) => file.path))).toEqual([
+				['a.ts', 'b.ts'],
+				['a.ts'],
+			]);
+		} finally {
+			controller.clear();
+			held.resolve(bodyResponse('doc', ['a.ts', 'b.ts']));
+		}
+	});
+
 	it.each(['viewport', 'navigation'] as const)(
 		'recovers %s demand after an incremental prefetch exceeds its budget',
 		async (kind) => {

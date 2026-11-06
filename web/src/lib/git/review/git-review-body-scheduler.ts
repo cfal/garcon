@@ -108,14 +108,15 @@ export class GitReviewBodyScheduler<T> {
 		for (const path of this.navigationPaths) retained.add(path);
 		const removed = this.visibleQueue.filter((path) => !retained.has(path));
 		this.removeQueued(this.visibleQueue, removed);
-		if (this.visibleActive) this.visibleActive.retained = retained;
+		const active = this.visibleActive;
+		if (active) active.retained = retained;
 		if (
-			this.visibleActive &&
-			!this.visibleActive.controller.signal.aborted &&
-			!this.visibleActive.paths.some((path) => retained.has(path))
+			active &&
+			!active.controller.signal.aborted &&
+			!active.paths.some((path) => !active.published.has(path) && retained.has(path))
 		) {
-			this.visibleActive.controller.abort();
-			removed.push(...this.visibleActive.paths);
+			active.controller.abort();
+			removed.push(...active.paths);
 		}
 		const idle = this.unique(removed).filter((path) => !this.hasPending(path));
 		if (idle.length > 0) this.options.onLoadingChange(idle, false);
@@ -126,8 +127,10 @@ export class GitReviewBodyScheduler<T> {
 			this.visibleQueue.includes(path) ||
 			this.prefetchQueue.includes(path) ||
 			(this.visibleActive?.controller.signal.aborted === false &&
+				!this.visibleActive.published.has(path) &&
 				this.visibleActive.paths.includes(path)) ||
 			(this.prefetchActive?.controller.signal.aborted === false &&
+				!this.prefetchActive.published.has(path) &&
 				this.prefetchActive.paths.includes(path))
 		);
 	}
@@ -183,8 +186,10 @@ export class GitReviewBodyScheduler<T> {
 				this.navigationPaths.delete(path);
 			}
 			this.options.onResult(result, fresh, resultPurpose);
-			if (generation === this.generation && !controller.signal.aborted)
-				this.options.onLoadingChange(fresh, false);
+			if (generation === this.generation && !controller.signal.aborted) {
+				const idle = fresh.filter((path) => !this.hasPending(path));
+				if (idle.length > 0) this.options.onLoadingChange(idle, false);
+			}
 		};
 		const publish = (result: T, completed: string[]) => {
 			if (purpose === 'visible') {
@@ -230,12 +235,14 @@ export class GitReviewBodyScheduler<T> {
 							(lane.retained.has(path) || this.navigationPaths.has(path)) && !this.hasPending(path),
 					);
 					for (const path of retry) this.singletonPaths.add(path);
-					this.enqueue(queue, retry, true);
+					if (retry.length > 0) this.enqueue(queue, retry, true);
 				}
 				this.pump(purpose);
-				const idle = paths.filter((path) => !this.hasPending(path));
-				for (const path of idle) this.navigationPaths.delete(path);
-				if (idle.length > 0) this.options.onLoadingChange(idle, false);
+				if (!controller.signal.aborted) {
+					const idle = paths.filter((path) => !this.hasPending(path));
+					for (const path of idle) this.navigationPaths.delete(path);
+					if (idle.length > 0) this.options.onLoadingChange(idle, false);
+				}
 			});
 	}
 

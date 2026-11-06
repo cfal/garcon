@@ -10,7 +10,7 @@ function deferred<T>() {
 }
 
 describe('GitReviewBodyScheduler', () => {
-	it('publishes cancellation once while an aborted lane is still settling', async () => {
+	it('publishes cancellation once, including after the aborted lane settles', async () => {
 		const held = deferred<string>();
 		const onLoadingChange = vi.fn();
 		const scheduler = new GitReviewBodyScheduler({
@@ -28,7 +28,99 @@ describe('GitReviewBodyScheduler', () => {
 			[['a'], false],
 		]);
 		held.resolve('late');
-		await held.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(onLoadingChange.mock.calls).toEqual([
+			[['a'], true],
+			[['a'], false],
+		]);
+	});
+
+	it.each(['visible', 'prefetch'] as const)(
+		'accepts renewed demand for a published file while its %s batch is unfinished',
+		async (purpose) => {
+			const held = deferred<string>();
+			const calls: string[][] = [];
+			const onResult = vi.fn();
+			const onLoadingChange = vi.fn();
+			let publishBatch!: (result: string, paths: string[]) => void;
+			const scheduler = new GitReviewBodyScheduler({
+				maxBatchFiles: 4,
+				load: (paths, _purpose, _signal, publish) => {
+					calls.push(paths);
+					if (calls.length === 1) {
+						publishBatch = publish;
+						return held.promise;
+					}
+					return Promise.resolve('renewed');
+				},
+				onResult,
+				onError: vi.fn(),
+				onLoadingChange,
+			});
+			if (purpose === 'visible') scheduler.requestVisible(['a', 'b']);
+			else scheduler.requestPrefetch(['a', 'b']);
+			publishBatch('original', ['a']);
+			expect(scheduler.hasPending('a')).toBe(false);
+			expect(scheduler.requestVisible(['a'])).toBe(true);
+			held.resolve('original');
+			await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(3));
+			expect(calls).toEqual([['a', 'b'], ['a']]);
+			expect(onResult).toHaveBeenCalledWith('renewed', ['a'], 'visible');
+			expect(onLoadingChange.mock.calls.every(([paths]) => paths.length > 0)).toBe(true);
+		},
+	);
+
+	it('cancels remaining batch work when only an already-published file is retained', () => {
+		const held = deferred<string>();
+		let publishBatch!: (result: string, paths: string[]) => void;
+		let batchSignal!: AbortSignal;
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (_paths, _purpose, signal, publish) => {
+				batchSignal = signal;
+				publishBatch = publish;
+				return held.promise;
+			},
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestVisible(['a', 'b']);
+		publishBatch('ready', ['a']);
+		scheduler.retainVisible(new Set(['a']));
+		expect(batchSignal.aborted).toBe(true);
+		expect(scheduler.hasPending('b')).toBe(false);
+		held.resolve('late');
+	});
+
+	it('keeps loading ownership when a result callback renews the same path', async () => {
+		const held = deferred<string>();
+		const renewed = deferred<string>();
+		let publishBatch!: (result: string, paths: string[]) => void;
+		const onLoadingChange = vi.fn();
+		const scheduler: GitReviewBodyScheduler<string> = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (_paths, purpose, _signal, publish) => {
+				if (purpose === 'visible') return renewed.promise;
+				publishBatch = publish;
+				return held.promise;
+			},
+			onResult: (result) => {
+				if (result === 'retry') scheduler.requestNavigation(['a']);
+			},
+			onError: vi.fn(),
+			onLoadingChange,
+		});
+		scheduler.requestPrefetch(['a', 'b']);
+		publishBatch('retry', ['a']);
+		expect(onLoadingChange.mock.calls).toEqual([
+			[['a', 'b'], true],
+			[['a'], true],
+		]);
+		expect(scheduler.hasPending('a')).toBe(true);
+		held.resolve('done');
+		renewed.resolve('done');
+		await vi.waitFor(() => expect(scheduler.hasPending('a')).toBe(false));
 	});
 
 	it('keeps navigation ahead of subsequent viewport demand', async () => {
