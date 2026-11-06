@@ -19,6 +19,10 @@ export async function mountLauncher(document, invoke) {
   const current = document.querySelector('#current-server');
   const selection = document.querySelector('#server-selection');
   const connection = document.querySelector('#connection');
+  const connectionHeading = document.querySelector('#connection-heading');
+  const connectionServer = document.querySelector('#connection-server');
+  const connectionUrl = document.querySelector('#connection-url');
+  const connectionStatus = document.querySelector('#connection-status');
   const retryConnection = document.querySelector('#retry-connection');
   const cancelConnection = document.querySelector('#cancel-connection');
   const showConnection = document.querySelector('#show-connection');
@@ -28,6 +32,8 @@ export async function mountLauncher(document, invoke) {
   let ready = false;
   let refreshId = 0;
   let refreshRequested = false;
+  let selectionDraft = null;
+  let suspendedFocus = null;
 
   function updateEndpointWarning() {
     try {
@@ -49,11 +55,21 @@ export async function mountLauncher(document, invoke) {
 
   function setPending(value) {
     pending = value;
+    if ((pending || !ready) && !suspendedFocus && document.activeElement?.matches('button, input')) {
+      suspendedFocus = { control: document.activeElement, attempt: choices?.connection?.id };
+    }
     for (const control of document.querySelectorAll('button, input')) control.disabled = value || !ready;
     if (choices?.connection) {
       for (const control of selection.querySelectorAll('button, input')) control.disabled = true;
       retryConnection.disabled ||= !choices.connection.canRetry;
       showConnection.disabled ||= !choices.connection.canShow;
+    }
+    if (ready && !pending && suspendedFocus) {
+      const { control, attempt } = suspendedFocus;
+      suspendedFocus = null;
+      if (attempt !== choices?.connection?.id || !document.hasFocus() || document.activeElement !== document.body) return;
+      const target = control.isConnected ? control : input;
+      if (!target.disabled && !target.closest('[hidden]')) target.focus({ preventScroll: true });
     }
   }
 
@@ -90,16 +106,19 @@ export async function mountLauncher(document, invoke) {
         let heading = 'Connecting';
         if (choices.connection.ready) heading = 'Ready';
         else if (choices.connection.message) heading = 'Connection not ready';
-        document.querySelector('#connection-heading').textContent = heading;
-        document.querySelector('#connection-server').textContent = choices.connection.server;
-        document.querySelector('#connection-url').textContent = choices.connection.url;
-        document.querySelector('#connection-status').textContent = choices.connection.message ?? (choices.connection.ready ? 'Garcon is ready.' : 'Waiting for Garcon...');
+        connectionHeading.textContent = heading;
+        connectionServer.textContent = choices.connection.server;
+        connectionUrl.textContent = choices.connection.url;
+        connectionStatus.textContent = choices.connection.message ?? (choices.connection.ready ? 'Garcon is ready.' : 'Waiting for Garcon...');
         showConnection.hidden = !choices.connection.canShow;
         showConnection.textContent = choices.connection.ready ? 'Show page' : 'Show page anyway';
       }
-      input.value = choices.lastUrl ?? '';
+      const draft = choices.connection ? null : selectionDraft;
+      input.value = draft?.url ?? choices.lastUrl ?? '';
       updateEndpointWarning();
-      name.value = savedName(input.value);
+      name.value = draft?.name ?? savedName(input.value);
+      if (draft) error.textContent = draft.error;
+      selectionDraft = null;
       current.textContent = choices.currentUrl ? `Opened from: ${choices.currentUrl}` : '';
       cancel.hidden = !choices.canCancel;
       recents.replaceChildren();
@@ -183,6 +202,15 @@ export async function mountLauncher(document, invoke) {
     if (choices?.connection) cancelConnection.click();
     else if (choices?.canCancel) cancel.click();
   });
-  document.defaultView.addEventListener('garcon-chooser-open', () => void refresh());
+  document.defaultView.addEventListener('garcon-chooser-open', () => {
+    selectionDraft = null;
+    void refresh();
+  });
+  document.defaultView.addEventListener('garcon-chooser-update', () => {
+    if (ready && !selection.hidden && !selectionDraft) {
+      selectionDraft = { url: input.value, name: name.value, error: error.textContent };
+    }
+    void refresh();
+  });
   await refresh();
 }

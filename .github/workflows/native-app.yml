@@ -74,7 +74,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev librsvg2-dev libayatana-appindicator3-dev patchelf xvfb xauth webkit2gtk-driver xdotool openssl curl
+          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev librsvg2-dev libayatana-appindicator3-dev patchelf xvfb xauth openbox webkit2gtk-driver xdotool openssl curl
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/src-tauri -> target
@@ -99,7 +99,7 @@ jobs:
         run: bun run tauri build --debug --no-bundle -- --locked
       - name: Smoke test native WebView
         if: runner.os == 'Linux'
-        run: xvfb-run -a bun run test:smoke
+        run: xvfb-run -a bun scripts/smoke-x11.js
       - name: Validate preview packages
         run: bun run distribution preview '${{ matrix.target }}'
       - name: Upload desktop packages

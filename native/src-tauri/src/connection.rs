@@ -54,26 +54,26 @@ impl ConnectionAttempt {
     }
 
     pub fn status(&self) -> ConnectionStatus {
+        let ready = self.can_reveal();
         ConnectionStatus {
             id: self.id,
-            server: self.target.server.name.clone().unwrap_or_else(|| {
-                self.target
-                    .server
-                    .deployment
-                    .url()
-                    .host_str()
-                    .unwrap_or("Garcon")
-                    .into()
-            }),
+            server: self.target.server.display_name().to_string(),
             url: self.target.server.deployment.url().to_string(),
             message: self.failure.clone().or_else(|| {
-                (self.timed_out && !self.can_reveal())
-                    .then(|| "Garcon has not become ready.".into())
+                (self.timed_out && !ready).then(|| "Garcon has not become ready.".into())
             }),
-            ready: self.can_reveal(),
-            can_retry: self.prepared || self.failure.is_some(),
-            can_show: self.prepared && (self.ready || self.timed_out) && self.failure.is_none(),
+            ready,
+            can_retry: self.can_retry(),
+            can_show: self.can_show(),
         }
+    }
+
+    pub fn can_retry(&self) -> bool {
+        self.prepared || self.failure.is_some()
+    }
+
+    pub fn can_show(&self) -> bool {
+        self.prepared && (self.ready || self.timed_out) && self.failure.is_none()
     }
 
     pub fn can_reveal(&self) -> bool {
@@ -160,5 +160,70 @@ mod tests {
         attempt.document_started();
         assert!(!attempt.status().ready);
         assert!(attempt.status().message.is_some());
+    }
+
+    #[test]
+    fn connection_controls_preserve_preparation_readiness_and_failure_precedence() {
+        for (prepared, ready, timed_out, failure, can_retry, can_show, expected_ready) in [
+            (false, false, false, None, false, false, false),
+            (false, true, true, None, false, false, false),
+            (
+                false,
+                true,
+                true,
+                Some("Synthetic failure"),
+                true,
+                false,
+                false,
+            ),
+            (true, false, false, None, true, false, false),
+            (true, false, true, None, true, true, false),
+            (true, true, false, None, true, true, true),
+            (true, true, true, None, true, true, true),
+            (
+                true,
+                true,
+                true,
+                Some("Synthetic failure"),
+                true,
+                false,
+                false,
+            ),
+        ] {
+            let mut attempt = attempt();
+            attempt.prepared = prepared;
+            attempt.ready = ready;
+            attempt.timed_out = timed_out;
+            attempt.failure = failure.map(str::to_string);
+            let status = attempt.status();
+            assert_eq!(attempt.can_retry(), can_retry);
+            assert_eq!(attempt.can_show(), can_show);
+            assert_eq!(status.can_retry, can_retry);
+            assert_eq!(status.can_show, can_show);
+            assert_eq!(attempt.can_reveal(), expected_ready);
+            assert_eq!(status.ready, expected_ready);
+            if let Some(failure) = failure {
+                assert_eq!(status.message.as_deref(), Some(failure));
+            }
+        }
+    }
+
+    #[test]
+    fn loading_identity_matches_the_window_title_without_port_or_mount() {
+        for (url, name, label) in [
+            ("https://server.test:8443/mount/", None, "server.test"),
+            ("http://[fd00::2]:3001/mount/", None, "[fd00::2]"),
+            ("https://server.test/", Some("Work"), "Work"),
+            ("https://server.test/", Some(""), ""),
+        ] {
+            let mut attempt = attempt();
+            attempt.target.server.deployment = Deployment::parse(url).unwrap();
+            attempt.target.server.name = name.map(str::to_string);
+            assert_eq!(attempt.status().server, label);
+            assert_eq!(
+                attempt.target.server.title(),
+                format!("{label} \u{2014} Garcon")
+            );
+        }
     }
 }

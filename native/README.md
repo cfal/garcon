@@ -135,12 +135,15 @@ bun run test
 CARGO_BUILD_JOBS=1 bun run --cwd native test:host
 bun run --cwd native tauri build --debug --no-bundle -- --locked
 cargo install tauri-driver --version 2.1.0 --locked
-xvfb-run -a bun run --cwd native test:smoke
+xvfb-run -a bun native/scripts/smoke-x11.js
 ```
 
 Build the launcher with `bun run --cwd native build` before running Rust checks
 from a clean checkout. Linux smoke tests need `webkit2gtk-driver`, `xvfb`,
-`xauth`, `xdotool`, `openssl`, and `curl`. Keyboard checks use OS-level input;
+`xauth`, `openbox`, `xdotool`, `openssl`, and `curl`. The X11 wrapper starts and
+stops its own window manager on the dedicated Xvfb display; bare Xvfb cannot
+exercise raising an already-mapped chooser. On an existing desktop, run
+`bun run --cwd native test:smoke` directly. Keyboard checks use OS-level input;
 WebDriver DOM key events are not proof of native menu activation. Tests use
 isolated app data and synthetic servers, never an existing
 user server. The real native WebView is tested for launcher rendering, root and
@@ -311,7 +314,7 @@ hotkeys, right-click interception or network preflight is installed.
 ## Chooser Contract
 
 The remote page receives an optional, top-frame-only capability:
-`window.__GARCON_NATIVE__ = { version: 1, requestServerChooser(): void, lifecycle }`.
+`window.__GARCON_NATIVE__ = { version: 1, requestServerChooser(): void, lifecycle, titlebar }`.
 The browser application discovers it through
 `web/src/lib/native/server-chooser.ts`; ordinary browsers have no capability.
 This is a request, not an acknowledgement or a navigation API. It takes no URL,
@@ -357,7 +360,8 @@ Local-only host commands:
   A stale generation is rejected. Closing the chooser's source invalidates its
   snapshot without changing any surviving window's identity.
 - `cancel_chooser({ generation })` hides only the chooser and focuses the existing
-  page. It never reloads, logs out, clears storage, or sends Stop.
+  page. It invalidates the snapshot so queued submissions cannot open a server
+  after cancellation. It never reloads, logs out, clears storage, or sends Stop.
 - `remove_recent({ url, generation })` removes only the recent-list entry.
 - `retry_connection({ id })`, `cancel_connection({ id })` and
   `show_connection({ id })` act only on the current attempt. Retry allocates a
@@ -378,9 +382,10 @@ The bundled-UI workstream must preserve this optional adapter contract, replace
 the remote-navigation sentinel with an equally narrow host request if its local
 origin model requires it, and independently partition credentials/drafts by
 deployment. Do not grant its UI the launcher's `connect_server` permission.
-The chooser adapter owns only chooser requests. Linux external-link handling is
-installed independently on each remote WebView and does not extend
-the injected capability.
+The chooser, lifecycle and titlebar adapters expose only their fixed host requests
+and the read-only titlebar state subscription.
+Linux external-link handling is installed independently on each remote WebView
+and does not extend the injected capability.
 
 ## Linux External Links
 

@@ -246,7 +246,7 @@ async function settleLoadingPaint() {
     script: `const done = arguments[arguments.length - 1];
       requestAnimationFrame(() => requestAnimationFrame(() => done(null)));`, args: [],
   });
-  assert.equal(await evaluate(`return ['#connection-heading', '#connection-url', '#cancel-connection'].every(selector => {
+  assert.equal(await evaluate(`return ['#connection-heading', '#connection-server', '#connection-url', '#cancel-connection'].every(selector => {
     const rect = document.querySelector(selector).getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight;
   }) && document.documentElement.scrollWidth <= innerWidth`), true, 'loading identity and recovery controls fit');
@@ -375,7 +375,7 @@ function fixture(base, outsideUrl) {
     },
     page() {
       const connection = socketConnections;
-      return { ...client, run: (script, args) => client.run(script, args, connection) };
+      return { run: (script, args) => client.run(script, args, connection) };
     },
     async run(script, args = [], connection) {
       await until(() => connection ? sockets.has(connection) : !!activeSocket, 'synthetic page command socket');
@@ -508,16 +508,39 @@ try {
       await settleChooserPaint();
       await Bun.write(resolve(artifacts, base ? 'chooser-mobile.png' : 'chooser.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
       await evaluate('document.querySelector("#server-url").value = "https://edited.test/";');
+      const repeatedOpenCount = await evaluate('return window.chooserOpenCount');
+      await focusNativeRemote('Synthetic A \u2014 Garcon');
       await remote.run('window.__GARCON_NATIVE__.requestServerChooser();');
+      await until(() => evaluate('return document.hasFocus()'), 'repeated sidebar request raises the existing chooser');
+      assert.equal(await evaluate('return window.chooserOpenCount'), repeatedOpenCount, 'raising an existing chooser must not refresh it');
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://edited.test/', 'repeated requests must not reset chooser edits');
       await remote.run('window.__GARCON_NATIVE__.lifecycle.reportReady();');
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://edited.test/', 'readiness from an already-open page must not reset chooser edits');
+      await evaluate('document.querySelector("#server-name").value = "Edited name"; document.querySelector("#connection-error").textContent = "Synthetic error";');
+      const busyHandles = await webdriver(`/session/${session}/window/handles`);
+      await remote.run('window.__GARCON_NATIVE__.lifecycle.requestReload();');
+      await settleChooserPaint();
+      assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://edited.test/', 'busy reload must preserve the chooser URL draft');
+      assert.equal(await evaluate('return document.querySelector("#server-name").value'), 'Edited name', 'busy reload must preserve the chooser name draft');
+      assert.equal(await evaluate('return document.querySelector("#connection-error").textContent'), 'Synthetic error', 'busy reload must preserve chooser errors');
+      assert.deepEqual(await webdriver(`/session/${session}/window/handles`), busyHandles, 'busy reload must not replace a window');
       await evaluate('document.querySelector("#cancel").click();');
       assert.equal(await remote.run('return window.cancelSentinel'), 'synthetic-unsaved');
       const focusBeforeTitlebar = await remote.run('return document.activeElement.id');
       await nativeTitlebarChooser();
+      const cancelledGeneration = await webdriver(`/session/${session}/execute/async`, {
+        script: `const done = arguments[arguments.length - 1];
+          window.__TAURI_INTERNALS__.invoke('server_choices').then(choices => done(choices.generation));`, args: [],
+      });
       await evaluate('document.querySelector("#cancel").click();');
       await until(() => remote.run('return document.hasFocus()'), 'titlebar chooser cancel restores page focus');
+      const cancelledSubmission = await webdriver(`/session/${session}/execute/async`, {
+        script: `const done = arguments[arguments.length - 1];
+          window.__TAURI_INTERNALS__.invoke('connect_server', {url: arguments[0], generation: arguments[1]})
+            .then(() => done(false), () => done(true));`, args: [remote.url, cancelledGeneration],
+      });
+      assert.equal(cancelledSubmission, true, 'cancelled chooser snapshots must not admit queued connections');
+      assert.deepEqual(await webdriver(`/session/${session}/window/handles`), busyHandles, 'cancelled submissions must not create candidates');
       assert.equal(await remote.run('return document.activeElement.id'), focusBeforeTitlebar);
       assert.equal(await remote.run('return window.cancelSentinel'), 'synthetic-unsaved', 'titlebar chooser cancel retains the page');
       await nativeTitlebarChooser();
@@ -560,7 +583,16 @@ try {
       assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'B reload preserves original A');
       assert.equal(await remote.run('return window.duplicateSentinel'), 'duplicate-unsaved', 'B reload preserves duplicate A');
       remoteTitle = 'Synthetic Duplicate \u2014 Garcon';
+      await openChooser(aPage);
+      await evaluate('document.querySelector("#server-url").value = "https://sibling-draft.test/"; document.querySelector("#server-name").value = "Sibling draft"; document.querySelector("#connection-error").textContent = "Synthetic error";');
+      const siblingCloseOpenCount = await evaluate('return window.chooserOpenCount');
       await closeRemote(bHandle, 'Synthetic B \u2014 Garcon');
+      assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://sibling-draft.test/');
+      assert.equal(await evaluate('return document.querySelector("#server-name").value'), 'Sibling draft');
+      assert.equal(await evaluate('return document.querySelector("#connection-error").textContent'), 'Synthetic error');
+      assert.equal(await evaluate('return window.chooserOpenCount'), siblingCloseOpenCount, 'closing an unrelated window must not reopen the chooser');
+      assert.equal(await evaluate('return document.querySelector("#cancel").hidden'), false);
+      await evaluate('document.querySelector("#cancel").click();');
       assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'closing B does not close A');
       const duplicatePage = remote.page();
       aHandle = await managedReload(aPage, aHandle);
@@ -574,8 +606,12 @@ try {
         args: [remote.url],
       });
       assert.equal(savedName, 'Synthetic Duplicate', 'original reload does not overwrite the newer saved name');
+      await evaluate('document.querySelector("#server-url").value = "https://source-draft.test/"; document.querySelector("#server-name").value = "Source draft"; document.querySelector("#connection-error").textContent = "Synthetic error";');
       await closeRemote(aHandle, 'Synthetic A \u2014 Garcon');
       await until(() => evaluate('return document.querySelector("#current-server").textContent === "" && !document.querySelector("#cancel").hidden'), 'closed chooser source is not retargeted');
+      assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://source-draft.test/');
+      assert.equal(await evaluate('return document.querySelector("#server-name").value'), 'Source draft');
+      assert.equal(await evaluate('return document.querySelector("#connection-error").textContent'), 'Synthetic error');
       await evaluate('document.querySelector("#cancel").click();');
       assert.equal(await duplicatePage.run('return location.href'), remote.url, 'duplicate survives closing original and cancelling chooser');
       await assertRemoteWorkflows(remote, duplicateHandle);
@@ -606,7 +642,7 @@ try {
   try {
     await openApp();
     const handles = await webdriver(`/session/${session}/window/handles`);
-    await connect(slow.url, 'Synthetic slow server');
+    await connect(slow.url, 'W'.repeat(120));
     await until(() => evaluate('return !document.querySelector("#connection").hidden && !document.querySelector("#cancel-connection").disabled'), 'loading controls before HTML arrives');
     await settleLoadingPaint();
     await Bun.write(resolve(artifacts, 'loading.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
@@ -618,6 +654,9 @@ try {
     await connect(slow.url, 'Synthetic slow server');
     await until(() => slow.connected(), 'unready page transport');
     await until(() => evaluate('return !document.querySelector("#retry-connection").disabled'), 'retry stays usable while JavaScript is not ready');
+    await evaluate('document.querySelector("#cancel-connection").focus(); window.dispatchEvent(new Event("garcon-chooser-update"));');
+    await settleLoadingPaint();
+    assert.equal(await evaluate('return document.activeElement.id'), 'cancel-connection', 'status refresh must restore keyboard focus to Cancel');
     const oldHandles = await webdriver(`/session/${session}/window/handles`);
     await slow.run('window.inMemorySentinel = "old candidate";');
     slow.setAutoReady(true);

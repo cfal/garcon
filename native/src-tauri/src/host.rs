@@ -16,17 +16,17 @@ pub(crate) fn locked(host: &Host) -> Result<MutexGuard<'_, Switcher>, String> {
 }
 
 #[cfg(any(desktop, test))]
-fn dispatch_chooser_request(host: &Host, id: u64, dispatch: impl FnOnce(u64)) {
-    let revision = host.lock().ok().and_then(|mut host| {
-        if host.attempt.is_some() && host.windows.contains_key(&id) {
-            Some(host.generation)
-        } else {
-            host.request_chooser(Some(id)).then_some(host.generation)
+fn dispatch_chooser_request(host: &Host, id: u64, dispatch: impl FnOnce(u64, bool)) {
+    let presentation = host.lock().ok().and_then(|mut host| {
+        if !host.windows.contains_key(&id) {
+            return None;
         }
+        let opened = host.request_chooser(Some(id));
+        host.chooser_open.then_some((host.generation, opened))
     });
     // Tauri may execute a main-thread dispatch synchronously.
-    if let Some(revision) = revision {
-        dispatch(revision);
+    if let Some((revision, opened)) = presentation {
+        dispatch(revision, opened);
     }
 }
 
@@ -69,14 +69,7 @@ pub fn cancel_chooser(
     host: tauri::State<'_, Host>,
 ) -> Result<(), String> {
     launcher(&window)?;
-    let target = {
-        let mut host = locked(host.inner())?;
-        host.check_generation(generation)?;
-        host.selection.as_ref().map_err(Clone::clone)?;
-        let target = host.cancel_target().ok_or("No server page is open.")?;
-        host.chooser_open = false;
-        target
-    };
+    let target = locked(host.inner())?.cancel_chooser(generation)?;
     window.hide().map_err(|_| "Unable to close the chooser.")?;
     if let Some(remote) = window
         .app_handle()
@@ -216,10 +209,7 @@ fn request_reload(app: &tauri::AppHandle, source: u64) {
                 }
                 crate::loading::start(&handle, id);
             }
-            Ok(None) => {
-                let _ = present_chooser(&handle);
-            }
-            Err(_) => request_host_chooser(&handle, Some(source)),
+            Ok(None) | Err(_) => request_host_chooser(&handle, Some(source)),
         }
     });
 }
@@ -266,7 +256,7 @@ pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String>
         }
         let host = navigation_app.state::<Host>();
         if destination.as_str() == CHOOSER_REQUEST {
-            dispatch_chooser_request(&host, id, |revision| {
+            dispatch_chooser_request(&host, id, |revision, opened| {
                 let handle = navigation_app.clone();
                 let _ = navigation_app.run_on_main_thread(move || {
                     let current = handle.state::<Host>().lock().is_ok_and(|host| {
@@ -275,7 +265,11 @@ pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String>
                             && host.chooser_open
                     });
                     if current {
-                        let _ = present_chooser(&handle);
+                        if opened {
+                            let _ = present_chooser(&handle);
+                        } else {
+                            let _ = focus_chooser(&handle);
+                        }
                     }
                 });
             });
@@ -312,7 +306,7 @@ pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String>
     .build()
     .map_err(|_| "Unable to open the server page. Choose another server or retry.")?;
     if locked(app.state::<Host>().inner())?.attempt(id).is_err() {
-        let _ = window.destroy();
+        crate::loading::destroy(app, id);
         return Ok(());
     }
     let handle = app.clone();
@@ -331,14 +325,22 @@ pub(crate) fn open_remote(app: &tauri::AppHandle, id: u64) -> Result<(), String>
             let _ = closing_window.remove_menu();
         }
         tauri::WindowEvent::Destroyed => {
-            let show = handle
-                .state::<Host>()
-                .lock()
-                .is_ok_and(|mut host| host.retire(id));
-            if show {
+            let (show, was_open, loading) = {
+                let binding = handle.state::<Host>();
+                let Ok(mut host) = binding.lock() else { return };
+                let was_open = host.chooser_open;
+                (host.retire(id), was_open, host.attempt.is_some())
+            };
+            if show && !was_open {
                 let _ = present_chooser(&handle);
+            } else {
+                if show {
+                    let _ = focus_chooser(&handle);
+                }
+                if show || loading {
+                    crate::loading::refresh(&handle);
+                }
             }
-            crate::loading::refresh(&handle);
         }
         _ => {}
     });
@@ -387,10 +389,18 @@ fn request_titlebar_visibility(app: &tauri::AppHandle, id: u64, hidden: bool) {
 
 #[cfg(desktop)]
 pub(crate) fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
+    focus_chooser(app)?;
+    if let Some(window) = app.get_webview_window("main") {
+        window.eval("window.dispatchEvent(new Event('garcon-chooser-open'))")?;
+    }
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn focus_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.unminimize()?;
         crate::chrome::present(&window)?;
-        window.eval("window.dispatchEvent(new Event('garcon-chooser-open'))")?;
     }
     Ok(())
 }
@@ -415,9 +425,8 @@ pub fn request_host_chooser(app: &tauri::AppHandle, source: Option<u64>) {
     };
     if refresh {
         let _ = present_chooser(app);
-    } else if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = crate::chrome::present(&window);
+    } else {
+        let _ = focus_chooser(app);
     }
 }
 
@@ -483,15 +492,22 @@ mod tests {
         );
         let host = Mutex::new(switcher);
         let mut presented = 0;
-        dispatch_chooser_request(&host, 3, |revision| {
+        dispatch_chooser_request(&host, 3, |revision, opened| {
             let current = host.try_lock().expect("presentation must not deadlock");
             assert_eq!(current.generation, revision);
             assert!(current.chooser_open);
+            assert!(opened);
             presented += 1;
         });
-        dispatch_chooser_request(&host, 3, |_| panic!("duplicate presentation"));
-        dispatch_chooser_request(&host, 2, |_| panic!("unknown page"));
-        assert_eq!(presented, 1);
+        dispatch_chooser_request(&host, 3, |revision, opened| {
+            let current = host.try_lock().expect("presentation must not deadlock");
+            assert_eq!(current.generation, revision);
+            assert_eq!(current.chooser_source, Some(3));
+            assert!(!opened);
+            presented += 1;
+        });
+        dispatch_chooser_request(&host, 2, |_, _| panic!("unknown page"));
+        assert_eq!(presented, 2);
     }
 
     #[test]
@@ -518,15 +534,16 @@ mod tests {
         let host = Mutex::new(switcher);
         for _ in 0..2 {
             let mut presented = false;
-            dispatch_chooser_request(&host, 7, |revision| {
+            dispatch_chooser_request(&host, 7, |revision, opened| {
                 let current = host.try_lock().expect("presentation must not deadlock");
                 assert_eq!(revision, 9);
                 assert_eq!(current.chooser_source, Some(3));
                 assert_eq!(current.attempt(8).unwrap().source, Some(3));
+                assert!(!opened);
                 presented = true;
             });
             assert!(presented);
         }
-        dispatch_chooser_request(&host, 99, |_| panic!("unknown page"));
+        dispatch_chooser_request(&host, 99, |_, _| panic!("unknown page"));
     }
 }

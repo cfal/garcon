@@ -29,12 +29,14 @@ pub struct ServerWindow {
 }
 
 impl ServerWindow {
-    pub fn title(&self) -> String {
-        let name = self
-            .name
+    pub fn display_name(&self) -> &str {
+        self.name
             .as_deref()
-            .unwrap_or_else(|| self.deployment.url().host_str().unwrap_or("Garcon"));
-        format!("{name} \u{2014} Garcon")
+            .unwrap_or_else(|| self.deployment.url().host_str().unwrap_or("Garcon"))
+    }
+
+    pub fn title(&self) -> String {
+        format!("{} \u{2014} Garcon", self.display_name())
     }
 }
 
@@ -165,7 +167,7 @@ impl Switcher {
 
     pub fn retry_attempt(&mut self, id: u64) -> Result<u64, String> {
         let attempt = self.attempt(id)?;
-        if !attempt.status().can_retry {
+        if !attempt.can_retry() {
             return Err("The native window is still opening.".into());
         }
         let target = attempt.target.clone();
@@ -201,23 +203,26 @@ impl Switcher {
         true
     }
 
+    pub fn cancel_chooser(&mut self, generation: u64) -> Result<u64, String> {
+        self.check_generation(generation)?;
+        self.selection.as_ref().map_err(Clone::clone)?;
+        let target = self.cancel_target().ok_or("No server page is open.")?;
+        self.generation += 1;
+        self.chooser_open = false;
+        Ok(target)
+    }
+
     pub fn cancel_target(&self) -> Option<u64> {
         [self.chooser_source, self.focused_window]
             .into_iter()
             .flatten()
+            .chain(self.windows.keys().rev().copied())
             .find(|id| {
                 self.windows.contains_key(id)
                     && self
                         .attempt
                         .as_ref()
                         .is_none_or(|attempt| attempt.id != *id)
-            })
-            .or_else(|| {
-                self.windows.keys().rev().copied().find(|id| {
-                    self.attempt
-                        .as_ref()
-                        .is_none_or(|attempt| attempt.id != *id)
-                })
             })
     }
 
@@ -347,6 +352,49 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_the_chooser_fences_queued_admission_before_persistence() {
+        let (mut host, directory) = fixture("cancel-chooser");
+        assert!(host.cancel_chooser(host.generation).is_err());
+        assert_eq!(host.generation, 0);
+        let source = open(&mut host, "https://source.test/", None);
+        assert!(host.request_chooser(Some(source)));
+        let generation = host.generation;
+        let saved = std::fs::read(directory.join("servers.json")).unwrap();
+        assert_eq!(host.cancel_chooser(generation).unwrap(), source);
+        assert!(
+            host.begin(
+                generation,
+                Deployment::parse("https://queued.test/abandoned/").unwrap(),
+                Some("Abandoned".into()),
+            )
+            .is_err()
+        );
+        assert!(!host.chooser_open);
+        assert!(host.attempt.is_none());
+        assert_eq!(host.windows.keys().copied().collect::<Vec<_>>(), [source]);
+        assert_eq!(
+            std::fs::read(directory.join("servers.json")).unwrap(),
+            saved
+        );
+        assert!(host.cancel_chooser(generation).is_err());
+        assert!(host.request_chooser(Some(source)));
+        assert!(
+            host.begin(
+                host.generation,
+                Deployment::parse("https://queued.test/accepted/").unwrap(),
+                None,
+            )
+            .is_ok()
+        );
+        let generation = host.generation;
+        assert!(host.cancel_chooser(generation).is_err());
+        assert_eq!(host.generation, generation);
+        assert!(host.attempt.is_some());
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn title_uses_only_the_hostname_unless_named() {
         let window = ServerWindow {
             deployment: Deployment::parse("https://a.example.com:8443/tools/garcon/").unwrap(),
@@ -354,6 +402,46 @@ mod tests {
             titlebar_hidden: false,
         };
         assert_eq!(window.title(), "a.example.com \u{2014} Garcon");
+    }
+
+    #[test]
+    fn cancellation_prefers_source_then_focus_then_latest_non_candidate_window() {
+        let server = ServerWindow {
+            deployment: Deployment::parse("https://synthetic.test/").unwrap(),
+            name: None,
+            titlebar_hidden: false,
+        };
+        let mut host = Switcher::new(Err("Synthetic settings".into()));
+        for id in 1..=3 {
+            host.windows.insert(id, server.clone());
+        }
+        host.attempt = Some(ConnectionAttempt::new(
+            3,
+            ConnectionTarget {
+                url: server.deployment.url().clone(),
+                server,
+                placement: None,
+            },
+            None,
+        ));
+        for (source, focused, expected) in [
+            (Some(1), Some(2), Some(1)),
+            (None, Some(1), Some(1)),
+            (Some(99), Some(1), Some(1)),
+            (Some(3), Some(1), Some(1)),
+            (None, Some(3), Some(2)),
+            (Some(99), Some(99), Some(2)),
+            (None, None, Some(2)),
+        ] {
+            host.chooser_source = source;
+            host.focused_window = focused;
+            assert_eq!(host.cancel_target(), expected);
+        }
+        host.windows.remove(&1);
+        host.windows.remove(&2);
+        assert_eq!(host.cancel_target(), None);
+        host.attempt = None;
+        assert_eq!(host.cancel_target(), Some(3));
     }
 
     #[test]

@@ -7,11 +7,11 @@ use tauri::Manager;
 
 pub fn refresh(app: &tauri::AppHandle) {
     if let Some(chooser) = app.get_webview_window("main") {
-        let _ = chooser.eval("window.dispatchEvent(new Event('garcon-chooser-open'))");
+        let _ = chooser.eval("window.dispatchEvent(new Event('garcon-chooser-update'))");
     }
 }
 
-fn destroy(app: &tauri::AppHandle, id: u64) {
+pub(crate) fn destroy(app: &tauri::AppHandle, id: u64) {
     if let Some(window) = app.get_webview_window(&window_label(id)) {
         #[cfg(not(target_os = "macos"))]
         let _ = window.remove_menu();
@@ -192,11 +192,7 @@ fn reveal(app: &tauri::AppHandle, id: u64) -> Result<(), String> {
 }
 
 pub fn show(app: &tauri::AppHandle, id: u64) -> Result<(), String> {
-    if !locked(app.state::<Host>().inner())?
-        .attempt(id)?
-        .status()
-        .can_show
-    {
+    if !locked(app.state::<Host>().inner())?.attempt(id)?.can_show() {
         return Err("The server page is not available to show yet.".into());
     }
     reveal(app, id)

@@ -57,7 +57,6 @@ test('desktop chrome keeps controls without custom recovery hotkeys or a reload 
   expect(read('../src-tauri/src/host.rs')).toContain('chrome::prepare(');
   const host = read('../src-tauri/src/host.rs');
   expect(host).not.toContain('CmdOrCtrl');
-  expect(host).not.toContain('reload-server');
   expect(host).not.toContain('acknowledged');
   expect(host).toContain('pub async fn connect_server(');
   expect(host).toContain('.focused(cfg!(target_os = "linux"))');

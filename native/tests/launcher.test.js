@@ -4,7 +4,7 @@ import { mountLauncher } from '../src/launcher.js';
 
 const html = await Bun.file(new URL('../src/index.html', import.meta.url)).text();
 const choices = (overrides = {}) => ({
-  generation: 0, recents: [], lastUrl: null, currentUrl: null,
+  generation: 0, lastUrl: null, currentUrl: null,
   canCancel: false, connection: null, ...overrides,
   recents: (overrides.recents ?? []).map(server => typeof server === 'string' ? { url: server, name: null } : server),
 });
@@ -190,6 +190,56 @@ test('stale snapshot failures cannot overwrite a newer successful chooser refres
   await mounting;
   expect(window.document.querySelector('#connection-error').textContent).toBe('');
   expect(window.document.querySelector('#server-url').value).toBe('https://new.test/');
+}));
+
+test('host updates retain selection drafts while refreshing source and generation', () => withLauncherDocument(async window => {
+  let snapshot = choices({ currentUrl: 'https://source.test/', canCancel: true, lastUrl: 'https://saved.test/' });
+  const commands = [];
+  await mountLauncher(window.document, async (command, args) => {
+    if (command === 'server_choices') return snapshot;
+    commands.push([command, args]);
+  });
+  const document = window.document;
+  document.querySelector('#server-url').value = 'http://draft.test/';
+  document.querySelector('#server-name').value = 'Draft';
+  document.querySelector('#connection-error').textContent = 'Synthetic error';
+  snapshot = choices({ generation: 2, lastUrl: 'https://saved.test/' });
+  window.dispatchEvent(new window.Event('garcon-chooser-update'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('#server-url').value).toBe('http://draft.test/');
+  expect(document.querySelector('#server-name').value).toBe('Draft');
+  expect(document.querySelector('#connection-error').textContent).toBe('Synthetic error');
+  expect(document.querySelector('#insecure-endpoint').hidden).toBe(false);
+  expect(document.querySelector('#current-server').textContent).toBe('');
+  expect(document.querySelector('#cancel').hidden).toBe(true);
+  document.querySelector('form').requestSubmit();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(commands).toEqual([['connect_server', { url: 'http://draft.test/', name: 'Draft', generation: 2 }]]);
+  window.dispatchEvent(new window.Event('garcon-chooser-open'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('#server-url').value).toBe('https://saved.test/');
+  expect(document.querySelector('#server-name').value).toBe('');
+}));
+
+test('overlapping host updates cannot replace a retained draft with transient empty fields', () => withLauncherDocument(async window => {
+  let finishOld;
+  let count = 0;
+  await mountLauncher(window.document, async () => {
+    if (++count === 2) return new Promise(resolve => { finishOld = resolve; });
+    return choices({ lastUrl: 'https://saved.test/' });
+  });
+  const document = window.document;
+  document.querySelector('#server-url').value = 'https://draft.test/';
+  document.querySelector('#server-name').value = 'Draft';
+  document.querySelector('#connection-error').textContent = 'Synthetic error';
+  window.dispatchEvent(new window.Event('garcon-chooser-update'));
+  window.dispatchEvent(new window.Event('garcon-chooser-update'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  finishOld(choices());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('#server-url').value).toBe('https://draft.test/');
+  expect(document.querySelector('#server-name').value).toBe('Draft');
+  expect(document.querySelector('#connection-error').textContent).toBe('Synthetic error');
 }));
 
 test('failed opens retain the attempted URL and name across queued host refreshes', () => withLauncherDocument(async window => {

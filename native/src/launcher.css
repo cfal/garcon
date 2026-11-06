@@ -41,7 +41,7 @@ button:disabled { opacity: .55; cursor: default; }
 #cancel { margin-top: 12px; }
 #server-form button { margin-top: 20px; }
 #connection h2 { font-size: 20px; }
-#connection-server { font-weight: 600; }
+#connection-server { font-weight: 600; overflow-wrap: anywhere; }
 #connection-url { overflow-wrap: anywhere; }
 #connection-status { min-height: 48px; line-height: 1.5; }
 #connection button { margin-top: 12px; }
