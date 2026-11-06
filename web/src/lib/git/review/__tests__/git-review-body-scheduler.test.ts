@@ -11,6 +11,68 @@ function deferred<T>() {
 }
 
 describe('GitReviewBodyScheduler', () => {
+	it('retains bounded bootstrap deferrals when the viewport moves without cancelling speculation', async () => {
+		const held = deferred<string[]>();
+		const calls: Array<{ paths: string[]; purpose: string }> = [];
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (paths, purpose) => {
+				calls.push({ paths, purpose });
+				return calls.length === 1 ? held.promise : Promise.resolve([]);
+			},
+			deferredPaths: (result) => result,
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestPrefetch(['neighbor-a', 'neighbor-b']);
+		scheduler.retainVisible(new Set(['elsewhere']));
+		held.resolve(['neighbor-b']);
+		await vi.waitFor(() => expect(scheduler.hasPending('neighbor-b')).toBe(false));
+		expect(calls).toEqual([
+			{ paths: ['neighbor-a', 'neighbor-b'], purpose: 'prefetch' },
+			{ paths: ['neighbor-b'], purpose: 'prefetch' },
+		]);
+	});
+
+	it.each(['navigation', 'viewport'] as const)(
+		'retries a deferred prefetch %s target on the visible lane',
+		async (demand) => {
+			const held = deferred<string[]>();
+			const calls: Array<{ paths: string[]; purpose: string }> = [];
+			const loading = new Set<string>();
+			const unowned: string[][] = [];
+			const scheduler: GitReviewBodyScheduler<string[]> = new GitReviewBodyScheduler({
+				maxBatchFiles: 4,
+				load: (paths, purpose) => {
+					calls.push({ paths, purpose });
+					return calls.length === 1 ? held.promise : Promise.resolve([]);
+				},
+				deferredPaths: (result) => result,
+				onResult: vi.fn(),
+				onError: vi.fn(),
+				onLoadingChange: (paths, isLoading) => {
+					for (const path of paths) {
+						if (isLoading) loading.add(path);
+						else loading.delete(path);
+					}
+					const lost = unownedGitReviewLoadingPaths(loading, (path) => scheduler.hasPending(path));
+					if (lost.length > 0) unowned.push(lost);
+				},
+			});
+			scheduler.requestPrefetch(['neighbor', 'target']);
+			if (demand === 'navigation') scheduler.requestNavigation(['target']);
+			else scheduler.requestVisible(['target']);
+			held.resolve(['target']);
+			await vi.waitFor(() => expect(loading.size).toBe(0));
+			expect(calls).toEqual([
+				{ paths: ['neighbor', 'target'], purpose: 'prefetch' },
+				{ paths: ['target'], purpose: 'visible' },
+			]);
+			expect(unowned).toEqual([]);
+		},
+	);
+
 	it('preserves loading ownership throughout cancelled prefetch promotion', async () => {
 		const held = deferred<string>();
 		const loading = new Set<string>();

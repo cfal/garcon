@@ -23,6 +23,15 @@ interface ActiveLane {
 	published: Set<string>;
 }
 
+function laneOwnsPath(lane: ActiveLane | null, path: string): boolean {
+	return (
+		lane !== null &&
+		!lane.controller.signal.aborted &&
+		!lane.published.has(path) &&
+		lane.paths.includes(path)
+	);
+}
+
 export class GitReviewBodyScheduler<T> {
 	private readonly visibleQueue: string[] = [];
 	private readonly prefetchQueue: string[] = [];
@@ -38,8 +47,10 @@ export class GitReviewBodyScheduler<T> {
 	requestNavigation(paths: readonly string[]): boolean {
 		const unique = this.unique(paths);
 		this.navigationPaths.clear();
-		for (const path of unique) this.navigationPaths.add(path);
-		for (const path of unique) this.singletonPaths.add(path);
+		for (const path of unique) {
+			this.navigationPaths.add(path);
+			this.singletonPaths.add(path);
+		}
 		this.removeQueued(this.visibleQueue, unique);
 		return this.queueVisible(unique);
 	}
@@ -54,7 +65,8 @@ export class GitReviewBodyScheduler<T> {
 		this.removeQueued(this.prefetchQueue, uniquePaths);
 		const requested = uniquePaths.filter((path) => !this.hasPending(path));
 		if (requested.length === 0) return false;
-		this.enqueue(this.visibleQueue, requested, true);
+		this.visibleQueue.unshift(...requested);
+		this.options.onLoadingChange(requested, true);
 		this.pump('visible');
 		return true;
 	}
@@ -62,7 +74,8 @@ export class GitReviewBodyScheduler<T> {
 	requestPrefetch(paths: readonly string[]): boolean {
 		const requested = this.unique(paths).filter((path) => !this.hasPending(path));
 		if (requested.length === 0) return false;
-		this.enqueue(this.prefetchQueue, requested, false);
+		this.prefetchQueue.push(...requested);
+		this.options.onLoadingChange(requested, true);
 		this.pump('prefetch');
 		return true;
 	}
@@ -97,10 +110,8 @@ export class GitReviewBodyScheduler<T> {
 		);
 		// Promoted paths retain loading ownership while their abandoned siblings are released.
 		this.visibleQueue.unshift(...promoted);
-		if (queued.length > 0) {
-			const idle = queued.filter((path) => !this.hasPending(path));
-			if (idle.length > 0) this.options.onLoadingChange(idle, false);
-		}
+		const idle = queued.filter((path) => !this.hasPending(path));
+		if (idle.length > 0) this.options.onLoadingChange(idle, false);
 		this.pump('visible');
 	}
 
@@ -128,23 +139,13 @@ export class GitReviewBodyScheduler<T> {
 		return (
 			this.visibleQueue.includes(path) ||
 			this.prefetchQueue.includes(path) ||
-			(this.visibleActive?.controller.signal.aborted === false &&
-				!this.visibleActive.published.has(path) &&
-				this.visibleActive.paths.includes(path)) ||
-			(this.prefetchActive?.controller.signal.aborted === false &&
-				!this.prefetchActive.published.has(path) &&
-				this.prefetchActive.paths.includes(path))
+			laneOwnsPath(this.visibleActive, path) ||
+			laneOwnsPath(this.prefetchActive, path)
 		);
 	}
 
 	private unique(paths: readonly string[]): string[] {
 		return Array.from(new Set(paths.filter(Boolean)));
-	}
-
-	private enqueue(queue: string[], paths: string[], prepend: boolean): void {
-		if (prepend) queue.unshift(...paths);
-		else queue.push(...paths);
-		this.options.onLoadingChange(paths, true);
 	}
 
 	private removeQueued(queue: string[], paths: readonly string[]): void {
@@ -237,7 +238,19 @@ export class GitReviewBodyScheduler<T> {
 							(lane.retained.has(path) || this.navigationPaths.has(path)) && !this.hasPending(path),
 					);
 					for (const path of retry) this.singletonPaths.add(path);
-					queue.unshift(...retry);
+					if (purpose === 'prefetch') {
+						const visible: string[] = [];
+						const speculative: string[] = [];
+						for (const path of retry) {
+							if (this.navigationPaths.has(path) || this.visiblePaths.has(path)) visible.push(path);
+							else speculative.push(path);
+						}
+						this.visibleQueue.unshift(...visible);
+						queue.unshift(...speculative);
+						if (visible.length > 0) this.pump('visible');
+					} else {
+						queue.unshift(...retry);
+					}
 				}
 				this.pump(purpose);
 				if (!controller.signal.aborted) {
