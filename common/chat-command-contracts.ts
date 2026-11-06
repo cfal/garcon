@@ -28,6 +28,8 @@ import {
 export { parseAgentHandoffCommandRequest } from './chat-execution-command-parsing.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
 import { normalizeAskUserQuestionDecisionResponse } from './ask-user-question-response.js';
+import type { AsyncQuestionReply } from './async-user-questions.js';
+import { parseCommandQuestionReply, parseCommandUserMessagePresentation, rejectQuestionReply } from './chat-input-command-parsing.js';
 
 export {
   parseDeleteChatCommandRequest,
@@ -46,11 +48,7 @@ export {
   type AskUserQuestionSkippedResponse,
 } from './ask-user-question-response.js';
 import { isPreambleId, PREAMBLE_MAX_COUNT, type PreambleId } from './preambles.js';
-import {
-  parseUserMessagePresentation,
-  type ChatStopOutcome,
-  type UserMessagePresentation,
-} from './chat-types.js';
+import type { ChatStopOutcome, UserMessagePresentation } from './chat-types.js';
 import {
   CommandRequestValidationError,
   optionalChatId,
@@ -234,6 +232,7 @@ export interface StartChatCommandRequest {
 }
 
 export interface AgentRunCommandRequest {
+  questionReply?: AsyncQuestionReply;
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
@@ -362,6 +361,9 @@ export interface QueueEntryDeleteResponse extends CommandAcceptedResponse {
 export type SteerUnavailableTurnPolicy = 'reject' | 'queue';
 
 export interface SteerCommandRequest {
+  questionReply?: AsyncQuestionReply;
+  expectedAgentId?: string;
+  expectedAgentOwnershipEpoch?: string;
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
@@ -540,6 +542,7 @@ export interface RunningChatsResponse {
 
 export function parseStartChatCommandRequest(value: unknown): StartChatCommandRequest {
   const body = requestRecord(value);
+  rejectQuestionReply(body);
   const executorId = body.executorId;
   if (executorId != null && !isExecutorId(executorId)) throw new CommandRequestValidationError('executorId is invalid');
   if ('options' in body) throw new CommandRequestValidationError('options is not supported');
@@ -612,6 +615,7 @@ function clientChatStartOrigin(value: unknown): ClientChatStartOrigin {
 
 export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequest {
   const body = requestRecord(value);
+  const questionReply = parseCommandQuestionReply(body, 'command');
   const handoff = optionalAgentHandoffRequest(body.handoff);
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   const images = optionalImages(body.images);
@@ -685,11 +689,13 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
       : {}),
     ...(handoff === undefined ? {} : { handoff }),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
+    ...(questionReply ? { questionReply } : {}),
   };
 }
 
 export function parseForkRunCommandRequest(value: unknown): ForkRunCommandRequest {
   const body = requestRecord(value);
+  rejectQuestionReply(body);
   const images = optionalImages(body.images);
   const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
   const model = optionalString(body, 'model');
@@ -718,6 +724,7 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
 
 export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryCreateCommandRequest {
   const body = requestRecord(value);
+  rejectQuestionReply(body);
   const images = optionalImages(body.images);
   const content = requiredStringContent(body, 'content');
   const expectedModel = optionalString(body, 'expectedModel');
@@ -821,6 +828,7 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
 
 export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
   const body = requestRecord(value);
+  const questionReply = parseCommandQuestionReply(body, 'content');
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   if (
     body.whenTurnUnavailable !== undefined
@@ -839,19 +847,12 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
+    ...(questionReply ? { questionReply } : {}),
+    ...(body.expectedAgentId === undefined ? {} : { expectedAgentId: optionalNonEmptyString(body, 'expectedAgentId') }),
+    ...(body.expectedAgentOwnershipEpoch === undefined ? {} : { expectedAgentOwnershipEpoch: optionalNonEmptyString(body, 'expectedAgentOwnershipEpoch') }),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
     ...(body.whenTurnUnavailable === undefined ? {} : { whenTurnUnavailable: body.whenTurnUnavailable }),
   };
-}
-
-function parseCommandUserMessagePresentation(value: unknown): UserMessagePresentation | undefined {
-  try {
-    return parseUserMessagePresentation(value);
-  } catch (error) {
-    throw new CommandRequestValidationError(
-      error instanceof Error ? error.message : 'userMessagePresentation is invalid',
-    );
-  }
 }
 
 export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySteerCommandRequest {

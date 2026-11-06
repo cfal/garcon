@@ -1,3 +1,4 @@
+import type { AsyncQuestionReply } from '@garcon/common/async-user-questions';
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
@@ -100,6 +101,7 @@ export interface AgentSteerTargetRequest {
 }
 
 export interface AgentSteerRequest {
+  readonly questionReply?: AsyncQuestionReply;
   readonly chatId: string;
   readonly projectPath: string;
   readonly agentSessionId: string;

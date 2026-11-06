@@ -10,6 +10,7 @@ import type {
   TodoItem,
   TodoStatus,
 } from './chat-types.js';
+import { parseAsyncQuestionReply } from './async-user-questions.js';
 
 export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -86,6 +87,7 @@ export function parseChatMessageMetadata(value: unknown): ChatMessageMetadata | 
   if (typeof raw.clientMessageId === 'string') metadata.clientMessageId = raw.clientMessageId;
   if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;
   if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;
+  if (raw.questionReply !== undefined) metadata.questionReply = parseAsyncQuestionReply(raw.questionReply);
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
