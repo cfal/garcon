@@ -37,6 +37,7 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		onReady?: (transcript: ActiveTranscriptState) => void;
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -60,6 +61,7 @@
 	}
 
 	const {
+		onReady,
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -90,6 +92,7 @@
 			initialized = true;
 			await viewportPort?.waitForLayout();
 			fixtureReady = true;
+			onReady?.(chatState);
 		});
 	}
 	let viewportPort: ConversationViewportPort | null = null;

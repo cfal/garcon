@@ -7,6 +7,7 @@ export type ConversationScrollState = Pick<
 	| 'displayMessageCount'
 	| 'feedMutationClock'
 	| 'hasLaterMessages'
+	| 'isDisplayBehindHead'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
 	| 'invalidatePendingHistoryLoad'

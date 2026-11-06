@@ -3,6 +3,7 @@ import { tick } from 'svelte';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DisplayWindowController } from '$lib/chat/transcript/display-window-controller.js';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 
 async function ready() {
 	await waitFor(() => expect(screen.getByTestId('feed-fixture-ready').getAttribute('data-ready')).toBe('true'));
@@ -128,6 +129,16 @@ describe('ConversationFeed', () => {
 		await fireEvent.focusIn(viewport);
 
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
+	it('admits explicit initial navigation while the mounted feed is still pinned', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation', onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		expect(transcript.entries[0].ordinal).toBeGreaterThan(1);
+		expect(await transcript.navigateToWindow('chat-1', 'initial')).toBe('loaded');
+		expect(transcript.entries[0].ordinal).toBe(1);
+		expect(transcript.hasLaterMessages).toBe(true);
 	});
 
 	it('combines ordinary tool rows behind an accessible disclosure without changing the off path', async () => {

@@ -145,9 +145,11 @@ export class DisplayWindowController {
 
 	setReadingAnchor(ordinal: number | null, pinned: boolean): void {
 		if (this.#readingAnchorHold || this.#navigationEpoch !== null) return;
+		const resumedFollowing = pinned && !this.#pinned;
 		this.#navigationAnchor = null;
 		this.#anchor = ordinal;
 		this.#pinned = pinned;
+		if (resumedFollowing && this.#needsHeadRefresh()) this.#scheduleRefresh(0);
 	}
 
 	holdReadingAnchor(ordinal: number): () => void {
@@ -188,6 +190,7 @@ export class DisplayWindowController {
 
 	#needsHeadRefresh(): boolean {
 		const window = this.#snapshot.window;
+		if (this.#pinned && window?.later.kind === 'more') return true;
 		return this.#head > (window?.certificate.watermark ?? -1)
 			&& (this.#pinned || !window || window.later.kind !== 'more');
 	}
@@ -206,6 +209,11 @@ export class DisplayWindowController {
 		const anchor: WindowAnchor = this.#pinned || this.#anchor === null
 			? { kind: 'newest' } : { kind: 'around', ordinal: this.#anchor };
 		return this.#loadWindow(anchor, 'replace');
+	}
+
+	loadInitialWindow(): Promise<CoverageOutcome> {
+		if (this.#navigationEpoch !== null) return Promise.resolve('blocked');
+		return this.#loadWindow({ kind: 'around', ordinal: 1 }, 'replace', undefined, undefined, this.#head);
 	}
 
 	load(direction: 'earlier' | 'later', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
@@ -371,7 +379,9 @@ export class DisplayWindowController {
 		if (keep.length === 0) return;
 		const pressured = this.bodies.activeOverBudget || this.residency.budgetException;
 		const margin = pressured ? 0 : 10;
-		const start = Math.max(0, keep[0].index - margin), end = Math.min(window.items.length, keep.at(-1)!.index + margin + 1);
+		const start = Math.max(0, keep[0].index - margin);
+		// Following retains the tail even while native scrolling defers end restoration.
+		const end = this.#pinned ? window.items.length : Math.min(window.items.length, keep.at(-1)!.index + margin + 1);
 		const items = window.items.slice(start, end);
 		const after = descriptorInterval(items[0]).after, through = descriptorInterval(items.at(-1)!).through;
 		const next: AvailableDisplayWindow = { ...window, items, interval: { after, through },
@@ -434,6 +444,14 @@ export class DisplayWindowController {
 			}
 			this.#assertIdentity(response.certificate);
 			this.#head = Math.max(this.#head, response.sourceHead);
+			const anchoredRefresh = mode === 'replace' && anchor.kind === 'around' && requiredThrough === undefined && atWatermark === undefined;
+			const assertReadingIntent = () => {
+				if (anchoredRefresh && this.#pinned) {
+					this.#scheduleRefresh(0);
+					throw new DOMException('Display reading intent changed', 'AbortError');
+				}
+			};
+			assertReadingIntent();
 			if (mode === 'details') {
 				const current = this.#snapshot;
 				if (!current.window) return 'blocked';
@@ -454,7 +472,7 @@ export class DisplayWindowController {
 						|| previous.cutPlacements.some(old => old.id === cut.id && old.placement === 'inline') ? 'inline' : 'detached' })) };
 			}
 			const expansions = mode === 'replace' ? await this.#remapExpansions(window, signal) : this.#snapshot.expansions;
-			await this.#hydrateAndApply(window, expansions, signal, epoch, applicationGate);
+			await this.#hydrateAndApply(window, expansions, signal, epoch, applicationGate, window.certificate, assertReadingIntent);
 			if (mode === 'replace') this.#refreshGoal = null;
 			if (this.#needsHeadRefresh()) this.#scheduleRefresh(250);
 			return 'loaded';
@@ -495,7 +513,7 @@ export class DisplayWindowController {
 		return new Map([...this.#snapshot.details].filter(([ordinal]) => seeds.has(ordinal)));
 	}
 
-	async #hydrateAndApply(window: AvailableDisplayWindow, expansions: readonly DisplayExpansion[], signal: AbortSignal, epoch: number, applicationGate?: TranscriptPageApplicationGate, detailsCertificate = window.certificate): Promise<void> {
+	async #hydrateAndApply(window: AvailableDisplayWindow, expansions: readonly DisplayExpansion[], signal: AbortSignal, epoch: number, applicationGate?: TranscriptPageApplicationGate, detailsCertificate = window.certificate, assertApplication?: () => void): Promise<void> {
 		const profile = this.#profile!;
 		const previousCertificate = this.#snapshot.detailsCertificate;
 		if (previousCertificate && previousCertificate.watermark > detailsCertificate.watermark
@@ -533,6 +551,7 @@ export class DisplayWindowController {
 			const gate = applicationGate ?? this.#applicationGate;
 			if (gate && await gate() !== 'apply') throw new DOMException('Display application cancelled', 'AbortError');
 			this.#assertCurrent(signal, epoch);
+			assertApplication?.();
 			const refreshedProtected = protectedRows.filter(row => this.#protected.has(row.detail.ordinal)).map(row => {
 				const detail = details.get(row.detail.ordinal);
 				return detail ? { ...row, certificate: detailsCertificate, detail } : row;

@@ -127,7 +127,7 @@ export class ConversationScrollController {
 		const chatId = this.deps.getChatId();
 		if (!chatId) return;
 		this.deps.onUserScrollIntent();
-		if (!this.deps.chatState.hasLaterMessages && !this.isScrollingToTop) {
+		if (!this.deps.chatState.hasLaterMessages && !this.deps.chatState.isDisplayBehindHead && !this.isScrollingToTop) {
 			this.scrollToBottom();
 			return;
 		}
@@ -375,7 +375,6 @@ export class ConversationScrollController {
 		const nearBottom = this.isNearBottom();
 		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
 		if (this.deps.chatState.hasLaterMessages) {
-			// A newer source head can precede its display window without detaching a pinned reader.
 			if (!this.isPinnedToBottom || (hasRecentUserScrollIntent && this.#userScrollIntent.direction === 'earlier'
 				&& this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter)) {
 				this.#preserveHistoryBrowsing();
@@ -500,7 +499,7 @@ export class ConversationScrollController {
 					viewId: () => this.deps.chatState.transcriptViewId,
 					viewport: this.deps.getViewport,
 					preserveHistoryBrowsing: () => this.#preserveHistoryBrowsing(),
-					setPinned: (pinned) => this.setPinnedToBottom(pinned),
+					setPinned: (pinned) => this.setPinnedToBottom(pinned && !this.deps.chatState.hasLaterMessages),
 				},
 			);
 			shouldResumeAutoFill = result === 'completed';
@@ -556,7 +555,7 @@ export class ConversationScrollController {
 			const completed = Boolean(
 				result === 'completed' && this.#isCurrentViewportOperation(chatId, operationEpoch),
 			);
-			if (completed) this.setPinnedToBottom(viewport.isAtEnd());
+			if (completed) this.setPinnedToBottom(viewport.isAtEnd() && !this.deps.chatState.hasLaterMessages);
 			shouldResumeAutoFill = completed;
 			return completed;
 		} finally {
