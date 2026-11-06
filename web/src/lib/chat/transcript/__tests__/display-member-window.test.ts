@@ -20,6 +20,7 @@ function fixture(initialGroups: GroupDescriptor[], limits = { count: 2000, bytes
 	let groups = initialGroups;
 	const open = displayOpen('chat-1', 'view-1', 40_000), bodies = new DisplayBodyStore(limits);
 	const api = {
+		open: async () => open,
 		window: vi.fn<TranscriptDisplayApi['window']>(async request => displayWindow(groups,
 			{ ...displayCertificate(open, request.profile), cutsKey: displayCutsKey(request.cuts) })),
 		members: vi.fn<TranscriptDisplayApi['members']>(async request => {
@@ -39,7 +40,7 @@ function fixture(initialGroups: GroupDescriptor[], limits = { count: 2000, bytes
 			deferredOrdinals: [], nonRenderedOrdinals: [], oversizedOrdinal: null })),
 		resolve: async request => ({ kind: 'group-member', ordinal: request.ordinal, landedOrdinal: request.ordinal }),
 		retry: async () => ({ success: true }),
-	} satisfies Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
+	} satisfies Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
 	const controller = new DisplayWindowController(bodies, () => {}, api);
 	controllers.push(controller);
 	controller.installOpen(open, displayProfile);
@@ -127,6 +128,21 @@ it('extends both member boundaries and reloads trimmed members without duplicate
 		{ kind: 'around', ordinal: 100 }, { kind: 'after', ordinal: 124 }, { kind: 'before', ordinal: 75 },
 		{ kind: 'before', ordinal: 70 }, { kind: 'after', ordinal: 121 },
 	]);
+});
+
+it.each([false, true])('remaps extended members around the current reading anchor, split=%s', async split => {
+	const whole = group(1, 200), f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole);
+	await f.controller.extendMembers(whole, { kind: 'after', ordinal: 50 });
+	f.controller.setReadingAnchor(80, false);
+	if (split) f.replace([{ ...group(1, 50), base: whole.base }, { ...group(51, 200), base: whole.base }]);
+	await f.controller.refresh();
+	expect(f.api.members.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 80 });
+	expect(f.controller.snapshot.expansions).toHaveLength(1);
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toContain(80);
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
+	expect(f.bodies.count).toBe(50);
 });
 
 it.each(['collapse', 'replace-view', 'dispose'] as const)('ignores held member replies after %s without retaining bodies', async action => {
