@@ -731,6 +731,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	observeHead(chatId: string, transcriptViewId: string, lastOrdinal: number, responseTypes: ResponseClassOrdinals = emptyResponseClassOrdinals()): void {
 		const previous = this.#heads.get(chatId);
 		if (previous && previous.transcriptViewId !== transcriptViewId) this.handleViewReplacement(chatId);
+		if (previous?.transcriptViewId === transcriptViewId && lastOrdinal > previous.lastOrdinal) {
+			this.#applyOverlayMutation(chatId, this.options.overlays.clearStatusNotices(chatId));
+		}
 		this.#heads.set(chatId, { transcriptViewId, lastOrdinal: previous?.transcriptViewId === transcriptViewId ? Math.max(previous.lastOrdinal, lastOrdinal) : lastOrdinal });
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.observeHead(transcriptViewId, lastOrdinal, responseTypes);
 		this.#inactiveWindows.observeHead(chatId, transcriptViewId, lastOrdinal);
