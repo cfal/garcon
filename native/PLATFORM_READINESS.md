@@ -61,6 +61,17 @@ The probes use Android's actual WebView, but do not claim to exercise a replacem
 Wry client. The host test uses the actual generated Tauri activity and Rust IPC.
 All HTTP fixtures are synthetic, bind `0.0.0.0`, and use device loopback.
 
+The host scenario intentionally remains open until instrumentation reports its
+results: destroying the last Tauri activity exits the shared app/test process.
+The test-only runner argument `waitForActivitiesToComplete=false` disables both
+AndroidX's [per-test activity finisher](https://github.com/android/android-test/blob/6de0b804ca086a6194a108ef2988fa6104eea96d/runner/android_junit_runner/java/androidx/test/runner/AndroidJUnitRunner.java#L502-L515)
+and its [final activity cleanup](https://github.com/android/android-test/blob/6de0b804ca086a6194a108ef2988fa6104eea96d/runner/monitor/java/androidx/test/runner/MonitoringInstrumentation.java#L390-L415)
+without changing assertion or result reporting. Run this harness only on a
+dedicated disposable emulator, which owns residual cleanup. Only one test
+launches the Tauri activity; adding another scenario requires isolated execution
+because a new launch can destroy the retained activity. This gate does not
+qualify orderly final activity destruction.
+
 After the normal Android build, from `native/`:
 
 ```sh

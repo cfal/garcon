@@ -1,6 +1,8 @@
 configure<com.android.build.api.dsl.ApplicationExtension> {
     defaultConfig {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Tauri's final activity destruction exits the shared instrumentation process.
+        testInstrumentationRunnerArguments["waitForActivitiesToComplete"] = "false"
     }
 }
 

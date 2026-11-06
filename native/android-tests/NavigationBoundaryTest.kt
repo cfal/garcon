@@ -67,33 +67,36 @@ class NavigationBoundaryTest {
 
     @Test
     fun hostRejectsConnectionsBeforeAndAfterActivityRecreation() {
+        assertEquals("The host must outlive instrumentation reporting", "false",
+            InstrumentationRegistry.getArguments().getString("waitForActivitiesToComplete"))
         server().use { destination ->
-            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                repeat(2) { generation ->
-                    if (generation > 0) scenario.recreate()
-                    var webView: WebView? = null
-                    eventually("Tauri WebView missing after recreation") {
-                        scenario.onActivity { webView = findWebView(it.window.decorView) }
-                        webView != null
-                    }
-                    val view = webView!!
-                    eventually("Android launcher must remain disabled") {
-                        evaluate(view, "document.querySelector('#connection-error')?.textContent.includes('Android build-only') && document.querySelector('#server-form button')?.disabled") == "true"
-                    }
-                    val targets = listOf("/allowed/", "/sibling/", "/allowed/redirect-307", "/allowed/redirect-308")
-                        .map { url(destination, it) } + "file:///synthetic"
-                    for (target in targets) {
-                        evaluate(view, """
-                            window.guardResult = null;
-                            window.__TAURI_INTERNALS__.invoke('connect_server', {url: ${JSONObject.quote(target)}, generation: 0})
-                              .then(() => window.guardResult = 'UNEXPECTED_SUCCESS', error => window.guardResult = String(error));
-                        """.trimIndent())
-                        eventually("Direct IPC must reject Android connection, including after recreation") {
-                            evaluate(view, "window.guardResult?.includes('Android build-only')") == "true"
-                        }
-                    }
-                    assertEquals("No connection attempt may reach a server", 0, destination.requestCount)
+            // Closing the last Tauri activity exits the runner before it can report results.
+            // The dedicated emulator owns final cleanup; guard-tests.gradle.kts disables runner finishing.
+            val scenario = ActivityScenario.launch(MainActivity::class.java)
+            repeat(2) { generation ->
+                if (generation > 0) scenario.recreate()
+                var webView: WebView? = null
+                eventually("Tauri WebView missing after recreation") {
+                    scenario.onActivity { webView = findWebView(it.window.decorView) }
+                    webView != null
                 }
+                val view = webView!!
+                eventually("Android launcher must remain disabled") {
+                    evaluate(view, "document.querySelector('#connection-error')?.textContent.includes('Android build-only') && document.querySelector('#server-form button')?.disabled") == "true"
+                }
+                val targets = listOf("/allowed/", "/sibling/", "/allowed/redirect-307", "/allowed/redirect-308")
+                    .map { url(destination, it) } + "file:///synthetic"
+                for (target in targets) {
+                    evaluate(view, """
+                        window.guardResult = null;
+                        window.__TAURI_INTERNALS__.invoke('connect_server', {url: ${JSONObject.quote(target)}, generation: 0})
+                          .then(() => window.guardResult = 'UNEXPECTED_SUCCESS', error => window.guardResult = String(error));
+                    """.trimIndent())
+                    eventually("Direct IPC must reject Android connection, including after recreation") {
+                        evaluate(view, "window.guardResult?.includes('Android build-only')") == "true"
+                    }
+                }
+                assertEquals("No connection attempt may reach a server", 0, destination.requestCount)
             }
         }
     }
