@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { nextRunOrSteerRoute, RUN_OR_STEER_MAX_ATTEMPTS, RUN_OR_STEER_RETRY_DELAY_MS } from '@garcon/common/run-or-steer';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -14,8 +15,8 @@ import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { AsyncDelivery } from './output.js';
 
-const MAX_CONTROL_DISPATCH_ATTEMPTS = 3;
-const CONTROL_STATE_RETRY_DELAY_MS = 50;
+const MAX_CONTROL_DISPATCH_ATTEMPTS = RUN_OR_STEER_MAX_ATTEMPTS;
+const CONTROL_STATE_RETRY_DELAY_MS = RUN_OR_STEER_RETRY_DELAY_MS;
 
 export interface ChatControlClient {
   getChatSnapshot(
@@ -54,8 +55,8 @@ function hasDefinitiveConflictCode(error: unknown, code: string): error is Garco
 // not deliver the input, so the chat may now accept a normal run. Provider
 // delivery failures and capability rejections never authorize a route switch.
 function isSafeSteerStateFlip(error: unknown): boolean {
-  return hasDefinitiveConflictCode(error, 'STEER_TURN_UNAVAILABLE')
-    || hasDefinitiveConflictCode(error, 'STEER_TURN_CHANGED');
+  return error instanceof GarconHttpError
+    && nextRunOrSteerRoute('steer', error.status, error.errorCode) === 'run';
 }
 
 // Alternates between the run and steer endpoints for at most three logical

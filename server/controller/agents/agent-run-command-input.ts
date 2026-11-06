@@ -24,6 +24,7 @@ export function runOptionsForCommand(
   input: AgentRunCommandRequest | ForkRunCommandRequest,
 ): RunAgentTurnOptions {
   return {
+    ...('questionReply' in input && input.questionReply ? { questionReply: input.questionReply } : {}),
     ...(input.model === undefined ? {} : { model: input.model }),
     ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
     ...(input.thinkingMode === undefined ? {} : { thinkingMode: input.thinkingMode }),
@@ -59,5 +60,6 @@ export function agentRunCommandPayload(
     permissionFallbackPolicy: input.permissionFallbackPolicy,
     handoff: input.handoff,
     userMessagePresentation: input.userMessagePresentation ?? null,
+    questionReply: options?.questionReply ?? null,
   };
 }

@@ -322,6 +322,7 @@ export class AgentRuntimeRouter {
       target,
       input,
       clientMessageId: options.clientMessageId,
+      questionReply: options.questionReply,
     }, { dispatchDeadline: deadline ?? undefined });
   }
 
@@ -814,6 +815,11 @@ export class AgentRuntimeRouter {
       dispatch: true,
       prompt: resolvedPrompt,
       outboundPrompt: `${composition?.providerPrefix ?? ''}${resolvedPrompt}`,
+      submission: composition?.input.detail.message.metadata?.questionReply ? {
+        clientMessageId: composition.input.detail.clientMessageId,
+        timestamp: composition.input.at,
+        questionReply: composition.input.detail.message.metadata.questionReply,
+      } : undefined,
       attachments: [...preparedAttachments],
       excludedOrdinals: excluded,
       viewId,
