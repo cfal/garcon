@@ -112,14 +112,21 @@ the generated project. Re-running `init` is not a full refresh of existing files
 ## CI
 
 `.github/workflows/native-app.yml` runs on relevant pull requests/main changes,
-version tags, and manual dispatch. It does not publish releases or use signing
-secrets. Its artifacts are:
+manual dispatch, and reusable calls from the tag-triggered executable workflow.
+It does not publish releases or use signing secrets. Its artifacts are:
 
 - Linux x64: `.deb` and AppImage, built on Ubuntu 22.04.
 - Windows x64: unsigned NSIS installer.
 - macOS arm64 and x64: unsigned/unnotarized DMGs.
 - Android: build-only debug APK for arm64 and x86_64; connections disabled.
 - iOS: unsigned simulator `.app` zip matching the runner architecture.
+
+The [release workflow](../docs/releases.md) attaches all six targets as separate
+`garcon-native-preview-*` ZIPs, each containing its original package(s), blocker
+manifest, and license. Hosting these previews does not change their qualification
+or enable `distribution release`. Extract before installing; AppImages need
+`chmod +x`. macOS Gatekeeper can block unsigned/unnotarized DMGs; these are not
+represented as end-user-ready installers.
 
 The workflow pins Rust, Bun, Tauri, SDK/NDK selections, and dependency lockfiles.
 Runner images, Xcode, and the emulator's system WebView can still change.

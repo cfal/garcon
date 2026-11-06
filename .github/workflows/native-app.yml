@@ -3,7 +3,6 @@ name: Native App
 on:
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - 'native/**'
       - 'web/static/icons/**'
@@ -24,13 +23,14 @@ on:
       - 'bun.lock'
       - '.github/workflows/native-app.yml'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: native-app-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_BUILD_JOBS: 1
