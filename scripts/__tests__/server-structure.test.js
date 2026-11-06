@@ -107,6 +107,23 @@ describe('server ownership boundaries', () => {
     }
   });
 
+  test('keeps workflow policy downstream of core and behind explicit composition', () => {
+    const composition = new Set(['controller/server.ts', 'controller/routes/index.ts']);
+    for (const filename of sources(server)) {
+      const owner = relative(server, filename);
+      for (const dependency of imports(filename)) {
+        if (dependency.startsWith('controller/workflows/') && !owner.startsWith('controller/workflows/')) {
+          expect(composition.has(owner), `${owner} imports ${dependency}`).toBe(true);
+        }
+        if (owner.startsWith('controller/workflows/') && !owner.startsWith('controller/workflows/adapters/')
+          && owner !== 'controller/workflows/setup.ts' && owner !== 'controller/workflows/routes.ts') {
+          expect(dependency, owner).not.toMatch(/^controller\/(agents|commands|chat-execution|ledger|executors|automation)\//);
+          expect(dependency, owner).not.toMatch(/^(runtime|remote)\//);
+        }
+      }
+    }
+  });
+
   test('uses executor terminology at the public command and runtime-discovery boundaries', () => {
     expect(readFileSync(join(server, 'main.ts'), 'utf8')).toContain("process.argv[2] === 'executor'");
     expect(readFileSync(join(root, 'common/cli-runtime-paths.ts'), 'utf8')).toContain("'controller' | 'executor'");

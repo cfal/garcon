@@ -1,5 +1,8 @@
+import { CONVERSATION_PRESENTATION } from '../automation.js';
 import { describe, expect, it } from 'bun:test';
 import { parseChatListResponse } from '../chat-list.ts';
+import { AUTOMATION_PRESENTATION } from '../automation.js';
+import { parsePromoteChatRequest, parsePromoteChatResponse } from '../chat-presentation-contracts.js';
 
 const CHAT_ID = '1785337200123456';
 const TS = '2026-09-07T00:00:00.000Z';
@@ -7,6 +10,7 @@ const TS = '2026-09-07T00:00:00.000Z';
 function response() {
   return {
     sessions: [{
+      presentation: CONVERSATION_PRESENTATION,
       id: CHAT_ID,
       parentChat: null,
       agentId: 'codex',
@@ -38,6 +42,23 @@ function response() {
 }
 
 describe('chat list contract', () => {
+  it('requires explicit, validated presentation and keeps automation in unfiltered lists', () => {
+    const value = response();
+    value.sessions[0].presentation = AUTOMATION_PRESENTATION;
+    expect(parseChatListResponse(value).sessions[0].presentation).toEqual(AUTOMATION_PRESENTATION);
+    for (const presentation of [undefined, null, {}, { collection: 'hidden', notifications: 'normal' }]) {
+      value.sessions[0].presentation = presentation;
+      expect(() => parseChatListResponse(value)).toThrow('presentation');
+    }
+  });
+  it('parses promotion without accepting policy or authority fields', () => {
+    expect(parsePromoteChatRequest({ chatId: CHAT_ID })).toEqual({ chatId: CHAT_ID });
+    expect(parsePromoteChatRequest({ chatId: CHAT_ID, automationPolicy: { inBandCommands: 'inherit' } })).toBeNull();
+    expect(parsePromoteChatRequest({ chatId: 'invalid' })).toBeNull();
+    const promoted = { success: true, chat: response().sessions[0] };
+    expect(parsePromoteChatResponse(promoted)).toEqual(promoted);
+    expect(parsePromoteChatResponse({ ...promoted, chat: { ...promoted.chat, presentation: AUTOMATION_PRESENTATION } })).toBeNull();
+  });
   it('preserves optional executor identity and rejects malformed explicit IDs', () => {
     for (const executorId of [undefined, null, 'local', '22222222-2222-4222-8222-222222222222']) {
       const value = response();

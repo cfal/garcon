@@ -1,4 +1,8 @@
+import { CONVERSATION_PRESENTATION } from '../../../../common/automation.js';
 import { CommandLedger } from '../../commands/command-ledger.js';
+import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
+import { ChatMutationGuard } from '../../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.ts';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { createForkedChat } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
@@ -62,6 +66,7 @@ export function createRouteCommandService({
     }),
   };
   return new ChatCommandService({
+    mutationGuard: new ChatMutationGuard(new KeyedPromiseLock(), new AutomationLifecycle()),
     inspectProject: inspectProjectDirectory,
     chats: registry,
     queue,
@@ -115,6 +120,7 @@ export function createRouteCommandService({
 			const session = registry.getChat(chatId);
 			if (!session) return null;
 			return {
+				presentation: CONVERSATION_PRESENTATION,
 				id: chatId,
 				agentId: session.agentId,
 				model: session.model ?? null,

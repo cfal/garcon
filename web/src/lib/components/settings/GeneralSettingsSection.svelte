@@ -6,6 +6,7 @@
 	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
 	import HiddenBashCommandsSettingsCard from './HiddenBashCommandsSettingsCard.svelte';
 	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
+	import WorkflowSettingsSection from './WorkflowSettingsSection.svelte';
 
 	const remoteSettings = getRemoteSettings();
 	let saveError = $state<string | null>(null);
@@ -70,6 +71,7 @@
 
 		<TranscriptSearchSettingsCard />
 		<AgentCommandsSettingsCard />
+		<WorkflowSettingsSection />
 		<AppTitleSettingsCard />
 	{/if}
 </div>

@@ -30,6 +30,8 @@
 		getChatProcessingReconciler,
 		getModelCatalog,
 		getLocalSettings,
+		getRemoteSettings,
+		getSingletonSurfaces,
 		getProjectResolution,
 		getSurfaceFrames,
 		getTerminalRegistry,
@@ -109,6 +111,8 @@
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
 	const localSettings = getLocalSettings();
+	const remoteSettings = getRemoteSettings();
+	const singletons = getSingletonSurfaces();
 	const projectResolution = getProjectResolution();
 	const gitBranchActions = getGitBranchActions();
 	const gitQuickSummary = getGitQuickSummary();
@@ -492,6 +496,7 @@
 			'chat-canvas': m.workspace_surface_chat_canvas(),
 			'chat-board': m.workspace_surface_chat_board(),
 			tickets: m.tickets_title(),
+			workflows: 'Workflows',
 			usage: m.workspace_surface_usage(),
 		};
 		return labels[surface.kind];
@@ -521,6 +526,11 @@
 	function appendToChatDraft(block: string): ChatDraftAppendResult {
 		return chatDraftAppend ? chatDraftAppend(block) : 'unavailable';
 	}
+	async function createWorkflow(chatId: string): Promise<void> {
+		if (!remoteSettings.snapshot?.features.workflows.enabled) return;
+		await workspace.openSingletonAsTab('workflows', workspace.currentWindowId);
+		singletons.workflows().newDraft(chatId);
+	}
 </script>
 
 {#snippet surfaceMenuItems(surfaceId: string, menu: MenuPrimitives)}
@@ -533,6 +543,7 @@
 		<CurrentChatMenuItems
 			{menu}
 			selectedChat={chat}
+			onCreateWorkflow={remoteSettings.snapshot?.features.workflows.enabled ? () => void createWorkflow(chat.id) : undefined}
 			canReload={chat.canReloadFromNativeHistory ?? false}
 			canUpdateProjectPath={executors.isReady(chat.executorId) &&
 				chatCatalog.supportsUpdateProjectPath(chat.agentId)}
@@ -723,6 +734,7 @@
 				onComposerNoticeChange={(notice) => (composerNotice = notice)}
 				{subagentToolbar}
 				{chatActions}
+				onCreateWorkflow={remoteSettings.snapshot?.features.workflows.enabled ? createWorkflow : undefined}
 				transcriptCache={chatTranscriptCache}
 			/>
 		</div>

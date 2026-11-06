@@ -15,6 +15,7 @@ import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
 import type { SlashCommand } from '../../../common/slash-commands.js';
 import { acceptsFileAttachmentMimeType, isTextAttachmentMimeType } from '../../../common/attachments.js';
+import { assertAutomationPreambles } from '../automation/input.js';
 
 // Text over an inline-only agent's limit would reach it truncated.
 export type FileAttachmentAdmission =
@@ -30,6 +31,8 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { ChatMutationGuard } from '../automation/mutation-guard.js';
+import type { ServerPrincipal } from '../lib/http-route-types.js';
 import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import type {
   AgentChatEntry,
@@ -169,6 +172,7 @@ export interface AgentRegistryServiceContract {
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
     deadline: number,
+    principal: ServerPrincipal | null,
   ): Promise<void>;
   prepareProjectPathUpdate(
     agentId: string,
@@ -222,7 +226,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     onSettingsCommitted?: (chatId: string) => void;
-    chatMutationLock?: KeyedPromiseLock;
+    mutationGuard: ChatMutationGuard;
     settingsExecution: SettingsExecutionPort;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
@@ -260,7 +264,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       registry: this.#registry,
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
-      chatMutationLock: args.chatMutationLock,
+      mutationGuard: args.mutationGuard,
       onCommitted: args.onSettingsCommitted,
       execution: args.settingsExecution,
     });
@@ -397,8 +401,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
     deadline: number,
+    principal: ServerPrincipal | null,
   ): Promise<void> {
-    return this.#runtime.resolvePermission(chatId, permissionOccurrenceId, decision, control, deadline);
+    return this.#runtime.resolvePermission(chatId, permissionOccurrenceId, decision, control, deadline, principal);
   }
   prepareProjectPathUpdate(
     agentId: string,
@@ -736,6 +741,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         );
       }
       if (boundary) assertPreambleSelectionComposition(chatId, preambles);
+      if (options.automation) {
+        options.automation.control.revoked.throwIfAborted();
+        options.automation.canceled.throwIfAborted();
+        assertAutomationPreambles(options.automation.effective.preambles, preambles);
+      }
       composition = this.#ledger.appendInputAndCompose({
         chatId,
         viewId,
@@ -749,6 +759,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           ? { excludedOrdinals: new Set(options.excludedResendOrdinals) }
           : {}),
       });
+      if (options.automation) options.automation.inputPublished = true;
     } catch (error) {
       throw mapInputSubmissionError(error);
     }

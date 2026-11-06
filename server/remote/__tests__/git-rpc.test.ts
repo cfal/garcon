@@ -8,6 +8,47 @@ import type { RemoteSessions } from '../client/executor-client.js';
 import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
+  for (const restarted of [false, true]) {
+    test(`parked Git mutations preserve instance pins on ${restarted ? 'restart' : 'reconnect'} with ${dialer} dialing`, async () => {
+      const fixture = await gitRpcFixture(dialer);
+      const local = await fixture.local.getGitService();
+      const mutate = spyOn(local, 'createBranch');
+      const info = await fixture.local.getInfo();
+      const release = Promise.withResolvers<void>();
+      const describe = spyOn(fixture.local, 'getInfo').mockImplementation(async () => {
+        await release.promise;
+        return { ...info, instanceId: restarted ? 'replacement-instance' : info.instanceId };
+      });
+      try {
+        const git = await fixture.executor.getGitService();
+        const reconnecting = Promise.withResolvers<void>();
+        const unsubscribe = fixture.executor.onAvailabilityChanged(value => {
+          if (value === 'reconnecting') { unsubscribe(); reconnecting.resolve(); }
+        });
+        fixture.controller.disconnect();
+        await reconnecting.promise;
+        const pinned = git.createBranch({ projectPath: fixture.projectPath, branch: 'pinned' }, { instanceId: info.instanceId })
+          .catch((error: unknown) => error);
+        const unpinned = git.createBranch({ projectPath: fixture.projectPath, branch: 'unpinned' })
+          .catch((error: unknown) => error);
+        release.resolve();
+        if (restarted) {
+          expect(await pinned).toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
+          expect(await unpinned).toMatchObject({ outcome: 'not-dispatched', code: 'UNAVAILABLE' });
+          expect(mutate).not.toHaveBeenCalled();
+          expect((await runGit(fixture.projectPath, ['branch', '--list', 'pinned', 'unpinned'])).stdout.trim()).toBe('');
+        } else {
+          expect(await pinned).toMatchObject({ instanceId: info.instanceId });
+          expect(await unpinned).toMatchObject({ instanceId: info.instanceId });
+          expect(mutate).toHaveBeenCalledTimes(2);
+          expect((await runGit(fixture.projectPath, ['branch', '--list', 'pinned'])).stdout).toContain('pinned');
+        }
+      } finally {
+        release.resolve(); describe.mockRestore(); mutate.mockRestore(); await fixture.dispose();
+      }
+    });
+  }
+
   test(`incomplete review summaries fail at the remote boundary with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);
     const local = await fixture.local.getGitService();

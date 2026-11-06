@@ -276,6 +276,7 @@ describe('PUT desired chat order state', () => {
 
 describe('GET /api/chats archive fields', () => {
   const handler = chatsRoutes['/api/v1/chats'].GET;
+  const url = new URL('http://localhost/api/v1/chats');
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
@@ -291,7 +292,7 @@ describe('GET /api/chats archive fields', () => {
     settings.getNormalChatIds.mockImplementation(() => []);
     settings.getArchivedChatIds.mockImplementation(() => [CHAT_ID]);
 
-    const response = await handler();
+    const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(body.sessions).toHaveLength(1);
@@ -310,7 +311,7 @@ describe('GET /api/chats archive fields', () => {
     settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_2]);
     settings.getArchivedChatIds.mockImplementation(() => [CHAT_ID]);
 
-    const response = await handler();
+    const response = await handler(new Request(url), url);
     const body = await response.json();
 
     expect(body.sessions).toHaveLength(3);

@@ -5,6 +5,7 @@ import {
   parseDeleteChatCommandRequest
 } from '../../../common/chat-command-contracts.js';
 import type { ChatDetailsResponse } from '../../../common/chat-details.js';
+import { parseChatCollectionFilter } from '../../../common/chat-filter-query.js';
 import type {
   ChatListEntry,
   ChatListResponse,
@@ -72,6 +73,7 @@ import type {
   UiSettings,
 } from '../settings/types.js';
 import { createChatCommandRoutes } from './chat-command-routes.js';
+import { createChatPresentationRoutes } from './chat-presentation.js';
 import {
   createChatSearchRoutes,
   type ChatSearchDep,
@@ -92,6 +94,7 @@ interface SettingsDep {
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
   recordChatStartup(defaults: ChatStartupPreferences): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
+  emitListChanged(reason: string, chatId: string): void;
   removeFromAllOrderLists(chatId: string): Promise<void>;
   removeSessionName(chatId: string): Promise<void>;
   togglePin(chatId: string): Promise<{ isPinned: boolean }>;
@@ -270,8 +273,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function getChats(): Promise<Response> {
+  async function getChats(_request: Request, url: URL): Promise<Response> {
     try {
+      const collection = parseChatCollectionFilter(url.searchParams.get('collection') ?? 'all');
+      if (!collection) return jsonError('Invalid chat collection', 400, 'VALIDATION_FAILED', false);
       const sessions = registry.listAllChats();
       const pinnedList = settings.getPinnedChatIds();
       const normalList = settings.getNormalChatIds();
@@ -298,9 +303,10 @@ export default function createChatRoutes({
         lastSelectedChat.getLastSelectedChatId(),
         sessions,
       );
+      const visible = collection === 'all' ? all : all.filter((entry) => entry.presentation.collection === collection);
       const body: ChatListResponse = {
-        sessions: all,
-        total: all.length,
+        sessions: visible,
+        total: visible.length,
         lastSelectedChatId,
       };
       return Response.json(body);
@@ -745,5 +751,6 @@ export default function createChatRoutes({
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
     '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChat) },
     '/api/v1/chats/sort': { POST: withJsonBody(postSortChatOrder) },
-  }, createChatCommandRoutes({ commands: commandService, registry, agents, queue }));
+  }, createChatCommandRoutes({ commands: commandService, registry, agents, queue }),
+  createChatPresentationRoutes({ registry, settings, chatMutationLock, chatListProjector }));
 }

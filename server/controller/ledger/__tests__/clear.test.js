@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../../common/chat-types.ts';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
+import { ChatMutationGuard } from '../../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.ts';
 import { TranscriptClearService } from '../clear.ts';
 import { TranscriptReloadService } from '../reload.ts';
 import { TranscriptLedgerService } from '../service.ts';
@@ -49,10 +51,11 @@ async function withClear(run, { hasSession = true, frozenRows = 0 } = {}) {
     readChatExecutionControl: mock(async () => ({ entries: [], controlEntries: [] })),
     withChatExecutionControl: mock(async (_id, operation) => operation(await execution.readChatExecutionControl())),
   };
+  const lifecycle = new AutomationLifecycle();
   const options = { ledger, registry, execution, ownership: { hasPending: () => false },
     integrations: { get: mock(() => ({ literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} } })) },
     adoption: { ensure: mock(async () => {}) },
-    chatMutationLock: new KeyedPromiseLock(), reopenProducer: () => { lease = ledger.openProducer(chatId, 'test'); } };
+    mutationGuard: new ChatMutationGuard(new KeyedPromiseLock(), lifecycle), reopenProducer: () => { lease = ledger.openProducer(chatId, 'test'); } };
   const clear = new TranscriptClearService(options);
   const request = () => { const head = ledger.highWatermark(chatId); return { chatId, transcriptViewId: head.viewId, lastOrdinal: head.ordinal, target: { kind: 'all' } }; };
   const native = [];
@@ -61,9 +64,35 @@ async function withClear(run, { hasSession = true, frozenRows = 0 } = {}) {
       nativeHistoryImport: { async *load() { yield native.map(message => ({ message })); } } }) },
     getCarryOverRevision: () => 'carry-v1:0',
   });
-  try { await run({ ledger, root, clear, reload, request, registry, entry, execution, native, options, get lease() { return lease; } }); }
+  try { await run({ ledger, root, clear, reload, request, registry, entry, execution, native, options, lifecycle, get lease() { return lease; } }); }
   finally { ledger.close(); await rm(root, { recursive: true, force: true }); }
 }
+
+it.each(['clear', 'reload'])('rejected %s does not revoke automation control', async operation => {
+  await withClear(async fixture => {
+    const control = fixture.lifecycle.acquire({ chatId, serverInstanceId: 'server', turnId: 'turn', clientRequestId: 'request' });
+    fixture.execution.reserveTranscriptSnapshot.mockImplementation(() => { throw new Error('Synthetic busy'); });
+    const result = operation === 'clear'
+      ? fixture.clear.clear(fixture.request(), new AbortController().signal) : fixture.reload.reload(chatId);
+    await expect(result).rejects.toMatchObject({ code: 'CHAT_RUNNING' });
+    expect(control.revoked.aborted).toBe(false);
+    expect(fixture.lease.closed).toBe(false);
+    control.release();
+  });
+});
+
+it('unsupported Clear preserves the lease, and accepted Clear revokes before closing the producer', async () => {
+  await withClear(async fixture => {
+    const control = fixture.lifecycle.acquire({ chatId, serverInstanceId: 'server', turnId: 'turn', clientRequestId: 'request' });
+    fixture.options.integrations.get.mockReturnValueOnce(null);
+    await expect(fixture.clear.clear(fixture.request(), new AbortController().signal)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    expect(control.revoked.aborted).toBe(false);
+    const close = fixture.ledger.closeProducer.bind(fixture.ledger);
+    fixture.ledger.closeProducer = id => { expect(control.revoked.aborted).toBe(true); close(id); };
+    await fixture.clear.clear(fixture.request(), new AbortController().signal);
+    control.release();
+  });
+});
 
 it('replaces visible history while retaining session identity and rejecting stale producers/retries', async () => {
   await withClear(async fixture => {
@@ -399,7 +428,8 @@ it('rejects Clear when a production background reply queues after its initial em
     });
     const chatMutationLock = new KeyedPromiseLock();
     const replies = new AgentCommandReplies({ registry, notices: ledger, execution, chatMutationLock });
-    const clear = new TranscriptClearService({ ledger, registry, execution, chatMutationLock,
+    const clear = new TranscriptClearService({ ledger, registry, execution,
+      mutationGuard: new ChatMutationGuard(chatMutationLock, new AutomationLifecycle()),
       ownership: { hasPending: () => false },
       integrations: fixture.options.integrations,
       adoption: { ensure: async () => {} }, reopenProducer: () => ledger.openProducer(chatId, 'test') });
@@ -449,7 +479,7 @@ it.each(['before-request', 'while-waiting'])('rejects deletion %s without reopen
     const original = request();
     const entered = Promise.withResolvers();
     const release = Promise.withResolvers();
-    const locked = options.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+    const locked = options.mutationGuard.lock.runExclusive(`chat:${chatId}`, async () => {
       entered.resolve();
       await release.promise;
     });

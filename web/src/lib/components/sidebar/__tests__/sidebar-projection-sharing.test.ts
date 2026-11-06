@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
@@ -23,6 +24,7 @@ vi.mock('../sidebar-row-model', async (importOriginal) => {
 });
 
 const chat = {
+	presentation: CONVERSATION_PRESENTATION,
 	id: 'synthetic-chat-1',
 	projectPath: '/workspace/project',
 	orderGroup: 'normal',

@@ -29,6 +29,8 @@ test('the reverse CLI allowlist accounts for every client HTTP operation and not
     getTurnReceipt: [chatId, 'synthetic'], getTicketBootstrap: [], getTicketProjectDefault: ['/synthetic'],
     listTickets: [{}], readTicket: [{ ticketId: 'synthetic' }], getTicketHistory: [{ ticketId: 'synthetic' }],
     mutateTicket: [{}],
+    getWorkflowBootstrap: [], readWorkflow: [{ kind: 'list', after: null, limit: 50 }],
+    getWorkflowOperation: ['synthetic'], mutateWorkflow: [{ mutation: { action: 'create' } }],
     getScheduledPrompts: [], createScheduledPrompt: [{}], updateScheduledPrompt: [{}],
     setScheduledPromptEnabled: [{}], deleteScheduledPrompt: [{}],
     listExecutors: [], createExecutor: [{}], updateExecutor: ['11111111-1111-4111-8111-111111111111', {}],
@@ -40,6 +42,15 @@ test('the reverse CLI allowlist accounts for every client HTTP operation and not
     .map(([name]) => name).sort()).toEqual(Object.keys(args).sort());
   for (const [name, parameters] of Object.entries(args)) {
     await Reflect.apply(client[name as Operation], client, parameters).catch(() => {});
+  }
+  for (const kind of ['show', 'diagram', 'attempts', 'activity', 'artifacts'] as const) {
+    await client.readWorkflow({ kind, id: 'synthetic', cursor: null, limit: 50, before: 100, planRevision: 1 }).catch(() => {});
+  }
+  await client.readWorkflow({ kind: 'attempt', id: 'synthetic', attemptId: 'historical' }).catch(() => {});
+  await client.readWorkflow({ kind: 'plan', id: 'synthetic', planRevision: 1 }).catch(() => {});
+  await client.readWorkflow({ kind: 'gate', id: 'synthetic', gateId: 'gate' }).catch(() => {});
+  for (const action of ['plan', 'pause', 'stop'] as const) {
+    await Reflect.apply(client.mutateWorkflow, client, [{ mutation: { action } }]).catch(() => {});
   }
   expect([...operations].sort()).toEqual(Object.keys(CLI_OPERATIONS).sort());
 });

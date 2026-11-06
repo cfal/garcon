@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./automation": "./automation.ts",
+    "./workflows": "./workflows.ts",
+    "./workflow-validation": "./workflow-validation.ts",
+    "./workflow-http": "./workflow-http.ts",
     "./base-path": "./base-path.ts",
     "./command-output": "./command-output.ts",
     "./agent-auth": "./agent-auth.ts",
@@ -30,6 +34,7 @@
     "./chat-order-contracts": "./chat-order-contracts.ts",
     "./chat-order-sort": "./chat-order-sort.ts",
     "./chat-preamble-selection-contracts": "./chat-preamble-selection-contracts.ts",
+    "./chat-presentation-contracts": "./chat-presentation-contracts.ts",
     "./chat-row-contracts": "./chat-row-contracts.ts",
     "./chat-snapshot": "./chat-snapshot.ts",
     "./chat-tags-contracts": "./chat-tags-contracts.ts",

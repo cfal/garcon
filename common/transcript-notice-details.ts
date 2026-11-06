@@ -90,6 +90,7 @@ export interface InterAgentMessageReceivedNoticeDetail {
 export type ServerControlReceiptDetail = InterAgentMessageReceivedNoticeDetail;
 
 export type TranscriptNoticeDetail =
+  | { readonly type: 'in-band-command-denied' }
   | TicketCommandOutcome
   | AgentStartProgressNoticeDetail
   | AgentStartOutcomeNoticeDetail
@@ -234,6 +235,9 @@ function hasType(value: unknown, type: string): boolean {
 }
 
 export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (value !== null && typeof value === 'object' && 'type' in value && value.type === 'in-band-command-denied') {
+    return { type: value.type };
+  }
   if (isPublicationGapNoticeDetail(value)) return { type: value.type };
   const progress = parseAgentStartProgressNotice(value);
   if (progress) return progress;

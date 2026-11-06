@@ -11,6 +11,8 @@ import { AgentScheduleController } from '../../../server/controller/chats/agent-
 import { ChatExecutionCoordinator } from '../../../server/controller/chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../../server/controller/chat-execution/chat-execution-control-repository.js';
 import { CommandSupport } from '../../../server/controller/commands/command-support.js';
+import { ChatMutationGuard } from '../../../server/controller/automation/mutation-guard.js';
+import { AutomationLifecycle } from '../../../server/controller/automation/lifecycle.js';
 import { CommandLedger } from '../../../server/controller/commands/command-ledger.js';
 import { QueueCommands } from '../../../server/controller/commands/queue-commands.js';
 import { KeyedPromiseLock } from '../../../server/common/keyed-lock.js';
@@ -85,7 +87,7 @@ async function withPipeline(run) {
       isControlInputViewCurrent: (chatId, viewId) => ledger.existingCurrentView(chatId)?.viewId === viewId,
     });
   const commands = new QueueCommands(new CommandSupport({ chats: registry, queue: execution,
-    ledger: new CommandLedger(), chatMutationLock: lock,
+    ledger: new CommandLedger(), mutationGuard: new ChatMutationGuard(lock, new AutomationLifecycle()),
     agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId,
       executionPolicy: () => 'conversation' },
   }));

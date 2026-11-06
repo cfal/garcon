@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { AUTOMATION_PRESENTATION, CONVERSATION_PRESENTATION } from '$shared/automation';
+
 	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
@@ -64,6 +66,7 @@
 	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
+		quietAutomation?: boolean;
 		composerStatusBarGitProjects?: boolean;
 		executionPolicy?: 'conversation' | 'literal' | null;
 		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
@@ -77,6 +80,7 @@
 	}
 
 	let {
+		quietAutomation = false,
 		composerStatusBarGitProjects = false,
 		executionPolicy = 'conversation',
 		onRegisterSubmit,
@@ -90,6 +94,7 @@
 	}: ConversationWorkspaceEscapeHostProps = $props();
 
 	let selectedChat = $state<ChatSessionRecord>({
+		presentation: untrack(() => quietAutomation) ? AUTOMATION_PRESENTATION : CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/workspace/project',

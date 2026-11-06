@@ -1,4 +1,5 @@
-import type { CommandWorkingDirectory } from '../../../common/command-output.js';
+import type { CommandOutcome, CommandWorkingDirectory } from '../../../common/command-output.js';
+import type { ExecutionFailureCertainty } from '../../../common/automation.js';
 import type { AgentAttachment } from '../../../common/agent-execution.js';
 import type {
   AgentEstablishedSession,
@@ -388,6 +389,10 @@ export type TranscriptCommitEvent =
       readonly row: LedgerRunEndedRow;
       readonly finalResponse: AgentFinalResponse | null;
       readonly workingDirectory?: CommandWorkingDirectory;
+      readonly commandOutcome?: CommandOutcome | null;
+      readonly failureCertainty?: ExecutionFailureCertainty;
+      readonly receivedOutputCoverage?: 'complete' | 'gapped' | 'unknown';
+      readonly executionScope?: { readonly executorId: string; readonly instanceId: string } | null;
     }
   | {
       readonly type: 'view-replaced';

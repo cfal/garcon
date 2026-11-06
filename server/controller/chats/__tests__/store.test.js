@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { ChatRegistry } from '../store.ts';
+import { AUTOMATION_PRESENTATION, CONVERSATION_PRESENTATION, GUARDED_AUTOMATION_POLICY, INHERITED_AUTOMATION_POLICY } from '../../../../common/automation.js';
 import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
 
 const CHAT_ID = '1783725900000200';
@@ -1010,8 +1011,32 @@ describe('ChatRegistry', () => {
 
     await registry.init();
 
-    expect(registry.getChat(CHAT_ID)).toEqual(persistedEntry());
+    expect(registry.getChat(CHAT_ID)).toEqual({ ...persistedEntry(),
+      presentation: CONVERSATION_PRESENTATION, automationPolicy: INHERITED_AUTOMATION_POLICY });
     expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('retains guarded automation policy and presentation across registry reload', async () => {
+    registry.addChat(newChat({ presentation: AUTOMATION_PRESENTATION, automationPolicy: GUARDED_AUTOMATION_POLICY }));
+    await registry.flush();
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(CHAT_ID)).toMatchObject({ presentation: AUTOMATION_PRESENTATION,
+      automationPolicy: GUARDED_AUTOMATION_POLICY });
+  });
+
+  it('validates and snapshots presentation patches before updating the registry', async () => {
+    registry.addChat(newChat());
+    const presentation = { ...AUTOMATION_PRESENTATION };
+    await registry.updateChat(CHAT_ID, { presentation }, { flush: true });
+    presentation.collection = 'conversation';
+    expect(registry.getChat(CHAT_ID).presentation).toEqual(AUTOMATION_PRESENTATION);
+    for (const invalid of [null, {}, { collection: 'invalid', notifications: 'normal' }]) {
+      expect(() => registry.updateChat(CHAT_ID, { presentation: invalid })).toThrow('Invalid chat presentation');
+    }
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(CHAT_ID).presentation).toEqual(AUTOMATION_PRESENTATION);
   });
 
   it('preserves duplicate binding ambiguity after persisted registry reload', async () => {

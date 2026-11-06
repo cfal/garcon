@@ -19,6 +19,7 @@ import {
 import { ownershipTransferPendingError } from '../agents/ownership-transfer-fence.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { ChatMutationGuard } from '../automation/mutation-guard.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import {
   LedgerFencedError,
@@ -74,7 +75,7 @@ export interface ChatPreambleSelectionServiceDeps {
   >;
   readonly preambles: Pick<PreambleService, 'snapshot'>;
   readonly ownershipJournal: Pick<AgentOwnershipJournal, 'hasPending'>;
-  readonly chatMutationLock: KeyedPromiseLock;
+  readonly mutationGuard: ChatMutationGuard;
   readonly selectionAdmissionLock: KeyedPromiseLock;
   readonly now?: () => string;
   // Invoked after a committed decision so the wiring can schedule the per-chat
@@ -89,7 +90,7 @@ export class ChatPreambleSelectionService {
     // Reconciliation, adoption, and the registry re-read run under the shared
     // chat mutation boundary so the reported view, selection, and project path
     // describe one coherent chat state.
-    return this.deps.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+    return this.deps.mutationGuard.lock.runExclusive(`chat:${chatId}`, async () => {
       // A GET reconciles a durability-unknown phased commit before reporting
       // state, so a client can recover into editing only after the server has
       // confirmed the committed candidate is durably persisted.
@@ -137,7 +138,7 @@ export class ChatPreambleSelectionService {
   ): Promise<ChatPreambleSelectionUpdateOutcome> {
     // Lock order is fixed: the chat mutation lock precedes the narrow
     // selection/admission lock, which queue admission never inverts.
-    return this.deps.chatMutationLock.runExclusive(`chat:${input.chatId}`, () =>
+    return this.deps.mutationGuard.lock.runExclusive(`chat:${input.chatId}`, () =>
       this.deps.selectionAdmissionLock.runExclusive(`chat:${input.chatId}`, () =>
         this.#updateLocked(input)));
   }
@@ -236,6 +237,7 @@ export class ChatPreambleSelectionService {
     const nextBoundary = this.#nextBoundary(chatId, session, nextSelection.revision);
     let durability: 'durable' | 'unknown';
     try {
+      this.deps.mutationGuard.observe(chatId, 'execution-settings');
       const result = await this.deps.registry.updateChatPhased(chatId, {
         preambleSelection: nextSelection,
         pendingPreambleBoundary: nextBoundary,

@@ -13,6 +13,7 @@ import { DomainError } from '../../common/domain-error.js';
 import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import type { ChatListEntry } from '../../../common/chat-list.js';
 import { CLI_ENVELOPE_BYTES, cliRequestBytes, cliRoute } from '../transport/cli-protocol.js';
 import {
   ASK_USER_QUESTION_TEXT_MAX_BYTES,
@@ -75,6 +76,28 @@ test('preserves transcript overload responses through the executor gateway', asy
   const response = await f.call('/api/v1/chats/export?chatId=1234567890123456&format=xml');
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual(await overload().json());
+});
+
+test('preserves presentation DTOs and collection queries through the worker gateway', async () => {
+  const worker: ChatListEntry = {
+    id: '1783725900000800', presentation: { collection: 'automation', notifications: 'attention-only' },
+    parentChat: null, executorId: CLI_EXECUTOR_ID, agentId: 'test', agentOwnershipEpoch: 'epoch-1',
+    model: null, permissionMode: 'default', thinkingMode: 'none',
+    agentSettings: { ownerId: 'test', schemaVersion: 1, values: {} }, title: 'Synthetic worker', projectPath: '/repo',
+    orderGroup: 'orphan', tags: [], activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+    preview: { lastMessage: '' }, isPinned: false, isArchived: false, isActive: false, isProcessing: false,
+    processingPhase: null, canReloadFromNativeHistory: false, isUnread: false,
+  };
+  const received: string[] = [];
+  const f = await fixture({ '/api/v1/chats': { GET: (_request, url) => {
+    received.push(url.searchParams.get('collection') ?? 'all');
+    return Response.json({ sessions: [worker], total: 1, lastSelectedChatId: null });
+  } } });
+  const client = new GarconClient(await f.discover());
+  expect((await client.listChats()).sessions).toEqual([worker]);
+  const response = await f.call('/api/v1/chats?collection=automation');
+  expect((await response.json()).sessions).toEqual([worker]);
+  expect(received).toEqual(['all', 'automation']);
 });
 
 test('existing shared-readable directories retain their modes while runtime files stay private', async () => {

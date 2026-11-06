@@ -72,6 +72,78 @@ describe('settings store', () => {
   });
 
   describe('load/save roundtrip', () => {
+    it('persists workflow initialization without exposing a public reset or settings event', async () => {
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('changed'));
+      expect(store.hasInitializedWorkflowStorage()).toBe(false);
+      await store.markWorkflowStorageInitialized();
+      await store.markWorkflowStorageInitialized();
+      await store.saveSettings({ ui: {} });
+      expect(store.hasInitializedWorkflowStorage()).toBe(true);
+      expect(store.getRemoteSettingsSnapshotSource()).not.toHaveProperty('workflowStorageInitialized');
+      expect(events).toEqual([]);
+      const reloaded = new SettingsStore(tmpDir);
+      await reloaded.init();
+      expect(reloaded.hasInitializedWorkflowStorage()).toBe(true);
+    });
+
+    it('does not publish a workflow initialization marker before its write succeeds', async () => {
+      const controlled = new SettingsStore(tmpDir, { writeFile: async () => { throw new Error('Synthetic write failure'); } });
+      await controlled.init();
+      await expect(controlled.markWorkflowStorageInitialized()).rejects.toThrow('Synthetic write failure');
+      expect(controlled.hasInitializedWorkflowStorage()).toBe(false);
+    });
+
+    it('treats a malformed workflow marker as possibly initialized', async () => {
+      await writeRaw({ workflowStorageInitialized: 'invalid' });
+      expect(store.hasInitializedWorkflowStorage()).toBe(true);
+    });
+
+    it('retains workflow ownership after an uncertain initialized-marker write', async () => {
+      await withFailingDirectorySync(async () => {
+        await expect(store.markWorkflowStorageInitialized()).rejects.toMatchObject({ renamed: true });
+        await expect(store.saveSettings({ ui: {} })).rejects.toMatchObject({ renamed: true });
+      });
+      expect(store.hasInitializedWorkflowStorage()).toBe(true);
+      await store.saveSettings({ ui: {} });
+      const reloaded = new SettingsStore(tmpDir);
+      await reloaded.init();
+      expect(reloaded.hasInitializedWorkflowStorage()).toBe(true);
+    });
+
+    it.each(['ordinary-first', 'marker-first'])('serializes pending saves with initialization: %s', async order => {
+      const entered = deferred();
+      const release = deferred();
+      const markers = [];
+      let holdNext = false;
+      const controlled = new SettingsStore(tmpDir, { writeFile: async (...args) => {
+        markers.push(args[1].workflowStorageInitialized);
+        if (holdNext) {
+          holdNext = false;
+          entered.resolve();
+          await release.promise;
+        }
+        return writeJsonFileAtomic(...args);
+      } });
+      await controlled.init();
+      markers.length = 0;
+      holdNext = true;
+      const ordinary = () => controlled.saveSettings({ ui: {}, chatNames: { synthetic: 'Synthetic title' } });
+      const marker = () => controlled.markWorkflowStorageInitialized();
+      const first = order === 'ordinary-first' ? ordinary() : marker();
+      await entered.promise;
+      const second = order === 'ordinary-first' ? marker() : ordinary();
+      expect(controlled.hasInitializedWorkflowStorage()).toBe(false);
+      expect(markers).toHaveLength(1);
+      release.resolve();
+      await Promise.all([first, second]);
+      expect(markers).toEqual(order === 'ordinary-first' ? [false, true] : [true, true]);
+      const reloaded = new SettingsStore(tmpDir);
+      await reloaded.init();
+      expect(reloaded.hasInitializedWorkflowStorage()).toBe(true);
+      expect(JSON.parse(await fs.readFile(settingsFile(), 'utf8')).chatNames.synthetic).toBe('Synthetic title');
+    });
+
     it('loads and returns a settings file', async () => {
       await writeRaw({
         ui: { theme: 'dark' },
@@ -832,6 +904,7 @@ describe('settings store', () => {
       const settings = await store.loadSettings();
       expect(settings).toEqual({
         features: {
+          workflows: { enabled: false },
           transcriptSearch: { enabled: false },
           agentCommands: {
             enabled: true,
@@ -843,6 +916,7 @@ describe('settings store', () => {
             tickets: true,
           },
         },
+        workflowStorageInitialized: false,
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         ...startupSettings(),
@@ -1542,6 +1616,7 @@ describe('settings store', () => {
         },
       });
       expect(store.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: false },
         agentCommands: {
           enabled: false,
@@ -1555,6 +1630,7 @@ describe('settings store', () => {
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: false },
         agentCommands: {
           enabled: false,
@@ -1603,6 +1679,7 @@ describe('settings store', () => {
       store.onRemoteSettingsChanged(() => events.push('changed'));
       await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
       expect(store.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: true },
         agentCommands: {
           enabled: true,
@@ -1620,6 +1697,7 @@ describe('settings store', () => {
       const reloaded = new SettingsStore(tmpDir);
       await reloaded.init();
       expect(reloaded.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: true },
         agentCommands: {
           enabled: true,
@@ -1649,6 +1727,7 @@ describe('settings store', () => {
       });
 
       expect(store.getFeatureSettings()).toEqual({
+        workflows: { enabled: false },
         transcriptSearch: { enabled: false },
         agentCommands: {
           enabled: true,

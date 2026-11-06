@@ -1,5 +1,32 @@
 # Garcon CLI And Server
 
+## Delivery Workflows
+
+Workflows are optional and disabled by default. Enable them in browser settings. CLI authority can create/edit drafts, inspect state, pause admissions, and request Stop. Activation, gate approval, resume, retry, resolution, clear-hold, cancel, archive, publication recheck, and managed cleanup require a current authenticated browser session.
+
+```sh
+garcon-cli workflow list --json
+garcon-cli workflow create --plan plan.json --json
+garcon-cli workflow create --plan - --json
+garcon-cli workflow show <workflow-id> --json
+garcon-cli workflow inspect-plan <workflow-id> --plan-revision 1 --json
+garcon-cli workflow attempt <workflow-id> --attempt-id <attempt-id> --json
+garcon-cli workflow gate <workflow-id> --gate-id <gate-id> --json
+garcon-cli workflow diagram <workflow-id> --plan-revision 1 --json
+garcon-cli workflow plan <workflow-id> --file revised.json --expected-plan-revision 1
+garcon-cli workflow attempts <workflow-id> --limit 50 --json
+garcon-cli workflow artifacts <workflow-id> --limit 50 --json
+garcon-cli workflow activity <workflow-id> --limit 50 --json
+garcon-cli workflow pause <workflow-id>
+garcon-cli workflow stop <workflow-id>
+garcon-cli workflow operation <operation-id> --json
+garcon-cli workflow retry-operation --payload <private-recovery-file> --operation-id <operation-id>
+```
+
+Plan paths and `-` stdin belong to the CLI host. Repository paths remain executor-qualified data. Page with `--cursor`; a nonempty byte-short attempt/artifact page can have a following page. Diagrams identify their stored revision. `show` returns a bounded overview; inspect exact plans, gates, and historical attempts separately. Drafts do not execute.
+
+Mutations print an operation ID and recovery command before submission, with a mode-0600 exact payload under the selected config root. Preserve the config/runtime selector and operation ID after an uncertain response. Recovery checks storage identity and principal-bound results before an explicit same-payload submission. Expired receipts are tombstones, not permission to repeat. Git/GitHub effects have separate durable intent and uncertainty handling.
+
 `bun cli/main.ts` controls ordinary Garcon chats through an already-running server. Chats started or resumed from the CLI stay visible in the SPA with their tools, permission requests, transcript, queue, and Stop controls.
 
 The examples below run from a Garcon checkout. `bun run build-exe` produces `dist/garcon-cli-linux-x64` and `dist/garcon-cli-darwin-arm64`; their help and command syntax use the `garcon-cli` name.
@@ -675,13 +702,22 @@ bun cli/main.ts --runtime controller chats \
 Supported metadata operators are `title:`, `tag:`, `agent:`, `model:`,
 `project:`, exact `id:`, direct-parent `parent:`, `created-before:`,
 `created-after:`, `updated-before:`, `updated-after:`, `status:active|unread`,
-and `is:pinned|normal|archived`. Negate an
+`collection:conversation|automation|all`, and `is:pinned|normal|archived`. Negate an
 order group with `is:!pinned`, `is:!normal`, or `is:!archived`. Pipe-separated
 identity values are OR alternatives within one clause and repeated identity
 clauses are ANDed. Repeated title and tag groups are also ANDed; agent,
 model, and project values accumulate as alternatives. Bare terms are ANDed and
 match chat title, project path, first and last previews, and tags. `chats` sorts
 by effective activity descending and uses the chat ID as a stable tie-breaker.
+
+Unfiltered CLI lists and transcript searches include automation chats. Use
+`--filter 'collection:automation'` to inspect workers or `collection:conversation`
+for ordinary chats. List and snapshot DTOs include `presentation.collection` and
+`presentation.notifications`. Direct and forwarded `GET /api/v1/chats` support
+the same optional `collection` query parameter; omission retains full enumeration.
+The browser sidebar defaults to Conversations, with Automation available when
+workers exist, even with Workflows disabled. Moving a worker to Conversations
+restores ordinary ordering and notifications without changing execution guards.
 
 Date-only filter values mean `00:00:00.000Z`. Datetimes must be RFC3339 with an
 explicit `Z` or numeric offset and at most millisecond precision. Before and
@@ -845,6 +881,11 @@ permission mode changed after a restart.
 Status is a one-shot, non-transactional observation. Use `wait` with the exact accepted chat and turn IDs when completion identity matters.
 
 Submit an exact pending permission decision using every fence shown by status:
+
+Guarded automation chats require a current authenticated browser session for
+permission decisions, including structured answers and denials. Local CLI and
+executor-gateway requests receive `PERMISSION_DECISION_FORBIDDEN`; the permission
+remains pending and Stop remains available. Ordinary chats are unchanged.
 
 ```bash
 bun cli/main.ts --runtime controller permission-decision 1785337200123456 \

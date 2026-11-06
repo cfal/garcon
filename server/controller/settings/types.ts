@@ -69,6 +69,7 @@ export interface SavedChatSearch {
 
 export interface ProjectSettings {
   features: FeatureSettings;
+  workflowStorageInitialized: boolean;
   ui: UiSettings;
   paths: PathSettings;
   chatNames: Record<string, string>;
@@ -83,6 +84,7 @@ export interface ProjectSettings {
 }
 
 export interface FeatureSettings {
+  workflows: { enabled: boolean };
   transcriptSearch: TranscriptSearchFeatureSettings;
   agentCommands: AgentCommandsFeatureSettings;
 }

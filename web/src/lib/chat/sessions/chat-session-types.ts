@@ -6,6 +6,7 @@ import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
 import type { ParentChatRef } from '$shared/chat-parentage';
 import type { ChatProcessingPhase } from '$shared/chat-types';
+import type { ChatPresentation } from '$shared/automation';
 
 export type ChatStatus = 'draft' | 'running';
 export type SessionAgentId = string;
@@ -31,6 +32,7 @@ export interface NewChatConfig extends ChatStartupConfig {
 }
 
 export interface ChatSessionRecord {
+  presentation: ChatPresentation;
 	executorId?: string | null;
 	id: string;
 	parentChat: ParentChatRef | null;

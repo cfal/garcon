@@ -23,7 +23,7 @@ export class RecentChatHistoryState {
 	rankChats(chats: readonly ChatSessionRecord[]): readonly ChatSessionRecord[] {
 		const visits = new Map(this.#visitedIds.map((id, index) => [id, index]));
 		return chats
-			.filter((chat) => !chat.isArchived)
+			.filter((chat) => !chat.isArchived && chat.presentation.collection === 'conversation')
 			.sort((a, b) => {
 				const visitOrder =
 					(visits.get(a.id) ?? VISITED_CHAT_LIMIT) - (visits.get(b.id) ?? VISITED_CHAT_LIMIT);

@@ -1,6 +1,14 @@
 import type { AgentProducerEvent, AgentProducerSink } from '@garcon/server-agent-interface';
 import { TranscriptSinkClosedError } from './errors.js';
-import type { TranscriptProducerLease } from './service.js';
+import type { AutomationExecutionScope } from '../../../common/automation.js';
+
+export interface TranscriptProducerLease {
+  readonly sink: AgentProducerSink;
+  publish(event: AgentProducerEvent, scope: AutomationExecutionScope | null): void;
+  close(): void;
+  readonly closed: boolean;
+  onClosed(listener: () => void): () => void;
+}
 
 export class ProducerLease implements TranscriptProducerLease {
   #closed = false;
@@ -9,15 +17,19 @@ export class ProducerLease implements TranscriptProducerLease {
   readonly sink: AgentProducerSink;
 
   constructor(
-    publish: (event: AgentProducerEvent) => void,
+    private readonly publishEvent: (event: AgentProducerEvent, scope: AutomationExecutionScope | null) => void,
     private readonly onClose: () => void,
   ) {
     this.sink = Object.freeze({
       publish: (event: AgentProducerEvent) => {
-        if (this.#closed) throw new TranscriptSinkClosedError();
-        publish(event);
+        this.publish(event, null);
       },
     });
+  }
+
+  publish(event: AgentProducerEvent, scope: AutomationExecutionScope | null): void {
+    if (this.#closed) throw new TranscriptSinkClosedError();
+    this.publishEvent(event, scope);
   }
 
   get closed(): boolean {

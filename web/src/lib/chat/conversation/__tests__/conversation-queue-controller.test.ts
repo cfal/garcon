@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getChatExecutionControl, moveQueuedInput } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
@@ -35,6 +36,7 @@ function queueEntry(id: string, revision: number): QueueEntry {
 
 function chatRecord(): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/repo',

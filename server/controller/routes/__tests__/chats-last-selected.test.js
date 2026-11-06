@@ -106,12 +106,29 @@ describe('last selected chat routes', () => {
     fixture = createFixture();
   });
 
+  it('keeps full enumeration by default and validates explicit collection filters', async () => {
+    const worker = '1783725900000801';
+    fixture.registry.listAllChats.mockReturnValue({ [CHAT_ID]: chatEntry(), [worker]: {
+      ...chatEntry(), presentation: { collection: 'automation', notifications: 'attention-only' },
+    } });
+    const list = async (query = '') => {
+      const url = new URL(`http://localhost/api/v1/chats${query}`);
+      const response = await fixture.routes['/api/v1/chats'].GET(new Request(url), url);
+      return { response, body: await response.json() };
+    };
+    expect((await list()).body.total).toBe(2);
+    expect((await list('?collection=automation')).body.sessions.map((chat) => chat.id)).toEqual([worker]);
+    expect((await list('?collection=conversation')).body.sessions.map((chat) => chat.id)).toEqual([CHAT_ID]);
+    expect((await list('?collection=all')).body.total).toBe(2);
+    expect((await list('?collection=hidden')).response.status).toBe(400);
+  });
+
   it('returns remembered chat id when it is visible', async () => {
     fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
     fixture.registry.listAllChats.mockImplementation(() => ({ [CHAT_ID]: chatEntry() }));
     fixture.settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
-    const response = await fixture.routes['/api/v1/chats'].GET();
+    const response = await fixture.routes['/api/v1/chats'].GET(new Request('http://localhost/api/v1/chats'), new URL('http://localhost/api/v1/chats'));
     const body = await response.json();
 
     expect(body.lastSelectedChatId).toBe(CHAT_ID);
@@ -122,7 +139,7 @@ describe('last selected chat routes', () => {
     fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
     fixture.registry.listAllChats.mockImplementation(() => ({ [CHAT_ID]: chatEntry('/missing') }));
 
-    const response = await fixture.routes['/api/v1/chats'].GET();
+    const response = await fixture.routes['/api/v1/chats'].GET(new Request('http://localhost/api/v1/chats'), new URL('http://localhost/api/v1/chats'));
     const body = await response.json();
 
     expect(body.lastSelectedChatId).toBe(CHAT_ID);
@@ -133,7 +150,7 @@ describe('last selected chat routes', () => {
     fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
     fixture.registry.listAllChats.mockImplementation(() => ({}));
 
-    const response = await fixture.routes['/api/v1/chats'].GET();
+    const response = await fixture.routes['/api/v1/chats'].GET(new Request('http://localhost/api/v1/chats'), new URL('http://localhost/api/v1/chats'));
     const body = await response.json();
 
     expect(body.lastSelectedChatId).toBeNull();

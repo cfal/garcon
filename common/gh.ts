@@ -16,6 +16,9 @@ export interface GhStatusResponse {
 }
 
 export interface GhResults {
+  getPublicationTarget: { repository: GhRepositoryIdentity; actor: GhActorIdentity; baseCommit: string };
+  createPullRequest: GhPublishedPullRequest;
+  findPullRequests: { repository: GhRepositoryIdentity; actor: GhActorIdentity; pulls: GhPublishedPullRequest[] };
   getStatus: GhStatusResponse;
   listPullRequests: PullRequestListResult;
   getPullRequest: PullRequestDetail;
@@ -25,6 +28,10 @@ export interface GhResults {
 }
 
 export interface GhRequests {
+  getPublicationTarget: { projectPath: string; remote: string; expectedRemoteUrl: string; baseBranch: string };
+  createPullRequest: GhPublicationRequest;
+  findPullRequests: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity;
+    headBranch: string; baseBranch: string; marker: string };
   getStatus: Record<string, never>;
   listPullRequests: { projectPath: string; repository?: GhRepositoryIdentity };
   getPullRequest: { projectPath: string; repository: GhRepositoryIdentity; number: number };
@@ -44,7 +51,7 @@ export interface GhActorIdentity {
 }
 
 export const GH_MUTATIONS = [
-  'createPullRequestComment', 'minimizePullRequestComment',
+  'createPullRequestComment', 'minimizePullRequestComment', 'createPullRequest',
 ] as const satisfies readonly (keyof GhRequests)[];
 
 export function isGhMutation(method: keyof GhRequests): boolean {
@@ -114,6 +121,37 @@ export interface PullRequestListResult {
 export interface PullRequestCommentRef {
   id: string;
   url: string;
+}
+
+export interface GhPublicationRequest {
+  projectPath: string;
+  repository: GhRepositoryIdentity;
+  actor: GhActorIdentity;
+  remote: string;
+  expectedRemoteUrl: string;
+  baseBranch: string;
+  baseCommit: string;
+  headBranch: string;
+  headCommit: string;
+  title: string;
+  body: string;
+  draft: boolean;
+  marker: string;
+}
+
+export interface GhPublishedPullRequest {
+  repository: GhRepositoryIdentity;
+  actor: GhActorIdentity;
+  number: number;
+  url: string;
+  state: PullRequestState;
+  baseBranch: string;
+  baseCommit: string;
+  headBranch: string;
+  headCommit: string;
+  title: string;
+  body: string;
+  draft: boolean;
 }
 
 // A comment carrying a hidden marker that starts with the requested prefix.

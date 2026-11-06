@@ -11,6 +11,7 @@ import {
 } from '$lib/api/settings.js';
 import { ApiError } from '$lib/api/client.js';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
 import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
@@ -24,6 +25,13 @@ import {
 	makeRemoteSettingsSnapshot,
 	mockRemoteSettingsUpdate,
 } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
+
+vi.mock('$lib/context', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/context')>(),
+	getWorkspaceCoordinator: () => ({
+		openSingleton: vi.fn<WorkspaceCoordinator['openSingleton']>(),
+	} satisfies Pick<WorkspaceCoordinator, 'openSingleton'>),
+}));
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),

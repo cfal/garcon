@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,6 +15,7 @@ function chat(
 	lastActivityAt: string | null,
 ): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		projectPath: '/workspace',

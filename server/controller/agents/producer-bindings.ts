@@ -7,7 +7,7 @@ import {
   type AgentRunFailureDetail,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
-import type { TranscriptProducerLease } from '../ledger/service.js';
+import type { TranscriptProducerLease } from '../ledger/producer-lease.js';
 import { waitAbortably } from '../../common/abortable-wait.js';
 import { reconnectTimedOut } from '../../common/executor-disconnect.js';
 import { retryAfterSessionLoss } from './session-loss-retry.js';
@@ -135,9 +135,21 @@ export class ProducerBindings {
         } else {
           if (event.type === 'run-ended') this.#progress.delete(event.runId);
           try {
-            route.lease.sink.publish(event);
+            route.lease.publish(event, { executorId: route.binding.executorId, instanceId: route.binding.instanceId });
           } catch (error) {
+            if (event.type === 'rows' && !route.lease.closed) {
+              try { this.onPublicationGap(route.chatId, route.lease); }
+              catch (failure) { this.onError(failure); }
+            }
             this.onError(error);
+            if (event.type === 'run-ended' && !route.lease.closed) {
+              try {
+                this.onPublicationFailed(route.chatId, route.lease, {
+                  code: 'OUTCOME_UNKNOWN', message: 'The agent terminal could not be accepted.',
+                });
+              } catch (failure) { this.onError(failure); }
+              finally { route.lease.close(); }
+            }
           }
         }
       });

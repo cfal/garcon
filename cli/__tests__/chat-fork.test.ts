@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../common/automation.js';
 import { describe, expect, test } from 'bun:test';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
@@ -22,6 +23,7 @@ const TIMESTAMP = '2026-09-18T12:00:00.000Z';
 
 function chat(id = TARGET_CHAT_ID): ChatListEntry {
   return {
+    presentation: CONVERSATION_PRESENTATION,
     id,
     parentChat: {
       chatId: SOURCE_CHAT_ID,

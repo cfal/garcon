@@ -1,5 +1,5 @@
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import type { CommandWorkingDirectory } from '@garcon/common/command-output';
+import type { CommandOutcome, CommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ChatMessage, ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
@@ -86,7 +86,10 @@ export interface AgentFinalResponse {
   readonly text: string;
 }
 
-export type AgentRunEndedEvent = { readonly workingDirectory?: CommandWorkingDirectory } & (
+export type AgentRunEndedEvent = {
+  readonly workingDirectory?: CommandWorkingDirectory;
+  readonly commandOutcome?: CommandOutcome | null;
+} & (
   | {
       readonly type: 'run-ended';
       readonly runId: string;

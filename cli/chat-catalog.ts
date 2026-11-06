@@ -6,12 +6,14 @@ import {
 import type { ChatListEntry, ChatListResponse } from '@garcon/common/chat-list';
 import { chatActivityTimeMs } from '@garcon/common/chat-order-sort';
 import { effectiveExecutorId } from '@garcon/common/executors';
+import type { ChatPresentation } from '@garcon/common/automation';
 import type { ChatsCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
 import { formatTextTable } from './text-table.js';
 
 export interface CliChatSummary {
+  readonly presentation: ChatPresentation;
   readonly chatId: string;
   readonly executorId: string;
   readonly parentChatId: string | null;
@@ -82,6 +84,7 @@ export function filterAndSortChats(
 
 export function projectCliChat(chat: ChatListEntry): CliChatSummary {
   return {
+    presentation: chat.presentation,
     chatId: chat.id,
     executorId: effectiveExecutorId(chat.executorId),
     parentChatId: chat.parentChat?.chatId ?? null,

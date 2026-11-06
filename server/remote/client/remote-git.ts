@@ -1,4 +1,4 @@
-import { AgentCallError, type ExecutionGitService, type ExecutionGhService, type ExecutorCallOptions } from '@garcon/server-agent-interface';
+import { AgentCallError, type ExecutionGitService, type ExecutionGhService, type ExecutorCallOptions, type GitCallOptions } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../../common/git.js';
 import { isGhMutation, type GhRequests } from '../../../common/gh.js';
 import { GIT_OPERATION_TIMEOUT_MS, ghOperationTimeoutMs, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults } from '../../../common/git-execution.js';
@@ -55,12 +55,22 @@ export class RemoteGitServices {
       getTargetCandidates: (request, options) => this.#gitCall('getTargetCandidates', request, options),
       createWorktree: (request, options) => this.#gitCall('createWorktree', request, options),
       removeWorktree: (request, options) => this.#gitCall('removeWorktree', request, options),
+      createManagedWorktree: (request, options) => this.#gitCall('createManagedWorktree', request, options),
+      inspectManagedWorktree: (request, options) => this.#gitCall('inspectManagedWorktree', request, options),
+      removeManagedWorktree: (request, options) => this.#gitCall('removeManagedWorktree', request, options),
+      inspectCommit: (request, options) => this.#gitCall('inspectCommit', request, options),
+      fetchExactRef: (request, options) => this.#gitCall('fetchExactRef', request, options),
+      pushExactRef: (request, options) => this.#gitCall('pushExactRef', request, options),
+      integrateCommits: (request, options) => this.#gitCall('integrateCommits', request, options),
       commitIndex: (request, options) => this.#gitCall('commitIndex', request, options),
       stagePaths: (request, options) => this.#gitCall('stagePaths', request, options),
       revertCommit: (request, options) => this.#gitCall('revertCommit', request, options),
       collectCommitMessageContext: (request, options) => this.#gitCall('collectCommitMessageContext', request, options),
     };
     this.gh = {
+      getPublicationTarget: (request, options) => this.#ghCall('getPublicationTarget', request, options),
+      createPullRequest: (request, options) => this.#ghCall('createPullRequest', request, options),
+      findPullRequests: (request, options) => this.#ghCall('findPullRequests', request, options),
       getStatus: (options) => this.#ghCall('getStatus', {}, options),
       listPullRequests: (request, options) => this.#ghCall('listPullRequests', request, options),
       getPullRequest: (request, options) => this.#ghCall('getPullRequest', request, options),
@@ -70,13 +80,13 @@ export class RemoteGitServices {
     };
   }
 
-  async #gitCall<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGitResults[K]> {
+  async #gitCall<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: GitCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
     if (!this.sessions.latest().info.services.git) throw new AgentCallError('not-dispatched', 'Git is unavailable on this executor', 'OPERATION_UNSUPPORTED');
     const mutation = isGitMutation(method);
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(`git.${method}`, request), callOptions);
+        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(`git.${method}`, request), { ...callOptions, instanceId: options?.instanceId });
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
         const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
@@ -92,13 +102,13 @@ export class RemoteGitServices {
     }
   }
 
-  async #ghCall<K extends keyof GhRequests>(method: K, request: GhRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
+  async #ghCall<K extends keyof GhRequests>(method: K, request: GhRequests[K], options?: GitCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
     if (!this.sessions.latest().info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this executor', 'OPERATION_UNSUPPORTED');
     const mutation = isGhMutation(method);
     try {
       return await withDeadline(options, ghOperationTimeoutMs(method), async (callOptions) => {
-        const { backing, timeoutMs } = await this.sessions.acquire('bulk', callOptions);
+        const { backing, timeoutMs } = await this.sessions.acquire('bulk', { ...callOptions, instanceId: options?.instanceId });
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
         const call = backing.rpc.call as (integrationId: string, method: string, request: unknown, options: ExecutorCallOptions) => Promise<unknown>;
         const result = await call.call(backing.rpc, '', `gh.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })

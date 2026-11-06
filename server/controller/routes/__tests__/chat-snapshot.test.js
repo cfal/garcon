@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../common/automation.js';
 import { describe, expect, mock, test } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { parseChatSnapshotResponse } from '../../../../common/chat-snapshot.js';
@@ -25,6 +26,7 @@ function fixture(overrides = {}) {
       calls.push('summary');
       return {
         chat: {
+          presentation: CONVERSATION_PRESENTATION,
           id: CHAT_ID,
           title: 'Implement validation',
           agentId: 'codex',

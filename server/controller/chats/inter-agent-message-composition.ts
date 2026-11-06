@@ -1,6 +1,7 @@
 import { diagnosticErrorCode } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import type { InterAgentMessageRequestSink } from '../ledger/garcon-command-publication.js';
+import { denyInBandCommand } from './in-band-command-policy.js';
 import {
   InterAgentMessageController,
   type InterAgentMessageControllerOptions,
@@ -16,11 +17,14 @@ type InterAgentMessageCompositionOptions = Pick<
 
 export class InterAgentMessageComposition implements InterAgentMessageRequestSink {
   #controller: InterAgentMessageController | null = null;
+  #options: InterAgentMessageCompositionOptions | null = null;
 
   request(input: InterAgentMessageRequest): void {
     if (!this.#controller) {
       throw new Error('Inter-agent message controller is not initialized');
     }
+    const options = this.#options!;
+    if (denyInBandCommand({ chatId: input.sourceChatId, viewId: input.sourceViewId }, options.registry, options.notices)) return;
     this.#controller.request(input);
   }
 
@@ -30,6 +34,7 @@ export class InterAgentMessageComposition implements InterAgentMessageRequestSin
 
   initialize(options: InterAgentMessageCompositionOptions): void {
     if (this.#controller) throw new Error('Inter-agent message controller is already initialized');
+    this.#options = options;
     const controller = new InterAgentMessageController({
       ...options,
       onDisposition(event) {

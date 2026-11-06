@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
@@ -28,6 +29,7 @@ function createChat(
 	overrides: Partial<ChatSessionRecord> = {},
 ): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		projectPath: '/tmp/project',
 		orderGroup: 'normal',
@@ -77,6 +79,19 @@ describe('sidebar search dialog flow', () => {
 					.workspaceScrollRegion,
 			).toBe('primary');
 		});
+	});
+
+	it('shows a neutral Automation filter only when workers exist', async () => {
+		const { rerender } = render(SidebarHost, { chats: [createChat('ordinary', 'Ordinary chat')] });
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+		expect(screen.queryByRole('menuitem', { name: 'Automation' })).toBeNull();
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await rerender({ chats: [createChat('ordinary', 'Ordinary chat'), createChat('worker', 'Worker chat', {
+			presentation: { collection: 'automation', notifications: 'attention-only' },
+		})] });
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Automation' }));
+		expect(await screen.findByText('collection:automation')).toBeTruthy();
 	});
 
 	it('revalidates an activity-only mutation without restarting page zero', async () => {

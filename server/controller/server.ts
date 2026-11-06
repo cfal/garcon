@@ -70,12 +70,13 @@ import { createApiProviderPolicy } from './api-providers/composition.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
+import { AutomationLifecycle } from './automation/lifecycle.js';
+import { ChatMutationGuard } from './automation/mutation-guard.js';
+import { composeWorkflows, createWorkflowProviderReferences } from './workflows/adapters/composition.js';
 import { queuedSteerContentResolver } from './commands/steer-file-context.js';
 import { KeyedPromiseLock } from '../common/keyed-lock.js';
 import { ChatHandler } from './ws/chat.js';
-import { TelegramNotifier } from './notifications/telegram.js';
-import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
-import { AttentionTracker } from './notifications/attention-tracker.js';
+import { setupNotifications } from './notifications/setup.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
@@ -334,7 +335,8 @@ export async function startServer(): Promise<void> {
     if (workspaceMigrations.initialVersion >= 5) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
-    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);
+    const workflowReferences = createWorkflowProviderReferences(workspaceDir, () => settings.hasInitializedWorkflowStorage());
+    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings, workflowReferences]);
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
     executors.onAvailabilityChanged((executorId) => modelCatalogResponseCache.clear(executorId));
     executors.onChanged(() => {
@@ -345,6 +347,8 @@ export async function startServer(): Promise<void> {
 
     // Every chat mutation shares one lock, including live settings changes.
     const chatMutationLock = new KeyedPromiseLock();
+    const automationLifecycle = new AutomationLifecycle();
+    const mutationGuard = new ChatMutationGuard(chatMutationLock, automationLifecycle);
     // Narrow per-chat lock shared by selection Save, direct admission, and queue
     // draining so an input can never overtake a Save's update-notice attempt.
     const selectionAdmissionLock = new KeyedPromiseLock();
@@ -411,7 +415,7 @@ export async function startServer(): Promise<void> {
       adoption: transcriptAdoption,
       ledger: transcriptLedger,
       ownershipJournal: agentOwnership,
-      chatMutationLock,
+      mutationGuard,
       selectionAdmissionLock,
       onSelectionCommitted: (chatId, revision) => eventWiring?.notifyChatPreamblesInvalidated(chatId, revision),
     });
@@ -450,7 +454,7 @@ export async function startServer(): Promise<void> {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
       hasPendingOwnershipTransfer: (chatId) => agentOwnership.hasPending(chatId),
-      chatMutationLock,
+      mutationGuard,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       preambles,
@@ -545,6 +549,7 @@ export async function startServer(): Promise<void> {
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       {
         projectAdmission,
+        automation: automationLifecycle,
         executionPolicy: (chatId) => agentRegistry.chatExecutionPolicy(chatId),
         workingDirectorySettlement: new WorkingDirectorySettler({ registry: chatRegistry, ledger: transcriptLedger, inspect: inspectProject, lock: chatMutationLock }),
         attachmentAdmission: queuedAttachmentAdmission(chatRegistry, agentRegistry),
@@ -570,7 +575,7 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine,
       ),
-      chatMutationLock,
+      mutationGuard,
     });
     const transcriptClear = new TranscriptClearService({
       ledger: transcriptLedger,
@@ -580,7 +585,7 @@ export async function startServer(): Promise<void> {
       registry: chatRegistry,
       execution: queue,
       reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
-      chatMutationLock,
+      mutationGuard,
     });
     const chatRows = new ChatRowService({
       registry: chatRegistry,
@@ -642,8 +647,18 @@ export async function startServer(): Promise<void> {
       transientFeeds,
       preambles,
       chatTags: chatBoardRuntime.chatTags,
-      chatMutationLock,
+      mutationGuard,
     });
+    const automation = chatCommands.createAutomationService({
+      serverInstanceId: runtimeState.identity.instanceId,
+      chatIds,
+      lifecycle: automationLifecycle,
+      execution: queue,
+      providerRevision: (input) => endpointResolver.resolveSelection(input).endpoint?.credential?.revision ?? null,
+    });
+    const { workflows, workflowSettings, startWorkflows } = composeWorkflows(workspaceDir, settings, { automation, execution: queue, chats: chatRegistry, executors,
+      onInvalidated: (id, revision) => eventWiring?.broadcastWorkflowInvalidated(id, revision),
+    }, error => logger.warn('Workflows are unavailable; ordinary chats remain available.', error));
     const scheduledPromptStore = new ScheduledPromptStore(workspaceDir, retainExecutorReferences, retainProviderReferences);
     const scheduledPrompts = new ScheduledPromptScheduler({
       inspectProject,
@@ -694,20 +709,9 @@ export async function startServer(): Promise<void> {
     });
 
     // Telegram notifications wire themselves to agent and queue events.
-    const telegramSettings = new TelegramSettingsStore();
-    await telegramSettings.init();
-    const telegramNotifier = new TelegramNotifier(
-      telegramSettings.getBotToken(),
-    );
-    new AttentionTracker(
-      agentRegistry,
-      queue,
-      settings,
-      chatRegistry,
-      metadata,
-      telegramNotifier,
-      telegramSettings,
-    );
+    const { telegramSettings, telegramNotifier } = await setupNotifications({
+      agents: agentRegistry, queue, settings, registry: chatRegistry, metadata,
+    });
 
     const primaryDelivery = new PrimarySocketDelivery(config.wsBackpressureLimit);
     eventWiring = await startExecutionControlPlane({
@@ -742,6 +746,7 @@ export async function startServer(): Promise<void> {
       startDispatchers: async () => {
         await scheduledPrompts.start();
         pullRequestReviews.start();
+        await startWorkflows();
       },
     });
     unsubscribeSearchStatus = chatSearch.onStatusChanged((status) => {
@@ -768,6 +773,7 @@ export async function startServer(): Promise<void> {
       executors,
       projectBasePath,
       resolveTicketProject,
+      workflows, workflowSettings,
       registry: chatRegistry,
       settings,
       recentTitleIcons,
@@ -906,6 +912,8 @@ export async function startServer(): Promise<void> {
         () => agentCommands.shutdown(),
         () => carryOverGarbageCollector.shutdown(),
         () => { metadataClosed = metadata.close().catch(reportCleanupError); },
+        () => workflows.beginShutdown(),
+        () => automation.beginShutdown(),
         () => { reservedChatIds = queue.beginShutdown(); },
         () => executors.quiesce(),
         stopObservingProviders,
@@ -938,6 +946,7 @@ export async function startServer(): Promise<void> {
           () => chatCommands.waitForBackgroundTasks(),
           () => queue.waitForExecutionOwners(),
           () => eventWiring!.waitForIdle(),
+          () => workflows.close(),
         ]);
         if (!backgroundTasks.completed) {
           cleanupFailed = true;

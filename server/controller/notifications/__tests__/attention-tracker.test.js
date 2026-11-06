@@ -173,6 +173,21 @@ describe('AttentionTracker', () => {
     expect(telegram.send).not.toHaveBeenCalled();
   });
 
+  it.each(['completed', 'failed', 'stopped', 'permission'])('suppresses automation %s notifications without a workflow service', async (event) => {
+    registry = createMockRegistry({ agentId: 'test', projectPath: '/repo',
+      presentation: { collection: 'automation', notifications: 'attention-only' } });
+    createTracker();
+    agents.emitInput('c1', 'Synthetic input');
+    if (event === 'completed') agents.emitFinished('c1', 0, { text: 'Synthetic output' });
+    if (event === 'failed') agents.emitFailed('c1', 'Synthetic failure');
+    if (event === 'stopped') queue.emitSessionStopped('c1', 'interrupt-requested');
+    if (event === 'permission') agents.emitPermissionRequest('c1', new PermissionRequestMessage(
+      '2026-11-01T00:00:01Z', 'permission-1', new BashToolUseMessage('2026-11-01T00:00:01Z', 'tool-1', 'true')));
+    queue.emitChatIdle('c1');
+    await Promise.resolve();
+    expect(telegram.send).not.toHaveBeenCalled();
+  });
+
   // Simulates a conversation round and its durable assistant commit.
   function simulateConversation(chatId, userText, assistantText) {
     agents.emitInput(chatId, userText);

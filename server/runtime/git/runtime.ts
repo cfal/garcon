@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
-import type { ExecutionGitService, ExecutionGhService, ExecutorCallOptions } from '@garcon/server-agent-interface';
+import type { ExecutionGitService, ExecutionGhService, ExecutorCallOptions, GitCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../../common/git.js';
 import { GIT_MAX_CONCURRENT_QUERIES, ghOperationTimeoutMs, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from '../../../common/git-execution.js';
@@ -30,6 +30,7 @@ interface GitExecutorOptions extends GitExecutorScope {
   reviewRegistry?: GitReviewDocumentRegistry;
   projectBasePath: string;
   assertAvailable(options?: ExecutorCallOptions): void;
+  withManagedRemoval?<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 
 const logger = createLogger('git:runtime');
@@ -79,6 +80,9 @@ export class GitRuntime {
     this.#gh = createGhOperations(toNativePath(configuration.projectBasePath));
     this.git = this.#gitService();
     this.gh = {
+      getPublicationTarget: (request, options) => this.#ghCall('getPublicationTarget', request, options),
+      createPullRequest: (request, options) => this.#ghCall('createPullRequest', request, options),
+      findPullRequests: (request, options) => this.#ghCall('findPullRequests', request, options),
       getStatus: (options) => this.#ghCall('getStatus', {}, options),
       listPullRequests: (request, options) => this.#ghCall('listPullRequests', request, options),
       getPullRequest: (request, options) => this.#ghCall('getPullRequest', request, options),
@@ -102,13 +106,16 @@ export class GitRuntime {
     }
   }
 
-  #available(options?: ExecutorCallOptions): void {
+  #available(options?: GitCallOptions): void {
     options?.signal?.throwIfAborted();
     if (this.#abort.signal.aborted) throw new AgentCallError('not-dispatched', 'Git serving instance retired');
+    if (options?.instanceId !== undefined && options.instanceId !== this.configuration.instanceId) {
+      throw new AgentCallError('not-dispatched', 'The executor restarted before the request was sent.', 'STALE_RESOURCE');
+    }
     this.configuration.assertAvailable(options);
   }
 
-  async #repository(projectPath: string, options?: ExecutorCallOptions): Promise<string> {
+  async #repository(projectPath: string, options?: GitCallOptions): Promise<string> {
     this.#available(options);
     let project: string;
     try { project = await this.#path(projectPath); }
@@ -135,7 +142,7 @@ export class GitRuntime {
     return project;
   }
 
-  async #admit<T>(method: string, mutation: boolean, options: ExecutorCallOptions | undefined, operation: (options: ExecutorCallOptions) => Promise<T>): Promise<T> {
+  async #admit<T>(method: string, mutation: boolean, options: GitCallOptions | undefined, operation: (options: GitCallOptions) => Promise<T>): Promise<T> {
     this.#available(options);
     if (mutation ? this.#mutations >= 8 || processAdmission.mutations >= 16 : this.#reads >= GIT_MAX_CONCURRENT_QUERIES || processAdmission.reads >= GIT_MAX_CONCURRENT_QUERIES) {
       reportAdmissionRefusal(method);
@@ -154,7 +161,7 @@ export class GitRuntime {
     }
   }
 
-  async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGitResults[K]> {
+  async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: GitCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
     try {
       return await this.#admit(method, isGitMutation(method), options, async (callOptions) => {
@@ -169,9 +176,14 @@ export class GitRuntime {
             if (input.document.executorId !== this.configuration.executorId || input.document.instanceId !== this.configuration.instanceId) throw new GitServiceError('GIT_STALE_DOCUMENT', 'Git review belongs to a different executor or serving instance');
             Object.assign(input, { documentId: input.document.documentId });
           }
-          if ('worktreePath' in input) input.worktreePath = await this.#path(path.resolve(projectPath, toNativePath(input.worktreePath)));
+          if ('worktreePath' in input) Object.assign(input, { worktreePath: await this.#path(path.resolve(projectPath, toNativePath(input.worktreePath))) });
           await this.#validateFiles(method, request, projectPath);
-          const result = await this.#operations[method](input as GitOperationOptions<K>);
+          const invoke = () => this.#operations[method](input as GitOperationOptions<K>);
+          if (method === 'removeManagedWorktree' && !this.configuration.withManagedRemoval) {
+            throw new GitServiceError('GIT_UNAVAILABLE', 'Managed removal requires executor writer exclusion.');
+          }
+          const result = method === 'removeManagedWorktree'
+            ? await this.configuration.withManagedRemoval!(invoke, callOptions.signal) : await invoke();
           const diagnostics = { ...metrics, phases: metrics.phases.slice(0, 128), commands: trace.slice(0, 128).map(({ args, durationMs, stdoutBytes, stderrBytes }) => ({ command: args[0], durationMs, stdoutBytes, stderrBytes })) };
           const response = { ...portableResult(result), executorId: this.configuration.executorId, instanceId: this.configuration.instanceId, diagnostics,
             ...(isGitMutation(method) && gitOutputTruncated() ? { outputTruncated: true } : {}) };
@@ -182,7 +194,7 @@ export class GitRuntime {
           }
           return response;
         };
-        return isGitMutation(method) ? withRepositoryMutation(projectPath, execute) : execute();
+        return isGitMutation(method) || method === 'inspectManagedWorktree' ? withRepositoryMutation(projectPath, execute) : execute();
       });
     } catch (error) {
       const failure = gitServiceError(error);
@@ -230,7 +242,7 @@ export class GitRuntime {
     }
   }
 
-  async #ghCall<K extends keyof GhRequests>(method: K, request: GhRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
+  async #ghCall<K extends keyof GhRequests>(method: K, request: GhRequests[K], options?: GitCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
     const mutation = isGhMutation(method);
     try {
@@ -254,6 +266,9 @@ export class GitRuntime {
 
   #ghOperation(method: keyof GhRequests, request: GhRequests[keyof GhRequests], signal?: AbortSignal): Promise<GhResults[keyof GhResults]> {
     switch (method) {
+      case 'getPublicationTarget': return this.#gh.getPublicationTarget({ ...request as GhRequests['getPublicationTarget'], signal });
+      case 'createPullRequest': return this.#gh.createPullRequest({ ...request as GhRequests['createPullRequest'], signal });
+      case 'findPullRequests': return this.#gh.findPullRequests({ ...request as GhRequests['findPullRequests'], signal });
       case 'getStatus': return this.#gh.getStatus(signal);
       case 'listPullRequests': return this.#gh.listPullRequests({ ...request as GhRequests['listPullRequests'], signal });
       case 'getPullRequest': return this.#gh.getPullRequest({ ...request as GhRequests['getPullRequest'], signal });
@@ -306,6 +321,13 @@ export class GitRuntime {
       getTargetCandidates: (request, options) => this.#run('getTargetCandidates', request, options),
       createWorktree: (request, options) => this.#run('createWorktree', request, options),
       removeWorktree: (request, options) => this.#run('removeWorktree', request, options),
+      createManagedWorktree: (request, options) => this.#run('createManagedWorktree', request, options),
+      inspectManagedWorktree: (request, options) => this.#run('inspectManagedWorktree', request, options),
+      removeManagedWorktree: (request, options) => this.#run('removeManagedWorktree', request, options),
+      inspectCommit: (request, options) => this.#run('inspectCommit', request, options),
+      fetchExactRef: (request, options) => this.#run('fetchExactRef', request, options),
+      pushExactRef: (request, options) => this.#run('pushExactRef', request, options),
+      integrateCommits: (request, options) => this.#run('integrateCommits', request, options),
       commitIndex: (request, options) => this.#run('commitIndex', request, options),
       stagePaths: (request, options) => this.#run('stagePaths', request, options),
       revertCommit: (request, options) => this.#run('revertCommit', request, options),

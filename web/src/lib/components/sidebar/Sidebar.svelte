@@ -87,6 +87,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowUsage: () => void;
+		onShowWorkflows?: () => void;
 		onShowSettings: () => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 	}
@@ -119,6 +120,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowUsage,
+		onShowWorkflows,
 		onShowSettings,
 		newWindowEdges,
 	}: SidebarProps = $props();
@@ -201,6 +203,14 @@
 	function handlePrimaryAction() {
 		if (selection.isActive) selection.exit();
 		onNewChat();
+	}
+
+	async function handlePromoteChat(chatId: string): Promise<void> {
+		try {
+			await controller.promoteChat(chatId);
+		} catch (error) {
+			reportActionFailure('Failed to promote chat:', m.notifications_promote_chat_failed(), error);
+		}
 	}
 
 	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
@@ -440,6 +450,7 @@
 			{chatListAutohideAvailable}
 			dockOnRight={localSettings.chatListDock === 'right'}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
+			hasAutomationChats={sidebarSearch.hasAutomationChats}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
 			activeQuery={sidebarSearch.activeQuery}
 			onOpenSearchDialog={() => sidebarSearch.openSearchDialog()}
@@ -461,6 +472,7 @@
 			{onShowPreambles}
 			{onShowSnippets}
 			{onShowUsage}
+			{onShowWorkflows}
 			{onShowSettings}
 		/>
 	</div>
@@ -495,6 +507,7 @@
 				void onForkChat(id);
 			}}
 			{onShareChat}
+			onPromoteChat={(id) => { void handlePromoteChat(id); }}
 			onTagClick={handleTagClick}
 			{onManageTags}
 			onOpenInNewWindow={onOpenChatInNewWindow}

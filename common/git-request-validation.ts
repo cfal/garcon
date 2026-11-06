@@ -1,4 +1,6 @@
 import { isRecord } from './json.js';
+import { isGitObjectId, isManagedResourceId } from './git-managed-worktrees.js';
+import { isCredentialFreeGitRemoteUrl } from './git-delivery.js';
 import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
 import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
@@ -50,6 +52,14 @@ export const GIT_REQUEST_FIELDS = {
   popStash: ['stashRef', 'expectedHash'], dropStash: ['stashRef', 'expectedHash'],
   getFileHistory: ['file', 'limit'], getBlame: ['file', 'ref', 'limit'], getGraph: ['limit'],
   createWorktree: ['worktreePath', 'branch', 'baseRef', 'detach'], removeWorktree: ['worktreePath', 'force'],
+  createManagedWorktree: ['worktreePath', 'operationId', 'managedResourceId', 'branch', 'baseCommit'],
+  inspectManagedWorktree: ['worktreePath', 'operationId', 'managedResourceId'],
+  removeManagedWorktree: ['worktreePath', 'operationId', 'managedResourceId', 'expectedRepositoryIdentity', 'expectedWorktreeIdentity', 'expectedHead', 'expectedBranch'],
+  inspectCommit: ['commit', 'ancestor'],
+  fetchExactRef: ['remote', 'expectedRemoteUrl', 'ref', 'commit'],
+  pushExactRef: ['remote', 'expectedRemoteUrl', 'ref', 'commit', 'expectedRemoteCommit'],
+  integrateCommits: ['worktreePath', 'operationId', 'managedResourceId', 'expectedRepositoryIdentity',
+    'expectedWorktreeIdentity', 'expectedHead', 'expectedBranch', 'commits', 'strategy'],
   commitIndex: ['message'], stagePaths: ['paths', 'mode'], revertCommit: ['commit'], collectCommitMessageContext: ['files'],
 } as const satisfies Record<GitMethod, readonly string[]>;
 
@@ -58,6 +68,9 @@ export function isGitMethod(value: unknown): value is GitMethod {
 }
 
 export const GH_REQUEST_FIELDS = {
+  getPublicationTarget: ['projectPath', 'remote', 'expectedRemoteUrl', 'baseBranch'],
+  createPullRequest: ['projectPath', 'repository', 'actor', 'remote', 'expectedRemoteUrl', 'baseBranch', 'baseCommit', 'headBranch', 'headCommit', 'title', 'body', 'draft', 'marker'],
+  findPullRequests: ['projectPath', 'repository', 'actor', 'headBranch', 'baseBranch', 'marker'],
   getStatus: [],
   listPullRequests: ['projectPath', 'repository'],
   getPullRequest: ['projectPath', 'repository', 'number'],
@@ -78,6 +91,14 @@ export function validateGhRequest<K extends keyof GhRequests>(method: K, request
     && (!keys.includes('projectPath') || path(request.projectPath))
     && (!keys.includes('repository') || method === 'listPullRequests' && request.repository === undefined || isGhRepositoryIdentity(request.repository))
     && (!keys.includes('actor') || isGhActorIdentity(request.actor))
+    && (!keys.includes('remote') || path(request.remote))
+    && (!keys.includes('expectedRemoteUrl') || isCredentialFreeGitRemoteUrl(request.expectedRemoteUrl))
+    && (!keys.includes('baseBranch') || bounded(request.baseBranch, 256))
+    && (!keys.includes('headBranch') || bounded(request.headBranch, 256))
+    && (!keys.includes('baseCommit') || isGitObjectId(request.baseCommit))
+    && (!keys.includes('headCommit') || isGitObjectId(request.headCommit))
+    && (!keys.includes('title') || bounded(request.title, 256))
+    && (!keys.includes('draft') || typeof request.draft === 'boolean')
     && (!keys.includes('number') || integer(request.number, Number.MAX_SAFE_INTEGER) && request.number !== 0)
     && (!keys.includes('marker') || bounded(request.marker, GH_COMMENT_MARKER_MAX_LENGTH))
     && (!keys.includes('body') || bounded(request.body, GH_COMMENT_BODY_MAX_LENGTH))
@@ -116,6 +137,27 @@ export function validateGitRequest<K extends GitMethod>(method: K, request: unkn
     case 'createBranch': if (!path(v.branch)) fail(); break;
     case 'revertCommit': case 'getCommitSnapshot': if (!path(v.commit)) fail(); break;
     case 'createWorktree': case 'removeWorktree': if (!path(v.worktreePath)) fail(); break;
+    case 'createManagedWorktree': case 'inspectManagedWorktree':
+      if (!path(v.worktreePath) || !isManagedResourceId(v.operationId) || !isManagedResourceId(v.managedResourceId)) fail();
+      if (method === 'createManagedWorktree' && (!path(v.branch) || !isGitObjectId(v.baseCommit))) fail();
+      break;
+    case 'inspectCommit':
+      if (!isGitObjectId(v.commit) || v.ancestor !== null && !isGitObjectId(v.ancestor)) fail();
+      break;
+    case 'removeManagedWorktree':
+      if (!path(v.worktreePath) || !isManagedResourceId(v.operationId) || !isManagedResourceId(v.managedResourceId)
+        || !path(v.expectedRepositoryIdentity) || !path(v.expectedWorktreeIdentity) || !path(v.expectedBranch) || !isGitObjectId(v.expectedHead)) fail();
+      break;
+    case 'integrateCommits':
+      if (!path(v.worktreePath) || !isManagedResourceId(v.operationId) || !isManagedResourceId(v.managedResourceId)
+        || !path(v.expectedRepositoryIdentity) || !path(v.expectedWorktreeIdentity) || !path(v.expectedBranch)
+        || !isGitObjectId(v.expectedHead) || v.strategy !== 'ordered-merge' || !Array.isArray(v.commits)
+        || !v.commits.length || v.commits.length > 256 || !v.commits.every(isGitObjectId)) fail();
+      break;
+    case 'fetchExactRef': case 'pushExactRef':
+      if (!path(v.remote) || !isCredentialFreeGitRemoteUrl(v.expectedRemoteUrl) || !path(v.ref) || !v.ref.startsWith('refs/') || !isGitObjectId(v.commit)) fail();
+      if (method === 'pushExactRef' && v.expectedRemoteCommit !== null && !isGitObjectId(v.expectedRemoteCommit)) fail();
+      break;
     case 'applyStash': case 'popStash': case 'dropStash': if (!path(v.stashRef) || !hash(v.expectedHash)) fail(); break;
     case 'getWorkbenchSnapshot': if (!oneOf(v.mode, ['working', 'staged']) || !integer(v.context, 50)) fail(); break;
     case 'getReviewDocumentFileBodies':

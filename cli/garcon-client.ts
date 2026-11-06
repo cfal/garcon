@@ -110,6 +110,9 @@ import { parseTicketWriteResult } from '@garcon/common/ticket-records';
 import { parseTicketBootstrap, parseTicketDetail, parseTicketHistoryPage, parseTicketPage,
   parseTicketProjectDefault } from '@garcon/common/ticket-responses';
 import type { TicketHistoryQuery, TicketListQuery, TicketReadQuery } from '@garcon/common/tickets';
+import { WORKFLOW_API, WORKFLOW_MUTATION_PATHS, parseWorkflowBootstrap, parseWorkflowMutationResult,
+  parseWorkflowOperationResult, workflowReadPath, type WorkflowReadQuery, type WorkflowHttpMutationRequest } from '@garcon/common/workflow-http';
+import { workflowId } from '@garcon/common/workflow-validation';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HANDOFF_REQUEST_TIMEOUT_MS = 10 * 60_000;
@@ -1174,6 +1177,30 @@ export class GarconClient {
 
   async getTicketBootstrap(signal?: AbortSignal) {
     return this.#ticketResponse('GET', '/bootstrap', undefined, parseTicketBootstrap, signal);
+  }
+
+  async getWorkflowBootstrap(signal?: AbortSignal) {
+    return parseWorkflowBootstrap(await this.#request('workflows', 'GET', `${WORKFLOW_API}/bootstrap`, undefined, signal));
+  }
+
+  async readWorkflow(query: WorkflowReadQuery, signal?: AbortSignal): Promise<unknown> {
+    return this.#request('workflows', 'GET', workflowReadPath(query), undefined, signal);
+  }
+
+  async getWorkflowOperation(id: string, signal?: AbortSignal) {
+    const result = parseWorkflowOperationResult(await this.#request('workflows', 'GET', `${WORKFLOW_API}/operation?id=${workflowId(id)}`, undefined, signal));
+    if (result.kind === 'completed' && result.result.operationId !== id) throw new CliError('workflows', 'Operation identity was not confirmed.', 3);
+    return result;
+  }
+
+  async mutateWorkflow(request: WorkflowHttpMutationRequest, signal?: AbortSignal) {
+    return oneShotMutation('workflows', async () => {
+      const result = parseWorkflowMutationResult(await this.#request('workflows', 'POST', WORKFLOW_MUTATION_PATHS[request.mutation.action], request, signal));
+      if (result.operationId !== request.operationId || request.mutation.action !== 'create' && result.workflowId !== request.mutation.workflowId) {
+        throw new Error('Workflow mutation identity was not confirmed.');
+      }
+      return result;
+    }, signal);
   }
 
   async getTicketProjectDefault(directory: string, signal?: AbortSignal) {

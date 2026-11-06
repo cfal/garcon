@@ -4,8 +4,10 @@ import { AgentRunFinishedMessage, ChatTransientFeedMutationMessage } from '$shar
 import { BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 import type { WsMessageLog } from '$lib/ws/drain';
 import type { BrowserNotificationDeliveryPort } from '$lib/notifications/browser-notifications.js';
+import { allowsChatNotifications } from '$lib/chat/sessions/chat-session-records.js';
+import { AUTOMATION_PRESENTATION, CONVERSATION_PRESENTATION } from '$shared/automation';
 
-function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert') {
+function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert', occurrence = 'occurrence') {
 	return new ChatTransientFeedMutationMessage(
 		'synthetic-instance',
 		'background',
@@ -15,24 +17,24 @@ function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert') {
 			? {
 					kind,
 					row: {
-						permissionOccurrenceId: 'occurrence',
+						permissionOccurrenceId: occurrence,
 						runId: 'run',
 						transcript: { transcriptViewId: 'synthetic-view', afterOrdinal: 0 },
 						displayOrder: 0,
 						message: new PermissionRequestMessage(
 							'2026-01-01T00:00:00Z',
-							'occurrence',
+							occurrence,
 							new BashToolUseMessage('2026-01-01T00:00:00Z', 'tool', 'synthetic-command'),
 						),
 					},
 				}
 			: kind === 'remove'
-				? { kind, permissionOccurrenceId: 'occurrence' }
+				? { kind, permissionOccurrenceId: occurrence }
 				: { kind, runId: 'run' },
 	);
 }
 
-function fixture(messages: unknown[], enabled = true, focused = false, processing = false, allowsNotifications = true) {
+function fixture(messages: unknown[], enabled = true, focused = false, processing = false, allowsNotifications: boolean | (() => boolean) = true) {
 	let currentProcessing = processing;
 	const ws = {
 		messages: messages.map((data) => ({
@@ -47,7 +49,7 @@ function fixture(messages: unknown[], enabled = true, focused = false, processin
 		enabled: () => enabled,
 		isFocused: () => focused,
 		isChatProcessing: () => currentProcessing,
-		allowsNotifications: () => allowsNotifications,
+		allowsNotifications: () => typeof allowsNotifications === 'function' ? allowsNotifications() : allowsNotifications,
 	});
 	router.start();
 	router.tick();
@@ -62,6 +64,20 @@ function fixture(messages: unknown[], enabled = true, focused = false, processin
 }
 
 describe('root browser notifications routing', () => {
+	it('suppresses automation announcements and restores future notifications after promotion', () => {
+		const chat = { presentation: AUTOMATION_PRESENTATION };
+		const completed = (turn: string) => new AgentRunFinishedMessage('background', 0, turn, undefined, undefined, 'finished');
+		const f = fixture([completed('first'), permission()], true, false, false, () => allowsChatNotifications(chat));
+		expect(f.delivery.show).not.toHaveBeenCalled();
+		chat.presentation = CONVERSATION_PRESENTATION;
+		for (const message of [completed('next'), permission('upsert', 'next-occurrence')]) {
+			f.ws.messages.push({ data: JSON.parse(JSON.stringify(message)), timestamp: Date.now() });
+		}
+		f.router.tick();
+		expect(f.delivery.show.mock.calls.map(call => call[0])).toEqual(['Garcon: chat completed', 'Garcon: permission needed']);
+		f.router.destroy();
+	});
+
 	it('suppresses intermediate queued completion and notifies after the queue becomes idle', () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',

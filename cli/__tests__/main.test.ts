@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../common/automation.js';
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -78,6 +79,7 @@ function controlSnapshotResponse(): Response {
     observedAt: '2026-08-04T12:00:00.000Z',
     messageLimit: 1,
     chat: {
+      presentation: CONVERSATION_PRESENTATION,
       id: CHAT_ID,
       title: 'Review',
       agentId: 'codex',
@@ -454,6 +456,7 @@ describe('main', () => {
           observedAt: '2026-08-04T12:00:00.000Z',
           messageLimit: 0,
           chat: {
+            presentation: CONVERSATION_PRESENTATION,
             id: CHAT_ID,
             title: 'Review',
             agentId: 'codex',

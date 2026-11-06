@@ -39,6 +39,7 @@ function settlement(overrides = {}) {
     settleSteerSuccess: mock(async () => undefined),
     settleSteerFailure: mock(async () => undefined),
     settleOperationFailure: mock(async () => undefined),
+    recordOperationFailure: mock(() => undefined),
     settleDuplicateInput: mock(async () => undefined),
     ...overrides,
   };

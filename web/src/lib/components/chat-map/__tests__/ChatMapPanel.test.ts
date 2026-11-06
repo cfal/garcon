@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -16,6 +17,7 @@ function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentCh
 
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		projectPath: '/workspace/project',

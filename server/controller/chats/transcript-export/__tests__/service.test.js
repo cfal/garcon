@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../common/automation.js';
 import { describe, expect, it } from 'bun:test';
 import {
   AgentSwitchMessage,
@@ -196,6 +197,7 @@ function createService(rows, rendering = inlineTranscriptRendering) {
     summaries: {
       buildSummary: () => ({
         chat: {
+          presentation: CONVERSATION_PRESENTATION,
           id: CHAT_ID,
           title: 'Export fixture',
           agentId: 'codex',

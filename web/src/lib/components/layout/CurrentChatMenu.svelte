@@ -29,6 +29,7 @@
 		onOpenChatMap?: () => void;
 		onOpenCanvas?: () => void;
 		onOpenPullRequests?: () => void;
+		onCreateWorkflow?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -54,6 +55,7 @@
 		onOpenChatMap,
 		onOpenCanvas,
 		onOpenPullRequests,
+		onCreateWorkflow,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -90,6 +92,7 @@
 			{onOpenChatMap}
 			{onOpenCanvas}
 			{onOpenPullRequests}
+			{onCreateWorkflow}
 			{onConfigurePreambles}
 			{onRename}
 			{onDetails}

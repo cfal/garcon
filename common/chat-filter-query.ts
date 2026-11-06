@@ -3,8 +3,14 @@ import {
   type PersistedChatOrderGroup,
 } from './chat-order-contracts.js';
 import { parseChatId } from './chat-id.js';
+import type { ChatPresentation } from './automation.js';
 
 export type ChatFilterOrGroup = string[];
+export type ChatCollectionFilter = ChatPresentation['collection'] | 'all';
+
+export function parseChatCollectionFilter(value: unknown): ChatCollectionFilter | null {
+  return value === 'conversation' || value === 'automation' || value === 'all' ? value : null;
+}
 
 export interface ChatOrderGroupFilter {
   group: PersistedChatOrderGroup;
@@ -12,6 +18,7 @@ export interface ChatOrderGroupFilter {
 }
 
 export interface ChatFilterSpec {
+  collection?: ChatCollectionFilter;
   textTokens: string[];
   titles: ChatFilterOrGroup[];
   tags: ChatFilterOrGroup[];
@@ -41,6 +48,7 @@ export interface ChatFilterTerm {
 }
 
 export interface ChatFilterTarget {
+  readonly presentation?: ChatPresentation;
   readonly id: string;
   readonly parentChat: { readonly chatId: string } | null;
   readonly title: string;
@@ -63,7 +71,7 @@ export function emptyFilterSpec(): ChatFilterSpec {
 }
 
 export function isEmptyFilter(spec: ChatFilterSpec): boolean {
-  return spec.textTokens.length === 0
+  return spec.collection === undefined && spec.textTokens.length === 0
     && spec.titles.length === 0
     && spec.tags.length === 0
     && spec.agents.length === 0
@@ -89,6 +97,12 @@ export function parseChatFilterQuery(query: string): ChatFilterParseResult {
   for (const term of tokenizeChatFilter(raw)) {
     const token = term.text;
     const lower = token.toLowerCase();
+    if (lower.startsWith('collection:')) {
+      const value = parseChatCollectionFilter(lower.slice(11));
+      if (value) spec.collection = value;
+      else invalidTokens.push(token);
+      continue;
+    }
     if (lower.startsWith('status:')) {
       const value = token.slice(7).trim().toLowerCase();
       if (value === 'active' || value === 'unread') spec.status = value;
@@ -164,6 +178,8 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 }
 
 export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec): boolean {
+  if (spec.collection && spec.collection !== 'all'
+    && (chat.presentation?.collection ?? 'conversation') !== spec.collection) return false;
   if (spec.status === 'active' && !chat.isProcessing) return false;
   if (spec.status === 'unread' && !chat.isUnread) return false;
   if (spec.orderGroup) {
@@ -229,6 +245,7 @@ export function chatOrderGroupFor(chat: {
 
 export function serializeChatFilter(spec: ChatFilterSpec): string {
   const parts: string[] = [];
+  if (spec.collection) parts.push(`collection:${spec.collection}`);
   if (spec.status) parts.push(`status:${spec.status}`);
   if (spec.orderGroup) {
     parts.push(`is:${spec.orderGroup.negated ? '!' : ''}${spec.orderGroup.group}`);
