@@ -81,10 +81,39 @@ test('container checks distinguish AppImage from ELF and DMG from arbitrary cont
   for (const format of ['apk', 'simulator']) checkContainer(format, head, tail);
 });
 
-test('APK manifests record only a complete, unambiguous public certificate fingerprint', () => {
-  const certificate = `Signer #1 certificate SHA-256 digest: ${'AB'.repeat(32)}\n`;
-  expect(apkSignerFingerprint(certificate)).toBe('ab'.repeat(32));
-  for (const invalid of ['', certificate + certificate, 'Signer #1 certificate SHA-256 digest: truncated']) {
+test('APK manifests read the pinned Build Tools 37 single-signer formats', () => {
+  for (const scheme of ['V1', 'V2', 'V3.0']) {
+    for (const newline of ['\n', '\r\n']) {
+      const output = [
+        'Verifies',
+        'Number of signers: 1',
+        `${scheme} Signer: certificate SHA-256 digest: ${'AB'.repeat(32)}`,
+        `${scheme} Signer: public key SHA-256 digest: ${'CD'.repeat(32)}`,
+        `Source Stamp Signer: certificate SHA-256 digest: ${'EF'.repeat(32)}`,
+        '',
+      ].join(newline);
+      expect(apkSignerFingerprint(output)).toBe('ab'.repeat(32));
+    }
+  }
+});
+
+test('APK manifests reject incomplete, rotated, or ambiguous signer identities', () => {
+  const certificate = `V3.0 Signer: certificate SHA-256 digest: ${'AB'.repeat(32)}`;
+  const output = `Number of signers: 1\n${certificate}\n`;
+  for (const invalid of [
+    '', certificate, `${output}${certificate}\n`,
+    output.replace('signers: 1', 'signers: 2'),
+    `${output}Number of signers: 1\n`,
+    output.replace('AB'.repeat(32), 'truncated'),
+    output.replace('V3.0 Signer:', 'Signer #1'),
+    output.replace('V3.0 Signer:', 'V2 Signer #1:'),
+    output.replace('V3.0 Signer:', 'Source Stamp Signer:'),
+    output.replace('certificate SHA-256', 'public key SHA-256'),
+    `${output}V2 Signer #2: certificate SHA-256 digest: ${'CD'.repeat(32)}\n`,
+    `${output}V3.1 Signer: (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: ${'CD'.repeat(32)}\n`,
+    `${output}V3.2 Hybrid PQC Signer: (minSdkVersion=37, maxSdkVersion=2147483647) certificate SHA-256 digest: ${'CD'.repeat(32)}\n`,
+    `${output}Unknown Signer: certificate SHA-256 digest: ${'CD'.repeat(32)}\n`,
+  ]) {
     expect(() => apkSignerFingerprint(invalid)).toThrow('exactly one');
   }
 });

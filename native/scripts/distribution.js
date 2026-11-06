@@ -35,9 +35,18 @@ export function checkContainer(format, head, tail) {
 }
 
 export function apkSignerFingerprint(output) {
-  const fingerprints = [...output.matchAll(/^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})\s*$/gm)];
-  if (fingerprints.length !== 1) throw new Error('Expected exactly one verified APK signer certificate');
-  return fingerprints[0][1].toLowerCase();
+  const lines = output.split(/\r?\n/);
+  const counts = lines.filter(line => line.startsWith('Number of signers:'));
+  const certificates = lines.filter(line => line.includes('certificate SHA-256 digest')
+    && !/^Source Stamp Signer: certificate SHA-256 digest: [a-fA-F0-9]{64}$/.test(line));
+  // Build Tools 37 uses scheme labels; rotation and hybrid identities need a richer manifest.
+  const fingerprint = certificates.length === 1
+    ? /^(?:V1|V2|V3\.0) Signer: certificate SHA-256 digest: ([a-fA-F0-9]{64})$/.exec(certificates[0])?.[1]
+    : undefined;
+  if (counts.length !== 1 || counts[0] !== 'Number of signers: 1' || !fingerprint) {
+    throw new Error(`Expected exactly one verified APK signer certificate. apksigner output:\n${output}`);
+  }
+  return fingerprint.toLowerCase();
 }
 
 export async function inspectArtifact(path, format) {

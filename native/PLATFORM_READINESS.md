@@ -136,6 +136,9 @@ checks package/version/debug status, and requires arm64/x86_64 host libraries.
 The manifest records the verified public signer-certificate SHA-256 so artifacts
 from different ephemeral keys are distinguishable. Signature integrity does not
 make an ephemeral debug key a stable identity.
+The pinned Build Tools 37 signer labels identify V1, V2, or V3.0 certificates;
+the single-certificate manifest rejects multiple, SDK-range rotation, and hybrid
+signers rather than selecting one identity from several.
 iOS archiving checks bundle identifier, version, executable, simulator platform,
 and Mach-O build platform before creating the archive; device apps are rejected.
 Debian packages also pass `dpkg-deb` content/version/architecture checks, DMGs pass
