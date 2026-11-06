@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { GitRuntime } from '../server/runtime/git/runtime.js';
-import type { GitReviewDocumentFileBodiesReady, GitReviewFilePatchBody } from '../common/git.js';
+import type { GitReviewDocumentFileBodiesReady } from '../common/git.js';
 
 export type GitReviewBenchmarkScenario =
   'revision-24' | 'revision-many' | 'working-tree-many' | 'workbench-many' | 'large-file';
@@ -138,10 +138,10 @@ async function initializeFixture(
   await runGit(projectPath, ['config', 'user.email', 'benchmark@example.com']);
   await runGit(projectPath, ['config', 'user.name', 'Benchmark']);
   const files = benchmarkScenarioFileNames(scenario);
+  const lineCount = scenario === 'large-file' ? 20_000 : 40;
   for (let index = 0; index < files.length; index += 1) {
     const filePath = path.join(projectPath, files[index]);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    const lineCount = scenario === 'large-file' ? 20_000 : 40;
     await fs.writeFile(filePath, fileContents(index, false, lineCount));
   }
   await runGit(projectPath, ['add', '.']);
@@ -149,7 +149,6 @@ async function initializeFixture(
   const fromRevision = await runGit(projectPath, ['rev-parse', 'HEAD']);
 
   for (let index = 0; index < files.length; index += 1) {
-    const lineCount = scenario === 'large-file' ? 20_000 : 40;
     await fs.writeFile(
       path.join(projectPath, files[index]),
       fileContents(index, true, lineCount, scenario === 'large-file'),
@@ -220,7 +219,7 @@ export async function runIteration(
     const loadBodies = async (
       files: string[],
       purpose: 'visible' | 'prefetch',
-    ): Promise<GitReviewFilePatchBody[]> => {
+    ): Promise<void> => {
       const response = await service.getReviewDocumentFileBodies({
         projectPath: fixture.projectPath,
         document,
@@ -231,33 +230,27 @@ export async function runIteration(
       const { diagnostics: _, ...wire } = response;
       bodyResponses.push(wire);
       tracedCommandCount += response.diagnostics?.commands?.length ?? 0;
-      const bodies = Object.values(response.files);
-      for (const file of response.deferredFiles ?? []) {
+      for (const file of response.deferredFiles) {
         if (files.length === 1) throw new Error('A singleton body was deferred.');
-        bodies.push(...(await loadBodies([file], purpose)));
+        await loadBodies([file], purpose);
       }
-      return bodies;
     };
     const [visiblePath, ...prefetchPaths] = snapshot.firstBodyCandidates;
     if (!visiblePath) throw new Error('Benchmark fixture produced no reviewable files.');
 
     const visibleStartedAt = performance.now();
-    const visiblePromise = loadBodies([visiblePath], 'visible').then((bodies) => ({
-      bodies,
-      durationMs: performance.now() - visibleStartedAt,
-    }));
+    const visiblePromise = loadBodies([visiblePath], 'visible').then(
+      () => performance.now() - visibleStartedAt,
+    );
     const prefetchStartedAt = performance.now();
     const prefetchPromise = (async () => {
-      const bodies: GitReviewFilePatchBody[] = [];
       for (let index = 0; index < prefetchPaths.length; index += batchFiles) {
-        bodies.push(
-          ...(await loadBodies(prefetchPaths.slice(index, index + batchFiles), 'prefetch')),
-        );
+        await loadBodies(prefetchPaths.slice(index, index + batchFiles), 'prefetch');
       }
-      return { bodies, durationMs: performance.now() - prefetchStartedAt };
+      return performance.now() - prefetchStartedAt;
     })();
-    const [visible, prefetch] = await Promise.all([visiblePromise, prefetchPromise]);
-    const bodies = [...visible.bodies, ...prefetch.bodies];
+    const [visibleBodyMs, prefetchBodyMs] = await Promise.all([visiblePromise, prefetchPromise]);
+    const bodies = bodyResponses.flatMap((response) => Object.values(response.files));
     const totalMs = performance.now() - startedAt;
     const repeatStarted = performance.now();
     const warmSnapshot = await loadSnapshot();
@@ -270,8 +263,8 @@ export async function runIteration(
     const json = JSON.stringify(wire);
     return {
       snapshotMs,
-      visibleBodyMs: visible.durationMs,
-      prefetchBodyMs: prefetch.durationMs,
+      visibleBodyMs,
+      prefetchBodyMs,
       totalMs,
       warmSnapshotMs,
       tracedCommandCount,
