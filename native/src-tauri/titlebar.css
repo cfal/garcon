@@ -1,0 +1,11 @@
+headerbar.garcon-titlebar {
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+headerbar.garcon-titlebar button {
+  min-height: 22px;
+  min-width: 22px;
+  margin: 2px 0;
+  padding: 0 3px;
+}
