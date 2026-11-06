@@ -82,6 +82,7 @@ export class DisplayWindowController {
 	#request: Promise<CoverageOutcome> | null = null;
 	#abort: AbortController | null = null;
 	#refreshTimer: ReturnType<typeof setTimeout> | null = null;
+	#refreshDue = 0;
 	#refreshPending = false;
 	#refreshGoal: number | null = null;
 	#parked = false;
@@ -101,7 +102,7 @@ export class DisplayWindowController {
 	constructor(
 		readonly bodies: DisplayBodyStore,
 		private readonly publish: (snapshot: DisplayWindowSnapshot) => void,
-		private readonly api: Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'> = transcriptDisplayApi,
+		private readonly api: Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'> = transcriptDisplayApi,
 	) {}
 
 	get snapshot(): DisplayWindowSnapshot { return this.#snapshot; }
@@ -274,6 +275,13 @@ export class DisplayWindowController {
 		} catch (error) {
 			if (!current()) return null;
 			if (error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW') return { kind: 'stale-view', ordinal, landedOrdinal: null };
+			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
+				let changed: boolean;
+				try { changed = await this.#reopenRevision(signal, epoch); }
+				catch (reopenError) { if (!current()) return null; throw reopenError; }
+				if (!current()) return null;
+				if (changed) return this.navigate(ordinal, signal, ownsNavigation);
+			}
 			throw error;
 		} finally {
 			signal?.removeEventListener('abort', abort);
@@ -445,8 +453,15 @@ export class DisplayWindowController {
 			this.#assertIdentity(response.certificate);
 			this.#head = Math.max(this.#head, response.sourceHead);
 			const anchoredRefresh = mode === 'replace' && anchor.kind === 'around' && requiredThrough === undefined && atWatermark === undefined;
-			const assertReadingIntent = () => {
-				if (anchoredRefresh && this.#pinned) {
+			const assertReadingIntent = (expansions?: readonly DisplayExpansion[]) => {
+				if (!anchoredRefresh) return;
+				const ordinal = this.#anchor;
+				const moved = expansions && ordinal !== null && ordinal !== anchor.ordinal;
+				const wasMember = moved && this.#snapshot.expansions.some(expansion => expansion.page.ordinals.includes(ordinal));
+				const represented = !moved || response.items.some(item => item.kind === 'row' ? item.ordinal === ordinal
+					: ordinal >= item.firstMember && ordinal <= item.lastMember
+						&& (!wasMember || expansions.some(expansion => expansion.page.ordinals.includes(ordinal))));
+				if (this.#pinned || !represented) {
 					this.#scheduleRefresh(0);
 					throw new DOMException('Display reading intent changed', 'AbortError');
 				}
@@ -472,7 +487,7 @@ export class DisplayWindowController {
 						|| previous.cutPlacements.some(old => old.id === cut.id && old.placement === 'inline') ? 'inline' : 'detached' })) };
 			}
 			const expansions = mode === 'replace' ? await this.#remapExpansions(window, signal) : this.#snapshot.expansions;
-			await this.#hydrateAndApply(window, expansions, signal, epoch, applicationGate, window.certificate, assertReadingIntent);
+			await this.#hydrateAndApply(window, expansions, signal, epoch, applicationGate, window.certificate, () => assertReadingIntent(expansions));
 			if (mode === 'replace') this.#refreshGoal = null;
 			if (this.#needsHeadRefresh()) this.#scheduleRefresh(250);
 			return 'loaded';
@@ -482,10 +497,12 @@ export class DisplayWindowController {
 	async #remapExpansions(window: AvailableDisplayWindow, signal: AbortSignal): Promise<DisplayExpansion[]> {
 		const profile = this.#profile;
 		if (!profile?.combine) return [];
+		const intents = this.#snapshot.expansions.map(expansion => this.#anchor !== null && expansion.page.ordinals.includes(this.#anchor)
+			? { ...expansion, anchorOrdinal: this.#anchor } : expansion);
 		const remapped: DisplayExpansion[] = [];
 		for (const group of window.items) {
 			if (group.kind !== 'tool-group') continue;
-			const candidates = this.#snapshot.expansions.filter(expansion => expansionFor(group, [expansion])
+			const candidates = intents.filter(expansion => expansionFor(group, [expansion])
 				|| (expansion.page.base.afterBreaker < group.lastMember && expansion.page.base.beforeBreaker > group.firstMember));
 			candidates.sort((a, b) => Number(b.page.ordinals.some(o => this.#protected.has(o))) - Number(a.page.ordinals.some(o => this.#protected.has(o)))
 				|| Number(b.anchorOrdinal === this.#anchor) - Number(a.anchorOrdinal === this.#anchor) || b.openedAt - a.openedAt);
@@ -552,7 +569,7 @@ export class DisplayWindowController {
 			if (gate && await gate() !== 'apply') throw new DOMException('Display application cancelled', 'AbortError');
 			this.#assertCurrent(signal, epoch);
 			assertApplication?.();
-			const refreshedProtected = protectedRows.filter(row => this.#protected.has(row.detail.ordinal)).map(row => {
+			const refreshedProtected = this.#captureProtectedRows(represented).map(row => {
 				const detail = details.get(row.detail.ordinal);
 				return detail ? { ...row, certificate: detailsCertificate, detail } : row;
 			});
@@ -581,9 +598,24 @@ export class DisplayWindowController {
 		this.bodies.retain(this, window.certificate, [...this.#snapshot.details.values(), ...this.#snapshot.protectedRows.map(row => row.detail)].flatMap(detailOrdinals));
 	}
 
-	#assertCurrent(signal: AbortSignal, epoch: number): void {
-		signal.throwIfAborted();
+	#assertCurrent(signal: AbortSignal | undefined, epoch: number): void {
+		signal?.throwIfAborted();
 		if (epoch !== this.#epoch || this.#disposed) throw new DOMException('Display request superseded', 'AbortError');
+	}
+
+	async #reopenRevision(signal: AbortSignal | undefined, epoch: number): Promise<boolean> {
+		const identity = this.#identity!;
+		const open = await this.api.open({ chatId: identity.chatId, expectedTranscriptViewId: identity.transcriptViewId,
+			reason: 'reconnect', outstandingClientMessageIds: [] }, signal);
+		this.#assertCurrent(signal, epoch);
+		if (open.serverInstanceId !== identity.serverInstanceId || open.transcriptViewId !== identity.transcriptViewId
+			|| open.chat.id !== identity.chatId || open.display.policyRevision !== identity.policyRevision) throw new Error('Foreign display open');
+		this.#head = Math.max(this.#head, open.sourceHead);
+		if (this.#profile!.bashRevision === open.display.bashRevision) return false;
+		this.#profile = { ...this.#profile!, bashRevision: open.display.bashRevision };
+		this.#refreshGoal = null;
+		this.#readinessRevision++;
+		return true;
 	}
 
 	#assertIdentity(certificate: DisplayCertificate): void {
@@ -609,10 +641,19 @@ export class DisplayWindowController {
 		this.#errorCode = null;
 		this.#abort = abort;
 		this.#commit({ ...this.#snapshot, phase: mode === 'details' ? 'available' : 'requesting', error: null });
-		const request = work(abort.signal, epoch).catch((error: unknown): CoverageOutcome => {
+		const request = work(abort.signal, epoch).catch(async (error: unknown): Promise<CoverageOutcome> => {
 			if (abort.signal.aborted || epoch !== this.#epoch || error instanceof DOMException && error.name === 'AbortError') return 'blocked';
+			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
+				try {
+					const changed = await this.#reopenRevision(abort.signal, epoch);
+					this.#commit({ ...this.#snapshot, phase: 'busy', error: null });
+					this.#scheduleRefresh(changed ? 0 : 1500);
+					return 'blocked';
+				} catch (reopenError) { error = reopenError; }
+				if (abort.signal.aborted || epoch !== this.#epoch || error instanceof DOMException && error.name === 'AbortError') return 'blocked';
+			}
 			this.#errorCode = error instanceof ApiError ? error.errorCode ?? null : null;
-			if (error instanceof ApiError && ['DISPLAY_BUSY', 'DISPLAY_TIMEOUT', 'DISPLAY_UNAVAILABLE', 'DISPLAY_PREPARING'].includes(error.errorCode ?? '')) {
+			if (error instanceof ApiError && ['DISPLAY_BUSY', 'DISPLAY_TIMEOUT', 'DISPLAY_UNAVAILABLE', 'DISPLAY_PREPARING', 'DISPLAY_SUPERSEDED'].includes(error.errorCode ?? '')) {
 				this.#commit({ ...this.#snapshot, phase: mode === 'details' ? 'available' : 'busy', error: null });
 				this.#scheduleRefresh(1500);
 				return 'blocked';
@@ -628,8 +669,8 @@ export class DisplayWindowController {
 				if (phase === 'requesting') phase = this.#snapshot.window ? 'available' : 'idle';
 				this.#commit({ ...this.#snapshot, phase });
 			}
-			if (this.#refreshPending || this.#snapshot.phase === 'available'
-				&& (this.#needsReplace() || this.#needsHeadRefresh() || this.#needsDetailRefresh())) this.#scheduleRefresh(250);
+			if (this.#refreshTimer === null && (this.#refreshPending || this.#snapshot.phase === 'available'
+				&& (this.#needsReplace() || this.#needsHeadRefresh() || this.#needsDetailRefresh()))) this.#scheduleRefresh(250);
 		});
 		this.#request = request;
 		return request;
@@ -637,7 +678,13 @@ export class DisplayWindowController {
 
 	#scheduleRefresh(delay: number): void {
 		this.#refreshPending = true;
-		if (this.#parked || this.#disposed || this.#navigationEpoch !== null || this.#refreshTimer !== null) return;
+		if (this.#parked || this.#disposed || this.#navigationEpoch !== null) return;
+		const due = Date.now() + delay;
+		if (this.#refreshTimer !== null) {
+			if (this.#refreshDue <= due) return;
+			clearTimeout(this.#refreshTimer);
+		}
+		this.#refreshDue = due;
 		this.#refreshTimer = setTimeout(() => {
 			this.#refreshTimer = null;
 			if (this.#request || this.#navigationEpoch !== null) return;

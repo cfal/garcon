@@ -2,8 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { UserMessage, BashToolUseMessage } from '$shared/chat-types';
 import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, type AvailableDisplayWindow, type DisplayCertificate, type DisplayProfile, type GroupDescriptor } from '$shared/transcript-display-contract';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
+import { ApiError } from '$lib/api/client.js';
 import { DisplayBodyStore } from '../display-body-store.js';
 import { DisplayWindowController, type DisplayWindowSnapshot } from '../display-window-controller.js';
+import { displayOpen } from './display-fixtures.js';
 
 const profile: DisplayProfile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'patterns' };
 const certificate: DisplayCertificate = { serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
@@ -19,10 +21,11 @@ function window(): AvailableDisplayWindow {
 }
 const controllers: DisplayWindowController[] = [];
 afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose(); vi.useRealTimers(); });
-function setup(overrides: Partial<Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>> = {},
+function setup(overrides: Partial<Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>> = {},
 	publish: (snapshot: DisplayWindowSnapshot) => void = () => undefined) {
 	const requested: number[] = [], store = new DisplayBodyStore();
 	const api = {
+		open: async () => displayOpen('chat', 'view', certificate.watermark, 'instance'),
 		window: async () => window(),
 		members: async request => {
 			const start = request.anchor.kind === 'first' ? 2 : request.anchor.kind === 'after' ? request.anchor.ordinal + 1
@@ -43,7 +46,7 @@ function setup(overrides: Partial<Pick<TranscriptDisplayApi, 'window' | 'members
 		resolve: async request => ({ kind: 'group-member' as const, ordinal: request.ordinal, landedOrdinal: request.ordinal }),
 		retry: async () => ({ success: true }),
 		...overrides,
-	} satisfies Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
+	} satisfies Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
 	const controller = new DisplayWindowController(store, publish, api);
 	controller.installOpen({ serverInstanceId: 'instance', chat: { id: 'chat' }, transcriptViewId: 'view', sourceHead: certificate.watermark,
 		display: { policyRevision: 1, bashRevision: 'patterns', preparedThrough: certificate.watermark, phase: 'available', errorCode: null } }, profile);
@@ -79,6 +82,69 @@ it('replaces an in-flight old profile when a same-view open carries a new revisi
 	expect(await pending).toBe('blocked');
 	expect(controller.snapshot.phase).toBe('available');
 	expect(controller.snapshot.error).toBeNull();
+});
+
+it('reopens a stale revision installed after its readiness notification', async () => {
+	vi.useFakeTimers();
+	const stale = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const fresh = { ...stale, display: { ...stale.display, bashRevision: 'patterns-2' } };
+	const open = vi.fn<TranscriptDisplayApi['open']>().mockResolvedValue(fresh);
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => {
+		if (request.profile.bashRevision === 'patterns') throw new ApiError(409, 'Revision changed', 'DISPLAY_REVISION_CHANGED');
+		return { ...window(), certificate: { ...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile) } };
+	});
+	const { controller } = setup({ open, window: read });
+	controller.ready('patterns-2');
+	controller.installOpen(stale, profile);
+	expect(await controller.refresh()).toBe('blocked');
+	await vi.advanceTimersByTimeAsync(1);
+	expect(open).toHaveBeenCalledOnce();
+	expect(open.mock.calls[0][0]).toEqual({ chatId: 'chat', expectedTranscriptViewId: 'view', reason: 'reconnect', outstandingClientMessageIds: [] });
+	expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+	expect(controller.snapshot.phase).toBe('available');
+});
+
+it.each(['park', 'reset', 'profile'] as const)('fences a revision reopen after %s', async cancel => {
+	const stale = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const response = Promise.withResolvers<Awaited<ReturnType<TranscriptDisplayApi['open']>>>();
+	const entered = Promise.withResolvers<void>();
+	const { controller } = setup({ open: async () => { entered.resolve(); return response.promise; },
+		window: async () => { throw new ApiError(409, 'Revision changed', 'DISPLAY_REVISION_CHANGED'); } });
+	const refresh = controller.refresh();
+	await Promise.race([entered.promise, refresh]);
+	expect(controller.snapshot.phase).not.toBe('failed');
+	if (cancel === 'park') controller.park();
+	else if (cancel === 'reset') controller.reset();
+	else controller.configure({ ...profile, showThinking: false }, []);
+	response.resolve({ ...stale, display: { ...stale.display, bashRevision: 'retired-revision' } });
+	expect(await refresh).toBe('blocked');
+	expect(controller.profile?.bashRevision).not.toBe('retired-revision');
+});
+
+it('retains explicit navigation when a resolver discovers a new revision', async () => {
+	const open = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const { controller } = setup({ open: async () => ({ ...open, display: { ...open.display, bashRevision: 'patterns-2' } }),
+		window: async request => ({ ...window(), certificate: { ...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile) } }),
+		resolve: vi.fn<TranscriptDisplayApi['resolve']>()
+			.mockRejectedValueOnce(new ApiError(409, 'Revision changed', 'DISPLAY_REVISION_CHANGED'))
+			.mockImplementation(async request => ({ kind: 'group-member', ordinal: request.ordinal, landedOrdinal: request.ordinal })),
+	});
+	expect(await controller.navigate(20000)).toMatchObject({ kind: 'group-member', landedOrdinal: 20000 });
+	expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+	expect(controller.snapshot.expansions[0].page.ordinals).toContain(20000);
+});
+
+it('cancels navigation while its resolver revision recovery is held', async () => {
+	const response = Promise.withResolvers<Awaited<ReturnType<TranscriptDisplayApi['open']>>>();
+	const entered = Promise.withResolvers<void>();
+	const { controller } = setup({ open: async () => { entered.resolve(); return response.promise; },
+		resolve: async () => { throw new ApiError(409, 'Revision changed', 'DISPLAY_REVISION_CHANGED'); } });
+	const abort = new AbortController();
+	const navigating = controller.navigate(20000, abort.signal);
+	await entered.promise;
+	abort.abort();
+	response.resolve(displayOpen('chat', 'view', certificate.watermark, 'instance'));
+	expect(await navigating).toBeNull();
 });
 
 it('defers automatic catch-up through a held resolver and its attached-detail window', async () => {
@@ -254,6 +320,38 @@ it('uses available readiness to recover failure without refreshing an already-cu
 	expect(controller.snapshot.phase).toBe('available');
 	controller.ready('patterns', 'available');
 	await vi.advanceTimersByTimeAsync(1000);
+	expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('uses readiness before the slow preparation fallback expires', async () => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce({
+		kind: 'preparing', ...certificate, sourceHead: certificate.watermark, preparedThrough: 0,
+		errorCode: null, retryAfterMs: 1500,
+	}).mockResolvedValue(window());
+	const { controller } = setup({ window: read });
+	controller.cancel();
+	expect(await controller.refresh()).toBe('blocked');
+	await vi.advanceTimersByTimeAsync(100);
+	controller.ready();
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(2);
+	expect(controller.snapshot.phase).toBe('available');
+});
+
+it('retries a superseded display job without failing the surface', async () => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>()
+		.mockRejectedValueOnce(new ApiError(409, 'Display job superseded', 'DISPLAY_SUPERSEDED'))
+		.mockResolvedValue(window());
+	const { controller } = setup({ window: read });
+	controller.cancel();
+	expect(await controller.refresh()).toBe('blocked');
+	expect(controller.snapshot.phase).toBe('busy');
+	await vi.advanceTimersByTimeAsync(1499);
+	expect(read).toHaveBeenCalledOnce();
+	await vi.advanceTimersByTimeAsync(1);
+	expect(controller.snapshot.phase).toBe('available');
 	expect(read).toHaveBeenCalledTimes(2);
 });
 
@@ -564,6 +662,55 @@ it('applies an anchored refresh when the reader remains detached through its gat
 	released.resolve('apply');
 	expect(await refresh).toBe('loaded');
 	expect(controller.snapshot.window).toBe(historical);
+});
+
+it.each([false, true])('reconciles a moved detached anchor at publication, still represented=%s', async represented => {
+	vi.useFakeTimers();
+	const row = (ordinal: number) => ({ kind: 'row' as const, ordinal, messageType: 'user-message' as const,
+		layout: 'standard' as const, estimatedBodyBytes: 100, permissionOccurrenceId: null });
+	const prior: AvailableDisplayWindow = { ...window(), items: [row(1), row(100)] };
+	const fresh: AvailableDisplayWindow = { ...prior, certificate: { ...certificate, watermark: 50000 }, sourceHead: 50000 };
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce(prior)
+		.mockResolvedValueOnce({ ...fresh, items: represented ? prior.items : [row(1)] })
+		.mockResolvedValue({ ...fresh, items: [row(100)] });
+	const { controller } = setup({ window: read });
+	await controller.refresh();
+	controller.setReadingAnchor(1, false);
+	controller.observeHead('view', 50000);
+	const entered = Promise.withResolvers<void>(), gate = Promise.withResolvers<'apply'>();
+	controller.setApplicationGate(() => { entered.resolve(); return gate.promise; });
+	const refresh = controller.refresh();
+	await entered.promise;
+	controller.setReadingAnchor(100, false);
+	gate.resolve('apply');
+	expect(await refresh).toBe(represented ? 'loaded' : 'blocked');
+	if (!represented) expect(controller.snapshot.window).toBe(prior);
+	await vi.advanceTimersByTimeAsync(250);
+	expect(read).toHaveBeenCalledTimes(represented ? 2 : 3);
+	if (!represented) expect(read.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 100 });
+	expect(controller.snapshot.window?.items).toContainEqual(row(100));
+});
+
+it('retains a member protected after hydration began until its protection is released', async () => {
+	const { controller, api, store } = setup();
+	await controller.refresh();
+	await controller.expand(group, { kind: 'around', ordinal: 100 });
+	api.window = async () => ({ ...window(), items: [window().items[0]] });
+	const entered = Promise.withResolvers<void>(), gate = Promise.withResolvers<'apply'>();
+	controller.setApplicationGate(() => { entered.resolve(); return gate.promise; });
+	const refresh = controller.refresh();
+	await entered.promise;
+	controller.protect([100]);
+	gate.resolve('apply');
+	expect(await refresh).toBe('loaded');
+	expect(controller.snapshot.protectedRows).toEqual([
+		{ certificate, layout: 'standard', detail: { ordinal: 100, pairedUse: null, pairedResult: null,
+			questionWrapper: null, permissionTerminal: null, commandFormat: null } },
+	]);
+	expect(store.get(certificate, 100)).toBeDefined();
+	expect(store.count).toBe(2);
+	controller.protect([]);
+	expect(store.count).toBe(1);
 });
 
 it('requests newest when following resumes from a current-watermark historical window', async () => {

@@ -57,7 +57,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		? [{ ordinal: item.ordinal, message: item.message }] : []).sort((a, b) => a.ordinal - b.ordinal));
 
 	constructor(readonly bodyStore = new DisplayBodyStore(), sharedOverlay: ConversationTranscriptOverlayView | null = null,
-		api: Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'> = transcriptDisplayApi,
+		api: Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'> = transcriptDisplayApi,
 		private readonly onInputRepresented?: (view: string, clientMessageId: string, ordinal: number) => void) {
 		this.#sharedOverlay = sharedOverlay;
 		this.controller = new DisplayWindowController(bodyStore, snapshot => {

@@ -36,6 +36,7 @@ export function feedDisplayApi() {
 			cutPlacements: request.cuts.map(cut => ({ id: cut.id, placement: 'inline' as const })) };
 	}
 	const api = {
+		open: async () => open,
 		window: async request => window(request),
 		members: async request => {
 			const eligible = rows.map(row => row.ordinal).filter(ordinal => ordinal > request.fragment.after && ordinal <= request.fragment.through);
@@ -59,7 +60,7 @@ export function feedDisplayApi() {
 		},
 		resolve: async request => ({ kind: request.profile.combine ? 'group-member' : 'visible-row', ordinal: request.ordinal, landedOrdinal: request.ordinal }),
 		retry: async () => ({ success: true }),
-	} satisfies Pick<TranscriptDisplayApi, 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
+	} satisfies Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'>;
 	return { api, window, replace(chatId: string, view: string, next: readonly TranscriptMessage[], head: number, later = false) {
 		rows = next; open = displayOpen(chatId, view, head); pendingLater = later; return open;
 	}, hideBash(value: boolean) { hideBash = value; } };
