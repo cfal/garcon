@@ -256,6 +256,7 @@ describe('GitReviewBodyScheduler', () => {
 		const calls: string[][] = [];
 		const loading = new Set<string>();
 		const unowned: string[][] = [];
+		const missingLoading: string[][] = [];
 		const onError = vi.fn();
 		let publishBatch!: (result: Result, paths: string[]) => void;
 		const scheduler: GitReviewBodyScheduler<Result> = new GitReviewBodyScheduler<Result>({
@@ -277,6 +278,10 @@ describe('GitReviewBodyScheduler', () => {
 				}
 				const lost = unownedGitReviewLoadingPaths(loading, (path) => scheduler.hasPending(path));
 				if (lost.length > 0) unowned.push(lost);
+				const missing = ['a', 'b', 'c', 'obsolete'].filter(
+					(path) => scheduler.hasPending(path) && !loading.has(path),
+				);
+				if (missing.length > 0) missingLoading.push(missing);
 			},
 			onError,
 		});
@@ -289,6 +294,7 @@ describe('GitReviewBodyScheduler', () => {
 		expect(calls).toEqual([['a', 'b', 'c', 'obsolete'], ['b'], ['c']]);
 		expect(onError).not.toHaveBeenCalled();
 		expect(unowned).toEqual([]);
+		expect(missingLoading).toEqual([]);
 		expect(loading.size).toBe(0);
 	});
 
