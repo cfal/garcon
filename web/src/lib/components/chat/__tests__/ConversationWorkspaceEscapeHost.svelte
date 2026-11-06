@@ -52,6 +52,8 @@
 	import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { AsyncQuestionController } from '$lib/chat/conversation/async-question-controller.svelte.js';
+	import { setAsyncQuestionController } from '$lib/chat/conversation/async-question-context.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
@@ -114,6 +116,7 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
+	setAsyncQuestionController(new AsyncQuestionController());
 	const gitDeps = createGitSurfaceTestDeps();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
 		...unusedSingletonFactories,
