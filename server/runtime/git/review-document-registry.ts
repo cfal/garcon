@@ -16,7 +16,6 @@ const DEFAULT_IDLE_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_IDLE_DOCUMENTS = 32;
 const DEFAULT_MAX_TOTAL_DOCUMENTS = 64;
 const DEFAULT_MAX_BODY_BYTES = 128 * 1024 * 1024;
-const DEFAULT_MAX_SUMMARY_BYTES = 16 * 1024 * 1024;
 
 export type GitReviewDocumentSource =
   | {
@@ -119,7 +118,6 @@ interface MutableRegisteredGitReviewDocument extends RegisteredGitReviewDocument
   superseded: boolean;
   bodies: Map<string, GitReviewFilePatchBody>;
   bodyBytes: number;
-  comparisonSummary?: { files: GitCommitFileSummary[]; totalFilesKnown: number; bytes: number };
 }
 
 export interface RegisterGitReviewDocumentInput {
@@ -145,7 +143,6 @@ interface GitReviewDocumentRegistryOptions {
   maxIdleDocuments?: number;
   maxTotalDocuments?: number;
   maxBodyBytes?: number;
-  maxSummaryBytes?: number;
 }
 
 function contentKey(input: RegisterGitReviewDocumentInput): string {
@@ -155,7 +152,7 @@ function contentKey(input: RegisterGitReviewDocumentInput): string {
     input.sourceCacheKey,
     input.context,
     JSON.stringify(input.source),
-    ...input.files.map((file) => `${file.path}\0${file.bodyFingerprint}`),
+    ...input.files.map((file) => JSON.stringify(file)),
   ].join('\x1f');
 }
 
@@ -173,7 +170,6 @@ export class GitReviewDocumentRegistry {
   private readonly maxIdleDocuments: number;
   private readonly maxTotalDocuments: number;
   private readonly maxBodyBytes: number;
-  private readonly maxSummaryBytes: number;
   private totalBodyBytes = 0;
 
   constructor(options: GitReviewDocumentRegistryOptions = {}) {
@@ -182,43 +178,6 @@ export class GitReviewDocumentRegistry {
     this.maxIdleDocuments = options.maxIdleDocuments ?? DEFAULT_MAX_IDLE_DOCUMENTS;
     this.maxTotalDocuments = options.maxTotalDocuments ?? DEFAULT_MAX_TOTAL_DOCUMENTS;
     this.maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
-    this.maxSummaryBytes = options.maxSummaryBytes ?? DEFAULT_MAX_SUMMARY_BYTES;
-  }
-
-  findComparisonSummary(input: Omit<RegisterGitReviewDocumentInput, 'files'>): {
-    documentId: string; files: GitCommitFileSummary[]; totalFilesKnown: number;
-  } | null {
-    this.prune();
-    const id = this.latestByRegistration.get(sourceRegistrationKey(input));
-    const document = id ? this.documents.get(id) : undefined;
-    if (!document || document.superseded || !document.comparisonSummary ||
-      document.source.kind !== 'comparison-revisions' || input.source.kind !== 'comparison-revisions' ||
-      document.repoRoot !== input.repoRoot || document.context !== input.context ||
-      document.source.effectiveFromHash !== input.source.effectiveFromHash ||
-      document.source.toHash !== input.source.toHash) return null;
-    document.lastAccessedAt = this.now();
-    return {
-      documentId: document.id,
-      files: document.comparisonSummary.files.map((file) => ({ ...file })),
-      totalFilesKnown: document.comparisonSummary.totalFilesKnown,
-    };
-  }
-
-  rememberComparisonSummary(documentId: string, files: GitCommitFileSummary[], totalFilesKnown: number): void {
-    const document = this.documents.get(documentId);
-    if (!document || document.superseded || document.source.kind !== 'comparison-revisions') return;
-    const bytes = Buffer.byteLength(JSON.stringify({ files, totalFilesKnown }));
-    if (bytes > this.maxSummaryBytes) return;
-    document.comparisonSummary = { files: files.map((file) => ({ ...file })), totalFilesKnown, bytes };
-    const retained = Array.from(this.documents.values())
-      .filter((entry) => entry.comparisonSummary)
-      .sort((left, right) => left.lastAccessedAt - right.lastAccessedAt);
-    let total = retained.reduce((sum, entry) => sum + entry.comparisonSummary!.bytes, 0);
-    for (const entry of retained) {
-      if (total <= this.maxSummaryBytes) break;
-      total -= entry.comparisonSummary!.bytes;
-      delete entry.comparisonSummary;
-    }
   }
 
   register(input: RegisterGitReviewDocumentInput): RegisteredGitReviewDocument {
@@ -250,10 +209,7 @@ export class GitReviewDocumentRegistry {
       );
     }
 
-    if (previous) {
-      previous.superseded = true;
-      delete previous.comparisonSummary;
-    }
+    if (previous) previous.superseded = true;
     const now = this.now();
     const document: MutableRegisteredGitReviewDocument = {
       id: randomUUID(),
@@ -302,7 +258,6 @@ export class GitReviewDocumentRegistry {
             const previous = document.patchDigests.get(body.path);
             if (previous && previous !== digest) {
               document.superseded = true;
-              delete document.comparisonSummary;
               throw new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
             }
             body.patchDigest = digest;

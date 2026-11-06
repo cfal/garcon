@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -30,40 +30,208 @@ function mutateDuringComparisonValidations(filePath, contents) {
 }
 
 describe("comparison operations", () => {
-  it("reuses resolved immutable summaries but refreshes aliases, candidates and moved refs", async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), "garcon-comparison-cache-"));
+  it("refreshes identical revisions after submodule diff policy changes", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-comparison-policy-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      const first = (
+        await runGitCommand(projectPath, ["rev-parse", "HEAD"])
+      ).stdout.trim();
+      await runGitCommand(projectPath, [
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "second gitlink target",
+      ]);
+      const second = (
+        await runGitCommand(projectPath, ["rev-parse", "HEAD"])
+      ).stdout.trim();
+      await runGitCommand(projectPath, [
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `160000,${first},module`,
+      ]);
+      await runGitCommand(projectPath, ["commit", "-qm", "base gitlink"]);
+      const from = (
+        await runGitCommand(projectPath, ["rev-parse", "HEAD"])
+      ).stdout.trim();
+      await runGitCommand(projectPath, [
+        "update-index",
+        "--cacheinfo",
+        `160000,${second},module`,
+      ]);
+      await runGitCommand(projectPath, ["commit", "-qm", "changed gitlink"]);
+      const to = (
+        await runGitCommand(projectPath, ["rev-parse", "HEAD"])
+      ).stdout.trim();
+      const git = createGitOperations();
+      const input = {
+        projectPath,
+        from: { kind: "revision", revision: from },
+        to: { kind: "revision", revision: to },
+        mode: "direct",
+        context: 3,
+      };
+      await runGitCommand(projectPath, [
+        "config",
+        "diff.ignoreSubmodules",
+        "all",
+      ]);
+      const hidden = await git.getComparisonSnapshot(input);
+      expect(hidden.files).toEqual([]);
+      expect(hidden.firstBodyCandidates).toEqual([]);
+      await runGitCommand(projectPath, [
+        "config",
+        "diff.ignoreSubmodules",
+        "none",
+      ]);
+      const refreshed = await git.getComparisonSnapshot(input);
+      expect(refreshed.files.map((file) => file.path)).toEqual(["module"]);
+      expect(refreshed.documentId).not.toBe(hidden.documentId);
+      await runGitCommand(projectPath, [
+        "config",
+        "diff.ignoreSubmodules",
+        "all",
+      ]);
+      const hiddenAgain = await git.getComparisonSnapshot(input);
+      expect(hiddenAgain.files).toEqual([]);
+      expect(hiddenAgain.firstBodyCandidates).toEqual([]);
+      expect(hiddenAgain.documentId).not.toBe(refreshed.documentId);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("refreshes identical revisions after working-tree attributes change", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-comparison-attributes-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      const from = (
+        await runGitCommand(projectPath, ["rev-parse", "HEAD"])
+      ).stdout.trim();
+      await fs.writeFile(path.join(projectPath, "a.txt"), "changed\n");
+      await runGitCommand(projectPath, ["commit", "-qam", "target"]);
+      const git = createGitOperations();
+      const input = {
+        projectPath,
+        from: { kind: "revision", revision: from },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+        context: 3,
+      };
+      const text = await git.getComparisonSnapshot(input);
+      expect(text.files[0]).toMatchObject({
+        path: "a.txt",
+        isBinary: false,
+        additions: 1,
+      });
+      await fs.writeFile(
+        path.join(projectPath, ".gitattributes"),
+        "a.txt -diff\n",
+      );
+      const binary = await git.getComparisonSnapshot(input);
+      expect(binary.files[0]).toMatchObject({
+        path: "a.txt",
+        isBinary: true,
+        bodyState: "binary",
+      });
+      expect(binary.documentId).not.toBe(text.documentId);
+      const binaryBodies = await git.getReviewDocumentFileBodies({
+        projectPath,
+        documentId: binary.documentId,
+        files: ["a.txt"],
+        purpose: "visible",
+      });
+      expect(binaryBodies.files["a.txt"]).toMatchObject({
+        bodyState: "binary",
+        patch: null,
+      });
+      await fs.rm(path.join(projectPath, ".gitattributes"));
+      const restored = await git.getComparisonSnapshot(input);
+      expect(restored.files).toEqual(text.files);
+      expect(restored.documentId).not.toBe(binary.documentId);
+      const textBodies = await git.getReviewDocumentFileBodies({
+        projectPath,
+        documentId: restored.documentId,
+        files: ["a.txt"],
+        purpose: "visible",
+      });
+      expect(textBodies.files["a.txt"]).toMatchObject({
+        bodyState: "loaded",
+        isBinary: false,
+      });
+      expect(textBodies.files["a.txt"].patch).toContain("+changed");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("reuses unchanged documents but refreshes summaries, aliases, candidates and moved refs", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-comparison-cache-"),
+    );
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["branch", "base"]);
       await fs.writeFile(path.join(projectPath, "a.txt"), "changed\n");
-      await fs.writeFile(path.join(projectPath, "b.ts"), "export const value = 1;\n");
+      await fs.writeFile(
+        path.join(projectPath, "b.ts"),
+        "export const value = 1;\n",
+      );
       await runGitCommand(projectPath, ["add", "."]);
       await runGitCommand(projectPath, ["commit", "-qm", "target"]);
       await runGitCommand(projectPath, ["branch", "alias"]);
       const git = createGitOperations();
-      const input = { projectPath, from: { kind: "revision", revision: "base" },
-        to: { kind: "revision", revision: "HEAD" }, mode: "direct", context: 3 };
+      const input = {
+        projectPath,
+        from: { kind: "revision", revision: "base" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+        context: 3,
+      };
       const trace = [];
-      const first = await git.getComparisonSnapshot({ ...input, trace, bodyCandidateCount: 1 });
+      const first = await git.getComparisonSnapshot({
+        ...input,
+        trace,
+        bodyCandidateCount: 1,
+      });
       expect(trace.filter(({ args }) => args[0] === "diff")).toHaveLength(2);
       trace.length = 0;
-      const alias = await git.getComparisonSnapshot({ ...input, trace,
-        to: { kind: "revision", revision: "alias" }, bodyCandidateCount: 2 });
+      const alias = await git.getComparisonSnapshot({
+        ...input,
+        trace,
+        to: { kind: "revision", revision: "alias" },
+        bodyCandidateCount: 2,
+      });
       expect(alias.documentId).toBe(first.documentId);
       expect(alias.to.requestedRevision).toBe("alias");
       expect(alias.firstBodyCandidates).toHaveLength(2);
       expect(alias.files).toEqual(first.files);
       expect(trace.some(({ args }) => args[0] === "rev-parse")).toBe(true);
-      expect(trace.filter(({ args }) => args[0] === "diff")).toEqual([]);
+      expect(trace.filter(({ args }) => args[0] === "diff")).toHaveLength(2);
       alias.files[0].additions = 999;
-      expect((await git.getComparisonSnapshot(input)).files).toEqual(first.files);
+      expect((await git.getComparisonSnapshot(input)).files).toEqual(
+        first.files,
+      );
       for (const changed of [{ context: 5 }, { mode: "merge-base" }]) {
         trace.length = 0;
-        const replacement = await git.getComparisonSnapshot({ ...input, ...changed, trace });
+        const replacement = await git.getComparisonSnapshot({
+          ...input,
+          ...changed,
+          trace,
+        });
         expect(replacement.documentId).not.toBe(first.documentId);
         expect(trace.filter(({ args }) => args[0] === "diff")).toHaveLength(2);
       }
-      await fs.writeFile(path.join(projectPath, "a.txt"), "changed again\nnew line\n");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "changed again\nnew line\n",
+      );
       await runGitCommand(projectPath, ["commit", "-qam", "advance"]);
       trace.length = 0;
       const moved = await git.getComparisonSnapshot({ ...input, trace });
@@ -979,6 +1147,71 @@ describe("comparison operations", () => {
           .filter((file) => file.statsKnown !== false)
           .map((file) => file.additions),
       ).toEqual([1, 1]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps budget-limited untracked summaries stable across I/O completion orders", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-comparison-budget-order-"),
+    );
+    const git = createGitOperations();
+    const names = ["one.txt", "three.txt", "two.txt"];
+    try {
+      await initRepoWithCommit(projectPath);
+      for (const name of names) {
+        await fs.writeFile(path.join(projectPath, name), Buffer.alloc(4_000_000, 0x61));
+      }
+      const snapshotWithDelayedStat = async (delayedName) => {
+        const handles = new Map();
+        const stats = new Map();
+        const mocks = [];
+        const open = fs.open.bind(fs);
+        const lstat = fs.lstat.bind(fs);
+        try {
+          for (const name of names) {
+            const filePath = path.join(projectPath, name);
+            const handle = await open(filePath, "r");
+            const fileStats = await handle.stat();
+            handles.set(filePath, handle);
+            stats.set(filePath, fileStats);
+            mocks.push(spyOn(handle, "stat").mockImplementation(async () => {
+              // Controls admission order without depending on filesystem timing.
+              if (name === delayedName) {
+                for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+              }
+              return fileStats;
+            }));
+          }
+          mocks.push(spyOn(fs, "open").mockImplementation((filePath, ...args) =>
+            handles.has(filePath) ? Promise.resolve(handles.get(filePath)) : open(filePath, ...args),
+          ));
+          mocks.push(spyOn(fs, "lstat").mockImplementation((filePath, options) =>
+            stats.has(filePath) && !options
+              ? Promise.resolve(stats.get(filePath))
+              : lstat(filePath, options),
+          ));
+          return await git.getComparisonSnapshot({
+            projectPath,
+            from: { kind: "revision", revision: "HEAD" },
+            to: { kind: "working-tree" },
+            mode: "direct",
+          });
+        } finally {
+          for (const mock of mocks) mock.mockRestore();
+          for (const handle of handles.values()) await handle.close();
+        }
+      };
+      const first = await snapshotWithDelayedStat("one.txt");
+      const repeated = await snapshotWithDelayedStat("two.txt");
+      expect(first.status).toBe("ready");
+      expect(repeated.status).toBe("ready");
+      expect(repeated.to.fingerprint).toBe(first.to.fingerprint);
+      expect(repeated.documentId).toBe(first.documentId);
+      expect(repeated.files).toEqual(first.files);
+      expect(first.files.filter((file) => file.statsKnown === false).map((file) => file.path))
+        .toEqual(["two.txt"]);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

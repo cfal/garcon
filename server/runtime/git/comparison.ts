@@ -1,5 +1,4 @@
 import { createHash } from 'crypto';
-import { mapWithConcurrency } from '../../common/concurrency.js';
 import { captureWorkingTreeObservation, isWorkingTreeObservationCurrent } from './working-tree-observation.js';
 import {
   isExpectedMissingGitResult,
@@ -206,7 +205,8 @@ async function summarizeComparisonFiles({
   const summaries: GitCommitFileSummary[] = [];
   const untrackedSummaryBudget: UntrackedSummaryBudget = createUntrackedSummaryBudget();
 
-  await mapWithConcurrency(candidates, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
+  // Sorted admission keeps the shared untracked-byte budget independent of I/O timing.
+  for (const file of candidates) {
     signal?.throwIfAborted();
     const isUntracked = file.status === '?';
     const untrackedLimits = isUntracked
@@ -272,10 +272,10 @@ async function summarizeComparisonFiles({
       ...(limitReason ? { limitReason } : {}),
       ...(limitMessage ? { limitMessage } : {}),
     });
-  });
+  }
 
   return {
-    files: summaries.sort((left, right) => left.path.localeCompare(right.path)),
+    files: summaries,
     totalFilesKnown,
   };
 }
@@ -541,37 +541,36 @@ async function getComparisonSnapshot(
     };
   }
   const effectiveFromHash = mergeBaseHash ?? from.hash;
-  const registration = {
-    sourceCacheKey: `comparison:${repoRoot}:${mode}:${effectiveFromHash}:${to.hash}:${context}`,
-    projectPath,
-    repoRoot,
+  const summary = await loadDiffSummary(repoRoot, effectiveFromHash, to.hash, trace, signal);
+  const summarized = await summarizeComparisonFiles({
+    projectPath: repoRoot,
+    effectiveFromHash,
+    targetIdentity: to.hash,
     context,
-    source: { kind: 'comparison-revisions' as const, effectiveFromHash, toHash: to.hash },
-  };
-  let summarized = registry.findComparisonSummary(registration);
-  if (!summarized) {
-    const summary = await loadDiffSummary(repoRoot, effectiveFromHash, to.hash, trace, signal);
-    const loaded = await summarizeComparisonFiles({
-      projectPath: repoRoot,
-      effectiveFromHash,
-      targetIdentity: to.hash,
-      context,
-      nameStatusOutput: summary.nameStatus,
-      numstatOutput: summary.numstat,
-      signal,
-    });
-    signal?.throwIfAborted();
-    const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>
-      registry.register({ ...registration, files: loaded.files.map(registeredTreeDiffFile) }));
-    registry.rememberComparisonSummary(document.id, loaded.files, loaded.totalFilesKnown);
-    summarized = { documentId: document.id, ...loaded };
-  }
+    nameStatusOutput: summary.nameStatus,
+    numstatOutput: summary.numstat,
+    signal,
+  });
+  signal?.throwIfAborted();
   const files = summarized.files;
+  const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>
+    registry.register({
+      sourceCacheKey: `comparison:${repoRoot}:${mode}:${effectiveFromHash}:${to.hash}:${context}`,
+      projectPath,
+      repoRoot,
+      context,
+      source: {
+        kind: 'comparison-revisions',
+        effectiveFromHash,
+        toHash: to.hash,
+      },
+      files: files.map(registeredTreeDiffFile),
+    }));
   return {
     status: 'ready',
     project: projectPath,
     repoRoot,
-    documentId: summarized.documentId,
+    documentId: document.id,
     mode,
     from,
     to,
