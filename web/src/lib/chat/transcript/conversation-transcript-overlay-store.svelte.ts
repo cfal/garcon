@@ -116,6 +116,13 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return feedMutation(true);
 	}
 
+	clearStatusNotices(): ConversationTranscriptOverlayMutation {
+		const next = this.#notices.filter(notice => notice.noticeType !== 'info' && notice.noticeType !== 'progress');
+		if (next.length === this.#notices.length) return feedMutation(false);
+		this.#notices = next;
+		return feedMutation(true);
+	}
+
 	upsertOptimisticInput(
 		input: OptimisticUserInput,
 		afterOrdinal: number,
@@ -250,6 +257,10 @@ export class ConversationTranscriptOverlayStore {
 
 	clearNoticesThrough(chatId: string, revision?: number): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).clearNoticesThrough(revision);
+	}
+
+	clearStatusNotices(chatId: string): ConversationTranscriptOverlayMutation {
+		return this.#entries.get(chatId)?.clearStatusNotices() ?? feedMutation(false);
 	}
 
 	upsertOptimisticInput(

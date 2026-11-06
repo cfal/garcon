@@ -43,6 +43,22 @@ function port(target: ReturnType<ConversationPanelPresentationPort['captureResto
 const pendingInput = { chatId: 'chat-1', clientMessageId: 'input-1', content: 'Synthetic input', createdAt: DISPLAY_TIME, delivery: 'pending' as const };
 
 describe('display surface registry', () => {
+	it('clears status notices only on a new head while retaining unproven diagnostics', async () => {
+		const { registry, overlays } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		registry.appendLocalNotice('chat-1', 'info', 'Synthetic status');
+		registry.appendLocalNotice('chat-1', 'progress', 'Synthetic progress');
+		registry.appendServerNotice('chat-1', 'warning', 'Synthetic warning');
+		registry.appendServerNotice('chat-1', 'error', 'Synthetic error');
+		registry.observeHead('chat-1', 'view-1', 1);
+		expect(overlays.forChat('chat-1').notices).toHaveLength(4);
+		registry.observeHead('chat-1', 'view-1', 2);
+		expect(overlays.forChat('chat-1').notices.map(notice => notice.noticeType)).toEqual(['warning', 'error']);
+		registry.appendLocalNotice('chat-1', 'info', 'New status');
+		registry.observeHead('chat-1', 'view-1', 1);
+		expect(overlays.forChat('chat-1').notices.at(-1)?.content).toBe('New status');
+	});
 	it('deduplicates source opens, not surface projection or leases', async () => {
 		const { api, registry, bodies, onOpen } = fixture();
 		registry.reconcile([presentation(left), presentation(right)]);
