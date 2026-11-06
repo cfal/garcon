@@ -43,20 +43,20 @@ export class DisplayQuery {
 
   eligible(ordinal: number): boolean {
     const feature = this.feature(ordinal);
-    if (feature?.class_id === null || !feature || !this.classes.includes(feature.class_id)) return false;
+    if (!feature || feature.class_id === null || !this.classes.includes(feature.class_id)) return false;
     return this.prefix(feature.class_id, ordinal)?.ordinal === ordinal;
   }
 
   prefix(id: number, through: number): Posting | null {
-    const [table, args] = this.source(id);
-    return this.store.get<Posting>(`SELECT ordinal, rank, cumulative_weight FROM ${table} WHERE ${args.length === 2 ? 'revision = ? AND ' : ''}class_id = ? AND ordinal <= ? ORDER BY ordinal DESC LIMIT 1`, ...args, Math.min(through, this.watermark));
+    const { table, filter, args } = this.source(id);
+    return this.store.get<Posting>(`SELECT ordinal, rank, cumulative_weight FROM ${table} WHERE ${filter} AND ordinal <= ? ORDER BY ordinal DESC LIMIT 1`, ...args, Math.min(through, this.watermark));
   }
 
   seek(ids: readonly number[], after: number, through: number, reverse = false): number | null {
     let found: number | null = null;
     for (const id of ids) {
-      const [table, args] = this.source(id);
-      const row = this.store.get<{ ordinal: number }>(`SELECT ordinal FROM ${table} WHERE ${args.length === 2 ? 'revision = ? AND ' : ''}class_id = ? AND ordinal > ? AND ordinal <= ? ORDER BY ordinal ${reverse ? 'DESC' : 'ASC'} LIMIT 1`,
+      const { table, filter, args } = this.source(id);
+      const row = this.store.get<{ ordinal: number }>(`SELECT ordinal FROM ${table} WHERE ${filter} AND ordinal > ? AND ordinal <= ? ORDER BY ordinal ${reverse ? 'DESC' : 'ASC'} LIMIT 1`,
         ...args, after, Math.min(through, this.watermark));
       if (row && (found === null || (reverse ? row.ordinal > found : row.ordinal < found))) found = row.ordinal;
     }
@@ -67,10 +67,15 @@ export class DisplayQuery {
     const feature = this.feature(ordinal);
     if (!feature || !feature.message_type || !this.eligible(ordinal)) throw new TypeError('Display target is not eligible');
     if (this.profile.combine && feature.role === 'member') return this.group(ordinal);
-    return { kind: 'row', ordinal, messageType: feature.message_type,
-      layout: feature.message_type === 'permission-request' || feature.message_type === 'exit-plan-mode-tool-use'
-        || (feature.message_type === 'tool-result' && this.store.get<{ tool_type: string }>(
-          'SELECT f.message_type AS tool_type FROM tool_pair p JOIN feature f ON f.ordinal = p.use_ordinal WHERE p.result_ordinal = ?', ordinal)?.tool_type === 'ask-user-question-tool-use') ? 'permission' : 'standard',
+    let layout: RowDescriptor['layout'] = 'standard';
+    if (feature.message_type === 'permission-request' || feature.message_type === 'exit-plan-mode-tool-use') {
+      layout = 'permission';
+    } else if (feature.message_type === 'tool-result') {
+      const pairedUse = this.store.get<{ tool_type: string }>(
+        'SELECT f.message_type AS tool_type FROM tool_pair p JOIN feature f ON f.ordinal = p.use_ordinal WHERE p.result_ordinal = ?', ordinal);
+      if (pairedUse?.tool_type === 'ask-user-question-tool-use') layout = 'permission';
+    }
+    return { kind: 'row', ordinal, messageType: feature.message_type, layout,
       estimatedBodyBytes: feature.estimated_body_bytes, permissionOccurrenceId: feature.permission_occurrence };
   }
 
@@ -133,7 +138,11 @@ export class DisplayQuery {
         const earlier = this.page(0, bounds.after, true, Math.floor((request.limit - 1) / 2));
         const later = this.page(bounds.through, this.watermark, false, request.limit - earlier.length - 1);
         const extra = request.limit - earlier.length - later.length - 1;
-        const prefix = extra > 0 ? this.page(0, earlier.length ? descriptorBounds(earlier[0]).after : bounds.after, true, extra) : [];
+        let prefix: DisplayDescriptor[] = [];
+        if (extra > 0) {
+          const before = earlier.length ? descriptorBounds(earlier[0]).after : bounds.after;
+          prefix = this.page(0, before, true, extra);
+        }
         items = [...prefix, ...earlier, center, ...later];
       }
     }
@@ -163,7 +172,8 @@ export class DisplayQuery {
       ? request.base.firstMember : this.seek(this.members, request.fragment.after, request.fragment.through) ?? 0);
     if (JSON.stringify(group.base) !== JSON.stringify(request.base) || group.fragment.after !== request.fragment.after
       || group.fragment.through !== request.fragment.through) throw new TypeError('Stale member extent');
-    const { after, through } = group.fragment, anchor = request.anchor;
+    const { after, through } = group.fragment;
+    const { anchor, limit } = request;
     const collect = (lo: number, hi: number, reverse: boolean, limit: number): number[] => {
       const result: number[] = [];
       while (result.length < limit) {
@@ -175,14 +185,32 @@ export class DisplayQuery {
       return reverse ? result.reverse() : result;
     };
     let ordinals: number[];
-    if (anchor.kind === 'first') ordinals = collect(after, through, false, request.limit);
-    else if (anchor.kind === 'before') ordinals = collect(after, Math.min(through, anchor.ordinal - 1), true, request.limit);
-    else if (anchor.kind === 'after') ordinals = collect(Math.max(after, anchor.ordinal), through, false, request.limit);
-    else {
-      const left = collect(after, Math.min(through, anchor.ordinal - 1), true, Math.floor(request.limit / 2));
-      ordinals = [...left, ...collect(Math.max(after, anchor.ordinal - 1), through, false, request.limit - left.length)];
+    switch (anchor.kind) {
+      case 'first':
+        ordinals = collect(after, through, false, limit);
+        break;
+      case 'before':
+        ordinals = collect(after, Math.min(through, anchor.ordinal - 1), true, limit);
+        break;
+      case 'after':
+        ordinals = collect(Math.max(after, anchor.ordinal), through, false, limit);
+        break;
+      case 'around': {
+        const left = collect(after, Math.min(through, anchor.ordinal - 1), true, Math.floor(limit / 2));
+        const right = collect(Math.max(after, anchor.ordinal - 1), through, false, limit - left.length);
+        ordinals = [...left, ...right];
+        break;
+      }
     }
-    const count = (lo: number, hi: number) => this.members.reduce((sum, id) => sum + (this.prefix(id, hi)?.rank ?? 0) - (this.prefix(id, lo)?.rank ?? 0), 0);
+    const count = (lo: number, hi: number): number => {
+      let total = 0;
+      for (const id of this.members) {
+        const upperRank = this.prefix(id, hi)?.rank ?? 0;
+        const lowerRank = this.prefix(id, lo)?.rank ?? 0;
+        total = total + upperRank - lowerRank;
+      }
+      return total;
+    };
     const first = ordinals[0] ?? after + 1, last = ordinals.at(-1) ?? through;
     const before = count(after, first - 1), later = count(last, through);
     return { certificate: request.certificate, base: group.base, fragment: group.fragment, ordinals,
@@ -205,8 +233,11 @@ export class DisplayQuery {
       landedOrdinal: this.seek(this.classes, 0, ordinal, true) ?? this.seek(this.classes, ordinal, this.watermark) };
   }
 
-  private source(id: number): [string, (number | string)[]] {
-    return this.useBashPostings && postingClass(id).bash ? ['bash_posting', [this.profile.bashRevision, id]] : ['posting', [id]];
+  private source(id: number): { table: string; filter: string; args: (number | string)[] } {
+    if (this.useBashPostings && postingClass(id).bash) {
+      return { table: 'bash_posting', filter: 'revision = ? AND class_id = ?', args: [this.profile.bashRevision, id] };
+    }
+    return { table: 'posting', filter: 'class_id = ?', args: [id] };
   }
 }
 

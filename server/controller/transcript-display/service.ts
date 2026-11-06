@@ -605,9 +605,7 @@ export class TranscriptDisplayService {
     if (policy !== DISPLAY_POLICY_REVISION || bash !== this.#revision) throw new DomainError('DISPLAY_REVISION_CHANGED', 'Transcript display settings changed.', 409, true);
   }
   #head(job: DisplayJob): TranscriptWatermark {
-    this.#exists(job.chatId); const head = this.options.ledger.highWatermark(job.chatId);
-    if (head.viewId !== job.viewId) throw new StaleTranscriptViewError(job.chatId, job.viewId, head.viewId);
-    return head;
+    return this.currentHead(job.chatId, job.viewId);
   }
   #current(job: DisplayJob): void {
     this.#exists(job.chatId);
