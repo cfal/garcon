@@ -2,8 +2,10 @@
 
 The native packages remain previews. A package build, a valid container, and a
 successful process launch are distinct from workflow qualification and signed
-distribution. No release workflow, signing credentials, store upload, or update
-channel is enabled by these gates.
+distribution. The [release workflow](../docs/releases.md) may host these packages
+as explicitly labeled previews with their original blocker manifests. No signing
+credentials, store upload, production distribution, or update channel is enabled
+by these gates.
 
 ## Android Loading Blocker
 

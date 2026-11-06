@@ -240,13 +240,15 @@ describe('Docker contract', () => {
     }
   });
 
-  test('publishes main commits for both Linux architectures', () => {
+  test('publishes resolved main and release commits for both Linux architectures', () => {
     expect(dockerPublishWorkflow).toContain('branches:\n      - main');
     const workflow = Bun.YAML.parse(dockerPublishWorkflow);
-    expect(workflow.jobs.publish_sha.if).toBe("github.event_name == 'push'");
-    expect(dockerPublishWorkflow).not.toContain('release:');
+    expect(workflow.jobs.source.if).toBe("github.event_name == 'push' || github.event_name == 'release'");
+    expect(workflow.jobs.publish_sha.needs).toBe('source');
+    expect(workflow.on.release.types).toEqual(['published']);
+    expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(dockerPublishWorkflow).toContain('packages: write');
-    expect(dockerPublishWorkflow).toContain('tags: type=sha,format=long,prefix=sha-');
+    expect(dockerPublishWorkflow).toContain('tags: type=raw,value=sha-${{ needs.source.outputs.sha }}');
     expect(dockerPublishWorkflow).toContain('platforms: linux/amd64,linux/arm64');
   });
 
@@ -264,17 +266,20 @@ describe('Docker contract', () => {
   });
 
   test('preserves commit images and serializes main promotion', () => {
-    expect(dockerPublishWorkflow).toContain('group: docker-publish-sha-${{ github.sha }}');
-    expect(dockerPublishWorkflow).toContain('docker buildx imagetools inspect --raw "${commit_image}"');
-    expect(dockerPublishWorkflow).toContain("grep -Eiq 'manifest unknown|not found'");
+    expect(dockerPublishWorkflow).toContain('group: docker-publish-sha-${{ needs.source.outputs.sha }}');
+    expect(dockerPublishWorkflow).toContain('run: bun scripts/docker-release.js find');
+    expect(dockerPublishWorkflow).toContain("if: steps.existing.outputs.exists != 'true'");
     expect(dockerPublishWorkflow).toMatch(
       /group: docker-publish-main-tag\n\s+cancel-in-progress: false\n\s+queue: max/,
     );
-    expect(dockerPublishWorkflow).toContain('needs: publish_sha');
     expect(dockerPublishWorkflow).toContain('"${IMAGE}:main"');
     const workflow = Bun.YAML.parse(dockerPublishWorkflow);
-    expect(workflow.jobs.promote_main.needs).toEqual(['publish_sha', 'smoke']);
-    expect(workflow.jobs.smoke.needs).toBe('publish_sha');
+    expect(workflow.jobs.promote_main.needs).toEqual(['source', 'publish_sha', 'smoke']);
+    expect(workflow.jobs.promote_main.if).toBe("github.event_name == 'push'");
+    expect(workflow.jobs.promote_release.needs).toEqual(['source', 'publish_sha', 'smoke']);
+    expect(workflow.jobs.promote_release.if).toBe("github.event_name == 'release'");
+    expect(workflow.jobs.smoke.needs).toEqual(['source', 'publish_sha']);
+    expect(workflow.jobs.smoke.strategy.matrix.include.map(value => value.architecture)).toEqual(['amd64', 'arm64']);
     expect(workflow.jobs.smoke.steps.at(-1).run).toContain('bun run docker:smoke "${IMAGE}@${DIGEST}"');
     expect(rootPackage.scripts['docker:smoke']).toBe('bun scripts/smoke-docker.js');
   });

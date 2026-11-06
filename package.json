@@ -1,6 +1,6 @@
 {
   "name": "garcon",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "A cross-platform agentic coding UI for Claude Code, Codex, and Opencode",
   "type": "module",
   "main": "server/main.ts",
@@ -39,6 +39,7 @@
     "build-exe:smoke:windows-x64": "bun scripts/smoke-exe.js --target=windows-x64",
     "build-exe": "bun run check && bun run test && bun run build && bun run build-exe:compile && bun run build-exe:smoke",
     "docker:smoke": "bun scripts/smoke-docker.js",
+    "release:check": "bun scripts/release-version.js",
     "cli": "bun cli/main.ts",
     "server": "bun server/main.ts",
     "start": "bun scripts/start.js",
