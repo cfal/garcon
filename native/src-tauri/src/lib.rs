@@ -1,0 +1,106 @@
+mod chrome;
+mod connection;
+mod deployment;
+mod external_links;
+mod host;
+#[cfg(desktop)]
+mod loading;
+mod platform;
+mod selection;
+mod switcher;
+
+use selection::ServerSelection;
+use std::sync::Mutex;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            host::server_choices,
+            host::connect_server,
+            host::cancel_chooser,
+            host::remove_recent,
+            host::retry_connection,
+            host::cancel_connection,
+            host::show_connection
+        ])
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            chrome::setup()?;
+            let mode = platform::connection_mode(std::env::consts::OS);
+            let selection = if mode == platform::ConnectionMode::Disabled {
+                // Android's navigation callback excludes POST, including method-preserving redirects.
+                Err(
+                    "Server connections are unavailable in the Android build-only preview."
+                        .to_string(),
+                )
+            } else {
+                app.path()
+                    .app_data_dir()
+                    .map_err(|_| "Unable to locate the app settings directory.".to_string())
+                    .and_then(|directory| ServerSelection::load(directory.join("servers.json")))
+            };
+            app.manage(Mutex::new(switcher::Switcher::new(selection)));
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            host::install_menu(app.handle())?;
+            let dev_url = app.config().build.dev_url.clone();
+            let navigation_app = app.handle().clone();
+            let chooser =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Garcon")
+                    .inner_size(520.0, 720.0)
+                    .visible(cfg!(mobile))
+                    .disable_drag_drop_handler()
+                    .on_navigation(move |url| {
+                        let host = navigation_app.state::<host::Host>();
+                        let Ok(host) = host.lock() else {
+                            return false;
+                        };
+                        let active = host
+                            .windows
+                            .values()
+                            .next_back()
+                            .map(|window| &window.deployment);
+                        platform::main_navigation_allowed(mode, active, url, dev_url.as_ref())
+                    })
+                    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                    .build()?;
+            let handle = app.handle().clone();
+            chooser.on_window_event(move |event| {
+                #[cfg(desktop)]
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    loading::chooser_focus_changed(&handle, *focused);
+                }
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let host = handle.state::<host::Host>();
+                    let Ok(host) = host.lock() else {
+                        return;
+                    };
+                    #[cfg(desktop)]
+                    if let Some(attempt) = &host.attempt {
+                        api.prevent_close();
+                        let id = attempt.id;
+                        drop(host);
+                        let _ = loading::cancel(&handle, id);
+                        return;
+                    }
+                    if mode == platform::ConnectionMode::Switcher && !host.windows.is_empty() {
+                        api.prevent_close();
+                        let generation = host.generation;
+                        drop(host);
+                        if let Some(window) = handle.get_webview_window("main") {
+                            let _ = host::cancel_chooser(generation, window, handle.state());
+                        }
+                    } else {
+                        handle.exit(0);
+                    }
+                }
+            });
+            #[cfg(desktop)]
+            chrome::show_initial(&chooser)?;
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("failed to run Garcon native client");
+}

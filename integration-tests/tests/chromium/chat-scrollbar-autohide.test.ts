@@ -3,6 +3,7 @@ import { expect as browserExpect } from 'playwright/test';
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { authenticateChromiumContext, withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 test('chat scrollbar auto-hide preserves scrolling, focus, dragging and viewport geometry', async () => {
   await withChromiumFixture('chat-scrollbar-autohide', async ({ page, browser, integration, watchBrowserErrors }, phase) => {
@@ -134,6 +135,7 @@ test('chat scrollbar auto-hide preserves scrolling, focus, dragging and viewport
     watchBrowserErrors(touchContext);
     try {
       await authenticateChromiumContext(touchContext, integration);
+      await touchContext.addInitScript(seedLocalSettings, { allowDirectChats: true });
       const touchPage = await touchContext.newPage();
       await touchPage.goto(`${integration.garcon.baseUrl}/chat/${chats[0]}`);
       const touchViewport = touchPage.locator('[data-chat-scroll-viewport]:visible');

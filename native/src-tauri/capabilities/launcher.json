@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "Only the bundled launcher can select a server.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["allow-server-choices", "allow-connect-server", "allow-cancel-chooser", "allow-remove-recent", "allow-retry-connection", "allow-cancel-connection", "allow-show-connection"]
+}

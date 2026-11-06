@@ -1,6 +1,8 @@
 **/node_modules
 .git
 web/build
+native/**
+!native/package.json
 dist
 out
 .idea

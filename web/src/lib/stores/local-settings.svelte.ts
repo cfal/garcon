@@ -271,7 +271,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGrouping: 'project-and-activity',
+	sidebarGrouping: 'none',
 	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'single-line',
@@ -279,7 +279,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	selectedChatBoardId: null,
 	chatBoardItemLayout: null,
 	chatBoardActiveColumnByBoardId: {},
-	sidebarSortMode: 'manual',
+	sidebarSortMode: 'recent',
 	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
 	codeEditorVimMode: false,
@@ -584,20 +584,23 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	};
 }
 
-// Reads the persisted local settings snapshot.
-function readPersistedLocalSettings(): LocalSettingsSnapshot {
+function readPersistedLocalSettings(): LocalSettingsSnapshot | null {
 	try {
 		const raw = getLocalStorageItem(LOCAL_STORAGE_KEYS.localSettings);
-		if (raw) {
-			const parsed = JSON.parse(raw);
-			if (parsed && typeof parsed === 'object') {
-				return parseFromRaw(parsed);
-			}
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		if (
+			!parsed ||
+			typeof parsed !== 'object' ||
+			Array.isArray(parsed) ||
+			Object.keys(parsed).length === 0
+		) {
+			return null;
 		}
+		return parseFromRaw(parsed);
 	} catch {
-		// Corrupt storage
+		return null;
 	}
-	return { ...DEFAULTS };
 }
 
 function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
@@ -605,6 +608,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 }
 
 export class LocalSettingsStore {
+	readonly hadSavedSettingsOnLoad: boolean;
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	terminalAppearance = $state(DEFAULTS.terminalAppearance);
 	interfaceFont = $state(DEFAULTS.interfaceFont);
@@ -687,12 +691,13 @@ export class LocalSettingsStore {
 	#storageListener = (event: StorageEvent) => {
 		if (event.storageArea !== window.localStorage) return;
 		if (event.key !== null && event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
-		this.#apply(readPersistedLocalSettings());
+		this.#apply(readPersistedLocalSettings() ?? DEFAULTS);
 	};
 
 	constructor() {
 		const initial = readPersistedLocalSettings();
-		this.#apply(initial);
+		this.hadSavedSettingsOnLoad = initial !== null;
+		this.#apply(initial ?? DEFAULTS);
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', this.#storageListener);
 		}
@@ -702,6 +707,10 @@ export class LocalSettingsStore {
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('storage', this.#storageListener);
 		}
+	}
+
+	save(): void {
+		persistLocalSettings(this.snapshot());
 	}
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {

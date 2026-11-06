@@ -16,20 +16,60 @@ on:
       - bunfig.toml
       - patches/**
       - scripts/smoke-docker.js
+      - scripts/*release*.js
+      - scripts/__tests__/*release*.test.js
       - .github/workflows/docker-publish.yml
   push:
     branches:
       - main
+  release:
+    types: [published]
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  source:
+    name: Resolve Publication Source
+    if: github.event_name == 'push' || github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      image: ${{ steps.source.outputs.image }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - name: Bind source to the release manifest
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ github.event.release.id }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: bun scripts/release-github.js source
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+      - name: Validate source version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$GITHUB_EVENT_NAME" = release ]; then args+=("$RELEASE_TAG"); fi
+          version="$(bun scripts/release-version.js "${args[@]}")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
   verify_pr:
     name: Docker Controller And Executor Smoke
     if: github.event_name == 'pull_request'
@@ -47,9 +87,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
@@ -67,10 +107,16 @@ jobs:
 
   publish_sha:
     name: Publish Commit Image
-    if: github.event_name == 'push'
+    needs: source
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.source.outputs.image }}
+      SOURCE_SHA: ${{ needs.source.outputs.sha }}
     concurrency:
-      group: docker-publish-sha-${{ github.sha }}
+      group: docker-publish-sha-${{ needs.source.outputs.sha }}
       cancel-in-progress: false
     outputs:
       digest: ${{ steps.published.outputs.digest }}
@@ -79,7 +125,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
@@ -101,39 +152,13 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          tags: type=sha,format=long,prefix=sha-
+          flavor: latest=false
+          tags: type=raw,value=sha-${{ needs.source.outputs.sha }}
+          labels: org.opencontainers.image.revision=${{ needs.source.outputs.sha }}
 
       - name: Find existing commit image
         id: existing
-        run: |
-          set -euo pipefail
-          commit_image="${IMAGE}:sha-${GITHUB_SHA}"
-          manifest_path="${RUNNER_TEMP}/existing-manifest.json"
-          error_path="${RUNNER_TEMP}/existing-manifest-error.log"
-
-          if ! docker buildx imagetools inspect --raw "${commit_image}" > "${manifest_path}" 2> "${error_path}"; then
-            if grep -Eiq 'manifest unknown|not found' "${error_path}"; then
-              echo "exists=false" >> "${GITHUB_OUTPUT}"
-              exit 0
-            fi
-
-            cat "${error_path}" >&2
-            exit 1
-          fi
-
-          if ! jq -e '
-            [.manifests[]?.platform | select(.os == "linux") | .architecture] as $architectures
-            | ($architectures | index("amd64")) != null
-              and ($architectures | index("arm64")) != null
-          ' "${manifest_path}" > /dev/null; then
-            echo "Existing ${commit_image} is not the expected amd64/arm64 image index." >&2
-            exit 1
-          fi
-
-          digest="sha256:$(sha256sum "${manifest_path}" | cut -d ' ' -f 1)"
-          echo "exists=true" >> "${GITHUB_OUTPUT}"
-          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
-          echo "Reusing ${commit_image} at ${digest}." >> "${GITHUB_STEP_SUMMARY}"
+        run: bun scripts/docker-release.js find
 
       - name: Build and push image
         id: build
@@ -154,19 +179,22 @@ jobs:
         env:
           EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
           BUILT_DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          set -euo pipefail
-          digest="${EXISTING_DIGEST:-$BUILT_DIGEST}"
-          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Docker publication did not produce a valid digest." >&2
-            exit 1
-          fi
-          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+        run: bun scripts/docker-release.js resolve
 
   smoke:
     name: Verify Controller And Executor Image
-    needs: publish_sha
-    runs-on: ubuntu-24.04
+    needs: [source, publish_sha]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      IMAGE: ${{ needs.source.outputs.image }}
     permissions:
       contents: read
       packages: read
@@ -175,12 +203,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.3
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -192,14 +221,25 @@ jobs:
       - name: Pull and verify published image
         env:
           DIGEST: ${{ needs.publish_sha.outputs.digest }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          EXPECTED_VERSION: ${{ needs.source.outputs.version }}
         run: |
-          docker pull "${IMAGE}@${DIGEST}"
+          set -euo pipefail
+          docker pull --platform "linux/${ARCHITECTURE}" "${IMAGE}@${DIGEST}"
+          test "$(docker image inspect "${IMAGE}@${DIGEST}" --format '{{.Architecture}}')" = "$ARCHITECTURE"
           bun run docker:smoke "${IMAGE}@${DIGEST}"
 
   promote_main:
     name: Advance Main Tag
-    needs: [publish_sha, smoke]
+    if: github.event_name == 'push'
+    needs: [source, publish_sha, smoke]
     runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+      contents: read
+    env:
+      IMAGE: ${{ needs.source.outputs.image }}
+      SOURCE_SHA: ${{ needs.source.outputs.sha }}
     concurrency:
       group: docker-publish-main-tag
       cancel-in-progress: false
@@ -223,8 +263,8 @@ jobs:
         run: |
           set -euo pipefail
           head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq .commit.sha)"
-          if [ "${head_sha}" != "${GITHUB_SHA}" ]; then
-            echo "Built ${GITHUB_SHA}, but main is now ${head_sha}; leaving :main unchanged." >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${head_sha}" != "${SOURCE_SHA}" ]; then
+            echo "Built ${SOURCE_SHA}, but main is now ${head_sha}; leaving :main unchanged." >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
 
@@ -232,4 +272,40 @@ jobs:
             --tag "${IMAGE}:main" \
             "${IMAGE}@${DIGEST}"
           docker buildx imagetools inspect "${IMAGE}:main"
-          echo "Published ${IMAGE}:main and ${IMAGE}:sha-${GITHUB_SHA}." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Published ${IMAGE}:main and ${IMAGE}:sha-${SOURCE_SHA}." >> "${GITHUB_STEP_SUMMARY}"
+
+  promote_release:
+    name: Advance Release Tags
+    if: github.event_name == 'release'
+    needs: [source, publish_sha, smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: docker-publish-release-tags
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote verified release digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ needs.source.outputs.image }}
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          DIGEST: ${{ needs.publish_sha.outputs.digest }}
+          RELEASE_ID: ${{ github.event.release.id }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: bun scripts/docker-release.js promote

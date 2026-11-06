@@ -31,12 +31,10 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: "You're all set" });
-		expect(
-			screen.getByText(
-				'Your preferences are saved. Adjust them anytime in Settings > Appearance or Behavior.',
-			),
-		).toBeTruthy();
+		expect(screen.getByText('Your preferences are saved.')).toBeTruthy();
 	}
 
 	it('advances through the pages and moves focus to each page heading', async () => {
@@ -80,6 +78,15 @@ describe('OnboardingWizard', () => {
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('radio', { name: /Medium/ }));
 		expect(localSettings.chatMaxWidth).toBe('medium');
+
+		const showThinking = localSettings.showThinking;
+		const autoExpandTools = localSettings.autoExpandTools;
+		await fireEvent.click(screen.getByRole('switch', { name: 'Show thinking' }));
+		expect(localSettings.showThinking).toBe(!showThinking);
+		expect(localSettings.autoExpandTools).toBe(autoExpandTools);
+		await fireEvent.click(screen.getByRole('switch', { name: 'Always expand tool calls' }));
+		expect(localSettings.showThinking).toBe(!showThinking);
+		expect(localSettings.autoExpandTools).toBe(!autoExpandTools);
 	});
 
 	it('limits System slots to compatible concrete themes', async () => {
@@ -103,6 +110,49 @@ describe('OnboardingWizard', () => {
 			lightThemeId: 'classic-light',
 			darkThemeId: 'colorblind-dark',
 		});
+	});
+
+	it('persists sidebar organization and writing preferences without leaving setup', async () => {
+		const { localSettings } = renderWizard();
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		const grouping = screen.getByRole('combobox', { name: 'Chat grouping' });
+		expect((grouping as HTMLSelectElement).value).toBe('none');
+		expect(
+			(screen.getByRole('radio', { name: 'Recent activity' }) as HTMLInputElement).checked,
+		).toBe(true);
+		await fireEvent.change(grouping, { target: { value: 'project' } });
+		await fireEvent.click(screen.getByRole('radio', { name: 'Manual' }));
+		expect(localSettings.sidebarGrouping).toBe('project');
+		expect(localSettings.sidebarSortMode).toBe('manual');
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await fireEvent.click(screen.getByRole('radio', { name: 'Source' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Send by Shift+Enter' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Auto-scroll' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Reduce motion' }));
+		expect(localSettings.snapshot()).toMatchObject({
+			composerInputMode: 'source',
+			sendByShiftEnter: true,
+			autoScrollToBottom: false,
+			reduceMotion: true,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		expect(
+			(screen.getByRole('combobox', { name: 'Chat grouping' }) as HTMLSelectElement).value,
+		).toBe('project');
+	});
+
+	it('dismisses automatic setup even when closing before making any selection', async () => {
+		const { appShell, localSettings } = renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		expect(appShell.showOnboardingWizard).toBe(false);
+		expect(localSettings.hadSavedSettingsOnLoad).toBe(false);
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		restored.destroy();
 	});
 
 	it('previews a fixed family and pairs it when following System', async () => {
@@ -177,24 +227,24 @@ describe('OnboardingWizard', () => {
 		expect(appShell.showSettings).toBe(false);
 	});
 
-	it('returns from the done page to revise chat display settings', async () => {
+	it('returns from the done page to revise writing preferences', async () => {
 		renderWizard();
 		await advanceToDonePage();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
-		await screen.findByRole('heading', { name: 'Chat display' });
+		await screen.findByRole('heading', { name: 'Writing preferences' });
 	});
 
 	it('announces the current step position', async () => {
 		renderWizard();
 		await screen.findByRole('heading', { name: 'Choose your theme' });
-		const stepStatus = screen.getByText('Step 1 of 4');
+		const stepStatus = screen.getByText('Step 1 of 5');
 		expect(stepStatus.getAttribute('aria-live')).toBe('polite');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 4'));
+		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 5'));
 	});
 
 	it('restarts on the theme page after closing', async () => {

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect, type Page } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import type { TicketBootstrap, TicketWriteResult } from '../../../common/tickets.js';
 
 async function authenticationSettings(page: Page) {
@@ -73,6 +74,7 @@ test('confirmed logout clears browser data and sibling tabs but not another devi
       return event.defaultPrevented;
     })).toBe(true);
     const otherContext = await browser.newContext({ serviceWorkers: 'block' });
+    await otherContext.addInitScript(seedLocalSettings, { allowDirectChats: true });
     watchBrowserErrors(otherContext);
     const other = await otherContext.newPage();
     try {

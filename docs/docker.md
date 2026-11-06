@@ -18,7 +18,11 @@ docker compose pull garcon
 docker compose up --no-build -d
 ```
 
-The `main` tag advances after a successful build and controller/executor smoke test of the current `main` branch head. Every published commit also has an immutable `sha-<full commit SHA>` tag for pinned deployments. Pin controllers and executors to the same commit and upgrade them together; a matching package version alone does not guarantee executor protocol compatibility. Run the same pull and up commands to update a moving-tag installation.
+The `main` tag advances only after both amd64 and arm64 controller/executor smokes pass and the source remains the current `main` head. Every published commit has a `sha-<full commit SHA>` tag that CI reuses rather than overwrites. Digest/SHA images can exist before smokes finish; only aliases are gated by successful smokes.
+
+Starting with v0.4.0, human publication of a [GitHub release](releases.md) starts a separate Docker run. It checks the live tag against the release manifest, reuses or builds that exact commit, and smoke-tests both architectures before assigning `v0.4.0` (or the corresponding exact version). An existing version alias at a different digest fails rather than being overwritten. Only GitHub's current latest non-prerelease release advances `latest`; release runs never advance `main`. There are no minor/major aliases. Converting a prerelease to stable or changing GitHub's latest selection later does not trigger promotion.
+
+Docker promotion completes asynchronously after GitHub publication; wait for the Docker workflow before pulling a new version. Registry tags are protected by workflow policy, not registry-enforced immutability. Pin deployments to `ghcr.io/cfal/garcon@sha256:<digest>` for immutable content. Pin controllers and executors to the same image and upgrade them together; a matching package version alone does not guarantee executor protocol compatibility. Run the same pull and up commands to update a moving-tag installation. Floating base images and provider installers mean rebuilding a source commit is not necessarily byte-reproducible.
 
 The GHCR package must be public for anonymous pulls. The first publication creates the package; verify its visibility in the repository package settings.
 
@@ -204,4 +208,4 @@ The SSH step is needed only for SSH remotes. HTTPS remotes can use GitHub CLI au
 
 ## Image Validation
 
-After building an image, run `bun run docker:smoke garcon:local`. The smoke test uses an isolated Docker network, fresh named volumes, and no provider credentials or model calls. It checks the packaged CLI from `/projects`, controller web assets and authentication, both executor connection directions, explicit project roots, CLI grants, catalogs, restart persistence, and graceful shutdown. Only its own containers, volumes, and network are removed. CI runs this smoke on amd64 against the published commit digest before promoting `:main`; arm64 is built but not runtime-smoke-tested by this gate.
+After building an image, run `bun run docker:smoke garcon:local`. The smoke test uses an isolated Docker network, fresh named volumes, and no provider credentials or model calls. It checks the packaged CLI version against this checkout (or `EXPECTED_VERSION`), controller web assets and authentication, both executor connection directions, explicit project roots, CLI grants, catalogs, restart persistence, and graceful shutdown. Only its own containers, volumes, and network are removed. CI runs this smoke on native amd64 and arm64 runners against the published digest, checking the pulled architecture before promoting aliases. PRs build and smoke a local amd64 candidate without registry credentials or publication.

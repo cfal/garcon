@@ -19,7 +19,6 @@ export const LOCAL_STORAGE_KEYS = {
 	gitBranchSort: 'git.branchSort.v1',
 	gitHideOtherTabFiles: 'git.hideOtherTabFiles',
 	gitTreePaneWidthPx: 'git.treePaneWidthPx',
-	justRegistered: 'just-registered',
 	localSettings: 'pref_local_settings',
 	modelCatalog: 'pref_model_catalog_v4',
 	modelCatalogLegacy: 'pref_model_catalog_v3',

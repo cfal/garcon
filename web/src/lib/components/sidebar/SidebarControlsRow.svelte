@@ -33,6 +33,8 @@
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import { sidebarGroupingUsesProjects } from './sidebar-display-options';
+	import NativeServerChooserItem from './NativeServerChooserItem.svelte';
+	import NativeTitlebarItem from './NativeTitlebarItem.svelte';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
@@ -68,11 +70,11 @@
 	let {
 		isLoading,
 		visibleUnreadCount = 0,
-		chatGrouping = 'project',
+		chatGrouping = 'none',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'single-line',
 		showProjectPath = false,
-		sortMode = 'manual',
+		sortMode = 'recent',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
@@ -294,6 +296,8 @@
 					<Settings class="h-3.5 w-3.5" />
 					{m.settings_title()}
 				</DropdownMenuItem>
+				<NativeServerChooserItem />
+				<NativeTitlebarItem />
 			</DropdownMenuContent>
 		</DropdownMenu>
 	</div>

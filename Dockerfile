@@ -35,6 +35,7 @@ COPY common/package.json common/
 COPY server/package.json server/
 COPY web/package.json web/
 COPY cli/package.json cli/
+COPY native/package.json native/
 COPY server-agents/interface/package.json server-agents/interface/
 COPY server-agents/common/package.json server-agents/common/
 COPY server-agents/amp/package.json server-agents/amp/
@@ -49,7 +50,7 @@ COPY server-agents/opencode/package.json server-agents/opencode/
 COPY server-agents/pi/package.json server-agents/pi/
 COPY server-agents/shell/package.json server-agents/shell/
 
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --filter '!garcon-native'
 
 COPY common/ common/
 COPY cli/ cli/
