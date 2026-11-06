@@ -71,7 +71,7 @@ type ParsedCommandEdge =
 export function extractGarconCommands(
   message: ChatMessage,
 ): GarconCommandTransform | null {
-  if (message.type !== 'assistant-message') return null;
+  if (message.type !== 'assistant-message' || message.questions) return null;
 
   const content = message.content;
   const scanner = new GarconEnvelopeScanner(content);

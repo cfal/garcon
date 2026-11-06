@@ -4314,7 +4314,7 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events).map((message) => message.content)).toEqual(['Earlier progress.', text].filter(Boolean));
   });
 
-  it.each(['commentary', 'partial_answer'])('retains the latest final answer before trailing %s', async (phase) => {
+  it.each(['commentary', 'partial_answer', 'async-question'])('retains the latest final answer before trailing %s', async (phase) => {
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
@@ -4323,7 +4323,8 @@ describe('CodexAppServerRuntime', () => {
     const items = [
       { type: 'agentMessage', id: 'earlier-final', text: 'Earlier final.', phase: 'final_answer', memoryCitation: null },
       { type: 'agentMessage', id: 'latest-final', text: 'Latest final.', phase: 'final_answer', memoryCitation: null },
-      { type: 'agentMessage', id: 'trailing', text: 'Trailing nonterminal text.', phase, memoryCitation: null },
+      { type: 'agentMessage', id: 'trailing', text: 'Trailing nonterminal text.', phase: phase === 'async-question' ? 'final_answer' : phase,
+        ...(phase === 'async-question' ? { delivery: 'async', questions: [{ title: 'Which environment?' }] } : {}), memoryCitation: null },
     ];
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
       turn: makeTurn({ id: 'turn-1', status: 'completed', items, itemsView: 'summary' }) } });

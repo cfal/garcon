@@ -12,6 +12,7 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
+import { codexHistoricalQuestionReply } from './async-questions.js';
 import {
   convertCodexSubagentActivity,
   convertCodexInterAgentLifecycle,
@@ -234,7 +235,7 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
         // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/protocol/src/legacy_events.rs#L77-L94
         const clientId = asString(rawPayload.client_id)?.trim();
         result.isCanonicalUser = true;
-        result.canonical.push(new UserMessage(
+        result.canonical.push(codexHistoricalQuestionReply(ts, stripResolvedFileMentionContext(text), clientId) ?? new UserMessage(
           ts,
           stripResolvedFileMentionContext(text),
           undefined,
@@ -345,7 +346,8 @@ function normalizeResponseItem(
             textContent,
           );
           if (lifecycle) result.canonical.push(lifecycle);
-          else result.fallbackUser.push(new UserMessage(ts, stripResolvedFileMentionContext(textContent)));
+          else result.fallbackUser.push(codexHistoricalQuestionReply(ts, stripResolvedFileMentionContext(textContent))
+            ?? new UserMessage(ts, stripResolvedFileMentionContext(textContent)));
         }
         return result;
       }

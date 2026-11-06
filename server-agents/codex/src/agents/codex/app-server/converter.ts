@@ -27,6 +27,7 @@ import {
   type CompactionTrigger,
 } from '@garcon/common/chat-types';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
+import { codexAsyncQuestions, codexHistoricalQuestionReply } from '../async-questions.js';
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
@@ -74,6 +75,8 @@ export function convertCodexAppServerItem(
     case 'userMessage': {
       const text = userInputText(item.content);
       if (options.includeUserMessages === false) return [];
+      const reply = codexHistoricalQuestionReply(timestamp, stripResolvedFileMentionContext(text), item.clientId ?? undefined);
+      if (reply) return [reply];
       return text.trim()
         ? [new UserMessage(
             timestamp,
@@ -84,7 +87,9 @@ export function convertCodexAppServerItem(
         : [];
     }
     case 'agentMessage': {
-      return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];
+      return item.text?.trim() ? [new AssistantMessage(
+        timestamp, item.text, codexAsyncQuestions(item.id, item.delivery, item.questions),
+      )] : [];
     }
     case 'plan':
       return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];

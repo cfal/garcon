@@ -15,6 +15,7 @@ import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/reso
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
 import type { CodexAuthStatus } from './codex-auth.js';
+import { codexQuestionReplyInput } from './async-questions.js';
 import {
   assertCodexSessionEndpoint,
   buildCodexAppServerEndpointRuntime,
@@ -217,7 +218,7 @@ function prepareStartRequest(
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
-    command: carriedContext ? `${carriedContext}${request.prompt}` : request.prompt,
+    command: `${carriedContext ?? ''}${codexQuestionReplyInput(request.prompt, request.submission?.questionReply)}`,
     images: request.attachments,
     ...configuration,
   };
@@ -233,7 +234,7 @@ function prepareResumeRequest(
     ...executionFields(request),
     operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
-    command: request.prompt,
+    command: codexQuestionReplyInput(request.prompt, request.submission?.questionReply),
     images: request.attachments,
     nativePath: nativeSessions.decode(request.nativeSession).path,
     ...configuration,
