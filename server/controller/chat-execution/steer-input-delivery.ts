@@ -80,6 +80,7 @@ export class SteerInputDelivery {
         transcriptViewId: options.transcriptViewId,
         turnId: target.identity.turnId,
         commandType: 'steer',
+        questionReply: options.questionReply,
         userMessagePresentation,
       });
       if (!inserted) return { turnId: target.identity.turnId, duplicate: true };

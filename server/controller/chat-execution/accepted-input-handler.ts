@@ -265,6 +265,7 @@ export class AcceptedInputHandler {
           clientRequestId: input.command.clientRequestId,
           clientMessageId: input.clientMessageId,
           transcriptViewId: input.transcriptViewId,
+          questionReply: input.questionReply,
         },
         input.target,
         (turnId) => input.settlement.markScheduled(input.command, turnId),

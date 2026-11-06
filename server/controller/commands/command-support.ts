@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { asyncQuestionReplyText, parseAsyncQuestionReply, type AsyncQuestionReply } from '../../../common/async-user-questions.js';
 import type { DerivedChatNameInput } from '../chats/chat-title.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
@@ -469,6 +470,35 @@ export class CommandSupport {
       409,
       false,
     );
+  }
+
+  assertQuestionReply(input: {
+    chatId: string;
+    transcriptViewId: string;
+    expectedAgentId?: string;
+    expectedAgentOwnershipEpoch?: string;
+    questionReply?: AsyncQuestionReply;
+  }, content: string): void {
+    if (!input.questionReply) return;
+    const reply = parseAsyncQuestionReply(input.questionReply)!;
+    const chat = this.deps.chats.getChat(input.chatId);
+    if (!chat || input.expectedAgentId !== chat.agentId
+      || input.expectedAgentOwnershipEpoch !== chat.agentOwnershipEpoch) {
+      throw new CommandValidationError('STALE_CHAT_OWNERSHIP', 'The question belongs to a previous chat owner', 409);
+    }
+    const view = this.deps.transcripts.currentView(input.chatId);
+    const source = reply.source;
+    if (!source || source.chatId !== input.chatId || source.transcriptViewId !== input.transcriptViewId
+      || view?.viewId !== source.transcriptViewId || source.ordinal < view.contentStartOrdinal
+      || content !== asyncQuestionReplyText(reply)) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'The question source or reply text is invalid');
+    }
+    const row = this.deps.transcripts.replayRows(input.chatId, view.viewId, source.ordinal - 1, source.ordinal, 1)[0];
+    const question = row?.kind === 'provider-row' && row.message.type === 'assistant-message'
+      ? row.message.questions?.questions.find(question => question.id === reply.questionId) : undefined;
+    if (!question || question.prompt !== reply.question) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'The source does not contain this question');
+    }
   }
 
   async projectCommandChat(chatId: string): Promise<import('../../../common/chat-list.js').ChatListEntry> {
