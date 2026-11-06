@@ -90,7 +90,8 @@ function announcementLineage(row: ChatDisplayRow): string | null {
 	if (row.message.type === 'permission-request') return `permission:${row.message.permissionOccurrenceId}`;
 	if (row.message.type !== 'user-message') return null;
 	const id = row.message.metadata?.clientMessageId ?? row.message.metadata?.clientRequestId;
-	return id ? `input:${id}` : row.ordinal === undefined ? row.id : null;
+	if (id) return `input:${id}`;
+	return row.ordinal === undefined ? row.id : null;
 }
 
 export class ConversationFeedAnnouncerState {

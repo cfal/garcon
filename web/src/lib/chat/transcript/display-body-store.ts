@@ -1,9 +1,8 @@
-import type { DisplayBody, DisplayCertificate } from '$shared/transcript-display-contract';
+import { DISPLAY_BYTE_BUDGET, type DisplayBody, type DisplayCertificate } from '$shared/transcript-display-contract';
 
 type BodyIdentity = Pick<DisplayCertificate, 'serverInstanceId' | 'chatId' | 'transcriptViewId'>;
 interface CachedBody { body: DisplayBody; bytes: number }
 export interface DisplayBodyUsage { readonly count: number; readonly bytes: number; readonly oversized: number }
-const OVERSIZED_BODY_BYTES = 2 * 1024 * 1024;
 
 function key(identity: BodyIdentity, ordinal: number): string {
 	return JSON.stringify([identity.serverInstanceId, identity.chatId, identity.transcriptViewId, ordinal]);
@@ -35,7 +34,7 @@ export class DisplayBodyStore {
 	}
 	get metrics() {
 		return { bodies: this.count, bytes: this.#bytes, owners: this.#leases.size, received: this.#received, evictions: this.#evictions,
-			budgetException: this.activeOverBudget, oversized: [...this.#bodies.values()].filter(body => body.bytes > OVERSIZED_BODY_BYTES).length };
+			budgetException: this.activeOverBudget, oversized: [...this.#bodies.values()].filter(body => body.bytes > DISPLAY_BYTE_BUDGET).length };
 	}
 	setParked(owner: object, parked: boolean): void { if (parked) this.#parked.add(owner); else this.#parked.delete(owner); }
 
@@ -45,7 +44,7 @@ export class DisplayBodyStore {
 			const body = this.#bodies.get(address);
 			if (!body) continue;
 			count++; bytes += body.bytes;
-			if (body.bytes > OVERSIZED_BODY_BYTES) oversized++;
+			if (body.bytes > DISPLAY_BYTE_BUDGET) oversized++;
 		}
 		return { count, bytes, oversized };
 	}

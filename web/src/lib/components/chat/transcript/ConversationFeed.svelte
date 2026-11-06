@@ -392,12 +392,17 @@
 		void virtualController.waitForLayout().then(result => {
 			if (cancelled || result !== 'settled' || virtualController.ownsScrollPosition()) return;
 			const visibleItems = model.items.slice(range.startIndex, range.endIndex + 1);
-			const ordinals = visibleItems.flatMap(item =>
-				item.kind === 'tool-group' ? [item.descriptor.firstMember, item.descriptor.lastMember]
-				: item.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined ? [item.item.ordinal] : []);
+			const ordinals: number[] = [];
+			const rows: number[] = [];
+			for (const item of visibleItems) {
+				if (item.kind === 'tool-group') {
+					ordinals.push(item.descriptor.firstMember, item.descriptor.lastMember);
+				} else if (item.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined) {
+					ordinals.push(item.item.ordinal);
+					rows.push(item.item.ordinal);
+				}
+			}
 			if (ordinals.length) {
-				const rows = visibleItems.flatMap(item => item.kind === 'transcript' && item.item.kind === 'message'
-					&& item.item.ordinal !== undefined ? [item.item.ordinal] : []);
 				transcript.controller.trim(Math.min(...ordinals), Math.max(...ordinals), rows);
 			}
 		});
@@ -513,7 +518,6 @@
 						{retention}
 						{itemState}
 						renderModel={projection.renderModel}
-						showThinking={true}
 						{pendingPermissionRequests}
 						{chatContext}
 						earlierPageState={chatState.pageStates.earlier}

@@ -1,4 +1,6 @@
 import {
+	DISPLAY_BODY_LIMIT,
+	DISPLAY_BYTE_BUDGET,
 	displayCutsKey,
 	displayProfileKey,
 	sameDisplayCertificate,
@@ -8,6 +10,7 @@ import {
 	type DisplayDescriptor,
 	type DisplayProfile,
 	type DisplayTargetResolution,
+	type DisplayWindowRequest,
 	type GroupDescriptor,
 	type MemberWindowRequest,
 	type MemberWindowResponse,
@@ -320,7 +323,7 @@ export class DisplayWindowController {
 		return this.#run(async (signal, epoch) => {
 			const window = this.#snapshot.window, profile = this.#profile;
 			if (!window || !profile) return 'blocked';
-			if (window.certificate.profileKey !== displayProfileKey(profile) || window.certificate.cutsKey !== displayCutsKey(this.#cuts)) return 'blocked';
+			if (this.#needsReplace()) return 'blocked';
 			let page = await this.api.members({ certificate: window.certificate, profile, cuts: this.#cuts,
 				base: group.base, fragment: group.fragment, anchor, limit: 50 }, signal);
 			this.#assertCertificate(page.certificate, window.certificate);
@@ -409,9 +412,17 @@ export class DisplayWindowController {
 			const identity = this.#identity, profile = this.#profile, cuts = this.#cuts;
 			if (!identity || !profile) return 'blocked';
 			const fresh = mode === 'replace' || mode === 'details';
-			const goal = requiredThrough ?? (fresh ? this.#refreshGoal ??= this.#head : this.#head);
+			let goal = this.#head;
+			if (requiredThrough !== undefined) goal = requiredThrough;
+			else if (fresh) {
+				this.#refreshGoal ??= this.#head;
+				goal = this.#refreshGoal;
+			}
+			let watermarkRequest: Pick<DisplayWindowRequest, 'atWatermark' | 'requiredThrough'> = {};
+			if (atWatermark !== undefined) watermarkRequest = { atWatermark };
+			else if (fresh) watermarkRequest = { requiredThrough: goal };
 			const response = await this.api.window({ ...identity, profile, cuts, anchor, limit: mode === 'details' ? 1 : 50,
-				...(atWatermark !== undefined ? { atWatermark } : fresh ? { requiredThrough: goal } : {}) }, signal);
+				...watermarkRequest }, signal);
 			this.#assertCurrent(signal, epoch);
 			if (response.kind !== 'available') {
 				if (response.chatId !== identity.chatId || response.transcriptViewId !== identity.transcriptViewId
@@ -504,7 +515,7 @@ export class DisplayWindowController {
 					this.#assertCurrent(signal, epoch);
 					const response = await this.api.bodies({ certificate: detailsCertificate, profile, cuts: this.#cuts,
 						seedOrdinals, residentOrdinals: this.bodies.residentOrdinals(detailsCertificate, retained).filter(ordinal => ordinal <= detailsCertificate.watermark).slice(-2000),
-						limitBodies: 200, estimatedByteBudget: 2 * 1024 * 1024 }, signal);
+						limitBodies: DISPLAY_BODY_LIMIT, estimatedByteBudget: DISPLAY_BYTE_BUDGET }, signal);
 					this.#assertCurrent(signal, epoch);
 					this.#assertCertificate(response.certificate, detailsCertificate);
 					for (const detail of response.details) {

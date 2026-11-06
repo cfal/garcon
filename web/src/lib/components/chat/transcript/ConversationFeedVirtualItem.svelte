@@ -30,7 +30,6 @@
 	interface Props {
 		item: ConversationVirtualFeedItem;
 		renderModel: ConversationFeedRenderModel;
-		showThinking: boolean;
 		pendingPermissionRequests: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		earlierPageState: TranscriptPageState;
@@ -55,7 +54,6 @@
 	let {
 		item,
 		renderModel,
-		showThinking,
 		pendingPermissionRequests,
 		chatContext = null,
 		earlierPageState,
@@ -160,7 +158,6 @@
 		<ConversationTranscriptItem
 			item={item.item}
 			{renderModel}
-			{showThinking}
 			{pendingPermissionRequests}
 			{chatContext}
 			{onPermissionDecision}

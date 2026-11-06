@@ -94,8 +94,6 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			removeChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			isChatProcessing: (chatId) => chatId === selectedChat?.id && selectedChat.isProcessing,
-			applyProcessingEvent: vi.fn(),
-			reconcileProcessing: vi.fn(),
 			quietRefreshChats: vi.fn(),
 		},
 		chatState,
@@ -224,7 +222,7 @@ describe('buildRouterStores', () => {
 		api.open.mockReturnValueOnce(new Promise(done => { resolve = done; }));
 		const stores = buildRouterStores(deps);
 		try {
-			const activation = stores.chatState.loadMessages('chat-1', { purpose: 'activation' });
+			const activation = deps.chatState.loadMessages('chat-1', { purpose: 'activation' });
 			await vi.waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
 			const panels: ConversationPanelDescriptor[] = [{
 				surfaceId: 'chat-view:window-left', chatId: 'chat-1', presentation: 'window-left',

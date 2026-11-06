@@ -11,7 +11,6 @@ export interface DisplayProfile {
   readonly hiddenToolGroups: readonly HiddenToolGroup[];
   readonly bashRevision: string;
 }
-export interface CanonicalAddress { readonly chatId: string; readonly transcriptViewId: string; readonly ordinal: number }
 export interface DisplayCertificate {
   readonly serverInstanceId: string;
   readonly chatId: string;
