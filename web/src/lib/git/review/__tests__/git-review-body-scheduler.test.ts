@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GitReviewBodyScheduler } from '$lib/git/review/git-review-body-scheduler.js';
+import { unownedGitReviewLoadingPaths } from '$lib/git/review/git-review-demand-trace.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -10,6 +11,35 @@ function deferred<T>() {
 }
 
 describe('GitReviewBodyScheduler', () => {
+	it('preserves loading ownership throughout cancelled prefetch promotion', async () => {
+		const held = deferred<string>();
+		const loading = new Set<string>();
+		const unowned: string[][] = [];
+		const scheduler: GitReviewBodyScheduler<string> = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (_paths, purpose) => (purpose === 'prefetch' ? held.promise : Promise.resolve('ready')),
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: (paths, isLoading) => {
+				for (const path of paths) {
+					if (isLoading) loading.add(path);
+					else loading.delete(path);
+				}
+				const lost = unownedGitReviewLoadingPaths(loading, (path) => scheduler.hasPending(path));
+				if (lost.length > 0) unowned.push(lost);
+			},
+		});
+		scheduler.requestPrefetch(['neighbor', 'target']);
+		scheduler.requestNavigation(['target']);
+		scheduler.retainVisible(new Set());
+		scheduler.cancelPrefetch();
+		expect(unowned).toEqual([]);
+		expect([...loading]).toEqual(['target']);
+		held.resolve('late');
+		await vi.waitFor(() => expect(loading.size).toBe(0));
+		expect(unowned).toEqual([]);
+	});
+
 	it('publishes cancellation once, including after the aborted lane settles', async () => {
 		const held = deferred<string>();
 		const onLoadingChange = vi.fn();

@@ -89,17 +89,19 @@ export class GitReviewBodyScheduler<T> {
 			queued.push(...active.paths);
 			active.controller.abort();
 		}
-		this.queueVisible(
-			queued.filter(
-				(path) =>
-					!active?.published.has(path) &&
-					(this.visiblePaths.has(path) || this.navigationPaths.has(path)),
-			),
+		const promoted = this.unique(queued).filter(
+			(path) =>
+				!active?.published.has(path) &&
+				(this.visiblePaths.has(path) || this.navigationPaths.has(path)) &&
+				!this.hasPending(path),
 		);
+		// Promoted paths retain loading ownership while their abandoned siblings are released.
+		this.visibleQueue.unshift(...promoted);
 		if (queued.length > 0) {
 			const idle = queued.filter((path) => !this.hasPending(path));
 			if (idle.length > 0) this.options.onLoadingChange(idle, false);
 		}
+		this.pump('visible');
 	}
 
 	retainVisible(paths: ReadonlySet<string>): void {
