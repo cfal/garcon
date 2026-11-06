@@ -251,7 +251,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	async #loadPage(direction: 'earlier' | 'later', chatId: string, applicationGate?: TranscriptPageApplicationGate): Promise<TranscriptPageLoadResult> {
 		if (chatId !== this.activeChatId || this.controller.busy) return 'invalidated';
 		const epoch = ++this.#pageEpoch;
-		this.pageStates[direction] = { status: 'loading', error: null };
+		this.pageStates[direction] = { status: 'loading', error: this.pageStates[direction].error };
 		const result = await this.controller.load(direction, applicationGate);
 		if (epoch !== this.#pageEpoch) return 'invalidated';
 		this.pageStates[direction] = result === 'failed' ? { status: 'error', error: this.loadError } : idlePageState();
@@ -267,8 +267,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const epoch = ++this.#navigationEpoch;
 		this.#navigating = true;
 		try {
-			this.controller.setReadingAnchor(target === 'initial' ? 1 : null, target === 'latest');
-			const result = await (target === 'initial' ? this.controller.loadInitialWindow() : this.controller.refresh());
+			const result = await this.controller.navigateWindow(target);
 			if (epoch !== this.#navigationEpoch) return 'invalidated';
 			if (result === 'loaded') {
 				this.#mutations.record('replacement');

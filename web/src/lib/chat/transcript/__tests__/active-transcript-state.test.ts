@@ -90,18 +90,52 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(transcript.entries).toHaveLength(3);
 	});
 
-	it('[TLV5-PAGE.06-WEB-UNIT-01] preserves page failures and makes explicit retry use the display service', async () => {
+	it.each(['earlier', 'later'] as const)('[TLV5-PAGE.06-WEB-UNIT-01] preserves a failed %s page until its directional retry succeeds', async direction => {
+		vi.useFakeTimers();
 		const { transcript, api } = setup(100);
 		await transcript.loadMessages('chat-1');
+		if (direction === 'later') await transcript.navigateToWindow('chat-1', 'initial');
+		const load = () => direction === 'earlier' ? transcript.loadEarlierPage('chat-1') : transcript.loadLaterPage('chat-1');
+		const before = api.window.mock.calls.length;
 		api.window.mockRejectedValueOnce(new Error('read failed'));
-		expect(await transcript.loadEarlierPage('chat-1')).toBe('failed');
-		expect(transcript.pageStates.earlier).toEqual({ status: 'error', error: 'read failed' });
+		expect(await load()).toBe('failed');
+		expect(transcript.pageStates[direction]).toEqual({ status: 'error', error: 'read failed' });
 		expect(transcript.entries).toHaveLength(50);
-		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(10_000);
-		expect(api.window).toHaveBeenCalledTimes(2);
-		expect(await transcript.controller.retry()).toBe('loaded');
-		expect(api.retry).toHaveBeenCalledTimes(1);
+		expect(api.window).toHaveBeenCalledTimes(before + 1);
+		const read = api.window.getMockImplementation()!;
+		const held = Promise.withResolvers<void>();
+		api.window.mockImplementationOnce(async (...args) => { await held.promise; return read(...args); });
+		const retry = load();
+		expect(transcript.pageStates[direction]).toEqual({ status: 'loading', error: 'read failed' });
+		expect(transcript.loadError).toBe('read failed');
+		expect(api.window.mock.calls.at(-1)![0].anchor.kind).toBe(direction === 'earlier' ? 'before' : 'after');
+		held.resolve();
+		expect(await retry).toBe('loaded');
+		expect(transcript.pageStates[direction]).toEqual({ status: 'idle', error: null });
+		expect(transcript.loadError).toBeNull();
+	});
+
+	it.each((['initial', 'latest'] as const).flatMap(target =>
+		(['readiness', 'fallback', 'cancel'] as const).map(wake => ({ target, wake }))))('keeps $target navigation pending until $wake', async ({ target, wake }) => {
+		vi.useFakeTimers();
+		const { transcript, api } = setup(200);
+		await transcript.loadMessages('chat-1');
+		transcript.controller.setReadingAnchor(100, false);
+		api.window.mockImplementationOnce(async request => ({ kind: 'lagging', serverInstanceId: 'instance-1', chatId: 'chat-1',
+			transcriptViewId: 'view-1', policyRevision: 1, profileKey: displayProfileKey(request.profile),
+			bashRevision: request.profile.bashRevision, sourceHead: 200, preparedThrough: 0, retryAfterMs: 1500, errorCode: null }));
+		let settled = false;
+		const navigation = transcript.navigateToWindow('chat-1', target).then(result => { settled = true; return result; });
+		await vi.advanceTimersByTimeAsync(10);
+		expect(settled).toBe(false);
+		expect(transcript.controller.busy).toBe(true);
+		if (target === 'initial') expect(api.window.mock.calls.at(-1)![0].requiredThrough).toBe(1);
+		if (wake === 'cancel') transcript.invalidatePendingWindowNavigation();
+		else if (wake === 'readiness') transcript.controller.ready();
+		await vi.advanceTimersByTimeAsync(wake === 'fallback' ? 1500 : 1);
+		expect(await navigation).toBe(wake === 'cancel' ? 'invalidated' : 'loaded');
+		if (wake !== 'cancel') expect(transcript.entries[target === 'initial' ? 0 : transcript.entries.length - 1].ordinal).toBe(target === 'initial' ? 1 : 200);
 	});
 
 	it.each(['initial', 'latest'] as const)('supersedes held paging when navigating to %s', async target => {
@@ -221,12 +255,15 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(transcript.entries).toHaveLength(50);
 	});
 
-	it('waits for native-scroll settlement before replacing presentation', async () => {
+	it.each(['earlier', 'later'] as const)('stages a %s page until native-scroll settlement', async direction => {
 		const { transcript, api } = setup(100);
 		await transcript.loadMessages('chat-1');
+		if (direction === 'later') await transcript.navigateToWindow('chat-1', 'initial');
+		api.bodies.mockClear();
 		const gate = Promise.withResolvers<'apply'>();
-		const loading = transcript.loadEarlierPage('chat-1', { applicationGate: () => gate.promise });
-		await vi.waitFor(() => expect(api.bodies).toHaveBeenCalledTimes(3));
+		const options = { applicationGate: () => gate.promise };
+		const loading = direction === 'earlier' ? transcript.loadEarlierPage('chat-1', options) : transcript.loadLaterPage('chat-1', options);
+		await vi.waitFor(() => expect(api.bodies).toHaveBeenCalledTimes(2));
 		expect(transcript.entries).toHaveLength(50);
 		gate.resolve('apply');
 		expect(await loading).toBe('loaded');
@@ -248,16 +285,18 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(transcript.bodyStore.count).toBe(0);
 	});
 
-	it('ignores late activation success and failure after rapid chat switching', async () => {
+	it.each(['success', 'failure'] as const)('ignores late activation %s after rapid chat switching', async outcome => {
 		const { transcript, api, open } = setup();
 		const held = Promise.withResolvers<typeof open>();
 		api.open.mockImplementationOnce(() => held.promise);
 		const loading = transcript.loadMessages('chat-1');
 		transcript.activateChat('chat-2');
-		held.resolve(open);
+		if (outcome === 'success') held.resolve(open);
+		else held.reject(new Error('Synthetic stale open failure'));
 		expect(await loading).toEqual([]);
 		expect(transcript.openSnapshot).toBeNull();
 		expect(transcript.isLoadingMessages).toBe(false);
+		expect(transcript.loadError).toBeNull();
 		expect(api.window).not.toHaveBeenCalled();
 	});
 
@@ -318,6 +357,14 @@ describe('ActiveTranscriptState display authority', () => {
 });
 
 describe('surface-local overlays', () => {
+	it('marks optimistic rows awaiting delivery only until the input is delivered', async () => {
+		const { transcript, overlays } = setup();
+		await transcript.loadMessages('chat-1');
+		overlays.upsertOptimisticInput('chat-1', input('pending'), 3);
+		expect(transcript.overlayRows).toContainEqual(expect.objectContaining({ id: 'optimistic:pending', awaitingDelivery: true }));
+		overlays.markOptimisticInputDelivered('chat-1', 'pending');
+		expect(transcript.overlayRows).toContainEqual(expect.objectContaining({ id: 'optimistic:pending', awaitingDelivery: false }));
+	});
 	it('keeps the latest Bash revision across notice and optimistic cut changes', async () => {
 		const { transcript, overlays } = setup();
 		await transcript.loadMessages('chat-1');

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client.js';
-import type { AvailableDisplayWindow, DisplayTargetResolution } from '$shared/transcript-display-contract';
+import { displayProfileKey, type AvailableDisplayWindow, type DisplayTargetResolution } from '$shared/transcript-display-contract';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { displayOpen, displayRow, mockDisplayApi } from './display-fixtures.js';
 
@@ -9,6 +9,7 @@ const transcripts: ActiveTranscriptState[] = [];
 afterEach(() => {
 	for (const transcript of transcripts.splice(0)) transcript.dispose();
 	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 
 async function fixture() {
@@ -94,10 +95,69 @@ it.each([
 	});
 });
 
-it.each(['non-rendered', 'missing', 'preparing'] as const)('does not report success for %s targets', async kind => {
+it.each(['non-rendered', 'missing'] as const)('does not report success for %s targets', async kind => {
 	const { api, transcript } = await fixture();
 	api.resolve.mockResolvedValueOnce({ kind, ordinal: 100, landedOrdinal: null });
 	expect(await transcript.navigateToRow(target, new AbortController().signal, () => true)).toBe('unavailable');
+});
+
+it.each(['readiness', 'fallback', 'cancel'] as const)('retains resolver preparation until %s', async wake => {
+	vi.useFakeTimers();
+	const { api, transcript } = await fixture();
+	api.resolve.mockResolvedValueOnce({ kind: 'preparing', ordinal: 100, landedOrdinal: null });
+	const abort = new AbortController();
+	let settled = false;
+	const navigation = transcript.navigateToRow(target, abort.signal, () => true).then(result => { settled = true; return result; });
+	await vi.advanceTimersByTimeAsync(10);
+	expect(settled).toBe(false);
+	expect(transcript.controller.busy).toBe(true);
+	if (wake === 'cancel') abort.abort();
+	else if (wake === 'readiness') transcript.controller.ready();
+	await vi.advanceTimersByTimeAsync(wake === 'fallback' ? 1500 : 1);
+	expect(await navigation).toEqual(wake === 'cancel' ? 'cancelled' : {
+		kind: 'loaded', landedOrdinal: 100, revealDetail: false, targetMatched: true,
+	});
+	expect(api.resolve).toHaveBeenCalledTimes(wake === 'cancel' ? 1 : 2);
+});
+
+it.each([1000, 1001])('checks the authoritative head before navigating beyond the observed head, source=%s', async head => {
+	vi.useFakeTimers();
+	const { api, transcript } = await fixture();
+	const open = displayOpen(target.chatId, target.transcriptViewId, head);
+	api.replace([displayRow(100), displayRow(1000), ...(head === 1001 ? [displayRow(1001)] : [])], open);
+	const read = api.window.getMockImplementation()!;
+	api.window.mockImplementation(async (...args) => {
+		const [request] = args;
+		if ((request.requiredThrough ?? 0) <= head) return read(...args);
+		return { kind: 'lagging', serverInstanceId: open.serverInstanceId, chatId: target.chatId, transcriptViewId: target.transcriptViewId,
+			policyRevision: 1, profileKey: displayProfileKey(request.profile), bashRevision: request.profile.bashRevision,
+			sourceHead: head, preparedThrough: head, retryAfterMs: 1500, errorCode: null };
+	});
+	let settled = false;
+	const navigation = transcript.navigateToRow({ ...target, ordinal: 1001 }, new AbortController().signal, () => true)
+		.then(result => { settled = true; return result; });
+	await vi.advanceTimersByTimeAsync(10);
+	expect(settled).toBe(true);
+	expect(await navigation).toEqual(head === 1000 ? 'unavailable' : {
+		kind: 'loaded', landedOrdinal: 1001, revealDetail: false, targetMatched: true,
+	});
+	expect(api.open).toHaveBeenCalledOnce();
+});
+
+it.each(['DISPLAY_SUPERSEDED', 'DISPLAY_REVISION_CHANGED'] as const)('retries %s resolution without releasing navigation ownership', async code => {
+	vi.useFakeTimers();
+	const { api, transcript } = await fixture();
+	api.resolve.mockRejectedValueOnce(new ApiError(409, 'Synthetic transient conflict', code));
+	let settled = false;
+	const navigation = transcript.navigateToRow(target, new AbortController().signal, () => true).then(result => { settled = true; return result; });
+	await vi.advanceTimersByTimeAsync(10);
+	expect(settled).toBe(false);
+	expect(transcript.controller.busy).toBe(true);
+	expect(await transcript.controller.refresh()).toBe('blocked');
+	transcript.controller.ready();
+	await vi.advanceTimersByTimeAsync(1);
+	expect(await navigation).toEqual({ kind: 'loaded', landedOrdinal: 100, revealDetail: false, targetMatched: true });
+	expect(api.resolve).toHaveBeenCalledTimes(2);
 });
 
 it('leaves the current window intact on failure and exposes the error', async () => {
