@@ -2,7 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { AssistantMessage, UserMessage, parseChatMessage } from '../chat-types.js';
 import { asyncQuestionReplyText, parseAsyncQuestionReply, parseAsyncQuestionSet } from '../async-user-questions.js';
 import { extractGarconCommands } from '../garcon-commands.js';
-import { parseAgentRunCommandRequest, parseSteerCommandRequest, parseQueueEntryCreateCommandRequest, parseStartChatCommandRequest, parseForkRunCommandRequest } from '../chat-command-contracts.js';
+import { parseAgentRunCommandRequest, parseSteerCommandRequest, parseQueueEntryCreateCommandRequest, parseQueueEntryReplaceCommandRequest, parseQueueEntrySteerCommandRequest, parseStartChatCommandRequest, parseForkRunCommandRequest } from '../chat-command-contracts.js';
+import { parseSelfHandoffRunCommandRequest } from '../self-handoff-contracts.js';
 
 const question = { id: 'question-1', prompt: 'Which environment?', options: [{ id: 'option-0', label: 'Staging' }], allowFreeText: true };
 const questions = { id: 'message-1', questions: [question] };
@@ -55,8 +56,11 @@ describe('conversational questions', () => {
       expect(() => parseSteerCommandRequest({ ...request, content: command, ...fields })).toThrow();
     }
     expect(() => parseAgentRunCommandRequest({ ...request, command: 'Different text' })).toThrow();
-    for (const parse of [parseQueueEntryCreateCommandRequest, parseStartChatCommandRequest, parseForkRunCommandRequest]) {
-      expect(() => parse({ ...request, command, content: command })).toThrow('direct run or steer');
+    for (const parse of [parseQueueEntryCreateCommandRequest, parseQueueEntryReplaceCommandRequest,
+      parseQueueEntrySteerCommandRequest, parseStartChatCommandRequest, parseForkRunCommandRequest,
+      parseSelfHandoffRunCommandRequest]) {
+      expect(() => parse({ ...request, command, content: command, entryId: 'entry-1',
+        expectedRevision: 1, expectedReorderRevision: 0 })).toThrow('direct run or steer');
     }
   });
 });
