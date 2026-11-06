@@ -38,6 +38,14 @@ describe('conversational questions', () => {
       expect(() => parseAsyncQuestionReply(malformed)).toThrow();
     }
   });
+  it('preserves optional native sources and distinguishes invalid source errors', () => {
+    const nativeReply = { questionId: reply.questionId, question: reply.question, answer: reply.answer };
+    expect(parseAsyncQuestionReply(nativeReply)).toStrictEqual(nativeReply);
+    expect(parseAsyncQuestionReply(undefined)).toBeUndefined();
+    for (const source of [null, {}, { ...reply.source, ordinal: 1.5 }, { ...reply.source, extra: true }]) {
+      expect(() => parseAsyncQuestionReply({ ...reply, source })).toThrow('Invalid async question reply source');
+    }
+  });
   it('preserves typed correlation only on ownership-fenced direct run and steer', () => {
     const command = asyncQuestionReplyText(reply);
     expect(parseAgentRunCommandRequest({ ...request, command }).questionReply).toEqual(reply);

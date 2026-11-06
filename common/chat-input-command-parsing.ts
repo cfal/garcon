@@ -2,7 +2,10 @@ import { asyncQuestionReplyText, parseAsyncQuestionReply, type AsyncQuestionRepl
 import { parseUserMessagePresentation, type UserMessagePresentation } from './chat-types.js';
 import { CommandRequestValidationError, optionalNonEmptyString } from './command-request-validation.js';
 
-export function parseCommandQuestionReply(body: Record<string, unknown>, contentField: string): AsyncQuestionReply | undefined {
+export function parseCommandQuestionReply(
+  body: Record<string, unknown>,
+  contentField: 'command' | 'content',
+): AsyncQuestionReply | undefined {
   let reply: AsyncQuestionReply | undefined;
   try {
     reply = parseAsyncQuestionReply(body.questionReply);
@@ -10,14 +13,18 @@ export function parseCommandQuestionReply(body: Record<string, unknown>, content
     throw new CommandRequestValidationError('Invalid async question reply');
   }
   if (!reply) return undefined;
-  if (!reply.source || reply.source.chatId !== body.chatId
+  if (
+    !reply.source
+    || reply.source.chatId !== body.chatId
     || reply.source.transcriptViewId !== body.transcriptViewId
     || asyncQuestionReplyText(reply) !== body[contentField]
     || !optionalNonEmptyString(body, 'expectedAgentId')
     || !optionalNonEmptyString(body, 'expectedAgentOwnershipEpoch')
-    || body.whenTurnUnavailable === 'queue' || body.handoff !== undefined
+    || body.whenTurnUnavailable === 'queue'
+    || body.handoff !== undefined
     || body.userMessagePresentation !== undefined
-    || (Array.isArray(body.images) && body.images.length > 0)) {
+    || (Array.isArray(body.images) && body.images.length > 0)
+  ) {
     throw new CommandRequestValidationError('Question replies require their source view, ownership, and exact text without queueing or handoff');
   }
   return reply;

@@ -15,9 +15,6 @@ import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { AsyncDelivery } from './output.js';
 
-const MAX_CONTROL_DISPATCH_ATTEMPTS = RUN_OR_STEER_MAX_ATTEMPTS;
-const CONTROL_STATE_RETRY_DELAY_MS = RUN_OR_STEER_RETRY_DELAY_MS;
-
 export interface ChatControlClient {
   getChatSnapshot(
     chatId: string,
@@ -41,22 +38,6 @@ export interface ChatControlClient {
 export interface ChatControlDependencies {
   createId?: () => string;
   delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
-}
-
-function hasDefinitiveConflictCode(error: unknown, code: string): error is GarconHttpError {
-  // Route switches require the definitive HTTP 409 conflict plus the exact code;
-  // an identical code on another status must propagate unchanged.
-  return error instanceof GarconHttpError
-    && error.status === 409
-    && error.errorCode === code;
-}
-
-// Only these two definitive 409 rejections prove that the steering identity did
-// not deliver the input, so the chat may now accept a normal run. Provider
-// delivery failures and capability rejections never authorize a route switch.
-function isSafeSteerStateFlip(error: unknown): boolean {
-  return error instanceof GarconHttpError
-    && nextRunOrSteerRoute('steer', error.status, error.errorCode) === 'run';
 }
 
 // Alternates between the run and steer endpoints for at most three logical
@@ -91,7 +72,7 @@ export async function resumeChatAsync(
   let operation: 'run' | 'steer' = 'run';
   let lastStateFlip: GarconHttpError | undefined;
 
-  for (let attempt = 0; attempt < MAX_CONTROL_DISPATCH_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < RUN_OR_STEER_MAX_ATTEMPTS; attempt += 1) {
     try {
       if (operation === 'run') {
         const response = await client.runChat(runRequest, signal);
@@ -113,35 +94,31 @@ export async function resumeChatAsync(
       const response = await client.steerChat(request, signal);
       return { delivery: 'steer', response };
     } catch (error) {
-      if (operation === 'run') {
-        if (!hasDefinitiveConflictCode(error, 'SESSION_BUSY')) throw error;
-        if (!input.allowSteer) {
-          throw new CliError(
-            'submission',
-            `chat ${input.chatId} cannot accept a new turn: ${error.message}; `
-              + 'wait for the active turn, pass --allow-steer to steer it, '
-              + 'or resolve paused or queued work in Garcon',
-            3,
-            { cause: error },
-          );
-        }
-        lastStateFlip = error as GarconHttpError;
-        operation = 'steer';
-      } else {
-        if (!isSafeSteerStateFlip(error)) throw error;
-        lastStateFlip = error as GarconHttpError;
-        operation = 'run';
+      if (!(error instanceof GarconHttpError)) throw error;
+      const next = nextRunOrSteerRoute(operation, error.status, error.errorCode);
+      if (!next) throw error;
+      if (next === 'steer' && !input.allowSteer) {
+        throw new CliError(
+          'submission',
+          `chat ${input.chatId} cannot accept a new turn: ${error.message}; `
+            + 'wait for the active turn, pass --allow-steer to steer it, '
+            + 'or resolve paused or queued work in Garcon',
+          3,
+          { cause: error },
+        );
       }
+      lastStateFlip = error;
+      operation = next;
 
-      if (attempt === MAX_CONTROL_DISPATCH_ATTEMPTS - 1) break;
-      await delay(CONTROL_STATE_RETRY_DELAY_MS, signal);
+      if (attempt === RUN_OR_STEER_MAX_ATTEMPTS - 1) break;
+      await delay(RUN_OR_STEER_RETRY_DELAY_MS, signal);
     }
   }
 
   throw new CliError(
     'submission',
     `chat ${input.chatId} could not find a valid delivery route; the message was not sent after `
-      + `${MAX_CONTROL_DISPATCH_ATTEMPTS} attempts; inspect its active turn and paused or queued work `
+      + `${RUN_OR_STEER_MAX_ATTEMPTS} attempts; inspect its active turn and paused or queued work `
       + `in Garcon before retrying; last result: ${lastStateFlip?.message ?? 'execution state conflict'}`,
     3,
     { cause: lastStateFlip },
