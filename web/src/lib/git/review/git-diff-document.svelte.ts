@@ -115,8 +115,8 @@ export class GitDiffDocumentController {
 	constructor(private readonly syntax = new GitDiffSyntaxController()) {
 		this.demandReconciler = new GitReviewDemandReconciler({
 			currentDocumentId: () => this.snapshot?.documentId ?? null,
-			requestViewportPaths: (filePaths) => this.requestBodies(filePaths, 'visible'),
-			requestNavigationPaths: (filePaths) => this.requestBodies(filePaths, 'visible'),
+			requestViewportPaths: (filePaths) => this.requestViewportBodies(filePaths),
+			requestNavigationPaths: (filePaths) => this.requestNavigationBodies(filePaths),
 			reportOutcome: (demand, outcome) => {
 				traceGitReviewDemand({
 					stage: 'controller',
@@ -254,7 +254,7 @@ export class GitDiffDocumentController {
 		const [priority, ...prefetch] = snapshot.firstBodyCandidates;
 		if (priority) this.requestNavigationBodies([priority]);
 		this.demandReconciler.markReadinessChanged();
-		this.requestBodies(prefetch, 'prefetch');
+		this.requestBodies(prefetch.slice(0, 2), 'prefetch');
 	}
 
 	setDisplayOptions(diffMode: DiffMode, contextLines: number): void {
@@ -392,6 +392,12 @@ export class GitDiffDocumentController {
 			documentId,
 			filePaths: demand.filePaths,
 		});
+	}
+
+	private requestViewportBodies(filePaths: readonly string[]): GitReviewDemandOutcome {
+		this.bodyScheduler?.retainVisible(new Set(filePaths));
+		if (filePaths.length === 0) this.bodyScheduler?.cancelPrefetch();
+		return this.requestBodies(filePaths, 'visible');
 	}
 
 	private requestNavigationBodies(filePaths: readonly string[]): GitReviewDemandOutcome {

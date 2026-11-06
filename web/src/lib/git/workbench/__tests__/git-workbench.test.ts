@@ -374,7 +374,7 @@ describe('GitWorkbenchStore', () => {
 				expect.objectContaining({
 					signal: expect.any(AbortSignal),
 					selectedFile: null,
-					bodyCandidateCount: 8,
+					bodyCandidateCount: 3,
 				}),
 			);
 		});
@@ -796,7 +796,7 @@ describe('GitWorkbenchStore', () => {
 				5,
 				expect.objectContaining({
 					selectedFile: 'a.ts',
-					bodyCandidateCount: 8,
+					bodyCandidateCount: 3,
 				}),
 			);
 			expect(wb.loadedWorkbenchFingerprint).toBe('v1:new');

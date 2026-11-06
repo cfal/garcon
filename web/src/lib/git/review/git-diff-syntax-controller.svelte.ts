@@ -110,7 +110,6 @@ export class GitDiffSyntaxController {
 
 	replaceBodies(bodies: Record<string, GitReviewFileBody>): void {
 		this.bodies = bodies;
-		if (this.activeJob && !this.isCurrent(this.activeJob)) this.activeAbort?.abort();
 		this.pruneActiveResultsToBodies();
 		this.reconcileDemand();
 	}
@@ -156,7 +155,7 @@ export class GitDiffSyntaxController {
 	}
 
 	private reconcileDemand(): void {
-		if (this.activeJob && !this.isDemanded(this.activeJob.filePath)) this.activeAbort?.abort();
+		if (this.activeJob && !this.isCurrent(this.activeJob)) this.activeAbort?.abort();
 		this.queue = [];
 		this.queuedKeys.clear();
 		for (const filePath of this.navigationPaths) this.enqueue(filePath);

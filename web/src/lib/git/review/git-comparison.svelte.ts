@@ -223,7 +223,7 @@ export class GitComparisonController {
 				{ kind: 'revision', revision: fromRevision },
 				to,
 				mode,
-				{ context: requestContextLines, bodyCandidateCount: 8, signal: controller.signal },
+				{ context: requestContextLines, bodyCandidateCount: 3, signal: controller.signal },
 			);
 			if (!this.isCurrent(generation, project, controller.signal)) return false;
 			if (result.status !== 'ready') {

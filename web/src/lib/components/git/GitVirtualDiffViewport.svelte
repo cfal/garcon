@@ -117,10 +117,8 @@
 		return row?.kind === 'file-header' ? row : null;
 	});
 	let demandedFilePaths = $derived.by(() => {
-		const first = virtualItems[0]?.index;
-		const last = virtualItems.at(-1)?.index;
-		if (first === undefined || last === undefined) return [];
-		return source.filePathsInRange(first, last + 1);
+		const range = virtualSnapshot.visibleRange ?? fallbackRange(false);
+		return range ? source.filePathsInRange(range.startIndex, range.endIndex + 1) : [];
 	});
 	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (element, direction) => {
 		completeScrollRequest();
@@ -293,8 +291,8 @@
 		demandEffectRuns += 1;
 		const isActive = active;
 		const documentId = reviewDocumentId;
-		const filePaths = demandedFilePaths;
-		if (!isActive || !documentId || filePaths.length === 0) return;
+		const filePaths = isActive ? demandedFilePaths : [];
+		if (!documentId) return;
 		demandPublications += 1;
 		untrack(() => {
 			traceGitReviewDemand({
@@ -315,15 +313,16 @@
 
 	$effect(() => {
 		const activeDocumentId = reviewDocumentId;
-		const rows = renderedVirtualItems.map(({ row }) => row);
-		if (!activeDocumentId || rows.length === 0) return;
+		const range = virtualSnapshot.visibleRange ?? fallbackRange(false);
+		const rows = range ? source.rowsInRange(range.startIndex, range.endIndex + 1) : [];
+		if (!active || !activeDocumentId || rows.length === 0) return;
 		const hasPendingFile = rows.some(
 			(row) => row.filePath && source.fileState(row.filePath) === 'pending',
 		);
 		const hasRealDiffRow = rows.some(
 			(row) => row.kind === 'unified-row' || row.kind === 'split-row',
 		);
-		if (hasPendingFile || (!hasRealDiffRow && source.rowCount === 0)) return;
+		if (!hasRealDiffRow && hasPendingFile) return;
 		const readyDocumentId = activeDocumentId;
 		untrack(() => {
 			if (performanceFrame !== null) cancelAnimationFrame(performanceFrame);
@@ -331,7 +330,7 @@
 				performanceFrame = null;
 				if (reviewDocumentId !== readyDocumentId) return;
 				if (hasRealDiffRow) markGitReviewFirstRow(readyDocumentId);
-				markGitReviewViewportReady(readyDocumentId);
+				if (!hasPendingFile) markGitReviewViewportReady(readyDocumentId);
 			});
 		});
 		return () => {
@@ -374,9 +373,7 @@
 		scrollIntentRevision += 1;
 		pendingScrollRequestKey = requestKey;
 		const requestSequence = ++scrollRequestSequence;
-		const start = Math.max(0, targetIndex - 6);
-		const end = Math.min(source.rowCount, targetIndex + 36);
-		const priorityFilePaths = source.filePathsInRange(start, end);
+		const priorityFilePaths = [scrollToRequest.filePath];
 		const documentId = reviewDocumentId;
 		untrack(() => {
 			if (requestKey !== lastScrollRequestKey && documentId && priorityFilePaths.length > 0) {

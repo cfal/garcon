@@ -10,6 +10,31 @@ function deferred<T>() {
 }
 
 describe('GitReviewBodyScheduler', () => {
+	it('keeps selected work while dropping obsolete visible queues and hidden speculation', async () => {
+		const held = deferred<string>();
+		const calls: Array<{ paths: string[]; signal: AbortSignal }> = [];
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (paths, _purpose, signal) => {
+				calls.push({ paths, signal });
+				return held.promise;
+			},
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestNavigation(['selected']);
+		scheduler.requestVisible(['old']);
+		scheduler.requestPrefetch(['neighbor']);
+		scheduler.retainVisible(new Set());
+		scheduler.cancelPrefetch();
+		expect(calls[0].signal.aborted).toBe(false);
+		expect(calls[1].signal.aborted).toBe(true);
+		expect(scheduler.hasPending('old')).toBe(false);
+		held.resolve('selected');
+		await vi.waitFor(() => expect(scheduler.hasPending('selected')).toBe(false));
+		expect(calls.map((call) => call.paths)).toEqual([['selected'], ['neighbor']]);
+	});
 	it('publishes incrementally, retries only retained deferrals as singletons, and never republishes', async () => {
 		type Result = { deferred: string[] };
 		const batch = deferred<Result>();
@@ -194,7 +219,7 @@ describe('GitReviewBodyScheduler', () => {
 
 		expect(scheduler.hasPending('selected.ts')).toBe(true);
 		expect(scheduler.hasPending('b.ts')).toBe(false);
-		expect(loadingChanges).toContainEqual({ paths: ['b.ts'], loading: false });
+		expect(loadingChanges).toContainEqual({ paths: ['b.ts', 'a.ts'], loading: false });
 		visible.resolve('visible');
 		prefetch.resolve('prefetch');
 	});

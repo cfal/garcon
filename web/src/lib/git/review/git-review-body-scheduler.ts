@@ -29,11 +29,14 @@ export class GitReviewBodyScheduler<T> {
 	private prefetchActive: ActiveLane | null = null;
 	private generation = 0;
 	private readonly singletonPaths = new Set<string>();
+	private readonly navigationPaths = new Set<string>();
 
 	constructor(private readonly options: GitReviewBodySchedulerOptions<T>) {}
 
 	requestNavigation(paths: readonly string[]): boolean {
 		const unique = this.unique(paths);
+		this.navigationPaths.clear();
+		for (const path of unique) this.navigationPaths.add(path);
 		for (const path of unique) this.singletonPaths.add(path);
 		this.removeQueued(this.visibleQueue, unique);
 		return this.requestVisible(unique);
@@ -67,11 +70,13 @@ export class GitReviewBodyScheduler<T> {
 		this.visibleQueue.splice(0);
 		this.prefetchQueue.splice(0);
 		this.singletonPaths.clear();
+		this.navigationPaths.clear();
 		if (pending.length > 0) this.options.onLoadingChange(pending, false);
 	}
 
 	cancelPrefetch(): void {
 		const queued = this.prefetchQueue.splice(0);
+		queued.push(...(this.prefetchActive?.paths ?? []));
 		this.prefetchActive?.controller.abort();
 		if (queued.length > 0) {
 			const idle = queued.filter((path) => !this.hasPending(path));
@@ -80,13 +85,17 @@ export class GitReviewBodyScheduler<T> {
 	}
 
 	retainVisible(paths: ReadonlySet<string>): void {
-		const removed = this.visibleQueue.filter((path) => !paths.has(path));
+		const retained = new Set(paths);
+		for (const path of this.navigationPaths) retained.add(path);
+		const removed = this.visibleQueue.filter((path) => !retained.has(path));
 		this.removeQueued(this.visibleQueue, removed);
-		if (this.visibleActive) this.visibleActive.retained = new Set(paths);
-		if (this.visibleActive && !this.visibleActive.paths.some((path) => paths.has(path))) {
+		if (this.visibleActive) this.visibleActive.retained = retained;
+		if (this.visibleActive && !this.visibleActive.paths.some((path) => retained.has(path))) {
 			this.visibleActive.controller.abort();
+			removed.push(...this.visibleActive.paths);
 		}
-		if (removed.length > 0) this.options.onLoadingChange(removed, false);
+		const idle = this.unique(removed).filter((path) => !this.hasPending(path));
+		if (idle.length > 0) this.options.onLoadingChange(idle, false);
 	}
 
 	hasPending(path: string): boolean {
@@ -142,7 +151,10 @@ export class GitReviewBodyScheduler<T> {
 			if (generation !== this.generation || controller.signal.aborted) return;
 			const fresh = completed.filter((path) => paths.includes(path) && !published.has(path));
 			if (fresh.length === 0) return;
-			for (const path of fresh) published.add(path);
+			for (const path of fresh) {
+				published.add(path);
+				this.navigationPaths.delete(path);
+			}
 			this.options.onResult(result, fresh, purpose);
 			if (generation === this.generation && !controller.signal.aborted)
 				this.options.onLoadingChange(fresh, false);
@@ -184,6 +196,7 @@ export class GitReviewBodyScheduler<T> {
 				}
 				this.pump(purpose);
 				const idle = paths.filter((path) => !this.hasPending(path));
+				for (const path of idle) this.navigationPaths.delete(path);
 				if (idle.length > 0) this.options.onLoadingChange(idle, false);
 			});
 	}

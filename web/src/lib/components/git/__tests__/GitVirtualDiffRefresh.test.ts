@@ -486,7 +486,11 @@ describe('Git virtual diff refresh', () => {
 
 		await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(1));
 		expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([]);
-		expect(props.onBodyDemand).not.toHaveBeenCalled();
+		expect(props.onBodyDemand).toHaveBeenCalledExactlyOnceWith({
+			kind: 'viewport',
+			documentId: 'doc-a',
+			filePaths: [],
+		});
 
 		await rerender({ ...props, active: true });
 

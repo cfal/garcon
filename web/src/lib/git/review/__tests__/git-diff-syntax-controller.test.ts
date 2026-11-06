@@ -248,7 +248,7 @@ describe('GitDiffSyntaxController stale work', () => {
 		expect(highlighter).toHaveBeenCalledTimes(2);
 		expect(controller.results['a.ts']?.cacheKey).toContain('b'.repeat(64));
 	});
-	it('requeues a demanded file when rapid navigation returns before its cancellation settles', async () => {
+	it('retains active syntax work across rapid viewport changes without recomputing it', async () => {
 		const pending = deferred<GitDiffSyntaxAttempt>();
 		const highlighter = vi.fn(async (value: GitDiffSyntaxFileInput) => highlighted(value));
 		highlighter.mockImplementationOnce(() => pending.promise);
@@ -258,9 +258,9 @@ describe('GitDiffSyntaxController stale work', () => {
 		await flushPromises();
 		controller.handleDemand(demand('doc', []));
 		controller.handleDemand(demand('doc', ['a.ts']));
-		pending.resolve({ status: 'cancelled' });
+		pending.resolve(highlighted(highlighter.mock.calls[0][0]));
 		await flushPromises();
-		expect(highlighter).toHaveBeenCalledTimes(2);
+		expect(highlighter).toHaveBeenCalledTimes(1);
 		expect(controller.results['a.ts']).toBeDefined();
 	});
 	it('does not publish an aborted result even when its document and fingerprint still match', async () => {
@@ -275,6 +275,8 @@ describe('GitDiffSyntaxController stale work', () => {
 		controller.handleDemand(demand('doc', ['a.ts']));
 		await flushPromises();
 		controller.handleDemand(demand('doc', []));
+		expect(signal?.aborted).toBe(false);
+		controller.invalidateFile('a.ts');
 		expect(signal?.aborted).toBe(true);
 		pending.resolve(highlighted(highlighter.mock.calls[0][0]));
 		await flushPromises();

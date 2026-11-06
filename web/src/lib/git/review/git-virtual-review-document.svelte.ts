@@ -209,7 +209,10 @@ export class GitVirtualReviewDocumentController {
 		this.demandReconciler = new GitReviewDemandReconciler({
 			currentDocumentId: () => this.summary?.documentId ?? null,
 			requestViewportPaths: (filePaths) => this.requestDemandPaths(filePaths),
-			requestNavigationPaths: (filePaths) => this.requestDemandPaths(filePaths),
+			requestNavigationPaths: (filePaths) => {
+				const projectPath = this.deps.targetProjectPath();
+				return projectPath ? this.requestNavigationBodies(projectPath, filePaths) : 'not-ready';
+			},
 			reportOutcome: (demand, outcome) => {
 				traceGitReviewDemand({
 					stage: 'controller',
@@ -230,7 +233,7 @@ export class GitVirtualReviewDocumentController {
 		return this.summary?.files.find((file) => file.path === filePath) ?? null;
 	}
 
-	applySummary(summary: GitReviewDocumentSummary | null): void {
+	applySummary(summary: GitReviewDocumentSummary | null, firstBodyCandidates: string[] = []): void {
 		this.suspended = false;
 		this.deps.invalidateSelections();
 		const nextBodies = summary ? this.retainedBodiesForSummary(summary) : {};
@@ -248,6 +251,8 @@ export class GitVirtualReviewDocumentController {
 			this.fileBodies = {};
 			this.syntax.close({ preserveCache: true });
 		}
+		const projectPath = this.deps.targetProjectPath();
+		if (projectPath && summary) this.requestInitialBodies(projectPath, firstBodyCandidates);
 		this.demandReconciler.markReadinessChanged();
 	}
 
@@ -290,7 +295,7 @@ export class GitVirtualReviewDocumentController {
 	requestInitialBodies(projectPath: string, filePaths: string[]): void {
 		const [priority, ...prefetch] = unique(filePaths);
 		if (priority) this.requestNavigationBodies(projectPath, [priority]);
-		this.requestBodies(projectPath, prefetch, 'prefetch');
+		this.requestBodies(projectPath, prefetch.slice(0, 2), 'prefetch');
 	}
 
 	requestBodies(
@@ -410,6 +415,8 @@ export class GitVirtualReviewDocumentController {
 	}
 
 	private requestDemandPaths(filePaths: readonly string[]): GitReviewDemandOutcome {
+		this.bodyScheduler?.retainVisible(new Set(filePaths));
+		if (filePaths.length === 0) this.bodyScheduler?.cancelPrefetch();
 		const projectPath = this.deps.targetProjectPath();
 		if (!projectPath) return 'not-ready';
 		return this.requestBodies(projectPath, filePaths, 'visible');
