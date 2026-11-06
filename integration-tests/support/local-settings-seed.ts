@@ -3,12 +3,19 @@
 // Puppeteer evaluateOnNewDocument callback, so it must stay self-contained
 // (no closures over module state).
 export function seedLocalSettings(overrides: Record<string, unknown>): void {
+  // Context init scripts also run on opaque about:blank documents.
+  let storage: Storage;
+  try {
+    storage = globalThis.localStorage;
+  } catch {
+    return;
+  }
   const key = 'pref_local_settings';
   try {
-    const stored = JSON.parse(globalThis.localStorage.getItem(key) ?? '{}');
+    const stored = JSON.parse(storage.getItem(key) ?? '{}');
     const snapshot = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
-    globalThis.localStorage.setItem(key, JSON.stringify({ ...snapshot, ...overrides }));
+    storage.setItem(key, JSON.stringify({ ...snapshot, ...overrides }));
   } catch {
-    globalThis.localStorage.setItem(key, JSON.stringify(overrides));
+    storage.setItem(key, JSON.stringify(overrides));
   }
 }

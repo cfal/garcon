@@ -18,6 +18,38 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([null, '', '{}', 'null', '[]', '42', '{invalid'])(
+		'offers setup without usable saved preferences: %s',
+		(raw) => {
+			if (raw !== null) localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, raw);
+			const store = createLocalSettingsStore();
+			expect(store.hadSavedSettingsOnLoad).toBe(false);
+			store.destroy();
+		},
+	);
+
+	it('saves default preferences on dismissal without adding an onboarding flag', () => {
+		const store = createLocalSettingsStore();
+		store.save();
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toEqual(store.snapshot());
+		expect(store.hadSavedSettingsOnLoad).toBe(false);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('recognizes existing preferences and captures freshness before early setting writes', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarGrouping', 'project');
+		expect(store.hadSavedSettingsOnLoad).toBe(false);
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		expect(restored.sidebarGrouping).toBe('project');
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('defaults the new category preferences independently of obsolete settings', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,

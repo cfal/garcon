@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { TicketBootstrap, TicketWriteResult } from '../../../common/tickets.js';
 import { authenticateChromiumContext, withChromiumFixture } from '../../support/chromium-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 async function openPasswordSettings(page: Page) {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
@@ -34,6 +35,7 @@ test('separate credential forms retain source, sibling, and other-device work on
     const otherContext = await browser.newContext({ serviceWorkers: 'block' });
     watchBrowserErrors(otherContext);
     await authenticateChromiumContext(otherContext, integration);
+    await otherContext.addInitScript(seedLocalSettings, { allowDirectChats: true });
     const other = await otherContext.newPage();
     try {
       for (const [target, text] of [[page, 'Source draft'], [peer, 'Sibling draft'], [other, 'Other-device draft']] as const) {

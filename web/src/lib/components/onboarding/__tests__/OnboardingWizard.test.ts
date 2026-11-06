@@ -31,6 +31,8 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: "You're all set" });
 		expect(
 			screen.getByText(
@@ -105,6 +107,49 @@ describe('OnboardingWizard', () => {
 		});
 	});
 
+	it('persists sidebar organization and writing preferences without leaving setup', async () => {
+		const { localSettings } = renderWizard();
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		const grouping = screen.getByRole('combobox', { name: 'Chat grouping' });
+		expect((grouping as HTMLSelectElement).value).toBe('none');
+		expect(
+			(screen.getByRole('radio', { name: 'Recent activity' }) as HTMLInputElement).checked,
+		).toBe(true);
+		await fireEvent.change(grouping, { target: { value: 'project' } });
+		await fireEvent.click(screen.getByRole('radio', { name: 'Manual' }));
+		expect(localSettings.sidebarGrouping).toBe('project');
+		expect(localSettings.sidebarSortMode).toBe('manual');
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await fireEvent.click(screen.getByRole('radio', { name: 'Source' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Send by Shift+Enter' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Auto-scroll' }));
+		await fireEvent.click(screen.getByRole('switch', { name: 'Reduce motion' }));
+		expect(localSettings.snapshot()).toMatchObject({
+			composerInputMode: 'source',
+			sendByShiftEnter: true,
+			autoScrollToBottom: false,
+			reduceMotion: true,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		expect(
+			(screen.getByRole('combobox', { name: 'Chat grouping' }) as HTMLSelectElement).value,
+		).toBe('project');
+	});
+
+	it('dismisses automatic setup even when closing before making any selection', async () => {
+		const { appShell, localSettings } = renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		expect(appShell.showOnboardingWizard).toBe(false);
+		expect(localSettings.hadSavedSettingsOnLoad).toBe(false);
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		restored.destroy();
+	});
+
 	it('previews a fixed family and pairs it when following System', async () => {
 		const { localSettings } = renderWizard();
 		await screen.findByRole('heading', { name: 'Choose your theme' });
@@ -177,24 +222,24 @@ describe('OnboardingWizard', () => {
 		expect(appShell.showSettings).toBe(false);
 	});
 
-	it('returns from the done page to revise chat display settings', async () => {
+	it('returns from the done page to revise writing preferences', async () => {
 		renderWizard();
 		await advanceToDonePage();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
-		await screen.findByRole('heading', { name: 'Chat display' });
+		await screen.findByRole('heading', { name: 'Writing preferences' });
 	});
 
 	it('announces the current step position', async () => {
 		renderWizard();
 		await screen.findByRole('heading', { name: 'Choose your theme' });
-		const stepStatus = screen.getByText('Step 1 of 4');
+		const stepStatus = screen.getByText('Step 1 of 5');
 		expect(stepStatus.getAttribute('aria-live')).toBe('polite');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 4'));
+		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 5'));
 	});
 
 	it('restarts on the theme page after closing', async () => {

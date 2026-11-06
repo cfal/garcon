@@ -40,21 +40,19 @@ describe('OnboardingWizardState', () => {
 		expect(wizard.pageIndex).toBe(ONBOARDING_PAGE_IDS.length - 1);
 
 		wizard.back();
-		expect(wizard.pageId).toBe('chat-display');
+		expect(wizard.pageId).toBe('writing');
 	});
 
 	it('writes each selection to its local setting', () => {
 		const { wizard, localSettings } = createWizard();
 
 		wizard.selectTheme({ mode: 'fixed', themeId: 'classic-dark' });
-		wizard.selectChatItemLayout('single-line');
 		wizard.selectChatMaxWidth('medium');
 
 		expect(localSettings.themePreference).toEqual({
 			mode: 'fixed',
 			themeId: 'classic-dark',
 		});
-		expect(localSettings.sidebarChatItemLayout).toBe('single-line');
 		expect(localSettings.chatMaxWidth).toBe('medium');
 	});
 
@@ -71,9 +69,13 @@ describe('OnboardingWizardState', () => {
 	});
 
 	it('finishes by closing, or closes and opens providers', () => {
-		const { wizard, onClose, onOpenProviders } = createWizard();
+		const { wizard, localSettings, onClose, onOpenProviders } = createWizard();
 
 		wizard.finish();
+		expect(localSettings.hadSavedSettingsOnLoad).toBe(false);
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		restored.destroy();
 		expect(onClose).toHaveBeenCalledOnce();
 		expect(onOpenProviders).not.toHaveBeenCalled();
 

@@ -1526,6 +1526,8 @@
 	"onboarding_done_start": "Start using Garcon",
 	"onboarding_done_providers": "Set up API providers",
 	"onboarding_restart_wizard": "Restart setup wizard",
+	"onboarding_writing_title": "Writing preferences",
+	"onboarding_writing_description": "Make yourself at home.",
 	"onboarding_setup_wizard_label": "Setup wizard",
 	"onboarding_restart_wizard_hint": "Walk through the initial setup steps again.",
 	"agent_amp": "Amp",

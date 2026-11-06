@@ -5,6 +5,7 @@ import { expect as browserExpect, webkit } from 'playwright/test';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { requireCurrentWebBuild } from '../../support/web-build-gate.js';
 import { withTimeout } from '../../support/deferred.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
   test(`WebKit login, chat delivery and reload at ${viewport.width}px`, async () => {
@@ -14,6 +15,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       let failed = false;
       try {
         const context = await browser.newContext({ viewport, serviceWorkers: 'block', hasTouch: viewport.width === 390 });
+        await context.addInitScript(seedLocalSettings, { allowDirectChats: true });
         const errors: string[] = [];
         context.on('weberror', event => errors.push(`pageerror: ${event.error().message}`));
         context.on('console', message => {

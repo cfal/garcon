@@ -1,6 +1,3 @@
-<!-- First-run setup wizard: theme, sidebar chat layout, and chat display
-     preferences across paged steps. Selections persist immediately so each
-     choice applies live behind the dialog. -->
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -10,13 +7,13 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
 	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
-	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import {
 		OnboardingWizardState,
 		type OnboardingPageId,
 	} from './onboarding-wizard-state.svelte.js';
 	import { ONBOARDING_OPTION_CARD_CLASS } from './onboarding-option-card.js';
-	import OnboardingChatLayoutPreview from './OnboardingChatLayoutPreview.svelte';
+	import OnboardingSidebarPage from './OnboardingSidebarPage.svelte';
+	import OnboardingWritingPage from './OnboardingWritingPage.svelte';
 	import OnboardingThemePage from './OnboardingThemePage.svelte';
 
 	const appShell = getAppShell();
@@ -28,10 +25,11 @@
 	});
 
 	function handleOpenChange(open: boolean) {
-		if (!open) appShell.closeOnboardingWizard();
+		if (!open) wizard.finish();
 	}
 
 	let pageTitleElement = $state<HTMLElement | null>(null);
+	let pageBodyElement = $state<HTMLDivElement | null>(null);
 
 	function handleOpenAutoFocus(event: Event): void {
 		event.preventDefault();
@@ -42,6 +40,7 @@
 	// technology announces the new page; focus otherwise stays on Continue.
 	$effect(() => {
 		wizard.pageIndex;
+		if (pageBodyElement) pageBodyElement.scrollTop = 0;
 		pageTitleElement?.focus();
 	});
 
@@ -49,36 +48,16 @@
 		theme: m.onboarding_theme_title,
 		'chat-layout': m.onboarding_layout_title,
 		'chat-display': m.onboarding_chat_display_title,
+		writing: m.onboarding_writing_title,
 		done: m.onboarding_done_title,
 	};
 	const pageDescriptions: Record<OnboardingPageId, () => string> = {
 		theme: m.onboarding_theme_description,
 		'chat-layout': m.onboarding_layout_description,
 		'chat-display': m.onboarding_chat_display_description,
+		writing: m.onboarding_writing_description,
 		done: m.onboarding_done_description,
 	};
-
-	const layoutOptions: Array<{
-		value: ChatItemLayout;
-		label: () => string;
-		hint: () => string;
-	}> = [
-		{
-			value: 'single-line',
-			label: m.onboarding_layout_single_line,
-			hint: m.onboarding_layout_single_line_hint,
-		},
-		{
-			value: 'compact',
-			label: m.onboarding_layout_compact,
-			hint: m.onboarding_layout_compact_hint,
-		},
-		{
-			value: 'detailed',
-			label: m.onboarding_layout_detailed,
-			hint: m.onboarding_layout_detailed_hint,
-		},
-	];
 
 	const chatMaxWidthOptions: Array<{
 		value: ChatMaxWidth;
@@ -94,12 +73,12 @@
 
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="max-h-[85vh] overflow-y-auto sm:max-w-xl"
+		class="flex h-[38rem] max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
 	>
-		<Dialog.Header>
-			<p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+		<Dialog.Header class="shrink-0 px-6 pt-6 pb-4 text-left">
+			<p class="text-xs font-medium text-muted-foreground">
 				{m.onboarding_wizard_title()}
 			</p>
 			<Dialog.Title
@@ -112,35 +91,11 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="min-h-40">
+		<div bind:this={pageBodyElement} class="min-h-0 flex-1 overflow-y-auto px-6 py-2">
 			{#if wizard.pageId === 'theme'}
 				<OnboardingThemePage onSelect={(preference) => wizard.selectTheme(preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
-				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-					<legend class="sr-only">{m.onboarding_layout_title()}</legend>
-					{#each layoutOptions as option (option.value)}
-						<label class={ONBOARDING_OPTION_CARD_CLASS}>
-							<input
-								type="radio"
-								class="sr-only"
-								name="onboarding-layout"
-								value={option.value}
-								checked={ls.sidebarChatItemLayout === option.value}
-								onchange={() => wizard.selectChatItemLayout(option.value)}
-							/>
-							<div class="flex w-full flex-1 items-center">
-								<OnboardingChatLayoutPreview
-									layout={option.value}
-									isSelected={ls.sidebarChatItemLayout === option.value}
-								/>
-							</div>
-							<span class="flex flex-col items-center gap-1">
-								<span class="text-sm font-medium text-foreground">{option.label()}</span>
-								<span class="text-xs text-muted-foreground">{option.hint()}</span>
-							</span>
-						</label>
-					{/each}
-				</fieldset>
+				<OnboardingSidebarPage />
 			{:else if wizard.pageId === 'chat-display'}
 				<fieldset>
 					<legend class="mb-2 text-sm font-medium text-foreground">
@@ -191,6 +146,8 @@
 						/>
 					</div>
 				</div>
+			{:else if wizard.pageId === 'writing'}
+				<OnboardingWritingPage />
 			{:else}
 				<div class="flex flex-col items-center gap-3 py-6 text-center">
 					<span
@@ -202,7 +159,9 @@
 			{/if}
 		</div>
 
-		<Dialog.Footer class="flex-row items-center justify-between gap-2 sm:justify-between">
+		<Dialog.Footer
+			class="shrink-0 flex-row flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-4 sm:justify-between"
+		>
 			<div class="flex items-center gap-2">
 				<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
 					{m.onboarding_back()}

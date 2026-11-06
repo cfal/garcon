@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { authenticateChromiumContext, withChromiumFixture } from '../../support/chromium-fixture.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 test('Shell composer preserves literal commands and stable chat switching on desktop and mobile', async () => {
   await withChromiumFixture('shell-composer', async ({ page, browser, integration, assertNoBrowserErrors, watchBrowserErrors }, phase) => {
@@ -56,6 +57,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
     watchBrowserErrors(touchContext);
     try {
       await authenticateChromiumContext(touchContext, integration);
+      await touchContext.addInitScript(seedLocalSettings, { allowDirectChats: true });
       const touchPage = await touchContext.newPage();
       await touchPage.goto(`${integration.garcon.baseUrl}/chat/${chatIds[0]}`);
       const touchBlock = touchPage.locator('.markdown-code-block').filter({ hasText: '**plain output**' });
