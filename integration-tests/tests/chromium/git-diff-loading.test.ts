@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import type { Page } from 'playwright';
+import type { Page, Request } from 'playwright';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -19,6 +19,11 @@ interface LoadingSample {
   mountedRows: number;
   requests: Array<{ files: string[]; purpose: string }>;
   resources: Array<{ path: string; duration: number; encodedBytes: number; decodedBytes: number }>;
+}
+
+interface BodyRequestActivity {
+  pending: Set<Request>;
+  lastChangedAt: number;
 }
 
 async function beginSample(page: Page, selector: string, scrollFraction?: number): Promise<void> {
@@ -81,14 +86,20 @@ async function beginSample(page: Page, selector: string, scrollFraction?: number
 async function finishSample(
   page: Page,
   requests: LoadingSample['requests'],
+  activity: BodyRequestActivity,
 ): Promise<LoadingSample> {
   await page.waitForFunction(() => {
     const sample = (window as typeof window & { gitLoadingSample?: LoadingSample })
       .gitLoadingSample;
     return sample?.visibleReadyMs != null && sample.firstVisibleSyntaxMs != null;
   });
-  // Includes requests dispatched after the first visible content becomes ready.
-  await page.waitForLoadState('networkidle');
+  // Load-state networkidle can predate later SPA requests; each phase observes its own quiet window.
+  const observingSince = performance.now();
+  await browserExpect.poll(
+    () => activity.pending.size === 0 &&
+      performance.now() - Math.max(observingSince, activity.lastChangedAt) >= 500,
+    { timeout: 10_000 },
+  ).toBe(true);
   return page.evaluate((requests) => {
     const sample = (window as typeof window & { gitLoadingSample: LoadingSample }).gitLoadingSample;
     return {
@@ -179,12 +190,20 @@ for (const executionBackend of [
         });
         await collapseCanonicalFilesWindow(page);
         const requests: LoadingSample['requests'] = [];
+        const activity: BodyRequestActivity = { pending: new Set(), lastChangedAt: 0 };
         page.on('request', (request) => {
           if (new URL(request.url()).pathname === '/api/v1/git/review-documents/files') {
+            activity.pending.add(request);
+            activity.lastChangedAt = performance.now();
             const { files, purpose } = request.postDataJSON();
             requests.push({ files, purpose });
           }
         });
+        const finishRequest = (request: Request) => {
+          if (activity.pending.delete(request)) activity.lastChangedAt = performance.now();
+        };
+        page.on('requestfinished', finishRequest);
+        page.on('requestfailed', finishRequest);
         const samples: Array<{ surface: string; phase: string; sample: LoadingSample }> = [];
         for (const [surface, action] of [
           ['git', 'Open Workbench'],
@@ -196,7 +215,7 @@ for (const executionBackend of [
           const selector = `[data-workspace-surface-id="singleton:${surface}"][aria-hidden="false"]`;
           await beginSample(page, selector);
           await clickWorkspaceWindowAddAction(page, action);
-          const sample = await finishSample(page, requests);
+          const sample = await finishSample(page, requests, activity);
           samples.push({ surface, phase: 'open', sample });
           expect(sample.requests[0]?.files).toEqual([paths[0]]);
           expectBoundedRequests(sample);
@@ -214,7 +233,7 @@ for (const executionBackend of [
           requests.length = 0;
           await page.evaluate(() => performance.clearResourceTimings());
           await beginSample(page, selector, 0.75);
-          const deep = await finishSample(page, requests);
+          const deep = await finishSample(page, requests, activity);
           samples.push({ surface, phase: 'deep-scroll', sample: deep });
           expectBoundedRequests(deep);
           expect(deep.requests.length).toBeGreaterThan(0);
@@ -246,7 +265,7 @@ for (const executionBackend of [
           requests.length = 0;
           await page.evaluate(() => performance.clearResourceTimings());
           await beginSample(page, selector, 0);
-          const warm = await finishSample(page, requests);
+          const warm = await finishSample(page, requests, activity);
           expect(warm.requests).toEqual([]);
           samples.push({
             surface,
