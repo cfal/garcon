@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { asyncQuestionReplyText } from '@garcon/common/async-user-questions';
+import { FILE_CONTEXT_SEPARATOR } from '@garcon/common/file-mention-context';
 import { codexAsyncQuestions, codexQuestionReplyInput, codexHistoricalQuestionReply } from '../async-questions.js';
 import { convertCodexAppServerItem, convertCodexRawCodeModeItem } from '../app-server/converter.js';
 import { normalizeCodexJsonlEntry } from '../history-normalizer.js';
@@ -63,6 +64,19 @@ describe('Codex asynchronous questions', () => {
     expect(codexHistoricalQuestionReply(timestamp, `prose\n${input}`)).toBeNull();
     expect(codexHistoricalQuestionReply(timestamp, '<send_user_message_question_reply>not JSON</send_user_message_question_reply>')).toBeNull();
     expect(normalizeCodexJsonlEntry({ type: 'event_msg', timestamp, payload: { type: 'user_message', message: input } }, {}).canonical[0].metadata.questionReply).toEqual(reply);
+  });
+  it('never replaces a matching passage inside appended file context', () => {
+    const answer = { ...reply, answer: 'Use @sample.txt' };
+    const text = asyncQuestionReplyText(answer);
+    const suffix = `${FILE_CONTEXT_SEPARATOR}sample.txt\n${text}`;
+    const framed = codexQuestionReplyInput(text, answer);
+    expect(codexQuestionReplyInput(`prior input\n${text}${suffix}`, answer))
+      .toBe(`prior input\n${framed}${suffix}`);
+  });
+  it('keeps readable input when an authored file separator makes framing ambiguous', () => {
+    const answer = { ...reply, answer: `Literal separator:${FILE_CONTEXT_SEPARATOR}keep this text` };
+    const content = asyncQuestionReplyText(answer);
+    expect(codexQuestionReplyInput(content, answer)).toBe(content);
   });
   it('keeps object replies, multi-answer text, and malformed-batch fallback distinct', () => {
     const nativeReply = { questionItemId: reply.questionId, question: reply.question, answer: reply.answer };

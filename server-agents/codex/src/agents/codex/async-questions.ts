@@ -7,6 +7,7 @@ import {
   type AsyncQuestionSet,
 } from '@garcon/common/async-user-questions';
 import { isRecord } from '@garcon/common/json';
+import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 
 const REPLY_START = '<send_user_message_question_reply>';
 const REPLY_END = '</send_user_message_question_reply>';
@@ -36,8 +37,12 @@ export function codexAsyncQuestions(id: string, delivery: unknown, value: unknow
 export function codexQuestionReplyInput(content: string, reply?: AsyncQuestionReply): string {
   if (!reply) return content;
   const readable = asyncQuestionReplyText(reply);
-  const position = content.lastIndexOf(readable);
-  if (position < 0) throw new Error('Question reply does not match its input');
+  const position = stripResolvedFileMentionContext(content).lastIndexOf(readable);
+  if (position < 0) {
+    // Authored separator text makes framing ambiguous; readable input remains intact.
+    if (content.includes(readable)) return content;
+    throw new Error('Question reply does not match its input');
+  }
   // Oversized native identities use readable text rather than a reply envelope.
   if (Buffer.byteLength(reply.questionId) > NATIVE_REPLY_FIELD_MAX_BYTES) return content;
   let question = '';
