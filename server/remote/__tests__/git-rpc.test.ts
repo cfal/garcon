@@ -29,7 +29,9 @@ for (const lane of ['local', 'controller', 'worker'] as const) {
         const continuation = await git.getReviewDocumentFileBodies({ ...request, files: response.deferredFiles });
         if (continuation.status !== 'ready') throw new Error('Expected continuation');
         expect(continuation.deferredFiles).toEqual([]);
-        expect(Object.values(continuation.files)[0]).toMatchObject({ bodyState: 'loaded', patchDigest: expect.any(String) });
+        const body = Object.values(continuation.files)[0];
+        expect(body.bodyState).toBe('loaded');
+        expect(body.patchDigest).toMatch(/^[a-f0-9]{64}$/);
       }
       await fs.writeFile(path.join(fixture.projectPath, paths[1]), 'replaced\n');
       expect((await git.getReviewDocumentFileBodies({ ...request, files: [paths[1]] })).status).toBe('stale');
