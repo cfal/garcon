@@ -241,8 +241,11 @@ describe("Lightpanda transcript paging", () => {
       const initial = await virtualTranscriptSnapshot(fixture.page);
       const initialWindow = (await availableWindows(fixture.page)).at(-1)!;
       expect(initialWindow.items).toHaveLength(50);
+      expect(initialWindow.earlier.kind).toBe('more');
+      expect(initialWindow.later.kind).toBe('exhausted-through-watermark');
       expect(initial.busy).toBe(false);
-      expect(initial.modelCount).toBeLessThanOrEqual(52);
+      // The virtual model also includes two spacers and the earlier boundary.
+      expect(initial.modelCount).toBe(initialWindow.items.length + 3);
       expect(initial.mountedCount).toBeLessThanOrEqual(initial.modelCount);
       expect(initial.mountedCount).toBeLessThan(60);
       expect(await app.hasButton("Load more")).toBe(false);
@@ -349,9 +352,12 @@ describe("Lightpanda transcript paging", () => {
       await installPageRequestGate(fixture.page);
 
       const initial = await virtualTranscriptSnapshot(fixture.page);
-      expect(initial.modelCount).toBeLessThanOrEqual(52);
       let oldest = (await availableWindows(fixture.page)).at(-1)!;
+      expect(oldest.items).toHaveLength(50);
+      expect(oldest.earlier.kind).toBe('more');
       expect(oldest.later.kind).toBe('exhausted-through-watermark');
+      // The virtual model also includes two spacers and the earlier boundary.
+      expect(initial.modelCount).toBe(oldest.items.length + 3);
       for (let page = 0; oldest.earlier.kind === 'more'; page += 1) {
         expect(page).toBeLessThan(expectedUsers.length);
         await requestEarlierPage(fixture.page);
