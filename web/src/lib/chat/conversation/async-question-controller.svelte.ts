@@ -3,6 +3,7 @@ import type { AsyncQuestionPrompt, AsyncQuestionReply } from '$shared/async-user
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { submitAsyncQuestionReply, type AsyncQuestionTarget } from './async-question-submission.js';
 import type { QuestionDraft } from './question-draft.js';
+import * as m from '$lib/paraglide/messages.js';
 
 const MAX_RETAINED_DRAFTS = 200;
 
@@ -26,20 +27,30 @@ export class AsyncQuestionController {
 		return this.#drafts.get(key);
 	}
 
-	#set(key: string, entry: AsyncQuestionDraft): void {
+	canRetain(key: string): boolean {
+		return this.#drafts.has(key) || this.#drafts.size < MAX_RETAINED_DRAFTS
+			|| [...this.#drafts.values()].some(entry => entry.status !== 'sending');
+	}
+
+	#set(key: string, entry: AsyncQuestionDraft): boolean {
+		if (!this.#drafts.has(key) && this.#drafts.size >= MAX_RETAINED_DRAFTS) {
+			const evictable = [...this.#drafts].find(([, draft]) => draft.status !== 'sending');
+			if (!evictable) return false;
+			this.#drafts.delete(evictable[0]);
+		}
+		// Pending entries retain the duplicate-submit fence until delivery settles.
 		this.#drafts.delete(key);
 		this.#drafts.set(key, entry);
-		// Bounded tab-local retention survives virtualization and chat switches.
-		while (this.#drafts.size > MAX_RETAINED_DRAFTS) {
-			this.#drafts.delete(this.#drafts.keys().next().value!);
-		}
+		return true;
 	}
 
 	edit(key: string, target: AsyncQuestionTarget, draft: QuestionDraft): void {
+		if (this.get(key)?.status === 'sending') return;
 		this.#set(key, { target, draft });
 	}
 
 	dismiss(key: string, target: AsyncQuestionTarget, draft: QuestionDraft): void {
+		if (this.get(key)?.status === 'sending') return;
 		this.#set(key, { ...this.get(key), target, draft, dismissed: true });
 	}
 
@@ -57,11 +68,14 @@ export class AsyncQuestionController {
 		}
 	}
 
-	async submit(target: AsyncQuestionTarget, ordinal: number, question: AsyncQuestionPrompt, answer: string): Promise<void> {
+	async submit(
+		target: AsyncQuestionTarget, ordinal: number, question: AsyncQuestionPrompt, answer: string,
+		excludedResendOrdinals: readonly number[] = [],
+	): Promise<void> {
 		const key = asyncQuestionDraftKey(target, ordinal, question.id);
 		if (this.get(key)?.status === 'sending') return;
 		const pending: AsyncQuestionDraft = { ...this.get(key), target, status: 'sending' };
-		this.#set(key, pending);
+		if (!this.#set(key, pending)) return;
 		const reply: AsyncQuestionReply = {
 			questionId: question.id,
 			question: question.prompt,
@@ -69,12 +83,12 @@ export class AsyncQuestionController {
 			source: { chatId: target.chatId, transcriptViewId: target.transcriptViewId, ordinal },
 		};
 		try {
-			const delivery = await this.send(target, reply);
+			const delivery = await this.send(target, reply, excludedResendOrdinals);
 			if (this.get(key) !== pending) return;
 			this.#set(key, {
 				target,
 				status: 'sent',
-				message: delivery === 'steer' ? 'Sent to active turn' : 'Started new turn',
+				message: delivery === 'steer' ? m.chat_async_sent_to_turn() : m.chat_async_started_turn(),
 			});
 		} catch (error) {
 			if (this.get(key) !== pending) return;
@@ -82,13 +96,13 @@ export class AsyncQuestionController {
 				this.#set(key, {
 					...pending,
 					status: 'unknown',
-					message: 'Delivery unconfirmed. Check the conversation before sending again.',
+					message: m.chat_async_delivery_unconfirmed(),
 				});
 			} else {
 				this.#set(key, {
 					...pending,
 					status: 'failed',
-					message: error instanceof Error ? error.message : 'Answer could not be sent',
+					message: error instanceof Error ? error.message : m.chat_async_send_failed(),
 				});
 			}
 		}

@@ -15,6 +15,7 @@ for (const width of [1440, 390]) {
       arguments: JSON.stringify({ questions: [{ title: 'Which environment?', options: ['Staging', 'Production'] }, { title: 'Deadline?' }] }) }]);
     const held = environment.model.scriptHeldStreamTurn([codexFinalAnswerMessage('UNUSED_INITIAL_REPLY')]);
     const steered = environment.model.scriptHeldTurn([codexFinalAnswerMessage('ASYNC_BACKGROUND_COMPLETE')]);
+    const interrupted = environment.model.scriptHeldStreamTurn([codexFinalAnswerMessage('UNUSED_INTERRUPTED_REPLY')]);
     environment.model.scriptTurn([codexFinalAnswerMessage('ASYNC_BROWSER_COMPLETE')]);
     try {
       await withChromiumFixture(`async-questions-${width}`, async ({ page, integration, withExpectedConsoleErrors }, phase) => {
@@ -90,16 +91,28 @@ for (const width of [1440, 390]) {
         phase('answering the remaining question after turn completion');
         await selectChat(chatId);
         await browserExpect(editor).toHaveValue('Independent composer draft');
-        await page.getByRole('button', { name: 'Send answer', exact: true }).click();
+        const declinedInput = 'DECLINED_RESEND_INPUT';
+        const stoppedTurn = await client.runChat({ chatId, clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(), command: declinedInput });
+        await interrupted.requested;
+        await client.stopChat({ chatId, clientRequestId: crypto.randomUUID() });
+        await client.waitForTurnTerminal(chatId, stoppedTurn.turnId);
+        await page.getByRole('button', { name: `Don't resend ${declinedInput}`, exact: true }).click();
+        await page.getByRole('textbox', { name: 'Deadline?', exact: true }).press('Enter');
         await browserExpect(page.getByText('ASYNC_BROWSER_COMPLETE', { exact: true })).toBeVisible();
         expect((await client.getExecutionControl(chatId)).queue.entries).toEqual([]);
         expect(environment.model.requests()[2].lastUserText).toContain('"answer":"Production"');
-        expect(environment.model.requests()[3].lastUserText).toContain('"answer":"Friday afternoon"');
+        expect(environment.model.requests()[4].lastUserText).toContain('"answer":"Friday afternoon"');
+        expect(environment.model.requests()[4].lastUserText).not.toContain(declinedInput);
+        const recorded = await client.getMessages(chatId);
+        expect(recorded.messages.filter(entry => entry.message.type === 'user-message'
+          && entry.message.metadata?.questionReply?.answer === 'Friday afternoon')).toHaveLength(1);
         environment.model.assertSettled();
       }, undefined, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace });
     } finally {
       held.release();
       steered.release();
+      interrupted.release();
       await environment.dispose();
     }
   }, 150_000);

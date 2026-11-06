@@ -13,11 +13,12 @@ export interface AsyncQuestionTarget {
 export async function submitAsyncQuestionReply(
 	target: AsyncQuestionTarget,
 	questionReply: AsyncQuestionReply,
+	excludedResendOrdinals: readonly number[] = [],
 	inputs: Pick<AcceptedInputSubmissionService, 'run' | 'steer'> = new AcceptedInputSubmissionService(),
 ): Promise<'new-turn' | 'steer'> {
 	const content = asyncQuestionReplyText(questionReply);
 	const common = { ...target, questionReply };
-	const run = inputs.run({ ...common, command: content });
+	const run = inputs.run({ ...common, command: content, excludedResendOrdinals: [...excludedResendOrdinals] });
 	let route: 'run' | 'steer' = 'run';
 	for (let attempt = 0; ; attempt += 1) {
 		try {
