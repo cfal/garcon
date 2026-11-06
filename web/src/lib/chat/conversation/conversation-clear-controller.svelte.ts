@@ -1,5 +1,5 @@
 import { clearChat } from '$lib/api/chat-clear.js';
-import { getChatSnapshot } from '$lib/api/chats.js';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import type { ClearChatRequest } from '$shared/chat-clear';
 import type { SessionControllerDeps } from './conversation-session-controller-types.js';
@@ -103,9 +103,10 @@ export class ConversationClearController {
 
 	async #reconcileUnknownOutcome(request: ClearChatRequest): Promise<void> {
 		try {
-			const snapshot = await getChatSnapshot(request.chatId, 0);
+			const snapshot = await transcriptDisplayApi.open({ chatId: request.chatId,
+				reason: 'reconnect', outstandingClientMessageIds: [] });
 			if (snapshot.chat.id !== request.chatId) return;
-			if (snapshot.transientFeed.transcriptViewId === request.transcriptViewId) return;
+			if (snapshot.transcriptViewId === request.transcriptViewId) return;
 			await this.#recoverViewReplacement(request);
 		} catch {
 			// A failed read cannot establish whether the mutation committed.

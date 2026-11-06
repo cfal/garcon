@@ -16,7 +16,7 @@ function presentation(surfaceId: typeof left | typeof right | typeof third, chat
 	const windowId = surfaceId.slice('chat-view:'.length) as `window-${string}`;
 	return { surfaceId, chatId, windowId, presentation: windowId, snapshotAdmission };
 }
-function fixture(options: { retainInactiveWindows?: () => boolean } = {}) {
+function fixture(options: { retainInactiveWindows?: () => boolean; getSelectedChatId?: () => string } = {}) {
 	const api = mockDisplayApi([displayRow(1)]);
 	const overlays = new ConversationTranscriptOverlayStore(), bodies = new DisplayBodyStore();
 	const lifecycles = new Map<string, ConversationLifecycleState>();
@@ -43,6 +43,22 @@ function port(target: ReturnType<ConversationPanelPresentationPort['captureResto
 const pendingInput = { chatId: 'chat-1', clientMessageId: 'input-1', content: 'Synthetic input', createdAt: DISPLAY_TIME, delivery: 'pending' as const };
 
 describe('display surface registry', () => {
+	it.each([false, true])('retires old-view overlays when an open first reveals replacement, restarted=%s', async restarted => {
+		const { registry, api, overlays } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		registry.upsertOptimisticInput('chat-1', pendingInput);
+		registry.appendServerNotice('chat-1', 'error', 'Old-view error');
+		registry.replaceResendCandidates('chat-1', [{ ordinal: 1, preview: 'Old prompt', timestamp: DISPLAY_TIME, attachmentCount: 0 }]);
+		registry.excludeResendCandidate('chat-1', 1);
+		if (restarted) registry.resetServerInstance('instance-2');
+		api.replace([displayRow(1)], displayOpen('chat-1', 'replacement-view', 1, restarted ? 'instance-2' : 'instance-1'));
+		await registry.loadChatSnapshot('chat-1');
+		expect(overlays.forChat('chat-1').optimisticInputs).toEqual([]);
+		expect(overlays.forChat('chat-1').notices).toEqual([]);
+		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([]);
+		expect(registry.panel(left)!.transcript.transcriptViewId).toBe('replacement-view');
+	});
 	it('clears status notices only on a new head while retaining unproven diagnostics', async () => {
 		const { registry, overlays } = fixture();
 		registry.reconcile([presentation(left)]);
@@ -374,15 +390,69 @@ describe('display surface registry', () => {
 	});
 
 	it('does not let an unmounted fallback invalidate mounted body leases', async () => {
-		const { registry, api, bodies } = fixture();
+		let selected = 'chat-1';
+		const { registry, api, bodies } = fixture({ getSelectedChatId: () => selected });
 		registry.reconcile([presentation(right)]);
 		await registry.loadChatSnapshot('chat-1');
-		const facade = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-2' });
-		api.replace([displayRow(1)], displayOpen('chat-2', 'other-view', 1, 'instance-2'));
+		selected = 'chat-2';
+		const facade = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => selected });
+		api.replace([displayRow(1)], displayOpen('chat-2', 'other-view', 1));
 		await facade.loadMessages('chat-2');
+		expect(api.open).toHaveBeenCalledTimes(2);
+		expect(registry.openSnapshot('chat-2')?.transcriptViewId).toBe('other-view');
 		expect(bodies.count).toBe(1);
 		expect(registry.panel(right)!.transcript.chatMessages).toHaveLength(1);
 		facade.discardChat('chat-2');
+	});
+
+	it.each([false, true])('transfers a retained window and reading target, parked=%s', async parked => {
+		const { registry, bodies } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const transcript = registry.panel(left)!.transcript;
+		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 };
+		registry.panel(left)!.attachPresentation(port(target));
+		if (parked) { registry.prepareForReconcile([]); registry.reconcile([]); }
+		registry.prepareChatSurfaceTransfer({ sourceSurfaceId: left, destinationSurfaceId: right, chatId: 'chat-1' }).publish();
+		registry.prepareForReconcile([presentation(right)]);
+		registry.reconcile([presentation(right)]);
+		const destination = registry.panel(right)!;
+		expect(destination.transcript).toBe(transcript);
+		expect(destination.scroll.isPinnedToBottom).toBe(false);
+		const jump = vi.spyOn(destination.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		destination.attachPresentation(port({ kind: 'end' }));
+		await registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' }, { viewportOffset: -12 }));
+		expect(bodies.count).toBe(1);
+		expect(registry.panel(left)).toBeNull();
+	});
+
+	it('rolls back an unpublished move without transferring the source window', async () => {
+		const { registry } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const source = registry.panel(left)!;
+		const transfer = registry.prepareChatSurfaceTransfer({ sourceSurfaceId: left, destinationSurfaceId: right, chatId: 'chat-1' });
+		transfer.publish(); transfer.rollback();
+		registry.reconcile([presentation(left), presentation(right)]);
+		await registry.loadChatSnapshot('chat-1');
+		expect(registry.panel(left)).toBe(source);
+		expect(registry.panel(right)!.transcript).not.toBe(source.transcript);
+	});
+
+	it('prunes a permanently removed surface and its parked leases and reading target', async () => {
+		const { registry, bodies } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const transcript = registry.panel(left)!.transcript;
+		registry.panel(left)!.attachPresentation(port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 }));
+		registry.prepareForReconcile([]); registry.reconcile([]);
+		registry.pruneRemovedSurfaces(new Set());
+		expect(bodies.count).toBe(0);
+		registry.reconcile([presentation(left)]);
+		expect(registry.panel(left)!.transcript).not.toBe(transcript);
+		expect(registry.panel(left)!.scroll.isPinnedToBottom).toBe(true);
 	});
 
 	it('drops pending publication and parked state after chat deletion', async () => {

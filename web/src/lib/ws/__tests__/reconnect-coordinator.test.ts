@@ -132,6 +132,20 @@ describe('ChatReconnectCoordinator', () => {
 		expect(f.setControl).toHaveBeenCalledWith('chat-1', control());
 	});
 
+	it('opens visible transcripts after instance confirmation without waiting for the chat list', async () => {
+		const f = fixture([], ['chat-1', 'chat-2']);
+		const held = Promise.withResolvers<void>();
+		f.sessions.quietRefreshChats.mockReturnValue(held.promise);
+		const connected = f.coordinator.handleConnectionState(true);
+		try {
+			await vi.waitFor(() => expect(f.panels.loadChatSnapshot).toHaveBeenCalledTimes(2));
+			expect(f.confirmInstance).toHaveBeenCalledWith('instance-1');
+		} finally {
+			held.resolve();
+			await connected;
+		}
+	});
+
 	it('bounds HTTP control concurrency and cancels later batches at disconnect', async () => {
 		const f = fixture(Array.from({ length: 20 }, (_, index) => `background-${index}`));
 		const held = Promise.withResolvers<{ control: ChatExecutionControlState }>();

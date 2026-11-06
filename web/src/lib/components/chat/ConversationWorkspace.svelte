@@ -637,7 +637,7 @@
 	): Promise<ChatReloadOutcome> {
 		const panel = panelForChat(chatId);
 		if (!panel) throw new Error(m.sidebar_chats_reload_requires_open_chat());
-		const outcome = await reloadChatFromNative(ws, panel.transcript, chatId, options);
+		const outcome = await reloadChatFromNative(ws, chatId, options);
 		if (
 			outcome === 'reloaded' &&
 			chatId === sessions.selectedChatId &&

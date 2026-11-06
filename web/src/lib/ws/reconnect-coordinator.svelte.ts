@@ -90,33 +90,14 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #reconcileAfterReconnect(selectedChatId: string | null, epoch: number): Promise<void> {
-		const globalState = await this.#reconcileGlobalState(selectedChatId, epoch);
+		const { controlRefresh } = await this.#requestReconnectState(this.#knownControlChatIds(selectedChatId), epoch);
 		if (epoch !== this.#reconnectEpoch) return;
+		const listRefresh = this.#refreshChatsQuietly();
 		const refreshes = this.options.panels.visibleChatIds().map(async chatId => {
 			if (epoch !== this.#reconnectEpoch) return;
 			try { await this.options.panels.loadChatSnapshot(chatId); } catch { /* A surface retains its explicit retry state. */ }
 		});
-		await Promise.all([...refreshes, globalState.controlRefresh]);
-	}
-
-	async #reconcileGlobalState(
-		selectedChatId: string | null,
-		epoch: number,
-	): Promise<{ controlRefresh: Promise<void> }> {
-		const { controlRefresh } = await this.#requestReconnectState(
-			this.#knownControlChatIds(selectedChatId),
-			epoch,
-		);
-		if (epoch !== this.#reconnectEpoch) {
-			return { controlRefresh: Promise.resolve() };
-		}
-
-		await this.#refreshChatsQuietly();
-		if (epoch !== this.#reconnectEpoch) {
-			return { controlRefresh: Promise.resolve() };
-		}
-
-		return { controlRefresh };
+		await Promise.all([...refreshes, controlRefresh, listRefresh]);
 	}
 
 	async #requestReconnectState(

@@ -181,7 +181,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	installOpen(snapshot: DisplayOpenResponse): void {
 		if (snapshot.chat.id !== this.activeChatId) return;
 		const replaced = this.transcriptViewId !== '' && this.transcriptViewId !== snapshot.transcriptViewId;
-		this.invalidatePendingHistoryLoad();
+		if (!this.#navigating || replaced || this.serverInstanceId !== snapshot.serverInstanceId) this.invalidatePendingHistoryLoad();
 		if (replaced) this.windowRevision += 1;
 		this.#committedInputs = new Map([...this.#committedInputs].filter(([, input]) => input.view === snapshot.transcriptViewId));
 		this.openSnapshot = snapshot;
@@ -205,7 +205,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.readinessRevision += 1;
 		this.controller.ready(message.bashRevision, message.phase);
 	}
-	beginOpen(): void { this.invalidatePendingWindowNavigation(); this.#opening = true; this.#openError = null; }
+	beginOpen(): void { this.#opening = true; this.#openError = null; }
+	cancelOpen(): void { this.#openEpoch += 1; this.#openAbort?.abort(); this.#openAbort = null; this.#opening = false; }
 	failOpen(error: unknown): void {
 		this.#opening = false;
 		this.#openError = error instanceof Error ? error.message : 'Unable to open transcript';
@@ -311,7 +312,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.controller.cancel();
 	}
 	invalidatePendingWindowNavigation(): void { this.#navigationEpoch += 1; if (this.#navigating) this.controller.cancel(); this.#navigating = false; }
-	invalidatePendingLoads(): void { this.invalidatePendingWindowNavigation(); this.#openEpoch += 1; this.#openAbort?.abort(); this.#opening = false; this.invalidatePendingHistoryLoad(); }
+	invalidatePendingLoads(): void { this.invalidatePendingWindowNavigation(); this.cancelOpen(); this.invalidatePendingHistoryLoad(); }
 	suspendForParking(): boolean { this.invalidatePendingLoads(); this.controller.park(); return this.display.window !== null; }
 	clearMessages(): void { this.invalidatePendingLoads(); this.controller.reset(); this.#committedInputs = new Map(); this.transcriptViewId = ''; this.lastOrdinal = 0; this.openSnapshot = null; this.responseClassOrdinals = emptyResponseClassOrdinals(); this.windowRevision += 1; }
 	resetForNewChat(): void { this.clearMessages(); this.isUserScrolledUp = false; }

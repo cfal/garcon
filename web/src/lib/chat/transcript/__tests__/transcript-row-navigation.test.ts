@@ -38,7 +38,7 @@ it('navigates through a bounded certified window without raw history or a body-g
 	expect(transcript.lastOrdinal).toBe(1000);
 });
 
-it.each(['cancel', 'focus', 'window', 'chat', 'open'] as const)(
+it.each(['cancel', 'focus', 'window', 'chat'] as const)(
 	'rejects a held response after %s supersedes navigation', async change => {
 		const { api, transcript } = await fixture();
 		const read = Promise.withResolvers<AvailableDisplayWindow>();
@@ -51,7 +51,6 @@ it.each(['cancel', 'focus', 'window', 'chat', 'open'] as const)(
 		if (change === 'focus') current = false;
 		if (change === 'window') transcript.invalidatePendingWindowNavigation();
 		if (change === 'chat') transcript.activateChat('chat-2');
-		if (change === 'open') transcript.beginOpen();
 		read.resolve(window);
 		expect(await work).toBe('cancelled');
 		expect(api.resolve).not.toHaveBeenCalled();
