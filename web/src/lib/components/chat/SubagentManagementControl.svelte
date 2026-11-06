@@ -84,7 +84,7 @@
 	}
 </script>
 
-{#if model.subagents.length > 0 || paging?.updating || paging?.error}
+{#if model.subagents.length > 0 || paging?.error}
 	<Popover.Root bind:open>
 		<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
 			<Popover.Trigger
