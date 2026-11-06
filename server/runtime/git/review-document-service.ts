@@ -1,5 +1,7 @@
 import { AsyncResource } from 'node:async_hooks';
 import { GitDomainError } from './git-domain-error.js';
+import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
+import { GitServiceError } from '../../../common/git-error.js';
 import {
   isGitReviewCollectionLimitBody,
   limitGitReviewResponseBodies,
@@ -19,6 +21,7 @@ import type {
   GitReviewBodyPurpose,
   GitReviewDocumentFileBodiesOptions,
   GitReviewDocumentFileBodiesResponse,
+  GitReviewDocumentFileBodiesReady,
 } from './types.js';
 import {
   measureGitReviewPhase,
@@ -185,7 +188,6 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
           );
           if (options.metrics) options.metrics.cacheHits = cached.size;
           const missing = requestedFiles.filter((file) => !cached.has(file.path));
-          let errors: Record<string, string> = {};
           if (missing.length > 0) {
             const cachedTotals = loadedGitReviewBodyTotals(cached.values());
             const loaded = await loadReviewDiffBatches(
@@ -196,7 +198,6 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
               options.metrics,
               cachedTotals,
             );
-            errors = loaded.errors;
             for (const body of loaded.bodies) cached.set(body.path, body);
             if (mutable) {
               const after = await measureGitReviewPhase(
@@ -230,20 +231,41 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
               return body ? [body] : [];
             }),
           );
-          const files = Object.fromEntries(responseBodies.map((body) => [body.path, body]));
+          const response: GitReviewDocumentFileBodiesReady = {
+            status: 'ready', documentId: options.documentId,
+            files: Object.create(null), errors: Object.create(null), deferredFiles: [],
+          };
+          // Reserves all deferred-path metadata and room for runtime scope/diagnostics.
+          let encodedBytes = Buffer.byteLength(JSON.stringify({ ...response, deferredFiles: requestedPaths }));
+          const candidates = new Map(responseBodies.map((body) => [body.path, body]));
+          for (const path of requestedPaths) {
+            const body = candidates.get(path);
+            if (!body || isGitReviewCollectionLimitBody(body)) {
+              response.deferredFiles.push(path);
+              continue;
+            }
+            const entryBytes = Buffer.byteLength(JSON.stringify({ [path]: body })) - 2 + 1;
+            const errorBytes = body.error
+              ? Buffer.byteLength(JSON.stringify({ [path]: body.error })) - 2 + 1 : 0;
+            if (encodedBytes + entryBytes + errorBytes > GIT_MAX_RESULT_BYTES - 512 * 1024) {
+              response.deferredFiles.push(path);
+              continue;
+            }
+            encodedBytes += entryBytes + errorBytes;
+            response.files[path] = body;
+            if (body.error) response.errors[path] = body.error;
+          }
+          if (requestedPaths.length === 1 && response.deferredFiles.length > 0) {
+            throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git file response exceeds the result limit.');
+          }
           if (options.metrics) {
-            options.metrics.fileCount = Object.keys(files).length;
-            options.metrics.rowCount = Object.values(files).reduce(
+            options.metrics.fileCount = Object.keys(response.files).length;
+            options.metrics.rowCount = Object.values(response.files).reduce(
               (total, body) => total + body.renderedRowCount,
               0,
             );
           }
-          return {
-            status: 'ready',
-            documentId: options.documentId,
-            files,
-            errors,
-          };
+          return response;
         } finally {
           lease.release();
         }

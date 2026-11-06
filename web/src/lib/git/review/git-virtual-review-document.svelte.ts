@@ -296,7 +296,7 @@ export class GitVirtualReviewDocumentController {
 	requestBodies(
 		projectPath: string,
 		filePaths: readonly string[],
-		purpose: GitReviewBodyPurpose = 'visible',
+		purpose: GitReviewBodyPurpose | 'navigation' = 'visible',
 	): GitReviewDemandOutcome {
 		if (!this.summary || this.suspended) return 'not-ready';
 		if (this.aggregateLimit) return 'limited';
@@ -305,7 +305,7 @@ export class GitVirtualReviewDocumentController {
 		this.ensureBodyScheduler(projectPath, guard);
 		if (!this.bodyScheduler) return 'not-ready';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
-		this.seedCachedBodies(uniquePaths, purpose, guard);
+		this.seedCachedBodies(uniquePaths, purpose === 'navigation' ? 'visible' : purpose, guard);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
 		const pending = uniquePaths.filter(
@@ -314,10 +314,12 @@ export class GitVirtualReviewDocumentController {
 				this.summaryForFile(filePath)?.bodyState === 'unloaded' &&
 				!this.fileBodies[filePath],
 		);
-		const scheduled =
-			purpose === 'visible'
-				? this.bodyScheduler.requestVisible([...toFetch, ...pending])
-				: this.bodyScheduler.requestPrefetch(toFetch);
+		let scheduled: boolean;
+		if (purpose === 'navigation')
+			scheduled = this.bodyScheduler.requestNavigation([...toFetch, ...pending]);
+		else if (purpose === 'visible')
+			scheduled = this.bodyScheduler.requestVisible([...toFetch, ...pending]);
+		else scheduled = this.bodyScheduler.requestPrefetch(toFetch);
 		return scheduled ? 'scheduled' : 'already-satisfied';
 	}
 
@@ -425,7 +427,7 @@ export class GitVirtualReviewDocumentController {
 				filePaths,
 			});
 		}
-		return this.requestBodies(projectPath, filePaths, 'visible');
+		return this.requestBodies(projectPath, filePaths, 'navigation');
 	}
 
 	private createLoadGuard(projectPath: string): GitWorkbenchLoadGuard {
@@ -522,15 +524,16 @@ export class GitVirtualReviewDocumentController {
 		if (this.bodyScheduler || !this.summary) return;
 		const summary = this.summary;
 		this.bodyScheduler = new GitReviewBodyScheduler({
-			maxBatchFiles: 1,
-			load: (paths, purpose, signal) =>
+			maxBatchFiles: 4,
+			deferredPaths: (result) => (result.status === 'ready' ? result.deferredFiles : []),
+			load: (paths, purpose, signal, publish) =>
 				getGitReviewFileBodies(
 					{ executorId: summary.document.executorId, projectPath },
 					summary.document,
 					paths,
 					guard.tab,
 					guard.contextLines,
-					{ purpose, signal },
+					{ purpose, signal, onIndexedBodies: publish },
 				),
 			onResult: (result, paths, purpose) => this.applyBodyResult(result, paths, purpose, guard),
 			onError: (error) => {

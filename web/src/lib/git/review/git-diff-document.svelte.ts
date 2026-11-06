@@ -67,6 +67,7 @@ export type GitDiffDocumentBodyLoader = (
 	files: GitDiffFileRequest[],
 	purpose: GitReviewBodyPurpose,
 	signal: AbortSignal,
+	publish: (result: GitDiffDocumentBodyResponse, paths: string[]) => void,
 ) => Promise<GitDiffDocumentBodyResponse>;
 
 export interface GitDiffDocumentOpenOptions {
@@ -227,14 +228,14 @@ export class GitDiffDocumentController {
 		this.clearCommentFeedback();
 		const generation = this.generation;
 		this.bodyScheduler = new GitReviewBodyScheduler({
-			// A single body fits the RPC limit without partial-batch continuation.
-			maxBatchFiles: 1,
-			load: (paths, purpose, signal) => {
+			maxBatchFiles: 4,
+			deferredPaths: (result) => (result.status === 'ready' ? result.deferredFiles : []),
+			load: (paths, purpose, signal, publish) => {
 				const requests = paths.map((path) => {
 					const summary = this.summaryForFile(path);
 					return { path, ...(summary?.originalPath ? { originalPath: summary.originalPath } : {}) };
 				});
-				return options.loadBodies(snapshot, requests, purpose, signal);
+				return options.loadBodies(snapshot, requests, purpose, signal, publish);
 			},
 			onResult: (result, paths, purpose) =>
 				this.applyBodyResult(result, paths, purpose, generation, snapshot),
@@ -250,9 +251,9 @@ export class GitDiffDocumentController {
 				});
 			},
 		});
-		this.demandReconciler.markReadinessChanged();
 		const [priority, ...prefetch] = snapshot.firstBodyCandidates;
 		if (priority) this.requestNavigationBodies([priority]);
+		this.demandReconciler.markReadinessChanged();
 		this.requestBodies(prefetch, 'prefetch');
 	}
 
@@ -402,19 +403,19 @@ export class GitDiffDocumentController {
 				filePaths,
 			});
 		}
-		return this.requestBodies(filePaths, 'visible');
+		return this.requestBodies(filePaths, 'navigation');
 	}
 
 	private requestBodies(
 		filePaths: readonly string[],
-		purpose: GitReviewBodyPurpose,
+		purpose: GitReviewBodyPurpose | 'navigation',
 	): GitReviewDemandOutcome {
 		const snapshot = this.snapshot;
 		if (!snapshot || !this.bodyScheduler || this.isStale) return 'not-ready';
 		if (this.aggregateLimit) return 'limited';
 		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
-		this.seedCachedBodies(uniquePaths, purpose);
+		this.seedCachedBodies(uniquePaths, purpose === 'navigation' ? 'visible' : purpose);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
 		const pending = uniquePaths.filter(
@@ -423,10 +424,12 @@ export class GitDiffDocumentController {
 				this.summaryForFile(filePath)?.bodyState === 'unloaded' &&
 				!this.fileBodies[filePath],
 		);
-		const scheduled =
-			purpose === 'visible'
-				? this.bodyScheduler.requestVisible([...toFetch, ...pending])
-				: this.bodyScheduler.requestPrefetch(toFetch);
+		let scheduled: boolean;
+		if (purpose === 'navigation')
+			scheduled = this.bodyScheduler.requestNavigation([...toFetch, ...pending]);
+		else if (purpose === 'visible')
+			scheduled = this.bodyScheduler.requestVisible([...toFetch, ...pending]);
+		else scheduled = this.bodyScheduler.requestPrefetch(toFetch);
 		return scheduled ? 'scheduled' : 'already-satisfied';
 	}
 

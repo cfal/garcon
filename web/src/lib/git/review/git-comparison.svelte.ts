@@ -251,7 +251,7 @@ export class GitComparisonController {
 					mode: result.mode,
 					...(result.mergeBaseHash ? { mergeBaseHash: result.mergeBaseHash } : {}),
 				},
-				loadBodies: (_snapshot, files, purpose, signal) =>
+				loadBodies: (_snapshot, files, purpose, signal, publish) =>
 					getGitComparisonFileBodies(
 						project,
 						result.document,
@@ -260,7 +260,7 @@ export class GitComparisonController {
 							? { kind: 'revision', hash: result.to.hash }
 							: { kind: 'working-tree', fingerprint: result.to.fingerprint },
 						files,
-						{ context: requestContextLines, purpose, signal },
+						{ context: requestContextLines, purpose, signal, onIndexedBodies: publish },
 					),
 				onError: (detail) => {
 					this.bodyError = m.git_compare_load_rows_failed({ detail });

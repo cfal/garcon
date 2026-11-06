@@ -212,6 +212,7 @@ describe('GitComparisonController', () => {
 			documentId: snapshot.documentId,
 			files: {},
 			errors: {},
+			deferredFiles: [],
 		});
 		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
 			status: 'ready',
@@ -349,6 +350,7 @@ describe('GitComparisonController', () => {
 				documentId: snapshot.documentId,
 				files: {},
 				errors: {},
+				deferredFiles: [],
 			});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
@@ -537,6 +539,7 @@ describe('GitComparisonController', () => {
 			documentId: snapshot.documentId,
 			files: {},
 			errors: {},
+			deferredFiles: [],
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });

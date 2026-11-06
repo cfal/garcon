@@ -3,7 +3,13 @@ import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 interface GitReviewBodySchedulerOptions<T> {
 	maxBatchFiles: number;
-	load: (paths: string[], purpose: GitReviewBodyPurpose, signal: AbortSignal) => Promise<T>;
+	load: (
+		paths: string[],
+		purpose: GitReviewBodyPurpose,
+		signal: AbortSignal,
+		publish: (result: T, paths: string[]) => void,
+	) => Promise<T>;
+	deferredPaths?: (result: T) => readonly string[];
 	onResult: (result: T, paths: string[], purpose: GitReviewBodyPurpose) => void;
 	onError: (error: unknown) => void;
 	onLoadingChange: (paths: string[], loading: boolean) => void;
@@ -13,6 +19,7 @@ interface GitReviewBodySchedulerOptions<T> {
 interface ActiveLane {
 	controller: AbortController;
 	paths: string[];
+	retained: Set<string>;
 }
 
 export class GitReviewBodyScheduler<T> {
@@ -21,8 +28,16 @@ export class GitReviewBodyScheduler<T> {
 	private visibleActive: ActiveLane | null = null;
 	private prefetchActive: ActiveLane | null = null;
 	private generation = 0;
+	private readonly singletonPaths = new Set<string>();
 
 	constructor(private readonly options: GitReviewBodySchedulerOptions<T>) {}
+
+	requestNavigation(paths: readonly string[]): boolean {
+		const unique = this.unique(paths);
+		for (const path of unique) this.singletonPaths.add(path);
+		this.removeQueued(this.visibleQueue, unique);
+		return this.requestVisible(unique);
+	}
 
 	requestVisible(paths: readonly string[]): boolean {
 		const uniquePaths = this.unique(paths);
@@ -51,6 +66,7 @@ export class GitReviewBodyScheduler<T> {
 		this.prefetchActive = null;
 		this.visibleQueue.splice(0);
 		this.prefetchQueue.splice(0);
+		this.singletonPaths.clear();
 		if (pending.length > 0) this.options.onLoadingChange(pending, false);
 	}
 
@@ -66,6 +82,7 @@ export class GitReviewBodyScheduler<T> {
 	retainVisible(paths: ReadonlySet<string>): void {
 		const removed = this.visibleQueue.filter((path) => !paths.has(path));
 		this.removeQueued(this.visibleQueue, removed);
+		if (this.visibleActive) this.visibleActive.retained = new Set(paths);
 		if (this.visibleActive && !this.visibleActive.paths.some((path) => paths.has(path))) {
 			this.visibleActive.controller.abort();
 		}
@@ -76,8 +93,10 @@ export class GitReviewBodyScheduler<T> {
 		return (
 			this.visibleQueue.includes(path) ||
 			this.prefetchQueue.includes(path) ||
-			this.visibleActive?.paths.includes(path) === true ||
-			this.prefetchActive?.paths.includes(path) === true
+			(this.visibleActive?.controller.signal.aborted === false &&
+				this.visibleActive.paths.includes(path)) ||
+			(this.prefetchActive?.controller.signal.aborted === false &&
+				this.prefetchActive.paths.includes(path))
 		);
 	}
 
@@ -102,19 +121,50 @@ export class GitReviewBodyScheduler<T> {
 		const active = purpose === 'visible' ? this.visibleActive : this.prefetchActive;
 		const queue = purpose === 'visible' ? this.visibleQueue : this.prefetchQueue;
 		if (active || queue.length === 0) return;
-		const paths = queue.splice(0, this.options.maxBatchFiles);
+		let count = 1;
+		if (!this.singletonPaths.has(queue[0])) {
+			while (
+				count < Math.min(queue.length, this.options.maxBatchFiles) &&
+				!this.singletonPaths.has(queue[count])
+			)
+				count++;
+		}
+		const paths = queue.splice(0, count);
+		for (const path of paths) this.singletonPaths.delete(path);
 		const controller = new AbortController();
-		const lane = { controller, paths };
+		const lane = { controller, paths, retained: new Set(paths) };
 		if (purpose === 'visible') this.visibleActive = lane;
 		else this.prefetchActive = lane;
 		const generation = this.generation;
+		const published = new Set<string>();
+		let deferred: string[] = [];
+		const publish = (result: T, completed: string[]) => {
+			if (generation !== this.generation || controller.signal.aborted) return;
+			const fresh = completed.filter((path) => paths.includes(path) && !published.has(path));
+			if (fresh.length === 0) return;
+			for (const path of fresh) published.add(path);
+			this.options.onResult(result, fresh, purpose);
+			if (generation === this.generation && !controller.signal.aborted)
+				this.options.onLoadingChange(fresh, false);
+		};
 		this.options.onDispatch?.(paths, purpose);
 
 		void this.options
-			.load(paths, purpose, controller.signal)
+			.load(paths, purpose, controller.signal, publish)
 			.then((result) => {
 				if (generation !== this.generation || controller.signal.aborted) return;
-				this.options.onResult(result, paths, purpose);
+				deferred = [...(this.options.deferredPaths?.(result) ?? [])];
+				if (
+					deferred.some((path) => !paths.includes(path) || published.has(path)) ||
+					(paths.length === 1 && deferred.length > 0)
+				) {
+					deferred = [];
+					throw new Error('Invalid deferred Git body response.');
+				}
+				publish(
+					result,
+					paths.filter((path) => !deferred.includes(path)),
+				);
 			})
 			.catch((error) => {
 				if (generation !== this.generation || controller.signal.aborted || isAbortError(error))
@@ -125,6 +175,13 @@ export class GitReviewBodyScheduler<T> {
 				if (generation !== this.generation) return;
 				if (purpose === 'visible' && this.visibleActive === lane) this.visibleActive = null;
 				if (purpose === 'prefetch' && this.prefetchActive === lane) this.prefetchActive = null;
+				if (!controller.signal.aborted) {
+					const retry = deferred.filter(
+						(path) => lane.retained.has(path) && !this.hasPending(path),
+					);
+					for (const path of retry) this.singletonPaths.add(path);
+					this.enqueue(queue, retry, true);
+				}
 				this.pump(purpose);
 				const idle = paths.filter((path) => !this.hasPending(path));
 				if (idle.length > 0) this.options.onLoadingChange(idle, false);

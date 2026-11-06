@@ -10,6 +10,7 @@ import {
 } from './git-client.js';
 import type { GitReviewDocumentIndexedFileBodiesResponse } from './git.js';
 import { getGitReviewDocumentFileBodies } from './git.js';
+import type { GitReviewBodyFetchOptions } from './git-review-documents.js';
 import {
 	finishGitReviewPerformanceSpan,
 	registerGitReviewDocument,
@@ -112,7 +113,7 @@ export async function getGitComparisonFileBodies(
 	effectiveFromHash: string,
 	to: GitComparisonBodyTarget,
 	files: GitComparisonFileRequest[],
-	options?: ApiFetchOptions & {
+	options?: GitReviewBodyFetchOptions & {
 		context?: number;
 		purpose?: import('./git.js').GitReviewBodyPurpose;
 	},

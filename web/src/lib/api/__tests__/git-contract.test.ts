@@ -101,10 +101,11 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await gitCommit({ executorId: 'remote-executor', projectPath: '/project' }, 'fix bug', [
-			'a.txt',
-			'b.txt',
-		]);
+		const result = await gitCommit(
+			{ executorId: 'remote-executor', projectPath: '/project' },
+			'fix bug',
+			['a.txt', 'b.txt'],
+		);
 
 		expect(result).toEqual({
 			...scope,
@@ -220,7 +221,10 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getRemoteStatus({ executorId: 'remote-executor', projectPath: '/project' });
+		const result = await getRemoteStatus({
+			executorId: 'remote-executor',
+			projectPath: '/project',
+		});
 
 		expect(result.hasRemote).toBe(true);
 		expect(result.ahead).toBe(1);
@@ -282,7 +286,10 @@ describe('git API contract', () => {
 	it('gitDeleteUntracked sends POST with project and file', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitDeleteUntracked({ executorId: 'remote-executor', projectPath: '/project' }, 'temp.txt');
+		await gitDeleteUntracked(
+			{ executorId: 'remote-executor', projectPath: '/project' },
+			'temp.txt',
+		);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.file).toBe('temp.txt');
@@ -372,7 +379,11 @@ describe('git API contract', () => {
 			}),
 		);
 
-		await getGitWorkbenchSnapshot({ executorId: 'remote-executor', projectPath: '/project' }, 'staged', 3);
+		await getGitWorkbenchSnapshot(
+			{ executorId: 'remote-executor', projectPath: '/project' },
+			'staged',
+			3,
+		);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.mode).toBe('staged');
@@ -422,7 +433,10 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await getGitQuickSummary({ executorId: 'remote-executor', projectPath: '/project' });
+		const result = await getGitQuickSummary({
+			executorId: 'remote-executor',
+			projectPath: '/project',
+		});
 
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
@@ -586,9 +600,10 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await generateCommitMessage({ executorId: 'remote-executor', projectPath: '/project' }, [
-			'src/app/login.ts',
-		]);
+		const result = await generateCommitMessage(
+			{ executorId: 'remote-executor', projectPath: '/project' },
+			['src/app/login.ts'],
+		);
 
 		expect(result.message).toBe('src/app: feat: add login');
 		expect(result.directoryPrefix).toBe('src/app');
@@ -624,14 +639,23 @@ describe('git API contract', () => {
 	it.each([
 		{ status: 413, errorCode: 'GIT_REQUEST_TOO_LARGE' },
 		{ status: 409, errorCode: 'GIT_LOCKED' },
-	])('gitStagePaths preserves $errorCode without splitting or retrying the selection', async ({ status, errorCode }) => {
-		fetchMock.mockImplementationOnce(() => jsonResponse({ error: 'Rejected', errorCode }, status));
-		await expect(
-			gitStagePaths({ executorId: scope.executorId, projectPath: '/project' }, ['first', 'second'], 'stage'),
-		).rejects.toMatchObject({ status, errorCode });
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(JSON.parse(fetchMock.mock.calls[0][1].body).paths).toEqual(['first', 'second']);
-	});
+	])(
+		'gitStagePaths preserves $errorCode without splitting or retrying the selection',
+		async ({ status, errorCode }) => {
+			fetchMock.mockImplementationOnce(() =>
+				jsonResponse({ error: 'Rejected', errorCode }, status),
+			);
+			await expect(
+				gitStagePaths(
+					{ executorId: scope.executorId, projectPath: '/project' },
+					['first', 'second'],
+					'stage',
+				),
+			).rejects.toMatchObject({ status, errorCode });
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(JSON.parse(fetchMock.mock.calls[0][1].body).paths).toEqual(['first', 'second']);
+		},
+	);
 
 	it('gitStagePaths keeps a lost mutation confirmation uncertain without retrying', async () => {
 		fetchMock.mockRejectedValueOnce(new TypeError('connection lost'));
@@ -643,7 +667,7 @@ describe('git API contract', () => {
 
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
 		fetchMock.mockResolvedValue(
-			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
+			jsonResponse({ status: 'document-expired', documentId: 'doc', message: 'Expired' }),
 		);
 
 		await getGitReviewFileBodies(
@@ -743,7 +767,7 @@ describe('git API contract', () => {
 
 	it('getGitCommitFileBodies posts commit file body requests', async () => {
 		fetchMock.mockResolvedValue(
-			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
+			jsonResponse({ status: 'document-expired', documentId: 'doc', message: 'Expired' }),
 		);
 		const controller = new AbortController();
 

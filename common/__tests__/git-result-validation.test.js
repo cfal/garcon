@@ -1,6 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { validateGhResult, validateGitResult } from '../git-result-validation.js';
 
+test('review body deferrals are bounded, unique and disjoint from returned bodies', () => {
+  const scope = { executorId: 'local', instanceId: 'synthetic' };
+  const value = { ...scope, status: 'ready', documentId: 'doc', files: {}, errors: {}, deferredFiles: ['a.ts'] };
+  expect(() => validateGitResult('getReviewDocumentFileBodies', value, scope)).not.toThrow();
+  for (const deferredFiles of [undefined, ['a.ts', 'a.ts'], Array(25).fill('a.ts'), [1]]) {
+    expect(() => validateGitResult('getReviewDocumentFileBodies', { ...value, deferredFiles }, scope)).toThrow();
+  }
+  const body = { path: 'a.ts', bodyFingerprint: 'a', bodyState: 'error', category: 'normal',
+    isBinary: false, isTooLarge: false, renderedRowCount: 0, patchBytes: 0, patch: null, error: 'Synthetic failure' };
+  expect(() => validateGitResult('getReviewDocumentFileBodies', { ...value, files: { 'a.ts': body } }, scope)).toThrow();
+});
+
 const scope = { executorId: 'executor-test', instanceId: 'instance-test' };
 const limits = {
   maxSummaryFiles: 10_000, maxBodyBatchFiles: 24, maxLoadedRows: 100_000,

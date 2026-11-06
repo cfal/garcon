@@ -139,6 +139,7 @@ function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => 
 			]),
 		),
 		errors: {},
+		deferredFiles: [],
 	};
 }
 
@@ -194,6 +195,7 @@ describe('GitHistoryController', () => {
 			documentId: 'comparison-doc',
 			files: {},
 			errors: {},
+			deferredFiles: [],
 		});
 	});
 

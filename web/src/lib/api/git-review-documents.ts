@@ -51,6 +51,11 @@ export interface GitReviewDocumentIndexedFileBodiesReady {
 	documentId: string;
 	files: Record<string, GitReviewFileBody>;
 	errors: Record<string, string>;
+	deferredFiles: string[];
+}
+
+export interface GitReviewBodyFetchOptions extends ApiFetchOptions {
+	onIndexedBodies?: (result: GitReviewDocumentIndexedFileBodiesReady, paths: string[]) => void;
 }
 
 export type GitReviewDocumentIndexedFileBodiesResponse =
@@ -63,8 +68,9 @@ export async function getGitReviewDocumentFileBodies(
 	document: GitReviewDocumentRef,
 	files: string[],
 	purpose: GitReviewBodyPurpose,
-	options?: ApiFetchOptions,
+	options?: GitReviewBodyFetchOptions,
 ): Promise<GitReviewDocumentIndexedFileBodiesResponse> {
+	const { onIndexedBodies, ...fetchOptions } = options ?? {};
 	const bodySpan = startGitReviewPerformanceSpan(
 		purpose === 'visible' ? 'body-visible' : 'body-prefetch',
 	);
@@ -72,7 +78,7 @@ export async function getGitReviewDocumentFileBodies(
 	let response: GitReviewDocumentFileBodiesResponse & GitExecutorScope;
 	try {
 		const rawResponse = await apiFetch('/api/v1/git/review-documents/files', {
-			...options,
+			...fetchOptions,
 			method: 'POST',
 			body: JSON.stringify({ ...gitProjectFields(target), document, files, purpose }),
 		});
@@ -102,10 +108,25 @@ export async function getGitReviewDocumentFileBodies(
 			'GIT_STALE_DOCUMENT',
 		);
 	}
-	markGitReviewBodyReady(gitDocumentKey(document), purpose);
 	if (response.status !== 'ready') return { ...response, documentId: gitDocumentKey(document) };
+	if (!Array.isArray(response.deferredFiles)) {
+		throw new ApiError(502, 'Invalid Git review body deferrals.', 'GIT_INVALID_RESULT');
+	}
+	const returned = [...Object.keys(response.files), ...response.deferredFiles];
+	if (
+		new Set(returned).size !== returned.length ||
+		returned.some((path) => !files.includes(path)) ||
+		new Set(files).size !== returned.length ||
+		(files.length === 1 && response.deferredFiles.length > 0)
+	) {
+		throw new ApiError(502, 'Invalid Git review body response.', 'GIT_INVALID_RESULT');
+	}
+	markGitReviewBodyReady(gitDocumentKey(document), purpose);
 	const indexed: Record<string, GitReviewFileBody> = Object.create(null);
-	for (const [path, body] of Object.entries(response.files)) {
+	for (const path of new Set(files)) {
+		const body = Object.hasOwn(response.files, path) ? response.files[path] : undefined;
+		if (!body) continue;
+		options?.signal?.throwIfAborted();
 		try {
 			indexed[path] = await createIndexedGitReviewFileBody(body, options?.signal ?? undefined);
 		} catch (error) {
@@ -118,6 +139,18 @@ export async function getGitReviewDocumentFileBodies(
 				error: error instanceof Error ? error.message : 'Diff indexing failed.',
 			};
 		}
+		options?.signal?.throwIfAborted();
+		onIndexedBodies?.(
+			{
+				status: 'ready',
+				documentId: gitDocumentKey(document),
+				files: { [path]: indexed[path] },
+				errors: {},
+				deferredFiles: [],
+			},
+			[path],
+		);
+		options?.signal?.throwIfAborted();
 	}
 	return {
 		...response,

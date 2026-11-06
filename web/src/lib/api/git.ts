@@ -30,6 +30,7 @@ export {
 } from '$shared/git-refs';
 import {
 	getGitReviewDocumentFileBodies,
+	type GitReviewBodyFetchOptions,
 	type GitReviewBodyPurpose,
 	type GitReviewDocumentIndexedFileBodiesResponse,
 	type GitReviewFileBody,
@@ -328,7 +329,7 @@ export async function getGitCommitFileBodies(
 	document: GitReviewDocumentRef,
 	commit: string,
 	files: GitDiffFileRequest[],
-	options?: ApiFetchOptions & {
+	options?: GitReviewBodyFetchOptions & {
 		parent?: string | null;
 		context?: number;
 		purpose?: GitReviewBodyPurpose;
@@ -492,7 +493,7 @@ export async function getGitReviewFileBodies(
 	files: string[],
 	tab: GitDiffTab,
 	context = 5,
-	options?: ApiFetchOptions & { purpose?: GitReviewBodyPurpose },
+	options?: GitReviewBodyFetchOptions & { purpose?: GitReviewBodyPurpose },
 ): Promise<GitReviewDocumentIndexedFileBodiesResponse> {
 	void tab;
 	void context;
@@ -576,21 +577,33 @@ export async function gitApplyStash(
 	target: GitProjectTarget,
 	stash: GitStashTarget,
 ): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/apply', stashFields(target, stash));
+	return gitApiMutation<SuccessResponse>(
+		target,
+		'/api/v1/git/stash/apply',
+		stashFields(target, stash),
+	);
 }
 
 export async function gitPopStash(
 	target: GitProjectTarget,
 	stash: GitStashTarget,
 ): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/pop', stashFields(target, stash));
+	return gitApiMutation<SuccessResponse>(
+		target,
+		'/api/v1/git/stash/pop',
+		stashFields(target, stash),
+	);
 }
 
 export async function gitDropStash(
 	target: GitProjectTarget,
 	stash: GitStashTarget,
 ): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/drop', stashFields(target, stash));
+	return gitApiMutation<SuccessResponse>(
+		target,
+		'/api/v1/git/stash/drop',
+		stashFields(target, stash),
+	);
 }
 
 export async function getGitFileHistory(

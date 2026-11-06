@@ -153,6 +153,7 @@ function makeReviewBodies(paths: string[]) {
 		documentId: 'doc',
 		files: Object.fromEntries(paths.map((path) => [path, makeReviewBody(path, `body:${path}`)])),
 		errors: {},
+		deferredFiles: [],
 	};
 }
 
@@ -283,6 +284,7 @@ describe('GitWorkbenchStore', () => {
 			documentId: 'doc',
 			files: { 'a.ts': makeReviewBody('a.ts') },
 			errors: {},
+			deferredFiles: [],
 		});
 	});
 
@@ -294,7 +296,8 @@ describe('GitWorkbenchStore', () => {
 		it('keeps the newest of three refreshes busy after obsolete requests complete', async () => {
 			await wb.setTarget(makeTarget());
 			const requests = Array.from({ length: 3 }, () => deferred<GitWorkbenchSnapshotResponse>());
-			for (const request of requests) mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(request.promise);
+			for (const request of requests)
+				mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(request.promise);
 			const refreshes = requests.map(() => wb.refresh({ reason: 'manual' }));
 			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(4);
 			requests[1].resolve(makeWorkbenchSnapshot({ workbenchFingerprint: 'obsolete-2' }));
@@ -676,6 +679,7 @@ describe('GitWorkbenchStore', () => {
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
 				errors: {},
+				deferredFiles: [],
 			});
 			await Promise.resolve();
 
@@ -703,6 +707,7 @@ describe('GitWorkbenchStore', () => {
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
 				errors: {},
+				deferredFiles: [],
 			});
 
 			await vi.waitFor(() => expect(wb.isExternallyStale).toBe(true));
@@ -718,7 +723,10 @@ describe('GitWorkbenchStore', () => {
 
 			await wb.setTarget(makeTarget());
 
-			await wb.runLocalGitMutation({ executorId: 'local', projectPath: '/project' }, async () => true);
+			await wb.runLocalGitMutation(
+				{ executorId: 'local', projectPath: '/project' },
+				async () => true,
+			);
 
 			await vi.waitFor(() => {
 				expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledWith(
@@ -844,6 +852,7 @@ describe('GitWorkbenchStore', () => {
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'loaded') },
 				errors: {},
+				deferredFiles: [],
 			});
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({
@@ -992,6 +1001,7 @@ describe('GitWorkbenchStore', () => {
 					documentId: 'doc',
 					files: { 'a.ts': makeReviewErrorBody() },
 					errors: { 'a.ts': 'Transient diff failure' },
+					deferredFiles: [],
 				})
 				.mockResolvedValueOnce(makeReviewBodies(['a.ts']));
 
@@ -1019,6 +1029,7 @@ describe('GitWorkbenchStore', () => {
 					documentId: 'doc',
 					files: { 'a.ts': makeReviewErrorBody() },
 					errors: { 'a.ts': 'Transient diff failure' },
+					deferredFiles: [],
 				})
 				.mockResolvedValueOnce(makeReviewBodies(['a.ts']));
 
@@ -1131,6 +1142,7 @@ describe('GitWorkbenchStore', () => {
 							},
 						},
 						errors: {},
+						deferredFiles: [],
 					};
 				},
 			);
@@ -1208,6 +1220,7 @@ describe('GitWorkbenchStore', () => {
 					documentId: 'staged-doc',
 					files: { 'a.ts': makeReviewBody('a.ts', 'new') },
 					errors: {},
+					deferredFiles: [],
 				});
 			await wb.setTarget({
 				executorId: 'local',
@@ -1521,7 +1534,10 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 			wb.staging.requestDiscard('a.ts');
 
-			const result = await wb.staging.confirmDiscard({ executorId: 'local', projectPath: '/project' });
+			const result = await wb.staging.confirmDiscard({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitDiscard).toHaveBeenCalledWith(
@@ -1570,7 +1586,10 @@ describe('GitWorkbenchStore', () => {
 				makeWorkbenchSnapshot({ root: [], hasCommits: true }),
 			);
 
-			const result = await wb.initialCommit.create({ executorId: 'local', projectPath: '/project' });
+			const result = await wb.initialCommit.create({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(result).toBe(true);
 			expect(wb.files.hasCommits).toBe(true);
@@ -2290,11 +2309,17 @@ describe('GitWorkbenchStore', () => {
 
 			wb.files.selectedFile = 'a.ts';
 			wb.porcelain.setInspectorView('history');
-			const firstLoad = wb.porcelain.loadCurrentView({ executorId: 'local', projectPath: '/project' });
+			const firstLoad = wb.porcelain.loadCurrentView({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 			const firstOptions = mockedApi.getGitFileHistory.mock.calls[0]?.[3] as RequestInit;
 
 			wb.files.selectedFile = 'b.ts';
-			const secondLoad = wb.porcelain.loadCurrentView({ executorId: 'local', projectPath: '/project' });
+			const secondLoad = wb.porcelain.loadCurrentView({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 			const secondOptions = mockedApi.getGitFileHistory.mock.calls[1]?.[3] as RequestInit;
 
 			expect(firstOptions.signal).toBeInstanceOf(AbortSignal);

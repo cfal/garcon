@@ -10,6 +10,92 @@ function deferred<T>() {
 }
 
 describe('GitReviewBodyScheduler', () => {
+	it('publishes incrementally, retries only retained deferrals as singletons, and never republishes', async () => {
+		type Result = { deferred: string[] };
+		const batch = deferred<Result>();
+		const results: string[][] = [];
+		const calls: string[][] = [];
+		const onError = vi.fn();
+		let publishBatch!: (result: Result, paths: string[]) => void;
+		const scheduler = new GitReviewBodyScheduler<Result>({
+			maxBatchFiles: 4,
+			load: (paths, _purpose, _signal, publish) => {
+				calls.push(paths);
+				if (calls.length === 1) {
+					publishBatch = publish;
+					return batch.promise;
+				}
+				return Promise.resolve({ deferred: [] });
+			},
+			deferredPaths: (result) => result.deferred,
+			onResult: (_result, paths) => results.push(paths),
+			onLoadingChange: vi.fn(),
+			onError,
+		});
+		scheduler.requestVisible(['a', 'b', 'c', 'obsolete']);
+		publishBatch({ deferred: [] }, ['a']);
+		expect(results).toEqual([['a']]);
+		scheduler.retainVisible(new Set(['a', 'b', 'c']));
+		batch.resolve({ deferred: ['b', 'c', 'obsolete'] });
+		await vi.waitFor(() => expect(results).toEqual([['a'], ['b'], ['c']]));
+		expect(calls).toEqual([['a', 'b', 'c', 'obsolete'], ['b'], ['c']]);
+		expect(onError).not.toHaveBeenCalled();
+	});
+
+	it('fences partial callbacks after cancellation and recovers demand renewed before settlement', async () => {
+		const held = deferred<string>();
+		const onResult = vi.fn();
+		const calls: string[][] = [];
+		let publishOld!: (result: string, paths: string[]) => void;
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 4,
+			load: (paths, _purpose, _signal, publish) => {
+				calls.push(paths);
+				if (calls.length === 1) {
+					publishOld = publish;
+					return held.promise;
+				}
+				return Promise.resolve('current');
+			},
+			onResult,
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestVisible(['a']);
+		scheduler.retainVisible(new Set());
+		scheduler.requestVisible(['a']);
+		publishOld('late', ['a']);
+		held.resolve('late');
+		await vi.waitFor(() =>
+			expect(onResult).toHaveBeenCalledExactlyOnceWith('current', ['a'], 'visible'),
+		);
+		expect(calls).toEqual([['a'], ['a']]);
+	});
+
+	it('rejects deferred singletons without looping and prioritizes queued navigation', async () => {
+		const held = deferred<string[]>();
+		const calls: string[][] = [];
+		const onError = vi.fn();
+		const scheduler = new GitReviewBodyScheduler<string[]>({
+			maxBatchFiles: 4,
+			load: (paths) => {
+				calls.push(paths);
+				return calls.length === 1 ? held.promise : Promise.resolve(paths);
+			},
+			deferredPaths: (result) => result,
+			onResult: vi.fn(),
+			onError,
+			onLoadingChange: vi.fn(),
+		});
+		scheduler.requestVisible(['first']);
+		scheduler.requestVisible(['a', 'b', 'c']);
+		scheduler.requestNavigation(['c']);
+		held.resolve([]);
+		await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+		expect(calls[1]).toEqual(['c']);
+		await vi.waitFor(() => expect(scheduler.hasPending('a')).toBe(false));
+		expect(calls).toEqual([['first'], ['c'], ['a', 'b'], ['a'], ['b']]);
+	});
 	it('publishes the visible file before a delayed prefetch batch', async () => {
 		const visible = deferred<string>();
 		const prefetch = deferred<string>();
@@ -81,7 +167,12 @@ describe('GitReviewBodyScheduler', () => {
 		expect(scheduler.requestVisible(['a.ts'])).toBe(false);
 
 		expect(load).toHaveBeenCalledOnce();
-		expect(load).toHaveBeenCalledWith(['a.ts'], 'prefetch', expect.any(AbortSignal));
+		expect(load).toHaveBeenCalledWith(
+			['a.ts'],
+			'prefetch',
+			expect.any(AbortSignal),
+			expect.any(Function),
+		);
 		prefetch.resolve('prefetched');
 	});
 

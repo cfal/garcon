@@ -157,7 +157,7 @@ describe('loadReviewDiffBatches', () => {
       const response = { ...scope, status: 'ready', documentId: document.id,
         files: { [body.path]: body }, errors: loaded.errors };
       expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(GIT_MAX_RESULT_BYTES);
-      expect(() => validateGitResult('getReviewDocumentFileBodies', response, scope)).not.toThrow();
+      expect(() => validateGitResult('getReviewDocumentFileBodies', { ...response, deferredFiles: [] }, scope)).not.toThrow();
     }
   });
 

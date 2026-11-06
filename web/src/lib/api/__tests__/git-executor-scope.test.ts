@@ -21,6 +21,126 @@ afterEach(() => {
 });
 
 describe('Git executor response boundaries', () => {
+	it('publishes each index before waiting for the next file, preserving deferred paths', async () => {
+		const patch = '@@ -0,0 +1 @@\n+const value = true;\n';
+		const index = createGitPatchIndex(patch);
+		const indexed = {
+			kind: 'index' as const,
+			index: index.toData(),
+			split: getGitSplitPatchIndex(index).toData(),
+		};
+		const held = Promise.withResolvers<typeof indexed>();
+		const run = vi
+			.spyOn(gitReviewWorker, 'run')
+			.mockResolvedValueOnce(indexed)
+			.mockReturnValueOnce(held.promise);
+		const files = Object.fromEntries(
+			['a.ts', 'b.ts'].map((path) => [
+				path,
+				{
+					path,
+					patch,
+					bodyFingerprint: path,
+					bodyState: 'loaded',
+					category: 'normal',
+					isBinary: false,
+					isTooLarge: false,
+					patchBytes: patch.length,
+					renderedRowCount: 2,
+				},
+			]),
+		);
+		fetchMock.mockResolvedValue(
+			response({
+				...scope,
+				documentId: document.documentId,
+				status: 'ready',
+				files,
+				errors: {},
+				deferredFiles: ['constructor'],
+			}),
+		);
+		const onIndexedBodies = vi.fn();
+		const result = getGitReviewDocumentFileBodies(
+			target,
+			document,
+			['a.ts', 'b.ts', 'constructor'],
+			'visible',
+			{ onIndexedBodies },
+		);
+		await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+		expect(onIndexedBodies).toHaveBeenCalledTimes(1);
+		expect(onIndexedBodies.mock.calls[0][1]).toEqual(['a.ts']);
+		held.resolve(indexed);
+		expect(await result).toMatchObject({ deferredFiles: ['constructor'] });
+		expect(onIndexedBodies.mock.calls.map((call) => call[1])).toEqual([['a.ts'], ['b.ts']]);
+	});
+
+	it('stops indexing when a partial publication cancels its document', async () => {
+		const patch = '@@ -0,0 +1 @@\n+value\n';
+		const index = createGitPatchIndex(patch);
+		const run = vi
+			.spyOn(gitReviewWorker, 'run')
+			.mockResolvedValue({
+				kind: 'index',
+				index: index.toData(),
+				split: getGitSplitPatchIndex(index).toData(),
+			});
+		const files = Object.fromEntries(
+			['a.ts', 'b.ts'].map((path) => [
+				path,
+				{
+					path,
+					patch,
+					bodyFingerprint: path,
+					bodyState: 'loaded',
+					category: 'normal',
+					isBinary: false,
+					isTooLarge: false,
+					patchBytes: patch.length,
+					renderedRowCount: 2,
+				},
+			]),
+		);
+		fetchMock.mockResolvedValue(
+			response({
+				...scope,
+				documentId: document.documentId,
+				status: 'ready',
+				files,
+				errors: {},
+				deferredFiles: [],
+			}),
+		);
+		const controller = new AbortController();
+		await expect(
+			getGitReviewDocumentFileBodies(target, document, ['a.ts', 'b.ts'], 'visible', {
+				signal: controller.signal,
+				onIndexedBodies: () => controller.abort(),
+			}),
+		).rejects.toMatchObject({ name: 'AbortError' });
+		expect(run).toHaveBeenCalledOnce();
+	});
+
+	it.each(
+		[undefined, [], ['a.ts'], ['a.ts', 'a.ts'], ['other']].map((deferredFiles) => ({
+			deferredFiles,
+		})),
+	)('rejects incomplete or invalid singleton deferrals: %j', async ({ deferredFiles }) => {
+		fetchMock.mockResolvedValue(
+			response({
+				...scope,
+				documentId: document.documentId,
+				status: 'ready',
+				files: {},
+				errors: {},
+				deferredFiles,
+			}),
+		);
+		await expect(
+			getGitReviewDocumentFileBodies(target, document, ['a.ts'], 'visible'),
+		).rejects.toMatchObject({ errorCode: 'GIT_INVALID_RESULT' });
+	});
 	it.each(['file.ts', 'constructor', 'toString', '__proto__'])(
 		'indexes %s without changing executor-qualified metadata or selection proof',
 		async (path) => {
@@ -37,6 +157,7 @@ describe('Git executor response boundaries', () => {
 					documentId: document.documentId,
 					status: 'ready',
 					errors: {},
+					deferredFiles: [],
 					files: {
 						[path]: {
 							path,
@@ -71,6 +192,7 @@ describe('Git executor response boundaries', () => {
 				documentId: document.documentId,
 				status: 'ready',
 				errors: {},
+				deferredFiles: [],
 				files: {
 					'file.ts': {
 						path: 'file.ts',
@@ -160,6 +282,7 @@ describe('Git executor response boundaries', () => {
 				documentId: document.documentId,
 				files: {},
 				errors: {},
+				deferredFiles: [],
 			}),
 		);
 		await expect(

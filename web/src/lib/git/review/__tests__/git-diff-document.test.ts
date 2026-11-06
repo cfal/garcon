@@ -77,6 +77,7 @@ function bodyResponse(documentId: string, paths: readonly string[]) {
 		documentId,
 		files: Object.fromEntries(paths.map((path) => [path, body(path)])),
 		errors: {},
+		deferredFiles: [],
 	};
 }
 
@@ -119,7 +120,51 @@ function addedSyntaxSegments(controller: GitDiffDocumentController) {
 }
 
 describe('GitDiffDocumentController', () => {
-	it('loads one file per request and continues after an oversized file', async () => {
+	it('preserves both lanes during incremental publication and fences a replaced document', async () => {
+		const controller = new GitDiffDocumentController();
+		const held = deferred<ReturnType<typeof bodyResponse>>();
+		let publish!: (result: ReturnType<typeof bodyResponse>, paths: string[]) => void;
+		try {
+			controller.open(
+				{
+					project: '/project',
+					documentId: 'doc',
+					files: ['a.ts', 'b.ts', 'c.ts'].map(file),
+					limits: { ...limits, maxLoadedRows: 100 },
+					firstBodyCandidates: ['a.ts', 'b.ts', 'c.ts'],
+				},
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					commentSource: testCommentSource(),
+					onError: vi.fn(),
+					loadBodies: async (_snapshot, paths, purpose, _signal, partial) => {
+						if (purpose === 'visible')
+							return bodyResponse(
+								'doc',
+								paths.map((file) => file.path),
+							);
+						publish = partial;
+						return held.promise;
+					},
+				},
+			);
+			publish(bodyResponse('doc', ['b.ts']), ['b.ts']);
+			await vi.waitFor(() => expect(controller.fileBodies['a.ts']).toBeDefined());
+			expect(controller.fileBodies['b.ts']).toBeDefined();
+			expect(controller.loadingBodies.has('b.ts')).toBe(false);
+			expect(controller.loadingBodies.has('c.ts')).toBe(true);
+			controller.clear();
+			publish(bodyResponse('doc', ['c.ts']), ['c.ts']);
+			held.resolve(bodyResponse('doc', ['b.ts', 'c.ts']));
+			await held.promise;
+			expect(controller.fileBodies).toEqual({});
+		} finally {
+			controller.clear();
+		}
+	});
+
+	it('keeps the selected file singleton and batches neighbors after an oversized file', async () => {
 		const controller = new GitDiffDocumentController();
 		const paths = ['large.ts', 'a.ts', 'b.ts'];
 		const oversized: GitReviewFileBody = {
@@ -164,7 +209,7 @@ describe('GitDiffDocumentController', () => {
 			expect(controller.fileBodies['large.ts']?.limitReason).toBe('file-too-many-bytes');
 			expect(
 				loadBodies.mock.calls.map(([, requested]) => requested.map(({ path }) => path)),
-			).toEqual(paths.map((path) => [path]));
+			).toEqual([['large.ts'], ['a.ts', 'b.ts']]);
 			expect(controller.aggregateLimit).toBeNull();
 		} finally {
 			controller.clear();
@@ -575,12 +620,14 @@ describe('GitDiffDocumentController', () => {
 			documentId: string;
 			files: Record<string, GitReviewFileBody>;
 			errors: Record<string, string>;
+			deferredFiles: string[];
 		}) => void;
 		const initial = new Promise<{
 			status: 'ready';
 			documentId: string;
 			files: Record<string, GitReviewFileBody>;
 			errors: Record<string, string>;
+			deferredFiles: string[];
 		}>((resolve) => {
 			resolveInitial = resolve;
 		});
@@ -591,6 +638,7 @@ describe('GitDiffDocumentController', () => {
 				documentId: 'doc',
 				files: Object.fromEntries(files.map(({ path }) => [path, body(path)])),
 				errors: {},
+				deferredFiles: [],
 			};
 		});
 		controller.open(
@@ -617,6 +665,7 @@ describe('GitDiffDocumentController', () => {
 			documentId: 'doc',
 			files: { 'initial.ts': body('initial.ts') },
 			errors: {},
+			deferredFiles: [],
 		});
 
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(2));
@@ -631,6 +680,7 @@ describe('GitDiffDocumentController', () => {
 			documentId: 'doc',
 			files: Object.fromEntries(requested.map(({ path }) => [path, body(path)])),
 			errors: {},
+			deferredFiles: [],
 		}));
 		controller.open(
 			{
@@ -768,6 +818,7 @@ describe('GitDiffDocumentController', () => {
 			documentId: 'doc',
 			files: Object.fromEntries(requested.map(({ path }) => [path, body(path)])),
 			errors: {},
+			deferredFiles: [],
 		}));
 
 		controller.open(
@@ -833,6 +884,7 @@ describe('GitDiffDocumentController', () => {
 						),
 					),
 					errors: {},
+					deferredFiles: [],
 				})),
 				onError: vi.fn(),
 				commentSource: testCommentSource(),
@@ -857,12 +909,14 @@ describe('GitDiffDocumentController', () => {
 			documentId: string;
 			files: Record<string, GitReviewFileBody>;
 			errors: Record<string, string>;
+			deferredFiles: string[];
 		}) => void;
 		const visible = new Promise<{
 			status: 'ready';
 			documentId: string;
 			files: Record<string, GitReviewFileBody>;
 			errors: Record<string, string>;
+			deferredFiles: string[];
 		}>((resolve) => {
 			resolveVisible = resolve;
 		});
@@ -874,6 +928,7 @@ describe('GitDiffDocumentController', () => {
 					documentId: 'doc',
 					files: Object.fromEntries(requested.map(({ path }) => [path, body(path)])),
 					errors: {},
+					deferredFiles: [],
 				};
 			},
 		);
@@ -901,6 +956,7 @@ describe('GitDiffDocumentController', () => {
 			documentId: 'doc',
 			files: { 'selected.ts': body('selected.ts') },
 			errors: {},
+			deferredFiles: [],
 		});
 
 		await vi.waitFor(() => expect(controller.fileBodies['selected.ts']?.bodyState).toBe('loaded'));
@@ -920,6 +976,7 @@ describe('GitDiffDocumentController', () => {
 				]),
 			),
 			errors: {},
+			deferredFiles: [],
 		}));
 
 		controller.open(
@@ -995,6 +1052,7 @@ describe('GitDiffDocumentController', () => {
 					documentId: 'doc',
 					files: { 'a.ts': failedBody },
 					errors: { 'a.ts': 'Unable to read this path.' },
+					deferredFiles: [],
 				})),
 				onError: vi.fn(),
 				commentSource: testCommentSource(),
@@ -1023,12 +1081,14 @@ describe('GitDiffDocumentController', () => {
 				documentId: 'doc',
 				files: { 'a.ts': failedBody },
 				errors: { 'a.ts': 'Transient diff failure' },
+				deferredFiles: [],
 			})
 			.mockResolvedValueOnce({
 				status: 'ready',
 				documentId: 'doc',
 				files: { 'a.ts': body('a.ts') },
 				errors: {},
+				deferredFiles: [],
 			});
 
 		controller.open(
@@ -1064,6 +1124,7 @@ describe('GitDiffDocumentController', () => {
 				documentId: snapshot.documentId,
 				files: Object.fromEntries(files.map(({ path }) => [path, body(path)])),
 				errors: {},
+				deferredFiles: [],
 			}),
 		);
 		const open = (documentId: string, path: string) =>
@@ -1112,6 +1173,7 @@ describe('GitDiffDocumentController', () => {
 					]),
 				),
 				errors: {},
+				deferredFiles: [],
 			}),
 		);
 		const open = (index: number) => {
@@ -1210,6 +1272,7 @@ describe('GitDiffDocumentController', () => {
 					documentId: 'doc',
 					files: { 'a.ts': loadedBody },
 					errors: {},
+					deferredFiles: [],
 				})),
 				onError: vi.fn(),
 				commentSource: {
@@ -1268,6 +1331,7 @@ describe('GitDiffDocumentController', () => {
 			documentId: 'doc',
 			files: { 'a.ts': body('a.ts') },
 			errors: {},
+			deferredFiles: [],
 		}));
 		const documentSnapshot = {
 			project: '/project',
