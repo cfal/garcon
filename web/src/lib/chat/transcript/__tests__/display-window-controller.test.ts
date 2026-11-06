@@ -200,13 +200,11 @@ it('retains selected members as islands and releases their leases after selectio
 	const { controller, store } = setup();
 	await controller.refresh(); await controller.expand(group);
 	controller.protect([2]);
-	const moving = controller.expand(group, { kind: 'around', ordinal: 20000 });
-	await new Promise(resolve => setTimeout(resolve, 0));
+	expect(await controller.expand(group, { kind: 'around', ordinal: 20000 })).toBe('loaded');
 	expect(controller.snapshot.expansions[0].page.ordinals).not.toContain(2);
 	expect(controller.snapshot.protectedRows.map(row => row.detail.ordinal)).toEqual([2]);
 	expect(store.get(certificate, 2)).toBeDefined();
 	controller.protect([]);
-	expect(await moving).toBe('loaded');
 	expect(store.get(certificate, 2)).toBeUndefined();
 });
 
@@ -476,13 +474,14 @@ it('loads an attached result owner outside the target window at the same waterma
 });
 
 it('applies pages only after the native-scroll gate and never hydrates parked windows', async () => {
-	const gate = Promise.withResolvers<'apply'>();
+	const entered = Promise.withResolvers<void>(), gate = Promise.withResolvers<'apply'>();
 	const { controller, store } = setup();
-	controller.setApplicationGate(() => gate.promise);
+	controller.setApplicationGate(() => { entered.resolve(); return gate.promise; });
 	const refreshing = controller.refresh();
-	await new Promise(resolve => setTimeout(resolve, 0));
-	expect(controller.snapshot.window).toBeNull();
-	gate.resolve('apply'); await refreshing;
+	await entered.promise;
+	try { expect(controller.snapshot.window).toBeNull(); }
+	finally { gate.resolve('apply'); }
+	expect(await refreshing).toBe('loaded');
 	expect(store.count).toBe(1);
 	controller.park(); controller.observeHead('view', 50000);
 	expect(await controller.refresh()).toBe('blocked'); expect(store.count).toBe(1);
