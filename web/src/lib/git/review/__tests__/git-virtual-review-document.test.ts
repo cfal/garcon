@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as gitApi from '$lib/api/git.js';
+import type { GitReviewBodyFetchOptions } from '$lib/api/git-review-documents.js';
 import type {
 	GitReviewDocumentSummary,
 	GitReviewFileBody,
@@ -285,19 +286,20 @@ describe('buildVirtualRows', () => {
 });
 
 describe('GitVirtualReviewDocumentController syntax', () => {
-	it('publishes indexed bodies while the rest of the batch is held and fences reset callbacks', async () => {
-		const paths = ['a.ts', 'b.ts'];
-		const ready = (requested: string[]) => ({
+	function ready(requested: string[]) {
+		return {
 			status: 'ready' as const,
 			documentId: 'doc',
 			files: Object.fromEntries(requested.map((path) => [path, makeBody(path)])),
 			errors: {},
 			deferredFiles: [],
-		});
+		};
+	}
+
+	it('publishes indexed bodies while the rest of the batch is held and fences reset callbacks', async () => {
+		const paths = ['a.ts', 'b.ts'];
 		const held = Promise.withResolvers<ReturnType<typeof ready>>();
-		let publish!: NonNullable<
-			NonNullable<Parameters<typeof gitApi.getGitReviewFileBodies>[5]>['onIndexedBodies']
-		>;
+		let publish!: NonNullable<GitReviewBodyFetchOptions['onIndexedBodies']>;
 		const load = vi
 			.spyOn(gitApi, 'getGitReviewFileBodies')
 			.mockImplementation((_target, _document, _files, _tab, _context, options) => {
@@ -327,17 +329,8 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		'recovers %s workbench demand after cancelling incremental prefetch',
 		async (kind) => {
 			const paths = ['initial.ts', 'blocked.ts', 'wanted.ts'];
-			const ready = (requested: string[]) => ({
-				status: 'ready' as const,
-				documentId: 'doc',
-				files: Object.fromEntries(requested.map((path) => [path, makeBody(path)])),
-				errors: {},
-				deferredFiles: [],
-			});
 			const held = Promise.withResolvers<ReturnType<typeof ready>>();
-			let publish!: NonNullable<
-				NonNullable<Parameters<typeof gitApi.getGitReviewFileBodies>[5]>['onIndexedBodies']
-			>;
+			let publish!: NonNullable<GitReviewBodyFetchOptions['onIndexedBodies']>;
 			const load = vi
 				.spyOn(gitApi, 'getGitReviewFileBodies')
 				.mockImplementation(async (_target, _document, files, _tab, _context, options) => {

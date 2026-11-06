@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGitStatus, gitCommitIndex, gitStageHunk } from '../git.js';
-import { getGitReviewDocumentFileBodies } from '../git-review-documents.js';
+import {
+	getGitReviewDocumentFileBodies,
+	type GitReviewFilePatchBody,
+} from '../git-review-documents.js';
 import { getPullRequest } from '../pull-requests.js';
 import { gitReviewWorker } from '$lib/git/review/git-review-worker-client.js';
 import { createGitPatchIndex, getGitSplitPatchIndex } from '$lib/git/review/git-patch-index.js';
@@ -10,6 +13,25 @@ const scope = { executorId: target.executorId, instanceId: 'instance-a' };
 const document = { ...scope, documentId: 'document-a' };
 const fetchMock = vi.fn<typeof fetch>();
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+
+function patchBodies(paths: string[], patch: string): Record<string, GitReviewFilePatchBody> {
+	return Object.fromEntries(
+		paths.map((path) => [
+			path,
+			{
+				path,
+				patch,
+				bodyFingerprint: path,
+				bodyState: 'loaded',
+				category: 'normal',
+				isBinary: false,
+				isTooLarge: false,
+				patchBytes: patch.length,
+				renderedRowCount: 2,
+			},
+		]),
+	);
+}
 
 beforeEach(() => {
 	fetchMock.mockReset();
@@ -34,28 +56,12 @@ describe('Git executor response boundaries', () => {
 			.spyOn(gitReviewWorker, 'run')
 			.mockResolvedValueOnce(indexed)
 			.mockReturnValueOnce(held.promise);
-		const files = Object.fromEntries(
-			['a.ts', 'b.ts'].map((path) => [
-				path,
-				{
-					path,
-					patch,
-					bodyFingerprint: path,
-					bodyState: 'loaded',
-					category: 'normal',
-					isBinary: false,
-					isTooLarge: false,
-					patchBytes: patch.length,
-					renderedRowCount: 2,
-				},
-			]),
-		);
 		fetchMock.mockResolvedValue(
 			response({
 				...scope,
 				documentId: document.documentId,
 				status: 'ready',
-				files,
+				files: patchBodies(['a.ts', 'b.ts'], patch),
 				errors: {},
 				deferredFiles: ['constructor'],
 			}),
@@ -79,35 +85,17 @@ describe('Git executor response boundaries', () => {
 	it('stops indexing when a partial publication cancels its document', async () => {
 		const patch = '@@ -0,0 +1 @@\n+value\n';
 		const index = createGitPatchIndex(patch);
-		const run = vi
-			.spyOn(gitReviewWorker, 'run')
-			.mockResolvedValue({
-				kind: 'index',
-				index: index.toData(),
-				split: getGitSplitPatchIndex(index).toData(),
-			});
-		const files = Object.fromEntries(
-			['a.ts', 'b.ts'].map((path) => [
-				path,
-				{
-					path,
-					patch,
-					bodyFingerprint: path,
-					bodyState: 'loaded',
-					category: 'normal',
-					isBinary: false,
-					isTooLarge: false,
-					patchBytes: patch.length,
-					renderedRowCount: 2,
-				},
-			]),
-		);
+		const run = vi.spyOn(gitReviewWorker, 'run').mockResolvedValue({
+			kind: 'index',
+			index: index.toData(),
+			split: getGitSplitPatchIndex(index).toData(),
+		});
 		fetchMock.mockResolvedValue(
 			response({
 				...scope,
 				documentId: document.documentId,
 				status: 'ready',
-				files,
+				files: patchBodies(['a.ts', 'b.ts'], patch),
 				errors: {},
 				deferredFiles: [],
 			}),

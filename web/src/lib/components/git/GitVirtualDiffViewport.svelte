@@ -373,22 +373,22 @@
 		scrollIntentRevision += 1;
 		pendingScrollRequestKey = requestKey;
 		const requestSequence = ++scrollRequestSequence;
-		const priorityFilePaths = [scrollToRequest.filePath];
+		const filePath = scrollToRequest.filePath;
 		const documentId = reviewDocumentId;
 		untrack(() => {
-			if (requestKey !== lastScrollRequestKey && documentId && priorityFilePaths.length > 0) {
+			if (requestKey !== lastScrollRequestKey && documentId) {
 				traceGitReviewDemand({
 					stage: 'viewport-demand',
 					documentId,
 					kind: 'navigation',
-					fileCount: priorityFilePaths.length,
-					firstFile: priorityFilePaths[0] ?? null,
-					lastFile: priorityFilePaths.at(-1) ?? null,
+					fileCount: 1,
+					firstFile: filePath,
+					lastFile: filePath,
 				});
 				onBodyDemand({
 					kind: 'navigation',
 					documentId,
-					filePaths: priorityFilePaths,
+					filePaths: [filePath],
 				});
 			}
 			void tick().then(() => {

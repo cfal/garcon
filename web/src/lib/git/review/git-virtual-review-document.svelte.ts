@@ -18,7 +18,6 @@ import type { GitWorkbenchLoadGuard } from '$lib/git/workbench/git-workbench-typ
 import { gitDocumentKey, type GitReviewDocumentRef } from '$lib/api/git-client.js';
 import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
 import {
-	collectionLimitDecisionFromGitReviewBody,
 	decideGitReviewBodyBudget,
 	type GitReviewBodyBudgetDecision,
 } from './git-review-body-budget.js';
@@ -589,12 +588,6 @@ export class GitVirtualReviewDocumentController {
 				this.deps.markExternallyStale();
 				continue;
 			}
-			const serverLimit = collectionLimitDecisionFromGitReviewBody(body, next);
-			if (serverLimit) {
-				next[filePath] = body;
-				this.setAggregateLimit(serverLimit, Object.keys(next).length, body.limitMessage);
-				break;
-			}
 			const effectivePurpose =
 				purpose === 'prefetch' && this.demandReconciler.demandsPath(summary.documentId, filePath)
 					? 'visible'
@@ -643,16 +636,12 @@ export class GitVirtualReviewDocumentController {
 		};
 	}
 
-	private setAggregateLimit(
-		decision: GitReviewBodyBudgetDecision,
-		visibleFiles: number,
-		message = this.aggregateLimitMessage(decision),
-	): void {
+	private setAggregateLimit(decision: GitReviewBodyBudgetDecision, visibleFiles: number): void {
 		this.bodyScheduler?.cancel();
 		this.loadingBodies = new Set();
 		this.aggregateLimit = {
 			reason: decision.reason ?? 'collection-too-many-rows',
-			message,
+			message: this.aggregateLimitMessage(decision),
 			visibleFiles,
 			totalFilesKnown: this.summary?.files.length ?? 0,
 		};

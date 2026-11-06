@@ -818,31 +818,13 @@ describe('GitDiffDocumentController', () => {
 
 	it('starts a selected lazy body after the initial body batch settles', async () => {
 		const controller = new GitDiffDocumentController();
-		let resolveInitial!: (value: {
-			status: 'ready';
-			documentId: string;
-			files: Record<string, GitReviewFileBody>;
-			errors: Record<string, string>;
-			deferredFiles: string[];
-		}) => void;
-		const initial = new Promise<{
-			status: 'ready';
-			documentId: string;
-			files: Record<string, GitReviewFileBody>;
-			errors: Record<string, string>;
-			deferredFiles: string[];
-		}>((resolve) => {
-			resolveInitial = resolve;
-		});
+		const initial = deferred<ReturnType<typeof bodyResponse>>();
 		const loadBodies = vi.fn(async (_snapshot, files: Array<{ path: string }>) => {
-			if (loadBodies.mock.calls.length === 1) return initial;
-			return {
-				status: 'ready' as const,
-				documentId: 'doc',
-				files: Object.fromEntries(files.map(({ path }) => [path, body(path)])),
-				errors: {},
-				deferredFiles: [],
-			};
+			if (loadBodies.mock.calls.length === 1) return initial.promise;
+			return bodyResponse(
+				'doc',
+				files.map(({ path }) => path),
+			);
 		});
 		controller.open(
 			{
@@ -863,13 +845,7 @@ describe('GitDiffDocumentController', () => {
 
 		controller.focusFile('selected.ts');
 		expect(loadBodies).toHaveBeenCalledOnce();
-		resolveInitial({
-			status: 'ready',
-			documentId: 'doc',
-			files: { 'initial.ts': body('initial.ts') },
-			errors: {},
-			deferredFiles: [],
-		});
+		initial.resolve(bodyResponse('doc', ['initial.ts']));
 
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(2));
 		expect(loadBodies.mock.calls[1]?.[1]).toEqual([{ path: 'selected.ts' }]);
@@ -1052,87 +1028,56 @@ describe('GitDiffDocumentController', () => {
 		expect(controller.aggregateLimit).toBeNull();
 	});
 
-	it('honors a collection budget limit emitted by the server', async () => {
+	it('continues server-deferred bodies without imposing a collection limit', async () => {
 		const controller = new GitDiffDocumentController();
-		const limitedBody: GitReviewFileBody = {
-			...body('b.ts'),
-			bodyState: 'too-large',
-			category: 'large',
-			isTooLarge: true,
-			renderedRowCount: 0,
-			patchBytes: 0,
-			patch: null,
-			patchIndex: null,
-			limitReason: 'collection-too-many-rows',
-			limitMessage: 'Server stopped after 6 rendered rows.',
-		};
+		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (_snapshot, requested) => {
+			const paths = requested.map(({ path }) => path);
+			if (paths.length === 1) return bodyResponse('doc', paths);
+			return { ...bodyResponse('doc', paths.slice(0, 1)), deferredFiles: paths.slice(1) };
+		});
 
 		controller.open(
 			{
 				project: '/project',
 				documentId: 'doc',
 				files: [file('a.ts'), file('b.ts'), file('c.ts')],
-				limits,
-				firstBodyCandidates: ['a.ts'],
+				limits: { ...limits, maxLoadedRows: 100 },
+				firstBodyCandidates: ['a.ts', 'b.ts', 'c.ts'],
 			},
 			{
 				contextLines: 5,
 				diffMode: 'unified',
-				loadBodies: vi.fn(async (_snapshot, requested: Array<{ path: string }>) => ({
-					status: 'ready' as const,
-					documentId: 'doc',
-					files: Object.fromEntries(
-						requested.flatMap(({ path }) =>
-							path === 'a.ts' ? [[path, body(path)]] : path === 'b.ts' ? [[path, limitedBody]] : [],
-						),
-					),
-					errors: {},
-					deferredFiles: [],
-				})),
+				loadBodies,
 				onError: vi.fn(),
 				commentSource: testCommentSource(),
 			},
 		);
 
-		await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded'));
-		controller.focusFile('b.ts');
-		await vi.waitFor(() =>
-			expect(controller.aggregateLimit?.reason).toBe('collection-too-many-rows'),
-		);
-		expect(controller.aggregateLimit?.message).toBe('Server stopped after 6 rendered rows.');
-		expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded');
-		expect(controller.fileBodies['b.ts']).toBe(limitedBody);
-		expect(controller.fileBodies['c.ts']).toBeUndefined();
+		try {
+			await vi.waitFor(() => expect(controller.fileBodies['c.ts']?.bodyState).toBe('loaded'));
+			expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded');
+			expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded');
+			expect(controller.aggregateLimit).toBeNull();
+			expect(loadBodies.mock.calls.map(([, paths]) => paths.map(({ path }) => path))).toEqual([
+				['a.ts'],
+				['b.ts', 'c.ts'],
+				['c.ts'],
+			]);
+		} finally {
+			controller.clear();
+		}
 	});
 
 	it('evicts a speculative body when the selected body arrives later', async () => {
 		const controller = new GitDiffDocumentController();
-		let resolveVisible!: (value: {
-			status: 'ready';
-			documentId: string;
-			files: Record<string, GitReviewFileBody>;
-			errors: Record<string, string>;
-			deferredFiles: string[];
-		}) => void;
-		const visible = new Promise<{
-			status: 'ready';
-			documentId: string;
-			files: Record<string, GitReviewFileBody>;
-			errors: Record<string, string>;
-			deferredFiles: string[];
-		}>((resolve) => {
-			resolveVisible = resolve;
-		});
+		const visible = deferred<ReturnType<typeof bodyResponse>>();
 		const loadBodies = vi.fn(
 			async (_snapshot, requested: Array<{ path: string }>, purpose: string) => {
-				if (purpose === 'visible') return visible;
-				return {
-					status: 'ready' as const,
-					documentId: 'doc',
-					files: Object.fromEntries(requested.map(({ path }) => [path, body(path)])),
-					errors: {},
-					deferredFiles: [],
-				};
+				if (purpose === 'visible') return visible.promise;
+				return bodyResponse(
+					'doc',
+					requested.map(({ path }) => path),
+				);
 			},
 		);
 
@@ -1154,13 +1099,7 @@ describe('GitDiffDocumentController', () => {
 		);
 
 		await vi.waitFor(() => expect(controller.fileBodies['prefetch.ts']?.bodyState).toBe('loaded'));
-		resolveVisible({
-			status: 'ready',
-			documentId: 'doc',
-			files: { 'selected.ts': body('selected.ts') },
-			errors: {},
-			deferredFiles: [],
-		});
+		visible.resolve(bodyResponse('doc', ['selected.ts']));
 
 		await vi.waitFor(() => expect(controller.fileBodies['selected.ts']?.bodyState).toBe('loaded'));
 		expect(controller.fileBodies['prefetch.ts']).toBeUndefined();

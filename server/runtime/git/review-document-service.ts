@@ -28,6 +28,14 @@ import {
   measureGitReviewPhaseSync,
 } from './review-performance.js';
 
+// Leaves room for executor scope and bounded diagnostics added by the runtime.
+const MAX_ENCODED_RESPONSE_BYTES = GIT_MAX_RESULT_BYTES - 512 * 1024;
+
+function encodedMemberBytes(path: string, value: unknown): number {
+  // Removes the object braces and reserves one separator comma.
+  return Buffer.byteLength(JSON.stringify({ [path]: value })) - 2 + 1;
+}
+
 interface QueuedPrefetch<T> {
   signal?: AbortSignal;
   task: () => Promise<T>;
@@ -232,29 +240,25 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
             }),
           );
           const response: GitReviewDocumentFileBodiesReady = {
-            status: 'ready', documentId: options.documentId,
-            files: Object.create(null), errors: Object.create(null), deferredFiles: [],
+            status: 'ready',
+            documentId: options.documentId,
+            files: Object.create(null),
+            errors: Object.create(null),
+            deferredFiles: [],
           };
-          // Reserves all deferred-path metadata and room for runtime scope/diagnostics.
+          // Reserves metadata for every requested path, including bodies omitted by either budget.
           let encodedBytes = Buffer.byteLength(JSON.stringify({ ...response, deferredFiles: requestedPaths }));
-          const candidates = new Map(responseBodies.map((body) => [body.path, body]));
-          for (const path of requestedPaths) {
-            const body = candidates.get(path);
-            if (!body || isGitReviewCollectionLimitBody(body)) {
-              response.deferredFiles.push(path);
-              continue;
-            }
-            const entryBytes = Buffer.byteLength(JSON.stringify({ [path]: body })) - 2 + 1;
-            const errorBytes = body.error
-              ? Buffer.byteLength(JSON.stringify({ [path]: body.error })) - 2 + 1 : 0;
-            if (encodedBytes + entryBytes + errorBytes > GIT_MAX_RESULT_BYTES - 512 * 1024) {
-              response.deferredFiles.push(path);
-              continue;
-            }
-            encodedBytes += entryBytes + errorBytes;
+          for (const body of responseBodies) {
+            if (isGitReviewCollectionLimitBody(body)) continue;
+            const path = body.path;
+            const entryBytes = encodedMemberBytes(path, body)
+              + (body.error ? encodedMemberBytes(path, body.error) : 0);
+            if (encodedBytes + entryBytes > MAX_ENCODED_RESPONSE_BYTES) continue;
+            encodedBytes += entryBytes;
             response.files[path] = body;
             if (body.error) response.errors[path] = body.error;
           }
+          response.deferredFiles = requestedPaths.filter((path) => !Object.hasOwn(response.files, path));
           if (requestedPaths.length === 1 && response.deferredFiles.length > 0) {
             throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git file response exceeds the result limit.');
           }

@@ -9,6 +9,7 @@ import {
 import type { GitExecutorScope } from '$shared/git-execution';
 import type {
 	GitReviewFilePatchBody,
+	GitReviewDocumentFileBodiesReady,
 	GitReviewDocumentFileBodiesResponse,
 	GitReviewDocumentFileBodiesStale,
 	GitReviewDocumentFileBodiesExpired,
@@ -46,12 +47,8 @@ export interface GitReviewFileBody extends GitReviewFilePatchBody {
 	patchIndex: GitPatchIndex | null;
 }
 
-export interface GitReviewDocumentIndexedFileBodiesReady {
-	status: 'ready';
-	documentId: string;
+export interface GitReviewDocumentIndexedFileBodiesReady extends GitReviewDocumentFileBodiesReady {
 	files: Record<string, GitReviewFileBody>;
-	errors: Record<string, string>;
-	deferredFiles: string[];
 }
 
 export interface GitReviewBodyFetchOptions extends ApiFetchOptions {
@@ -112,18 +109,19 @@ export async function getGitReviewDocumentFileBodies(
 	if (!Array.isArray(response.deferredFiles)) {
 		throw new ApiError(502, 'Invalid Git review body deferrals.', 'GIT_INVALID_RESULT');
 	}
+	const requested = new Set(files);
 	const returned = [...Object.keys(response.files), ...response.deferredFiles];
 	if (
 		new Set(returned).size !== returned.length ||
-		returned.some((path) => !files.includes(path)) ||
-		new Set(files).size !== returned.length ||
+		returned.some((path) => !requested.has(path)) ||
+		requested.size !== returned.length ||
 		(files.length === 1 && response.deferredFiles.length > 0)
 	) {
 		throw new ApiError(502, 'Invalid Git review body response.', 'GIT_INVALID_RESULT');
 	}
 	markGitReviewBodyReady(gitDocumentKey(document), purpose);
 	const indexed: Record<string, GitReviewFileBody> = Object.create(null);
-	for (const path of new Set(files)) {
+	for (const path of requested) {
 		const body = Object.hasOwn(response.files, path) ? response.files[path] : undefined;
 		if (!body) continue;
 		options?.signal?.throwIfAborted();

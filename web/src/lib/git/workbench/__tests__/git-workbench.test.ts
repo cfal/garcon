@@ -1111,52 +1111,36 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.review.aggregateLimit).toBeNull();
 		});
 
-		it('honors a collection budget limit emitted by the server', async () => {
+		it('continues server-deferred bodies without imposing a collection limit', async () => {
 			const paths = ['a.ts', 'b.ts', 'c.ts'];
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({
 					root: paths.map((path) => makeTreeFile(path)),
 					summary: makeReviewSummary(paths),
 					selectedFile: paths[0],
-					firstBodyCandidates: [paths[0]],
+					firstBodyCandidates: paths,
 				}),
 			);
 			mockedApi.getGitReviewFileBodies.mockImplementation(
 				async (_project, _documentId, requestedPaths) => {
-					if (requestedPaths[0] !== 'b.ts') return makeReviewBodies(requestedPaths);
+					if (requestedPaths.length === 1) return makeReviewBodies(requestedPaths);
 					return {
-						status: 'ready' as const,
-						documentId: 'doc',
-						files: {
-							'b.ts': {
-								...makeReviewBody('b.ts'),
-								bodyState: 'too-large' as const,
-								category: 'large' as const,
-								isTooLarge: true,
-								renderedRowCount: 0,
-								patchBytes: 0,
-								patch: null,
-								patchIndex: null,
-								limitReason: 'collection-too-many-bytes' as const,
-								limitMessage: 'Server stopped after 42 patch bytes.',
-							},
-						},
-						errors: {},
-						deferredFiles: [],
+						...makeReviewBodies(requestedPaths.slice(0, 1)),
+						deferredFiles: requestedPaths.slice(1),
 					};
 				},
 			);
 
 			await wb.setTarget(makeTarget());
-			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']).toBeTruthy());
-			wb.review.focusFile('/project', 'b.ts');
-
-			await vi.waitFor(() =>
-				expect(wb.review.aggregateLimit?.reason).toBe('collection-too-many-bytes'),
-			);
-			expect(wb.review.aggregateLimit?.message).toBe('Server stopped after 42 patch bytes.');
-			expect(wb.review.fileBodies['b.ts']?.bodyState).toBe('too-large');
-			expect(wb.review.fileBodies['c.ts']).toBeUndefined();
+			await vi.waitFor(() => expect(wb.review.fileBodies['c.ts']?.bodyState).toBe('loaded'));
+			expect(wb.review.fileBodies['a.ts']?.bodyState).toBe('loaded');
+			expect(wb.review.fileBodies['b.ts']?.bodyState).toBe('loaded');
+			expect(wb.review.aggregateLimit).toBeNull();
+			expect(mockedApi.getGitReviewFileBodies.mock.calls.map(([, , files]) => files)).toEqual([
+				['a.ts'],
+				['b.ts', 'c.ts'],
+				['c.ts'],
+			]);
 		});
 
 		it('refreshes an expired workbench document once without retrying indefinitely', async () => {
