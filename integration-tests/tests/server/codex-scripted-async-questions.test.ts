@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { asyncQuestionReplyText, type AsyncQuestionReply } from '../../../common/async-user-questions.js';
+import { FILE_CONTEXT_SEPARATOR } from '../../../common/file-mention-context.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
@@ -18,6 +21,7 @@ test('async questions continue immediately and accept correlated ordinary input 
   }]);
   const continued = environment.model.scriptHeldStreamTurn([codexFinalAnswerMessage('UNUSED_INITIAL_REPLY')]);
   const steered = environment.model.scriptHeldTurn([codexFinalAnswerMessage('ASYNC_STEER_COMPLETE')]);
+  const interrupted = environment.model.scriptHeldStreamTurn([codexFinalAnswerMessage('UNUSED_INTERRUPTED_REPLY')]);
   environment.model.scriptTurn([codexFinalAnswerMessage('ASYNC_IDLE_COMPLETE')]);
   try {
     await withIntegrationFixture('codex-async-questions', async fixture => {
@@ -34,6 +38,16 @@ test('async questions continue immediately and accept correlated ordinary input 
       if (row?.message.type !== 'assistant-message' || !row.message.questions) throw new Error('Expected structured questions');
       expect(history.messages.filter(entry => entry.message.type === 'assistant-message' && entry.message.questions)).toHaveLength(1);
       const prompts = row.message.questions.questions;
+      const questionText = row.message.content;
+      const forkId = fixture.newChatId();
+      await client.forkChat({ sourceChatId: chatId, chatId: forkId, upToOrdinal: row.ordinal,
+        transcriptViewId: history.transcriptViewId, allowHandoffFork: true });
+      const frozen = await client.getMessages(forkId);
+      const copied = frozen.messages.find(entry => entry.message.type === 'assistant-message'
+        && entry.message.content === questionText);
+      expect(copied?.message).toMatchObject({ type: 'assistant-message', content: questionText });
+      expect(copied?.message.type === 'assistant-message' && copied.message.questions).toBeUndefined();
+      expect((await client.getChatSnapshot(forkId, 0)).chat.canReloadFromNativeHistory).toBe(false);
       const source = { chatId, transcriptViewId: history.transcriptViewId, ordinal: row.ordinal };
       const reply: AsyncQuestionReply = { questionId: prompts[0].id, question: prompts[0].prompt, answer: '  Staging\nOnly tests.  ', source };
       const request = { chatId, transcriptViewId: history.transcriptViewId,
@@ -44,6 +58,9 @@ test('async questions continue immediately and accept correlated ordinary input 
         .toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
       expect(await rejectionOf(client.steer({ ...request, questionReply: { ...reply, source: { ...source, ordinal: 1 } } })))
         .toMatchObject({ status: 400 });
+      expect(await rejectionOf(client.steer({ ...request,
+        questionReply: { ...reply, source: { ...source, ordinal: Number.MAX_SAFE_INTEGER } } })))
+        .toMatchObject({ status: 400, body: { errorCode: 'VALIDATION_FAILED' } });
       expect(await rejectionOf(client.steer({ ...request, whenTurnUnavailable: 'queue' }))).toMatchObject({ status: 400 });
       const response = await client.steer(request);
       expect(response.turnId).toBe(turn.turnId);
@@ -65,21 +82,39 @@ test('async questions continue immediately and accept correlated ordinary input 
       await fixture.restartGarcon();
       client = fixture.client;
       expect((await client.getMessages(chatId)).messages).toEqual(recorded.messages);
-      const laterReply = { ...reply, questionId: prompts[1].id, question: prompts[1].prompt, answer: 'Friday' };
+      const declinedInput = 'DECLINED_RESEND_INPUT';
+      const stopped = await client.runChat({ chatId, command: declinedInput,
+        clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID() });
+      await interrupted.requested;
+      await client.stopChat({ chatId, clientRequestId: crypto.randomUUID() });
+      await client.waitForTurnTerminal(chatId, stopped.turnId);
+      const unsent = (await client.getMessages(chatId)).messages.find(entry =>
+        entry.message.type === 'user-message' && entry.message.content === declinedInput);
+      if (!unsent) throw new Error('Missing interrupted input');
+      const laterReply = { ...reply, questionId: prompts[1].id, question: prompts[1].prompt, answer: 'Friday; use @sample.txt' };
+      const repeatedText = asyncQuestionReplyText(laterReply);
+      await writeFile(join(fixture.executionDirs.project, 'sample.txt'), repeatedText);
       const later = await client.runChat({ ...request, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-        command: asyncQuestionReplyText(laterReply), questionReply: laterReply });
+        command: asyncQuestionReplyText(laterReply), questionReply: laterReply, excludedResendOrdinals: [unsent.ordinal] });
       await client.waitForTurnTerminal(chatId, later.turnId);
-      expect(environment.model.requests()[3].lastUserText).toContain('"answer":"Friday"');
+      const nativeInput = environment.model.requests()[4].lastUserText;
+      expect(nativeInput).not.toContain(declinedInput);
+      const fileContext = `${FILE_CONTEXT_SEPARATOR}@sample.txt\n\`\`\`\n${repeatedText}\n\`\`\``;
+      expect(nativeInput).toEndWith(fileContext);
+      expect(nativeInput.slice(0, nativeInput.indexOf(FILE_CONTEXT_SEPARATOR)))
+        .toContain(`"answer":${JSON.stringify(laterReply.answer)}`);
       await reloadUntilNativeContains(fixture, chatId, 'ASYNC_IDLE_COMPLETE');
       const reloaded = await client.getMessages(chatId);
       expect(reloaded.messages.some(entry => entry.message.type === 'assistant-message' && entry.message.questions?.id === 'call-async')).toBe(true);
-      expect(reloaded.messages.some(entry => entry.message.type === 'user-message' && entry.message.metadata?.questionReply?.answer === 'Friday')).toBe(true);
+      expect(reloaded.messages.some(entry => entry.message.type === 'user-message'
+        && entry.message.metadata?.questionReply?.answer === laterReply.answer)).toBe(true);
       expect(await rejectionOf(client.steer(request))).toMatchObject({ status: 409, body: { errorCode: 'STALE_TRANSCRIPT_VIEW' } });
       environment.model.assertSettled();
     }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace });
   } finally {
     continued.release();
     steered.release();
+    interrupted.release();
     await environment.dispose();
   }
 }, 120_000);
