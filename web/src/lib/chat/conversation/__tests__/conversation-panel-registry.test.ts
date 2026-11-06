@@ -239,6 +239,39 @@ describe('display surface registry', () => {
 		expect(registry.panel(left)!.transcript).toBe(first);
 	});
 
+	it('evicts a parked window receiving new inputs and restores its saved reading target', async () => {
+		const { api, registry } = fixture();
+		registry.reconcile([presentation(left), presentation(right)]);
+		await registry.loadChatSnapshot('chat-1');
+		const first = registry.panel(left)!.transcript;
+		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 };
+		registry.panel(left)!.attachPresentation(port(target));
+		registry.prepareForReconcile([presentation(right)]);
+		registry.reconcile([presentation(right)]);
+		const requests = api.window.mock.calls.length;
+		for (let index = 0; index < 33; index++) {
+			const input = { ...pendingInput, clientMessageId: `input-${index}`, content: `Synthetic input ${index}` };
+			registry.upsertOptimisticInput('chat-1', input);
+			registry.acknowledgeInput('chat-1', 'view-1', input.clientMessageId, index + 2);
+			api.replace([displayRow(1), displayRow(index + 2, new UserMessage(DISPLAY_TIME, input.content, undefined,
+				{ clientMessageId: input.clientMessageId }))], displayOpen('chat-1', 'view-1', index + 2));
+			await registry.panel(right)!.transcript.controller.refresh();
+			await Promise.resolve();
+		}
+		expect(api.window.mock.calls.slice(requests).every(([request]) => request.anchor.kind === 'newest')).toBe(true);
+		registry.reconcile([presentation(left), presentation(right)]);
+		const restored = registry.panel(left)!;
+		expect(restored.transcript).not.toBe(first);
+		expect(restored.scroll.isPinnedToBottom).toBe(false);
+		const jump = vi.spyOn(restored.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		restored.attachPresentation(port({ kind: 'end' }));
+		await registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' }, { viewportOffset: -12 }));
+		expect(restored.transcript.visibleOptimisticInputs).toEqual([]);
+		expect(restored.transcript.loadError).toBeNull();
+	});
+
 	it('gates a retained end restore before its refresh and ignores early geometry completion', async () => {
 		const { api, registry } = fixture();
 		registry.reconcile([presentation(left)]);

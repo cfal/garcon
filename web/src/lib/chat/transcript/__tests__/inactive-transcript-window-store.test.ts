@@ -48,6 +48,16 @@ describe('InactiveTranscriptWindowStore', () => {
 		expect(store.size).toBe(0);
 		expect(large.bodyStore.count).toBe(0);
 	});
+
+	it('does not park input bodies outside the shared body budget', async () => {
+		const store = new InactiveTranscriptWindowStore();
+		const window = await transcript('chat-1');
+		window.upsertOptimisticUserInput({ chatId: 'chat-1', clientMessageId: 'pending', content: 'Synthetic pending input',
+			createdAt: DISPLAY_TIME, delivery: 'pending' });
+		await park(store, 'left', 'chat-1', window);
+		expect(store.size).toBe(0);
+		expect(window.bodyStore.count).toBe(0);
+	});
 	it('uses cached payload estimates when parking', async () => {
 		const store = new InactiveTranscriptWindowStore();
 		const window = await transcript('chat-1');

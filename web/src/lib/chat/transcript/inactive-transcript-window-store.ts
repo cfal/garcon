@@ -18,6 +18,8 @@ export class InactiveTranscriptWindowStore {
 	park(window: InactiveTranscriptWindow): void {
 		this.discard(window.surfaceId, window.chatId);
 		const snapshot = window.transcript.display;
+		// Input overlays are not body-store leases; their live owner retains them instead.
+		if (window.transcript.visibleOptimisticInputs.length) { window.transcript.dispose(); return; }
 		const details = [...snapshot.details.values(), ...snapshot.protectedRows.map(row => row.detail)];
 		const usage = window.transcript.bodyStore.usage(window.transcript.controller);
 		const bytes = usage.bytes + JSON.stringify([snapshot.window, snapshot.expansions, snapshot.protectedRows, details]).length * 2;
@@ -51,7 +53,11 @@ export class InactiveTranscriptWindowStore {
 		}
 	}
 	applyOverlayMutation(chatId: string, mutation: ConversationTranscriptOverlayMutation): void {
-		for (const window of this.#windows.values()) if (window.chatId === chatId) window.transcript.applySharedOverlayMutation(mutation);
+		for (const window of this.#windows.values()) {
+			if (window.chatId !== chatId) continue;
+			if (window.transcript.visibleOptimisticInputs.length) this.discard(window.surfaceId, chatId);
+			else window.transcript.applySharedOverlayMutation(mutation);
+		}
 	}
 	removeChat(chatId: string): void { for (const window of this.#windows.values()) if (window.chatId === chatId) this.discard(window.surfaceId, chatId); }
 	pruneSurfaces(ids: ReadonlySet<string>): void { for (const window of this.#windows.values()) if (!ids.has(window.surfaceId)) this.discard(window.surfaceId, window.chatId); }
