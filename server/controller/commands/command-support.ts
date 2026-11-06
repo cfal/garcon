@@ -490,6 +490,7 @@ export class CommandSupport {
     const source = reply.source;
     if (!source || source.chatId !== input.chatId || source.transcriptViewId !== input.transcriptViewId
       || view?.viewId !== source.transcriptViewId || source.ordinal < view.contentStartOrdinal
+      || source.ordinal > this.deps.transcripts.highWatermark(input.chatId).ordinal
       || content !== asyncQuestionReplyText(reply)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'The question source or reply text is invalid');
     }

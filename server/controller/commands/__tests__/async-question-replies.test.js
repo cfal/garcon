@@ -14,7 +14,7 @@ function fixture() {
   const replayRows = mock(() => [row]);
   const support = new CommandSupport({
     chats: { getChat: () => ({ agentId: 'codex', agentOwnershipEpoch: 'epoch' }) },
-    transcripts: { currentView: () => view, replayRows },
+    transcripts: { currentView: () => view, highWatermark: () => ({ viewId: view.viewId, ordinal: 5 }), replayRows },
   });
   return { support, row, view, replayRows };
 }
@@ -48,4 +48,17 @@ it('includes answer identity and source in durable input fingerprints', () => {
   expect(submissionFingerprint(detail)).not.toBe(fingerprint);
   detail.message.metadata.questionReply = { ...reply, source: { ...reply.source, ordinal: 8 } };
   expect(submissionFingerprint(detail)).not.toBe(fingerprint);
+});
+
+it('rejects an ahead-of-view question source before calling the replay reader', () => {
+  const { support, replayRows } = fixture();
+  const ahead = { ...reply, source: { ...reply.source, ordinal: 6 } };
+  let error;
+  try {
+    support.assertQuestionReply({ ...input, questionReply: ahead }, asyncQuestionReplyText(ahead));
+  } catch (caught) {
+    error = caught;
+  }
+  expect(error).toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+  expect(replayRows).not.toHaveBeenCalled();
 });

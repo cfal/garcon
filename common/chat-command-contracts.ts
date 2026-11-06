@@ -765,6 +765,7 @@ function optionalResendOrdinals(value: unknown): { excludedResendOrdinals: numbe
 
 export function parseQueueEntryReplaceCommandRequest(value: unknown): QueueEntryReplaceCommandRequest {
   const body = requestRecord(value);
+  rejectQuestionReply(body);
   if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 1) {
     throw new CommandRequestValidationError('expectedRevision must be a positive integer');
   }
@@ -857,6 +858,7 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
 
 export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySteerCommandRequest {
   const body = requestRecord(value);
+  rejectQuestionReply(body);
   if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 1) {
     throw new CommandRequestValidationError('expectedRevision must be a positive integer');
   }
