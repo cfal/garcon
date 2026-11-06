@@ -38,12 +38,8 @@
 		onSubmit,
 		onSkip,
 	}: Props = $props();
-	const selections = $derived(
-		draft.selectedQuestionOptions,
-	);
-	const texts = $derived(
-		draft.questionTextAnswers ?? {},
-	);
+	const selections = $derived(draft.selectedQuestionOptions);
+	const texts = $derived(draft.questionTextAnswers ?? {});
 	const notesLabel = $derived(isPending
 		? m.chat_permission_question_notes_optional()
 		: m.chat_permission_question_notes());
@@ -120,6 +116,9 @@
 		onSubmit(response.answers);
 	}
 
+	function skip(): void {
+		if (canAnswer && isPending) onSkip?.();
+	}
 </script>
 
 <form
@@ -232,14 +231,16 @@
 			>
 				<Check class="w-3.5 h-3.5" />{submitLabel}
 			</button>
-			{#if onSkip}<button
-				type="button"
-				onclick={() => { if (canAnswer && isPending) onSkip?.(); }}
-				disabled={!canAnswer}
-				class="inline-flex items-center gap-1.5 rounded-md border border-status-error-border text-status-error-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-			>
-				<X class="w-3.5 h-3.5" />{m.chat_permission_skip()}
-			</button>{/if}
+			{#if onSkip}
+				<button
+					type="button"
+					onclick={skip}
+					disabled={!canAnswer}
+					class="inline-flex items-center gap-1.5 rounded-md border border-status-error-border text-status-error-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+				>
+					<X class="w-3.5 h-3.5" />{m.chat_permission_skip()}
+				</button>
+			{/if}
 		</div>
 	{/if}
 </form>

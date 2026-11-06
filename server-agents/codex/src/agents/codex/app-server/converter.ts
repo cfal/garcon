@@ -75,12 +75,13 @@ export function convertCodexAppServerItem(
     case 'userMessage': {
       const text = userInputText(item.content);
       if (options.includeUserMessages === false) return [];
-      const reply = codexHistoricalQuestionReply(timestamp, stripResolvedFileMentionContext(text), item.clientId ?? undefined);
+      const content = stripResolvedFileMentionContext(text);
+      const reply = codexHistoricalQuestionReply(timestamp, content, item.clientId ?? undefined);
       if (reply) return [reply];
       return text.trim()
         ? [new UserMessage(
             timestamp,
-            stripResolvedFileMentionContext(text),
+            content,
             undefined,
             item.clientId ? { upstreamRequestId: item.clientId } : undefined,
           )]

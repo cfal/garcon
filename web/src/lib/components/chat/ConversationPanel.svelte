@@ -86,8 +86,9 @@
 		expectedAgentId: chat.agentId,
 		expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch ?? '',
 	});
-	const lastOwnershipBoundary = $derived(panel.transcript.entries.reduce((last, entry) =>
-		entry.message.type === 'agent-switch' ? entry.ordinal : last, 0));
+	const lastOwnershipBoundary = $derived(
+		panel.transcript.entries.findLast(entry => entry.message.type === 'agent-switch')?.ordinal ?? 0,
+	);
 	const recordedQuestionAnswers = $derived.by(() => {
 		const answers = new Map<string, string>();
 		for (const entry of panel.transcript.entries) {

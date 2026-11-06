@@ -28,7 +28,8 @@ export async function submitAsyncQuestionReply(
 			await inputs.steer({ ...common, content, whenTurnUnavailable: 'reject' }).submit();
 			return 'steer';
 		} catch (error) {
-			const next: 'run' | 'steer' | null = error instanceof ApiError ? nextRunOrSteerRoute(route, error.status, error.errorCode) : null;
+			if (!(error instanceof ApiError)) throw error;
+			const next = nextRunOrSteerRoute(route, error.status, error.errorCode);
 			if (!next || attempt + 1 >= RUN_OR_STEER_MAX_ATTEMPTS) throw error;
 			route = next;
 			await new Promise(resolve => setTimeout(resolve, RUN_OR_STEER_RETRY_DELAY_MS));

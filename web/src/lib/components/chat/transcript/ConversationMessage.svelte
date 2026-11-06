@@ -804,10 +804,9 @@
 						</ChatEventCard>
 					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
 						<CommandStatusRow {message} />
+					{:else if asAssistant?.questions}
+						<AsyncQuestionMessage questions={asAssistant.questions} ordinal={forkUpToSeq} />
 					{:else if asAssistant || asCommandOutput}
-						{#if asAssistant?.questions}
-							<AsyncQuestionMessage questions={asAssistant.questions} ordinal={forkUpToSeq} />
-						{:else}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
 								bind:ref={messageMenuTriggerRef}
@@ -853,7 +852,6 @@
 								/>
 							</ContextMenuContent>
 						</ContextMenu>
-						{/if}
 					{:else if asCliRow}
 						<CliRow
 							message={asCliRow}

@@ -54,6 +54,31 @@ it('uses the same readiness gate for click and form submission', async () => {
 	expect(send).not.toHaveBeenCalled();
 });
 
+it('dismisses and reopens a question without losing its draft or sending input', async () => {
+	const { panel, controller, send } = fixture();
+	controller.edit(key, target, { selectedQuestionOptions: {}, questionTextAnswers: { q1: 'Custom answer' } });
+	render(AsyncQuestionPrompt, { question, ordinal: 3, panel });
+	await fireEvent.click(screen.getByRole('button', { name: 'Dismiss question' }));
+	expect(screen.queryByRole('textbox')).toBeNull();
+	await fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+	expect((screen.getByRole('textbox', { name: question.prompt }) as HTMLInputElement).value).toBe('Custom answer');
+	expect(send).not.toHaveBeenCalled();
+});
+
+it.each([
+	[new Error('Definite failure'), 'Definite failure'],
+	['non-error rejection', 'Answer could not be sent'],
+])('retains drafts on definite failures: %s', async (failure, message) => {
+	const { panel, controller, send } = fixture();
+	send.mockRejectedValue(failure);
+	controller.edit(key, target, { selectedQuestionOptions: {}, questionTextAnswers: { q1: 'Custom answer' } });
+	render(AsyncQuestionPrompt, { question, ordinal: 3, panel });
+	await fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+	await tick();
+	expect(controller.get(key)).toMatchObject({ status: 'failed', message, draft: { questionTextAnswers: { q1: 'Custom answer' } } });
+	expect(send).toHaveBeenCalledTimes(1);
+});
+
 it('retains a failed draft and reports uncertainty without another send', async () => {
 	const { panel, send, controller } = fixture();
 	send.mockRejectedValue(new CommandOutcomeUnknownError());
@@ -73,6 +98,32 @@ it('renders shares and prior owners without reply controls', () => {
 	render(AsyncQuestionPrompt, { question });
 	expect(screen.queryByRole('button')).toBeNull();
 	expect(screen.getAllByText(question.prompt)).toHaveLength(2);
+});
+
+it.each(['success', 'failure'])('does not restore a pruned draft after late %s', async outcome => {
+	const { controller, send } = fixture();
+	const delivery = Promise.withResolvers<'steer'>();
+	send.mockReturnValue(delivery.promise);
+	const pending = controller.submit(target, 3, question, 'Staging');
+	controller.retainView(target.chatId, 'replacement');
+	if (outcome === 'success') delivery.resolve('steer');
+	else delivery.reject(new Error('Late failure'));
+	await pending;
+	expect(controller.get(key)).toBeUndefined();
+});
+
+it.each(['success', 'failure'])('does not overwrite a replacement draft after late %s', async outcome => {
+	const { controller, send } = fixture();
+	const delivery = Promise.withResolvers<'steer'>();
+	send.mockReturnValue(delivery.promise);
+	const pending = controller.submit(target, 3, question, 'Staging');
+	controller.retainView(target.chatId, 'replacement');
+	const draft = { selectedQuestionOptions: {}, questionTextAnswers: { q1: 'New draft' } };
+	controller.edit(key, target, draft);
+	if (outcome === 'success') delivery.resolve('steer');
+	else delivery.reject(new Error('Late failure'));
+	await pending;
+	expect(controller.get(key)).toStrictEqual({ target, draft });
 });
 
 it('bounds draft retention and prunes replaced views and deleted chats', () => {

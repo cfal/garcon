@@ -21,11 +21,31 @@ describe('Codex asynchronous questions', () => {
     expect(convertCodexRawCodeModeItem({ type: 'function_call_output', call_id: native.id, output: '{"accepted":true}' }, timestamp, new Map())).toEqual([]);
   });
   it('preserves fallback text for malformed, non-async, or oversized structured data', () => {
-    for (const value of [[{ title: '' }], [{ title: 'Question', options: [] }], Array(101).fill(questions[0]), [{ title: 'Question', options: [3] }]]) {
+    const malformed = [
+      null,
+      {},
+      [],
+      [null],
+      [{ title: '' }],
+      [{ title: 'Question', options: [] }],
+      [{ title: 'Question', options: 'Staging' }],
+      [{ title: 'Question', options: [3] }],
+      [{ title: 'Question', options: Array(101).fill('Staging') }],
+      Array(101).fill(questions[0]),
+    ];
+    for (const value of malformed) {
       expect(codexAsyncQuestions('call', 'async', value)).toBeUndefined();
       expect(convertCodexAppServerItem({ ...native, questions: value }, timestamp)[0].content).toBe(native.text);
     }
     expect(codexAsyncQuestions('call', undefined, questions)).toBeUndefined();
+  });
+  it('accepts omitted or null suggestions but retains the full supported suggestion set', () => {
+    for (const options of [undefined, null]) {
+      expect(codexAsyncQuestions('call', 'async', [{ title: 'Question', options }])?.questions[0].options).toEqual([]);
+    }
+    const options = Array.from({ length: 100 }, (_, index) => `Suggestion ${index}`);
+    expect(codexAsyncQuestions('call', 'async', [{ title: 'Question', options }])?.questions[0].options)
+      .toEqual(options.map((label, index) => ({ id: `option-${index}`, label })));
   });
   it('formats native ordinary input without losing composed prefix or file context', () => {
     const text = asyncQuestionReplyText(reply);
@@ -43,6 +63,18 @@ describe('Codex asynchronous questions', () => {
     expect(codexHistoricalQuestionReply(timestamp, `prose\n${input}`)).toBeNull();
     expect(codexHistoricalQuestionReply(timestamp, '<send_user_message_question_reply>not JSON</send_user_message_question_reply>')).toBeNull();
     expect(normalizeCodexJsonlEntry({ type: 'event_msg', timestamp, payload: { type: 'user_message', message: input } }, {}).canonical[0].metadata.questionReply).toEqual(reply);
+  });
+  it('keeps object replies, multi-answer text, and malformed-batch fallback distinct', () => {
+    const nativeReply = { questionItemId: reply.questionId, question: reply.question, answer: reply.answer };
+    const envelope = value => `<send_user_message_question_reply>${JSON.stringify(value)}</send_user_message_question_reply>`;
+    expect(codexHistoricalQuestionReply(timestamp, envelope(nativeReply))?.metadata?.questionReply).toEqual(reply);
+
+    const batch = codexHistoricalQuestionReply(timestamp, envelope([nativeReply, nativeReply]));
+    expect(batch?.content).toBe([asyncQuestionReplyText(reply), asyncQuestionReplyText(reply)].join('\n\n'));
+    expect(batch?.metadata?.questionReply).toBeUndefined();
+    for (const invalid of [[], [nativeReply, null], [nativeReply, { ...nativeReply, answer: '' }]]) {
+      expect(codexHistoricalQuestionReply(timestamp, envelope(invalid))).toBeNull();
+    }
   });
   it('limits native question context on UTF-8 boundaries', () => {
     const long = { ...reply, question: 'Q\n' + '\u00e9'.repeat(300) };
