@@ -60,6 +60,7 @@
 	let displayOptions = $derived({
 		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		grouping: 'none' as const,
+		sortMode: 'manual' as const,
 		...displayOptionsInput,
 	});
 	let internalCollapsedKeys = $derived<ReadonlySet<string>>(new Set(collapsedProjectKeys));

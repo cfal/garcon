@@ -68,11 +68,11 @@
 	let {
 		isLoading,
 		visibleUnreadCount = 0,
-		chatGrouping = 'project',
+		chatGrouping = 'none',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'single-line',
 		showProjectPath = false,
-		sortMode = 'manual',
+		sortMode = 'recent',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
 		dockOnRight = false,

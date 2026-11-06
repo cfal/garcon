@@ -18,13 +18,13 @@ export interface SidebarDisplayOptions {
 }
 
 export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
-	grouping: 'project-and-activity',
+	grouping: 'none',
 	inactivityDuration: '3-days',
 	groupNestedProjectPaths: false,
 	chatItemLayout: 'single-line',
 	showProjectPath: false,
 	chatFontScale: 1,
-	sortMode: 'manual',
+	sortMode: 'recent',
 	pinnedInsertPosition: 'top',
 };
 
