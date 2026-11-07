@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TYPOGRAPHY_SIZE_OPTIONS, TYPOGRAPHY_SURFACES } from '$lib/theme/typography';
-import { fontControlLabel } from '$lib/components/shared/typography-labels';
+import { fontControlLabel, fontLabel } from '$lib/components/shared/typography-labels';
+import { FONT_OPTIONS } from '$lib/theme/fonts';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import TypographySettingsTestHost from './TypographySettingsTestHost.svelte';
 
@@ -113,6 +114,45 @@ describe('TypographySettings', () => {
 		dialog = await open('Expanded Text Editors Font');
 		expect(dialog.getByRole('radio', { name: 'Inter' })).toBeTruthy();
 	});
+
+	it('previews, applies, and restores every interface font', async () => {
+		render(TypographySettingsTestHost);
+		for (const font of FONT_OPTIONS.filter((choice) => choice !== 'default')) {
+			const label = fontLabel('interface', font);
+			let dialog = await open('Interface Font');
+			await fireEvent.click(dialog.getByRole('radio', { name: label }));
+			expect(document.querySelector<HTMLElement>('[data-font-preview]')!.style.fontFamily).toBe(
+				`var(--font-choice-${font})`,
+			);
+			await fireEvent.click(dialog.getByRole('button', { name: 'Apply' }));
+			expect(saved()).toMatchObject({ interfaceFont: font, codeEditorFont: 'default' });
+			dialog = await open('Interface Font');
+			expect(
+				dialog.getByRole<HTMLInputElement>('radio', {
+					name: label,
+				}).checked,
+			).toBe(true);
+			await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+		}
+	});
+
+	it.each(['Chat Code & Commands Font', 'File Editors Font', 'Code Diffs Font', 'Terminal Font'])(
+		'offers bundled monospace fonts without proportional choices in %s',
+		async (label) => {
+			render(TypographySettingsTestHost);
+			const dialog = await open(label);
+			for (const family of ['IBM Plex Mono', 'Source Code Pro'])
+				expect(dialog.getByRole('radio', { name: family })).toBeTruthy();
+			for (const family of [
+				'Source Sans 3',
+				'Atkinson Hyperlegible',
+				'Source Serif 4',
+				'Arimo',
+				'Roboto',
+			])
+				expect(dialog.queryByRole('radio', { name: family })).toBeNull();
+		},
+	);
 
 	it('previews commands at the default Chat Code size', async () => {
 		render(TypographySettingsTestHost);

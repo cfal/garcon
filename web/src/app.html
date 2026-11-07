@@ -144,8 +144,22 @@
 					'departure-mono',
 					'jetbrains-mono',
 					'inter',
+					'source-sans-3',
+					'atkinson-hyperlegible',
+					'source-serif-4',
+					'ibm-plex-mono',
+					'source-code-pro',
+					'arimo',
+					'roboto',
 				];
-				const monoFonts = ['default', 'system-mono', 'departure-mono', 'jetbrains-mono'];
+				const monoFonts = [
+					'default',
+					'system-mono',
+					'departure-mono',
+					'jetbrains-mono',
+					'ibm-plex-mono',
+					'source-code-pro',
+				];
 				for (const [id, fontKey, sizeKey, defaultSize] of surfaces) {
 					const allowedFonts = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id)
 						? monoFonts

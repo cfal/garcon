@@ -9,22 +9,31 @@ export const FONT_OPTIONS = [
 	'departure-mono',
 	'jetbrains-mono',
 	'inter',
+	'source-sans-3',
+	'atkinson-hyperlegible',
+	'source-serif-4',
+	'ibm-plex-mono',
+	'source-code-pro',
+	'arimo',
+	'roboto',
 ] as const;
 export type FontPreference = (typeof FONT_OPTIONS)[number];
+
+const MONOSPACE_FONTS = [
+	'default',
+	'system-mono',
+	'departure-mono',
+	'jetbrains-mono',
+	'ibm-plex-mono',
+	'source-code-pro',
+] as const satisfies readonly FontPreference[];
 
 export function parseFontPreference(value: unknown): FontPreference {
 	return FONT_OPTIONS.find((font) => font === value) ?? 'default';
 }
 
-export function isMonospaceFont(
-	font: FontPreference,
-): font is 'default' | 'system-mono' | 'departure-mono' | 'jetbrains-mono' {
-	return (
-		font === 'default' ||
-		font === 'system-mono' ||
-		font === 'departure-mono' ||
-		font === 'jetbrains-mono'
-	);
+export function isMonospaceFont(font: FontPreference): font is (typeof MONOSPACE_FONTS)[number] {
+	return MONOSPACE_FONTS.some((choice) => choice === font);
 }
 
 export function observeFontChanges(
@@ -45,32 +54,49 @@ export const BUNDLED_FONT_FAMILIES = {
 	'departure-mono': '"Departure Mono"',
 	'jetbrains-mono': '"JetBrains Mono"',
 	inter: '"Inter"',
+	'source-sans-3': '"Source Sans 3"',
+	'atkinson-hyperlegible': '"Atkinson Hyperlegible"',
+	'source-serif-4': '"Source Serif 4"',
+	'ibm-plex-mono': '"IBM Plex Mono"',
+	'source-code-pro': '"Source Code Pro"',
+	arimo: '"Arimo"',
+	// Avoids intercepting platform Roboto in the system UI fallback stack.
+	roboto: '"Garcon Roboto"',
 } as const;
+export type BundledFont = keyof typeof BUNDLED_FONT_FAMILIES;
+
+export function isBundledFont(font: FontPreference): font is BundledFont {
+	return Object.hasOwn(BUNDLED_FONT_FAMILIES, font);
+}
+
 const FONT_LOAD_TIMEOUT_MS = 4_000;
 const fontLoads = new Map<FontPreference, Promise<boolean>>();
 
 export function loadFont(font: FontPreference): Promise<boolean> {
-	if (!Object.hasOwn(BUNDLED_FONT_FAMILIES, font)) return Promise.resolve(true);
+	if (!isBundledFont(font)) return Promise.resolve(true);
 	let pending = fontLoads.get(font);
 	if (!pending) {
-		pending = loadFace(BUNDLED_FONT_FAMILIES[font as keyof typeof BUNDLED_FONT_FAMILIES]).then(
-			(loaded) => {
-				if (!loaded) fontLoads.delete(font);
-				return loaded;
-			},
-		);
+		pending = loadFaces(BUNDLED_FONT_FAMILIES[font]).then((loaded) => {
+			if (!loaded) fontLoads.delete(font);
+			return loaded;
+		});
 		fontLoads.set(font, pending);
 	}
 	return pending;
 }
 
-async function loadFace(family: string): Promise<boolean> {
+async function loadFaces(family: string): Promise<boolean> {
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	try {
 		return await Promise.race([
-			document.fonts
-				.load(`400 16px ${family}`)
-				.then((faces) => faces.some((face) => face.status === 'loaded')),
+			// Loads real bold/italic faces before canvas terminals cache fallback glyphs.
+			Promise.all(
+				['400', '700', 'italic 400', 'italic 700'].map((style) =>
+					document.fonts.load(`${style} 16px ${family}`),
+				),
+			).then((variants) =>
+				variants.every((faces) => faces.some((face) => face.status === 'loaded')),
+			),
 			new Promise<boolean>((resolve) => {
 				timeout = setTimeout(() => resolve(false), FONT_LOAD_TIMEOUT_MS);
 			}),

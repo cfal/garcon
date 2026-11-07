@@ -1,4 +1,4 @@
-@import "./font-faces.css";
+@import './font-faces.css';
 
 :root:where([data-interface-font]:not([data-interface-font='default'])) {
 	--font-sans: var(--interface-font-override);
@@ -7,6 +7,8 @@
 :root:where(
 	[data-interface-font='departure-mono'],
 	[data-interface-font='jetbrains-mono'],
+	[data-interface-font='ibm-plex-mono'],
+	[data-interface-font='source-code-pro'],
 	[data-interface-font='system-mono']
 ) {
 	--font-mono: var(--interface-font-override);
@@ -26,6 +28,13 @@
 		'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
 	--font-choice-jetbrains-mono: 'JetBrains Mono', var(--system-code-font);
 	--font-choice-inter: 'Inter', var(--system-ui-font);
+	--font-choice-source-sans-3: 'Source Sans 3', var(--system-ui-font);
+	--font-choice-atkinson-hyperlegible: 'Atkinson Hyperlegible', var(--system-ui-font);
+	--font-choice-source-serif-4: 'Source Serif 4', ui-serif, Georgia, 'Times New Roman', serif;
+	--font-choice-ibm-plex-mono: 'IBM Plex Mono', var(--system-code-font);
+	--font-choice-source-code-pro: 'Source Code Pro', var(--system-code-font);
+	--font-choice-arimo: 'Arimo', Arial, var(--system-ui-font);
+	--font-choice-roboto: 'Garcon Roboto', var(--system-ui-font);
 	--chat-list-font-family: var(--chat-list-font-override, var(--system-ui-font));
 	--chat-feed-font-family: var(--chat-feed-font-override, var(--system-ui-font));
 	--chat-code-font-family: var(--chat-code-font-override, var(--system-code-font));
@@ -130,6 +139,8 @@ body {
 :root:where(
 		[data-chat-list-font='departure-mono'],
 		[data-chat-list-font='jetbrains-mono'],
+		[data-chat-list-font='ibm-plex-mono'],
+		[data-chat-list-font='source-code-pro'],
 		[data-chat-list-font='system-mono']
 	)
 	[data-typography-chat-list] {
