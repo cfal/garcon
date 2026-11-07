@@ -78,13 +78,13 @@ export class DisplayWindowController {
 	#snapshot = emptyDisplayWindow();
 	#identity: Pick<DisplayOpenResponse, 'serverInstanceId' | 'transcriptViewId'> & { chatId: string; policyRevision: number } | null = null;
 	#profile: DisplayProfile | null = null;
+	#pendingBashRevision: string | null = null;
 	#cuts: readonly DisplayCut[] = [];
 	#head = 0;
 	#epoch = 0;
 	#request: Promise<CoverageOutcome> | null = null;
 	#abort: AbortController | null = null;
 	#refreshTimer: ReturnType<typeof setTimeout> | null = null;
-	#refreshDue = 0;
 	#refreshPending = false;
 	#refreshGoal: number | null = null;
 	#parked = false;
@@ -130,12 +130,14 @@ export class DisplayWindowController {
 		this.#head = Math.max(this.#head, open.sourceHead);
 		this.#parked = false;
 		this.bodies.setParked(this, false);
-		this.configure({ ...profile, bashRevision: open.display.bashRevision }, this.#cuts);
+		if (this.#navigationEpoch === null) this.configure({ ...profile, bashRevision: open.display.bashRevision }, this.#cuts);
+		else this.#pendingBashRevision = open.display.bashRevision;
 	}
 
 	configure(profile: DisplayProfile, cuts: readonly DisplayCut[]): void {
 		if (this.#profile && displayProfileKey(profile) === displayProfileKey(this.#profile)
 			&& displayCutsKey(cuts) === displayCutsKey(this.#cuts)) return;
+		this.#pendingBashRevision = null;
 		this.#profile = profile;
 		this.#cuts = cuts;
 		this.cancel();
@@ -175,10 +177,11 @@ export class DisplayWindowController {
 			this.#wakeNavigation?.();
 		}
 		if (bashRevision && this.#profile && this.#profile.bashRevision !== bashRevision) {
+			if (this.#navigationEpoch !== null) { this.#pendingBashRevision = bashRevision; return; }
 			this.configure({ ...this.#profile, bashRevision }, this.#cuts);
 			return;
 		}
-		if (phase === 'available' && (this.#snapshot.phase !== 'available' || this.#needsHeadRefresh() || this.#needsDetailRefresh())) this.#scheduleRefresh(0);
+		if (phase === 'available' && (this.#snapshot.phase !== 'available' || this.#needsHeadRefresh() || this.#needsDetailRefresh())) this.#scheduleRefresh(0, 'readiness');
 	}
 
 	#needsReplace(): boolean {
@@ -319,6 +322,7 @@ export class DisplayWindowController {
 				await this.#waitForNavigationReadiness(this.#readinessRevision);
 				return current() ? this.#navigate(target, signal, ownsNavigation) : null;
 			}
+			this.#commit({ ...this.#snapshot, phase: 'failed', error: error instanceof Error ? error.message : 'Display request failed' });
 			throw error;
 		} finally {
 			signal?.removeEventListener('abort', abort);
@@ -328,6 +332,10 @@ export class DisplayWindowController {
 				if (['preparing', 'lagging', 'busy'].includes(this.#snapshot.phase)) {
 					this.#commit({ ...this.#snapshot, phase: this.#snapshot.window ? 'available' : 'idle', error: null });
 				}
+			}
+			if (completed && epoch === this.#epoch && this.#pendingBashRevision && this.#profile) {
+				this.configure({ ...this.#profile, bashRevision: this.#pendingBashRevision }, this.#cuts);
+				this.#pendingBashRevision = null;
 			}
 			if (completed && epoch === this.#epoch && this.#refreshPending) this.#scheduleRefresh(250);
 		}
@@ -490,7 +498,7 @@ export class DisplayWindowController {
 					|| response.serverInstanceId !== identity.serverInstanceId || response.profileKey !== displayProfileKey(profile)) throw new Error('Foreign display status');
 				this.#commit({ ...this.#snapshot, phase: mode === 'details' && response.kind !== 'failed' ? 'available' : response.kind,
 					error: response.kind === 'failed' ? response.errorCode : null });
-				if (response.kind !== 'failed') this.#scheduleRefresh(Math.max(1000, response.retryAfterMs ?? 1500));
+				if (response.kind !== 'failed') this.#scheduleRefresh(Math.max(1000, response.retryAfterMs ?? 1500), 'backoff');
 				return response.kind === 'failed' ? 'failed' : 'blocked';
 			}
 			this.#assertIdentity(response.certificate);
@@ -661,6 +669,7 @@ export class DisplayWindowController {
 		if (open.serverInstanceId !== identity.serverInstanceId || open.transcriptViewId !== identity.transcriptViewId
 			|| open.chat.id !== identity.chatId || open.display.policyRevision !== identity.policyRevision) throw new Error('Foreign display open');
 		this.#head = Math.max(this.#head, open.sourceHead);
+		this.#pendingBashRevision = null;
 		if (this.#profile!.bashRevision === open.display.bashRevision) return false;
 		this.#profile = { ...this.#profile!, bashRevision: open.display.bashRevision };
 		this.#refreshGoal = null;
@@ -699,10 +708,11 @@ export class DisplayWindowController {
 		const request = work(abort.signal, epoch).catch(async (error: unknown): Promise<CoverageOutcome> => {
 			if (abort.signal.aborted || epoch !== this.#epoch || error instanceof DOMException && error.name === 'AbortError') return 'blocked';
 			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
+				if (this.#navigationEpoch === epoch) throw error;
 				try {
 					const changed = await this.#reopenMetadata(abort.signal, epoch);
 					this.#commit({ ...this.#snapshot, phase: 'busy', error: null });
-					this.#scheduleRefresh(changed ? 0 : 1500);
+					this.#scheduleRefresh(changed ? 0 : 1500, 'backoff');
 					return 'blocked';
 				} catch (reopenError) { error = reopenError; }
 				if (abort.signal.aborted || epoch !== this.#epoch || error instanceof DOMException && error.name === 'AbortError') return 'blocked';
@@ -710,7 +720,7 @@ export class DisplayWindowController {
 			this.#errorCode = error instanceof ApiError ? error.errorCode ?? null : null;
 			if (error instanceof ApiError && RETRYABLE_DISPLAY_ERRORS.has(error.errorCode ?? '')) {
 				this.#commit({ ...this.#snapshot, phase: mode === 'details' ? 'available' : 'busy', error: null });
-				this.#scheduleRefresh(1500);
+				this.#scheduleRefresh(1500, 'backoff');
 				return 'blocked';
 			}
 			this.#commit({ ...this.#snapshot, phase: 'failed', error: error instanceof Error ? error.message : 'Display request failed' });
@@ -731,15 +741,13 @@ export class DisplayWindowController {
 		return request;
 	}
 
-	#scheduleRefresh(delay: number): void {
+	#scheduleRefresh(delay: number, reason: 'catch-up' | 'readiness' | 'backoff' = 'catch-up'): void {
 		this.#refreshPending = true;
 		if (this.#parked || this.#disposed || this.#navigationEpoch !== null) return;
-		const due = Date.now() + delay;
 		if (this.#refreshTimer !== null) {
-			if (this.#refreshDue <= due) return;
+			if (reason === 'catch-up') return;
 			clearTimeout(this.#refreshTimer);
 		}
-		this.#refreshDue = due;
 		this.#refreshTimer = setTimeout(() => {
 			this.#refreshTimer = null;
 			if (this.#request || this.#navigationEpoch !== null) return;
@@ -752,6 +760,8 @@ export class DisplayWindowController {
 
 	cancel(): void {
 		this.#epoch += 1;
+		if (this.#pendingBashRevision && this.#profile) this.#profile = { ...this.#profile, bashRevision: this.#pendingBashRevision };
+		this.#pendingBashRevision = null;
 		this.#navigationEpoch = null;
 		this.#wakeNavigation?.();
 		if (this.#navigationAnchor) {

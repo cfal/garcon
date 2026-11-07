@@ -433,12 +433,13 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#snapshotLoads = new Map<string, SnapshotLoad>();
 	#heads = new SvelteMap<string, { transcriptViewId: string; lastOrdinal: number }>();
 	#opens = new SvelteMap<string, DisplayOpenResponse>();
-	#serverInstanceId = '';
+	#serverInstanceId = $state('');
 	#openListeners = new Set<(snapshot: DisplayOpenResponse) => void>();
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
 	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
 	#onOpen = (snapshot: DisplayOpenResponse): void => {
 		const previous = this.#heads.get(snapshot.chat.id);
+		this.#expireStatusNotices(snapshot.chat.id, snapshot.transcriptViewId, snapshot.sourceHead);
 		if (previous && previous.transcriptViewId !== snapshot.transcriptViewId) {
 			const committed = new Map(snapshot.submissions.flatMap(input => input.ordinal === null ? [] : [[input.clientMessageId, input.ordinal] as const]));
 			const carried = this.options.overlays.viewFor(snapshot.chat.id)?.optimisticInputs.filter(input => committed.has(input.clientMessageId)) ?? [];
@@ -470,6 +471,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	) {}
 
 	get bodyStore(): DisplayBodyStore { return this.options.bodies; }
+	get serverInstanceId(): string { return this.#serverInstanceId; }
 	knownHead(chatId: string) { return this.#heads.get(chatId) ?? null; }
 	openSnapshot(chatId: string) { return this.#opens.get(chatId) ?? null; }
 	observeOpenSnapshots(listener: (snapshot: DisplayOpenResponse) => void): () => void {
@@ -590,7 +592,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			);
 			this.#panels.set(item.surfaceId, panel);
 			const stored = this.#restoreTargets.get(item.surfaceId);
-			let target: ConversationPanelRestoreTarget | null = null;
+			let target = this.#inactiveWindows.takeRestoreTarget(item.surfaceId, item.chatId);
 			if (transfer?.chatId === item.chatId) {
 				target = transfer.target;
 			} else if (stored?.chatId === item.chatId) {
@@ -761,12 +763,16 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	observeHead(chatId: string, transcriptViewId: string, lastOrdinal: number, responseTypes: ResponseClassOrdinals = emptyResponseClassOrdinals()): void {
 		const previous = this.#heads.get(chatId);
 		if (previous && previous.transcriptViewId !== transcriptViewId) this.handleViewReplacement(chatId);
-		if (previous?.transcriptViewId === transcriptViewId && lastOrdinal > previous.lastOrdinal) {
-			this.#applyOverlayMutation(chatId, this.options.overlays.clearStatusNotices(chatId));
-		}
+		this.#expireStatusNotices(chatId, transcriptViewId, lastOrdinal);
 		this.#heads.set(chatId, { transcriptViewId, lastOrdinal: previous?.transcriptViewId === transcriptViewId ? Math.max(previous.lastOrdinal, lastOrdinal) : lastOrdinal });
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.observeHead(transcriptViewId, lastOrdinal, responseTypes);
 		this.#inactiveWindows.observeHead(chatId, transcriptViewId, lastOrdinal);
+	}
+	#expireStatusNotices(chatId: string, transcriptViewId: string, lastOrdinal: number): void {
+		const previous = this.#heads.get(chatId);
+		if (previous?.transcriptViewId === transcriptViewId && lastOrdinal > previous.lastOrdinal) {
+			this.#applyOverlayMutation(chatId, this.options.overlays.clearStatusNotices(chatId));
+		}
 	}
 
 	markChatDirty(chatId: string): void {
@@ -951,6 +957,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 
 		let retained = this.#inactiveWindows.take(transfer.sourceSurfaceId, item.chatId);
+		this.#inactiveWindows.takeRestoreTarget(transfer.sourceSurfaceId, item.chatId);
 		const sourcePanel = this.#panels.get(transfer.sourceSurfaceId);
 		const sourceMovesAway = desired.get(transfer.sourceSurfaceId)?.chatId !== item.chatId;
 		if (!retained && sourcePanel?.chatId === item.chatId && sourceMovesAway) {
@@ -980,7 +987,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const sourceTarget = this.#restoreTargets.get(transfer.sourceSurfaceId);
 		if (sourceTarget?.chatId === transfer.chatId) return sourceTarget.target;
 
-		return { kind: 'end' };
+		return this.#inactiveWindows.restoreTarget(transfer.sourceSurfaceId, transfer.chatId) ?? { kind: 'end' };
 	}
 
 	#deleteStoredSurfaceStateForChat(chatId: string): void {

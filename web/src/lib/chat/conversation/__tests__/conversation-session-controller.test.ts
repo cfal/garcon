@@ -68,6 +68,10 @@ import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 import { displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
+import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
+import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
@@ -355,6 +359,7 @@ function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
 	const chatState = {
 		activeChatId: chat.id,
+		serverInstanceId: 'server-instance-test',
 		openSnapshot: null as DisplayOpenResponse | null,
 		forkSelection: vi.fn((ordinal: number): { ordinal: number; transcriptViewId: string; clientMessageId: string | null } | null => chatState.entries.some(row => row.ordinal === ordinal)
 			? { ordinal, transcriptViewId: chatState.getCursor().transcriptViewId, clientMessageId: null } : null),
@@ -3555,6 +3560,43 @@ describe('ConversationSessionController', () => {
 		await flushPromises();
 		expect(deps.agentState.permissionMode).toBe(restarted ? 'plan' : 'bypassPermissions');
 		expect(mockRunChat).toHaveBeenCalledTimes(restarted ? 0 : 1);
+	});
+
+	it.each(['bypass', 'approve-edits', 'bypass-new'])('fences held %s when HTTP admits a replacement before the socket', async choice => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		const conversationUi = new ConversationUiState();
+		conversationUi.confirmExecutionControlSocketInstance('server-instance-test');
+		conversationUi.setExecutionControlFromRefresh('chat-1', openSnapshot(transientFeed([], 1)).control);
+		conversationUi.updatePendingPermissionsForChat('chat-1', [{ permissionOccurrenceId: 'plan-exit-1',
+			planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 },
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan') }]);
+		let snapshot = openSnapshot(transientFeed([], 1));
+		const registry = new ConversationPanelRegistry({ bodies: new DisplayBodyStore(), overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: vi.fn() },
+			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => null,
+			openTranscript: async () => snapshot,
+			onOpen: open => conversationUi.setExecutionControlFromRefresh('chat-1', open.control) });
+		const chatState = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-1' });
+		chatState.activeChatId = 'chat-1';
+		const held = deferred<DisplayOpenResponse['plan']>();
+		vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockReturnValue(held.promise);
+		try {
+			await registry.loadChatSnapshot('chat-1');
+			deps.agentState.permissionMode = 'plan';
+			const controller = new ConversationSessionController({ ...deps, chatState, conversationUi });
+			controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', choice, 'Synthetic plan');
+			snapshot = displayOpen('chat-1', 'generation-1', 28, 'replacement-instance');
+			await registry.loadChatSnapshot('chat-1');
+			expect(conversationUi.isExecutionControlSocketInstanceConfirmed('server-instance-test')).toBe(true);
+			expect(conversationUi.getExecutionControl('chat-1')?.serverInstanceId).toBe('server-instance-test');
+			held.resolve(openSnapshot(transientFeed([], 1)).plan);
+			await flushPromises();
+			expect(deps.agentState.permissionMode).toBe('plan');
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(deps.appShell.openNewChatDialog).not.toHaveBeenCalled();
+			chatState.activeChatId = null;
+			expect(chatState.serverInstanceId).toBe('replacement-instance');
+		} finally { held.resolve(snapshot.plan); registry.destroy(); chatState.destroy(); }
 	});
 
 	it('single-flights concurrent choices for the same plan occurrence and allows dismissal retry', async () => {

@@ -24,7 +24,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	) {
 		this.#fallback = new ActiveTranscriptState();
 	}
-	get serverInstanceId(): string { return this.openSnapshot?.serverInstanceId ?? ''; }
+	get serverInstanceId(): string { return this.options.panels.serverInstanceId; }
 
 	get activeChatId(): string | null {
 		return this.#current()?.chatId ?? this.#fallback.activeChatId;

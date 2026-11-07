@@ -340,6 +340,84 @@ it('uses readiness before the slow preparation fallback expires', async () => {
 	expect(controller.snapshot.phase).toBe('available');
 });
 
+it.each(['preparing', 'busy'] as const)('keeps %s backoff through live heads but lets readiness preempt it', async kind => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValue(window());
+	if (kind === 'preparing') read.mockResolvedValueOnce({ kind, ...certificate, sourceHead: certificate.watermark,
+		preparedThrough: 0, errorCode: null, retryAfterMs: 1500 });
+	else read.mockRejectedValueOnce(new ApiError(503, 'Busy', 'DISPLAY_BUSY'));
+	const { controller } = setup({ window: read });
+	controller.cancel();
+	expect(await controller.refresh()).toBe('blocked');
+	await vi.advanceTimersByTimeAsync(100);
+	controller.observeHead('view', certificate.watermark + 1);
+	await vi.advanceTimersByTimeAsync(1300);
+	expect(read).toHaveBeenCalledOnce();
+	controller.ready();
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(2);
+});
+
+it.each(['members', 'bodies'] as const)('restarts navigation after a revision conflict in %s', async stage => {
+	vi.useFakeTimers();
+	const fresh = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => ({ ...window(), certificate: {
+		...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+	} }));
+	const { controller, api } = setup({ window: read, open: async () => ({ ...fresh, display: { ...fresh.display, bashRevision: 'patterns-2' } }) });
+	if (stage === 'members') api.members = vi.fn<TranscriptDisplayApi['members']>().mockRejectedValueOnce(new ApiError(409, 'Changed', 'DISPLAY_REVISION_CHANGED')).mockImplementation(api.members);
+	else api.bodies = vi.fn<TranscriptDisplayApi['bodies']>().mockImplementationOnce(api.bodies)
+		.mockRejectedValueOnce(new ApiError(409, 'Changed', 'DISPLAY_REVISION_CHANGED')).mockImplementation(api.bodies);
+	const settled = vi.fn();
+	const pending = controller.navigate(20000).then(result => { settled(result); return result; });
+	await vi.advanceTimersByTimeAsync(1600);
+	expect(settled).toHaveBeenCalledOnce();
+	expect(await pending).toMatchObject({ kind: 'group-member', landedOrdinal: 20000 });
+	expect(controller.snapshot.expansions[0].page.ordinals).toContain(20000);
+	expect(controller.snapshot.detailsCertificate?.bashRevision).toBe('patterns-2');
+});
+
+it('settles navigation with a visible terminal failure after resolver preparation', async () => {
+	vi.useFakeTimers();
+	const resolve = vi.fn<TranscriptDisplayApi['resolve']>()
+		.mockResolvedValueOnce({ kind: 'preparing', ordinal: 20000, landedOrdinal: null })
+		.mockRejectedValue(new ApiError(503, 'Synthetic disk failure', 'DISPLAY_DISK_FULL'));
+	const { controller } = setup({ resolve });
+	const outcome = controller.navigate(20000).catch(error => error);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(resolve).toHaveBeenCalledOnce();
+	controller.ready('patterns', 'failed');
+	expect(await outcome).toMatchObject({ errorCode: 'DISPLAY_DISK_FULL' });
+	expect(controller.busy).toBe(false);
+	expect(controller.snapshot).toMatchObject({ phase: 'failed', error: 'Synthetic disk failure' });
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(resolve).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+	['readiness', true], ['open', true], ['readiness', false], ['open', false],
+] as const)('defers %s revision changes until navigation settles its member request, rejected=%s', async (source, rejected) => {
+	vi.useFakeTimers();
+	const open = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const replacement = { ...open, display: { ...open.display, bashRevision: 'patterns-2' } };
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => ({ ...window(), certificate: {
+		...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+	} }));
+	const { controller, api } = setup({ window: read, open: async () => replacement });
+	const members = api.members;
+	api.members = vi.fn<TranscriptDisplayApi['members']>().mockImplementationOnce(async request => {
+		if (source === 'readiness') controller.ready('patterns-2');
+		else controller.installOpen(replacement, profile);
+		expect(controller.profile?.bashRevision).toBe('patterns');
+		if (rejected) throw new ApiError(409, 'Changed', 'DISPLAY_REVISION_CHANGED');
+		return members(request);
+	}).mockImplementation(api.members);
+	expect(await controller.navigate(20000)).toMatchObject({ kind: 'group-member', landedOrdinal: 20000 });
+	expect(controller.snapshot.expansions[0].page.ordinals).toContain(20000);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(controller.snapshot.detailsCertificate?.bashRevision).toBe('patterns-2');
+});
+
 it('retries a superseded display job without failing the surface', async () => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>()

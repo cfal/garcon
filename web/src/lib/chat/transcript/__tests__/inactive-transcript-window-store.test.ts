@@ -27,6 +27,7 @@ describe('InactiveTranscriptWindowStore', () => {
 		await park(store, 'left', 'chat-2');
 		await park(store, 'left', 'chat-3');
 		expect(store.take('left', 'chat-1')).toBeNull();
+		expect(store.restoreTarget('left', 'chat-1')).toEqual({ kind: 'end' });
 		expect(first.bodyStore.count).toBe(0);
 		expect(store.take('left', 'chat-2')).not.toBeNull();
 		expect(store.take('left', 'chat-3')).not.toBeNull();
@@ -47,6 +48,8 @@ describe('InactiveTranscriptWindowStore', () => {
 		await park(store, 'left', 'chat-1', large);
 		expect(store.size).toBe(0);
 		expect(large.bodyStore.count).toBe(0);
+		expect(store.takeRestoreTarget('left', 'chat-1')).toEqual({ kind: 'end' });
+		expect(store.restoreTarget('left', 'chat-1')).toBeNull();
 	});
 
 	it('does not park input bodies outside the shared body budget', async () => {
@@ -57,6 +60,7 @@ describe('InactiveTranscriptWindowStore', () => {
 		await park(store, 'left', 'chat-1', window);
 		expect(store.size).toBe(0);
 		expect(window.bodyStore.count).toBe(0);
+		expect(store.restoreTarget('left', 'chat-1')).toEqual({ kind: 'end' });
 	});
 	it('uses cached payload estimates when parking', async () => {
 		const store = new InactiveTranscriptWindowStore();
@@ -101,5 +105,17 @@ describe('InactiveTranscriptWindowStore', () => {
 		await park(store, 'right', 'chat-3');
 		store.pruneSurfaces(new Set(['left']));
 		expect(store.size).toBe(0);
+	});
+
+	it.each(['replacement', 'deletion', 'surface-removal', 'reset'] as const)('prunes evicted restoration metadata on %s', async event => {
+		const store = new InactiveTranscriptWindowStore({ windows: 0, messages: 10, bytes: 100_000 });
+		await park(store, 'left', 'chat-1');
+		expect(store.size).toBe(0);
+		expect(store.restoreTarget('left', 'chat-1')).not.toBeNull();
+		if (event === 'replacement') store.observeHead('chat-1', 'view-2', 2);
+		else if (event === 'deletion') store.removeChat('chat-1');
+		else if (event === 'surface-removal') store.pruneSurfaces(new Set());
+		else store.clear();
+		expect(store.restoreTarget('left', 'chat-1')).toBeNull();
 	});
 });

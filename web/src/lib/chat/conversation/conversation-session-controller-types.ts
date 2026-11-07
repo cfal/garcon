@@ -32,6 +32,7 @@ type SessionTranscriptState = Pick<
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
 > & {
+	readonly serverInstanceId: string;
 	readonly openSnapshot: DisplayOpenResponse | null;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;

@@ -303,6 +303,24 @@ it('does not cancel an HTTP row navigation when the socket disconnects', async (
 	expect(await navigating).toBe('completed');
 });
 
+it('defers changed cuts and profile through a same-view reopen during navigation', async () => {
+	const f = await fixture(); f.attach();
+	const targetPage = held<AvailableDisplayWindow>();
+	f.api.window.mockReturnValueOnce(targetPage.promise);
+	const navigating = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
+	await vi.waitFor(() => expect(f.api.window).toHaveBeenCalledOnce());
+	const profile = f.panel.transcript.controller.profile!;
+	const cuts = [{ id: 'pending-permission', afterOrdinal: 1, anchorRule: 'eligible-row' as const }];
+	f.panel.transcript.configureDisplay({ ...profile, showThinking: false }, cuts);
+	await f.registry.loadChatSnapshot(chatId);
+	expect(f.panel.transcript.controller.profile).toEqual(profile);
+	expect(f.panel.transcript.controller.cuts).toEqual([]);
+	targetPage.release(page());
+	expect(await navigating).toBe('completed');
+	expect(f.panel.transcript.controller.profile?.showThinking).toBe(false);
+	expect(f.panel.transcript.controller.cuts).toEqual(cuts);
+});
+
 it('waits for a current reload open and reports the replaced view', async () => {
 	const f = await fixture(); f.attach();
 	const snapshot = held<DisplayOpenResponse>();

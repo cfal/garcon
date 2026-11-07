@@ -19,6 +19,7 @@ import type { AuxiliaryPreparing, DisplayAuxiliaryRequest } from '../../../commo
 import { ChatPlanPresentationStore } from './plan-presentation.js';
 import type { PlanPresentationRequest } from '../../../common/transcript-display-open.js';
 import { displayErrorCode as errorCode, transientDisplayFailure } from './errors.js';
+import { isErrorCode } from '../../../common/error-codes.js';
 
 interface DisplayJob {
   chatId: string; viewId: string; path: string; frontier: number; goal: number;
@@ -189,6 +190,7 @@ export class TranscriptDisplayService {
     const head = this.#head(job).ordinal, frontier = this.#frontier(job, request.profile.hiddenToolGroups.includes('bash'));
     const watermark = request.atWatermark ?? Math.min(head, frontier);
     if (watermark > head) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Transcript source changed.', 409, true);
+    this.#assertPreparationHealthy(job, request.profile);
     if (!job.ready || watermark > frontier) return { kind: 'preparing' as const, ordinal, landedOrdinal: null };
     const result = await this.#read(job, { kind: 'resolve', path: job.path, request, watermark, sourceHead: head, ordinal, filteredBash: this.#patterns.length > 0 }, signal);
     this.#current(job); return result;
@@ -591,6 +593,11 @@ export class TranscriptDisplayService {
     const job = this.#admit(request.certificate.chatId, request.certificate.transcriptViewId, true);
     this.#validateCertificate(job, request); return job;
   }
+  #assertPreparationHealthy(job: DisplayJob, profile: DisplayWindowRequest['profile']): void {
+    const failure = job.failure ?? (profile.hiddenToolGroups.includes('bash') ? null : job.bash.get(this.#revision)?.failure);
+    if (failure) throw new DomainError(isErrorCode(failure) ? failure : 'DISPLAY_INDEX_FAILED',
+      `Transcript display preparation failed (${failure}). Retry the display.`, 503, transientDisplayFailure(failure));
+  }
   #validateCertificate(job: DisplayJob, request: CertifiedDisplayRequest): void {
     const cert = request.certificate;
     this.#validateRevision(cert.policyRevision, cert.bashRevision);
@@ -599,6 +606,7 @@ export class TranscriptDisplayService {
       || cert.bashRevision !== request.profile.bashRevision || cert.watermark > this.#head(job).ordinal) {
       throw new DomainError('DISPLAY_STALE_CERTIFICATE', 'Refresh this transcript window.', 409, true);
     }
+    this.#assertPreparationHealthy(job, request.profile);
     if (!job.ready || cert.watermark > this.#frontier(job, request.profile.hiddenToolGroups.includes('bash'))) throw new DomainError('DISPLAY_PREPARING', 'Transcript display is preparing.', 503, true);
   }
   #validateRevision(policy: number, bash: string): void {
