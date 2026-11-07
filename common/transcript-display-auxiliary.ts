@@ -1,6 +1,8 @@
 import { parseUserMessagePresentation, type UserMessagePresentation } from './user-message-presentation.js';
 import { displayArray, displayInteger, displayRecord, displayString } from './transcript-display-contract.js';
 import type { SubagentManagementEntry } from './subagent-management.js';
+import { CHAT_PROCESSING_PHASES, type ChatProcessingPhase } from './chat-types.js';
+import { parseResendCandidates, type ResendCandidate } from './chat-view.js';
 
 export interface DisplayAuxiliaryRequest {
   readonly chatId: string;
@@ -30,7 +32,16 @@ export interface UserRowPage extends DisplayAuxiliaryIdentity {
   readonly rows: readonly UserRowSummary[];
   readonly nextBeforeOrdinal: number | null;
 }
-export interface ResendSummaryPage extends UserRowPage { readonly total: number }
+export interface ResendSnapshotRequest {
+  readonly serverInstanceId: string;
+  readonly chatId: string;
+  readonly transcriptViewId: string;
+}
+export interface ResendSnapshot extends ResendSnapshotRequest {
+  readonly sourceHead: number;
+  readonly processingPhase: ChatProcessingPhase | null;
+  readonly candidates: readonly ResendCandidate[];
+}
 export interface SubagentSummaryPage extends DisplayAuxiliaryIdentity {
   readonly kind: 'available';
   readonly entries: readonly SubagentManagementEntry[];
@@ -79,9 +90,19 @@ export function parseUserRowPage(value: unknown): AuxiliaryResponse<UserRowPage>
   return { ...identity, kind: 'available', rows, nextBeforeOrdinal };
 }
 
-export function parseResendSummaryPage(value: unknown): AuxiliaryResponse<ResendSummaryPage> {
-  const page = parseUserRowPage(value);
-  return page.kind === 'available' ? { ...page, total: displayInteger(displayRecord(value).total, page.rows.length) } : page;
+export function parseResendSnapshotRequest(value: unknown): ResendSnapshotRequest {
+  const raw = displayRecord(value);
+  return { serverInstanceId: displayString(raw.serverInstanceId), chatId: displayString(raw.chatId, 128),
+    transcriptViewId: displayString(raw.transcriptViewId, 256) };
+}
+
+export function parseResendSnapshot(value: unknown): ResendSnapshot {
+  const raw = displayRecord(value), identity = parseResendSnapshotRequest(raw), sourceHead = displayInteger(raw.sourceHead);
+  const processingPhase = raw.processingPhase === null ? null : CHAT_PROCESSING_PHASES.find(phase => phase === raw.processingPhase);
+  const candidates = parseResendCandidates(raw.candidates);
+  if (processingPhase === undefined || candidates === null || candidates.some(candidate => candidate.ordinal > sourceHead)
+    || processingPhase !== null && candidates.length > 0) throw new TypeError('Invalid resend snapshot');
+  return { ...identity, sourceHead, processingPhase, candidates };
 }
 
 export function parseSubagentSummaryPage(value: unknown): AuxiliaryResponse<SubagentSummaryPage> {

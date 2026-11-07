@@ -1,14 +1,15 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, ExitPlanModeToolUseMessage } from '../../../../common/chat-types.js';
+import { AssistantMessage, ExitPlanModeToolUseMessage, UserMessage, type ChatProcessingPhase } from '../../../../common/chat-types.js';
 import { parseDisplayOpenResponse, parsePlanPresentationSnapshot } from '../../../../common/transcript-display-open.js';
-import { parseSubagentSummaryPage } from '../../../../common/transcript-display-auxiliary.js';
+import { parseResendSnapshot, parseSubagentSummaryPage } from '../../../../common/transcript-display-auxiliary.js';
 import { TranscriptLedgerStore } from '../../ledger/store.js';
 import { TranscriptLedgerService } from '../../ledger/service.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
-import { TranscriptDisplayService } from '../../transcript-display/service.js';
+import { TranscriptDisplayService, type DisplayStatus } from '../../transcript-display/service.js';
+import { DisplayWorkerClient } from '../../transcript-display/worker-client.js';
 import { ChatTransientFeedStore } from '../../chats/chat-transient-feed.js';
 import { emptyStoredChatExecutionControl } from '../../chat-execution/control-state.js';
 import type { ChatExecutionQueries } from '../../chat-execution/types.js';
@@ -18,16 +19,24 @@ import type { RouteMap } from '../../lib/http-route-types.js';
 const chatId = '1700000000000001', at = '2026-01-01T00:00:00.000Z';
 let root: string, ledger: TranscriptLedgerService, display: TranscriptDisplayService, routes: RouteMap, checks: number;
 let execution: Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
+let store: TranscriptLedgerStore, processingPhase: ChatProcessingPhase | null;
+let onStatus: (status: DisplayStatus) => void;
+const resendCandidates = mock((id: string) => ledger.resendCandidates(id));
 beforeEach(async () => {
   await mkdir(path.join(homedir(), 'tmp'), { recursive: true });
   root = await mkdtemp(path.join(homedir(), 'tmp', 'display-route-'));
-  ledger = new TranscriptLedgerService(new TranscriptLedgerStore(path.join(root, 'ledger')));
+  store = new TranscriptLedgerStore(path.join(root, 'ledger'));
+  ledger = new TranscriptLedgerService(store);
+  processingPhase = null;
+  resendCandidates.mockClear();
+  onStatus = () => {};
   display = new TranscriptDisplayService({ workspaceDirectory: root, serverInstanceId: 'server', ledger, hasChat: id => id === chatId,
-    patterns: () => [], freeSpaceReserve: 0, adoption: { ensure: async id => ledger.currentView(id) ?? ledger.initializeChat(id) } });
+    patterns: () => [], freeSpaceReserve: 0, onStatus: status => onStatus(status),
+    adoption: { ensure: async id => ledger.currentView(id) ?? ledger.initializeChat(id) } });
   checks = 0;
   execution = { readChatExecutionControl: async () => emptyStoredChatExecutionControl('server') };
   routes = createTranscriptDisplayRoutes({ display, ledger, transientFeeds: new ChatTransientFeedStore('server'),
-    execution, nativeActivity: { requestCheck: () => { checks++; } },
+    execution, nativeActivity: { requestCheck: () => { checks++; } }, resendCandidates, processingPhase: () => processingPhase,
     summaries: { buildSummary: () => ({ chat: { id: chatId, title: 'Generic chat', agentId: 'generic', agentOwnershipEpoch: 'epoch', carryOverRevision: 'revision',
       model: null, apiProviderId: null, modelEndpointId: null, modelProtocol: null, permissionMode: 'default', thinkingMode: 'high',
       projectPath: '/generic', tags: [], canReloadFromNativeHistory: false, activity: { createdAt: at, lastActivityAt: at } }, processingPhase: null }) } });
@@ -39,6 +48,86 @@ async function post(suffix: string, body: unknown) {
   return { response, body: await response.json() };
 }
 const opening = () => ({ chatId, outstandingClientMessageIds: [], reason: 'activate' });
+
+function seedResend(count = 150) {
+  const view = ledger.initializeChat(chatId);
+  store.append(chatId, view.viewId, Array.from({ length: count }, (_, index) => ({
+    kind: 'user-input' as const, at, detail: { clientMessageId: `input-${index}`,
+      message: new UserMessage(at, `Synthetic input ${index} ${'x'.repeat(600)}`),
+      attachments: [{ kind: 'image' as const, name: `synthetic-${index}.txt`, mimeType: 'text/plain', data: 'c3ludGhldGlj' }],
+      steer: false, preambleBoundary: null, preamblePrefixReceipt: null },
+  })));
+  return { serverInstanceId: 'server', chatId, transcriptViewId: view.viewId };
+}
+
+test('reads every source candidate without admitting display preparation or truncating text and filenames', async () => {
+  const request = seedResend();
+  const auxiliary = spyOn(display, 'auxiliary');
+  const before = { ...display.metrics };
+  try {
+    const result = await post('resend', request);
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get('Cache-Control')).toBe('no-store');
+    const snapshot = parseResendSnapshot(result.body);
+    expect(snapshot).toEqual({ ...request, sourceHead: 150, processingPhase: null, candidates: ledger.resendCandidates(chatId) });
+    expect(snapshot.candidates).toHaveLength(150);
+    expect(snapshot.candidates[0].content.length).toBeGreaterThan(300);
+    expect(snapshot.candidates[0].attachmentNames).toEqual(['synthetic-0.txt']);
+    expect(result.body).not.toHaveProperty('nextBeforeOrdinal');
+    expect(result.body).not.toHaveProperty('messages');
+    expect(auxiliary).not.toHaveBeenCalled();
+    expect(display.metrics).toEqual(before);
+    expect(resendCandidates).toHaveBeenCalledWith(chatId);
+  } finally { auxiliary.mockRestore(); }
+});
+
+test('processing suppresses the source scan without claiming an idle empty snapshot', async () => {
+  const request = seedResend(1);
+  processingPhase = 'running';
+  expect(parseResendSnapshot((await post('resend', request)).body)).toEqual({ ...request, sourceHead: 1, processingPhase, candidates: [] });
+  expect(resendCandidates).not.toHaveBeenCalled();
+  processingPhase = null;
+  expect(parseResendSnapshot((await post('resend', request)).body).candidates).toHaveLength(1);
+});
+
+test('resend remains complete while the derived index is partial or failed', async () => {
+  const request = seedResend(300);
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), failed = Promise.withResolvers<DisplayStatus>();
+  onStatus = status => { if (status.phase === 'failed') failed.resolve(status); };
+  const original = DisplayWorkerClient.prototype.request;
+  let frames = 0;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame' && ++frames === 2) {
+      entered.resolve();
+      await release.promise;
+      throw Object.assign(new Error('Synthetic display failure'), { code: 'DISPLAY_INDEX_FAILED' });
+    }
+    return original.call(this, task, ...args);
+  });
+  try {
+    await display.open(chatId);
+    await entered.promise;
+    expect(display.metrics.frontiers[0].preparedThrough).toBeGreaterThan(0);
+    expect(display.metrics.frontiers[0].preparedThrough).toBeLessThan(300);
+    expect(parseResendSnapshot((await post('resend', request)).body).candidates).toEqual(ledger.resendCandidates(chatId));
+    release.resolve();
+    expect((await failed.promise).phase).toBe('failed');
+    expect(parseResendSnapshot((await post('resend', request)).body).candidates).toHaveLength(300);
+  } finally { release.resolve(); worker.mockRestore(); }
+});
+
+test('resend rejects stale identities and propagates source failures rather than false-empty success', async () => {
+  const request = seedResend(1);
+  for (const [body, status] of [
+    [{ ...request, serverInstanceId: 'old' }, 409], [{ ...request, transcriptViewId: 'old' }, 409],
+    [{ ...request, chatId: 'missing' }, 404], [{ chatId }, 400],
+  ] as const) expect((await post('resend', body)).response.status).toBe(status);
+  expect(resendCandidates).not.toHaveBeenCalled();
+  resendCandidates.mockImplementationOnce(() => { throw new Error('Synthetic source failure'); });
+  const failed = await post('resend', request);
+  expect(failed.response.status).toBe(500);
+  expect(failed.body).not.toHaveProperty('candidates');
+});
 
 test('opens canonical empty views without raw bodies and probes only activation', async () => {
   const opened = await post('open', opening());

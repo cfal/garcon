@@ -5,7 +5,6 @@ import { isCleanCommandSuccess } from '../../../common/command-output.js';
 import { decodeStoredLedgerRow, type StoredLedgerRow } from '../ledger/codec.js';
 import { ledgerRowToMessage } from '../ledger/presentation.js';
 import type { LedgerRow } from '../ledger/contracts.js';
-import { resendRole } from '../ledger/resend-policy.js';
 import { classId } from './classes.js';
 import { DisplayStore, contentDigest, sourceFingerprint } from './store.js';
 import { appendSubagentFact } from './subagents.js';
@@ -137,9 +136,4 @@ function appendAuxiliary(store: DisplayStore, row: LedgerRow, message: ChatMessa
   if (message?.type === 'user-message') store.run('INSERT INTO user_navigation VALUES (?, ?, ?, ?, ?, ?)', row.ordinal,
     message.content.slice(0, 300), message.timestamp, Number(message.content.trim().length > 0), message.images?.length ?? 0,
     message.presentation ? JSON.stringify(message.presentation) : null);
-  const role = resendRole(row);
-  if (role === 'candidate') {
-    const last = store.get<{ rank: number }>('SELECT rank FROM resend_input ORDER BY ordinal DESC LIMIT 1');
-    store.run('INSERT INTO resend_input VALUES (?, ?)', row.ordinal, (last?.rank ?? 0) + 1);
-  } else if (role === 'boundary') store.run('INSERT INTO resend_boundary VALUES (?)', row.ordinal);
 }

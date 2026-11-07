@@ -5,7 +5,7 @@ import { DisplayQuery, displayCertificate } from './query.js';
 import { hydrateBodyRead, planBodyRead } from './details.js';
 import type { DisplayWorkerReply, DisplayWorkerRequest, DisplayWorkerTask } from './worker-protocol.js';
 import { prepareSubagentFrame, pruneSubagentFrame } from './subagents.js';
-import { queryResend, querySubagents, queryUserRows } from './auxiliary-query.js';
+import { querySubagents, queryUserRows } from './auxiliary-query.js';
 import { decodeStoredLedgerRow } from '../ledger/codec.js';
 import { ledgerRowToMessage } from '../ledger/presentation.js';
 import { displayErrorCode } from './errors.js';
@@ -70,7 +70,6 @@ export function runDisplayWorker(role: 'builder' | 'reader'): void {
         if (!pruneSubagentFrame(store)) return store.get<{ published: number }>('SELECT published FROM auxiliary_control')!.published;
         return prepareSubagentFrame(store, task.goal);
       case 'user-rows': return queryUserRows(store, task.request, task.identity);
-      case 'resend': return queryResend(store, task.request, task.identity);
       case 'subagents': return querySubagents(store, task.request, task.identity);
       case 'window': {
         return store.db.transaction(() => {

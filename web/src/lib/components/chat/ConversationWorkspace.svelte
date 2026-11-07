@@ -48,6 +48,8 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 	import { DisplaySummaryController } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import { ResendCandidatesController } from '$lib/chat/transcript/resend-candidates-controller.svelte.js';
+	import type { ResendSnapshot } from '$shared/transcript-display-auxiliary';
 	import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 	import TranscriptSummaryPager from './transcript/TranscriptSummaryPager.svelte';
 	import { playCompletionSound } from '$lib/notifications/completion-sound.js';
@@ -186,8 +188,21 @@
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const planPaging = $derived(sessions.selectedChatId ? conversationUi.planPresentationFor(sessions.selectedChatId) : null);
 	const subagentPages = new DisplaySummaryController(transcriptDisplayApi.subagents, page => page.nextAfterOrder, 'afterOrder');
-	const resendPages = new DisplaySummaryController(transcriptDisplayApi.resend, page => page.nextBeforeOrdinal, 'beforeOrdinal',
-		page => conversationPanels.replaceResendCandidates(page.chatId, page.rows));
+	const resend = new ResendCandidatesController(transcriptDisplayApi.resend, snapshot => {
+		if (isSelectedResendSnapshot(snapshot)) conversationPanels.replaceResendCandidates(snapshot.chatId, snapshot.candidates);
+	});
+	function isSelectedResendSnapshot(snapshot: ResendSnapshot): boolean {
+		return ws.isConnected && isVisible && isPresented && !selectedIsProcessing && snapshot.processingPhase === null
+			&& snapshot.chatId === sessions.selectedChatId && snapshot.transcriptViewId === chatState.transcriptViewId
+			&& snapshot.serverInstanceId === chatState.openSnapshot?.serverInstanceId && snapshot.sourceHead >= chatState.lastOrdinal;
+	}
+	const currentResend = $derived(resend.current && isSelectedResendSnapshot(resend.current) ? resend.current : null);
+	const excludeResendCandidate = $derived.by(() => {
+		const snapshot = currentResend;
+		return (ordinal: number) => {
+			if (snapshot && snapshot === resend.current && isSelectedResendSnapshot(snapshot)) chatState.excludeResendCandidate(ordinal);
+		};
+	});
 	const subagentModel = $derived.by<SubagentManagementModel>(() => {
 		const subagents = [...(subagentPages.page?.entries ?? [])];
 		return { subagents, entries: [{ id: 'root', kind: 'root', name: sessions.selectedChat?.title || 'Root',
@@ -198,14 +213,30 @@
 		const snapshot = chatState.openSnapshot;
 		const target = snapshot && snapshot.chat.id === sessions.selectedChatId ? { chatId: snapshot.chat.id,
 			transcriptViewId: snapshot.transcriptViewId, serverInstanceId: snapshot.serverInstanceId } : null;
-		const head = chatState.lastOrdinal, processing = selectedIsProcessing;
-		untrack(() => { subagentPages.configure(target, head); resendPages.configure(target, head, !processing); });
+		const head = chatState.lastOrdinal;
+		untrack(() => { subagentPages.configure(target, head); resend.observeHead(head); });
+	});
+	$effect(() => {
+		const snapshot = chatState.openSnapshot;
+		const target = ws.isConnected && isVisible && isPresented && !selectedIsProcessing && snapshot?.chat.id === sessions.selectedChatId
+			&& snapshot?.transcriptViewId === chatState.transcriptViewId
+			? { chatId: snapshot.chat.id, transcriptViewId: snapshot.transcriptViewId, serverInstanceId: snapshot.serverInstanceId } : null;
+		untrack(() => resend.activate(target, chatState.lastOrdinal));
 	});
 	$effect(() => {
 		const revision = currentPanel()?.transcript.readinessRevision;
-		if (revision) untrack(() => { subagentPages.ready(); resendPages.ready(); });
+		if (revision) untrack(() => subagentPages.ready());
 	});
-	onDestroy(() => { subagentPages.reset(); resendPages.reset(); });
+	$effect(() => {
+		const error = resend.error, snapshot = chatState.openSnapshot;
+		if (!error || !snapshot || snapshot.chat.id !== sessions.selectedChatId) return;
+		const key = `resend:${snapshot.chat.id}`;
+		untrack(() => notifications.error(error, { key, action: { label: m.chat_feed_retry(), onClick: () => {
+			if (chatState.openSnapshot === snapshot && sessions.selectedChatId === snapshot.chat.id) void resend.refresh();
+		} } }));
+		return () => notifications.dismissKey(key);
+	});
+	onDestroy(() => { subagentPages.reset(); resend.reset(); });
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
@@ -628,9 +659,11 @@
 			throw new Error(m.sidebar_chats_reload_requires_open_chat());
 		}
 		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_already_pending());
-		const page = resendPages.page;
-		return reloadDialog.request(chatId, page?.rows ?? [], { total: page?.total ?? 0,
-			incomplete: !page || resendPages.updating || resendPages.stale || resendPages.error !== null });
+		const opened = chatState.openSnapshot;
+		if (!currentResend) await resend.refresh();
+		if (chatId !== sessions.selectedChatId || opened !== chatState.openSnapshot) return;
+		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_already_pending());
+		return reloadDialog.request(chatId, currentResend?.candidates ?? [], { incomplete: currentResend === null });
 	}
 
 	async function reloadFromNative(
@@ -896,14 +929,13 @@
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAgentSettingChange={(descriptor, value) =>
 				controller.handleAgentSettingChange(descriptor, value)}
-			resendCandidates={chatState.resendCandidates}
-			resendPaging={resendPages}
+			resendCandidates={currentResend ? chatState.resendCandidates : []}
 			recallIdentity={sessions.selectedChatId && chatState.activeChatId === sessions.selectedChatId
 				? `${sessions.selectedChatId}:${chatState.transcriptViewId}`
 				: null}
 			recallSource={promptRecallSource()}
 			onRecallError={(message) => chatState.appendLocalNotice('error', message)}
-			onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
+			onExcludeResendCandidate={excludeResendCandidate}
 		/>
 	</div>
 
@@ -940,7 +972,6 @@
 	{/if}
 
 	<ReloadChatDialog
-		totalCandidates={reloadDialog.totalCandidates}
 		summaryIncomplete={reloadDialog.summaryIncomplete}
 		open={reloadDialog.open}
 		candidates={reloadDialog.candidates}

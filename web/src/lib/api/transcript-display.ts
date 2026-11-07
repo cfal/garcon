@@ -16,10 +16,11 @@ import {
 	type PlanPresentationRequest,
 } from '$shared/transcript-display-open';
 import {
-	parseResendSummaryPage,
+	parseResendSnapshot,
 	parseSubagentSummaryPage,
 	parseUserRowPage,
 	type DisplayAuxiliaryRequest,
+	type ResendSnapshotRequest,
 } from '$shared/transcript-display-auxiliary';
 import { apiPost } from './client.js';
 
@@ -37,7 +38,7 @@ export const transcriptDisplayApi = {
 		profile, cuts, atWatermark: certificate.watermark, anchor: { kind: 'around', ordinal }, limit: 50,
 	}, parseDisplayTargetResolution, signal),
 	userRows: (request: DisplayAuxiliaryRequest, signal?: AbortSignal) => read('user-rows', request, parseUserRowPage, signal),
-	resend: (request: DisplayAuxiliaryRequest, signal?: AbortSignal) => read('resend', request, parseResendSummaryPage, signal),
+	resend: (request: ResendSnapshotRequest, signal?: AbortSignal) => read('resend', request, parseResendSnapshot, signal),
 	subagents: (request: DisplayAuxiliaryRequest, signal?: AbortSignal) => read('subagents', request, parseSubagentSummaryPage, signal),
 	plan: (request: PlanPresentationRequest, signal?: AbortSignal) => read('plan', request, parsePlanPresentationSnapshot, signal),
 	planDetail: (request: PlanPresentationRequest, signal?: AbortSignal) => read('plan-detail', request, parsePlanPresentationDetail, signal),

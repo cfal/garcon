@@ -179,7 +179,8 @@ export default function createAllRoutes(workspaceDir: string, {
   const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, gitBudget) : USAGE_READ_TIMEOUT_MS;
   return composeRoutes(
     createTranscriptDisplayRoutes({ display: transcriptDisplay, ledger: transcriptLedger, nativeActivity: nativeTranscriptActivity,
-      summaries: chatListProjector, execution: queue, transientFeeds }),
+      summaries: chatListProjector, execution: queue, transientFeeds,
+      resendCandidates: chatId => agents.resendCandidates(chatId), processingPhase: chatId => processing.phase(chatId) }),
     createExecutorRoutes(executors),
     createUsageRoutes(new UsageService(executors), usageBudget),
     createRuntimeRoutes(runtimeState, workspaceName),

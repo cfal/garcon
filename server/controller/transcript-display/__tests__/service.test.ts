@@ -271,7 +271,7 @@ test('retry racing deletion cannot make retirement wait on its replacement initi
   } finally { release.resolve(); await retry?.catch(() => undefined); worker.mockRestore(); }
 });
 
-test('zero-frontier user and resend summaries are preparing rather than authoritative empty lists', async () => {
+test('zero-frontier user summaries are preparing rather than authoritative empty lists', async () => {
   const view = seed('chat', 2);
   const original = DisplayWorkerClient.prototype.request;
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
@@ -282,9 +282,7 @@ test('zero-frontier user and resend summaries are preparing rather than authorit
   try {
     await display.open('chat');
     await entered.promise;
-    for (const kind of ['user-rows', 'resend'] as const) {
-      expect(await display.auxiliary(kind, { chatId: 'chat', transcriptViewId: view.viewId, limit: 50 })).toMatchObject({ kind: 'preparing', watermark: 0 });
-    }
+    expect(await display.auxiliary('user-rows', { chatId: 'chat', transcriptViewId: view.viewId, limit: 50 })).toMatchObject({ kind: 'preparing', watermark: 0 });
   } finally { release.resolve(); worker.mockRestore(); }
 });
 

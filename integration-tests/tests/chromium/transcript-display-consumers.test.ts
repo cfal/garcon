@@ -43,16 +43,18 @@ function expectNoHistoricalMembers(wire: Awaited<ReturnType<typeof observeDispla
   expect(wire.requests).not.toContain('/api/v1/chats/messages');
 }
 
-test('resend chips exclude the chosen input from real submission without loading collapsed history', async () => {
+test('the complete resend list stays editable beyond 50 inputs without loading collapsed history', async () => {
   await withChromiumFixture('display-resend-consumer', async fixture => {
-    const excluded = 'Synthetic excluded resend input', included = 'Synthetic included resend input';
+    const candidates = Array.from({ length: 65 }, (_, index) => `Synthetic resend input ${String(index).padStart(2, '0')}`);
+    const excluded = candidates[0], included = candidates.at(-1)!;
     const { page, integration } = fixture;
-    const seed = await seedConsumerChat(fixture, [input('resend-excluded', excluded), input('resend-included', included)]);
+    const seed = await seedConsumerChat(fixture, candidates.map((content, index) => input(`resend-${index}`, content)));
     const chips = page.locator('[data-slot="composer-resend-candidate"]');
-    await browserExpect(chips).toHaveCount(2);
+    await browserExpect(chips).toHaveCount(candidates.length);
+    await browserExpect(page.locator('[data-composer]').getByRole('button', { name: /^(Previous page|Next page|Resend status)$/ })).toHaveCount(0);
     await chips.filter({ hasText: excluded }).getByRole('button', { name: `Don't resend ${excluded}`, exact: true }).click();
-    await browserExpect(chips).toHaveCount(1);
-    await browserExpect(chips).toContainText(included);
+    await browserExpect(chips).toHaveCount(candidates.length - 1);
+    await browserExpect(chips.filter({ hasText: included })).toHaveCount(1);
     expectNoHistoricalMembers(seed.wire);
     const held = integration.fakeProviders.openAi.holdNext({});
     const afterIndex = integration.client.markEvents();
@@ -60,7 +62,8 @@ test('resend chips exclude the chosen input from real submission without loading
       await page.locator('[data-composer] textarea').fill('Synthetic next input');
       await page.locator('[data-composer]').getByRole('button', { name: 'Send message', exact: true }).click();
       const request = await held.received;
-      expect(request.lastUserText).toContain(included);
+      expect(Array.from(request.lastUserText.match(/Synthetic resend input \d+/g) ?? [])).toEqual(candidates.slice(1));
+      await browserExpect(chips).toHaveCount(0);
       expect(request.lastUserText).toContain('Synthetic next input');
       expect(request.lastUserText).not.toContain(excluded);
       held.releaseText('Synthetic resend completed');

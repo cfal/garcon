@@ -19,9 +19,8 @@ describe('ReloadChatDialog', () => {
 			candidates: [
 				{
 					ordinal: 4,
-					preview: 'Please keep this pending prompt',
-					attachmentCount: 1,
-					timestamp: '2026-01-01T00:00:00.000Z',
+					content: 'Please keep this pending prompt',
+					attachmentNames: ['synthetic.txt'],
 				},
 			],
 			onCancel: vi.fn(),
@@ -32,7 +31,7 @@ describe('ReloadChatDialog', () => {
 			screen.getByRole('heading', { name: m.sidebar_chats_reload_confirm_title() }),
 		).toBeTruthy();
 		expect(screen.getByText('Please keep this pending prompt')).toBeTruthy();
-		expect(screen.getByText('1 attachment')).toBeTruthy();
+		expect(screen.getByText('synthetic.txt')).toBeTruthy();
 		expect(screen.queryByRole('status')).toBeNull();
 
 		await fireEvent.click(
@@ -43,7 +42,7 @@ describe('ReloadChatDialog', () => {
 		expect(onConfirm).toHaveBeenCalledOnce();
 	});
 
-	it.each([{ candidates: [] }, { candidates: [{ ordinal: 4, preview: 'Older summary', attachmentCount: 0, timestamp: '' }] }])('discloses an incomplete summary without blocking explicit replacement: %j', async ({ candidates }) => {
+	it.each([{ candidates: [] }, { candidates: [{ ordinal: 4, content: 'Older summary', attachmentNames: [] }] }])('discloses an incomplete summary without blocking explicit replacement: %j', async ({ candidates }) => {
 		const onConfirm = vi.fn();
 		render(ReloadChatDialog, { open: true, busy: false, cancelling: false, progress: null,
 			candidates, summaryIncomplete: true, onCancel: vi.fn(), onConfirm });

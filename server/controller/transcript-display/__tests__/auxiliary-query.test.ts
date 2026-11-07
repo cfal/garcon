@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { AssistantMessage, UserMessage } from '../../../../common/chat-types.js';
 import type { DisplayAuxiliaryRequest } from '../../../../common/transcript-display-auxiliary.js';
-import { parseResendSummaryPage, parseUserRowPage } from '../../../../common/transcript-display-auxiliary.js';
+import { parseUserRowPage } from '../../../../common/transcript-display-auxiliary.js';
 import { encodeLedgerDraft } from '../../ledger/codec.js';
 import type { LedgerRowDraft } from '../../ledger/contracts.js';
-import { queryResend, queryUserRows } from '../auxiliary-query.js';
+import { queryUserRows } from '../auxiliary-query.js';
 import { appendDisplayFrame } from '../extractor.js';
 import { DisplayStore } from '../store.js';
 
@@ -16,11 +16,11 @@ function fixture() {
   store.initialize('chat', 'view', 'server');
   stores.push(store);
   const drafts: LedgerRowDraft[] = [];
-  const users: { ordinal: number; nonblank: boolean; resend: boolean }[] = [];
+  const users: { ordinal: number; nonblank: boolean }[] = [];
   for (let index = 0; index < 137; index++) {
     if (index === 60) drafts.push({ kind: 'provider-row', at, message: new AssistantMessage(at, 'Generic response') });
     const nonblank = index % 10 !== 0, literal = index === 85;
-    users.push({ ordinal: drafts.length + 1, nonblank, resend: !literal });
+    users.push({ ordinal: drafts.length + 1, nonblank });
     drafts.push({ kind: 'user-input', at, detail: { clientMessageId: `input-${index}`,
       message: new UserMessage(at, nonblank ? `Generic prompt ${index}` : ' ', undefined, literal ? { contentMode: 'literal' } : undefined),
       attachments: [], steer: false, preambleBoundary: null, preamblePrefixReceipt: null } });
@@ -49,27 +49,4 @@ test.each(['navigation', 'recall'] as const)('pages every %s user row at a captu
   }
   expect(collected).toEqual(expected);
   expect(queryUserRows(store, { ...input, beforeOrdinal: 1 }, identity(100)).rows).toEqual([]);
-});
-
-test('resend pagination keeps exact totals within the last response boundary at each watermark', () => {
-  const { store, users, identity } = fixture();
-  const input: DisplayAuxiliaryRequest = { chatId: 'chat', transcriptViewId: 'view', mode: 'navigation', limit: 17 };
-  expect(queryResend(store, input, identity(60)).total).toBe(60);
-  const expected = users.filter(user => user.ordinal > 61 && user.ordinal <= 100 && user.resend).map(user => user.ordinal).reverse();
-  expect(expected).toHaveLength(38);
-  let cursor = input;
-  const collected: number[] = [];
-  for (let offset = 0; offset < expected.length; offset += input.limit) {
-    const page = queryResend(store, cursor, identity(100));
-    expect(parseResendSummaryPage(page)).toEqual(page);
-    expect(page.total).toBe(38);
-    expect(page.rows.map(row => row.ordinal)).toEqual(expected.slice(offset, offset + input.limit));
-    expect(page.nextBeforeOrdinal).toBe(offset + input.limit < expected.length ? expected[offset + input.limit - 1] : null);
-    collected.push(...page.rows.map(row => row.ordinal));
-    if (page.nextBeforeOrdinal === null) break;
-    cursor = { ...input, beforeOrdinal: page.nextBeforeOrdinal };
-  }
-  expect(collected).toEqual(expected);
-  expect(queryResend(store, { ...input, beforeOrdinal: 61 }, identity(100))).toMatchObject({ total: 38, rows: [], nextBeforeOrdinal: null });
-  expect(queryResend(store, input, identity(139))).toMatchObject({ total: 0, rows: [], nextBeforeOrdinal: null });
 });

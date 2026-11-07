@@ -3,13 +3,12 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+	import type { ResendCandidate } from '$shared/chat-view';
 	import type { ChatReloadProgress } from '$shared/ws-events';
 
 	let {
 		open,
 		candidates,
-		totalCandidates = candidates.length,
 		summaryIncomplete = false,
 		busy,
 		cancelling,
@@ -18,8 +17,7 @@
 		onConfirm,
 	}: {
 		open: boolean;
-		candidates: readonly UserRowSummary[];
-		totalCandidates?: number;
+		candidates: readonly ResendCandidate[];
 		summaryIncomplete?: boolean;
 		busy: boolean;
 		cancelling: boolean;
@@ -56,20 +54,17 @@
 		{#if summaryIncomplete}
 			<p class="text-sm text-muted-foreground" role="status">{m.sidebar_chats_reload_summary_incomplete()}</p>
 		{/if}
-		{#if totalCandidates > 0}
+		{#if candidates.length > 0}
 			<section class="space-y-2" aria-label={m.sidebar_chats_reload_confirm_resend()}>
 				<p class="text-sm font-medium">{m.sidebar_chats_reload_confirm_resend()}</p>
-				{#if totalCandidates > candidates.length}
-					<p class="text-sm text-muted-foreground">{m.chat_chat_messages_showing_of({ shown: candidates.length, total: totalCandidates })}</p>
-				{/if}
 				<ul class="max-h-48 divide-y divide-border overflow-y-auto border-y border-border">
 					{#each candidates as candidate (candidate.ordinal)}
 						<svelte:boundary>
 							<li class="min-w-0 py-2 text-sm">
-								<p class="line-clamp-2 break-words">{candidate.preview}</p>
-								{#if candidate.attachmentCount > 0}
+								<p class="line-clamp-2 break-words">{candidate.content}</p>
+								{#if candidate.attachmentNames.length > 0}
 									<p class="mt-1 truncate text-xs text-muted-foreground">
-										{m.chat_attachment_count({ count: candidate.attachmentCount })}
+										{candidate.attachmentNames.join(', ')}
 									</p>
 								{/if}
 							</li>

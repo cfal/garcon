@@ -15,7 +15,6 @@ import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-r
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
-import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -81,16 +80,20 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
-	it('announces an empty resend refresh without moving the composer and keeps retry visible', async () => {
-		const resendPaging = { loading: true, updating: true, stale: false, error: null,
-			hasPrevious: false, hasNext: false, retry: vi.fn(async () => {}), next: vi.fn(async () => {}), previous: vi.fn(async () => {}),
-		} satisfies DisplaySummaryPaging;
-		const view = render(PromptComposerTestHost, { resendPaging });
-		expect(screen.getByText('Updating...').closest('.sr-only')).toBeNull();
-		await view.rerender({ resendPaging: { ...resendPaging, loading: false, updating: false, error: 'Resend unavailable' } });
-		expect(screen.getByText('Resend unavailable').closest('.sr-only')).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: /^Retry$/ }));
-		expect(resendPaging.retry).toHaveBeenCalledOnce();
+	it('renders the complete resend list without paging or status controls and keeps the input mounted', async () => {
+		const view = render(PromptComposerTestHost);
+		const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(input, 'Synthetic draft', 4);
+		const resendCandidates = Array.from({ length: 150 }, (_, index) => ({ ordinal: index + 1,
+			content: `Synthetic candidate ${index}`, attachmentNames: [] }));
+		await view.rerender({ resendCandidates });
+		expect(screen.getAllByRole('button', { name: /^Don't resend / })).toHaveLength(150);
+		expect(screen.queryByRole('button', { name: /^(Previous page|Next page|Resend status)$/ })).toBeNull();
+		await view.rerender({ resendCandidates: [] });
+		expect(screen.queryByRole('button', { name: /^Don't resend / })).toBeNull();
+		expect(screen.getByRole('textbox')).toBe(input);
+		expect(input.value).toBe('Synthetic draft');
+		expect(input.selectionStart).toBe(4);
 	});
 
 	it.each(['in', 'rename', 'move', 'tag', 'fork'])(

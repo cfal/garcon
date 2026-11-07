@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { ResendCandidate } from '$shared/chat-view';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
 import { diagnosticDigest } from './local-notice.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
@@ -21,8 +21,8 @@ export interface ConversationTranscriptOverlayView {
 	readonly noticeRevision: number;
 	readonly optimisticInputs: readonly OptimisticUserInput[];
 	readonly optimisticAfterOrdinals: ReadonlyMap<string, number>;
-	readonly resendCandidates: readonly UserRowSummary[];
-	readonly includedResendCandidates: readonly UserRowSummary[];
+	readonly resendCandidates: readonly ResendCandidate[];
+	readonly includedResendCandidates: readonly ResendCandidate[];
 	readonly excludedResendOrdinals: readonly number[];
 }
 
@@ -35,7 +35,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	#noticeRevision = $state(0);
 	#optimisticInputs = $state<OptimisticUserInput[]>([]);
 	#optimisticAfterOrdinals = $state.raw<ReadonlyMap<string, number>>(new Map());
-	#resendCandidates = $state<UserRowSummary[]>([]);
+	#resendCandidates = $state<ResendCandidate[]>([]);
 	#excludedResendOrdinals = $state<number[]>([]);
 
 	get notices(): readonly (LocalNoticeRow & { readonly revision: number })[] {
@@ -54,11 +54,11 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return this.#optimisticAfterOrdinals;
 	}
 
-	get resendCandidates(): readonly UserRowSummary[] {
+	get resendCandidates(): readonly ResendCandidate[] {
 		return this.#resendCandidates;
 	}
 
-	get includedResendCandidates(): readonly UserRowSummary[] {
+	get includedResendCandidates(): readonly ResendCandidate[] {
 		const excluded = new Set(this.#excludedResendOrdinals);
 		return this.#resendCandidates.filter((candidate) => !excluded.has(candidate.ordinal));
 	}
@@ -168,9 +168,11 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	}
 
 	replaceResendCandidates(
-		candidates: readonly UserRowSummary[],
+		candidates: readonly ResendCandidate[],
 	): ConversationTranscriptOverlayMutation {
 		this.#resendCandidates = [...candidates];
+		const offered = new Set(candidates.map(candidate => candidate.ordinal));
+		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter(ordinal => offered.has(ordinal));
 		return feedMutation(false);
 	}
 
@@ -287,7 +289,7 @@ export class ConversationTranscriptOverlayStore {
 
 	replaceResendCandidates(
 		chatId: string,
-		candidates: readonly UserRowSummary[],
+		candidates: readonly ResendCandidate[],
 	): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).replaceResendCandidates(candidates);
 	}
@@ -298,6 +300,10 @@ export class ConversationTranscriptOverlayStore {
 
 	clearResendExclusions(chatId: string): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).clearResendExclusions();
+	}
+
+	resetResendCandidates(): void {
+		for (const entry of this.#entries.values()) entry.replaceResendCandidates([]);
 	}
 
 	acknowledgeInput(chatId: string, clientMessageId: string, ordinal: number): ConversationTranscriptOverlayMutation {

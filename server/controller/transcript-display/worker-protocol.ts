@@ -4,7 +4,7 @@ import type { AvailableDisplayWindow, BodyDependencyRequest, DisplayTargetResolu
 import type { StoredLedgerRow } from '../ledger/codec.js';
 import type { BodyReadPlan } from './details.js';
 import type { DisplayManifest } from './store.js';
-import type { DisplayAuxiliaryIdentity, DisplayAuxiliaryRequest, ResendSummaryPage, SubagentSummaryPage, UserRowPage } from '../../../common/transcript-display-auxiliary.js';
+import type { DisplayAuxiliaryIdentity, DisplayAuxiliaryRequest, SubagentSummaryPage, UserRowPage } from '../../../common/transcript-display-auxiliary.js';
 
 export type DisplayWorkerTask =
   | { kind: 'inspect'; path: string; chatId: string; viewId: string; serverInstanceId: string }
@@ -14,7 +14,6 @@ export type DisplayWorkerTask =
   | { kind: 'prune'; path: string; revision: string }
   | { kind: 'auxiliary-frame'; path: string; goal: number }
   | { kind: 'user-rows'; path: string; request: DisplayAuxiliaryRequest; identity: DisplayAuxiliaryIdentity }
-  | { kind: 'resend'; path: string; request: DisplayAuxiliaryRequest; identity: DisplayAuxiliaryIdentity }
   | { kind: 'subagents'; path: string; request: DisplayAuxiliaryRequest; identity: DisplayAuxiliaryIdentity }
   | { kind: 'close'; path: string }
   | { kind: 'window'; path: string; request: DisplayWindowRequest; watermark: number; sourceHead: number; bashFrontier: number; serverInstanceId: string; filteredBash: boolean }
@@ -42,7 +41,6 @@ export interface DisplayWorkerResults {
   prune: boolean;
   'auxiliary-frame': number;
   'user-rows': UserRowPage;
-  resend: ResendSummaryPage;
   subagents: SubagentSummaryPage;
   close: null;
   window: AvailableDisplayWindow;

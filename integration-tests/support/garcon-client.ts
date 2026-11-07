@@ -65,8 +65,8 @@ import {
   type DisplayOpenRequest, type PlanPresentationRequest,
 } from '../../common/transcript-display-open.js';
 import {
-  parseResendSummaryPage, parseSubagentSummaryPage, parseUserRowPage,
-  type DisplayAuxiliaryRequest,
+  parseResendSnapshot, parseSubagentSummaryPage, parseUserRowPage,
+  type DisplayAuxiliaryRequest, type ResendSnapshotRequest,
 } from '../../common/transcript-display-auxiliary.js';
 import type { ChatInputCommittedMessage, ChatTranscriptHeadUpdatedMessage } from '../../common/transcript-display-events.js';
 import {
@@ -1009,8 +1009,8 @@ export class GarconTestClient {
     return parseUserRowPage(await this.post('/api/v1/chats/transcript-display/user-rows', request));
   }
 
-  async displayResend(request: DisplayAuxiliaryRequest) {
-    return parseResendSummaryPage(await this.post('/api/v1/chats/transcript-display/resend', request));
+  async displayResend(request: ResendSnapshotRequest) {
+    return parseResendSnapshot(await this.post('/api/v1/chats/transcript-display/resend', request));
   }
 
   async displaySubagents(request: DisplayAuxiliaryRequest) {

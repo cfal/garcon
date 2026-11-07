@@ -10,7 +10,7 @@ import { appendDisplayFrame } from '../extractor.js';
 import { DisplayQuery, displayCertificate } from '../query.js';
 import { prepareBashFrame, pruneBashRevision } from '../bash-revision.js';
 import { planBodyRead } from '../details.js';
-import { queryResend, queryUserRows } from '../auxiliary-query.js';
+import { queryUserRows } from '../auxiliary-query.js';
 import { displayErrorCode } from '../errors.js';
 
 const at = '2026-01-01T00:00:00.000Z';
@@ -61,7 +61,6 @@ describe('persistent transcript display read model', () => {
       () => planBodyRead(store, { certificate: displayCertificate('server', { ...request, profile, cuts: [] }, 2),
         profile, cuts: [], seedOrdinals: [1], residentOrdinals: [], limitBodies: 50, estimatedByteBudget: 10000 }),
       () => queryUserRows(store, request, identity),
-      () => queryResend(store, request, identity),
     ];
     for (const read of reads) {
       try { read(); throw new Error('An unprepared prefix was accepted'); }

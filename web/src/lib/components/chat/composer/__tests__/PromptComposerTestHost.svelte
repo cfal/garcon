@@ -60,7 +60,7 @@
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import type { PromptRecallSource } from '$lib/chat/composer/prompt-recall';
-	import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import type { ResendCandidate } from '$shared/chat-view';
 	import type { InputFormatByModel } from '$shared/input-format';
 	import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 	import {
@@ -69,7 +69,7 @@
 	} from '$shared/attachments';
 
 	interface Props {
-		resendPaging?: DisplaySummaryPaging;
+		resendCandidates?: readonly ResendCandidate[];
 		recallPrompts?: readonly { ordinal: number; content: string }[];
 		selectedExecutorId?: string;
 		executors?: readonly ExecutorSnapshot[];
@@ -113,7 +113,7 @@
 	}
 
 	let {
-		resendPaging,
+		resendCandidates,
 		recallPrompts = [],
 		selectedExecutorId = 'local',
 		executors: executorSnapshots,
@@ -561,7 +561,6 @@
 	{onCommit}
 />
 <PromptComposer
-	{resendPaging}
 	{recallSource}
 	onRecallError={message => notifications.error(message)}
 	recallIdentity={`${selectedChatId}:synthetic-view`}
@@ -577,7 +576,7 @@
 		composerNotice = notice;
 		onAvailabilityNoticeChange?.(notice);
 	}}
-	resendCandidates={transcript.resendCandidates}
+	resendCandidates={resendCandidates ?? transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />
 

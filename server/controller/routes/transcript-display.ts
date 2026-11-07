@@ -1,5 +1,7 @@
 import { parseDisplayWindowRequest, parseMemberWindowRequest, parseBodyDependencyRequest } from '../../../common/transcript-display-contract.js';
-import { parseDisplayAuxiliaryRequest } from '../../../common/transcript-display-auxiliary.js';
+import { parseDisplayAuxiliaryRequest, parseResendSnapshotRequest, type ResendSnapshot } from '../../../common/transcript-display-auxiliary.js';
+import type { ResendCandidate } from '../../../common/chat-view.js';
+import type { ChatProcessingPhase } from '../../../common/chat-types.js';
 import { parseDisplayOpenRequest, parsePlanPresentationRequest, type DisplayOpenResponse } from '../../../common/transcript-display-open.js';
 import { ERROR_CODES, type ErrorCode } from '../../../common/error-codes.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
@@ -21,6 +23,8 @@ interface DisplayRouteDeps {
   readonly execution: Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
   readonly transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   readonly nativeActivity: Pick<NativeTranscriptActivityService, 'requestCheck'>;
+  readonly resendCandidates: (chatId: string) => readonly ResendCandidate[];
+  readonly processingPhase: (chatId: string) => ChatProcessingPhase | null;
 }
 
 export function createTranscriptDisplayRoutes(deps: DisplayRouteDeps): RouteMap {
@@ -76,8 +80,16 @@ export function createTranscriptDisplayRoutes(deps: DisplayRouteDeps): RouteMap 
       await display.retry(input.chatId);
       return { success: true };
     }) },
+    '/api/v1/chats/transcript-display/resend': { POST: post(async body => {
+      const input = parseResendSnapshotRequest(body);
+      if (input.serverInstanceId !== display.serverInstanceId) throw new DomainError('DISPLAY_STALE_CERTIFICATE', 'Refresh resend candidates.', 409, true);
+      const head = display.currentHead(input.chatId, input.transcriptViewId);
+      const processingPhase = deps.processingPhase(input.chatId);
+      return { ...input, sourceHead: head.ordinal, processingPhase,
+        candidates: processingPhase === null ? deps.resendCandidates(input.chatId) : [] } satisfies ResendSnapshot;
+    }) },
   };
-  for (const kind of ['user-rows', 'resend', 'subagents'] as const) routes[`/api/v1/chats/transcript-display/${kind}`] = {
+  for (const kind of ['user-rows', 'subagents'] as const) routes[`/api/v1/chats/transcript-display/${kind}`] = {
     POST: post((body, request) => {
       const input = parseDisplayAuxiliaryRequest(body);
       if (kind === 'subagents' && input.limit > 50) throw new TypeError('Subagent summary limit exceeds 50');

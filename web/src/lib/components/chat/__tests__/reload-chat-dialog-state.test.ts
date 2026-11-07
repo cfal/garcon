@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChatReloadOptions, ChatReloadOutcome } from '$lib/chat/conversation/reload-chat.js';
 import { ReloadChatDialogState } from '../reload-chat-dialog-state.svelte.js';
 
-const CANDIDATES = [{ ordinal: 3, preview: 'unsent', timestamp: '2026-01-01T00:00:00.000Z', attachmentCount: 0 }];
+const CANDIDATES = [{ ordinal: 3, content: 'unsent', attachmentNames: [] }];
 
 describe('ReloadChatDialogState', () => {
 	it('settles a dismissed confirmation without running a reload', async () => {
@@ -18,11 +18,10 @@ describe('ReloadChatDialogState', () => {
 		expect(dialog.open).toBe(false);
 	});
 
-	it('captures summary uncertainty and the full removal count with the confirmation', async () => {
+	it('captures unavailable reads separately from a complete candidate list', async () => {
 		const dialog = new ReloadChatDialogState();
-		const requested = dialog.request('chat-1', CANDIDATES, { total: 80, incomplete: true });
+		const requested = dialog.request('chat-1', CANDIDATES, { incomplete: true });
 		expect(dialog.candidates).toEqual(CANDIDATES);
-		expect(dialog.totalCandidates).toBe(80);
 		expect(dialog.summaryIncomplete).toBe(true);
 		dialog.cancel();
 		await requested;
