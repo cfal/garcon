@@ -89,6 +89,26 @@ it('reports a retry that is still preparing as blocked, not superseded', async (
 	expect(controller.snapshot.phase).toBe('preparing');
 });
 
+it('retries a retained failure before waiting for an automatic recovery request', async () => {
+	const { controller, api } = setup();
+	await controller.refresh();
+	api.window = async () => ({ kind: 'failed', serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
+		policyRevision: 1, profileKey: certificate.profileKey, bashRevision: 'patterns', sourceHead: 40002,
+		preparedThrough: 0, errorCode: 'DISPLAY_STORE_INVALID', retryAfterMs: null });
+	await controller.refresh();
+	const held = Promise.withResolvers<AvailableDisplayWindow>();
+	api.window = vi.fn<TranscriptDisplayApi['window']>().mockReturnValueOnce(held.promise).mockResolvedValue(window());
+	const recovering = controller.refresh();
+	expect(controller.snapshot).toMatchObject({ phase: 'requesting', error: 'DISPLAY_STORE_INVALID' });
+	api.retry = vi.fn(async () => ({ success: true }));
+	const retried = controller.retry();
+	expect(api.retry).toHaveBeenCalledOnce();
+	held.resolve(window());
+	await recovering;
+	expect(await retried).toBe('loaded');
+	expect(controller.snapshot).toMatchObject({ phase: 'available', error: null });
+});
+
 it('keeps a published retry successful when publication queues a new profile', async () => {
 	let reconfigure = false;
 	const { controller } = setup({}, snapshot => {

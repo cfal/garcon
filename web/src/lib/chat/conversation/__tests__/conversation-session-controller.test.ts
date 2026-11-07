@@ -1687,6 +1687,32 @@ describe('ConversationSessionController', () => {
 		transcript.dispose();
 	});
 
+	it.each(['requesting', 'available', 'idle'] as const)('retries a retained display failure while %s', async phase => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase, error: 'DISPLAY_STORE_INVALID' };
+		const calls: string[] = [];
+		vi.spyOn(transcript.controller, 'retry').mockImplementation(async () => { calls.push('retry'); return 'loaded'; });
+		const open = vi.fn(async () => { calls.push('open'); return true; });
+		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		expect(calls).toEqual(['retry', 'open']);
+		transcript.dispose();
+	});
+
+	it('reopens a healthy requesting display without retrying its preparation', async () => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase: 'requesting', error: null };
+		const retry = vi.spyOn(transcript.controller, 'retry');
+		const open = vi.fn(async () => true);
+		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		expect(retry).not.toHaveBeenCalled();
+		expect(open).toHaveBeenCalledOnce();
+		transcript.dispose();
+	});
+
 	it.each(['chat-switch', 'cancelled'] as const)('does not reopen after a held display retry is superseded by %s', async supersession => {
 		const { deps } = createDeps();
 		const transcript = new ActiveTranscriptState();
