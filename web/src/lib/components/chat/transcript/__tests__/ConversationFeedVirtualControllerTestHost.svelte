@@ -31,6 +31,7 @@
 		showAtLayout(viewportWidth: number, itemSize: number): Promise<void>;
 		prependGroup(): Promise<void>;
 		appendGroup(): Promise<void>;
+		filterFirstGroupMember(): Promise<void>;
 	}
 
 	interface Props {
@@ -39,6 +40,7 @@
 		groupFocusMode?: boolean;
 		groupTailCount?: number;
 		initialPinned?: boolean;
+		retainedFirst?: boolean;
 	}
 
 	let {
@@ -47,6 +49,7 @@
 		groupFocusMode = false,
 		groupTailCount = 0,
 		initialPinned = true,
+		retainedFirst = false,
 	}: Props = $props();
 	let itemCount = $state(12);
 	let firstItemNumber = $state(0);
@@ -61,6 +64,7 @@
 	let visible = $state(true);
 	let viewportWidth = $state(400);
 	let groupMembers = $state.raw(['b', 'c']);
+	let groupAfter = $state(1);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let virtualRoot: HTMLDivElement | null = $state(null);
 	let scrollbarDragActive = false;
@@ -82,7 +86,9 @@
 		if (groupFocusMode) {
 			const group: ConversationVirtualFeedItem = {
 				kind: 'tool-group', key: keys[0], anchorId: keys[0],
-				descriptor: displayGroup(groupMembers[0].charCodeAt(0) - 96, groupMembers.at(-1)!.charCodeAt(0) - 96, groupMembers.length),
+				descriptor: { ...displayGroup(groupMembers[0].charCodeAt(0) - 96, groupMembers.at(-1)!.charCodeAt(0) - 96, groupMembers.length),
+					fragment: { after: groupAfter, through: groupMembers.at(-1)!.charCodeAt(0) - 96 } },
+				retained: retainedFirst ? true : undefined,
 				expanded: false, spacingAfter: 'none',
 			};
 			const tail: TranscriptVirtualFeedItem[] = keys.slice(1).map((key, index) => ({
@@ -114,6 +120,7 @@
 		const items: ConversationVirtualFeedItem[] = keys.map((key, index) => ({
 			kind: 'transcript',
 			key,
+			retained: retainedFirst && index === 0 ? true : undefined,
 			item: {
 				kind: 'message',
 				id: `row-${index}`,
@@ -257,6 +264,7 @@
 			showAtLayout,
 			prependGroup,
 			appendGroup,
+			filterFirstGroupMember,
 		});
 	});
 
@@ -324,6 +332,7 @@
 
 	async function prependGroup(): Promise<void> {
 		groupMembers = ['a', ...groupMembers];
+		groupAfter = 0;
 		geometryRevision += 1;
 		contentRevision += 1;
 		await tick();
@@ -331,6 +340,13 @@
 
 	async function appendGroup(): Promise<void> {
 		groupMembers = [...groupMembers, 'd'];
+		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
+	}
+
+	async function filterFirstGroupMember(): Promise<void> {
+		groupMembers = groupMembers.slice(1);
 		geometryRevision += 1;
 		contentRevision += 1;
 		await tick();

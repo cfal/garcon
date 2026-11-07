@@ -7,9 +7,9 @@ import { descriptorLast, expansionFor, type DisplayWindowSnapshot } from '$lib/c
 
 export type ConversationFeedSpacing = 'responsive-feed' | 'transcript' | 'none';
 export type ConversationEarlierBoundaryMode = 'hidden' | 'visible' | 'when-collapsed';
-export type TranscriptVirtualFeedItem = { kind: 'transcript'; key: string; item: ConversationFeedRenderItem; spacingAfter: ConversationFeedSpacing };
+export type TranscriptVirtualFeedItem = { kind: 'transcript'; key: string; item: ConversationFeedRenderItem; spacingAfter: ConversationFeedSpacing; retained?: true };
 export type ToolGroupVirtualFeedItem = {
-	kind: 'tool-group'; key: string; anchorId: string; descriptor: GroupDescriptor; expanded: boolean; spacingAfter: ConversationFeedSpacing;
+	kind: 'tool-group'; key: string; anchorId: string; descriptor: GroupDescriptor; expanded: boolean; spacingAfter: ConversationFeedSpacing; retained?: true;
 };
 export type ConversationVirtualFeedItem =
 	| { kind: 'viewport-start-spacer' | 'refresh-error' | 'earlier-boundary' | 'later-boundary' | 'retained-gap'; key: string; spacingAfter: 'none' }
@@ -105,18 +105,19 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 		}
 	};
 	const islands = [
-		...retained.map(row => ({ ordinal: row.ordinal!, item: { kind: 'transcript' as const, key: key(`transcript:${row.id}`), item: row, spacingAfter: 'transcript' as const } })),
-		...input.display.protectedGroups.map(group => ({ ordinal: group.descriptor.firstMember, item: groupItem(group.descriptor, group.certificate, false) })),
+		...retained.map(row => ({ ordinal: row.ordinal!, item: { kind: 'transcript' as const, key: key(`transcript:${row.id}`), item: row, spacingAfter: 'transcript' as const, retained: true as const } })),
+		...input.display.protectedGroups.map(group => ({ ordinal: group.descriptor.firstMember, item: { ...groupItem(group.descriptor, group.certificate, false), retained: true as const } })),
 	].sort((a, b) => a.ordinal - b.ordinal);
 	const retainedKeys = new Set<string>();
 	const insertRetained = (through: number) => {
 		for (const { ordinal, item } of islands) {
 			if (ordinal > through || retainedKeys.has(item.key)) continue;
+			if (item.kind === 'transcript' && rendered.has(item.item.id)) continue;
 			insertOverlays(ordinal - 1);
 			// Retained islands have no completeness certificate for their intervening spans.
 			if (items.at(-1)?.kind !== 'retained-gap') items.push({ kind: 'retained-gap', key: key(`retained:before:${item.key}`), spacingAfter: 'none' });
-			if (item.kind === 'transcript') pushRow(item.item);
-			else items.push(item);
+			if (item.kind === 'transcript') rendered.add(item.item.id);
+			items.push(item);
 			items.push({ kind: 'retained-gap', key: key(`retained:after:${item.key}`), spacingAfter: 'none' });
 			retainedKeys.add(item.key);
 		}
@@ -151,10 +152,10 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 					anchor: { kind: 'after', ordinal: page.later.afterOrdinal }, remaining: page.later.remaining, spacingAfter: 'none' });
 			}
 		}
-		insertRetained(descriptorLast(descriptor));
+		insertRetained(descriptor.kind === 'tool-group' ? descriptor.fragment.through : descriptorLast(descriptor));
 		insertOverlays(descriptor.kind === 'tool-group' ? descriptor.fragment.through : descriptorLast(descriptor));
 	}
-	if (window) insertOverlays(window.interval.through);
+	if (window) { insertRetained(window.interval.through); insertOverlays(window.interval.through); }
 	const transcriptEndIndex = items.length;
 	if (input.showLaterBoundary) items.push({ kind: 'later-boundary', key: key('suffix:later-boundary'), spacingAfter: 'none' });
 	insertRetained(Infinity);

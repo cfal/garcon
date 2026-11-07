@@ -91,6 +91,7 @@ export class DisplayWindowController {
 	#abort: AbortController | null = null;
 	#refreshTimer: ReturnType<typeof setTimeout> | null = null;
 	#refreshPending = false;
+	#replacementPending = false;
 	#refreshGoal: number | null = null;
 	#parked = false;
 	#disposed = false;
@@ -144,6 +145,7 @@ export class DisplayWindowController {
 		if (this.#profile && displayProfileKey(profile) === displayProfileKey(this.#profile)
 			&& displayCutsKey(cuts) === displayCutsKey(this.#cuts)) return;
 		this.#pendingBashRevision = null;
+		this.#replacementPending ||= this.#profile !== null;
 		this.#profile = profile;
 		this.#cuts = cuts;
 		this.cancel();
@@ -151,7 +153,7 @@ export class DisplayWindowController {
 			this.#commit({ ...this.#snapshot, phase: 'failed', error: 'Too many pending transcript overlays. Pending requests remain available below.' });
 			return;
 		}
-		this.#scheduleRefresh(0);
+		this.#scheduleRefresh(0, 'readiness');
 	}
 
 	setReadingAnchor(ordinal: number | null, pinned: boolean): void {
@@ -190,8 +192,8 @@ export class DisplayWindowController {
 		if (phase === 'available' && (this.#snapshot.phase !== 'available' || this.#needsReplace() || this.#needsHeadRefresh() || this.#needsDetailRefresh())) this.#scheduleRefresh(0, 'readiness');
 	}
 
-	#needsReplace(): boolean {
-		const certificate = this.#snapshot.window?.certificate;
+	#needsReplace(window = this.#snapshot.window): boolean {
+		const certificate = window?.certificate;
 		return !certificate || !!this.#profile && (certificate.profileKey !== displayProfileKey(this.#profile)
 			|| certificate.cutsKey !== displayCutsKey(this.#cuts));
 	}
@@ -208,13 +210,13 @@ export class DisplayWindowController {
 	}
 
 	async retry(): Promise<CoverageOutcome | 'superseded'> {
-		if (!this.#identity) return 'superseded';
+		if (!this.#identity) return 'blocked';
 		const epoch = this.#epoch;
 		await this.api.retry(this.#identity);
 		if (this.#request) await this.#request;
 		if (epoch !== this.#epoch) return 'superseded';
 		const result = await this.refresh();
-		return epoch === this.#epoch ? result : 'superseded';
+		return result === 'loaded' || epoch === this.#epoch ? result : 'superseded';
 	}
 
 	refresh(): Promise<CoverageOutcome> {
@@ -317,7 +319,8 @@ export class DisplayWindowController {
 			completed = current();
 			if (completed && this.#navigationAnchor === navigationAnchor) this.#navigationAnchor = null;
 			return completed ? resolution : null;
-		} catch (error) {
+		} catch (caughtError) {
+			let error = caughtError;
 			if (!current()) return null;
 			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
 				try {
@@ -390,8 +393,6 @@ export class DisplayWindowController {
 		const direction = mode === 'extend' ? anchor.kind === 'before' ? 'earlier' : 'later' : undefined;
 		if (this.#request) await this.#request;
 		if (epoch !== this.#epoch) return 'blocked';
-		if (this.#needsReplace() && await this.#refreshWindow(applicationGate, direction) !== 'loaded') return 'blocked';
-		if (epoch !== this.#epoch) return 'blocked';
 		const anchorOrdinal = anchor.kind === 'first' ? group.firstMember : anchor.ordinal;
 		const findGroup = () => this.#snapshot.window?.items.find((item): item is GroupDescriptor => item.kind === 'tool-group'
 			&& anchorOrdinal > item.fragment.after && anchorOrdinal <= item.fragment.through);
@@ -400,6 +401,8 @@ export class DisplayWindowController {
 			if (await this.#loadWindow({ kind: 'around', ordinal: anchorOrdinal }, 'replace', { applicationGate, requiredThrough: this.#head, direction }) !== 'loaded') return 'blocked';
 			if (epoch !== this.#epoch) return 'blocked';
 		}
+		if (this.#needsReplace() && await this.#refreshWindow(applicationGate, direction) !== 'loaded') return 'blocked';
+		if (epoch !== this.#epoch) return 'blocked';
 		const currentGroup = findGroup();
 		if (!currentGroup) return 'blocked';
 		group = currentGroup;
@@ -579,12 +582,14 @@ export class DisplayWindowController {
 		if (!profile?.combine) return [];
 		const intents = this.#snapshot.expansions.map(expansion => this.#anchor !== null && expansion.page.ordinals.includes(this.#anchor)
 			? { ...expansion, anchorOrdinal: this.#anchor } : expansion);
+		const isProtected = (expansion: DisplayExpansion) => expansion.page.ordinals.some(ordinal => this.#protected.has(ordinal))
+			|| [...this.#protectedGroups].some(ordinal => ordinal > expansion.page.fragment.after && ordinal <= expansion.page.fragment.through);
 		const remapped: DisplayExpansion[] = [];
 		for (const group of window.items) {
 			if (group.kind !== 'tool-group') continue;
 			const candidates = intents.filter(expansion => expansionFor(group, [expansion])
 				|| (expansion.page.base.afterBreaker < group.lastMember && expansion.page.base.beforeBreaker > group.firstMember));
-			candidates.sort((a, b) => Number(b.page.ordinals.some(o => this.#protected.has(o))) - Number(a.page.ordinals.some(o => this.#protected.has(o)))
+			candidates.sort((a, b) => Number(isProtected(b)) - Number(isProtected(a))
 				|| Number(b.anchorOrdinal === this.#anchor) - Number(a.anchorOrdinal === this.#anchor) || b.openedAt - a.openedAt);
 			const intent = candidates.find(candidate => !remapped.some(accepted => accepted.openedAt === candidate.openedAt));
 			if (!intent) continue;
@@ -687,7 +692,8 @@ export class DisplayWindowController {
 			if (descriptor.kind === 'tool-group') groups.set(descriptor.firstMember, { certificate: window.certificate, descriptor });
 		}
 		return [...groups.values()].filter(({ descriptor }) => this.#protectedGroups.has(descriptor.firstMember)
-			&& !next.items.some(item => descriptor.firstMember >= descriptorFirst(item) && descriptor.firstMember <= descriptorLast(item)));
+			&& !next.items.some(item => item.kind === 'row' ? descriptor.firstMember === item.ordinal
+				: descriptor.firstMember > item.fragment.after && descriptor.firstMember <= item.fragment.through));
 	}
 
 	#retainBodies(): void {
@@ -712,6 +718,7 @@ export class DisplayWindowController {
 		this.#pendingBashRevision = null;
 		if (this.#profile!.bashRevision === open.display.bashRevision) return false;
 		this.#profile = { ...this.#profile!, bashRevision: open.display.bashRevision };
+		this.#replacementPending = true;
 		this.#refreshGoal = null;
 		this.#readinessRevision++;
 		return true;
@@ -729,11 +736,8 @@ export class DisplayWindowController {
 	}
 
 	#commit(snapshot: DisplayWindowSnapshot, direction?: TranscriptPageDirection): void {
-		if (snapshot.phase === 'failed') {
-			if (this.#refreshTimer !== null) clearTimeout(this.#refreshTimer);
-			this.#refreshTimer = null;
-			this.#refreshPending = false;
-		}
+		if (snapshot.phase === 'failed') this.#clearRefresh();
+		if (snapshot.phase === 'failed' || snapshot.phase === 'available' && !this.#needsReplace(snapshot.window)) this.#replacementPending = false;
 		this.#snapshot = { ...snapshot, revision: this.#snapshot.revision + 1 };
 		this.publish(this.#snapshot, direction);
 	}
@@ -799,14 +803,17 @@ export class DisplayWindowController {
 	}
 
 	cancel(): void {
-		const refreshPending = this.#pendingBashRevision !== null || this.#refreshPending;
 		this.#cancelRequests();
-		if (refreshPending && this.#identity && this.#profile && this.#needsReplace()) this.#scheduleRefresh(0, 'readiness');
+		if (this.#replacementPending && this.#identity && this.#profile && this.#needsReplace()) this.#scheduleRefresh(0);
+		else this.#clearRefresh();
 	}
 
 	#cancelRequests(): void {
 		this.#epoch += 1;
-		if (this.#pendingBashRevision && this.#profile) this.#profile = { ...this.#profile, bashRevision: this.#pendingBashRevision };
+		if (this.#pendingBashRevision && this.#profile) {
+			this.#profile = { ...this.#profile, bashRevision: this.#pendingBashRevision };
+			this.#replacementPending = true;
+		}
 		this.#pendingBashRevision = null;
 		this.#navigationEpoch = null;
 		this.#wakeNavigation?.();
@@ -818,17 +825,22 @@ export class DisplayWindowController {
 		this.#abort?.abort();
 		this.#request = null;
 		this.#abort = null;
-		if (this.#refreshTimer !== null) clearTimeout(this.#refreshTimer);
-		this.#refreshTimer = null;
-		this.#refreshPending = false;
 		this.#refreshGoal = null;
 		if (this.#snapshot.phase === 'requesting') this.#commit({ ...this.#snapshot, phase: this.#snapshot.window ? 'available' : 'idle', error: null });
 	}
 
-	park(): void { this.#cancelRequests(); this.#readingAnchorHold = null; this.#applicationGate = undefined; this.#parked = true; this.bodies.setParked(this, true); }
+	#clearRefresh(): void {
+		if (this.#refreshTimer !== null) clearTimeout(this.#refreshTimer);
+		this.#refreshTimer = null;
+		this.#refreshPending = false;
+	}
+
+	park(): void { this.#cancelRequests(); this.#clearRefresh(); this.#readingAnchorHold = null; this.#applicationGate = undefined; this.#parked = true; this.bodies.setParked(this, true); }
 	activate(): void { this.#parked = false; this.bodies.setParked(this, false); this.#scheduleRefresh(0); }
 	reset(): void {
 		this.#cancelRequests();
+		this.#clearRefresh();
+		this.#replacementPending = false;
 		this.#readingAnchorHold = null;
 		this.#identity = null;
 		this.#profile = null;

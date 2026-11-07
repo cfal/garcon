@@ -33,6 +33,7 @@ interface ControllerExposure {
 	showAtLayout(viewportWidth: number, itemSize: number): Promise<void>;
 	prependGroup(): Promise<void>;
 	appendGroup(): Promise<void>;
+	filterFirstGroupMember(): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -50,6 +51,7 @@ async function renderController(options?: {
 	groupFocusMode?: boolean;
 	groupTailCount?: number;
 	initialPinned?: boolean;
+	retainedFirst?: boolean;
 }): Promise<{
 	exposure: ControllerExposure;
 	unmount(): void;
@@ -292,6 +294,36 @@ describe('ConversationFeedVirtualController', () => {
 				viewportOffset: expect.any(Number),
 			}),
 		);
+	});
+
+	it.each(['group', 'row'] as const)('excludes a leading retained %s island from reading and hidden restoration', async kind => {
+		const { exposure } = await renderController({ groupFocusMode: kind === 'group', groupTailCount: 8,
+			initialPinned: false, retainedFirst: true });
+		const viewport = exposure.viewport()!;
+		viewport.scrollTop = 0;
+		for (const row of viewport.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')) {
+			row.getBoundingClientRect = () => new DOMRect(0, Number(row.dataset.index) * 40 - viewport.scrollTop, 400, 40);
+		}
+		viewport.dispatchEvent(new Event('scroll'));
+		await settleController();
+		const target = { kind: 'row', transcriptViewId: 'view-1', ordinal: kind === 'group' ? 10 : 2, viewportOffset: 40 };
+		expect(exposure.controller.captureRestoreTarget('view-1', false)).toEqual(target);
+		await exposure.hide();
+		await exposure.showAtLayout(400, 40);
+		await settleController();
+		expect(exposure.controller.captureRestoreTarget('view-1', false)).toEqual(target);
+	});
+
+	it('transfers summary focus through a filtered first member within the same raw fragment', async () => {
+		const { exposure } = await renderController({ groupFocusMode: true, initialPinned: false });
+		const oldButton = exposure.viewport()!.querySelector<HTMLButtonElement>('[data-chat-tool-group]')!;
+		oldButton.focus();
+		await exposure.filterFirstGroupMember();
+		await waitFor(() => {
+			const replacement = exposure.viewport()!.querySelector<HTMLButtonElement>('[data-chat-tool-group]');
+			expect(replacement).not.toBe(oldButton);
+			expect(document.activeElement).toBe(replacement);
+		});
 	});
 
 	it('retries an initially rejected geometry publication', async () => {

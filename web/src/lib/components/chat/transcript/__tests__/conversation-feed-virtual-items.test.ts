@@ -54,6 +54,30 @@ describe('certified virtual feed', () => {
 		expect(build(input).items.filter(item => item.kind === 'permission')).toHaveLength(0);
 		expect(build({ ...input, display: { ...input.display, window: null } }).items.filter(item => item.kind === 'permission')).toHaveLength(1);
 	});
+	it.each([false, true])('orders filtered-tail islands before a fragment cut, expanded=%s', expanded => {
+		const group = { ...displayGroup(1, 90, 90), fragment: { after: 0, through: 100 } };
+		const input = certifiedFeed([bash(50), bash(95)], { items: [group], display: {
+			protectedRows: [{ certificate: displayCertificate(), detail: displayDetail(95), layout: 'standard' }],
+			expansions: expanded ? [{ anchorOrdinal: 50, openedAt: 1, page: { certificate: displayCertificate(), base: group.base,
+				fragment: group.fragment, ordinals: [50], earlier: { beforeOrdinal: 50, remaining: 49 }, later: { afterOrdinal: 50, remaining: 40 } } }] : [],
+		}, input: { overlays: [{ kind: 'message', id: 'optimistic:pending', message: new UserMessage('', 'Pending input') }],
+			optimisticAfterOrdinals: new Map([['pending', 100]]) } });
+		input.display = { ...input.display, window: { ...input.display.window!, cutPlacements: [{ id: 'optimistic:pending', placement: 'inline' }] } };
+		const model = build(input);
+		expect(model.items.flatMap(item => item.kind === 'transcript' ? [item.item.id] : []))
+			.toEqual(expanded ? ['view-1:50', 'view-1:95', 'optimistic:pending'] : ['view-1:95', 'optimistic:pending']);
+		if (expanded) expect(model.indexByRowId.get('view-1:95')).toBeGreaterThan(model.items.findLastIndex(item => item.kind === 'member-boundary'));
+	});
+	it('orders inline overlays before an intervening retained group island', () => {
+		const group = displayGroup(18, 19, 2);
+		const input = certifiedFeed([user(10), user(20)], { display: {
+			protectedGroups: [{ certificate: displayCertificate(), descriptor: group }],
+		}, input: { overlays: [{ kind: 'message', id: 'optimistic:pending', message: new UserMessage('', 'Pending input') }],
+			optimisticAfterOrdinals: new Map([['pending', 15]]) } });
+		input.display = { ...input.display, window: { ...input.display.window!, cutPlacements: [{ id: 'optimistic:pending', placement: 'inline' }] } };
+		expect(build(input).items.flatMap(item => item.kind === 'transcript' ? [item.item.id] : item.kind === 'tool-group' ? [item.anchorId] : []))
+			.toEqual(['view-1:10', 'optimistic:pending', 'tool-group:view-1:18', 'view-1:20']);
+	});
 	it('represents 40,000 collapsed members with one descriptor and no per-member indexes', () => {
 		const group = displayGroup(2, 40001, 40000);
 		const input = certifiedFeed([user(1)], { items: [{ kind: 'row', ordinal: 1, messageType: 'user-message', layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }, group] });
@@ -134,7 +158,7 @@ describe('certified virtual feed', () => {
 		input.display = { ...input.display, window: { ...input.display.window!, interval: { after: 499, through: 500 } } };
 		const model = build(input);
 		const summary = model.items.findIndex(item => item.kind === 'tool-group');
-		expect(model.items[summary]).toEqual(original);
+		expect(model.items[summary]).toEqual({ ...original, retained: true });
 		expect(model.items[summary - 1].kind).toBe('retained-gap');
 		expect(model.items[summary + 1].kind).toBe('retained-gap');
 		expect(summary).toBeLessThan(model.items.findIndex(item => item.kind === 'earlier-boundary'));

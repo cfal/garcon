@@ -671,7 +671,7 @@ export class ConversationScrollController {
 					this.#isCurrentViewportOperation(chatId, operationEpoch)
 					? 'apply'
 					: 'invalidated';
-			})();
+			})().finally(() => { decision = null; });
 			return decision;
 		};
 	}
@@ -729,7 +729,7 @@ export class ConversationScrollController {
 		if (this.#activeTargetNavigations > 0 || this.#isPageMutationInProgress) return false;
 		if (reason === 'scroll' && this.deps.chatState.loadStatus === 'error') return false;
 		if (reason === 'scroll' && this.deps.getViewport()?.memberPageTarget(direction)) {
-			return !this.deps.chatState.isLoadingMessages;
+			return !this.deps.chatState.isRequestingDisplay;
 		}
 		if (
 			this.deps.chatState.pageStates[direction].status === 'loading' ||
