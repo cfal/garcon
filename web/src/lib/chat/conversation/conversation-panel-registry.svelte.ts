@@ -406,21 +406,9 @@ class PanelRegistration implements ConversationPanelRegistration {
 function waitForSnapshot(snapshot: Promise<unknown>, signal: AbortSignal): Promise<void> {
 	if (signal.aborted) return Promise.reject(signal.reason);
 	return new Promise((resolve, reject) => {
-		const abort = () => {
-			signal.removeEventListener('abort', abort);
-			reject(signal.reason);
-		};
+		const abort = () => reject(signal.reason);
 		signal.addEventListener('abort', abort, { once: true });
-		void snapshot.then(
-			() => {
-				signal.removeEventListener('abort', abort);
-				resolve();
-			},
-			(error: unknown) => {
-				signal.removeEventListener('abort', abort);
-				reject(error);
-			},
-		);
+		void snapshot.then(() => resolve(), reject).finally(() => signal.removeEventListener('abort', abort));
 	});
 }
 

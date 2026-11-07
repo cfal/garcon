@@ -364,20 +364,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		pinned: boolean,
 	): ConversationPanelRestoreTarget | null {
 		if (pinned) return { kind: 'end' };
-		const messageKeys = new Set<string>();
-		for (const item of this.#configuredModel.items) {
-			if (item.kind === 'tool-group') {
-				messageKeys.add(item.key);
-				continue;
-			}
-			if (
-				item.kind !== 'transcript' ||
-				item.item.kind !== 'message' ||
-				item.item.ordinal === undefined
-			)
-				continue;
-			messageKeys.add(item.key);
-		}
+		const messageKeys = new Set(this.#configuredModel.items.filter(item =>
+			item.kind === 'tool-group' && !item.retained || item.kind === 'transcript' && !item.retained
+				&& item.item.kind === 'message' && item.item.ordinal !== undefined).map(item => item.key));
 		const viewport = this.options.viewport;
 		const visibleAnchor = viewport
 			? this.#mountedItems.visibleAnchor({
@@ -390,6 +379,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const anchor = visibleAnchor ?? virtualAnchor;
 		if (!anchor) return null;
 		for (const key of [anchor.key, ...anchor.fallbackKeys]) {
+			if (!messageKeys.has(key)) continue;
 			const index = this.#configuredModel.indexByKey.get(key);
 			if (index === undefined) continue;
 			const virtualItem = this.#configuredModel.items[index];
@@ -703,9 +693,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		model: ConversationVirtualFeedModel,
 	): ConversationVirtualAnchor | null {
 		if (!anchor) return null;
-		const key = [anchor.key, ...anchor.fallbackKeys].find((candidate) =>
-			model.indexByKey.has(candidate),
-		);
+		const key = [anchor.key, ...anchor.fallbackKeys].find(candidate => {
+			const item = model.items[model.indexByKey.get(candidate) ?? -1];
+			return item && !((item.kind === 'tool-group' || item.kind === 'transcript') && item.retained);
+		});
 		if (!key) return null;
 		return {
 			key,
@@ -985,7 +976,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 function transcriptKeys(model: ConversationVirtualFeedModel): ReadonlySet<string> {
 	const keys = new Set<string>();
 	for (const item of model.items) {
-		if (item.kind === 'transcript' || item.kind === 'tool-group') keys.add(item.key);
+		if ((item.kind === 'transcript' || item.kind === 'tool-group') && !item.retained) keys.add(item.key);
 	}
 	return keys;
 }

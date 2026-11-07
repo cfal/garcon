@@ -89,6 +89,25 @@ it('reports a retry that is still preparing as blocked, not superseded', async (
 	expect(controller.snapshot.phase).toBe('preparing');
 });
 
+it('keeps a published retry successful when publication queues a new profile', async () => {
+	let reconfigure = false;
+	const { controller } = setup({}, snapshot => {
+		if (!reconfigure || snapshot.phase !== 'available') return;
+		reconfigure = false;
+		queueMicrotask(() => controller.configure({ ...profile, showThinking: false }, []));
+	});
+	await controller.refresh();
+	reconfigure = true;
+	expect(await controller.retry()).toBe('loaded');
+	expect(controller.profile?.showThinking).toBe(false);
+});
+
+it('allows the caller to open a display that has no retry identity yet', async () => {
+	const { controller } = setup();
+	controller.reset();
+	expect(await controller.retry()).toBe('blocked');
+});
+
 it('replaces an in-flight old profile when a same-view open carries a new revision', async () => {
 	vi.useFakeTimers();
 	const old = Promise.withResolvers<AvailableDisplayWindow>();
@@ -496,6 +515,101 @@ it.each(['readiness-then-old-open', 'unchanged-then-new-open'] as const)('settle
 	expect(await controller.navigate(20000)).toMatchObject({ kind: 'group-member', landedOrdinal: 20000 });
 	await vi.advanceTimersByTimeAsync(1);
 	expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+});
+
+it.each(['window', 'members'] as const)('preserves deferred revision demand from %s when its replacement is cancelled in flight', async stage => {
+	vi.useFakeTimers();
+	const response = (request: Parameters<TranscriptDisplayApi['window']>[0]) => ({ ...window(), certificate: {
+		...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+	} });
+	const held = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
+	const navigationHold = Promise.withResolvers<void>(), navigationEntered = Promise.withResolvers<void>();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockImplementationOnce(async request => {
+		if (stage === 'window') { navigationEntered.resolve(); await navigationHold.promise; }
+		return response(request);
+	})
+		.mockImplementationOnce(async request => { entered.resolve(); await held.promise; return response(request); })
+		.mockImplementation(async request => response(request));
+	const { controller, api } = setup({ window: read });
+	const members = api.members;
+	api.members = async request => { navigationEntered.resolve(); await navigationHold.promise; return members(request); };
+	const abort = new AbortController();
+	const pending = controller.navigate(20000, abort.signal);
+	await navigationEntered.promise;
+	controller.ready('patterns-2');
+	abort.abort();
+	navigationHold.resolve();
+	expect(await pending).toBeNull();
+	await vi.advanceTimersByTimeAsync(1);
+	await entered.promise;
+	controller.cancel();
+	held.resolve();
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(read).toHaveBeenCalledTimes(3);
+	expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+	controller.cancel();
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(read).toHaveBeenCalledTimes(3);
+});
+
+it.each(['busy', 'preparing'] as const)('preserves %s backoff while cancelling a pending revision replacement', async kind => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce(window())
+		.mockImplementationOnce(async request => ({ kind, serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
+			policyRevision: 1, profileKey: displayProfileKey(request.profile), bashRevision: request.profile.bashRevision,
+			sourceHead: 40002, preparedThrough: 0, errorCode: null, retryAfterMs: 1500 }))
+		.mockImplementation(async request => ({ ...window(), certificate: {
+			...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+		} }));
+	const { controller } = setup({ window: read });
+	await controller.refresh();
+	controller.ready('patterns-2');
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(2);
+	await vi.advanceTimersByTimeAsync(100);
+	controller.cancel();
+	await vi.advanceTimersByTimeAsync(1398);
+	expect(read).toHaveBeenCalledTimes(2);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(3);
+	expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+});
+
+it.each(['busy', 'preparing'] as const)('preempts %s backoff when the display profile changes', async kind => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce(window())
+		.mockImplementationOnce(async request => ({ kind, serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
+			policyRevision: 1, profileKey: displayProfileKey(request.profile), bashRevision: request.profile.bashRevision,
+			sourceHead: 40002, preparedThrough: 0, errorCode: null, retryAfterMs: 1500 }))
+		.mockImplementation(async request => ({ ...window(), certificate: {
+			...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+		} }));
+	const { controller } = setup({ window: read });
+	await controller.refresh();
+	controller.ready('patterns-2');
+	await vi.advanceTimersByTimeAsync(100);
+	expect(read).toHaveBeenCalledTimes(2);
+	const next = { ...profile, bashRevision: 'patterns-2', showThinking: false };
+	controller.configure(next, []);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(3);
+	expect(controller.snapshot.window?.certificate.profileKey).toBe(displayProfileKey(next));
+});
+
+it('stops a failed revision replacement even when it is cancelled again', async () => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce(window())
+		.mockImplementation(async request => ({ kind: 'failed', serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
+			policyRevision: 1, profileKey: displayProfileKey(request.profile), bashRevision: request.profile.bashRevision,
+			sourceHead: 40002, preparedThrough: 0, errorCode: 'DISPLAY_DISK_FULL', retryAfterMs: null }));
+	const { controller } = setup({ window: read });
+	await controller.refresh();
+	controller.ready('patterns-2');
+	await vi.advanceTimersByTimeAsync(1);
+	expect(controller.snapshot.phase).toBe('failed');
+	controller.cancel();
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(read).toHaveBeenCalledTimes(2);
 });
 
 it.each(['network', 'stale-view', 'busy'] as const)('handles a %s metadata reopen failure during member revision recovery', async failure => {

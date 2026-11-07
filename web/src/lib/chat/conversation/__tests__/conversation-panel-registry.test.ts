@@ -86,9 +86,10 @@ describe('display surface registry', () => {
 	});
 
 	it.each(['before-parking', 'while-parked', 'stale'] as const)('preserves a per-chat reading target across surface reuse with eviction %s', async timing => {
-		const { registry, api } = fixture();
+		const { registry, api, bodies } = fixture();
 		registry.reconcile([presentation(left)]);
 		await registry.loadChatSnapshot('chat-1');
+		const original = registry.panel(left)!.transcript;
 		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 };
 		registry.panel(left)!.attachPresentation(port(target));
 		if (timing === 'before-parking') registry.upsertOptimisticInput('chat-1', pendingInput);
@@ -98,9 +99,11 @@ describe('display surface registry', () => {
 		await registry.loadChatSnapshot('chat-2');
 		if (timing === 'while-parked') registry.upsertOptimisticInput('chat-1', pendingInput);
 		if (timing === 'stale') registry.markChatStale('chat-1');
+		expect(bodies.usage(original.controller).count).toBe(0);
 		registry.prepareForReconcile([presentation(left)]);
 		registry.reconcile([presentation(left)]);
 		const restored = registry.panel(left)!;
+		expect(restored.transcript).not.toBe(original);
 		expect(restored.scroll.isPinnedToBottom).toBe(false);
 		const jump = vi.spyOn(restored.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
 		restored.attachPresentation(port({ kind: 'end' }));

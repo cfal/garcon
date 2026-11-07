@@ -47,6 +47,7 @@ function scrollState(
 		hasLaterMessages: false,
 		isDisplayBehindHead: false,
 		isLoadingMessages: false,
+		isRequestingDisplay: false,
 		isUserScrolledUp: false,
 		invalidatePendingHistoryLoad: vi.fn(),
 		invalidatePendingWindowNavigation: vi.fn(),
@@ -263,6 +264,24 @@ describe('ConversationScrollController', () => {
 		fixture.state.pageStates[direction] = { status: 'error', error: 'Parent read failed' };
 		expect(await fixture.controller.requestPage(direction, 'button')).toBe('loaded');
 		expect(load).toHaveBeenCalledTimes(2);
+	});
+
+	it('allows member paging at a retained certificate while preparation is lagging', async () => {
+		const chat = expandedTranscriptState();
+		chat.display = { ...chat.display, phase: 'lagging' };
+		const viewport = fakeViewport();
+		viewport.memberPageTarget.mockReturnValue({
+			group: { kind: 'tool-group', firstMember: 1, lastMember: 200, count: 200,
+				base: { afterBreaker: 0, beforeBreaker: 201, firstMember: 1, lastMember: 200, openAtWatermark: false },
+				fragment: { after: 0, through: 200 }, totals: { commands: 200, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] },
+			anchor: { kind: 'after', ordinal: 100 },
+		});
+		const load = vi.spyOn(chat, 'loadLaterPage').mockResolvedValue('loaded');
+		const fixture = controllerFixture({ chatState: chat, viewport });
+		expect(chat.isLoadingMessages).toBe(true);
+		expect(await fixture.controller.requestPage('later', 'scroll')).toBe('loaded');
+		expect(load).toHaveBeenCalledOnce();
+		chat.dispose();
 	});
 
 	it('delegates physical end checks and end scrolling to the viewport', () => {
@@ -791,6 +810,32 @@ describe('ConversationScrollController', () => {
 
 		await expect(request).resolves.toBe('invalidated');
 		expect(applied).toBe(false);
+	});
+
+	it('rechecks native ownership for a member publication after its profile refresh applied', async () => {
+		vi.useFakeTimers();
+		const refreshed = Promise.withResolvers<void>(), memberResponse = Promise.withResolvers<void>();
+		let memberApplied = false;
+		const load = vi.fn<ConversationScrollState['loadEarlierPage']>(async (_chatId, options) => {
+			expect(await options?.applicationGate?.()).toBe('apply');
+			refreshed.resolve();
+			await memberResponse.promise;
+			if (await options?.applicationGate?.() !== 'apply') return 'invalidated';
+			memberApplied = true;
+			return 'loaded';
+		});
+		const fixture = controllerFixture({ state: { canLoadEarlier: true, loadEarlierPage: load } });
+		const pending = fixture.controller.requestPage('earlier', 'scroll');
+		await refreshed.promise;
+		fixture.controller.noteNativeTouchLifecycle('move');
+		fixture.controller.noteUserScrollIntent('earlier', 'native-touch');
+		memberResponse.resolve();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(memberApplied).toBe(false);
+		fixture.controller.noteNativeTouchLifecycle('end');
+		await vi.advanceTimersByTimeAsync(NATIVE_SCROLL_SETTLE_DELAY_MS);
+		expect(await pending).toBe('loaded');
+		expect(memberApplied).toBe(true);
 	});
 
 	it('defers applying a certified page until native scrolling settles', async () => {

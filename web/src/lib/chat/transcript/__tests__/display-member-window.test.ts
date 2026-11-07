@@ -76,13 +76,18 @@ it('[TLV5-DISPLAY.05-WEB-UNIT-01] expands only the anchor-containing fragment wh
 	expect(f.api.members).toHaveBeenCalledTimes(2);
 });
 
-it('[TLV5-DISPLAY.05-WEB-UNIT-02] merges expansions using the protected window and releases redundant body leases', async () => {
-	const left = group(1, 500), right = group(502, 1000), f = fixture([left, right]);
+it.each(['row', 'summary', 'fragment-summary'] as const)('[TLV5-DISPLAY.05-WEB-UNIT-02] merges expansions using the protected %s and releases redundant body leases', async protection => {
+	const whole = group(1, 1000);
+	const left = { ...group(1, 500), ...(protection === 'fragment-summary' ? { base: whole.base } : {}) };
+	const right = { ...group(502, 1000), ...(protection === 'fragment-summary' ? { base: whole.base, fragment: { after: 500, through: 1000 } } : {}) };
+	const f = fixture([left, right]);
 	await f.controller.refresh();
 	await f.controller.expand(left, { kind: 'around', ordinal: 100 });
 	await f.controller.expand(right, { kind: 'around', ordinal: 700 });
 	expect(f.bodies.count).toBe(100);
-	f.controller.protect([100]); f.replace([group(1, 1000)]);
+	if (protection === 'row') f.controller.protect([100]);
+	else f.controller.protectGroups([left.firstMember]);
+	f.replace([group(1, 1000)]);
 	await f.controller.refresh();
 	expect(f.controller.snapshot.expansions).toHaveLength(1);
 	expect(f.controller.snapshot.expansions[0].anchorOrdinal).toBe(100);
@@ -281,21 +286,38 @@ it.each([false, true])('releases intervening bodies and retains only the focused
 	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 200)).toBeUndefined();
 });
 
-it('readmits a retained summary before expansion without reusing its old certificate', async () => {
+it.each(['expand', 'extend'] as const)('readmits a retained summary before %s without reusing its old certificate', async action => {
 	const groups = Array.from({ length: 40 }, (_, index) => group(index * 100 + 1, index * 100 + 99));
 	const f = fixture(groups);
 	await f.controller.refresh();
 	f.controller.protectGroups([1]);
 	f.controller.setReadingAnchor(3901, false);
 	f.controller.trim(3901, 3999);
+	const oldCertificate = f.controller.snapshot.window!.certificate;
+	f.controller.configure({ ...displayProfile, showThinking: false }, []);
 	f.replace([groups[0]]);
-	expect(await f.controller.expand(groups[0])).toBe('loaded');
-	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 1 });
+	expect(await (action === 'expand' ? f.controller.expand(groups[0])
+		: f.controller.extendMembers(groups[0], { kind: 'after', ordinal: 50 }))).toBe('loaded');
+	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: action === 'expand' ? 1 : 50 });
+	expect(f.api.members.mock.calls.at(-1)![0].certificate).toEqual(f.controller.snapshot.window!.certificate);
+	expect(f.api.members.mock.calls.at(-1)![0].certificate.profileKey).not.toBe(oldCertificate.profileKey);
 	expect(f.controller.snapshot.protectedGroups).toEqual([]);
 	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
 	f.controller.collapse(groups[0]);
 	expect(f.controller.snapshot.protectedRows).toEqual([]);
 	expect(f.bodies.count).toBe(0);
+});
+
+it('rebinds a protected summary when filtering removes its first eligible member', async () => {
+	const whole = group(1, 100), f = fixture([whole]);
+	await f.controller.refresh();
+	f.controller.protectGroups([1]);
+	const filtered = { ...whole, firstMember: 2, count: 99, totals: { ...whole.totals, commands: 99 } };
+	f.replace([filtered]);
+	f.controller.configure({ ...displayProfile, bashRevision: 'patterns-2' }, []);
+	await f.controller.refresh();
+	expect(f.controller.snapshot.window!.items).toEqual([filtered]);
+	expect(f.controller.snapshot.protectedGroups).toEqual([]);
 });
 
 it('retains a summary acquired during hydration and releases it on replacement', async () => {
