@@ -3,6 +3,7 @@ import { NewChatFormState } from '../new-chat-form-state.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import { createExecutorStartupFixture, executorStartupSnapshot } from './executor-startup-fixture';
+import type { NewChatStartupSeed } from '../new-chat-seed';
 
 vi.mock('$lib/api/chats', () => ({ validateStart: vi.fn().mockResolvedValue({ valid: true, isGitRepo: false }) }));
 vi.mock('$lib/api/chat-preambles', () => ({ preambleSelectionPreview: vi.fn() }));
@@ -30,6 +31,124 @@ describe('new chat executor initialization', () => {
 		forms.push(form);
 		return { ...deps, form };
 	}
+
+	it.each([false, true])('restores explicit startup before delayed defaults and catalog discovery (offline: %s)', async offline => {
+		const { form, remoteCatalog, remoteSettings, executors } = fixture();
+		const settings = Promise.withResolvers<RemoteSettingsSnapshot>();
+		vi.spyOn(remoteSettings, 'ensureLoaded').mockReturnValue(settings.promise);
+		const discovery = Promise.withResolvers<void>();
+		vi.mocked(remoteCatalog.refreshIfStale).mockReturnValue(discovery.promise);
+		const models = remoteCatalog.agentModels;
+		const metadata = remoteCatalog.agentMetadata;
+		remoteCatalog.agentModels = {};
+		remoteCatalog.agentMetadata = {};
+		remoteCatalog.lastValidatedAt = null;
+		if (offline) executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+		const seed: NewChatStartupSeed = {
+			executorId: remoteExecutor.id, agentId: 'claude', projectPath: '/worker/seed',
+			model: 'worker-edited', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['review'],
+			agentSettingsById: { claude: { ownerId: 'claude', schemaVersion: 1, values: {} } },
+			preambleChoice: { mode: 'explicit', orderedPreambleIds: [] },
+		};
+		form.reseed('Scheduled prompt');
+		form.restoreStartup(seed);
+		const loading = form.loadSettingsAndModels();
+		form.firstMessage = 'Edited scheduled prompt';
+		form.projectPath = '/worker/edited';
+		const snapshot = executorStartupSnapshot();
+		snapshot.executionDefaults.global.agentSettingsById.claude = { ownerId: 'claude', schemaVersion: 1, values: { changed: true } };
+		settings.resolve(snapshot);
+		await loading;
+		remoteCatalog.agentModels = models;
+		remoteCatalog.agentMetadata = metadata;
+		remoteCatalog.lastValidatedAt = Date.now();
+		discovery.resolve();
+		await discovery.promise;
+		form.validateAllModelsAgainstLive();
+		form.validationStatus = 'valid';
+		expect(form.executorId).toBe(remoteExecutor.id);
+		expect(form.agentId).toBe('claude');
+		expect(form.modelValue).toBe('worker-edited');
+		expect(form.projectPath).toBe('/worker/edited');
+		expect(form.firstMessage).toBe('Edited scheduled prompt');
+		expect(form.permissionMode).toBe('acceptEdits');
+		expect(form.thinkingMode).toBe('high');
+		expect(form.agentSettings).toEqual(seed.agentSettingsById.claude);
+		expect(form.chatTags).toEqual(['review']);
+		expect(form.preambles.creationFields).toEqual({ orderedPreambleIds: [] });
+		expect(form.canSubmit).toBe(!offline);
+		if (offline) expect(form.buildConfig()).toBeNull();
+	});
+
+	it.each(['permission', 'thinking'] as const)('blocks an unsupported restored %s mode instead of changing it on submit', async kind => {
+		const { form } = fixture();
+		await form.loadSettingsAndModels();
+		form.restoreExecutionModes(kind === 'permission' ? 'plan' : 'default', kind === 'thinking' ? 'max' : 'none');
+		form.validationStatus = 'valid';
+		form.firstMessage = 'Synthetic prompt';
+		expect(form.executionModeError).toContain('mode is unavailable');
+		expect(form.canSubmit).toBe(false);
+		expect(form.buildConfig()).toBeNull();
+		if (kind === 'permission') form.setPermissionMode('default');
+		else form.setThinkingMode('none');
+		expect(form.executionModeError).toBeNull();
+		expect(form.canSubmit).toBe(true);
+		expect(form.buildConfig()).toMatchObject({ permissionMode: 'default', thinkingMode: 'none' });
+	});
+
+	it.each(['worker-edited', 'endpoint-b:worker-edited'])('accepts equivalent saved endpoint model identities: %s', async model => {
+		const { form, remoteCatalog } = fixture();
+		remoteCatalog.agentModels.claude.push({
+			value: 'endpoint-b:worker-edited', label: 'Routed worker model', rawModel: 'worker-edited',
+			apiProviderId: 'provider-b', endpointId: 'endpoint-b', protocol: 'openai-compatible',
+		});
+		const routing = { apiProviderId: 'provider-b', modelEndpointId: 'endpoint-b', modelProtocol: 'openai-compatible' as const };
+		form.restoreStartup({
+			model, ...routing, executorId: remoteExecutor.id, agentId: 'claude', projectPath: '/worker/seed',
+			permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+			preambleChoice: { mode: 'defaults' },
+		});
+		await form.loadSettingsAndModels();
+		form.validationStatus = 'valid';
+		form.firstMessage = 'Synthetic routed prompt';
+		expect(form.modelSelectionTarget).toEqual({ model, ...routing });
+		expect(form.modelSelectionError).toBeNull();
+		expect(form.canSubmit).toBe(true);
+		expect(form.buildConfig()).toMatchObject({ model: 'worker-edited', ...routing });
+	});
+
+	it.each([
+		{ apiProviderId: 'provider-a', modelEndpointId: 'endpoint-b', modelProtocol: 'openai-compatible' },
+		{ apiProviderId: 'provider-a', modelEndpointId: null, modelProtocol: null },
+		{ apiProviderId: 'provider-b', modelEndpointId: 'endpoint-b', modelProtocol: 'anthropic-messages' },
+	] as const)('blocks inconsistent restored routing without substituting the catalog selection: %j', async routing => {
+		const { form, remoteCatalog } = fixture();
+		const routedModel = {
+			value: 'routed-worker-model', label: 'Routed worker model', rawModel: 'worker-edited',
+			apiProviderId: 'provider-b', endpointId: 'endpoint-b', protocol: 'openai-compatible' as const,
+		};
+		remoteCatalog.agentModels.claude.push(routedModel);
+		const selection = { model: 'worker-edited', ...routing };
+		form.restoreStartup({
+			...selection, executorId: remoteExecutor.id, agentId: 'claude', projectPath: '/worker/seed',
+			permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+			preambleChoice: { mode: 'defaults' },
+		});
+		await form.loadSettingsAndModels();
+		form.validationStatus = 'valid';
+		form.firstMessage = 'Synthetic routed prompt';
+		expect(form.modelSelectionTarget).toEqual(selection);
+		expect(form.canSubmit).toBe(false);
+		expect(form.modelSelectionError).not.toBeNull();
+		expect(form.buildConfig()).toBeNull();
+		form.selectModel(routedModel.value);
+		expect(form.canSubmit).toBe(true);
+		expect(form.buildConfig()).toMatchObject({
+			model: 'worker-edited', apiProviderId: 'provider-b',
+			modelEndpointId: 'endpoint-b', modelProtocol: 'openai-compatible',
+		});
+	});
 
 	it('restores the last executor before resolving its path, agent and model', async () => {
 		const { form, modelCatalog, remoteCatalog } = fixture();

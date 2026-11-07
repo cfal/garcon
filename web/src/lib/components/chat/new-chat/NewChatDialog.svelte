@@ -15,7 +15,6 @@
 	const sessions = getChatSessions();
 
 	const open = $derived(appShell.newChatDialogOpen);
-	const prefill = $derived(appShell.newChatDialogSeed?.prefill ?? '');
 
 	function handleOpenChange(next: boolean) {
 		if (!next) appShell.closeNewChatDialog();
@@ -55,14 +54,16 @@
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),
 			// which would immediately trigger the directory browser overlay.
-			// The form's reseed effect handles focusing the textarea instead.
+			// The form focuses the textarea after its startup defaults load.
 			e.preventDefault();
 		}}
 	>
-		<NewChatForm
-			{prefill}
-			onStartChat={handleStartChat}
-			onCancel={() => appShell.closeNewChatDialog()}
-		/>
+		{#key appShell.newChatDialogRequestId}
+			<NewChatForm
+				seed={appShell.newChatDialogSeed}
+				onStartChat={handleStartChat}
+				onCancel={() => appShell.closeNewChatDialog()}
+			/>
+		{/key}
 	</Dialog.Content>
 </Dialog.Root>

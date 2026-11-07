@@ -255,22 +255,7 @@ export class ScheduledPromptFormState {
 		}
 		this.customTitleEnabled = scheduledPrompt.target.chatTitleTemplate !== undefined;
 		this.customTitleTemplate = scheduledPrompt.target.chatTitleTemplate ?? '';
-		this.startup.selectExecutor(scheduledPrompt.target.executorId);
-		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
-			model: scheduledPrompt.target.model,
-			apiProviderId: scheduledPrompt.target.apiProviderId,
-			modelEndpointId: scheduledPrompt.target.modelEndpointId,
-			modelProtocol: scheduledPrompt.target.modelProtocol,
-		});
-		this.startup.projectPath = scheduledPrompt.target.projectPath;
-		this.startup.restoreExecutionModes(
-			scheduledPrompt.target.permissionMode,
-			scheduledPrompt.target.thinkingMode,
-		);
-		this.startup.replaceAgentSettingsById(scheduledPrompt.target.agentSettingsById);
-		this.startup.chatTags = [...scheduledPrompt.target.tags];
-		this.startup.showTagInput = false;
-		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
+		this.startup.restoreStartup(scheduledPrompt.target);
 		await this.startup.loadSettingsAndModels();
 		this.startup.validateChangedPath();
 	}
