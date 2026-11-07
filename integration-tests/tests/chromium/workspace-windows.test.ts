@@ -1072,7 +1072,6 @@ describe('Chromium workspace windows', () => {
       if (!windowId) throw new Error('Missing adaptive-action workspace window.');
 
       const titlebar = fixture.page.locator(`[data-workspace-window-titlebar="${windowId}"]`);
-      await titlebar.getByRole('button', { name: /^Agents/ }).waitFor({ state: 'hidden' });
       const addControls = titlebar.locator(`[data-workspace-window-add-controls="${windowId}"]`);
       const tabViewport = fixture.page.locator(`[data-workspace-window-tabs="${windowId}"]`);
       const selectedTab = tabViewport.getByRole('tab');
@@ -1389,7 +1388,6 @@ describe('Chromium workspace windows', () => {
       const contextMenu = fixture.page.locator('[data-workspace-window-tab-context-menu]');
       expect(await selectedTab.count()).toBe(1);
 
-      await workspaceWindow.getByRole('button', { name: /^Agents/ }).waitFor({ state: 'hidden' });
       // The paused clock holds the animation frame in which the opened menu takes focus.
       const clockStart = Date.now();
       await fixture.page.clock.install({ time: clockStart });

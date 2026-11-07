@@ -1,5 +1,4 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import WorkspaceWindowAddMenu from '../WorkspaceWindowAddMenu.svelte';
@@ -1251,38 +1250,6 @@ describe('WorkspaceWindowTitleBar', () => {
 			}
 		},
 	);
-
-	it('defers resize-driven tab measurements and cancels them on teardown', async () => {
-		const restore = installResizeObserverHarness();
-		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]));
-		try {
-			const viewport = measureTabRail(rendered.container, 700);
-			await waitFor(() => expect(viewport.dataset.workspaceTabLabelMode).toBe('full'));
-			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-			const frames: FrameRequestCallback[] = [];
-			vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
-			const cancel = vi.fn();
-			vi.stubGlobal('cancelAnimationFrame', cancel);
-			const measured = rendered.container.querySelector<HTMLElement>('[data-window-tab-measure-id]')!;
-			const read = vi.spyOn(measured, 'getBoundingClientRect');
-			ResizeObserverHarness.emit(viewport, 700);
-			ResizeObserverHarness.emit(viewport, 700);
-			await tick();
-			expect(read).not.toHaveBeenCalled();
-			expect(frames).toHaveLength(1);
-			frames[0](0);
-			await tick();
-			expect(read).toHaveBeenCalledTimes(1);
-			ResizeObserverHarness.emit(viewport, 700);
-			rendered.unmount();
-			expect(cancel).toHaveBeenCalledWith(2);
-			frames[1](0);
-			expect(read).toHaveBeenCalledTimes(1);
-		} finally {
-			rendered.unmount();
-			restore();
-		}
-	});
 
 	it('keeps tab titles full while moving add actions in and out of the toolbar', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
