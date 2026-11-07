@@ -1,22 +1,11 @@
-import type { AuxiliaryResponse, DisplayAuxiliaryIdentity, DisplayAuxiliaryRequest } from '$shared/transcript-display-auxiliary';
+import type { AuxiliaryResponse, DisplayAuxiliaryRequest, SubagentSummaryPage } from '$shared/transcript-display-auxiliary';
 import { ApiError } from '$lib/api/client.js';
+import type { DisplaySummaryPaging } from './display-summary-paging.js';
 
-interface SummaryPage extends DisplayAuxiliaryIdentity { readonly kind: 'available' }
 interface SummaryTarget { readonly chatId: string; readonly transcriptViewId: string; readonly serverInstanceId: string }
-export interface DisplaySummaryPaging {
-	readonly loading: boolean;
-	readonly updating: boolean;
-	readonly stale: boolean;
-	readonly error: string | null;
-	readonly hasPrevious: boolean;
-	readonly hasNext: boolean;
-	retry(): Promise<void>;
-	next(): Promise<void>;
-	previous(): Promise<void>;
-}
 
-export class DisplaySummaryController<T extends SummaryPage> {
-	page = $state.raw<T | null>(null);
+export class SubagentSummaryController implements DisplaySummaryPaging {
+	page = $state.raw<SubagentSummaryPage | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);
 	sourceHead = $state(0);
@@ -31,12 +20,9 @@ export class DisplaySummaryController<T extends SummaryPage> {
 	#generationStale = $state(false);
 	#navigation: { cursor: number | null; previous: (number | null)[] } | null = null;
 
-	constructor(private readonly read: (request: DisplayAuxiliaryRequest, signal: AbortSignal) => Promise<AuxiliaryResponse<T>>,
-		private readonly continuation: (page: T) => number | null,
-		private readonly cursorField: 'beforeOrdinal' | 'afterOrder',
-		private readonly onPage?: (page: T) => void) {}
+	constructor(private readonly read: (request: DisplayAuxiliaryRequest, signal: AbortSignal) => Promise<AuxiliaryResponse<SubagentSummaryPage>>) {}
 
-	get hasNext(): boolean { return this.page !== null && this.continuation(this.page) !== null; }
+	get hasNext(): boolean { return this.page !== null && this.page.nextAfterOrder !== null; }
 	get hasPrevious(): boolean { return this.#previous.length > 0; }
 	get stale(): boolean { return this.#generationStale || this.#cursor !== null && this.page !== null && this.page.watermark < this.sourceHead; }
 	get updating(): boolean { return this.loading || !this.#generationStale && (!this.page || this.#cursor === null && this.page.watermark < this.sourceHead); }
@@ -61,7 +47,7 @@ export class DisplaySummaryController<T extends SummaryPage> {
 	}
 	async next(): Promise<void> {
 		if (!this.page || this.loading) return;
-		const cursor = this.continuation(this.page);
+		const cursor = this.page.nextAfterOrder;
 		if (cursor === null) return;
 		this.#navigation = { cursor, previous: [...this.#previous.slice(-99), this.#cursor] };
 		await this.#load();
@@ -75,14 +61,15 @@ export class DisplaySummaryController<T extends SummaryPage> {
 		const target = this.#target;
 		if (!target || !this.#enabled || this.#abort || this.#generationStale && this.#navigation?.cursor !== null) return;
 		this.#dirty = false;
-		const epoch = this.#epoch, abort = new AbortController();
+		const epoch = this.#epoch;
+		const abort = new AbortController();
 		const navigation = this.#navigation ?? { cursor: this.#cursor, previous: this.#previous };
 		this.#abort = abort;
 		this.loading = true;
 		this.error = null;
 		try {
 			const response = await this.read({ ...target, mode: 'navigation', limit: 50,
-				...(navigation.cursor === null ? {} : { [this.cursorField]: navigation.cursor, atWatermark: this.page?.watermark }) }, abort.signal);
+				...(navigation.cursor === null ? {} : { afterOrder: navigation.cursor, atWatermark: this.page?.watermark }) }, abort.signal);
 			if (abort.signal.aborted || epoch !== this.#epoch) return;
 			if (response.chatId !== target.chatId || response.transcriptViewId !== target.transcriptViewId || response.serverInstanceId !== target.serverInstanceId) throw new Error('Foreign transcript summary');
 			if (response.kind === 'failed') throw new Error(response.errorCode ?? 'Transcript summary unavailable');
@@ -93,7 +80,6 @@ export class DisplaySummaryController<T extends SummaryPage> {
 				this.#navigation = null;
 				this.#generationStale = false;
 				this.page = response;
-				this.onPage?.(response);
 			}
 			if (response.kind === 'preparing' || navigation.cursor === null && response.watermark < this.sourceHead) this.#schedule(1500);
 		} catch (error) {
@@ -110,13 +96,20 @@ export class DisplaySummaryController<T extends SummaryPage> {
 				} else this.error = error instanceof Error ? error.message : 'Transcript summary unavailable';
 			}
 		} finally {
-			if (epoch === this.#epoch) { this.#abort = null; this.loading = false; if (this.#dirty) this.#schedule(1500); }
+			if (epoch === this.#epoch) {
+				this.#abort = null;
+				this.loading = false;
+				if (this.#dirty) this.#schedule(1500);
+			}
 		}
 	}
 	#schedule(delay: number): void {
 		this.#dirty = true;
 		if (this.#timer !== null) return;
-		this.#timer = setTimeout(() => { this.#timer = null; void this.#load(); }, delay);
+		this.#timer = setTimeout(() => {
+			this.#timer = null;
+			void this.#load();
+		}, delay);
 	}
 	#cancel(): void {
 		this.#epoch++;
@@ -127,5 +120,15 @@ export class DisplaySummaryController<T extends SummaryPage> {
 		this.#dirty = false;
 		this.loading = false;
 	}
-	reset(): void { this.#cancel(); this.#target = null; this.page = null; this.#cursor = null; this.#previous = []; this.#navigation = null; this.sourceHead = 0; this.error = null; this.#generationStale = false; }
+	reset(): void {
+		this.#cancel();
+		this.#target = null;
+		this.page = null;
+		this.#cursor = null;
+		this.#previous = [];
+		this.#navigation = null;
+		this.sourceHead = 0;
+		this.error = null;
+		this.#generationStale = false;
+	}
 }

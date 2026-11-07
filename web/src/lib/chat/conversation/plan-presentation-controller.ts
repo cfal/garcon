@@ -2,7 +2,7 @@ import type { PlanPresentationSnapshot, PlanPresentationRequest } from '$shared/
 import type { PermissionMode } from '$lib/types/chat';
 import { transcriptDisplayApi, type TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import type { ConversationUiPort } from './conversation-ui-state.svelte.js';
-import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-paging.js';
 
 export function planOccurrenceId(view: string, ordinal: number): string { return `plan:${view}:${ordinal}`; }
 export type PlanPresentationView = DisplaySummaryPaging;

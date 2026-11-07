@@ -44,6 +44,7 @@ import {
 } from './conversation-feed-virtual-runtime.js';
 import {
 	conversationProjectionMutationAnchor,
+	isReadingAnchorKey,
 	remapConversationAnchor,
 	resolveConversationTarget,
 } from './conversation-feed-anchor-remapping.js';
@@ -694,10 +695,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		model: ConversationVirtualFeedModel,
 	): ConversationVirtualAnchor | null {
 		if (!anchor) return null;
-		const key = [anchor.key, ...anchor.fallbackKeys].find(candidate => {
-			const item = model.items[model.indexByKey.get(candidate) ?? -1];
-			return item && !((item.kind === 'tool-group' || item.kind === 'transcript') && item.retained);
-		});
+		const key = [anchor.key, ...anchor.fallbackKeys].find(candidate => isReadingAnchorKey(model, candidate));
 		if (!key) return null;
 		return {
 			key,

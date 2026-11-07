@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest';
 import SubagentManagementControl from '../SubagentManagementControl.svelte';
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
-import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-paging.js';
 
 function makePaging(overrides: Partial<DisplaySummaryPaging> = {}): DisplaySummaryPaging {
 	return {

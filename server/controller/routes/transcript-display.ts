@@ -3,7 +3,7 @@ import { parseDisplayAuxiliaryRequest, parseResendSnapshotRequest, type ResendSn
 import type { ResendCandidate } from '../../../common/chat-view.js';
 import type { ChatProcessingPhase } from '../../../common/chat-types.js';
 import { parseDisplayOpenRequest, parsePlanPresentationRequest, type DisplayOpenResponse } from '../../../common/transcript-display-open.js';
-import { ERROR_CODES, type ErrorCode } from '../../../common/error-codes.js';
+import { isErrorCode } from '../../../common/error-codes.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import type { ChatExecutionQueries } from '../chat-execution/types.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
@@ -126,9 +126,8 @@ function displayRouteError(error: unknown): unknown {
   if (error instanceof StaleTranscriptViewError) return new DomainError('STALE_TRANSCRIPT_VIEW', 'Transcript view was replaced.', 409, true);
   if (error instanceof LedgerFencedError) return new DomainError('TRANSCRIPT_UNAVAILABLE', 'The transcript ledger is unavailable.', 422, false);
   if (error instanceof LedgerBulkOperationAbandonedError) return new DomainError('DISPLAY_SUPERSEDED', 'Transcript request was superseded.', 409, true);
-  if (error instanceof Error && 'code' in error && typeof error.code === 'string' && error.code.startsWith('DISPLAY_')
-    && (ERROR_CODES as readonly string[]).includes(error.code)) {
-    return new DomainError(error.code as ErrorCode, 'Transcript display is unavailable. Retry the request.', error.code === 'DISPLAY_INVALID_REQUEST' ? 400 : 503, true);
+  if (error instanceof Error && 'code' in error && isErrorCode(error.code) && error.code.startsWith('DISPLAY_')) {
+    return new DomainError(error.code, 'Transcript display is unavailable. Retry the request.', error.code === 'DISPLAY_INVALID_REQUEST' ? 400 : 503, true);
   }
   return error;
 }

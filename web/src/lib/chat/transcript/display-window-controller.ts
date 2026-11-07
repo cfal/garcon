@@ -236,7 +236,8 @@ export class DisplayWindowController {
 
 	async navigateWindow(target: 'initial' | 'latest'): Promise<CoverageOutcome> {
 		const result = await this.#navigate(target);
-		return result === 'loaded' ? 'loaded' : this.#snapshot.phase === 'failed' ? 'failed' : 'blocked';
+		if (result === 'loaded') return 'loaded';
+		return this.#snapshot.phase === 'failed' ? 'failed' : 'blocked';
 	}
 
 	load(direction: 'earlier' | 'later', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
@@ -394,7 +395,8 @@ export class DisplayWindowController {
 
 	async #loadMembers(group: GroupDescriptor, anchor: MemberWindowRequest['anchor'], mode: 'replace' | 'extend', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
 		const epoch = this.#epoch;
-		const direction = mode === 'extend' ? anchor.kind === 'before' ? 'earlier' : 'later' : undefined;
+		let direction: TranscriptPageDirection | undefined;
+		if (mode === 'extend') direction = anchor.kind === 'before' ? 'earlier' : 'later';
 		if (this.#request) await this.#request;
 		if (epoch !== this.#epoch) return 'blocked';
 		const anchorOrdinal = anchor.kind === 'first' ? group.firstMember : anchor.ordinal;
@@ -846,8 +848,19 @@ export class DisplayWindowController {
 		this.#refreshPending = false;
 	}
 
-	park(): void { this.#cancelRequests(); this.#clearRefresh(); this.#readingAnchorHold = null; this.#applicationGate = undefined; this.#parked = true; this.bodies.setParked(this, true); }
-	activate(): void { this.#parked = false; this.bodies.setParked(this, false); this.#scheduleRefresh(0); }
+	park(): void {
+		this.#cancelRequests();
+		this.#clearRefresh();
+		this.#readingAnchorHold = null;
+		this.#applicationGate = undefined;
+		this.#parked = true;
+		this.bodies.setParked(this, true);
+	}
+	activate(): void {
+		this.#parked = false;
+		this.bodies.setParked(this, false);
+		this.#scheduleRefresh(0);
+	}
 	reset(): void {
 		this.#cancelRequests();
 		this.#clearRefresh();

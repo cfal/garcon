@@ -170,8 +170,9 @@ export class TranscriptDisplayService {
     if (cursor) this.#validateCertificate(job, { certificate: cursor, profile: request.profile, cuts: request.cuts });
     const W = request.atWatermark ?? cursor?.watermark ?? Math.min(head, frontier);
     if (W > head) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Transcript source changed. Refresh the window.', 409, true);
-    if (!job.ready || frontier < Math.max(W, request.requiredThrough ?? 0) || job.failure
-      || (!request.profile.hiddenToolGroups.includes('bash') && job.bash.get(this.#revision)?.failure)) return this.#unavailable(job, request, head, frontier);
+    if (!job.ready || frontier < Math.max(W, request.requiredThrough ?? 0) || this.#preparationFailure(job, request.profile)) {
+      return this.#unavailable(job, request, head, frontier);
+    }
     const response = await this.#read(job, { kind: 'window', path: job.path, request, watermark: W, sourceHead: head,
       bashFrontier: frontier, serverInstanceId: this.serverInstanceId, filteredBash: this.#patterns.length > 0 }, signal);
     this.#current(job);
@@ -412,14 +413,21 @@ export class TranscriptDisplayService {
     });
   }
 
+  #needsBashWork(job: DisplayJob): boolean {
+    if ([...job.bash.values()].some(revision => revision.pruning)) return true;
+    const preparation = job.bash.get(this.#revision);
+    return this.#patterns.length > 0 && !preparation?.failure && (preparation?.frontier ?? -1) < job.frontier;
+  }
+
+  #needsAuxiliaryWork(job: DisplayJob): boolean {
+    return job.auxiliaryRequested && !job.auxiliaryFailure && job.auxiliaryFrontier < job.frontier;
+  }
+
   async #work(): Promise<void> {
     for (;;) {
       if (this.#abort.signal.aborted) return;
       const eligible = [...this.#jobs.values()].filter(job => job.ready && !job.failure
-        && (job.frontier < job.goal || (this.#patterns.length > 0 && !job.bash.get(this.#revision)?.failure
-          && (job.bash.get(this.#revision)?.frontier ?? -1) < job.frontier)
-          || [...job.bash.values()].some(revision => revision.pruning)
-          || (job.auxiliaryRequested && !job.auxiliaryFailure && job.auxiliaryFrontier < job.frontier)));
+        && (job.frontier < job.goal || this.#needsBashWork(job) || this.#needsAuxiliaryWork(job)));
       if (!eligible.length) return;
       const now = Date.now(), visible = eligible.filter(job => now - job.activeAt < 10000), background = eligible.filter(job => now - job.activeAt >= 10000);
       const job = this.#visibleFrames >= 8 && background.length ? background[0] : visible[0] ?? background[0];
@@ -430,16 +438,13 @@ export class TranscriptDisplayService {
         this.#current(job);
         await this.#admitDisk(job); this.#current(job);
         const revision = this.#revision, patterns = this.#patterns;
-        const needsBash = [...job.bash.values()].some(revision => revision.pruning)
-          || (patterns.length > 0 && !job.bash.get(revision)?.failure && (job.bash.get(revision)?.frontier ?? -1) < job.frontier);
-        const needsAuxiliary = job.auxiliaryRequested && !job.auxiliaryFailure && job.auxiliaryFrontier < job.frontier;
         const phases = ['structure', 'bash', 'auxiliary'] as const;
         const start = phases.indexOf(job.phase);
         const phase = [...phases.slice(start), ...phases.slice(0, start)].find(phase => {
           switch (phase) {
             case 'structure': return job.frontier < job.goal;
-            case 'bash': return needsBash;
-            case 'auxiliary': return needsAuxiliary;
+            case 'bash': return this.#needsBashWork(job);
+            case 'auxiliary': return this.#needsAuxiliaryWork(job);
           }
         });
         if (phase === 'auxiliary') {
@@ -581,7 +586,7 @@ export class TranscriptDisplayService {
     }, 250));
   }
   #unavailable(job: DisplayJob, request: DisplayWindowRequest, head: number, frontier: number): DisplayUnavailable {
-    const failure = job.failure ?? (request.profile.hiddenToolGroups.includes('bash') ? null : job.bash.get(this.#revision)?.failure);
+    const failure = this.#preparationFailure(job, request.profile);
     let kind: DisplayUnavailable['kind'] = 'preparing';
     if (failure) kind = 'failed';
     else if (job.frontier) kind = 'lagging';
@@ -594,9 +599,14 @@ export class TranscriptDisplayService {
     this.#validateCertificate(job, request); return job;
   }
   #assertPreparationHealthy(job: DisplayJob, profile: DisplayWindowRequest['profile']): void {
-    const failure = job.failure ?? (profile.hiddenToolGroups.includes('bash') ? null : job.bash.get(this.#revision)?.failure);
+    const failure = this.#preparationFailure(job, profile);
     if (failure) throw new DomainError(isErrorCode(failure) ? failure : 'DISPLAY_INDEX_FAILED',
       `Transcript display preparation failed (${failure}). Retry the display.`, 503, transientDisplayFailure(failure));
+  }
+  #preparationFailure(job: DisplayJob, profile: DisplayWindowRequest['profile']): string | null {
+    if (job.failure !== null) return job.failure;
+    if (profile.hiddenToolGroups.includes('bash')) return null;
+    return job.bash.get(this.#revision)?.failure ?? null;
   }
   #validateCertificate(job: DisplayJob, request: CertifiedDisplayRequest): void {
     const cert = request.certificate;

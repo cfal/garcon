@@ -1,5 +1,5 @@
 import type { SubagentManagementModel } from './subagent-management.js';
-import type { DisplaySummaryPaging } from './display-summary-controller.svelte.js';
+import type { DisplaySummaryPaging } from './display-summary-paging.js';
 
 export interface SubagentToolbarSource {
 	readonly model: SubagentManagementModel;

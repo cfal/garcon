@@ -25,7 +25,7 @@ export function resolveConversationTarget(
 	return { index, innerRowId };
 }
 
-function isReadingAnchorKey(model: ConversationVirtualFeedModel, key: string): boolean {
+export function isReadingAnchorKey(model: ConversationVirtualFeedModel, key: string): boolean {
 	const item = model.items[model.indexByKey.get(key) ?? -1];
 	return !!item && !((item.kind === 'tool-group' || item.kind === 'transcript') && item.retained);
 }

@@ -1,5 +1,4 @@
 import { Database } from 'bun:sqlite';
-import { resendRole } from './resend-policy.js';
 import crypto from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { lstat, readdir, rm } from 'node:fs/promises';
@@ -52,6 +51,7 @@ import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './director
 import {
   isLedgerCliRowNoticeRow,
   isLedgerPreambleSelectionChangedNoticeRow,
+  isPresentationOnlyProviderRow,
   PREAMBLES_UPDATED_MESSAGE,
   transcriptViewId,
 } from './contracts.js';
@@ -966,9 +966,15 @@ function collectResendCandidates(
   const candidates: LedgerUserInputRow[] = [];
   for (const stored of storedRows) {
     const row = decodeStoredLedgerRow(stored);
-    const role = resendRole(row);
-    if (role === 'boundary') break;
-    if (role === 'candidate' && row.kind === 'user-input' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
+    if (row.kind === 'user-input') {
+      if (row.detail.message.metadata?.contentMode !== 'literal' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
+      continue;
+    }
+    if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
+    if (isPresentationOnlyProviderRow(row)) continue;
+    if (row.kind === 'provider-row'
+        || row.kind === 'permission-requested'
+        || row.kind === 'run-ended') break;
   }
   return candidates;
 }

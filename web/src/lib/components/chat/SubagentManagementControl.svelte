@@ -17,7 +17,7 @@
 		FLOATING_TOOLBAR_RAIL_CLASS,
 	} from '$lib/components/shared/floating-toolbar-styles.js';
 	import { cn } from '$lib/utils/cn';
-	import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-paging.js';
 	import TranscriptSummaryPager from './transcript/TranscriptSummaryPager.svelte';
 
 	interface Props {

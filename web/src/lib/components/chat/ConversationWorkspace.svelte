@@ -47,7 +47,7 @@
 	import type { QueueEntry } from '$lib/types/chat';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
-	import { DisplaySummaryController } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import { SubagentSummaryController } from '$lib/chat/transcript/subagent-summary-controller.svelte.js';
 	import { ResendCandidatesController } from '$lib/chat/transcript/resend-candidates-controller.svelte.js';
 	import type { ResendSnapshot } from '$shared/transcript-display-auxiliary';
 	import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
@@ -187,7 +187,7 @@
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const planPaging = $derived(sessions.selectedChatId ? conversationUi.planPresentationFor(sessions.selectedChatId) : null);
-	const subagentPages = new DisplaySummaryController(transcriptDisplayApi.subagents, page => page.nextAfterOrder, 'afterOrder');
+	const subagentPages = new SubagentSummaryController(transcriptDisplayApi.subagents);
 	const resend = new ResendCandidatesController(transcriptDisplayApi.resend, snapshot => {
 		if (isSelectedResendSnapshot(snapshot)) conversationPanels.replaceResendCandidates(snapshot.chatId, snapshot.candidates);
 	});

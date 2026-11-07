@@ -35,7 +35,7 @@ export function appendDisplayFrame(store: DisplayStore, rows: readonly StoredLed
       if (message?.type === 'transcript-notice' && message.detail?.type === 'publication-gap') gap = ordinal;
       appendFeature(store, row, message, stored.payload_json.length * 2);
       if (message?.type === 'command-output' || message?.type === 'command-result') appendCommandEvidence(store, ordinal, message, gap);
-      appendAuxiliary(store, row, message);
+      appendUserNavigation(store, ordinal, message);
       appendSubagentFact(store, ordinal, message);
       if (message) {
         const content = 'content' in message && typeof message.content === 'string' ? message.content : null;
@@ -132,8 +132,9 @@ function appendCommandEvidence(store: DisplayStore, ordinal: number,
     previous.last_result_complete, previous.last_gap_at_result);
 }
 
-function appendAuxiliary(store: DisplayStore, row: LedgerRow, message: ChatMessage | null): void {
-  if (message?.type === 'user-message') store.run('INSERT INTO user_navigation VALUES (?, ?, ?, ?, ?, ?)', row.ordinal,
+function appendUserNavigation(store: DisplayStore, ordinal: number, message: ChatMessage | null): void {
+  if (message?.type !== 'user-message') return;
+  store.run('INSERT INTO user_navigation VALUES (?, ?, ?, ?, ?, ?)', ordinal,
     message.content.slice(0, 300), message.timestamp, Number(message.content.trim().length > 0), message.images?.length ?? 0,
     message.presentation ? JSON.stringify(message.presentation) : null);
 }

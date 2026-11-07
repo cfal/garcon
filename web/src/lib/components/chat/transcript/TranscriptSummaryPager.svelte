@@ -3,7 +3,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-paging.js';
 	let { paging }: { paging: DisplaySummaryPaging } = $props();
 	const status = $derived.by(() => {
 		if (paging.error !== null) return paging.error;
