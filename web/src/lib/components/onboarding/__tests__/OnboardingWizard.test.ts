@@ -81,8 +81,16 @@ describe('OnboardingWizard', () => {
 
 		const showThinking = localSettings.showThinking;
 		const autoExpandTools = localSettings.autoExpandTools;
+		const combineToolUseMessages = localSettings.combineToolUseMessages;
+		expect(
+			screen.getAllByRole('switch').map((element) => element.getAttribute('aria-label')),
+		).toEqual(['Show thinking', 'Combine tool use messages', 'Always expand tool calls']);
 		await fireEvent.click(screen.getByRole('switch', { name: 'Show thinking' }));
 		expect(localSettings.showThinking).toBe(!showThinking);
+		expect(localSettings.autoExpandTools).toBe(autoExpandTools);
+		expect(localSettings.combineToolUseMessages).toBe(combineToolUseMessages);
+		await fireEvent.click(screen.getByRole('switch', { name: 'Combine tool use messages' }));
+		expect(localSettings.combineToolUseMessages).toBe(!combineToolUseMessages);
 		expect(localSettings.autoExpandTools).toBe(autoExpandTools);
 		await fireEvent.click(screen.getByRole('switch', { name: 'Always expand tool calls' }));
 		expect(localSettings.showThinking).toBe(!showThinking);
@@ -116,6 +124,15 @@ describe('OnboardingWizard', () => {
 		const { localSettings } = renderWizard();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		const grouping = screen.getByRole('combobox', { name: 'Chat grouping' });
+		const projectPath = screen.getByRole('checkbox', { name: 'Show project path' });
+		const dockRight = screen.getByRole('checkbox', { name: 'Dock sidebar on the right' });
+		await fireEvent.click(projectPath);
+		await fireEvent.click(dockRight);
+		expect(localSettings.sidebarShowProjectPath).toBe(true);
+		expect(localSettings.chatListDock).toBe('right');
+		await fireEvent.click(dockRight);
+		expect(localSettings.chatListDock).toBe('left');
+		await fireEvent.click(dockRight);
 		expect((grouping as HTMLSelectElement).value).toBe('none');
 		expect(
 			(screen.getByRole('radio', { name: 'Recent activity' }) as HTMLInputElement).checked,
@@ -133,6 +150,8 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('switch', { name: 'Reduce motion' }));
 		expect(localSettings.snapshot()).toMatchObject({
 			composerInputMode: 'source',
+			sidebarShowProjectPath: true,
+			chatListDock: 'right',
 			sendByShiftEnter: true,
 			autoScrollToBottom: false,
 			reduceMotion: true,

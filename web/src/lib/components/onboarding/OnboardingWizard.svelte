@@ -142,6 +142,16 @@
 					</div>
 					<div class="flex items-center justify-between gap-4 py-2">
 						<span class="text-sm font-medium text-foreground">
+							{m.settings_chat_combine_tool_use_messages()}
+						</span>
+						<Switch
+							checked={ls.combineToolUseMessages}
+							onCheckedChange={(checked) => ls.set('combineToolUseMessages', checked)}
+							aria-label={m.settings_chat_combine_tool_use_messages()}
+						/>
+					</div>
+					<div class="flex items-center justify-between gap-4 py-2">
+						<span class="text-sm font-medium text-foreground">
 							{m.settings_chat_auto_expand_tools()}
 						</span>
 						<Switch

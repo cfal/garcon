@@ -81,6 +81,8 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await browserExpect(wizard.getByRole('radio', { name: 'Recent activity', exact: true })).toBeChecked();
           await grouping.selectOption('project');
           await wizard.getByText('Manual', { exact: true }).click();
+          await wizard.getByRole('checkbox', { name: 'Show project path', exact: true }).check();
+          await wizard.getByRole('checkbox', { name: 'Dock sidebar on the right', exact: true }).check();
           for (const width of [320, 1440]) {
             await page.setViewportSize({ width, height: 568 });
             for (const fontSize of [18, 20]) {
@@ -104,6 +106,9 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await page.evaluate(() => document.documentElement.style.setProperty('--interface-font-scale', '1'));
           await page.setViewportSize({ width: 320, height: 568 });
         }
+        if (title === 'Chat display') {
+          await wizard.getByRole('switch', { name: 'Combine tool use messages', exact: true }).uncheck();
+        }
         if (title === 'Writing and behavior') {
           await wizard.getByText('Source', { exact: true }).click();
           await wizard.getByRole('switch', { name: 'Reduce motion', exact: true }).click();
@@ -126,6 +131,9 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pref_local_settings')!))).toMatchObject({
         sidebarGrouping: 'project',
         sidebarSortMode: 'manual',
+        sidebarShowProjectPath: true,
+        chatListDock: 'right',
+        combineToolUseMessages: false,
         composerInputMode: 'source',
         reduceMotion: true,
       });
