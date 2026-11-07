@@ -9,7 +9,7 @@ export type ConversationScrollState = Pick<
 	| 'hasLaterMessages'
 	| 'isDisplayBehindHead'
 	| 'isLoadingMessages'
-	| 'isRequestingDisplay'
+	| 'canLoadMembers'
 	| 'isUserScrolledUp'
 	| 'invalidatePendingHistoryLoad'
 	| 'invalidatePendingWindowNavigation'

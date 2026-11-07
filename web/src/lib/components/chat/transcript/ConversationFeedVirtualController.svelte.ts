@@ -230,6 +230,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			nextGeometry.geometryRevision === this.#configuredGeometry.geometryRevision
 		) {
 			this.#configuredModel = input.next.model;
+			this.#configuredTranscriptKeys = transcriptKeys(input.next.model);
 			this.#configuredGeometry = nextGeometry;
 			this.#appliedDataRevision = Math.max(
 				this.#appliedDataRevision,

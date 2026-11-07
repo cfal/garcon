@@ -266,6 +266,33 @@ it.each(['abort', 'park', 'profile', 'reset'] as const)('settles a cold navigati
 	expect(vi.getTimerCount()).toBe(0);
 });
 
+it('preserves a cold readiness wake after cancelling its navigation request', async () => {
+	vi.useFakeTimers();
+	const held = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce({
+		kind: 'preparing', ...certificate, sourceHead: certificate.watermark, preparedThrough: 0,
+		errorCode: null, retryAfterMs: 1500,
+	}).mockImplementationOnce(async () => { entered.resolve(); await held.promise; return window(); })
+		.mockResolvedValue(window());
+	const { controller } = setup({ window: read });
+	const abort = new AbortController();
+	const pending = controller.navigate(20000, abort.signal);
+	await vi.advanceTimersByTimeAsync(1);
+	controller.ready();
+	await entered.promise;
+	abort.abort();
+	held.resolve();
+	expect(await pending).toBeNull();
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(3);
+	expect(read.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'newest' });
+	expect(controller.snapshot.phase).toBe('available');
+	expect(controller.snapshot.expansions).toEqual([]);
+	controller.cancel();
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(read).toHaveBeenCalledTimes(3);
+});
+
 it('does not lose readiness published before a preparing navigation response settles', async () => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValue(window());

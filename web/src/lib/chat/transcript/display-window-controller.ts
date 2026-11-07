@@ -119,6 +119,10 @@ export class DisplayWindowController {
 	get profile(): DisplayProfile | null { return this.#profile; }
 	get cuts(): readonly DisplayCut[] { return this.#cuts; }
 	get busy(): boolean { return this.#request !== null || this.#navigationEpoch !== null; }
+	get canLoadMembers(): boolean {
+		return !this.#parked && !this.#disposed && !this.busy && !this.#needsReplace()
+			&& (this.#snapshot.phase === 'available' || this.#snapshot.phase === 'lagging');
+	}
 	get parked(): boolean { return this.#parked; }
 	get residency() {
 		const usage = this.bodies.usage(this), descriptors = (this.#snapshot.window?.items.length ?? 0) + this.#snapshot.protectedGroups.length;
@@ -803,6 +807,7 @@ export class DisplayWindowController {
 	}
 
 	cancel(): void {
+		this.#replacementPending ||= this.#snapshot.window === null && this.#refreshPending;
 		this.#cancelRequests();
 		if (this.#replacementPending && this.#identity && this.#profile && this.#needsReplace()) this.#scheduleRefresh(0);
 		else this.#clearRefresh();

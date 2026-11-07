@@ -25,22 +25,27 @@ export function resolveConversationTarget(
 	return { index, innerRowId };
 }
 
+function isReadingAnchorKey(model: ConversationVirtualFeedModel, key: string): boolean {
+	const item = model.items[model.indexByKey.get(key) ?? -1];
+	return !!item && !((item.kind === 'tool-group' || item.kind === 'transcript') && item.retained);
+}
+
 function replacementKey(
 	key: string,
 	previous: ConversationVirtualFeedModel,
 	next: ConversationVirtualFeedModel,
 ): string | undefined {
-	if (next.indexByKey.has(key)) return key;
+	if (isReadingAnchorKey(next, key)) return key;
 	const rowId = previous.representativeRowIdByKey.get(key);
 	if (rowId !== undefined) {
 		const group = groupContainingRow(next, rowId);
 		const index = next.indexByRowId.get(rowId) ?? (group ? next.indexByKey.get(group.key) : undefined);
 		const nextKey = index === undefined ? undefined : next.items[index]?.key;
-		if (nextKey) return nextKey;
+		if (nextKey && isReadingAnchorKey(next, nextKey)) return nextKey;
 	}
 	const prior = previous.items[previous.indexByKey.get(key) ?? -1];
 	if (prior?.kind === 'tool-group') {
-		const group = next.items.find(item => item.kind === 'tool-group'
+		const group = next.items.find(item => item.kind === 'tool-group' && !item.retained
 			&& item.descriptor.firstMember <= prior.descriptor.lastMember
 			&& item.descriptor.lastMember >= prior.descriptor.firstMember);
 		if (group) return group.key;
@@ -63,7 +68,7 @@ export function remapConversationAnchor(
 			: conversationAnchorFallbackKeys(
 					next.items.map((item) => item.key),
 					nextIndex,
-				);
+				).filter(key => isReadingAnchorKey(next, key));
 		let viewportOffset = 0;
 		if (candidate === anchor.key) {
 			viewportOffset = nextKey === candidate

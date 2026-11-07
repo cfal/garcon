@@ -8,7 +8,9 @@ import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { NATIVE_SCROLL_SETTLE_DELAY_MS } from '../conversation-native-scroll-settlement.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
-import { displayCertificate, displayDetail, displayOpen, displayWindow } from './display-fixtures.js';
+import { displayCertificate, displayDetail, displayOpen, displayRow, displayWindow, mockDisplayApi } from './display-fixtures.js';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
+import { displayProfileKey } from '$shared/transcript-display-contract';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
 import type { TranscriptMemberPageTarget } from '../transcript-page-progress.js';
 
@@ -47,7 +49,7 @@ function scrollState(
 		hasLaterMessages: false,
 		isDisplayBehindHead: false,
 		isLoadingMessages: false,
-		isRequestingDisplay: false,
+		canLoadMembers: true,
 		isUserScrolledUp: false,
 		invalidatePendingHistoryLoad: vi.fn(),
 		invalidatePendingWindowNavigation: vi.fn(),
@@ -266,22 +268,41 @@ describe('ConversationScrollController', () => {
 		expect(load).toHaveBeenCalledTimes(2);
 	});
 
-	it('allows member paging at a retained certificate while preparation is lagging', async () => {
-		const chat = expandedTranscriptState();
-		chat.display = { ...chat.display, phase: 'lagging' };
+	it.each(['lagging', 'stale-lagging', 'preparing', 'busy'] as const)('admits certified member scrolling without bypassing %s backoff', async scenario => {
+		vi.useFakeTimers();
+		const open = displayOpen('chat-1', 'view-1', 200);
+		const api = mockDisplayApi([displayRow(50), displayRow(101)], open);
+		const chat = new ActiveTranscriptState();
 		const viewport = fakeViewport();
-		viewport.memberPageTarget.mockReturnValue({
+		const target: TranscriptMemberPageTarget = {
 			group: { kind: 'tool-group', firstMember: 1, lastMember: 200, count: 200,
 				base: { afterBreaker: 0, beforeBreaker: 201, firstMember: 1, lastMember: 200, openAtWatermark: false },
 				fragment: { after: 0, through: 200 }, totals: { commands: 200, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] },
-			anchor: { kind: 'after', ordinal: 100 },
-		});
-		const load = vi.spyOn(chat, 'loadLaterPage').mockResolvedValue('loaded');
-		const fixture = controllerFixture({ chatState: chat, viewport });
-		expect(chat.isLoadingMessages).toBe(true);
-		expect(await fixture.controller.requestPage('later', 'scroll')).toBe('loaded');
-		expect(load).toHaveBeenCalledOnce();
-		chat.dispose();
+			anchor: { kind: 'after', ordinal: 50 },
+		};
+		viewport.memberPageTarget.mockReturnValue(target);
+		api.window.mockImplementation(async request => displayWindow([target.group], displayCertificate(open, request.profile)));
+		const members = vi.spyOn(transcriptDisplayApi, 'members').mockImplementation(async request => ({
+			certificate: request.certificate, base: request.base, fragment: request.fragment,
+			ordinals: [request.anchor.kind === 'first' ? 50 : 101], earlier: null, later: { afterOrdinal: 101, remaining: 99 },
+		}));
+		try {
+			chat.activateChat('chat-1');
+			await chat.loadMessages('chat-1');
+			await chat.controller.expand(target.group);
+			if (scenario === 'preparing' || scenario === 'stale-lagging') chat.configureDisplay({ combine: true, showThinking: false, hiddenToolGroups: [] });
+			const kind = scenario === 'stale-lagging' ? 'lagging' : scenario;
+			api.window.mockImplementationOnce(async request => ({ kind, ...displayCertificate(open, request.profile),
+				profileKey: displayProfileKey(request.profile), sourceHead: 201, preparedThrough: 200, errorCode: null, retryAfterMs: 1500 }));
+			await chat.controller.refresh();
+			const fixture = controllerFixture({ chatState: chat, viewport });
+			expect(chat.isLoadingMessages).toBe(true);
+			for (let gesture = 0; gesture < 3; gesture++) {
+				expect(await fixture.controller.requestPage('later', 'scroll')).toBe(scenario === 'lagging' ? 'loaded' : 'invalidated');
+			}
+			expect(api.window).toHaveBeenCalledTimes(2);
+			expect(members).toHaveBeenCalledTimes(scenario === 'lagging' ? 4 : 1);
+		} finally { chat.dispose(); vi.restoreAllMocks(); }
 	});
 
 	it('delegates physical end checks and end scrolling to the viewport', () => {
