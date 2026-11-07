@@ -154,6 +154,7 @@ export class ConversationPermissionService {
 			try {
 				await transcriptDisplayApi.dismissPlan(reference);
 				if (!deps.sessions.byId[chatId]
+					|| deps.chatState.serverInstanceId !== reference.serverInstanceId
 					|| (!deps.conversationUi.isExecutionControlSocketInstanceConfirmed(reference.serverInstanceId)
 						&& deps.conversationUi.getExecutionControl(chatId)?.serverInstanceId !== reference.serverInstanceId)
 					|| deps.chatState.getCursorForChat(chatId).transcriptViewId !== reference.transcriptViewId) return;

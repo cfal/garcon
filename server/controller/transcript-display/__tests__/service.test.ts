@@ -121,8 +121,11 @@ test('Bash timeouts fail only the matching profile, retry explicitly and retire 
   try {
     await waitForFailure();
     expect(await display.window(input)).toMatchObject({ kind: 'failed', errorCode: 'DISPLAY_FILTER_TIMEOUT' });
+    await expect(display.resolve(input, 1)).rejects.toMatchObject({ code: 'DISPLAY_FILTER_TIMEOUT' });
     const hidden = await ready({ ...input, profile: { ...input.profile, hiddenToolGroups: ['bash'] } });
     expect(hidden.items).toMatchObject([{ kind: 'row', ordinal: 65 }]);
+    expect(await display.resolve({ ...input, profile: { ...input.profile, hiddenToolGroups: ['bash'] } }, 65))
+      .toMatchObject({ kind: 'visible-row', landedOrdinal: 65 });
     await display.retry('chat');
     expect((await display.open('chat')).display.phase).toBe('preparing');
     await waitForFailure();
@@ -139,6 +142,39 @@ test('Bash timeouts fail only the matching profile, retry explicitly and retire 
     } finally { database.close(); }
   } finally { worker.mockRestore(); }
 }, 20_000);
+
+test('certified reads report a permanent rebuild failure instead of staying preparing', async () => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  const before = await ready(input);
+  const group = before.items.find(item => item.kind === 'tool-group');
+  if (!group || group.kind !== 'tool-group') throw new Error('Missing synthetic group');
+  display.forget('chat');
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame') {
+      entered.resolve(); await release.promise;
+      throw Object.assign(new Error('Synthetic disk failure'), { code: 'DISPLAY_DISK_FULL' });
+    }
+    return original.call(this, task, ...args);
+  });
+  try {
+    await display.open('chat');
+    await entered.promise;
+    const resolve = { ...input, atWatermark: before.certificate.watermark };
+    expect(await display.resolve(resolve, 2)).toMatchObject({ kind: 'preparing' });
+    release.resolve();
+    const deadline = Date.now() + 5000;
+    while ((await display.open('chat')).display.phase !== 'failed' && Date.now() < deadline) await Bun.sleep(5);
+    expect((await display.open('chat')).display).toMatchObject({ phase: 'failed', errorCode: 'DISPLAY_DISK_FULL' });
+    await expect(display.resolve(resolve, 2)).rejects.toMatchObject({ code: 'DISPLAY_DISK_FULL' });
+    const certified = { certificate: before.certificate, profile: input.profile, cuts: [] };
+    await expect(display.members({ ...certified, base: group.base, fragment: group.fragment, anchor: { kind: 'first' }, limit: 50 }))
+      .rejects.toMatchObject({ code: 'DISPLAY_DISK_FULL' });
+    await expect(display.bodies({ ...certified, seedOrdinals: [2], residentOrdinals: [], limitBodies: 10, estimatedByteBudget: 10000 }))
+      .rejects.toMatchObject({ code: 'DISPLAY_DISK_FULL' });
+  } finally { release.resolve(); worker.mockRestore(); }
+});
 
 test('lost frame acknowledgements reconcile the persisted checkpoint on retry', async () => {
   const original = DisplayWorkerClient.prototype.request;

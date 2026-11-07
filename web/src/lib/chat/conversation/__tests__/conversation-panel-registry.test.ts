@@ -75,6 +75,38 @@ describe('display surface registry', () => {
 		registry.observeHead('chat-1', 'view-1', 1);
 		expect(overlays.forChat('chat-1').notices.at(-1)?.content).toBe('New status');
 	});
+	it('expires status notices on authoritative open advancement without a socket head', async () => {
+		const { registry, api, overlays } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		for (const kind of ['info', 'progress', 'warning', 'error'] as const) registry.appendLocalNotice('chat-1', kind, `Synthetic ${kind}`);
+		api.replace([displayRow(1), displayRow(2)]);
+		await registry.loadChatSnapshot('chat-1');
+		expect(overlays.forChat('chat-1').notices.map(notice => notice.noticeType)).toEqual(['warning', 'error']);
+	});
+
+	it.each(['before-parking', 'while-parked'] as const)('preserves a per-chat reading target across surface reuse with input eviction %s', async timing => {
+		const { registry, api } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 };
+		registry.panel(left)!.attachPresentation(port(target));
+		if (timing === 'before-parking') registry.upsertOptimisticInput('chat-1', pendingInput);
+		api.replace([displayRow(1)], displayOpen('chat-2', 'view-2', 1));
+		registry.prepareForReconcile([presentation(left, 'chat-2')]);
+		registry.reconcile([presentation(left, 'chat-2')]);
+		await registry.loadChatSnapshot('chat-2');
+		if (timing === 'while-parked') registry.upsertOptimisticInput('chat-1', pendingInput);
+		registry.prepareForReconcile([presentation(left)]);
+		registry.reconcile([presentation(left)]);
+		const restored = registry.panel(left)!;
+		expect(restored.scroll.isPinnedToBottom).toBe(false);
+		const jump = vi.spyOn(restored.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		restored.attachPresentation(port({ kind: 'end' }));
+		await registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' }, { viewportOffset: -12 }));
+	});
 	it('deduplicates source opens, not surface projection or leases', async () => {
 		const { api, registry, bodies, onOpen } = fixture();
 		registry.reconcile([presentation(left), presentation(right)]);

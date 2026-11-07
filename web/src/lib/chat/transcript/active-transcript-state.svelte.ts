@@ -207,7 +207,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.acknowledgeInput(snapshot.transcriptViewId, input, submission.ordinal, this.optimisticAfterOrdinals.get(input.clientMessageId) ?? 0);
 			this.#localOverlays.acknowledgeInput(snapshot.chat.id, input.clientMessageId, submission.ordinal);
 		}
-		this.#configureCuts();
+		if (!this.#navigating) this.#configureCuts();
 		this.#opening = false;
 		this.#openError = null;
 	}

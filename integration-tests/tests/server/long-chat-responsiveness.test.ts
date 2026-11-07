@@ -8,6 +8,7 @@ import {
 } from '../../support/integration-fixture.js';
 import { appendDisplayRun, createDisplayChat } from '../../support/transcript-display-fixture.js';
 import { displayRequest } from '../../support/transcript-display.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 // 30,000 native rows. Before whole-history work moved into bounded steps and a
 // Worker, reloading a history this long held the server's event loop for over
@@ -84,6 +85,8 @@ test('display preparation and a failed regex leave growing chats and ready reads
         failed = await fixture.client.displayWindow(displayRequest(bad));
       }
       expect(failed).toMatchObject({ kind: 'failed', errorCode: 'DISPLAY_FILTER_TIMEOUT' });
+      expect(await rejectionOf(fixture.client.resolveDisplay({ ...displayRequest(bad), anchor: { kind: 'around', ordinal: 1 } })))
+        .toMatchObject({ status: 503, body: { errorCode: 'DISPLAY_FILTER_TIMEOUT' } });
       expect((await fixture.client.waitForDisplayWindow(request, 90_000)).items.find(item => item.kind === 'tool-group')).toMatchObject({ count: 40_000 });
       await fixture.client.updateSettings({ ui: { hiddenBashCommandPatterns: [] } });
       const repaired = await fixture.client.openDisplay({ chatId: pathological, reason: 'reconnect', outstandingClientMessageIds: [] });
