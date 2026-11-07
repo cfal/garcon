@@ -111,8 +111,10 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(saved?.title).toBe('Synthetic offline title');
       expect(saved?.tags).toEqual(['offline']);
 
+      const fileLink = `[data-conversation-panel-chat-id="${chatId}"] [data-chat-message-type="assistant-message"] a[href="./example.txt"]`;
+      await fixture.page.waitForSelector(fileLink);
       await fixture.page.$eval(
-        `[data-conversation-panel-chat-id="${chatId}"] [data-chat-message-type="assistant-message"] a[href="./example.txt"]`,
+        fileLink,
         element => (element as HTMLElement).click(),
       );
       await app.waitForText('Files are unavailable on this executor.');
