@@ -1180,6 +1180,37 @@ it('retains a member protected after hydration began until its protection is rel
 	expect(store.count).toBe(1);
 });
 
+it('ignores source heads for a foreign view without scheduling reads', async () => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValue(window());
+	const { controller } = setup({ window: read });
+	await controller.refresh();
+	const previous = controller.snapshot;
+	controller.observeHead('retired-view', 50000);
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(controller.sourceHead).toBe(certificate.watermark);
+	expect(controller.snapshot).toBe(previous);
+	expect(read).toHaveBeenCalledOnce();
+});
+
+it('refreshes a stale exhausted later edge before its scheduled head refresh', async () => {
+	vi.useFakeTimers();
+	const head = certificate.watermark + 2;
+	const newer = { ...window(), certificate: { ...certificate, watermark: head }, sourceHead: head,
+		interval: { after: 0, through: head }, structuralPreparedThrough: head, bashPreparedThrough: head };
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce(window()).mockResolvedValue(newer);
+	const { controller } = setup({ window: read });
+	controller.setReadingAnchor(1, false);
+	await controller.refresh();
+	controller.observeHead('view', head);
+	expect(await controller.load('later')).toBe('loaded');
+	expect(read.mock.calls.at(-1)?.[0]).toMatchObject({ anchor: { kind: 'around', ordinal: 1 }, requiredThrough: head });
+	expect(controller.snapshot.window?.certificate.watermark).toBe(head);
+	expect(await controller.load('later')).toBe('exhausted');
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(read).toHaveBeenCalledTimes(2);
+});
+
 it('requests newest when following resumes from a current-watermark historical window', async () => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>()
