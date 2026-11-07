@@ -23,6 +23,14 @@ function initialized() {
 }
 
 describe('certified feed announcements', () => {
+	it.each([false, true])('does not consume future permission lineage before it can be announced, floating=%s', floating => {
+		const announcer = initialized();
+		const future = input({ rows: [permission(2)], sourceHead: 2 });
+		expect(announcer.reconcile(future)).toBeNull();
+		expect(announcer.reconcile({ ...future, watermark: floating ? 1 : 2,
+			floatingPermissionOccurrences: floating ? ['permission-1'] : [] })).toBe('Permission required');
+		expect(announcer.reconcile({ ...future, watermark: 2, floatingPermissionOccurrences: ['permission-1'] })).toBeNull();
+	});
 	it('announces newly accepted rows, not descriptor refreshes or historical member hydration', () => {
 		const announcer = initialized();
 		const next = input({ rows: [assistant(1, 'Existing'), assistant(2, '**New** response')], watermark: 2, sourceHead: 2,

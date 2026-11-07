@@ -1,4 +1,5 @@
 import type { ConversationNativeScrollActivity } from './conversation-native-scroll-settlement.js';
+import type { TranscriptMemberPageTarget, TranscriptPageDirection } from './transcript-page-progress.js';
 
 export type ConversationViewportTarget =
 	{ kind: 'row'; id: string; revealDetail?: boolean } |
@@ -22,6 +23,7 @@ export interface ConversationViewportPosition {
 
 export interface ConversationViewportPort {
 	requestCoverage(): void;
+	memberPageTarget(direction: TranscriptPageDirection): TranscriptMemberPageTarget | null;
 	isReady(): boolean;
 	hasCollapsedToolGroups(): boolean;
 	isAtEnd(threshold?: number): boolean;

@@ -1,4 +1,6 @@
 import { untrack } from 'svelte';
+import type { TranscriptMemberPageTarget, TranscriptPageDirection } from '$lib/chat/transcript/transcript-page-progress.js';
+import { nextConversationCoverage } from './conversation-feed-coverage.js';
 import { observeTypographyChanges } from '$lib/theme/typography.js';
 import type { Attachment } from 'svelte/attachments';
 import type { ConversationNativeScrollActivity } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
@@ -512,6 +514,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	requestCoverage(): void { this.options.onCoverageRequested?.(); }
+	memberPageTarget(direction: TranscriptPageDirection): TranscriptMemberPageTarget | null {
+		const demand = nextConversationCoverage(this.#configuredModel, this.#virt.snapshot.visibleRange, direction, { earlier: false, later: false });
+		return demand && typeof demand !== 'string' ? demand : null;
+	}
 
 	async measureViewportFill(): Promise<ConversationViewportFillResult> {
 		if (!this.isReady()) return 'unsettled';

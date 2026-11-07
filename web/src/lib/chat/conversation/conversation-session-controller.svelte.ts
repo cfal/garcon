@@ -6,6 +6,7 @@ import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/c
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
 	type ChatLoadMessagesOptions,
+	type ActiveTranscriptState,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
@@ -366,10 +367,14 @@ export class ConversationSessionController {
 
 	async loadPanelChat(
 		chatId: string,
-		transcript: SessionTranscriptLoadTarget,
+		transcript: SessionTranscriptLoadTarget & Pick<ActiveTranscriptState, 'display' | 'controller'>,
 		loadPanelSnapshot: PanelTranscriptSnapshotLoader,
 	): Promise<void> {
 		try {
+			if (transcript.display.phase === 'failed') {
+				const result = await transcript.controller.retry();
+				if (result === 'blocked' || transcript.activeChatId !== chatId) return;
+			}
 			await this.#loadChat(chatId, { restoreBottom: false }, transcript, loadPanelSnapshot);
 		} catch {
 			// Leaves the panel's load error visible for another explicit retry.

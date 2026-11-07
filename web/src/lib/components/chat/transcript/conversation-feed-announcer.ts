@@ -115,9 +115,9 @@ export class ConversationFeedAnnouncerState {
 		for (const row of input.rows.slice(-512)) {
 			const lineage = announcementLineage(row);
 			const seen = lineage !== null && (previousLineages.has(lineage) || this.#lineages.has(lineage));
-			if (lineage !== null) this.#remember(lineage);
 			const fresh = row.kind === 'local-notice' || row.ordinal === undefined
 				|| row.ordinal > after && row.ordinal <= input.watermark;
+			if (lineage !== null && (fresh || row.kind === 'message' && row.ordinal !== undefined && row.ordinal <= after)) this.#remember(lineage);
 			if (seen || !fresh) continue;
 			const text = announcementForAppendedRow(row);
 			if (text) chunks.push(text);

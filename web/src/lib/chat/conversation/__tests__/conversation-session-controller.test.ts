@@ -1669,6 +1669,36 @@ describe('ConversationSessionController', () => {
 		panelTranscript.dispose();
 	});
 
+	it('retries failed display preparation before reopening the panel', async () => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase: 'failed', error: 'DISPLAY_FILTER_TIMEOUT' };
+		const calls: string[] = [];
+		vi.spyOn(transcript.controller, 'retry').mockImplementation(async () => { calls.push('retry'); return 'loaded'; });
+		const open = vi.fn(async () => { calls.push('open'); return true; });
+		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		expect(calls).toEqual(['retry', 'open']);
+		transcript.dispose();
+	});
+
+	it.each(['chat-switch', 'cancelled'] as const)('does not reopen after a held display retry is superseded by %s', async supersession => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase: 'failed', error: 'DISPLAY_FILTER_TIMEOUT' };
+		const retry = Promise.withResolvers<'loaded' | 'blocked'>();
+		vi.spyOn(transcript.controller, 'retry').mockReturnValue(retry.promise);
+		const open = vi.fn(async () => true);
+		const pending = new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		if (supersession === 'chat-switch') transcript.activateChat('chat-2');
+		retry.resolve(supersession === 'cancelled' ? 'blocked' : 'loaded');
+		await pending;
+		expect(open).not.toHaveBeenCalled();
+		expect(transcript.activeChatId).toBe(supersession === 'chat-switch' ? 'chat-2' : 'chat-1');
+		transcript.dispose();
+	});
+
 	it('restores a selected chat live permission capability with its initial snapshot', async () => {
 		const permission = transientPermission('permission-live', 'run-live', 28);
 		const conversationUi = new ConversationUiState();

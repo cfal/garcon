@@ -27,6 +27,9 @@ describe('exit-plan permission occurrence rendering', () => {
 
 		expect(screen.queryByRole('button', { name: 'Yes, approve edits' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+		expect(screen.queryByText('Plan approved')).toBeNull();
+		expect(screen.queryByText('Plan cancelled')).toBeNull();
+		expect(screen.getByText('Plan', { selector: 'span' })).toBeTruthy();
 	});
 
 	it('keeps approval and dismissal on the exact inline presentation occurrence', async () => {

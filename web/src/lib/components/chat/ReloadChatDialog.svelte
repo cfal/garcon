@@ -10,6 +10,7 @@
 		open,
 		candidates,
 		totalCandidates = candidates.length,
+		summaryIncomplete = false,
 		busy,
 		cancelling,
 		progress,
@@ -19,6 +20,7 @@
 		open: boolean;
 		candidates: readonly UserRowSummary[];
 		totalCandidates?: number;
+		summaryIncomplete?: boolean;
 		busy: boolean;
 		cancelling: boolean;
 		progress: ChatReloadProgress | null;
@@ -51,6 +53,9 @@
 				{m.sidebar_chats_reload_confirm_description()}
 			</Dialog.Description>
 		</Dialog.Header>
+		{#if summaryIncomplete}
+			<p class="text-sm text-muted-foreground" role="status">{m.sidebar_chats_reload_summary_incomplete()}</p>
+		{/if}
 		{#if totalCandidates > 0}
 			<section class="space-y-2" aria-label={m.sidebar_chats_reload_confirm_resend()}>
 				<p class="text-sm font-medium">{m.sidebar_chats_reload_confirm_resend()}</p>
@@ -64,7 +69,7 @@
 								<p class="line-clamp-2 break-words">{candidate.preview}</p>
 								{#if candidate.attachmentCount > 0}
 									<p class="mt-1 truncate text-xs text-muted-foreground">
-										{candidate.attachmentCount} attachments
+										{m.chat_attachment_count({ count: candidate.attachmentCount })}
 									</p>
 								{/if}
 							</li>

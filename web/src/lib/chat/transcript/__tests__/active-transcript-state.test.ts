@@ -76,6 +76,23 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(api.bodies).not.toHaveBeenCalled();
 	});
 
+	it('orders announced rows canonically rather than by detail hydration order', async () => {
+		const { transcript } = setup();
+		await transcript.loadMessages('chat-1');
+		transcript.display = { ...transcript.display, details: new Map([...transcript.display.details].reverse()) };
+		expect(transcript.visibleRows.flatMap(row => row.kind === 'message' ? [row.ordinal] : [])).toEqual([1, 2, 3]);
+	});
+
+	it('resets response watermarks when an open first reveals a replacement view', async () => {
+		const { transcript } = setup();
+		await transcript.loadMessages('chat-1');
+		transcript.observeHead('view-1', 1000, { ...emptyResponseClassOrdinals(), tool: 1000 });
+		transcript.installOpen(displayOpen('chat-1', 'view-2', 3));
+		expect(transcript.responseClassOrdinals).toEqual(emptyResponseClassOrdinals());
+		transcript.observeHead('view-2', 4, { ...emptyResponseClassOrdinals(), tool: 4 });
+		expect(transcript.responseClassOrdinals.tool).toBe(4);
+	});
+
 	it('keeps the old certified window while preparation lags', async () => {
 		const { transcript, api } = setup();
 		await transcript.loadMessages('chat-1');

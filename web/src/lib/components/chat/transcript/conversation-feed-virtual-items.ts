@@ -83,13 +83,20 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 		items.push({ kind: 'earlier-boundary', key: key('prefix:earlier-boundary'), spacingAfter: 'none' });
 	}
 	const transcriptStartIndex = items.length;
-	const represented = new Set(window?.items.flatMap(item => item.kind === 'row' && item.permissionOccurrenceId && renderByOrdinal.has(item.ordinal) ? [item.permissionOccurrenceId] : []) ?? []);
+	const representedOrdinals = new Set([
+		...(window?.items.flatMap(item => item.kind === 'row' && renderByOrdinal.has(item.ordinal) ? [item.ordinal] : []) ?? []),
+		...retained.map(row => row.ordinal!),
+	]);
+	const represented = new Set([...representedOrdinals].flatMap(ordinal => {
+		const message = renderByOrdinal.get(ordinal)?.message;
+		return message?.type === 'permission-request' ? [message.permissionOccurrenceId] : [];
+	}));
 	const permissions = input.pendingPermissions.filter(request => {
 		if (represented.has(request.permissionOccurrenceId)) return false;
 		const plan = request.planReference;
 		return !plan || plan.serverInstanceId !== window?.certificate.serverInstanceId
 			|| plan.chatId !== window.certificate.chatId || plan.transcriptViewId !== input.transcriptViewId
-			|| !window.items.some(item => item.kind === 'row' && item.ordinal === plan.ordinal && renderByOrdinal.has(item.ordinal));
+			|| !representedOrdinals.has(plan.ordinal);
 	});
 	const overlays = input.overlays.filter(row => row.kind === 'message');
 	const inserted = new Set<string>();
@@ -112,6 +119,7 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 	if (window) insertOverlays(window.interval.after);
 	for (const descriptor of window?.items ?? []) {
 		insertRetained(descriptor.kind === 'row' ? descriptor.ordinal - 1 : descriptor.firstMember - 1);
+		insertOverlays(descriptor.kind === 'row' ? descriptor.ordinal - 1 : descriptor.fragment.after);
 		if (descriptor.kind === 'row') {
 			const item = renderByOrdinal.get(descriptor.ordinal);
 			if (item) pushRow(item);
@@ -133,6 +141,7 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 		insertRetained(descriptorLast(descriptor));
 		insertOverlays(descriptor.kind === 'tool-group' ? descriptor.fragment.through : descriptorLast(descriptor));
 	}
+	if (window) insertOverlays(window.interval.through);
 	const transcriptEndIndex = items.length;
 	if (input.showLaterBoundary) items.push({ kind: 'later-boundary', key: key('suffix:later-boundary'), spacingAfter: 'none' });
 	insertRetained(Infinity);

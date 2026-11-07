@@ -13,7 +13,7 @@
 	function label(candidate: UserRowSummary): string {
 		const content = candidate.preview.trim();
 		if (content) return content;
-		return `${candidate.attachmentCount} attachments`;
+		return m.chat_attachment_count({ count: candidate.attachmentCount });
 	}
 </script>
 

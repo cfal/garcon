@@ -58,6 +58,7 @@ async function fixture() {
 	api.open.mockClear(); api.window.mockClear();
 	const viewport = {
 		requestCoverage: vi.fn(),
+		memberPageTarget: () => null,
 		isReady: () => true,
 		hasCollapsedToolGroups: () => false,
 		isAtEnd: () => false,

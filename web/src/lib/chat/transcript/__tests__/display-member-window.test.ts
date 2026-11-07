@@ -242,3 +242,33 @@ it('trims root-budget overscan while preserving focused children and releases th
 	expect(f.bodies.count).toBe(2);
 	expect(f.bodies.metrics.evictions).toBe(48);
 });
+
+it('keeps a protected summary through trimming without hydrating its members', async () => {
+	const groups = Array.from({ length: 40 }, (_, index) => group(index * 100 + 1, index * 100 + 99));
+	const f = fixture(groups);
+	await f.controller.refresh();
+	f.controller.setReadingAnchor(3901, false);
+	f.controller.protect([1]);
+	f.controller.trim(3901, 3999);
+	expect(f.controller.snapshot.window!.items).toContainEqual(groups[0]);
+	expect(f.api.members).not.toHaveBeenCalled();
+	expect(f.api.bodies).not.toHaveBeenCalled();
+	f.controller.protect([]);
+	f.controller.trim(3901, 3999);
+	expect(f.controller.snapshot.window!.items).not.toContainEqual(groups[0]);
+	expect(f.controller.snapshot.window!.earlier.kind).toBe('more');
+});
+
+it('stages member continuation behind the caller application gate', async () => {
+	const whole = group(1, 200), f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole);
+	const held = Promise.withResolvers<'apply'>(), entered = Promise.withResolvers<void>();
+	const before = f.controller.snapshot.expansions;
+	const loading = f.controller.extendMembers(whole, { kind: 'after', ordinal: 50 }, () => { entered.resolve(); return held.promise; });
+	await entered.promise;
+	expect(f.controller.snapshot.expansions).toBe(before);
+	held.resolve('apply');
+	expect(await loading).toBe('loaded');
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toContain(51);
+});
