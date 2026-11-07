@@ -14,6 +14,8 @@ import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import { CLI_ENVELOPE_BYTES, cliRequestBytes, cliRoute } from '../transport/cli-protocol.js';
+import { parseAgentRunCommandRequest, parseSteerCommandRequest } from '../../../common/chat-command-contracts.js';
+import { asyncQuestionReplyText } from '../../../common/async-user-questions.js';
 import {
   ASK_USER_QUESTION_TEXT_MAX_BYTES,
   normalizeAskUserQuestionDecisionResponse,
@@ -75,6 +77,26 @@ test('preserves transcript overload responses through the executor gateway', asy
   const response = await f.call('/api/v1/chats/export?chatId=1234567890123456&format=xml');
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual(await overload().json());
+});
+
+test('forwards correlated question replies unchanged through both existing input routes', async () => {
+  const source = { chatId: '1000000000000001', transcriptViewId: 'view-1', ordinal: 3 };
+  const questionReply = { questionId: 'question-1', question: 'Which environment?', answer: '  Staging  ', source };
+  const common = { chatId: source.chatId, transcriptViewId: source.transcriptViewId,
+    expectedAgentId: 'codex', expectedAgentOwnershipEpoch: 'owner-1',
+    clientRequestId: 'request-1', clientMessageId: 'message-1', questionReply };
+  const f = await fixture({
+    '/api/v1/chats/run': { POST: async request => Response.json(parseAgentRunCommandRequest(await parseJsonBody(request))) },
+    '/api/v1/chats/steer': { POST: async request => Response.json(parseSteerCommandRequest(await parseJsonBody(request))) },
+  });
+  for (const [route, body] of [
+    ['run', { ...common, command: asyncQuestionReplyText(questionReply) }],
+    ['steer', { ...common, content: asyncQuestionReplyText(questionReply), whenTurnUnavailable: 'reject' }],
+  ] as const) {
+    const response = await f.call(`/api/v1/chats/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(body);
+  }
 });
 
 test('existing shared-readable directories retain their modes while runtime files stay private', async () => {

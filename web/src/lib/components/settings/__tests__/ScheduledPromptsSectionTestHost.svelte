@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import ScheduledPromptsSection from '../ScheduledPromptsSection.svelte';
-	import { setChatSessions, setScheduledPrompts } from '$lib/context';
+	import { setChatSessions, setModelCatalog, setScheduledPrompts } from '$lib/context';
+	import { createExecutorStartupFixture } from '$lib/chat/new-chat/__tests__/executor-startup-fixture';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
+	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 	import { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte';
@@ -15,15 +18,24 @@
 		chats,
 		runLog = [],
 		onOpenChat = () => {},
+		onOpenInNewChat = () => {},
+		modelCatalog,
+		active = true,
+		newChatRequestId = 0,
 	}: {
 		executors: readonly ExecutorSnapshot[];
 		prompts: ScheduledPrompt[];
 		chats: ChatListEntry[];
 		runLog?: ScheduledPromptRunLogEntry[];
 		onOpenChat?: (chatId: string) => void;
+		onOpenInNewChat?: (seed: NewChatDialogSeed) => void;
+		modelCatalog?: ModelCatalogStore;
+		active?: boolean;
+		newChatRequestId?: number;
 	} = $props();
 
 	setExecutorsTestContext(untrack(() => executors));
+	setModelCatalog(untrack(() => modelCatalog ?? createExecutorStartupFixture().modelCatalog));
 	const scheduledPrompts = new ScheduledPromptsStore();
 	scheduledPrompts.applySnapshot({
 		revision: 1,
@@ -36,4 +48,4 @@
 	setChatSessions(sessions);
 </script>
 
-<ScheduledPromptsSection active={true} {onOpenChat} />
+<ScheduledPromptsSection {active} {onOpenChat} {onOpenInNewChat} {newChatRequestId} />

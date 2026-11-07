@@ -72,6 +72,9 @@ export class SteerCommands {
         clientMessageId,
         userMessagePresentation: input.userMessagePresentation ?? null,
         whenTurnUnavailable: input.whenTurnUnavailable ?? 'reject',
+        questionReply: input.questionReply ?? null,
+        expectedAgentId: input.expectedAgentId ?? null,
+        expectedAgentOwnershipEpoch: input.expectedAgentOwnershipEpoch ?? null,
       },
     };
     let outcomeTurnId = observedTarget?.identity.turnId;
@@ -93,6 +96,18 @@ export class SteerCommands {
         }
 
         await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
+        const currentChat = this.deps.chats.getChat(input.chatId);
+        if (input.expectedAgentOwnershipEpoch !== undefined
+          && input.expectedAgentOwnershipEpoch !== currentChat?.agentOwnershipEpoch) {
+          throw new CommandValidationError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed before steering', 409);
+        }
+        if (input.expectedAgentId !== undefined && input.expectedAgentId !== currentChat?.agentId) {
+          throw new CommandValidationError('EXPECTED_AGENT_MISMATCH', 'Chat agent changed before steering', 409);
+        }
+        this.support.assertQuestionReply(input, input.content);
+        if (input.questionReply && queueWhenUnavailable) {
+          throw new CommandValidationError('VALIDATION_FAILED', 'Question replies cannot be queued');
+        }
 
         let ledger: LedgerAcceptResult;
         try {
@@ -159,6 +174,7 @@ export class SteerCommands {
           clientMessageId,
           transcriptViewId: input.transcriptViewId,
           userMessagePresentation: input.userMessagePresentation,
+          questionReply: input.questionReply,
           target,
           settlement: this.support.settlement,
         });

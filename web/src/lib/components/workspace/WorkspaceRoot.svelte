@@ -55,6 +55,8 @@
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { AsyncQuestionController } from '$lib/chat/conversation/async-question-controller.svelte.js';
+	import { setAsyncQuestionController } from '$lib/chat/conversation/async-question-context.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import {
 		ConversationPanelRegistry,
@@ -119,6 +121,8 @@
 	const subagentToolbar = new SubagentToolbarState();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const conversationUi = new ConversationUiState();
+	const asyncQuestions = new AsyncQuestionController();
+	setAsyncQuestionController(asyncQuestions);
 	setConversationUi(conversationUi);
 	const conversationLifecycles = new ConversationLifecycleRegistry({
 		sessions,
@@ -429,6 +433,7 @@
 		untrack(() => {
 			conversationLifecycles.prune(activeChatIds);
 			conversationTranscriptOverlays.prune(activeChatIds);
+			asyncQuestions.prune(activeChatIds);
 		});
 	});
 

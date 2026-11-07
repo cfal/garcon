@@ -8,6 +8,7 @@ import {
   type CodexAppServerClient,
 } from './client.ts';
 import { buildUserInput } from './request-builders.ts';
+import { codexQuestionReplyInput } from '../async-questions.js';
 
 interface SteerableCodexSession {
   threadId: string;
@@ -26,7 +27,7 @@ export async function steerCodexSession(
     const response = await session.client.steerTurn({
       threadId: session.threadId,
       expectedTurnId,
-      input: buildUserInput(request.input, []),
+      input: buildUserInput(codexQuestionReplyInput(request.input, request.questionReply), []),
       clientUserMessageId: request.clientMessageId,
     }, {
       prepareDelivery: request.prepareDelivery,

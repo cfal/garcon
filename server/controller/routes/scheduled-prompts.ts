@@ -13,6 +13,9 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import { ScheduledPromptDomainError } from '../scheduled-prompts/store.js';
+import { parseRenderScheduledPromptRequest, type RenderScheduledPromptResponse } from '../../../common/scheduled-prompt-render.js';
+import { renderScheduledPrompt } from '../../../common/scheduled-prompts.js';
+import { runtimeTemplateValues, TemplateExpansionTooLongError } from '../../../common/template-tokens.js';
 
 function expectedRevision(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -25,7 +28,27 @@ function scheduledPromptError(error: unknown): Response {
   return jsonErrorFromUnknown(error);
 }
 
-export default function createScheduledPromptRoutes(scheduledPrompts: ScheduledPromptScheduler): RouteMap {
+export default function createScheduledPromptRoutes(
+  scheduledPrompts: ScheduledPromptScheduler,
+  now: () => Date = () => new Date(),
+): RouteMap {
+  async function renderPrompt(body: unknown): Promise<Response> {
+    const input = parseRenderScheduledPromptRequest(body);
+    if (!input) return jsonError('A valid chatId and prompt are required', 400, 'SCHEDULED_PROMPT_VALIDATION_FAILED');
+    try {
+      return Response.json({
+        success: true,
+        chatId: input.chatId,
+        expandedText: renderScheduledPrompt(input.prompt, runtimeTemplateValues(input.chatId, now())),
+      } satisfies RenderScheduledPromptResponse);
+    } catch (error) {
+      if (error instanceof TemplateExpansionTooLongError) {
+        return jsonError(error.message, 400, 'SCHEDULED_PROMPT_VALIDATION_FAILED');
+      }
+      return scheduledPromptError(error);
+    }
+  }
+
   async function getPrompts(): Promise<Response> {
     try {
       return Response.json(await scheduledPrompts.snapshotAfterReconciliation());
@@ -135,6 +158,9 @@ export default function createScheduledPromptRoutes(scheduledPrompts: ScheduledP
   }
 
   return {
+    '/api/v1/scheduled-prompts/render': {
+      POST: withJsonBody(renderPrompt),
+    },
     '/api/v1/scheduled-prompts': {
       GET: getPrompts,
       POST: withJsonBody(postPrompt),

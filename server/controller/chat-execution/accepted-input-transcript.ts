@@ -91,7 +91,7 @@ function inputMessage(content: string, options: UserInputAdmissionOptions): User
     options.createdAt ?? new Date().toISOString(),
     content,
     normalizeChatImages(options.images),
-    undefined,
+    options.questionReply ? { questionReply: options.questionReply } : undefined,
     options.userMessagePresentation,
   );
 }

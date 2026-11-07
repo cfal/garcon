@@ -87,6 +87,7 @@ test('schedule forwarding requires explicit new-chat executors and excludes unre
     }
   }
   for (const [method, pathname] of [['POST', '/api/v1/scheduled-prompts/in'], ['PUT', '/api/v1/scheduled-prompts/reorder'],
+    ['POST', '/api/v1/scheduled-prompts/render'],
     ['PATCH', '/api/v1/scheduled-prompts'], ['POST', '/api/v1/scheduled-prompts/enabled']]) {
     expect(() => cliRoute(method!, pathname!)).toThrow();
   }

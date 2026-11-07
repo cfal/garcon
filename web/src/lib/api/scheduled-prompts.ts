@@ -1,4 +1,9 @@
-import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
+import { apiDelete, apiGet, apiPost, apiPut, type ApiFetchOptions } from './client.js';
+import {
+	parseRenderScheduledPromptResponse,
+	type RenderScheduledPromptRequest,
+	type RenderScheduledPromptResponse,
+} from '$shared/scheduled-prompt-render';
 import {
 	normalizeCreateScheduledPromptResponse,
 	normalizeScheduledPromptsSnapshot,
@@ -18,6 +23,17 @@ function normalizeSnapshot(value: unknown): ScheduledPromptsSnapshot {
 	const snapshot = normalizeScheduledPromptsSnapshot(value);
 	if (!snapshot) throw new Error('Invalid scheduled prompts response');
 	return snapshot;
+}
+
+export async function renderScheduledPrompt(
+	request: RenderScheduledPromptRequest,
+	options?: ApiFetchOptions,
+): Promise<RenderScheduledPromptResponse> {
+	const result = parseRenderScheduledPromptResponse(
+		await apiPost<unknown>('/api/v1/scheduled-prompts/render', request, options),
+	);
+	if (!result || result.chatId !== request.chatId) throw new Error('Invalid scheduled prompt rendering response');
+	return result;
 }
 
 function normalizeMutation(value: unknown): ScheduledPromptsMutationResponse {

@@ -55,6 +55,38 @@ function scheduler() {
 describe('scheduled prompt routes', () => {
   beforeEach(() => parseJsonBody.mockClear());
 
+  it('renders with the controller clock without reconciling or executing schedules', async () => {
+    const service = scheduler();
+    const priorTimezone = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      const now = mock(() => new Date('2030-01-02T01:00:00.000Z'));
+      const route = createScheduledPromptRoutes(service, now)['/api/v1/scheduled-prompts/render'].POST;
+      const { response, body } = await call(route, {
+        chatId: '1000000000000001',
+        prompt: '  {{chat_id}} {{current_date}} {{current_date_local}} \\{{chat_id}} {{unknown}}\n',
+      }, 'POST');
+      expect(response.status).toBe(200);
+      expect(body).toEqual({ success: true, chatId: '1000000000000001', expandedText: '  1000000000000001 2030-01-02 2030-01-01 {{chat_id}} {{unknown}}\n' });
+      expect(now).toHaveBeenCalledTimes(1);
+      for (const method of Object.values(service)) expect(method).not.toHaveBeenCalled();
+    } finally {
+      if (priorTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = priorTimezone;
+    }
+  });
+
+  it('rejects malformed or oversized template expansion before any schedule operation', async () => {
+    const service = scheduler();
+    const route = createScheduledPromptRoutes(service)['/api/v1/scheduled-prompts/render'].POST;
+    for (const body of [null, { chatId: 'bad', prompt: 'text' }, { chatId: '1000000000000001', prompt: '{{chat_id}}'.repeat(2500) }]) {
+      const result = await call(route, body, 'POST');
+      expect(result.response.status).toBe(400);
+      expect(result.body.errorCode).toBe('SCHEDULED_PROMPT_VALIDATION_FAILED');
+    }
+    for (const method of Object.values(service)) expect(method).not.toHaveBeenCalled();
+  });
+
   it('returns the reconciled snapshot and typed mutation envelopes', async () => {
     const service = scheduler();
     const routes = createScheduledPromptRoutes(service);

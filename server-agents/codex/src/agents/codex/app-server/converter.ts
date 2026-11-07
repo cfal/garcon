@@ -15,7 +15,6 @@ import {
   TodoWriteToolUseMessage,
   ToolResultMessage,
   UpdatePlanToolUseMessage,
-  UserMessage,
   WebFetchToolUseMessage,
   WebSearchToolUseMessage,
   WriteStdinToolUseMessage,
@@ -26,7 +25,7 @@ import {
   type CodexSubagentState,
   type CompactionTrigger,
 } from '@garcon/common/chat-types';
-import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
+import { codexAsyncQuestions, codexHistoricalUserMessage } from '../async-questions.js';
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
@@ -74,17 +73,13 @@ export function convertCodexAppServerItem(
     case 'userMessage': {
       const text = userInputText(item.content);
       if (options.includeUserMessages === false) return [];
-      return text.trim()
-        ? [new UserMessage(
-            timestamp,
-            stripResolvedFileMentionContext(text),
-            undefined,
-            item.clientId ? { upstreamRequestId: item.clientId } : undefined,
-          )]
-        : [];
+      if (!text.trim()) return [];
+      return [codexHistoricalUserMessage(timestamp, text, item.clientId ?? undefined)];
     }
     case 'agentMessage': {
-      return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];
+      return item.text?.trim() ? [new AssistantMessage(
+        timestamp, item.text, codexAsyncQuestions(item.id, item.delivery, item.questions),
+      )] : [];
     }
     case 'plan':
       return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];

@@ -45,6 +45,7 @@
 		type ResolveChatReference,
 	} from '$lib/chat/transcript/chat-reference.js';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
+	import AsyncQuestionMessage from './AsyncQuestionMessage.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
@@ -803,6 +804,8 @@
 						</ChatEventCard>
 					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
 						<CommandStatusRow {message} />
+					{:else if asAssistant?.questions}
+						<AsyncQuestionMessage questions={asAssistant.questions} ordinal={forkUpToSeq} />
 					{:else if asAssistant || asCommandOutput}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger

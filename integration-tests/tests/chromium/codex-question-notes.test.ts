@@ -6,6 +6,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { codexFinalAnswerMessage } from '../../support/fake-codex-model.js';
+import { ASK_USER_QUESTION_TEXT_MAX_BYTES } from '../../../common/ask-user-question-response.js';
 
 test('Codex options and notes submit together and remain visible after reload on desktop and mobile', async () => {
   const environment = await startScriptedCodexTestEnvironment();
@@ -38,6 +39,15 @@ test('Codex options and notes submit together and remain visible after reload on
         const submit = page.getByRole('button', { name: 'Submit answer', exact: true });
         await note.fill('   ');
         await browserExpect(submit).toBeDisabled();
+        for (const character of ['x', '\u00e9']) {
+          const limit = ASK_USER_QUESTION_TEXT_MAX_BYTES / Buffer.byteLength(character);
+          const oversized = character.repeat(limit + 1);
+          await note.fill('');
+          await note.focus();
+          await page.keyboard.insertText(oversized);
+          await browserExpect(note).toHaveValue(oversized);
+          await browserExpect(submit).toBeDisabled();
+        }
         await note.fill(text);
         await browserExpect(submit).toBeEnabled();
         await browserExpect(careful).toBeChecked();

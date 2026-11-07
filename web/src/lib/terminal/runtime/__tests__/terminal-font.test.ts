@@ -27,18 +27,18 @@ describe('TerminalFontLoader', () => {
 		);
 	});
 
-	it.each(['jetbrains-mono', 'system-mono'] as const)(
-		'keeps Nerd Font fallback for %s',
-		async (font) => {
-			vi.mocked(loadFont).mockResolvedValue(true);
-			const loader = new TerminalFontLoader(() => [], vi.fn());
-			const pending = loader.load(font);
-			expect(loader.load(font)).toBe(pending);
-			await expect(pending).resolves.toBe(
-				`${font === 'jetbrains-mono' ? '"JetBrains Mono"' : TERMINAL_FALLBACK_FONT_FAMILY}, ${TERMINAL_FONT_FAMILY}`,
-			);
-		},
-	);
+	it.each([
+		['jetbrains-mono', '"JetBrains Mono"'],
+		['ibm-plex-mono', '"IBM Plex Mono"'],
+		['source-code-pro', '"Source Code Pro"'],
+		['system-mono', TERMINAL_FALLBACK_FONT_FAMILY],
+	] as const)('keeps Nerd Font fallback for %s', async (font, family) => {
+		vi.mocked(loadFont).mockResolvedValue(true);
+		const loader = new TerminalFontLoader(() => [], vi.fn());
+		const pending = loader.load(font);
+		expect(loader.load(font)).toBe(pending);
+		await expect(pending).resolves.toBe(`${family}, ${TERMINAL_FONT_FAMILY}`);
+	});
 
 	it('retries a failed selected font while retaining the default font request', async () => {
 		vi.mocked(loadFont).mockResolvedValueOnce(false).mockResolvedValue(true);
