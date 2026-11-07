@@ -811,14 +811,16 @@ export class AgentRuntimeRouter {
     const resolvedPrompt = await retryAfterSessionLoss(
       () => this.#resolveFileMentions(prompt, entry.projectPath, entry.executorId, readBefore(opts.dispatchDeadline, signal)), signal,
     );
+    const submittedInput = composition?.input;
+    const questionReply = submittedInput?.detail.message.metadata?.questionReply;
     return {
       dispatch: true,
       prompt: resolvedPrompt,
       outboundPrompt: `${composition?.providerPrefix ?? ''}${resolvedPrompt}`,
-      submission: composition?.input.detail.message.metadata?.questionReply ? {
-        clientMessageId: composition.input.detail.clientMessageId,
-        timestamp: composition.input.at,
-        questionReply: composition.input.detail.message.metadata.questionReply,
+      submission: submittedInput && questionReply ? {
+        clientMessageId: submittedInput.detail.clientMessageId,
+        timestamp: submittedInput.at,
+        questionReply,
       } : undefined,
       attachments: [...preparedAttachments],
       excludedOrdinals: excluded,
