@@ -3,15 +3,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect } from 'playwright/test';
 import { authenticateChromiumContext, createChromiumFixture } from '../support/chromium-fixture.js';
+import { originalFontCss } from '../support/font-proof-sources.js';
 
 const root = resolve(import.meta.dirname, '../..');
 const output = resolve(process.argv[2] ?? '/projects/font-optimization-evidence/application');
 await mkdir(output, { recursive: true });
 const sources: { file: string }[] = await Bun.file(join(root, 'scripts/fonts/sources.json')).json();
-const originalFaces = sources.map(({ file }) => {
-  const family = file.startsWith('Inter') ? 'Inter' : file.startsWith('JetBrains') ? 'JetBrains Mono' : 'Departure Mono';
-  return `@font-face {font-family:'${family}';src:url('/__font_proof/${file}');font-style:${file.includes('Italic') ? 'italic' : 'normal'};font-weight:${family === 'Inter' ? '100 900' : family === 'JetBrains Mono' ? '100 800' : '400'};font-display:swap;}`;
-}).join('\n');
+const originalFaces = originalFontCss(sources, '/__font_proof');
 const samples = {
   ascii: '# Font proof\n\nAVATAR To office affine -> != ===. “Quoted text”—a dash…\n\n*Italic text with **bold inside italics**.*\n\n```js\nconst result = items.filter(value => value !== null);\n// A code comment\n```',
   accents: '# Font proof\n\nCafé déjà vu. ĀČĎĒĢŁŊŒŘŠŤŪŽ. AV ÁV A\u0301V To Tô. Straße Œuvre. Ĳ\u0301 ĳ\u0301 Ƃ\u0301 Ƅ\u0301 ı\u0301 ø\u0301 ð\u0301 ƂA ƄA.\n\n*Italics with **bold café ĀŽ** inside.*\n\n```js\nconst café = "café"; // ĀŽ\n```',
