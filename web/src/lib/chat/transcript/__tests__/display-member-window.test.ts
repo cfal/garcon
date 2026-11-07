@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { BashToolUseMessage } from '$shared/chat-types';
-import type { DisplayDescriptor, GroupDescriptor } from '$shared/transcript-display-contract';
+import type { DisplayDescriptor, GroupDescriptor, RowDescriptor } from '$shared/transcript-display-contract';
 import { displayCutsKey } from '$shared/transcript-display-contract';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DisplayBodyStore } from '../display-body-store.js';
@@ -76,6 +76,71 @@ it('updates an appended group summary and continuation without admitting the new
 	await vi.advanceTimersByTimeAsync(5000);
 	expect(f.api.window).toHaveBeenCalledTimes(2);
 	expect(f.api.members).toHaveBeenCalledTimes(2);
+});
+
+it.each(['current-head', 'newer-watermark', 'preparation-retry'] as const)('keeps a visible expanded tail after pressured trimming and a %s append', async update => {
+	vi.useFakeTimers();
+	const base = group(39951, 40000);
+	const whole = { ...base, base: { ...base.base, openAtWatermark: true } };
+	const row = (ordinal: number): RowDescriptor => ({ kind: 'row', ordinal, messageType: 'assistant-message',
+		layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null });
+	let sourceHead = 40000;
+	let items: DisplayDescriptor[] = [row(39950), whole];
+	const f = fixture(items);
+	f.api.window.mockImplementation(async request => {
+		const certificate = { ...displayCertificate(displayOpen('chat-1', 'view-1', sourceHead), request.profile),
+			cutsKey: displayCutsKey(request.cuts) };
+		const admitted = items.slice(-request.limit);
+		const first = admitted[0];
+		const after = first.kind === 'row' ? first.ordinal - 1 : first.fragment.after;
+		return { ...displayWindow(admitted, certificate), interval: { after, through: certificate.watermark },
+			cutPlacements: request.cuts.map(cut => ({ id: cut.id, placement: cut.afterOrdinal >= after ? 'inline' : 'detached' })),
+			earlier: { kind: 'more', cursor: { certificate, boundaryOrdinal: after + 1 } } };
+	});
+	f.controller.configure(displayProfile, [
+		{ id: 'trimmed-input', afterOrdinal: 39949, anchorRule: 'raw-position' },
+		{ id: 'retained-input', afterOrdinal: 39950, anchorRule: 'raw-position' },
+	]);
+	await f.controller.refresh();
+	await f.controller.expand(whole);
+	const pressure = vi.spyOn(f.bodies, 'activeOverBudget', 'get').mockReturnValue(true);
+	try {
+		f.controller.trim(whole.firstMember, whole.lastMember, f.controller.snapshot.expansions[0].page.ordinals);
+		expect(f.controller.snapshot.window?.items).toEqual([whole]);
+		const previous = f.controller.snapshot.expansions[0];
+		const closed = { ...whole, base: { ...whole.base, openAtWatermark: false } };
+		const appended = [row(40001)];
+		sourceHead = 40001;
+		if (update === 'newer-watermark') appended.push(row(++sourceHead));
+		items = [row(39950), closed, ...appended];
+		if (update === 'preparation-retry') f.api.window.mockResolvedValueOnce({ kind: 'lagging',
+			...f.controller.snapshot.window!.certificate, sourceHead, preparedThrough: 40000, errorCode: null, retryAfterMs: 1000 });
+		f.api.bodies.mockClear();
+		f.controller.observeHead('view-1', 40001);
+		await vi.advanceTimersByTimeAsync(250);
+		if (update === 'preparation-retry') {
+			expect(f.controller.snapshot.window?.items).toEqual([whole]);
+			appended.push(row(++sourceHead));
+			items = [row(39950), closed, ...appended];
+			f.controller.observeHead('view-1', sourceHead);
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(f.api.window.mock.calls.at(-1)?.[0].requiredThrough).toBe(40001);
+		}
+		const current = f.controller.snapshot.window!;
+		expect(current.items).toEqual([closed, ...appended]);
+		expect(current.certificate.watermark).toBe(sourceHead);
+		expect(current.interval).toEqual({ after: 39950, through: sourceHead });
+		expect(current.earlier).toEqual({ kind: 'more', cursor: { certificate: current.certificate, boundaryOrdinal: 39951 } });
+		expect(current.cutPlacements).toEqual([{ id: 'trimmed-input', placement: 'detached' }, { id: 'retained-input', placement: 'inline' }]);
+		expect(f.controller.snapshot.expansions[0]).toMatchObject({ openedAt: previous.openedAt,
+			anchorOrdinal: previous.anchorOrdinal, page: { ordinals: previous.page.ordinals } });
+		const hydrated: Awaited<ReturnType<TranscriptDisplayApi['bodies']>>[] = await Promise.all(f.api.bodies.mock.results.map(result => result.value));
+		expect(hydrated.flatMap(response => response.bodies.map(body => body.ordinal))).toEqual(appended.map(item => item.ordinal));
+		const reads = update === 'preparation-retry' ? 3 : 2;
+		expect(f.api.window.mock.calls.map(([request]) => request.anchor)).toEqual(Array.from({ length: reads }, () => ({ kind: 'newest' })));
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(f.api.window).toHaveBeenCalledTimes(reads);
+	} finally { pressure.mockRestore(); }
 });
 
 it('retains one bounded anchor window across parking and overlapping filters', async () => {

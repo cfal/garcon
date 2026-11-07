@@ -528,10 +528,10 @@ export class DisplayWindowController {
 			if (atWatermark !== undefined) watermarkRequest = { atWatermark };
 			else if (fresh) watermarkRequest = { requiredThrough: goal };
 			const currentWindow = this.#snapshot.window;
-			// Live following refreshes the resident tail without repeatedly readmitting trimmed history.
-			const retainTailSize = mode === 'replace' && anchor.kind === 'newest' && this.#pinned && this.#navigationEpoch === null
+			// Live following preserves the resident floor without readmitting trimmed history.
+			const retainTail = mode === 'replace' && anchor.kind === 'newest' && this.#pinned && this.#navigationEpoch === null
 				&& !this.#needsReplace() && currentWindow?.earlier.kind === 'more' && currentWindow.later.kind === 'exhausted-through-watermark';
-			const limit = mode === 'details' ? 1 : retainTailSize ? Math.min(50, currentWindow.items.length || 50) : 50;
+			const limit = mode === 'details' ? 1 : 50;
 			const response = await this.api.window({ ...identity, profile, cuts, anchor, limit,
 				...watermarkRequest }, signal);
 			this.#assertCurrent(signal, epoch);
@@ -569,6 +569,16 @@ export class DisplayWindowController {
 				return 'loaded';
 			}
 			let window = response;
+			if (retainTail) {
+				const items = response.items.filter(item => descriptorInterval(item).through > currentWindow.interval.after);
+				if (items.length > 0 && items.length < response.items.length) {
+					const after = descriptorInterval(items[0]).after;
+					window = { ...response, items, interval: { ...response.interval, after },
+						earlier: { kind: 'more', cursor: { certificate: response.certificate, boundaryOrdinal: after + 1 } },
+						cutPlacements: response.cutPlacements.map(cut => ({ ...cut, placement: cuts.some(anchor => anchor.id === cut.id
+							&& anchor.afterOrdinal >= after && anchor.afterOrdinal <= response.interval.through) ? cut.placement : 'detached' })) };
+				}
+			}
 			const previous = this.#snapshot.window;
 			if (mode !== 'replace' && previous) {
 				this.#assertCertificate(previous.certificate, response.certificate);

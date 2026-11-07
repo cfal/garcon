@@ -996,12 +996,14 @@ async function trimmedEditTail() {
 
 it('refreshes a growing final group without readmitting trimmed rows or hydrating collapsed members', async () => {
 	const { controller, read, requested, retained, append } = await trimmedEditTail();
+	const before = controller.snapshot.window!;
 	requested.length = 0;
 	append();
 	await vi.advanceTimersByTimeAsync(250);
-	expect(read.mock.calls.at(-1)?.[0].limit).toBe(retained.length);
 	expect(controller.snapshot.window?.items.slice(0, -1)).toEqual(retained.slice(0, -1));
 	expect(controller.snapshot.window?.items.at(-1)).toMatchObject({ count: 3, totals: { fileEdits: 3 } });
+	expect(controller.snapshot.window?.interval).toEqual({ after: before.interval.after, through: before.interval.through + 1 });
+	expect(controller.snapshot.window?.earlier).toMatchObject({ kind: 'more', cursor: { boundaryOrdinal: before.interval.after + 1 } });
 	expect(requested).toEqual(retained.flatMap(item => item.kind === 'row' ? [item.ordinal] : []));
 	expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
 	await vi.advanceTimersByTimeAsync(5000);
