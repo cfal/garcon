@@ -30,13 +30,13 @@ describe('scheduled prompt new-chat preparation', () => {
 		await controller.open(task);
 		expect(render).toHaveBeenCalledOnce();
 		expect(open).not.toHaveBeenCalled();
-		expect(controller.openingPromptId).toBe(task.id);
+		expect(controller.isOpening).toBe(true);
 		const chatId = resolve();
 		await opening;
 		expect(open).toHaveBeenCalledWith({ prefill: `Review ${chatId}`, prospectiveChatId: chatId,
 			startup: scheduledPromptStartup(task, undefined, undefined) });
 		expect(task).toEqual(original);
-		expect(controller.openingPromptId).toBeNull();
+		expect(controller.isOpening).toBe(false);
 	});
 
 	it.each(['closed', 'superseded', 'cancelled'] as const)('ignores late rendering after %s', async reason => {
@@ -50,6 +50,33 @@ describe('scheduled prompt new-chat preparation', () => {
 		expect(open).not.toHaveBeenCalled();
 		expect(controller.error).toBeNull();
 		if (reason === 'cancelled') expect(render.mock.calls[0][1]?.signal?.aborted).toBe(true);
+	});
+
+	it.each(['resolved', 'rejected'] as const)('keeps a replacement request pending after the cancelled request %s', async outcome => {
+		const { task, pending, render, controller, open, resolve } = fixture();
+		const firstOpening = controller.open(task);
+		controller.cancel();
+		expect(controller.isOpening).toBe(false);
+		const replacement = Promise.withResolvers<RenderScheduledPromptResponse>();
+		render.mockReturnValueOnce(replacement.promise);
+		const nextOpening = controller.open(task);
+		expect(controller.isOpening).toBe(true);
+
+		if (outcome === 'resolved') resolve();
+		else pending.reject(new Error('Cancelled render failure'));
+		await firstOpening;
+		expect(controller.isOpening).toBe(true);
+		expect(controller.error).toBeNull();
+		expect(open).not.toHaveBeenCalled();
+		await controller.open(task);
+		expect(render).toHaveBeenCalledTimes(2);
+
+		const chatId = render.mock.calls[1][0].chatId;
+		replacement.resolve({ success: true, chatId, expandedText: `Review ${chatId}` });
+		await nextOpening;
+		expect(controller.isOpening).toBe(false);
+		expect(open).toHaveBeenCalledOnce();
+		expect(open).toHaveBeenCalledWith(expect.objectContaining({ prospectiveChatId: chatId }));
 	});
 
 	it.each(['missing', 'changed'] as const)('rejects a %s target during preparation instead of publishing mixed configuration', async reason => {
@@ -70,7 +97,7 @@ describe('scheduled prompt new-chat preparation', () => {
 		pending.reject(new Error('Synthetic render failure'));
 		await opening;
 		expect(controller.error).toBe('Synthetic render failure');
-		expect(controller.openingPromptId).toBeNull();
+		expect(controller.isOpening).toBe(false);
 		expect(open).not.toHaveBeenCalled();
 	});
 

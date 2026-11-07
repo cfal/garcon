@@ -31,10 +31,10 @@
 		active: boolean;
 		onOpenChat: (chatId: string) => void;
 		onOpenInNewChat: (seed: NewChatDialogSeed) => void;
-		newChatRequestId?: number;
+		newChatRequestId: number;
 	}
 
-	let { active, onOpenChat, onOpenInNewChat, newChatRequestId = 0 }: Props = $props();
+	let { active, onOpenChat, onOpenInNewChat, newChatRequestId }: Props = $props();
 	const prompts = getScheduledPrompts();
 	const sessions = getChatSessions();
 	const executors = getExecutors();
@@ -42,14 +42,20 @@
 	function sourceChat(prompt: ScheduledPrompt) {
 		return prompt.target.type === 'existing-chat' ? sessions.byId[prompt.target.chatId] : undefined;
 	}
-	function executionPolicy(prompt: ScheduledPrompt) {
-		const chat = sourceChat(prompt);
+	function executionPolicy(chat: ChatSessionRecord | undefined) {
 		return chat ? modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy : undefined;
 	}
 	const newChat = new ScheduledPromptNewChatController({
-		get active() { return active; },
-		get newChatRequestId() { return newChatRequestId; },
-		startupFor: (prompt) => scheduledPromptStartup(prompt, sourceChat(prompt), executionPolicy(prompt)),
+		get active() {
+			return active;
+		},
+		get newChatRequestId() {
+			return newChatRequestId;
+		},
+		startupFor(prompt) {
+			const chat = sourceChat(prompt);
+			return scheduledPromptStartup(prompt, chat, executionPolicy(chat));
+		},
 		open: (seed) => onOpenInNewChat(seed),
 	});
 	$effect(() => {
@@ -59,10 +65,11 @@
 	});
 	$effect(() => {
 		if (!active) return;
-		const executorIds = new Set(prompts.prompts.flatMap((prompt) => {
+		const executorIds = new Set<ChatSessionRecord['executorId']>();
+		for (const prompt of prompts.prompts) {
 			const chat = sourceChat(prompt);
-			return chat && executors.isReady(chat.executorId) ? [chat.executorId] : [];
-		}));
+			if (chat && executors.isReady(chat.executorId)) executorIds.add(chat.executorId);
+		}
 		untrack(() => {
 			for (const executorId of executorIds) {
 				void modelCatalog.forExecutor(executorId).refreshIfStale().catch(() => {});
@@ -261,10 +268,7 @@
 		<div class="space-y-2" aria-live="polite">
 			{#each prompts.prompts as scheduledPrompt, index (scheduledPrompt.id)}
 				<svelte:boundary>
-					{@const existingChat =
-						scheduledPrompt.target.type === 'existing-chat'
-							? sessions.byId[scheduledPrompt.target.chatId]
-							: undefined}
+					{@const existingChat = sourceChat(scheduledPrompt)}
 					{@const lastRun = lastRunByPromptId.get(scheduledPrompt.id)}
 					<ScheduledPromptRow
 						{scheduledPrompt}
@@ -277,7 +281,7 @@
 						lastRunChatId={lastRun?.outcome === 'created-chat'
 							? openableChatId(lastRun.chatId)
 							: null}
-						disabled={movingPromptId !== null || togglingPromptId !== null || newChat.openingPromptId !== null}
+						disabled={movingPromptId !== null || togglingPromptId !== null || newChat.isOpening}
 						toggling={togglingPromptId === scheduledPrompt.id}
 						onToggle={() => void toggle(scheduledPrompt)}
 						onEdit={() => openEdit(scheduledPrompt)}
@@ -286,7 +290,7 @@
 							removePrompt = scheduledPrompt;
 						}}
 						onMove={(direction) => void move(scheduledPrompt, direction)}
-						onOpenInNewChat={canOpenScheduledPromptInNewChat(scheduledPrompt, existingChat, executionPolicy(scheduledPrompt))
+						onOpenInNewChat={canOpenScheduledPromptInNewChat(scheduledPrompt, existingChat, executionPolicy(existingChat))
 							? () => void newChat.open(scheduledPrompt) : undefined}
 						{onOpenChat}
 					/>

@@ -255,21 +255,12 @@
 		);
 	}
 
-	function reseed(): void {
+	onMount(() => {
 		markdown.reset();
-		snippetExpansion.cancel();
-		promptRefinement.abort();
 		prospectiveChatId = seed?.prospectiveChatId ?? null;
-		composerEditor.reset();
 		snippetInteractionGeneration += 1;
-		snippetPalette.reset();
 		form.reseed(seed?.prefill ?? '');
 		if (seed?.startup) form.restoreStartup(seed.startup);
-		pendingTextareaFocus = true;
-	}
-
-	onMount(() => {
-		reseed();
 		form.loadSettingsAndModels();
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;
@@ -635,7 +626,11 @@
 		);
 	}
 	const displayedFormError = $derived(
-		form.modelSelectionError ?? form.agentSelectionError ?? form.executionModeError ?? form.attachmentError ?? form.error,
+		form.modelSelectionError ??
+			form.agentSelectionError ??
+			form.executionModeError ??
+			form.attachmentError ??
+			form.error,
 	);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';

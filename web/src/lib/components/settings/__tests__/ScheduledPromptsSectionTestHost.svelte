@@ -44,4 +44,4 @@
 	setChatSessions(sessions);
 </script>
 
-<ScheduledPromptsSection active={true} {onOpenChat} {onOpenInNewChat} />
+<ScheduledPromptsSection active={true} {onOpenChat} {onOpenInNewChat} newChatRequestId={0} />
