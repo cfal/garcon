@@ -1931,8 +1931,18 @@ model context, carryover, or export.
   outstanding submission IDs, and fetches only their bounded working windows.
   It never transfers the raw gap. An acknowledged optimistic body remains on
   each surface until that surface represents its canonical replacement.
-  User navigation/recall, resend summaries, and subagent summaries have explicit
-  paged read folds rather than depending on resident member bodies. Subagent
+  User navigation/recall and subagent summaries have explicit paged read folds
+  rather than depending on resident member bodies. Resend chips and the Reload
+  warning read one complete source-qualified candidate snapshot through the
+  existing registry resend fold, independent of display preparation. The snapshot
+  preserves full candidate text and attachment names; its count and aggregate
+  bytes are an explicit exception to display-window budgets. Reads occur only
+  on selected idle-composer demand and source/activation changes, never through
+  body-bearing broadcasts or display-readiness polling. Processing suppression
+  and source failure are distinct from a successful empty candidate list.
+  Exclusions remain ephemeral and survive refresh while their candidates remain
+  offered; view/process replacement invalidates them. No resend pager or new
+  composer status control is required. Subagent
   generations publish atomically and paged stale results require explicit
   refresh. Plan presentation is process-ephemeral, canonically addressed,
   independently readable during index lag, and dismissed by an instance/view
