@@ -466,24 +466,28 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	prepareChatSurfaceTransfer(transfer: ChatSurfaceTransfer): WorkspacePublication {
 		const token = ++this.#surfaceTransferToken;
 		const destinationPanel = this.#panels.get(transfer.destinationSurfaceId);
-		const destinationTarget = this.#restoreTargets.get(transfer.destinationSurfaceId);
-		const preserveDestination =
-			destinationPanel?.chatId === transfer.chatId || destinationTarget?.chatId === transfer.chatId;
-		const target = this.#captureSurfaceTransferTarget(transfer);
+		const preserveDestination = destinationPanel?.chatId === transfer.chatId;
+		const pendingSource = this.#pendingSurfaceTransfers.get(transfer.sourceSurfaceId);
+		// A hidden Chat can move again before its previous transfer is consumed.
+		const source = pendingSource?.chatId === transfer.chatId ? pendingSource : null;
+		const target = source?.target ?? this.#captureSurfaceTransferTarget(transfer);
+		let previous: PendingSurfaceTransfer | undefined;
 
 		return {
 			publish: () => {
 				if (preserveDestination) return;
+				previous = this.#pendingSurfaceTransfers.get(transfer.destinationSurfaceId);
 				this.#pendingSurfaceTransfers.set(transfer.destinationSurfaceId, {
 					token,
 					chatId: transfer.chatId,
 					target,
-					sourceSurfaceId: transfer.sourceSurfaceId,
+					sourceSurfaceId: source?.sourceSurfaceId ?? transfer.sourceSurfaceId,
 				});
 			},
 			rollback: () => {
 				if (this.#pendingSurfaceTransfers.get(transfer.destinationSurfaceId)?.token === token) {
-					this.#pendingSurfaceTransfers.delete(transfer.destinationSurfaceId);
+					if (previous) this.#pendingSurfaceTransfers.set(transfer.destinationSurfaceId, previous);
+					else this.#pendingSurfaceTransfers.delete(transfer.destinationSurfaceId);
 				}
 			},
 		};

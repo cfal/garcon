@@ -875,6 +875,178 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it.each([
+		{ retain: false, reverse: false },
+		{ retain: false, reverse: true },
+		{ retain: true, reverse: false },
+		{ retain: true, reverse: true },
+	])(
+		'exchanges both Chat reading targets and active intervals: %j',
+		async ({ retain, reverse }) => {
+			const { cache, registry } = fixture({ retainInactiveWindows: () => retain });
+			const ids = ['chat-view:window-left', 'chat-view:window-right'] as const;
+			cache.replace('chat-1', 'view-1', [message(1)], 1, null);
+			cache.replace('chat-2', 'view-2', [message(1)], 1, null);
+			registry.reconcile(ids.map((id, index) => presentation(id, `chat-${index + 1}`)));
+			const originals = ids.map((id, index) => {
+				const panel = registry.panel(id)!;
+				const target = {
+					kind: 'row' as const,
+					transcriptViewId: `view-${index + 1}`,
+					ordinal: 1,
+					viewportOffset: -17 - index * 10,
+				};
+				panel.attachPresentation(port(target));
+				if (retain) {
+					registry.applyCommittedBatch({
+						chatId: panel.chatId,
+						transcriptViewId: target.transcriptViewId,
+						messages: Array.from({ length: 4_099 }, (_, offset) => message(offset + 2)),
+						firstOrdinal: 2,
+						lastOrdinal: 4_100,
+						resendCandidates: [],
+						noticeRevision: 0,
+					});
+					panel.transcript.revealAllLoadedMessages();
+				}
+				return { panel, target };
+			});
+			const publications = ids.map((id, index) =>
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: id,
+					destinationSurfaceId: ids[1 - index],
+					chatId: originals[index].panel.chatId,
+				}),
+			);
+			for (const publication of publications) publication.publish();
+			const visible = ids.map((id, index) => presentation(id, originals[1 - index].panel.chatId));
+			if (reverse) visible.reverse();
+			registry.prepareForReconcile(visible);
+			registry.reconcile(visible);
+			for (const [index, id] of ids.entries()) {
+				const incoming = originals[1 - index];
+				const panel = registry.panel(id)!;
+				const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+				panel.attachPresentation(port({ kind: 'end' }));
+				await vi.waitFor(() =>
+					expect(jump).toHaveBeenCalledWith(
+						{
+							chatId: incoming.panel.chatId,
+							transcriptViewId: incoming.target.transcriptViewId,
+							rowId: `${incoming.target.transcriptViewId}:1`,
+						},
+						{ viewportOffset: incoming.target.viewportOffset },
+					),
+				);
+				if (retain) {
+					expect(panel.transcript).toBe(incoming.panel.transcript);
+					expect(panel.transcript.entries).toHaveLength(4_100);
+				}
+			}
+			registry.destroy();
+			cache.flush();
+		},
+	);
+
+	it('preserves pending reading targets across repeated swaps from a hidden source', async () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		const left = 'chat-view:window-left';
+		const right = 'chat-view:window-right';
+		registry.reconcile([presentation(left, 'chat-1'), presentation(right, 'chat-2')]);
+		const first = registry.panel(left)!;
+		const second = registry.panel(right)!;
+		first.attachPresentation(
+			port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -11 }),
+		);
+		second.attachPresentation(
+			port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -22 }),
+		);
+		const hidden = [presentation(right, 'chat-2')];
+		registry.prepareForReconcile(hidden);
+		registry.reconcile(hidden);
+		for (const [incoming, outgoing] of [
+			['chat-1', 'chat-2'],
+			['chat-2', 'chat-1'],
+		]) {
+			const publications = [
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: left,
+					destinationSurfaceId: right,
+					chatId: incoming,
+				}),
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: right,
+					destinationSurfaceId: left,
+					chatId: outgoing,
+				}),
+			];
+			for (const publication of publications) publication.publish();
+			const visible = [presentation(right, incoming)];
+			registry.prepareForReconcile(visible);
+			registry.reconcile(visible);
+			const panel = registry.panel(right)!;
+			expect(panel.transcript).toBe(incoming === 'chat-1' ? first.transcript : second.transcript);
+			const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+			const viewportOffset = incoming === 'chat-1' ? -11 : -22;
+			panel.attachPresentation(
+				port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset }),
+			);
+			await vi.waitFor(() =>
+				expect(jump).toHaveBeenCalledWith(
+					{ chatId: incoming, transcriptViewId: 'view-1', rowId: 'view-1:1' },
+					{ viewportOffset },
+				),
+			);
+		}
+		registry.reconcile([presentation(left, 'chat-1'), presentation(right, 'chat-2')]);
+		expect(registry.panel(left)?.transcript).toBe(first.transcript);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('restores the previous pending transfer when a replacement rolls back', async () => {
+		const { cache, registry } = fixture();
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-2'),
+		]);
+		registry
+			.panel('chat-view:window-left')!
+			.attachPresentation(
+				port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -11 }),
+			);
+		registry
+			.prepareChatSurfaceTransfer({
+				sourceSurfaceId: 'chat-view:window-left',
+				destinationSurfaceId: 'chat-view:window-hidden',
+				chatId: 'chat-1',
+			})
+			.publish();
+		const replacement = registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-right',
+			destinationSurfaceId: 'chat-view:window-hidden',
+			chatId: 'chat-2',
+		});
+		replacement.publish();
+		replacement.rollback();
+		registry.reconcile([presentation('chat-view:window-hidden', 'chat-1')]);
+		const panel = registry.panel('chat-view:window-hidden')!;
+		const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		panel.attachPresentation(port({ kind: 'end' }));
+		await vi.waitFor(() =>
+			expect(jump).toHaveBeenCalledWith(
+				{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' },
+				{ viewportOffset: -11 },
+			),
+		);
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('transfers a captured row target when a Chat move rekeys its surface', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
