@@ -107,11 +107,9 @@ describe('WorkspaceTransitionArbiter', () => {
 		expect(observed).toBe(true);
 	});
 
-	it('does not adopt a failed publication or roll back a committed success-hook failure', async () => {
+	it('does not adopt a failed publication', async () => {
 		const layout = createWorkspaceLayoutStore();
-		const afterPublish = vi.fn(() => {
-			throw new Error('success observer failed');
-		});
+		const afterPublish = vi.fn();
 		const publishFailed = vi.fn();
 		const mutations = [
 			{ type: 'set-window-chat' as const, windowId: 'window-main' as const, chatId: 'chat-a' },
@@ -120,14 +118,36 @@ describe('WorkspaceTransitionArbiter', () => {
 		await expect(failing.commit(mutations, { afterPublish, publishFailed })).resolves.toBe(false);
 		expect(afterPublish).not.toHaveBeenCalled();
 		expect(publishFailed).toHaveBeenCalledOnce();
-		publishFailed.mockClear();
-		const arbiter = new WorkspaceTransitionArbiter(layout, layout);
-		await expect(arbiter.commit(mutations, { afterPublish, publishFailed })).rejects.toThrow(
-			'success observer failed',
-		);
-		expect(layout.surface('chat-view:window-main')).toMatchObject({ chatId: 'chat-a' });
-		expect(publishFailed).not.toHaveBeenCalled();
 	});
+
+	it.each([false, true])(
+		'does not roll back a committed success-hook failure (no-op: %s)',
+		async (noOp) => {
+			const layout = createWorkspaceLayoutStore();
+			const before = layout.snapshot;
+			const afterPublish = vi.fn(() => {
+				throw new Error('success observer failed');
+			});
+			const publishFailed = vi.fn();
+			const mutations = noOp
+				? []
+				: [
+						{
+							type: 'set-window-chat' as const,
+							windowId: 'window-main' as const,
+							chatId: 'chat-a',
+						},
+					];
+			const arbiter = new WorkspaceTransitionArbiter(layout, layout);
+			await expect(arbiter.commit(mutations, { afterPublish, publishFailed })).rejects.toThrow(
+				'success observer failed',
+			);
+			expect(afterPublish).toHaveBeenCalledWith(layout.snapshot);
+			if (noOp) expect(layout.snapshot).toBe(before);
+			else expect(layout.surface('chat-view:window-main')).toMatchObject({ chatId: 'chat-a' });
+			expect(publishFailed).not.toHaveBeenCalled();
+		},
+	);
 
 	it('replans a guaranteed removal after a compare-and-publish miss', async () => {
 		const layout = createWorkspaceLayoutStore();

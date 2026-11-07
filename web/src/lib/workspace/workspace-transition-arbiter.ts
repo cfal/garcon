@@ -35,25 +35,18 @@ export class WorkspaceTransitionArbiter {
 			hooks.publishFailed?.();
 		};
 		return this.#queue.enqueue(() => {
-			let committed = false;
+			let publishedSnapshot: WorkspaceLayoutSnapshot;
 			try {
 				while (true) {
 					const revision = this.layout.revision;
 					const snapshot = this.layout.snapshot;
 					const mutations = typeof plan === 'function' ? plan(snapshot) : plan;
-					if (mutations.length === 0) {
-						hooks.beforePublish?.(snapshot, snapshot);
-						committed = true;
-						hooks.afterPublish?.(snapshot);
-						return true;
-					}
-					const next = reduceWorkspaceLayout(snapshot, mutations);
+					const hasMutations = mutations.length > 0;
+					const next = hasMutations ? reduceWorkspaceLayout(snapshot, mutations) : snapshot;
 					hooks.beforePublish?.(next, snapshot);
-					const published = this.commitPort.publish(revision, next);
-					if (published) {
-						committed = true;
-						hooks.afterPublish?.(next);
-						return true;
+					if (!hasMutations || this.commitPort.publish(revision, next)) {
+						publishedSnapshot = next;
+						break;
 					}
 					notifyFailure();
 					if (!options.retryPublishFailure) {
@@ -62,8 +55,6 @@ export class WorkspaceTransitionArbiter {
 					failureNotified = false;
 				}
 			} catch (error) {
-				// Published layouts cannot be rolled back by a failed success observer.
-				if (committed) throw error;
 				try {
 					notifyFailure();
 				} catch (rollbackError) {
@@ -73,6 +64,9 @@ export class WorkspaceTransitionArbiter {
 				}
 				throw error;
 			}
+			// Success observers run outside rollback handling: the layout is already committed.
+			hooks.afterPublish?.(publishedSnapshot);
+			return true;
 		});
 	}
 }
