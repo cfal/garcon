@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ScheduledPromptNewChatController, type ScheduledPromptNewChatControllerDeps } from '../scheduled-prompt-new-chat-controller.svelte';
 import { scheduledPromptStartup } from '../scheduled-prompt-new-chat';
 import type { RenderScheduledPromptResponse } from '$shared/scheduled-prompt-render';
-import { scheduledNewChat } from './scheduled-prompt-new-chat-fixture';
+import { scheduledNewChat, sourceChat } from './scheduled-prompt-new-chat-fixture';
 
 function fixture() {
 	const task = scheduledNewChat();
@@ -79,16 +79,28 @@ describe('scheduled prompt new-chat preparation', () => {
 		expect(open).toHaveBeenCalledWith(expect.objectContaining({ prospectiveChatId: chatId }));
 	});
 
-	it.each(['missing', 'changed'] as const)('rejects a %s target during preparation instead of publishing mixed configuration', async reason => {
-		const { task, deps, controller, open, resolve } = fixture();
+	it.each(['missing', 'routing', 'path', 'settings', 'tags'] as const)('rejects an existing-chat source with changed %s during rendering', async change => {
+		const { deps, controller, open, resolve } = fixture();
+		let chat: ReturnType<typeof sourceChat> | undefined = sourceChat();
+		const settings = { mode: 'saved' };
+		chat.agentSettings = { ...chat.agentSettings, values: settings };
+		const task = { ...scheduledNewChat(), target: {
+			type: 'existing-chat' as const, chatId: chat.id, busyBehavior: 'queue' as const,
+		} };
+		deps.startupFor.mockImplementation(() => scheduledPromptStartup(task, chat, 'conversation'));
 		const opening = controller.open(task);
-		deps.startupFor.mockReturnValue(reason === 'missing' ? null : {
-			...scheduledPromptStartup(task, undefined, undefined)!, model: 'changed-model',
-		});
+		switch (change) {
+			case 'missing': chat = undefined; break;
+			case 'routing': chat.modelEndpointId = 'replacement-endpoint'; break;
+			case 'path': chat.projectPath = '/worker/other-project'; break;
+			case 'settings': settings.mode = 'changed'; break;
+			case 'tags': chat.tags.push('changed'); break;
+		}
 		resolve();
 		await opening;
 		expect(open).not.toHaveBeenCalled();
 		expect(controller.error).toContain('target settings changed');
+		expect(controller.isOpening).toBe(false);
 	});
 
 	it('keeps preparation failures actionable and never opens a partial seed', async () => {

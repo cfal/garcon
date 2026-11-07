@@ -153,6 +153,37 @@ describe('ScheduledPromptsSection', () => {
 		else expect(screen.getByRole('alert').textContent).toBe('Synthetic render failure');
 	});
 
+	it.each(['closed', 'superseded', 'unmounted'] as const)('aborts rendering when the section is %s and ignores a late reply', async reason => {
+		const pending = Promise.withResolvers<void>();
+		const onOpenInNewChat = vi.fn();
+		vi.mocked(renderScheduledPrompt).mockImplementation(async request => {
+			await pending.promise;
+			return { success: true, chatId: request.chatId, expandedText: 'Late rendered task' };
+		});
+		const view = render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor], chats: [],
+			prompts: [prompt('a', 'Review task', newChat())], onOpenInNewChat,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new chat' }));
+		expect(renderScheduledPrompt).toHaveBeenCalledOnce();
+		const signal = vi.mocked(renderScheduledPrompt).mock.calls[0][1]?.signal;
+		expect(signal?.aborted).toBe(false);
+		try {
+			if (reason === 'closed') await view.rerender({ active: false });
+			if (reason === 'superseded') await view.rerender({ newChatRequestId: 1 });
+			if (reason === 'unmounted') view.unmount();
+			await tick();
+			expect(signal?.aborted).toBe(true);
+		} finally {
+			pending.resolve();
+		}
+		await vi.mocked(renderScheduledPrompt).mock.results[0].value;
+		await tick();
+		expect(onOpenInNewChat).not.toHaveBeenCalled();
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
 	it('shows where each prompt runs once a remote executor is configured', () => {
 		render(ScheduledPromptsSectionTestHost, {
 			executors: [localExecutor, remoteExecutor],

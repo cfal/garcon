@@ -66,6 +66,25 @@ describe('scheduled prompts API contract', () => {
 		expect(JSON.parse(options.body)).toEqual({ expectedRevision: 1, id: paused.id, enabled: false });
 	});
 
+	it('propagates render cancellation through the authenticated HTTP client', async () => {
+		const abort = new AbortController();
+		const cancelled = new DOMException('Rendering cancelled', 'AbortError');
+		fetchMock.mockImplementation((_url: string, options: RequestInit) => new Promise<Response>((_resolve, reject) => {
+			options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+		}));
+		const rendering = renderScheduledPrompt(
+			{ chatId: parseChatId('1000000000000001'), prompt: 'For {{chat_id}}' },
+			{ signal: abort.signal },
+		);
+		const rejection = expect(rendering).rejects.toBe(cancelled);
+		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
+		abort.abort(cancelled);
+		await rejection;
+		expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
 	it('posts a relative scheduled prompt and normalizes the created prompt and snapshot', async () => {
 		fetchMock.mockResolvedValue(
 			Response.json({

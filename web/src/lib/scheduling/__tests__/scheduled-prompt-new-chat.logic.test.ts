@@ -21,15 +21,27 @@ describe('scheduled prompt startup copy', () => {
 		expect(task).toEqual(original);
 	});
 
-	it('copies current existing-chat settings with default new-chat preambles', () => {
+	it.each([
+		{ apiProviderId: null, modelEndpointId: null, modelProtocol: null },
+		{ apiProviderId: 'provider-a', modelEndpointId: 'endpoint-a', modelProtocol: 'openai-compatible' as const },
+	])('copies current existing-chat routing %j with isolated settings and default preambles', routing => {
 		const chat = sourceChat();
+		Object.assign(chat, routing);
+		const nested = { value: 'saved' };
+		chat.agentSettings = { ...chat.agentSettings, values: { nested } };
 		const task = { ...scheduledNewChat(), target: { type: 'existing-chat' as const, chatId: chat.id, busyBehavior: 'queue' as const } };
-		expect(scheduledPromptStartup(task, chat, 'conversation')).toEqual({
+		const seed = scheduledPromptStartup(task, chat, 'conversation')!;
+		expect(seed).toEqual({
 			executorId: chat.executorId, agentId: chat.agentId, model: chat.model,
-			projectPath: chat.projectPath, apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			projectPath: chat.projectPath, ...routing,
 			permissionMode: chat.permissionMode, thinkingMode: chat.thinkingMode,
 			agentSettingsById: { codex: chat.agentSettings }, tags: chat.tags, preambleChoice: { mode: 'defaults' },
 		});
+		expect(seed.agentSettingsById.codex.values.nested).not.toBe(chat.agentSettings.values.nested);
+		nested.value = 'changed';
+		chat.tags.push('changed');
+		expect(seed.agentSettingsById.codex.values.nested).toEqual({ value: 'saved' });
+		expect(seed.tags).toEqual(['source']);
 	});
 
 	it('rejects missing, incomplete, unguarded literal, and stale guarded targets', () => {

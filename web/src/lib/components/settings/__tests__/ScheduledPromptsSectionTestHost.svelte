@@ -20,6 +20,8 @@
 		onOpenChat = () => {},
 		onOpenInNewChat = () => {},
 		modelCatalog,
+		active = true,
+		newChatRequestId = 0,
 	}: {
 		executors: readonly ExecutorSnapshot[];
 		prompts: ScheduledPrompt[];
@@ -28,6 +30,8 @@
 		onOpenChat?: (chatId: string) => void;
 		onOpenInNewChat?: (seed: NewChatDialogSeed) => void;
 		modelCatalog?: ModelCatalogStore;
+		active?: boolean;
+		newChatRequestId?: number;
 	} = $props();
 
 	setExecutorsTestContext(untrack(() => executors));
@@ -44,4 +48,4 @@
 	setChatSessions(sessions);
 </script>
 
-<ScheduledPromptsSection active={true} {onOpenChat} {onOpenInNewChat} newChatRequestId={0} />
+<ScheduledPromptsSection {active} {onOpenChat} {onOpenInNewChat} {newChatRequestId} />
