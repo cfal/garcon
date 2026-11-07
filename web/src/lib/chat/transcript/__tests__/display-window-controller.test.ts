@@ -967,6 +967,81 @@ it.each([false, true])('retains the pinned tail when the visible range trails be
 	} finally { pressure.mockRestore(); }
 });
 
+async function trimmedEditTail() {
+	vi.useFakeTimers();
+	const rows = Array.from({ length: 49 }, (_, index) => ({ kind: 'row' as const, ordinal: index + 1,
+		messageType: 'user-message' as const, layout: 'standard' as const, estimatedBodyBytes: 100, permissionOccurrenceId: null }));
+	let count = 2;
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => {
+		const nextCertificate = { ...certificate, watermark: request.requiredThrough ?? certificate.watermark,
+			profileKey: displayProfileKey(request.profile), cutsKey: displayCutsKey(request.cuts) };
+		const tail: GroupDescriptor = { ...group, firstMember: 50, lastMember: 49 + count, count,
+			base: { afterBreaker: 49, beforeBreaker: nextCertificate.watermark + 1, firstMember: 50, lastMember: 49 + count, openAtWatermark: true },
+			fragment: { after: 49, through: nextCertificate.watermark }, totals: { commands: 0, fileReads: 0, fileEdits: count, other: 0 }, categoryOrder: ['fileEdits'] };
+		const items = [...rows, tail].slice(-request.limit);
+		const after = items[0].kind === 'row' ? items[0].ordinal - 1 : items[0].fragment.after;
+		return { ...window(), certificate: nextCertificate, sourceHead: nextCertificate.watermark, items,
+			interval: { after, through: nextCertificate.watermark },
+			earlier: after ? { kind: 'more', cursor: { certificate: nextCertificate, boundaryOrdinal: after + 1 } } : { kind: 'exhausted-through-watermark' } };
+	});
+	const { controller, requested } = setup({ window: read });
+	await controller.refresh();
+	expect(read.mock.calls[0][0].limit).toBe(50);
+	controller.trim(45, 51);
+	const retained = controller.snapshot.window!.items;
+	expect(retained.length).toBeLessThan(50);
+	expect(controller.snapshot.window).toMatchObject({ earlier: { kind: 'more' }, later: { kind: 'exhausted-through-watermark' } });
+	return { controller, read, requested, retained, append() { count++; controller.observeHead('view', certificate.watermark + count - 2); } };
+}
+
+it('refreshes a growing final group without readmitting trimmed rows or hydrating collapsed members', async () => {
+	const { controller, read, requested, retained, append } = await trimmedEditTail();
+	requested.length = 0;
+	append();
+	await vi.advanceTimersByTimeAsync(250);
+	expect(read.mock.calls.at(-1)?.[0].limit).toBe(retained.length);
+	expect(controller.snapshot.window?.items.slice(0, -1)).toEqual(retained.slice(0, -1));
+	expect(controller.snapshot.window?.items.at(-1)).toMatchObject({ count: 3, totals: { fileEdits: 3 } });
+	expect(requested).toEqual(retained.flatMap(item => item.kind === 'row' ? [item.ordinal] : []));
+	expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(read).toHaveBeenCalledTimes(2);
+});
+
+it.each(['navigation', 'profile', 'cuts'] as const)('readmits a full window after trimming for explicit %s replacement', async action => {
+	const { controller, read } = await trimmedEditTail();
+	if (action === 'navigation') await controller.navigateWindow('latest');
+	else {
+		controller.configure(action === 'profile' ? { ...profile, showThinking: false } : profile,
+			action === 'cuts' ? [{ id: 'synthetic-input', afterOrdinal: 49, anchorRule: 'raw-position' }] : []);
+		await vi.advanceTimersByTimeAsync(1);
+	}
+	expect(read).toHaveBeenCalledTimes(2);
+	expect(read.mock.calls.at(-1)?.[0].limit).toBe(50);
+	expect(controller.snapshot.window?.items).toHaveLength(50);
+});
+
+it('keeps full-sized live reads for short histories so new rows do not displace visible context', async () => {
+	vi.useFakeTimers();
+	const initial = window().items;
+	let items = initial;
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => {
+		const watermark = request.requiredThrough ?? certificate.watermark;
+		return { ...window(), certificate: { ...certificate, watermark }, sourceHead: watermark,
+			interval: { after: 0, through: watermark }, items: items.slice(-request.limit) };
+	});
+	const { controller } = setup({ window: read });
+	await controller.refresh();
+	items = [...initial, { kind: 'row', ordinal: certificate.watermark + 1, messageType: 'user-message',
+		layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }];
+	controller.observeHead('view', certificate.watermark + 1);
+	await vi.advanceTimersByTimeAsync(250);
+	expect(read.mock.calls.at(-1)?.[0].limit).toBe(50);
+	expect(controller.snapshot.window?.items).toEqual(items);
+	expect(controller.snapshot.window?.items.slice(0, -1)).toEqual(initial);
+	expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
+});
+
 it.each(['window', 'bodies', 'gate'])('never publishes an anchored refresh after follow resumes during its held %s', async stage => {
 	vi.useFakeTimers();
 	const received = Promise.withResolvers<void>();
@@ -1106,16 +1181,20 @@ it('retains a member protected after hydration began until its protection is rel
 it('requests newest when following resumes from a current-watermark historical window', async () => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>()
-		.mockResolvedValueOnce({ ...window(), later: { kind: 'more', cursor: { certificate, boundaryOrdinal: 40001 } } })
+		.mockResolvedValueOnce({ ...window(), items: [group], interval: { after: 1, through: 40001 },
+			earlier: { kind: 'more', cursor: { certificate, boundaryOrdinal: 2 } },
+			later: { kind: 'more', cursor: { certificate, boundaryOrdinal: 40001 } } })
 		.mockResolvedValue(window());
 	const { controller } = setup({ window: read });
-	controller.setReadingAnchor(1, false);
+	controller.setReadingAnchor(2, false);
 	await controller.refresh();
 	await vi.advanceTimersByTimeAsync(250);
 	expect(read).toHaveBeenCalledOnce();
 	controller.setReadingAnchor(null, true);
 	await vi.advanceTimersByTimeAsync(0);
 	expect(read.mock.calls.at(-1)?.[0].anchor).toEqual({ kind: 'newest' });
+	expect(read.mock.calls.at(-1)?.[0].limit).toBe(50);
+	expect(read).toHaveBeenCalledTimes(2);
 	expect(controller.snapshot.window?.later.kind).toBe('exhausted-through-watermark');
 });
 
