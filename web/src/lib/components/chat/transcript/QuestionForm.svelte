@@ -2,7 +2,6 @@
 	import type { AskUserQuestionPrompt } from '$shared/chat-types';
 	import {
 		askUserQuestionAnswersValidationError,
-		ASK_USER_QUESTION_TEXT_MAX_BYTES,
 		normalizeAskUserQuestionDecisionResponse,
 		type AskUserQuestionAnsweredResponse,
 		type AskUserQuestionAnswerPayload,
@@ -186,7 +185,6 @@
 						<span>{notesLabel}</span>
 						<textarea
 							rows="2"
-							maxlength={ASK_USER_QUESTION_TEXT_MAX_BYTES}
 							value={answerText(question.id)}
 							oninput={(event) => setNote(question.id, event.currentTarget.value)}
 							class="block w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-2 text-base text-foreground"
@@ -198,7 +196,6 @@
 					{/if}
 					<input
 						type={question.isSecret ? 'password' : 'text'}
-						maxlength={ASK_USER_QUESTION_TEXT_MAX_BYTES}
 						aria-label={notesMode(question) ? notesLabel : question.prompt}
 						value={answerText(question.id)}
 						readonly={!isPending}

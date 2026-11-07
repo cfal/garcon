@@ -12,6 +12,7 @@ import {
 } from '$shared/chat-types';
 import PermissionRequestRowTestHost from './PermissionRequestRowTestHost.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { ASK_USER_QUESTION_TEXT_MAX_BYTES } from '$shared/ask-user-question-response';
 
 const TS = '2026-07-02T00:00:00.000Z';
 
@@ -160,6 +161,37 @@ describe('PermissionRequestRow', () => {
 		expect(screen.queryByRole('textbox')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
 		expect(onDecision.mock.calls.at(-1)?.[1].response.answers).toEqual([{ questionId: 'Which mode?', selectedOptionIds: ['Fast'] }]);
+	});
+
+	it.each([
+		{ notes: false, isSecret: false },
+		{ notes: false, isSecret: true },
+		{ notes: true, isSecret: false },
+		{ notes: true, isSecret: true },
+	])('retains over-limit text and blocks submission, notes=$notes secret=$isSecret', async ({ notes, isSecret }) => {
+		const onDecision = vi.fn();
+		render(PermissionRequestRowTestHost, {
+			request: askUserQuestionRequest({
+				allowFreeText: true, allowNotes: notes, isSecret,
+				options: notes ? [{ id: 'Careful', label: 'Careful' }] : [],
+			}),
+			onDecision,
+		});
+		if (notes) await fireEvent.click(screen.getByRole('radio', { name: 'Careful' }));
+		const input = screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(notes ? 'Notes (optional)' : 'Which mode?');
+		const submit = screen.getByRole<HTMLButtonElement>('button', { name: /submit answer/i });
+		expect(input.hasAttribute('maxlength')).toBe(false);
+		for (const character of ['x', '\u00e9']) {
+			const limit = ASK_USER_QUESTION_TEXT_MAX_BYTES / new TextEncoder().encode(character).byteLength;
+			const oversized = character.repeat(limit + 1);
+			await fireEvent.input(input, { target: { value: oversized } });
+			expect(input.value).toBe(oversized);
+			expect(submit.disabled).toBe(true);
+			await fireEvent.submit(input.closest('form')!);
+			expect(onDecision).not.toHaveBeenCalled();
+			await fireEvent.input(input, { target: { value: character.repeat(limit) } });
+			expect(submit.disabled).toBe(false);
+		}
 	});
 
 	it('renders resolved secret text masked and read-only', () => {

@@ -7,6 +7,7 @@ import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { codexFinalAnswerMessage } from '../../support/fake-codex-model.js';
 import { parseServerWsMessage } from '../../../common/ws-events.js';
+import { ASK_USER_QUESTION_TEXT_MAX_BYTES } from '../../../common/ask-user-question-response.js';
 
 for (const width of [1440, 390]) {
   test(`async answers preserve independent drafts and chat surfaces at ${width}px`, async () => {
@@ -40,7 +41,17 @@ for (const width of [1440, 390]) {
         const originalEditor = await editor.elementHandle();
         await editor.fill('Independent composer draft');
         await page.getByRole('radio', { name: 'Production', exact: true }).check();
-        await page.getByRole('textbox', { name: 'Deadline?', exact: true }).fill('Friday afternoon');
+        const deadline = page.getByRole('textbox', { name: 'Deadline?', exact: true });
+        for (const character of ['x', '\u00e9']) {
+          const limit = ASK_USER_QUESTION_TEXT_MAX_BYTES / Buffer.byteLength(character);
+          const oversized = character.repeat(limit + 1);
+          await deadline.fill('');
+          await deadline.focus();
+          await page.keyboard.insertText(oversized);
+          await browserExpect(deadline).toHaveValue(oversized);
+          await browserExpect(page.getByRole('button', { name: 'Send answer', exact: true }).nth(1)).toBeDisabled();
+        }
+        await deadline.fill('Friday afternoon');
         const composerTop = (await composer.boundingBox())!.y;
 
         async function selectChat(id: string) {
