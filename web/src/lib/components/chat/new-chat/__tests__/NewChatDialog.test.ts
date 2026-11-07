@@ -10,6 +10,7 @@ import * as clientChatId from '$shared/client-chat-id';
 import NewChatDialogTestHost from './NewChatDialogTestHost.svelte';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { parseChatId } from '$shared/chat-id';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 
@@ -179,8 +180,82 @@ describe('NewChatDialog', () => {
 		expect(document.querySelector('textarea')?.value).not.toBe('Replacement');
 	});
 
-	it('uses one prospective ID for expansion, draft creation, and navigation', async () => {
+	it('retains edited text and its chat ID, but resets startup settings on ordinary reopen', async () => {
+		const shell = createAppShellStore();
 		const onCreateDraft = vi.fn();
+		render(NewChatDialogTestHost, { shell, initialSeed: scheduledSeed, onCreateDraft });
+		const edited = `Edited ${scheduledSeed.prefill}`;
+		const textarea = await screen.findByPlaceholderText('How can I help you today?');
+		await fireEvent.input(textarea, { target: { value: edited } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		shell.openNewChatDialog();
+		await waitFor(() => expect(screen.getByPlaceholderText('How can I help you today?')).toHaveProperty('value', edited));
+		const send = screen.getByRole('button', { name: 'Start session' });
+		await waitFor(() => expect(send).toHaveProperty('disabled', false));
+		await fireEvent.click(send);
+		expect(onCreateDraft).toHaveBeenCalledWith(expect.objectContaining({
+			id: scheduledSeed.prospectiveChatId,
+			projectPath: '/workspace',
+			startup: expect.objectContaining({
+				firstMessage: edited, permissionMode: 'default', thinkingMode: 'none', tags: undefined,
+			}),
+		}));
+		expect(onCreateDraft.mock.calls[0][0].startup.orderedPreambleIds).toBeUndefined();
+		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
+	});
+
+	it('preserves a retained prompt and existing chat when another tab has consumed its ID', async () => {
+		const shell = createAppShellStore();
+		const sessions = new ChatSessionsStore();
+		const onCreateDraft = vi.fn();
+		render(NewChatDialogTestHost, { shell, sessions, initialSeed: scheduledSeed, onCreateDraft });
+		const edited = `Edited ${scheduledSeed.prefill}`;
+		const textarea = await screen.findByPlaceholderText('How can I help you today?');
+		await fireEvent.input(textarea, { target: { value: edited } });
+		sessions.upsertFromServer([{
+			id: scheduledSeed.prospectiveChatId!, agentId: 'claude', model: 'opus',
+			title: 'Synthetic existing chat', projectPath: '/workspace', orderGroup: 'normal', tags: [],
+			permissionMode: 'default', thinkingMode: 'none', parentChat: null, agentOwnershipEpoch: 'epoch-a',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null }, preview: { lastMessage: '' },
+			isPinned: false, isArchived: false, isActive: true, isProcessing: false, processingPhase: null,
+			isUnread: false, canReloadFromNativeHistory: false,
+		}]);
+		const existing = sessions.byId[scheduledSeed.prospectiveChatId!];
+		const start = screen.getByRole('button', { name: 'Start session' });
+		await waitFor(() => expect(start).toHaveProperty('disabled', false));
+		await fireEvent.click(start);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onCreateDraft).not.toHaveBeenCalled();
+		expect(navigation.gotoChat).not.toHaveBeenCalled();
+		expect(sessions.byId[existing.id]).toEqual(existing);
+		expect(shell.newChatDialogOpen).toBe(true);
+		expect(textarea).toHaveProperty('value', edited);
+		expect(screen.getByText(/chat ID is already in use/)).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		shell.openNewChatDialog();
+		await waitFor(() => expect(screen.getByPlaceholderText('How can I help you today?')).toHaveProperty('value', edited));
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Start session' })).toHaveProperty('disabled', false));
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onCreateDraft).not.toHaveBeenCalled();
+		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
+		const reopenedTextarea = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(reopenedTextarea, { target: { value: '' } });
+		await fireEvent.input(reopenedTextarea, { target: { value: 'Replacement prompt' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onCreateDraft).toHaveBeenCalledWith(expect.objectContaining({
+			id: '1787471053739199',
+			startup: expect.objectContaining({ firstMessage: 'Replacement prompt' }),
+		}));
+		expect(sessions.byId[existing.id]).toEqual(existing);
+	});
+
+	it.each([undefined, scheduledSeed])('retains one prospective ID through snippet expansion, reopen, and Start (seed: %j)', async initialSeed => {
+		const onCreateDraft = vi.fn();
+		const shell = createAppShellStore();
+		const expectedId = initialSeed?.prospectiveChatId ?? '1787471053739199';
 		vi.mocked(snippetsApi.expandSnippet).mockImplementationOnce(async (request) => {
 			if (request.context.type !== 'new-chat') throw new Error('Expected new-chat context');
 			return {
@@ -195,6 +270,7 @@ describe('NewChatDialog', () => {
 			};
 		});
 		render(NewChatDialogTestHost, {
+			shell, initialSeed,
 			snippetTemplate: 'Continue chat {{chat_id}}',
 			onCreateDraft,
 		});
@@ -212,7 +288,12 @@ describe('NewChatDialog', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
-		await waitFor(() => expect(messageInput.value).toBe('Continue chat 1787471053739199'));
+		await waitFor(() => expect(messageInput.value).toBe(`Continue chat ${expectedId}`));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		shell.openNewChatDialog();
+		await waitFor(() => expect(screen.getByPlaceholderText('How can I help you today?')).toHaveProperty('value', `Continue chat ${expectedId}`));
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Start session' })).toHaveProperty('disabled', false));
 		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
 
 		await waitFor(() => expect(onCreateDraft).toHaveBeenCalledTimes(1));
@@ -221,20 +302,20 @@ describe('NewChatDialog', () => {
 				context: {
 					type: 'new-chat',
 					executorId: 'local',
-					chatId: '1787471053739199',
-					projectPath: '/workspace',
+					chatId: expectedId,
+					projectPath: initialSeed?.startup?.projectPath ?? '/workspace',
 				},
 			}),
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(onCreateDraft).toHaveBeenCalledWith(
 			expect.objectContaining({
-				id: '1787471053739199',
-				startup: expect.objectContaining({ firstMessage: 'Continue chat 1787471053739199' }),
+				id: expectedId,
+				startup: expect.objectContaining({ firstMessage: `Continue chat ${expectedId}` }),
 			}),
 		);
-		expect(navigation.gotoChat).toHaveBeenCalledWith('1787471053739199');
-		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
+		expect(navigation.gotoChat).toHaveBeenCalledWith(expectedId);
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(initialSeed ? 0 : 1);
 	});
 
 	it('keeps the small-screen dialog within the safe viewport', async () => {

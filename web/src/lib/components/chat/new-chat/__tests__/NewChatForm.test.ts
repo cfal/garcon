@@ -1215,7 +1215,7 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
-	it('mints the prospective ID lazily and clears it on a new open request', async () => {
+	it('mints the prospective ID lazily and retains it with the draft on a new open request', async () => {
 		stubMatchMedia(false);
 		vi.mocked(clientChatId.createClientChatId)
 			.mockReset()
@@ -1245,6 +1245,7 @@ describe('NewChatForm', () => {
 		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
 		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 		const replacementInput = screen.getByPlaceholderText('How can I help you today?');
+		expect(replacementInput).toHaveProperty('value', 'edited prompt');
 		await fireEvent.input(replacementInput, { target: { value: 'after reseed' } });
 		await waitFor(() => {
 			expect(
@@ -1253,10 +1254,10 @@ describe('NewChatForm', () => {
 		});
 		await fireEvent.keyDown(replacementInput, { key: 'Enter' });
 
-		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(2);
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 		expect(onStartChat).toHaveBeenCalledWith(
 			expect.objectContaining({ firstMessage: 'after reseed' }),
-			RESEEDED_CHAT_ID,
+			PROSPECTIVE_CHAT_ID,
 		);
 	});
 

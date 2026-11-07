@@ -20,6 +20,7 @@
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
+	import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import type { PreamblesSnapshot } from '$shared/preambles';
@@ -116,9 +117,7 @@
 	setRemoteSettings(remoteSettings);
 	untrack(() => onRemoteSettings?.(remoteSettings));
 
-	setChatSessions({
-		orderedChats: [],
-	} as never);
+	setChatSessions(new ChatSessionsStore());
 
 	setNotifications(notifications);
 	const preambleDeps = untrack(() => (loadPreambles ? { get: loadPreambles } : {}));

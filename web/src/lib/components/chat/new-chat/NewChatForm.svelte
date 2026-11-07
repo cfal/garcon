@@ -86,7 +86,6 @@
 		matchesSelectableSnippetExpansion,
 		type SelectableSnippet,
 	} from '$lib/snippets/selectable-snippet.js';
-	import { createClientChatId } from '$shared/client-chat-id';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -163,7 +162,6 @@
 
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
-	let prospectiveChatId = $state<ChatId | null>(null);
 	const initialContentReady = $derived(form.settingsLoaded);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
@@ -257,9 +255,8 @@
 
 	onMount(() => {
 		markdown.reset();
-		prospectiveChatId = seed?.prospectiveChatId ?? null;
 		snippetInteractionGeneration += 1;
-		form.reseed(seed?.prefill ?? '');
+		form.reseed(seed?.prefill ?? '', seed?.prospectiveChatId);
 		if (seed?.startup) form.restoreStartup(seed.startup);
 		form.loadSettingsAndModels();
 		const mql = window.matchMedia('(max-width: 768px)');
@@ -429,17 +426,12 @@
 		composerEditor.updateSelection(selection);
 	}
 
-	function ensureProspectiveChatId(): ChatId {
-		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
-		return prospectiveChatId;
-	}
-
 	function expansionContext() {
 		const projectPath = form.nonblankPath;
 		if (projectPath) {
 			return {
 				type: 'new-chat' as const,
-				chatId: ensureProspectiveChatId(),
+				chatId: promptDraft.ensureProspectiveChatId(),
 				projectPath,
 				executorId: form.executorId,
 			};
@@ -564,7 +556,12 @@
 		}
 		const config = form.buildConfig();
 		if (!config) return;
-		onStartChat(config, ensureProspectiveChatId());
+		const chatId = promptDraft.ensureProspectiveChatId();
+		if (sessions.byId[chatId]) {
+			form.error = m.chat_new_chat_errors_chat_id_in_use();
+			return;
+		}
+		onStartChat(config, chatId);
 		promptDraft.discardSubmitted();
 	}
 

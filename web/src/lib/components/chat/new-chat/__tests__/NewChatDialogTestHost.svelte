@@ -23,6 +23,7 @@
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
+	import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
@@ -33,9 +34,10 @@
 		onCreateDraft?: (draft: unknown) => void;
 		shell?: AppShellStore;
 		initialSeed?: NewChatDialogSeed;
+		sessions?: ChatSessionsStore;
 	}
 
-	let { snippetTemplate = null, onCreateDraft = () => {}, shell, initialSeed }: Props = $props();
+	let { snippetTemplate = null, onCreateDraft = () => {}, shell, initialSeed, sessions: suppliedSessions }: Props = $props();
 
 	const appShell = untrack(() => shell ?? createAppShellStore());
 	setCanonicalWorkspaceLayout();
@@ -73,12 +75,13 @@
 			}),
 		}),
 	);
-	setChatSessions({
-		orderedChats: [],
-		createDraft(draft: unknown) {
-			onCreateDraft(draft);
-		},
-	} as never);
+	const sessions = untrack(() => suppliedSessions ?? new ChatSessionsStore());
+	const createDraft = sessions.createDraft.bind(sessions);
+	sessions.createDraft = draft => {
+		onCreateDraft(draft);
+		createDraft(draft);
+	};
+	setChatSessions(sessions);
 	setWorkspaceCoordinator({
 		focusChat: () => Promise.resolve(),
 	} as never);

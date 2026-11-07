@@ -32,6 +32,7 @@ import {
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
 import type { NewChatStartupSeed } from './new-chat-seed';
 import { resolveNewChatModelSelection } from './new-chat-model-selection';
+import type { ChatId } from '$shared/chat-id';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -825,9 +826,9 @@ export class NewChatFormState {
 	}
 
 	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
-	reseed(prefill: string): void {
+	reseed(prefill: string, prospectiveChatId?: ChatId): void {
 		this.#pathCompletion.reset();
-		const retained = this.#options.promptDraft?.seed(prefill);
+		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
 		this.#images.images = [...(retained?.attachments ?? [])];
 		this.#contentRevision += 1;

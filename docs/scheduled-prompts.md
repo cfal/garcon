@@ -14,6 +14,14 @@ The row menu supports **Move to top**, **Move to bottom**, and **Open in new cha
 Opening prepares an editable prompt without running or changing the schedule.
 Runtime variables expand once using the prospective new chat ID and controller
 time, shared with snippet expansion; subsequent edits are sent as ordinary text.
+Retained unsent text keeps its prospective chat ID across closing and reloading.
+An ordinary New Chat reopen restores that text and ID, not the copied startup
+settings; the form uses its normal defaults and recents.
+Clearing all prompt content releases the ID for a new prompt. Start blocks an
+ID already known to this tab, preserving the text instead of changing the
+rendered ID. This is best-effort protection: simultaneous starts of the same
+retained draft across tabs are not coordinated. The server rejects duplicate
+IDs, but the losing tab's unsent edits may not be retained.
 Saved new-chat execution settings and preamble choices are copied. Existing-chat
 tasks copy the current execution settings, without history, and use New Chat's
 default preambles. Missing or stale literal targets cannot be copied. Explicit
