@@ -49,7 +49,7 @@ describe('display surface registry', () => {
 		await registry.loadChatSnapshot('chat-1');
 		registry.upsertOptimisticInput('chat-1', pendingInput);
 		registry.appendServerNotice('chat-1', 'error', 'Old-view error');
-		registry.replaceResendCandidates('chat-1', [{ ordinal: 1, preview: 'Old prompt', timestamp: DISPLAY_TIME, attachmentCount: 0 }]);
+		registry.replaceResendCandidates('chat-1', [{ ordinal: 1, content: 'Old prompt', attachmentNames: [] }]);
 		registry.excludeResendCandidate('chat-1', 1);
 		if (restarted) registry.resetServerInstance('instance-2');
 		api.replace([displayRow(1)], displayOpen('chat-1', 'replacement-view', 1, restarted ? 'instance-2' : 'instance-1'));
@@ -58,6 +58,22 @@ describe('display surface registry', () => {
 		expect(overlays.forChat('chat-1').notices).toEqual([]);
 		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([]);
 		expect(registry.panel(left)!.transcript.transcriptViewId).toBe('replacement-view');
+	});
+	it('clears process-qualified resend state without discarding optimistic recovery on restart', async () => {
+		const { registry, overlays } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		registry.upsertOptimisticInput('chat-1', pendingInput);
+		for (const chatId of ['chat-1', 'chat-2']) {
+			registry.replaceResendCandidates(chatId, [{ ordinal: 1, content: 'Synthetic input', attachmentNames: [] }]);
+			registry.excludeResendCandidate(chatId, 1);
+		}
+		registry.resetServerInstance('instance-2');
+		for (const chatId of ['chat-1', 'chat-2']) {
+			expect(overlays.forChat(chatId).resendCandidates).toEqual([]);
+			expect(overlays.forChat(chatId).excludedResendOrdinals).toEqual([]);
+		}
+		expect(overlays.forChat('chat-1').optimisticInputs).toEqual([pendingInput]);
 	});
 	it('clears status notices only on a new head while retaining unproven diagnostics', async () => {
 		const { registry, overlays } = fixture();

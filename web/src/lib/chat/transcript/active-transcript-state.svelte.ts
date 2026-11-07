@@ -1,6 +1,6 @@
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import { untrack } from 'svelte';
-import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { ResendCandidate } from '$shared/chat-view';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { DisplayCut, DisplayProfile, GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
@@ -168,7 +168,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const retained = this.#renderModel.items.filter(item => item.kind === 'message' && item.ordinal !== undefined && protectedOrdinals.has(item.ordinal));
 		return (this.display.window?.items.length ?? 0) + retained.length + this.display.protectedGroups.length + this.overlayRows.length;
 	}
-	get resendCandidates(): readonly UserRowSummary[] { return this.overlay.includedResendCandidates; }
+	get resendCandidates(): readonly ResendCandidate[] { return this.overlay.includedResendCandidates; }
 	get excludedResendOrdinals(): readonly number[] { return this.overlay.excludedResendOrdinals; }
 	getCursor(): ChatCursor { return { transcriptViewId: this.transcriptViewId, lastOrdinal: this.lastOrdinal }; }
 	forkSelection(ordinal: number) {
@@ -338,7 +338,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	upsertOptimisticUserInput(input: OptimisticUserInput): void { if (!this.#sharedOverlay) { this.#localOverlays.upsertOptimisticInput(input.chatId, input, this.lastOrdinal); this.#configureCuts(); } }
 	markOptimisticUserInputDelivered(id: string): void { if (!this.#sharedOverlay && this.activeChatId) this.#localOverlays.markOptimisticInputDelivered(this.activeChatId, id); }
 	clearOptimisticUserInput(id: string): void { if (!this.#sharedOverlay && this.activeChatId) { this.#localOverlays.clearOptimisticInput(this.activeChatId, id); this.#configureCuts(); } }
-	setResendCandidates(candidates: readonly UserRowSummary[]): void { if (!this.#sharedOverlay && this.activeChatId) this.#localOverlays.replaceResendCandidates(this.activeChatId, candidates); }
+	setResendCandidates(candidates: readonly ResendCandidate[]): void { if (!this.#sharedOverlay && this.activeChatId) this.#localOverlays.replaceResendCandidates(this.activeChatId, candidates); }
 	excludeResendCandidate(ordinal: number): void { if (!this.#sharedOverlay && this.activeChatId) this.#localOverlays.excludeResendCandidate(this.activeChatId, ordinal); }
 	clearResendExclusions(): void { if (!this.#sharedOverlay && this.activeChatId) this.#localOverlays.clearResendExclusions(this.activeChatId); }
 }

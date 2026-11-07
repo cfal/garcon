@@ -80,7 +80,6 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
-	import TranscriptSummaryPager from '../transcript/TranscriptSummaryPager.svelte';
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
@@ -97,7 +96,6 @@
 		onThinkingModeChange,
 		onAgentSettingChange,
 		resendCandidates = [],
-		resendPaging,
 		recallSource = null,
 		onRecallError = () => {},
 		recallIdentity = null,
@@ -843,9 +841,6 @@
 					candidates={resendCandidates}
 					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
 				/>
-				{#if resendPaging}
-					<TranscriptSummaryPager paging={resendPaging} />
-				{/if}
 			{/if}
 			<ComposerAttachmentList
 				files={composerState.images}

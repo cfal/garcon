@@ -1,4 +1,4 @@
-import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { ResendCandidate } from '$shared/chat-view';
 import type { ChatReloadProgress } from '$shared/ws-events';
 import type {
 	ChatReloadOptions,
@@ -7,8 +7,7 @@ import type {
 
 interface PendingReload {
 	readonly chatId: string;
-	readonly candidates: readonly UserRowSummary[];
-	readonly totalCandidates: number;
+	readonly candidates: readonly ResendCandidate[];
 	readonly summaryIncomplete: boolean;
 	readonly complete: () => void;
 	readonly fail: (error: unknown) => void;
@@ -31,10 +30,9 @@ export class ReloadChatDialogState {
 		return this.#pending?.chatId ?? null;
 	}
 
-	get candidates(): readonly UserRowSummary[] {
+	get candidates(): readonly ResendCandidate[] {
 		return this.#pending?.candidates ?? [];
 	}
-	get totalCandidates(): number { return this.#pending?.totalCandidates ?? 0; }
 	get summaryIncomplete(): boolean { return this.#pending?.summaryIncomplete ?? false; }
 
 	get running(): boolean {
@@ -50,9 +48,9 @@ export class ReloadChatDialogState {
 	}
 
 	/** Opens the confirmation. Settles when it is dismissed or the reload ends. */
-	request(chatId: string, candidates: readonly UserRowSummary[], summary: { total?: number; incomplete?: boolean } = {}): Promise<void> {
+	request(chatId: string, candidates: readonly ResendCandidate[], summary: { incomplete?: boolean } = {}): Promise<void> {
 		return new Promise<void>((complete, fail) => {
-			this.#pending = { chatId, candidates, totalCandidates: summary.total ?? candidates.length, summaryIncomplete: summary.incomplete ?? false, complete, fail };
+			this.#pending = { chatId, candidates, summaryIncomplete: summary.incomplete ?? false, complete, fail };
 		});
 	}
 

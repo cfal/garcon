@@ -227,7 +227,7 @@ export class TranscriptDisplayService {
     this.#pump();
   }
 
-  async auxiliary(kind: 'user-rows' | 'resend' | 'subagents', request: DisplayAuxiliaryRequest, signal?: AbortSignal) {
+  async auxiliary(kind: 'user-rows' | 'subagents', request: DisplayAuxiliaryRequest, signal?: AbortSignal) {
     const job = this.#admit(request.chatId, request.transcriptViewId, true), sourceHead = this.#head(job).ordinal;
     if (kind === 'subagents') { job.auxiliaryRequested = true; this.#pump(); }
     const frontier = kind === 'subagents' ? job.auxiliaryFrontier : job.frontier;

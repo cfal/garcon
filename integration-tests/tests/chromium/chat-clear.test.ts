@@ -6,7 +6,7 @@ import type { Route } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { displayWindowRequest } from '../../support/transcript-display-browser.js';
-import { parseResendSummaryPage, parseSubagentSummaryPage } from '../../../common/transcript-display-auxiliary.js';
+import { parseResendSnapshot, parseSubagentSummaryPage } from '../../../common/transcript-display-auxiliary.js';
 
 test('Notes formats and Clear before message preserve the selected suffix and composer draft', async () => {
   await withChromiumFixture('notes-clear-before', async ({ page, integration, assertNoBrowserErrors }, phase) => {
@@ -183,14 +183,15 @@ test('confirmed Shell clear works on desktop and mobile while AI clear is reject
       try {
         // Settles independent summaries before forcing only the window read across Reload.
         const summaries = [
-          ['resend', parseResendSummaryPage],
+          ['resend', parseResendSnapshot],
           ['subagents', parseSubagentSummaryPage],
         ] as const;
         const summariesReady = summaries.map(([operation, parse]) => page.waitForResponse(async response => {
           if (!response.url().endsWith(`/transcript-display/${operation}`) || response.status() !== 200) return false;
           const summary = parse(await response.json());
           return summary.chatId === chatId && summary.transcriptViewId === cleared.transcriptViewId
-            && summary.kind === 'available' && summary.watermark === summary.sourceHead;
+            && ('processingPhase' in summary ? summary.processingPhase === null
+              : summary.kind === 'available' && summary.watermark === summary.sourceHead);
         }));
         await Promise.all([page.reload(), ...summariesReady]);
         await browserExpect(editor).toBeVisible();

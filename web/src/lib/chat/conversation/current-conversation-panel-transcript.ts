@@ -1,5 +1,5 @@
 import type { ChatMessage } from '$shared/chat-types';
-import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { ResendCandidate } from '$shared/chat-view';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import {
@@ -38,7 +38,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return this.#transcript().entries;
 	}
 
-	get resendCandidates(): readonly UserRowSummary[] {
+	get resendCandidates(): readonly ResendCandidate[] {
 		const chatId = this.options.getSelectedChatId();
 		return chatId ? (this.options.panels.overlayFor(chatId)?.includedResendCandidates ?? []) : [];
 	}
@@ -116,7 +116,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return this.getCursorForChat(chatId);
 	}
 
-	setResendCandidates(candidates: readonly UserRowSummary[]): void {
+	setResendCandidates(candidates: readonly ResendCandidate[]): void {
 		const chatId = this.options.getSelectedChatId();
 		if (chatId) this.options.panels.replaceResendCandidates(chatId, candidates);
 	}

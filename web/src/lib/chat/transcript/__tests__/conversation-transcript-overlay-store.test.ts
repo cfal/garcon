@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { ResendCandidate } from '$shared/chat-view';
 import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
-function candidate(ordinal: number): UserRowSummary {
-	return { ordinal, preview: `candidate-${ordinal}`, timestamp: '2026-01-01T00:00:00.000Z', attachmentCount: 0, presentation: undefined };
+function candidate(ordinal: number): ResendCandidate {
+	return { ordinal, content: `candidate-${ordinal}`, attachmentNames: [] };
 }
 
 function optimistic(clientMessageId: string) {
@@ -119,7 +119,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		]);
 	});
 
-	it('preserves exclusions across summary pages until explicitly reset', () => {
+	it('preserves exclusions while candidates remain offered and prunes them after a complete refresh', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		overlays.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);
 		overlays.excludeResendCandidate('chat-1', 1);
@@ -128,7 +128,9 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(overlays.forChat('chat-1').includedResendCandidates).toEqual([candidate(2)]);
 
 		overlays.replaceResendCandidates('chat-1', [candidate(2)]);
-		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([1]);
+		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([]);
+		overlays.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);
+		expect(overlays.forChat('chat-1').includedResendCandidates).toEqual([candidate(1), candidate(2)]);
 		overlays.clearResendExclusions('chat-1');
 		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([]);
 	});

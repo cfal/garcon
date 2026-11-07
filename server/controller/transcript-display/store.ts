@@ -5,7 +5,7 @@ import type { StoredLedgerRow } from '../ledger/codec.js';
 import { DISPLAY_POLICY_REVISION } from '../../../common/transcript-display-policy.js';
 import { invalidDisplayStore } from './errors.js';
 
-export const DISPLAY_STORE_FORMAT = 2;
+export const DISPLAY_STORE_FORMAT = 3;
 export interface DisplayManifest {
   chat_id: string;
   view_id: string;
@@ -121,8 +121,6 @@ CREATE TABLE public_tail (ordinal INTEGER PRIMARY KEY, message_type TEXT NOT NUL
 CREATE TABLE user_navigation (ordinal INTEGER PRIMARY KEY, preview TEXT NOT NULL, timestamp TEXT NOT NULL,
   nonblank INTEGER NOT NULL, attachment_count INTEGER NOT NULL, presentation_json TEXT) STRICT;
 CREATE INDEX user_recall ON user_navigation(ordinal) WHERE nonblank = 1;
-CREATE TABLE resend_boundary (ordinal INTEGER PRIMARY KEY) STRICT;
-CREATE TABLE resend_input (ordinal INTEGER PRIMARY KEY, rank INTEGER NOT NULL) STRICT;
 CREATE TABLE auxiliary_fact (ordinal INTEGER PRIMARY KEY, kind TEXT NOT NULL, payload_json TEXT NOT NULL) STRICT;
 CREATE INDEX auxiliary_kind ON auxiliary_fact(kind, ordinal);
 CREATE TABLE auxiliary_result (tool_id TEXT NOT NULL, ordinal INTEGER NOT NULL, payload_json TEXT NOT NULL,

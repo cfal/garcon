@@ -1,4 +1,4 @@
-import type { DisplayAuxiliaryIdentity, DisplayAuxiliaryRequest, ResendSummaryPage, SubagentSummaryPage, UserRowPage, UserRowSummary } from '../../../common/transcript-display-auxiliary.js';
+import type { DisplayAuxiliaryIdentity, DisplayAuxiliaryRequest, SubagentSummaryPage, UserRowPage, UserRowSummary } from '../../../common/transcript-display-auxiliary.js';
 import { parseUserMessagePresentation } from '../../../common/user-message-presentation.js';
 import type { SubagentReductionEntry } from '../../../common/subagent-management.js';
 import { DisplayStore } from './store.js';
@@ -14,18 +14,6 @@ export function queryUserRows(store: DisplayStore, request: DisplayAuxiliaryRequ
     WHERE ordinal < ? ${recall ? 'AND nonblank = 1' : ''} ORDER BY ordinal DESC LIMIT ?`,
     Math.min(request.beforeOrdinal ?? identity.watermark + 1, identity.watermark + 1), request.limit + 1);
   return { ...identity, kind: 'available', rows: rows.slice(0, request.limit).map(userSummary),
-    nextBeforeOrdinal: rows.length > request.limit ? rows[request.limit - 1].ordinal : null };
-}
-
-export function queryResend(store: DisplayStore, request: DisplayAuxiliaryRequest, identity: DisplayAuxiliaryIdentity): ResendSummaryPage {
-  store.requirePrepared(identity.watermark);
-  const boundary = store.get<{ ordinal: number }>('SELECT ordinal FROM resend_boundary WHERE ordinal <= ? ORDER BY ordinal DESC LIMIT 1', identity.watermark)?.ordinal ?? 0;
-  const lo = store.get<{ rank: number }>('SELECT rank FROM resend_input WHERE ordinal <= ? ORDER BY ordinal DESC LIMIT 1', boundary)?.rank ?? 0;
-  const hi = store.get<{ rank: number }>('SELECT rank FROM resend_input WHERE ordinal <= ? ORDER BY ordinal DESC LIMIT 1', identity.watermark)?.rank ?? 0;
-  const rows = store.all<UserRecord>(`SELECT u.* FROM resend_input r JOIN user_navigation u ON u.ordinal = r.ordinal
-    WHERE r.ordinal > ? AND r.ordinal < ? ORDER BY r.ordinal DESC LIMIT ?`,
-    boundary, Math.min(request.beforeOrdinal ?? identity.watermark + 1, identity.watermark + 1), request.limit + 1);
-  return { ...identity, kind: 'available', total: hi - lo, rows: rows.slice(0, request.limit).map(userSummary),
     nextBeforeOrdinal: rows.length > request.limit ? rows[request.limit - 1].ordinal : null };
 }
 

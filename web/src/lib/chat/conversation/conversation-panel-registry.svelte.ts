@@ -21,7 +21,7 @@ import {
 } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
 import type { ConversationLifecycleState } from './conversation-lifecycle-state.svelte.js';
-import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { ResendCandidate } from '$shared/chat-view';
 import { emptyResponseClassOrdinals, type ResponseClassOrdinals } from '$shared/transcript-display-events';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
@@ -788,6 +788,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.#serverInstanceId = serverInstanceId;
 		this.options.bodies.resetInstance(serverInstanceId);
 		if (!previous) return;
+		this.options.overlays.resetResendCandidates();
 		for (const [chatId, operation] of this.#snapshotLoads) {
 			if (chatId === openingChatId) continue;
 			operation.abort.abort();
@@ -867,7 +868,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.#applyOverlayMutation(chatId, this.options.overlays.clearResendExclusions(chatId));
 	}
 
-	replaceResendCandidates(chatId: string, candidates: readonly UserRowSummary[]): void {
+	replaceResendCandidates(chatId: string, candidates: readonly ResendCandidate[]): void {
 		this.#applyOverlayMutation(
 			chatId,
 			this.options.overlays.replaceResendCandidates(chatId, candidates),
