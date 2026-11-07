@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { asyncQuestionReplyText } from '@garcon/common/async-user-questions';
 import { FILE_CONTEXT_SEPARATOR } from '@garcon/common/file-mention-context';
+import { UserMessage } from '@garcon/common/chat-types';
 import { codexAsyncQuestions, codexQuestionReplyInput, codexHistoricalQuestionReply } from '../async-questions.js';
 import { convertCodexAppServerItem, convertCodexRawCodeModeItem } from '../app-server/converter.js';
 import { normalizeCodexJsonlEntry } from '../history-normalizer.js';
@@ -97,5 +98,56 @@ describe('Codex asynchronous questions', () => {
     expect(Buffer.byteLength(parsed.question)).toBe(512);
     expect(parsed.question).not.toContain('\n');
     expect(parsed.answer).toBe(reply.answer);
+  });
+
+  it.each([
+    {
+      name: 'app-server',
+      upstreamRequestId: ' client-1 ',
+      convert: text => convertCodexAppServerItem({
+        type: 'userMessage', id: 'input-1', clientId: ' client-1 ', content: [{ type: 'text', text }],
+      }, timestamp),
+    },
+    {
+      name: 'event message',
+      upstreamRequestId: 'client-1',
+      convert: text => normalizeCodexJsonlEntry({
+        type: 'event_msg', timestamp,
+        payload: { type: 'user_message', message: text, client_id: ' client-1 ' },
+      }).canonical,
+    },
+    {
+      name: 'response item',
+      upstreamRequestId: undefined,
+      convert: text => normalizeCodexJsonlEntry({
+        type: 'response_item', timestamp,
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+      }).fallbackUser,
+    },
+  ])('preserves $name history text, envelopes, and source-specific client IDs', ({ convert, upstreamRequestId }) => {
+    const metadata = upstreamRequestId ? { upstreamRequestId } : undefined;
+    const nativeReply = { questionItemId: reply.questionId, question: reply.question, answer: reply.answer };
+    const envelope = values => `<send_user_message_question_reply>${JSON.stringify(values)}</send_user_message_question_reply>`;
+    const fileContext = `${FILE_CONTEXT_SEPARATOR}Synthetic file contents`;
+    const readable = asyncQuestionReplyText(reply);
+    const text = '  Ordinary input\nwith whitespace.  ';
+    const malformed = '<send_user_message_question_reply>invalid</send_user_message_question_reply>';
+
+    expect(convert(` \n `)).toEqual([]);
+    expect(convert(text + fileContext)).toStrictEqual([new UserMessage(timestamp, text, undefined, metadata)]);
+    expect(convert(fileContext)).toStrictEqual([new UserMessage(timestamp, '', undefined, metadata)]);
+    expect(convert(malformed)).toStrictEqual([new UserMessage(timestamp, malformed, undefined, metadata)]);
+    expect(convert(envelope([nativeReply]) + fileContext)).toStrictEqual([
+      new UserMessage(timestamp, readable, undefined, { ...metadata, questionReply: reply }),
+    ]);
+    expect(convert(envelope([nativeReply, nativeReply]) + fileContext)).toStrictEqual([
+      new UserMessage(timestamp, `${readable}\n\n${readable}`, undefined, metadata ?? {}),
+    ]);
+  });
+
+  it.each([undefined, null, ''])('omits absent app-server client IDs without publishing live user echoes: %s', clientId => {
+    const item = { type: 'userMessage', id: 'input-1', clientId, content: [{ type: 'text', text: 'Input' }] };
+    expect(convertCodexAppServerItem(item, timestamp)).toStrictEqual([new UserMessage(timestamp, 'Input')]);
+    expect(convertCodexAppServerItem(item, timestamp, { includeUserMessages: false })).toEqual([]);
   });
 });

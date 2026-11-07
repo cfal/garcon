@@ -59,6 +59,20 @@ export function codexQuestionReplyInput(content: string, reply?: AsyncQuestionRe
   return content.slice(0, position) + envelope + content.slice(position + readable.length);
 }
 
+export function codexHistoricalUserMessage(
+  timestamp: string,
+  text: string,
+  upstreamRequestId?: string,
+): UserMessage {
+  const content = stripResolvedFileMentionContext(text);
+  return codexHistoricalQuestionReply(timestamp, content, upstreamRequestId) ?? new UserMessage(
+    timestamp,
+    content,
+    undefined,
+    upstreamRequestId ? { upstreamRequestId } : undefined,
+  );
+}
+
 export function codexHistoricalQuestionReply(
   timestamp: string, content: string, upstreamRequestId?: string,
 ): UserMessage | null {

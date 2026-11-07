@@ -3,7 +3,6 @@
 
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import {
-  UserMessage,
   AssistantMessage,
   ThinkingMessage,
   WebSearchToolUseMessage,
@@ -12,13 +11,12 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
-import { codexHistoricalQuestionReply } from './async-questions.js';
+import { codexHistoricalUserMessage } from './async-questions.js';
 import {
   convertCodexSubagentActivity,
   convertCodexInterAgentLifecycle,
   convertCodexSubagentLifecycleText,
 } from './subagent-lifecycle.js';
-import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
 
 export interface CodexJsonlNormalizationResult {
@@ -234,14 +232,8 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
         // Pinned Codex carries client_id into its legacy user-message event:
         // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/protocol/src/legacy_events.rs#L77-L94
         const clientId = asString(rawPayload.client_id)?.trim();
-        const content = stripResolvedFileMentionContext(text);
         result.isCanonicalUser = true;
-        result.canonical.push(codexHistoricalQuestionReply(ts, content, clientId) ?? new UserMessage(
-          ts,
-          content,
-          undefined,
-          clientId ? { upstreamRequestId: clientId } : undefined,
-        ));
+        result.canonical.push(codexHistoricalUserMessage(ts, text, clientId));
       }
       return result;
     }
@@ -347,10 +339,7 @@ function normalizeResponseItem(
             textContent,
           );
           if (lifecycle) result.canonical.push(lifecycle);
-          else {
-            const content = stripResolvedFileMentionContext(textContent);
-            result.fallbackUser.push(codexHistoricalQuestionReply(ts, content) ?? new UserMessage(ts, content));
-          }
+          else result.fallbackUser.push(codexHistoricalUserMessage(ts, textContent));
         }
         return result;
       }
