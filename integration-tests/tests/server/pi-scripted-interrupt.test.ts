@@ -12,6 +12,7 @@ import {
   chatCompletionsToolUse,
 } from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { latestInterruptedTerminal, type InterruptedTerminal } from '../../support/ledger-assertions.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
@@ -135,6 +136,7 @@ export default function (pi) {
         fixture.client.eventsSince(stopCursor),
         chatId,
         active.turnId,
+        latestInterruptedTerminal(fixture.dirs.workspace, chatId),
       );
       const stoppedTranscript = (await fixture.client.getMessages(chatId)).messages;
       expect(userContents(stoppedTranscript)).toContain(stoppedPrompt);
@@ -187,6 +189,7 @@ function expectPiStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,
   turnId: string,
+  terminal: InterruptedTerminal,
 ): void {
   const stopping = events.findIndex((event) =>
     event.type === 'chat-processing-updated'
@@ -203,7 +206,9 @@ function expectPiStoppedTurnEventOrder(
     && event.outcome === 'interrupt-requested');
   const interruption = events.findIndex((event) =>
     event.type === 'chat-transcript-head-updated'
-    && event.chatId === chatId);
+    && event.chatId === chatId
+    && event.transcriptViewId === terminal.transcriptViewId
+    && event.sourceHead >= terminal.ordinal);
 
   expect(interruption).toBeGreaterThanOrEqual(0);
   expect(stopped).toBeGreaterThan(interruption);

@@ -43,6 +43,7 @@ import {
   type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { latestInterruptedTerminal, type InterruptedTerminal } from '../../support/ledger-assertions.js';
 
 // Stop flows through the real binary: Garcon's abort reaches OpenCode's session.abort, the
 // active model request or shell tool dies, and no provider failure is fabricated for a
@@ -102,6 +103,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         fixture.client.eventsSince(stopCursor),
         chatId,
         active.turnId,
+        latestInterruptedTerminal(fixture.dirs.workspace, chatId),
       );
 
       // Stop confirms the request, not provider quiescence. The held response must stay
@@ -191,6 +193,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         fixture.client.eventsSince(stopCursor),
         chatId,
         active.turnId,
+        latestInterruptedTerminal(fixture.dirs.workspace, chatId),
       );
       await waitForAbortedAssistant(fixture, chatId);
       await waitForProcessesExit(processIdentities);
@@ -488,6 +491,7 @@ function expectOpenCodeStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,
   turnId: string,
+  terminal: InterruptedTerminal,
 ): void {
   const stopping = events.findIndex((event) =>
     event.type === 'chat-processing-updated'
@@ -504,7 +508,9 @@ function expectOpenCodeStoppedTurnEventOrder(
     && event.outcome === 'interrupt-requested');
   const interruption = events.findIndex((event) =>
     event.type === 'chat-transcript-head-updated'
-    && event.chatId === chatId);
+    && event.chatId === chatId
+    && event.transcriptViewId === terminal.transcriptViewId
+    && event.sourceHead >= terminal.ordinal);
 
   expect(interruption).toBeGreaterThanOrEqual(0);
   expect(stopped).toBeGreaterThan(interruption);

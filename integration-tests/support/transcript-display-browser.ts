@@ -12,6 +12,7 @@ export async function observeDisplayWire(page: Page) {
   const pending = new Set<Promise<void>>();
   const requests: string[] = [];
   const ws: { bytes: number; type: string; chatId: string | null }[] = [];
+  const protocolErrors: string[] = [];
   let socket: WebSocketRoute | null = null, connections = 0;
   const droppedChats = new Set<string>();
   await page.routeWebSocket('**/ws?*', route => {
@@ -19,10 +20,13 @@ export async function observeDisplayWire(page: Page) {
     const server = route.connectToServer();
     server.onMessage(payload => {
       const raw = typeof payload === 'string' ? payload : payload.toString();
-      const message = parsePrimaryWsServerMessage(JSON.parse(raw));
-      if (!message) throw new Error('Unrecognized browser WebSocket event.');
-      const chatId = 'chatId' in message && typeof message.chatId === 'string' ? message.chatId : null;
-      ws.push({ bytes: Buffer.byteLength(raw), type: message.type, chatId });
+      let chatId: string | null = null;
+      try {
+        const data = JSON.parse(raw);
+        chatId = typeof data?.chatId === 'string' ? data.chatId : null;
+        ws.push({ bytes: Buffer.byteLength(raw), type: typeof data?.type === 'string' ? data.type : '<missing>', chatId });
+        if (!parsePrimaryWsServerMessage(data)) protocolErrors.push('Unrecognized browser WebSocket event');
+      } catch (error) { protocolErrors.push(String(error)); }
       if (chatId && droppedChats.has(chatId)) return;
       route.send(payload);
     });
@@ -50,7 +54,7 @@ export async function observeDisplayWire(page: Page) {
       socket.close({ code: 1012, reason: 'Synthetic connection gap' });
       await browserExpect.poll(() => connections).toBeGreaterThan(previous);
     },
-    async settle() { await Promise.all([...pending]); },
+    async settle() { await Promise.all([...pending]); expect(protocolErrors).toEqual([]); },
     bodies() { return http.filter(item => item.operation === 'bodies').flatMap(item => parseBodyDependencyResponse(item.body).bodies); },
   };
 }

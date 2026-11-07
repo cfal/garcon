@@ -460,6 +460,9 @@ interface TouchPublicationSnapshot {
   readonly entryCount: number;
   readonly layoutPending: boolean;
   readonly modelCount: number;
+  readonly after: number;
+  readonly through: number;
+  readonly lastRevisionByKind: Record<string, number>;
 }
 
 async function touchPublicationSnapshot(page: Page): Promise<TouchPublicationSnapshot> {
@@ -473,6 +476,9 @@ async function touchPublicationSnapshot(page: Page): Promise<TouchPublicationSna
       entryCount: Number(sizer.dataset.chatTranscriptEntryCount ?? 0),
       layoutPending: feed.querySelector('[data-chat-layout-pending]') !== null,
       modelCount: Number(sizer.dataset.chatVirtualModelCount ?? 0),
+      after: Number(sizer.dataset.chatDisplayAfter),
+      through: Number(sizer.dataset.chatDisplayThrough),
+      lastRevisionByKind: JSON.parse(sizer.dataset.chatMutationRevisions ?? '{}'),
     };
   }, SIZER_SELECTOR);
 }
@@ -482,8 +488,8 @@ function publicationReady(
   baseline: TouchPublicationSnapshot,
 ): boolean {
   return (
-    snapshot.entryCount > 0 && snapshot.entryCount <= 100 &&
-    snapshot.dataRevision > baseline.dataRevision &&
+    snapshot.after < baseline.after &&
+    snapshot.lastRevisionByKind['history-earlier']! > baseline.lastRevisionByKind['history-earlier']! &&
     !snapshot.busy &&
     !snapshot.layoutPending
   );
@@ -2545,7 +2551,10 @@ async function verifyTouchDragPrepend(
     const stagedPublication = await touchPublicationSnapshot(fixture.page);
     expect(stagedPublication.entryCount).toBe(baselinePublication.entryCount);
     expect(stagedPublication.modelCount).toBe(baselinePublication.modelCount);
-    expect(stagedPublication.dataRevision).toBe(baselinePublication.dataRevision);
+    expect(stagedPublication.after).toBe(baselinePublication.after);
+    expect(stagedPublication.through).toBe(baselinePublication.through);
+    expect(stagedPublication.lastRevisionByKind['history-earlier'], JSON.stringify({ baselinePublication, stagedPublication }))
+      .toBe(baselinePublication.lastRevisionByKind['history-earlier']);
     expect(stagedPublication.busy).toBe(true);
     await finishTranscriptTouchDrag(drag);
     drag = null;
@@ -2694,6 +2703,7 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     drag = null;
 
     await startTranscriptMomentum(fixture.page);
+    const baselinePublication = await touchPublicationSnapshot(fixture.page);
     const response = fixture.page.waitForResponse((candidate) => {
       if (new URL(candidate.url()).pathname !== '/api/v1/chats/transcript-display/window') return false;
       const query = displayWindowRequest(candidate.request().postData());
@@ -2707,12 +2717,14 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     await waitForTranscriptMomentumFrames(fixture.page, 12);
 
     expect(await transcriptEntryCount(fixture.page)).toBe(initialEntryCount);
+    expect((await touchPublicationSnapshot(fixture.page)).after).toBe(baselinePublication.after);
     expect(await fixture.page.locator(FEED_SELECTOR).getAttribute('aria-busy')).toBe('true');
 
     await stopTranscriptMomentum(fixture.page);
     const anchor = await readingAnchor(fixture.page);
     await startReadingAnchorFrameSampler(fixture.page, anchor);
     await waitForDisplayIdle(fixture.page);
+    expect(publicationReady(await touchPublicationSnapshot(fixture.page), baselinePublication)).toBe(true);
     expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
     expect(await fixture.page.locator(FEED_SELECTOR).getAttribute('aria-busy')).toBe('false');
     expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
@@ -2860,6 +2872,7 @@ async function verifyNoOwnedScrollWritesDuringCoasting(fixture: ChromiumFixture)
     }
     await withDiagnosticTimeout('the coasting earlier-page request', earlierRequest);
     const entryCountBeforePrepend = await transcriptEntryCount(fixture.page);
+    const baselinePublication = await touchPublicationSnapshot(fixture.page);
     await installTranscriptScrollTopWriteTrap(fixture.page);
     trapInstalled = true;
     await finishTranscriptTouchDrag(drag);
@@ -2885,6 +2898,7 @@ async function verifyNoOwnedScrollWritesDuringCoasting(fixture: ChromiumFixture)
 
     await stopTranscriptCoastingHeartbeat(fixture.page);
     await waitForDisplayIdle(fixture.page);
+    expect(publicationReady(await touchPublicationSnapshot(fixture.page), baselinePublication)).toBe(true);
     expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
     await waitForTranscriptReady(fixture.page);
     await fixture.page.waitForFunction(
@@ -4466,7 +4480,7 @@ async function verifyLiveEdgeRetention(
 
   await dispatchClockedTranscriptPosition(fixture.page, 'end');
   await fixture.page.clock.runFor(100);
-  expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+  expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
 
   await dispatchClockedTranscriptPosition(fixture.page, 'away');
   await fixture.page.clock.runFor(100);
@@ -4482,7 +4496,7 @@ async function verifyLiveEdgeRetention(
     userScrolledUp: false,
   });
   await fixture.page.clock.fastForward(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
-  expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+  expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
@@ -4513,6 +4527,10 @@ async function verifyLiveEdgeRetention(
   await fixture.page.clock.resume();
   for (const prompt of laterPrompts) {
     await appendTurn(fixture.integration, chatId, prompt);
+    const feed = fixture.page.locator(FEED_SELECTOR);
+    await feed.getByText(`echo:${prompt}`, { exact: true }).waitFor();
+    expect(await feed.getByText(prompt, { exact: true }).count()).toBe(1);
+    expect(await feed.getByText(`echo:${prompt}`, { exact: true }).count()).toBe(1);
   }
   await fixture.page.locator(FEED_SELECTOR).getByText(`echo:${laterPrompts.at(-1)}`, { exact: true }).waitFor();
   await waitForDisplayIdle(fixture.page);
@@ -4520,10 +4538,10 @@ async function verifyLiveEdgeRetention(
     pinned: true,
     userScrolledUp: false,
   });
-  expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+  expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
 
   await fixture.page.clock.fastForward(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
-  expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+  expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
 
   const canonicalAfterGrowth = await readCompleteCanonicalTranscript(fixture, chatId);
   expect(canonicalAfterGrowth.transcriptViewId).toBe(canonicalBeforeIdle.transcriptViewId);
@@ -4593,7 +4611,7 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
   });
-  expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+  expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
 
   const livePrompt = `${promptPrefix}-live`;
   await appendTurn(fixture.integration, chatId, livePrompt);
@@ -4601,7 +4619,7 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
     .locator(FEED_SELECTOR)
     .getByText(`echo:${livePrompt}`, { exact: true })
     .waitFor();
-  expect(await transcriptEntryCount(fixture.page)).toBeLessThan(expectedEntryCount);
+  expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
   const tail = await fixture.page.locator(FEED_SELECTOR).evaluate(
     (feedElement, input) =>
       [...feedElement.querySelectorAll<HTMLElement>('[data-chat-row-id]')]
