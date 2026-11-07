@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
@@ -28,6 +29,7 @@ function deferred<T>() {
 
 function chat(): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/repo',

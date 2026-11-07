@@ -23,11 +23,11 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
         permissionOccurrenceId: 'incarnation-1',
       },
     }],
-  }), permissions = permissionFixture(new Map())) {
+  }), permissions = permissionFixture(new Map()), automationPolicy = undefined) {
   return new AgentRuntimeRouter({
     resolveFileMentions: resolveFileMentionsInCommand,
     registry: {
-      getChat: mock(() => ({ agentId: 'test' })),
+      getChat: mock(() => ({ agentId: 'test', automationPolicy })),
     },
     directory: {
       get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
@@ -46,6 +46,18 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
 }
 
 describe('AgentRuntimeRouter permission replies', () => {
+  it.each([null, undefined, { mode: 'local', key: 'local' }, { mode: 'executor', key: 'synthetic', executorId: 'synthetic' }])(
+    'denies guarded internal permission bypass before claiming an occurrence: %j', async principal => {
+      const transcript = createRuntimeTranscriptFixture();
+      transcript.ledger.claimPermissionResolution = mock(() => { throw new Error('Must not claim'); });
+      const respond = mock(async () => {});
+      const router = makeRouter(transcript, { respond }, { permissionDecisionAuthority: 'browser-session' });
+      await expect(router.resolvePermission('chat-1', 'incarnation-1', { allow: true }, permissionControl(), 1, principal))
+        .rejects.toMatchObject({ code: 'PERMISSION_DECISION_FORBIDDEN', status: 403 });
+      expect(transcript.ledger.claimPermissionResolution).not.toHaveBeenCalled();
+      expect(respond).not.toHaveBeenCalled();
+    },
+  );
   it('invokes the exact scoped permission operation with its receiver', async () => {
     const resolvePermission = mock(async () => undefined);
     const decisionCapability = {

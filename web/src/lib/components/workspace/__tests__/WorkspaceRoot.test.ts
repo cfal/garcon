@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,11 +38,17 @@ import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
 
 vi.mock('$lib/context', () => ({
+	getRemoteSettings: () => ({ snapshot: null } satisfies Pick<RemoteSettingsStore, 'snapshot'>),
+	getSingletonSurfaces: () => ({
+		workflows: vi.fn<SingletonSurfaceRegistry['workflows']>(),
+	} satisfies Pick<SingletonSurfaceRegistry, 'workflows'>),
 	getAuth: () => ({ token: null }),
 	getSidebarSearch: () => ({ discardStaleTranscriptResult: vi.fn() }),
 	setTicketSourceNavigation: () => {},
@@ -102,6 +109,7 @@ function chat(
 	overrides: Partial<ChatSessionRecord> = {},
 ): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		projectPath: '/workspace/project',

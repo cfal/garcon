@@ -17,6 +17,7 @@ import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
 import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
+import { WorkflowsController } from '$lib/workflows/catalog/workflows-controller.svelte.js';
 import { UsageController } from '$lib/usage/usage-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
@@ -42,6 +43,7 @@ export interface SingletonControllerByKind {
 	'chat-canvas': CanvasController;
 	'chat-board': ChatBoardController;
 	tickets: TicketsController;
+	workflows: WorkflowsController;
 	usage: UsageController;
 }
 
@@ -70,6 +72,7 @@ export class SingletonSurfaceRegistry {
 		'chat-canvas': false,
 		'chat-board': false,
 		tickets: false,
+		workflows: false,
 		usage: false,
 	};
 	#hasVisibleProjectSurface = $state(false);
@@ -82,6 +85,7 @@ export class SingletonSurfaceRegistry {
 		this.#canvasExitGuard.activate();
 		this.#factories = {
 			tickets: () => this.deps.createTickets(),
+			workflows: () => new WorkflowsController(),
 			git: () => new GitWorkbenchSurfaceController(this.deps),
 			'git-history': () => new GitHistorySurfaceController(this.deps),
 			'git-compare': () => new GitCompareSurfaceController(this.deps),
@@ -142,6 +146,10 @@ export class SingletonSurfaceRegistry {
 	tickets(): TicketsController {
 		return this.#controller('tickets');
 	}
+	workflows(): WorkflowsController { return this.#controller('workflows'); }
+	workflowsIfPresent(): WorkflowsController | null {
+		return (this.#controllers.get('workflows')?.controller as WorkflowsController | undefined) ?? null;
+	}
 	ticketsIfPresent(): TicketsController | null {
 		return (this.#controllers.get('tickets')?.controller as TicketsController | undefined) ?? null;
 	}
@@ -193,6 +201,11 @@ export class SingletonSurfaceRegistry {
 	}
 
 	disposeSurface(kind: PortableSingletonKind): void {
+		const workflows = this.workflowsIfPresent();
+		if (kind === 'workflows' && workflows && (workflows.pending || workflows.editor !== null)) {
+			this.setPresentationVisible(kind, false);
+			return;
+		}
 		if (kind === 'tickets' && this.ticketsIfPresent()?.drafts.needsExitGuard) {
 			this.setPresentationVisible(kind, false);
 			return;
@@ -221,6 +234,7 @@ export class SingletonSurfaceRegistry {
 				candidate !== 'chat-canvas' &&
 				candidate !== 'chat-board' &&
 				candidate !== 'tickets' &&
+				candidate !== 'workflows' &&
 				candidate !== 'pull-requests' &&
 				candidate !== 'usage' &&
 				this.#visible[candidate],

@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../automation.js';
 import { describe, expect, test } from 'bun:test';
 import {
   ChatSnapshotContractError,
@@ -12,6 +13,7 @@ function snapshot(overrides = {}) {
     observedAt: TIMESTAMP,
     messageLimit: 10,
     chat: {
+      presentation: CONVERSATION_PRESENTATION,
       id: CHAT_ID,
       title: 'Implement validation',
       agentId: 'codex',
@@ -74,6 +76,13 @@ function snapshot(overrides = {}) {
 }
 
 describe('chat snapshot contract', () => {
+  test('requires presentation on exact chat reads', () => {
+    const value = snapshot();
+    value.chat.presentation = { collection: 'automation', notifications: 'attention-only' };
+    expect(parseChatSnapshotResponse(value).chat.presentation).toEqual(value.chat.presentation);
+    delete value.chat.presentation;
+    expect(() => parseChatSnapshotResponse(value)).toThrow('presentation');
+  });
   test('parses available and unavailable transcript snapshots', () => {
     expect(parseChatSnapshotResponse(snapshot())).toMatchObject({
       chat: { id: CHAT_ID, tags: ['cli', 'review'] },

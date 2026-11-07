@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -159,6 +160,7 @@ function captureAnimationFrames() {
 function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	const isProcessing = overrides.isProcessing ?? false;
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
@@ -267,6 +269,7 @@ function chatSnapshot(
 		observedAt: '2026-08-17T00:00:00.000Z',
 		messageLimit: 1,
 		chat: {
+			presentation: CONVERSATION_PRESENTATION,
 			id: 'chat-1',
 			title: 'Unread chat',
 			agentId: 'claude',
@@ -316,6 +319,7 @@ function controlWithQueue(
 
 function createServerEntry(id: string) {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		agentId: 'claude',

@@ -1,6 +1,8 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../common/automation.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	listChats,
+	promoteChat,
 	startChat,
 	deleteChat,
 	togglePinned,
@@ -78,6 +80,7 @@ describe('chats API contract', () => {
 
 	function chatEntry(id: string) {
 		return {
+			presentation: CONVERSATION_PRESENTATION,
 			id,
 			parentChat: null,
 			agentId: 'claude',
@@ -148,11 +151,30 @@ describe('chats API contract', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('promotes the captured chat with a validated normal-presentation response', async () => {
+		const chatId = '1783725900000800';
+		const chat = { ...chatEntry(chatId), isActive: true };
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, chat }));
+		expect(await promoteChat(chatId)).toEqual({ success: true, chat });
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/promote');
+		expect(options.method).toBe('POST');
+		expect(JSON.parse(options.body)).toEqual({ chatId });
+		for (const invalid of [
+			{ ...chat, id: '1783725900000801' },
+			{ ...chat, presentation: { collection: 'automation', notifications: 'attention-only' } },
+		]) {
+			fetchMock.mockResolvedValue(jsonResponse({ success: true, chat: invalid }));
+			await expect(promoteChat(chatId)).rejects.toThrow('Invalid chat promotion response');
+		}
+	});
+
 	it('listChats calls GET /api/v1/chats', async () => {
 		const chatId = '1785337200123456';
 		const payload: ChatListResponse = {
 			sessions: [
 				{
+					presentation: CONVERSATION_PRESENTATION,
 					id: chatId,
 					parentChat: null,
 					agentId: 'claude',

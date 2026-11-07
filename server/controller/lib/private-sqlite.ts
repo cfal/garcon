@@ -59,6 +59,38 @@ export function openPrivateSqliteDatabase(path: string, afterOpen?: () => void):
   }
 }
 
+// Inspection never creates a replacement for missing domain authority.
+export function openPrivateSqliteReadOnly(path: string): Database {
+  const inspect = (name: string): number => {
+    const fd = openSync(name, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const file = fstatSync(fd);
+      if (!file.isFile() || (file.mode & 0o077) !== 0) throw new Error('SQLite inspection requires a private regular file.');
+      return fd;
+    } catch (error) { closeSync(fd); throw error; }
+  };
+  const fd = inspect(path);
+  let database: Database | null = null;
+  try {
+    const original = fstatSync(fd, { bigint: true });
+    for (const suffix of ['-wal', '-shm']) {
+      try { closeSync(inspect(`${path}${suffix}`)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    database = new Database(path, { readonly: true, strict: true, create: false });
+    const current = inspect(path);
+    try {
+      const file = fstatSync(current, { bigint: true });
+      if (file.ino !== original.ino || file.dev !== original.dev) throw new Error('SQLite path changed during inspection.');
+    } finally { closeSync(current); }
+    database.exec('PRAGMA query_only=ON');
+    return database;
+  } catch (error) {
+    database?.close();
+    throw error;
+  } finally { closeSync(fd); }
+}
+
 // Requires write-ahead logging with full synchronization and enforced foreign keys.
 export function configureDurableSqlite(database: Database): void {
   database.exec('PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;');

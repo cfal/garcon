@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import { ArchiveUndoController } from '$lib/chat/actions/archive-undo-controller.js';
@@ -67,6 +68,7 @@ async function flushMicrotasks(): Promise<void> {
 
 function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		agentId: 'claude',
 		model: 'sonnet',

@@ -14,6 +14,8 @@ import { discoverApiProviderModels } from './providers/discovery.js';
 import { FilesService } from './files/service.js';
 import { TerminalRuntime, type TerminalService } from './terminals/runtime.js';
 import { GitRuntime } from './git/runtime.js';
+import { RuntimeMaintenance } from './maintenance.js';
+import { GitServiceError } from '../../common/git-error.js';
 
 export class ExecutionRuntime implements ExecutionRuntimeApi {
   readonly id: string;
@@ -27,6 +29,7 @@ export class ExecutionRuntime implements ExecutionRuntimeApi {
   readonly #terminalRuntime: TerminalRuntime;
   readonly #ownsTerminalRuntime: boolean;
   readonly #terminals: TerminalService;
+  readonly #maintenance = new RuntimeMaintenance();
 
   constructor(options: IntegrationHostFactoryOptions & {
     readonly id: string;
@@ -40,9 +43,15 @@ export class ExecutionRuntime implements ExecutionRuntimeApi {
     this.#terminalRuntime = options.terminalRuntime ?? new TerminalRuntime({ projectBasePath: options.projectBasePath, userShell: options.userShell });
     this.#terminals = this.#terminalRuntime.service(options.id);
     this.#projects = new ProjectService(options.projectBasePath, (callOptions) => this.#assertAvailable(callOptions));
-    this.#files = new FilesService({ executorId: options.id, projectBasePath: options.projectBasePath, assertAvailable: (callOptions) => this.#assertAvailable(callOptions) });
+    this.#files = new FilesService({ executorId: options.id, projectBasePath: options.projectBasePath,
+      assertAvailable: (callOptions) => this.#assertAvailable(callOptions), reserveMutation: () => this.#maintenance.reserveMutation() });
     const instanceId = options.instanceId ?? crypto.randomUUID();
-    this.#git = new GitRuntime({ executorId: options.id, instanceId, projectBasePath: options.projectBasePath, assertAvailable: (callOptions) => this.#assertAvailable(callOptions) });
+    this.#git = new GitRuntime({ executorId: options.id, instanceId, projectBasePath: options.projectBasePath,
+      assertAvailable: (callOptions) => this.#assertAvailable(callOptions),
+      withManagedRemoval: (run, signal) => this.#maintenance.remove(this.#registry.list(), () => {
+        try { return this.#terminals.manager.reserveEmpty(); }
+        catch { throw new GitServiceError('GIT_SERVICE_BUSY', 'Executor has active or starting terminals.'); }
+      }, run, signal) });
     this.#registry = new IntegrationRegistry({
       integrations: options.integrations,
       hostFactory: new IntegrationHostFactory({ ...options, executorId: options.id, instanceId }),
@@ -65,7 +74,7 @@ export class ExecutionRuntime implements ExecutionRuntimeApi {
 
   async getAgentIntegration(agentId: string, options?: ExecutorCallOptions) {
     this.#assertAvailable(options);
-    return this.#registry.require(agentId);
+    return this.#maintenance.integration(this.#registry.require(agentId));
   }
 
   async discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: ExecutorCallOptions) {

@@ -8,6 +8,7 @@
 	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import Workflow from '@lucide/svelte/icons/workflow';
 	import Info from '@lucide/svelte/icons/info';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -35,6 +36,7 @@
 		onOpenChatMap,
 		onOpenCanvas,
 		onOpenPullRequests,
+		onCreateWorkflow,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -57,6 +59,7 @@
 		onOpenChatMap?: () => void;
 		onOpenCanvas?: () => void;
 		onOpenPullRequests?: () => void;
+		onCreateWorkflow?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -117,6 +120,9 @@
 {/if}
 
 {#if selectedChat}
+	{#if onCreateWorkflow}
+		<menu.Item onSelect={onCreateWorkflow}><Workflow />Create Workflow</menu.Item>
+	{/if}
 	{#if hasWorkspaceCommands}
 		<menu.Separator />
 	{/if}

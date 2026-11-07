@@ -30,6 +30,9 @@ import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
 import { createProjectResolutionRoutes } from './project-resolution.js';
 import { createChatBoardRoutes } from './chat-boards.js';
 import { createTicketRoutes } from './tickets.js';
+import { createWorkflowRoutes } from '../workflows/routes.js';
+import type { WorkflowRuntime } from '../workflows/setup.js';
+import type { WorkflowSettings } from '../workflows/settings.js';
 import createPullRequestReviewRoutes from './pull-request-reviews.js';
 import { createChatTicketSourceRoutes } from './chat-ticket-source.js';
 import type { TicketSourceReader } from '../chats/chat-message-reader.js';
@@ -106,6 +109,8 @@ export default function createAllRoutes(workspaceDir: string, {
   chatPreambleSelection,
   chatBoards,
   tickets,
+  workflows,
+  workflowSettings,
   resolveTicketProject,
   chatTags,
   chatMutationLock,
@@ -148,6 +153,8 @@ export default function createAllRoutes(workspaceDir: string, {
   chatPreambleSelection: ChatPreambleSelectionService;
   chatBoards: ChatBoardService;
   tickets: TicketRuntime;
+  workflows: WorkflowRuntime;
+  workflowSettings: WorkflowSettings;
   resolveTicketProject: Parameters<typeof createTicketRoutes>[1];
   chatTags: ChatTagMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
@@ -211,6 +218,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createChatTagRoutes(chatTags),
     createChatBoardRoutes(chatBoards),
     createTicketRoutes(tickets, resolveTicketProject),
+    createWorkflowRoutes(workflows, workflowSettings),
     createChatTicketSourceRoutes(registry, ticketSources),
     createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     createFilesRoutes(registry, { files: (executorId) => executors.requireExecutor(executorId).getFilesService(), inspectProject }),

@@ -33,6 +33,7 @@ import * as m from '$lib/paraglide/messages.js';
 import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 
 const {
 	closeSurface,
@@ -85,6 +86,7 @@ const {
 vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
 
 vi.mock('$lib/context', () => ({
+	getRemoteSettings: () => ({ snapshot: null } satisfies Pick<RemoteSettingsStore, 'snapshot'>),
 	getWorkspaceCoordinator: () => ({
 		terminalCreationExecutorIdFor: () => 'local',
 		layout: {
@@ -1060,7 +1062,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		},
 	);
 
-	it('offers every portable view exactly once across inline groups and direct controls', async () => {
+	it('offers every enabled portable view exactly once across inline groups and direct controls', async () => {
 		const executor = workspaceWindow([chatSurface.id]);
 		const rendered = render(WorkspaceWindowAddMenu, {
 			windowId: executor.id,
@@ -1081,7 +1083,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 		}
 		expect(offered.sort()).toEqual(
-			PORTABLE_SINGLETON_KINDS.map((kind) => `singleton:${kind}`).sort(),
+			PORTABLE_SINGLETON_KINDS.filter((kind) => kind !== 'workflows').map((kind) => `singleton:${kind}`).sort(),
 		);
 	});
 

@@ -1,4 +1,5 @@
 import type { ChatListEntry, ChatOrderGroup } from '../../../common/chat-list.js';
+import { CONVERSATION_PRESENTATION } from '../../../common/automation.js';
 import type { ChatSnapshotChat } from '../../../common/chat-snapshot.js';
 import type { ChatProcessingPhase } from '../../../common/chat-types.js';
 import {
@@ -112,6 +113,7 @@ export class ChatListProjector {
     return {
       chat: {
         id: chatId,
+        presentation: { ...(session.presentation ?? CONVERSATION_PRESENTATION) },
         ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
         agentId: session.agentId,
         agentOwnershipEpoch: session.agentOwnershipEpoch,
@@ -155,6 +157,7 @@ export class ChatListProjector {
     const lastActivityAt = chat.activity.lastActivityAt;
     return {
       id: chat.id,
+      presentation: chat.presentation,
       ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
       parentChat: session.parentChat,
       agentId: chat.agentId,
@@ -190,7 +193,7 @@ export class ChatListProjector {
       isPinned: orderGroup === 'pinned',
       isArchived: orderGroup === 'archived',
       isUnread: Boolean(
-        lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt),
+        chat.presentation.notifications === 'normal' && lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt),
       ),
     };
   }

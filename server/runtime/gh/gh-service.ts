@@ -22,6 +22,7 @@ import {
 } from './gh-types.js';
 import { readPullRequestList, readReviewTarget } from './gh-review-reads.js';
 import { assertGhActor, readPostingActor, requireGhActor, resolveCheckoutRepository } from './gh-repository.js';
+import { getPublicationTarget, createPullRequest, findPullRequests } from './publication.js';
 
 const logger = createLogger('gh:service');
 
@@ -46,6 +47,9 @@ export type CreatePullRequestCommentOptions = WithSignal<GhRequests['createPullR
 export type MinimizePullRequestCommentOptions = WithSignal<GhRequests['minimizePullRequestComment']>;
 
 export interface GhOperations {
+  getPublicationTarget: typeof getPublicationTarget;
+  createPullRequest: typeof createPullRequest;
+  findPullRequests: typeof findPullRequests;
   getStatus(signal?: AbortSignal): Promise<GhStatusResponse>;
   listPullRequests(options: ListPullRequestsOptions): Promise<PullRequestListResult>;
   getPullRequest(options: GetPullRequestOptions): Promise<PullRequestDetail>;
@@ -84,6 +88,7 @@ async function loadReviewThreads(
 
 export function createGhOperations(statusDirectory = process.cwd()): GhOperations {
   return {
+    getPublicationTarget, createPullRequest, findPullRequests,
     async getStatus(signal): Promise<GhStatusResponse> {
       try {
         const raw = await runGhJson<GhAuthStatusJson>(

@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../common/automation.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { parseChatHandoffArtifactResponse } from '../../../../../common/chat-handoff-artifact-contracts.ts';
 import {
@@ -123,6 +124,7 @@ function request(contextWindowTokens = 500_000) {
 
 function chat() {
   return {
+    presentation: CONVERSATION_PRESENTATION,
     id: CHAT_ID,
     title: 'Artifact fixture',
     agentId: 'codex',

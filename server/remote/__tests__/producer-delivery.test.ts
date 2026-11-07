@@ -78,6 +78,32 @@ async function runningTurn(dialer: 'controller' | 'worker') {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`structured failed command metadata survives remoting (${dialer} dials)`, async () => {
+    const { fixture, integration, request, publish } = await runningTurn(dialer);
+    try {
+      const terminals: AgentProducerNotification['event'][] = [];
+      integration.producers.subscribe(({ event }) => { if (event.type === 'run-ended') terminals.push(event); });
+      const terminal = { type: 'run-ended', runId: request.runId, outcome: 'failed',
+        workingDirectory: { kind: 'reported', path: '/synthetic' },
+        commandOutcome: { outcome: 'failed', exitCode: 7, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/synthetic' } },
+      } as const;
+      publish(terminal);
+      await integration.execution.runningSessions();
+      expect(terminals).toEqual([terminal]);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`malformed command outcomes do not bypass validation with a valid cwd (${dialer} dials)`, async () => {
+    const { fixture, integration, request, publish } = await runningTurn(dialer);
+    try {
+      const delivered = deliveries(integration);
+      publish({ type: 'run-ended', runId: request.runId, outcome: 'finished',
+        workingDirectory: { kind: 'reported', path: '/synthetic' }, commandOutcome: { outcome: 'invented' },
+      } as unknown as AgentRuntimeEvent);
+      await integration.execution.runningSessions();
+      expect(delivered).toEqual(['publication-failed']);
+    } finally { await fixture.dispose(); }
+  });
   test(`completion preserves the executor's Windows cwd (${dialer} dials)`, async () => {
     const { fixture, integration, request, publish } = await runningTurn(dialer);
     try {

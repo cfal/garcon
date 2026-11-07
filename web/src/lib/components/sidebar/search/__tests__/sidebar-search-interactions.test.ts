@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +16,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 function createChat(id: string, title: string): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		projectPath: '/tmp/project',

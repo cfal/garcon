@@ -34,6 +34,7 @@
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import { allowsChatNotifications } from '$lib/chat/sessions/chat-session-records.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
 	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
@@ -117,6 +118,7 @@
 	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.js';
 	import { TicketsRouter } from '$lib/events/tickets-router.js';
+	import { WorkflowsRouter } from '$lib/events/workflows-router.js';
 	import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 	import { setTicketChat, setTicketsInvalidations } from '$lib/context/tickets-context.js';
 	import { TicketChatController } from '$lib/tickets/chat/ticket-chat-controller.svelte.js';
@@ -376,6 +378,7 @@
 			const chat = chatSessions.byId[id];
 			return (
 				!!chat &&
+				allowsChatNotifications(chat) &&
 				modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy ===
 					'conversation'
 			);
@@ -409,6 +412,7 @@
 	const apiProvidersRouter = new ApiProvidersRouter(ws, apiProviders);
 	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
 	const ticketsRouter = new TicketsRouter(ws, ticketsInvalidations);
+	const workflowsRouter = new WorkflowsRouter(ws, id => singletonSurfaces.workflowsIfPresent()?.invalidate(id));
 	browserNotificationsRouter.start();
 	settingsRouter.start();
 	transcriptSearchStatus.start();
@@ -420,6 +424,7 @@
 	apiProvidersRouter.start();
 	chatBoardsRouter.start();
 	ticketsRouter.start();
+	workflowsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		browserNotificationsRouter.tick();
@@ -433,6 +438,7 @@
 		apiProvidersRouter.tick();
 		chatBoardsRouter.tick();
 		ticketsRouter.tick();
+		workflowsRouter.tick();
 	});
 
 	$effect(() => {
@@ -453,6 +459,7 @@
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
 		untrack(() => chatBoardInvalidations.publishReconnect());
 		untrack(() => ticketsInvalidations.publishReconnect());
+		untrack(() => singletonSurfaces.workflowsIfPresent()?.invalidate());
 		return () => transcriptSearchStatus.cancelRefresh();
 	});
 
@@ -544,6 +551,7 @@
 		ghCapability.destroy();
 		chatBoardsRouter.destroy();
 		ticketsRouter.destroy();
+		workflowsRouter.destroy();
 		localSettings.destroy();
 		fileImages.destroy();
 		sidebarProjectCollapse.destroy();

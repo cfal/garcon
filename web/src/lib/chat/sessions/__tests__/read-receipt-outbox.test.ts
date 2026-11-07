@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the API module before importing the store.
@@ -131,6 +132,7 @@ describe('ReadReceiptOutboxStore', () => {
 		// Set up sessions with the chat so patchLastReadAt works.
 		sessions.upsertFromServer([
 			{
+				presentation: CONVERSATION_PRESENTATION,
 				id: 'a',
 				parentChat: null,
 				agentId: 'claude',
@@ -172,6 +174,7 @@ describe('ReadReceiptOutboxStore', () => {
 
 		sessions.upsertFromServer([
 			{
+				presentation: CONVERSATION_PRESENTATION,
 				id: 'a',
 				parentChat: null,
 				agentId: 'claude',
@@ -199,6 +202,7 @@ describe('ReadReceiptOutboxStore', () => {
 				canReloadFromNativeHistory: false,
 			},
 			{
+				presentation: CONVERSATION_PRESENTATION,
 				id: 'b',
 				parentChat: null,
 				agentId: 'claude',

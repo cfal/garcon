@@ -1,9 +1,11 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, expect, it } from 'vitest';
 import { resolveChatSurfacePresentation } from '../chat-surface-presentation';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 function chat(status: ChatSessionRecord['status']): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/workspace/project',

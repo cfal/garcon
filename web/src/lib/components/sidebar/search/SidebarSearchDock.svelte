@@ -20,6 +20,7 @@
 		chatListAutohideAvailable?: boolean;
 		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
+		hasAutomationChats?: boolean;
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
 		onOpenSearchDialog: () => void;
@@ -39,6 +40,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowUsage: () => void;
+		onShowWorkflows?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -54,6 +56,7 @@
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
 		sidebarMenuSearches = [],
+		hasAutomationChats = false,
 		sidebarPillSearches,
 		activeQuery,
 		onOpenSearchDialog,
@@ -73,6 +76,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowUsage,
+		onShowWorkflows,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -95,6 +99,7 @@
 		{chatListAutohideAvailable}
 		{dockOnRight}
 		{sidebarMenuSearches}
+		{hasAutomationChats}
 		hasAdjacentSearchContext={hasContentBelowControls}
 		{onOpenSearchDialog}
 		{onCreateChat}
@@ -111,6 +116,7 @@
 		{onShowPreambles}
 		{onShowSnippets}
 		{onShowUsage}
+		{onShowWorkflows}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext

@@ -1,9 +1,11 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import SidebarHost from './SidebarHost.svelte';
 
 const chat = {
+	presentation: CONVERSATION_PRESENTATION,
 	id: 'chat-1',
 	projectPath: '/workspace/project',
 	orderGroup: 'normal',

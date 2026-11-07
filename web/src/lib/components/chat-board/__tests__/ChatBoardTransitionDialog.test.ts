@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatBoard } from '$shared/chat-boards';
@@ -30,6 +31,7 @@ const board: ChatBoard = {
 
 function chat(): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/workspace',

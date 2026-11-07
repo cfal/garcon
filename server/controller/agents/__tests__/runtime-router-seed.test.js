@@ -13,6 +13,11 @@ import { DomainError } from '../../../common/domain-error.ts';
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 import { createProducerFixture } from './producer-fixture.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.js';
+import { automationTerminalResult } from '../../automation/results.js';
+import { CommandLedger } from '../../commands/command-ledger.js';
+import { ChatCommandSettlement } from '../../commands/chat-command-settlement.js';
+import { projectAgentTurnReceipt } from '../../commands/agent-turn-receipt-projector.js';
 
 let projectDir;
 
@@ -142,6 +147,34 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter producer boundary', () => {
+  it.each([false, true])('preserves definite pre-run non-dispatch without changing ordinary errors: automation=%s', async automated => {
+    const f = makeRouter();
+    const failure = new DomainError('SESSION_LIMIT', 'Synthetic setup rejection', 429, true);
+    const lifecycle = new AutomationLifecycle();
+    const control = lifecycle.acquire({ chatId: 'chat-1', turnId: 'synthetic-turn', clientRequestId: 'synthetic-request', serverInstanceId: 'synthetic' });
+    const automation = { control, canceled: new AbortController().signal, inputPublished: true,
+      effective: { digest: 'sha256:synthetic', executorId: 'local', projectPath: projectDir, promptDigest: 'sha256:synthetic',
+        preambles: [], selectionDigest: 'sha256:synthetic', settingsDigest: 'sha256:synthetic', providerRevision: null } };
+    const ensure = spyOn(f.transcript.adoption, 'ensure').mockRejectedValueOnce(failure);
+    try {
+      const starting = f.router.startSession('chat-1', 'Synthetic task', automated ? { automation } : {});
+      if (automated) {
+        const error = await starting.catch(error => error);
+        expect(error).toMatchObject({ outcome: 'not-dispatched', message: failure.message });
+        const ledger = new CommandLedger();
+        const { record } = await ledger.accept({ commandType: 'chat-start', chatId: 'chat-1',
+          clientRequestId: 'synthetic-request', turnId: 'synthetic-turn', payload: {} });
+        await new ChatCommandSettlement(ledger).settleOperationFailure(record, error);
+        await ledger.markPublicTerminal('chat-1', 'synthetic-turn');
+        expect(projectAgentTurnReceipt(await ledger.getTurnRecord('chat-1', 'synthetic-turn')))
+          .toMatchObject({ kind: 'found', receipt: { state: 'failed', errorCode: 'SESSION_LIMIT' } });
+        expect(automationTerminalResult(await ledger.getTurnRecord('chat-1', 'synthetic-turn')))
+          .toMatchObject({ kind: 'failed', certainty: 'not-started' });
+      } else await expect(starting).rejects.toBe(failure);
+      expect(f.start).not.toHaveBeenCalled();
+    } finally { ensure.mockRestore(); control.release(); }
+  });
+
   it('keeps a lazy literal startup override turn-local while later input uses the saved mode', async () => {
     const launched = Promise.withResolvers();
     const finish = Promise.withResolvers();
@@ -579,7 +612,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(failRun).toHaveBeenCalledWith('chat-1', 'turn-1', {
       code: 'CARRYOVER_COMPACTION_FAILED',
       message: failure.message,
-    });
+    }, 'not-started');
     expect(start).not.toHaveBeenCalled();
     expect(transcript.notices).toEqual([]);
     expect(transcript.activeRunId()).toBeNull();

@@ -9,6 +9,8 @@ import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.j
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { TranscriptReloadService } from '../../../server/controller/ledger/reload.js';
+import { ChatMutationGuard } from '../../../server/controller/automation/mutation-guard.js';
+import { AutomationLifecycle } from '../../../server/controller/automation/lifecycle.js';
 import { NativeTranscriptActivityService } from '../../../server/controller/ledger/native-activity.js';
 import { ChatExecutionCoordinator } from '../../../server/controller/chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../../server/controller/chat-execution/chat-execution-control-repository.js';
@@ -74,7 +76,7 @@ async function withReload(run) {
   const adoption = new TranscriptAdoptionService({ ledger, registry, integrations,
     getCarryOverRevision: () => 'synthetic-carry', loadFrozenPrefix: async () => [] });
   const reload = new TranscriptReloadService({ ledger, registry, integrations, adoption, execution,
-    getCarryOverRevision: () => 'synthetic-carry', chatMutationLock: new KeyedPromiseLock(),
+    getCarryOverRevision: () => 'synthetic-carry', mutationGuard: new ChatMutationGuard(new KeyedPromiseLock(), new AutomationLifecycle()),
     reopenProducer: () => { ledger.openProducer(CHAT, 'test'); } });
   try { await run({ ledger, store, registry, view, lease, execution, reload, integration, integrations, request, dispatched, appendReceipt }); }
   finally {

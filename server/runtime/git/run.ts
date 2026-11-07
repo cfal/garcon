@@ -231,7 +231,7 @@ async function runGitProcess(
     if (outputLimitError) throw outputLimitError;
     if (exitCode === 0 && !abortState.aborted()) return { stdout, stderr };
 
-    if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
+    if (options.retryLocks !== false && isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       lastFailure = { exitCode, stdout, stderr };
       // The attempt's timer was already cleaned up, so the delay itself must
       // respect the absolute budget; otherwise the total runtime overshoots

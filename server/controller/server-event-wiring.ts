@@ -4,6 +4,7 @@ import { effectiveExecutorId } from '../../common/executors.js';
 import type { TranscriptSearchStatusV1 } from '../../common/chat-search.js';
 import { isChatListInvalidationReason } from '../../common/ws-events.ts';
 import { PullRequestReviewsInvalidatedMessage, TicketsInvalidatedMessage } from '../../common/ws-revision-invalidations.ts';
+import { WorkflowInvalidatedMessage } from '../../common/ws-events.js';
 import { isErrorCode } from '../../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { wireExecutorAvailability } from './executors/availability-wiring.js';
@@ -128,6 +129,7 @@ export interface ServerEventWiring {
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
   broadcastTicketsInvalidated(revision: number): void;
   broadcastPullRequestReviewsInvalidated(revision: number): void;
+  broadcastWorkflowInvalidated(workflowId: string, revision: number): void;
   broadcastApiProvidersInvalidated(): void;
   waitForIdle(): Promise<void>;
 }
@@ -437,6 +439,12 @@ export function wireServerEvents({
     }
     publishTransientFeedMutation(transientFeeds.apply(event));
     if (event.type !== 'run-ended') return;
+    commandLedger.recordExecutionEvidence(event.chatId, event.runId, {
+      outcome: event.row.outcome, origin: event.row.origin,
+      failureCertainty: event.failureCertainty ?? 'unknown',
+      executionScope: event.executionScope ?? null,
+      commandOutcome: event.commandOutcome ?? null, receivedOutputCoverage: event.receivedOutputCoverage ?? 'unknown',
+    });
     await commandLedger.setTurnResult(event.chatId, event.runId, event.finalResponse);
   });
   const publishProcessing = (chatId: string) => {
@@ -718,6 +726,9 @@ export function wireServerEvents({
     },
     broadcastPullRequestReviewsInvalidated(revision: number): void {
       broadcast(new PullRequestReviewsInvalidatedMessage(revision));
+    },
+    broadcastWorkflowInvalidated(workflowId: string, revision: number): void {
+      broadcast(new WorkflowInvalidatedMessage(workflowId, revision));
     },
     broadcastApiProvidersInvalidated(): void {
       broadcast(new ApiProvidersInvalidatedMessage());

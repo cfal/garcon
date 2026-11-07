@@ -19,6 +19,7 @@ export interface GitCommandResult {
 }
 
 export interface GitCommandOptions {
+  retryLocks?: boolean;
   truncateStdout?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;

@@ -23,12 +23,14 @@ import {
 } from './chat-transient-feed.js';
 import { normalizeTags } from './tags.js';
 import { isExecutorId } from './executors.js';
+import { parseChatPresentation, type ChatPresentation } from './automation.js';
 
 export const CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 10;
 export const CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT = 200;
 
 export interface ChatSnapshotChat {
   id: string;
+  presentation: ChatPresentation;
   executorId?: string | null;
   title: string;
   agentId: string;
@@ -128,6 +130,8 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
 
 function parseChat(value: unknown): ChatSnapshotChat {
   const raw = record(value, 'chat');
+  const presentation = parseChatPresentation(raw.presentation);
+  if (!presentation) fail('chat.presentation is invalid');
   let id: string;
   try {
     id = parseChatId(raw.id);
@@ -153,6 +157,7 @@ function parseChat(value: unknown): ChatSnapshotChat {
   if (executorId != null && !isExecutorId(executorId)) fail('chat.executorId is invalid');
   return {
     id,
+    presentation,
     ...(executorId === undefined ? {} : { executorId }),
     title: requiredString(raw.title, 'chat.title'),
     agentId: requiredString(raw.agentId, 'chat.agentId'),

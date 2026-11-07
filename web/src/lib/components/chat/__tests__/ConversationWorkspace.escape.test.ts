@@ -98,6 +98,15 @@ const mockStopChat = vi.mocked(stopChat);
 const mockGetGitRefs = vi.mocked(getGitRefs);
 
 describe('ConversationWorkspace Escape abort handling', () => {
+	it('silences automation completion without removing ordinary chat controls', async () => {
+		render(ConversationWorkspaceEscapeHost, { quietAutomation: true });
+		const router = vi.mocked(mountConversationRouter).mock.calls.at(-1)?.[0];
+		if (!router) throw new Error('Expected conversation router registration');
+		router.notifyCompletion('chat-1');
+		expect(playCompletionSound).not.toHaveBeenCalled();
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		await waitFor(() => expect(mockStopChat).toHaveBeenCalledOnce());
+	});
 	it.each(['conversation', 'literal', null] as const)('gates sibling prose and completion sounds with %s policy', async (executionPolicy) => {
 		const submit = vi.spyOn(ConversationSessionController.prototype, 'submitForChat').mockResolvedValue('accepted');
 		let registeredSubmit!: (message: string) => Promise<boolean>;

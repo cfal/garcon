@@ -4,7 +4,6 @@ import type { QueueEntryPlacement } from '../../../common/chat-command-contracts
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../../common/queue-state.ts';
 import {
   isStopSatisfied,
-  type ChatStopIntent,
   type ChatStopOutcome,
 } from '../../../common/chat-types.ts';
 import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/session-types.js';
@@ -73,6 +72,8 @@ import { settleAgentTurn } from './turn-terminal-settlement.js';
 import { controlInputBlockedError, serverShuttingDownError, chatNotFoundError } from './execution-errors.js';
 import type { TurnEventMetadata } from '../agents/event-bus.js';
 import type { WorkingDirectorySettlement, WorkingDirectorySettlementPort } from '../projects/working-directory-settlement.js';
+import { AutomationLifecycle, type AutomationControlLease } from '../automation/lifecycle.js';
+import { TurnStops } from './turn-stops.js';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -94,7 +95,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #shuttingDown = false;
   #ownership = new ExecutionOwnership();
   #dispatchTasks = new Set<Promise<void>>();
-  #stopTasks = new Map<string, Promise<ChatStopOutcome>>();
+  readonly #stops: TurnStops;
   #turnRunner: AgentTurnRunnerPort;
   #getDrainOptions: QueueDrainOptionsResolver;
   #chatExists: ChatExistsResolver;
@@ -109,6 +110,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #controlInputDelivery: ControlInputDelivery;
   #executionPolicy: (chatId: string) => 'conversation' | 'literal';
   #workingDirectorySettlement?: WorkingDirectorySettlementPort;
+  readonly #automation: AutomationLifecycle;
 
   constructor(
     turnRunner: AgentTurnRunnerPort,
@@ -136,6 +138,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const appendControlReceipt = options.appendControlReceipt ?? (() => undefined);
     const selectionAdmissionLock = options.selectionAdmissionLock ?? new KeyedPromiseLock();
     this.#turnRunner = turnRunner;
+    this.#automation = options.automation ?? new AutomationLifecycle();
+    this.#stops = new TurnStops({
+      ownership: this.#ownership, automation: this.#automation, runner: turnRunner,
+      retireAttempt: (chatId, attempt, reason) => this.#retireAttempt(chatId, attempt, reason),
+      stopped: (...args) => { this.emit('session-stopped', ...args); },
+      invalidateProcessing: chatId => this.#invalidateProcessing(chatId),
+      rearmDrain: chatId => this.#rearmRequestedDrain(chatId),
+    });
     this.#executionPolicy = options.executionPolicy ?? (() => 'conversation');
     this.#workingDirectorySettlement = options.workingDirectorySettlement;
     this.#getDrainOptions = getDrainOptions;
@@ -147,6 +157,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       runExclusive: (chatId, operation) => this.#locks.runExclusive(`chat:${chatId}`, operation),
       chatExists: (chatId) => this.#chatExists(chatId),
       unsettledQueueReceiptKeys,
+      observeMutation: (chatId, action) => this.#automation.observe(chatId, action),
       publish: (chatId, control) => {
         this.#queuedSteers.observe(chatId, control);
         this.emit('execution-control-updated', chatId, control);
@@ -166,6 +177,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     };
     this.#steerInputDelivery = new SteerInputDelivery({
       ...inputDeliveryOptions,
+      observeMutation: (chatId, action) => this.#automation.observe(chatId, action),
       isShuttingDown: () => this.#shuttingDown,
     });
     this.#queuedSteers = new QueuedSteerDelivery({
@@ -188,7 +200,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       controls: this.#controlOperations,
       coordinator: {
         requestDrain: (chatId, context) => { this.#requestDrain(chatId, context); },
-        reserveDirect: (chatId, turn) => this.#reserveDirect(chatId, turn),
+        reserveDirect: (chatId, turn, lease) => this.#reserveDirect(chatId, turn, lease),
         checkpoint: (reservation) => {
           this.#checkpointDirect(reservation);
           reservation.executionAdmission.signal.throwIfAborted();
@@ -280,7 +292,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       chatId,
       new Error('Turn interrupted because the server is shutting down'),
     );
-    return isStopSatisfied(await this.#requestStop(chatId, 'stop'));
+    return isStopSatisfied(await this.#stops.request(chatId, 'stop'));
   }
 
   async waitForExecutionOwners(): Promise<void> {
@@ -613,14 +625,23 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   async stopActiveTurn(chatId: string): Promise<StopActiveTurnResult> {
+    this.#automation.observe(chatId, 'stop');
     return this.#stopActiveTurn(chatId);
   }
 
+  stopExactTurn(lease: AutomationControlLease): Promise<ChatStopOutcome | 'stale-target'> {
+    return this.#stops.exact(lease);
+  }
+
   async interruptActiveTurn(chatId: string): Promise<ChatStopOutcome> {
+    this.#automation.observe(chatId, 'stop');
     return this.#interruptActiveTurn(chatId);
   }
 
-  async abortForChatDeletion(chatId: string): Promise<boolean> { return this.#abortForDeletion(chatId); }
+  async abortForChatDeletion(chatId: string): Promise<boolean> {
+    this.#automation.observe(chatId, 'delete');
+    return this.#abortForDeletion(chatId);
+  }
 
   rollbackChatDeletion(chatId: string): void { this.#rollbackDeletion(chatId); }
 
@@ -650,7 +671,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   isChatStopInFlight(chatId: string): boolean {
-    return this.#stopTasks.has(chatId);
+    return this.#stops.isStopping(chatId);
   }
 
   async triggerDrain(chatId: string): Promise<void> {
@@ -714,13 +735,18 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#ownership.hasSuppression(chatId, reason);
   }
 
-  #reserveDirect(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {
+  #reserveDirect(chatId: string, turn: TurnIdentity = {}, lease?: AutomationControlLease): DirectTurnReservation {
     if (this.#shuttingDown) {
       throw serverShuttingDownError();
     }
     if (this.ownsExecution(chatId)) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
+    if (lease && (!this.#automation.owns(lease) || lease.key.chatId !== chatId
+      || lease.key.turnId !== turn.turnId || lease.key.clientRequestId !== turn.clientRequestId)) {
+      throw new Error('Automation control lease does not own this turn');
+    }
+    this.#automation.observe(chatId, 'input', lease);
     const reservation = this.#ownership.reserveDirect(chatId, turn);
     this.#invalidateProcessing(chatId);
     return reservation;
@@ -888,21 +914,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
   }
 
-  #requestStop(chatId: string, intent: ChatStopIntent): Promise<ChatStopOutcome> {
-    const existing = this.#stopTasks.get(chatId);
-    if (existing) return existing;
-    const interruptedTurn = this.#ownership.attempt(chatId)?.identity();
-    const task = this.#performStop(chatId).then((outcome) => {
-      this.emit('session-stopped', chatId, outcome, intent, interruptedTurn);
-      return outcome;
-    }).finally(() => {
-      if (this.#stopTasks.get(chatId) === task) this.#stopTasks.delete(chatId);
-      this.#invalidateProcessing(chatId);
-    });
-    this.#stopTasks.set(chatId, task);
-    return task;
-  }
-
   async #stopActiveTurn(chatId: string): Promise<StopActiveTurnResult> {
     const drainWasActive = this.#ownership.isDraining(chatId);
     this.#ownership.enterAbortSuppression(chatId);
@@ -917,7 +928,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
     let outcome: ChatStopOutcome;
     try {
-      outcome = await this.#requestStop(chatId, 'stop');
+      outcome = await this.#stops.request(chatId, 'stop');
     } finally {
       this.#ownership.clearAbortSuppression(chatId);
       this.#ownership.exitManualStop(chatId, {
@@ -936,7 +947,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async #interruptActiveTurn(chatId: string): Promise<ChatStopOutcome> {
     try {
-      return await this.#requestStop(chatId, 'interrupt-and-send');
+      return await this.#stops.request(chatId, 'interrupt-and-send');
     } finally {
       this.#requestDrain(chatId, 'interrupt');
     }
@@ -945,7 +956,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async #abortForDeletion(chatId: string): Promise<boolean> {
     this.#ownership.enterDeletionSuppression(chatId);
     try {
-      const outcome = await this.#requestStop(chatId, 'chat-deletion');
+      const outcome = await this.#stops.request(chatId, 'chat-deletion');
       if (!isStopSatisfied(outcome)) {
         this.#rollbackDeletion(chatId);
         return false;
@@ -954,31 +965,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     } catch (error) {
       this.#rollbackDeletion(chatId);
       throw error;
-    }
-  }
-
-  async #performStop(chatId: string): Promise<ChatStopOutcome> {
-    const attempt = this.#ownership.attempt(chatId);
-    if (attempt?.hasTerminalCommit) return 'already-idle';
-    const interruption = new Error('Turn interrupted by the user');
-    if (attempt) this.#ownership.abortAdmission(chatId, interruption);
-    try {
-      const acknowledged = await this.#turnRunner.abortSession(chatId);
-      let currentAttempt: QueueExecutionAttempt | undefined;
-      if (attempt && this.#ownership.isCurrentAttempt(chatId, attempt)) {
-        currentAttempt = attempt;
-      }
-      if (!acknowledged && !attempt) return 'already-idle';
-      if (currentAttempt) {
-        this.#retireAttempt(chatId, currentAttempt, interruption);
-      }
-      return 'interrupt-requested';
-    } catch (error) {
-      logger.warn('queue: provider interrupt failed', {
-        chatId,
-        errorType: error instanceof Error ? error.name : typeof error,
-      });
-      return 'failed';
     }
   }
 

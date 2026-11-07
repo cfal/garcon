@@ -1,5 +1,4 @@
 import {
-	isEmptyFilter,
 	matchesChatFilter,
 	parseChatSearch,
 	type ChatFilterSpec,
@@ -7,13 +6,16 @@ import {
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatSearchResult } from '$shared/chat-search';
 
+export function matchesSidebarChatFilter(chat: ChatSessionRecord, spec: ChatFilterSpec): boolean {
+	return matchesChatFilter(chat, { ...spec, collection: spec.collection ?? 'conversation' });
+}
+
 export function facetFilteredChats(
 	spec: ChatFilterSpec,
-	chats: ChatSessionRecord[],
+	chats: readonly ChatSessionRecord[],
 ): ChatSessionRecord[] {
 	const facetSpec: ChatFilterSpec = { ...spec, textTokens: [] };
-	if (isEmptyFilter(facetSpec)) return chats;
-	return chats.filter((chat) => matchesChatFilter(chat, facetSpec));
+	return chats.filter((chat) => matchesSidebarChatFilter(chat, facetSpec));
 }
 
 // Appends transcript-only matches after metadata matches for the same query.

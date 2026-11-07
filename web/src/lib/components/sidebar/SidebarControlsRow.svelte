@@ -19,12 +19,15 @@
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import Braces from '@lucide/svelte/icons/braces';
 	import ChartSpline from '@lucide/svelte/icons/chart-spline';
+	import Workflow from '@lucide/svelte/icons/workflow';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import History from '@lucide/svelte/icons/history';
 	import Activity from '@lucide/svelte/icons/activity';
 	import CircleDot from '@lucide/svelte/icons/circle-dot';
+	import Bot from '@lucide/svelte/icons/bot';
+	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import List from '@lucide/svelte/icons/list';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
@@ -48,6 +51,7 @@
 		chatListAutohideAvailable?: boolean;
 		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
+		hasAutomationChats?: boolean;
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
@@ -64,6 +68,7 @@
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
 		onShowUsage: () => void;
+		onShowWorkflows?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -79,6 +84,7 @@
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
 		sidebarMenuSearches = [],
+		hasAutomationChats = false,
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
 		onCreateChat,
@@ -95,6 +101,7 @@
 		onShowPreambles,
 		onShowSnippets,
 		onShowUsage,
+		onShowWorkflows,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -163,6 +170,17 @@
 				<EllipsisVertical class="h-3.5 w-3.5" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
+				{#if hasAutomationChats}
+					<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.('collection:conversation')}>
+						<MessagesSquare class="h-3.5 w-3.5" />
+						{m.sidebar_collection_conversations()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.('collection:automation')}>
+						<Bot class="h-3.5 w-3.5" />
+						{m.sidebar_collection_automation()}
+					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+				{/if}
 				{#if sidebarMenuSearches.length > 0}
 					{#each sidebarMenuSearches as search (search.id)}
 						<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.(search.query)}>
@@ -292,6 +310,7 @@
 					<ChartSpline class="h-3.5 w-3.5" />
 					{m.workspace_surface_usage()}
 				</DropdownMenuItem>
+				{#if onShowWorkflows}<DropdownMenuItem onclick={onShowWorkflows}><Workflow class="h-3.5 w-3.5" />Workflows</DropdownMenuItem>{/if}
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.settings_title()}

@@ -16,6 +16,12 @@ it('round-trips execution settings invalidations', () => {
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
 });
 
+it('round-trips presentation invalidations with a required chat target', () => {
+  const event = new ChatListRefreshRequestedMessage('chat-presentation-changed', '1783725900000200');
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+  expect(parseServerWsMessage({ ...event, chatId: null })).toBeNull();
+});
+
 it('round-trips workspace metadata repair without accepting missing targets for chat mutations', () => {
   const event = new ChatListRefreshRequestedMessage('metadata-repaired', null);
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);

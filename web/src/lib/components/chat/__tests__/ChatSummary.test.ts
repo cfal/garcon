@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ChatSummary from '../ChatSummary.svelte';
@@ -5,6 +6,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js
 
 function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-summary',
 		parentChat: null,
 		projectPath: '/workspace/project',

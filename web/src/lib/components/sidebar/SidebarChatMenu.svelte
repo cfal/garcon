@@ -8,6 +8,7 @@
 	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import Info from '@lucide/svelte/icons/info';
+	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
@@ -52,6 +53,7 @@
 		onRename: () => void;
 		onDetails: () => void;
 		onShare: () => void;
+		onPromoteChat?: (chatId: string) => void;
 		onManageTags?: () => void;
 		onFork: () => void;
 		onDelete: () => void;
@@ -76,6 +78,7 @@
 		onRename,
 		onDetails,
 		onShare,
+		onPromoteChat,
 		onManageTags,
 		onFork,
 		onDelete,
@@ -217,6 +220,12 @@
 	<Share2 />
 	{m.share_button()}
 </DropdownMenuItem>
+{#if session.presentation.collection === 'automation' && onPromoteChat}
+	<DropdownMenuItem onclick={() => onPromoteChat?.(session.id)}>
+		<MessagesSquare />
+		{m.sidebar_chat_promote()}
+	</DropdownMenuItem>
+{/if}
 <DropdownMenuItem onclick={onDetails}>
 	<Info />
 	{m.sidebar_chats_details()}

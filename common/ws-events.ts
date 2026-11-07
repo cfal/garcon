@@ -26,6 +26,8 @@ import {
 import { parseExecutors, type ExecutorSnapshot } from './executors';
 import type { ErrorCode } from './error-codes';
 import { parseRevisionInvalidation, type RevisionInvalidationMessage } from './ws-revision-invalidations';
+import { parseWorkflowInvalidation, WorkflowInvalidatedMessage } from './ws-workflows';
+export { WorkflowInvalidatedMessage } from './ws-workflows';
 import { normalizeRemoteSettingsSnapshot, type RemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
@@ -334,6 +336,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'chats-reordered',
   'agent-handoff',
   'execution-settings-updated',
+  'chat-presentation-changed',
   'metadata-repaired',
 ] as const;
 
@@ -476,6 +479,7 @@ export type ServerWsMessage =
   | ChatListRefreshRequestedMessage
   | ChatBoardsInvalidatedMessage
   | RevisionInvalidationMessage
+  | WorkflowInvalidatedMessage
   | SettingsChangedMessage
   | ApiProvidersInvalidatedMessage
   | ExecutorsChangedMessage
@@ -918,6 +922,7 @@ export function parseServerWsMessage(
     case 'tickets-invalidated':
     case 'pull-request-reviews-invalidated':
       return parseRevisionInvalidation(data);
+    case 'workflow-invalidated': return parseWorkflowInvalidation(data);
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;

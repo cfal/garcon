@@ -1,6 +1,6 @@
 import type { ClearChatRequest, ClearChatResponse } from '../../../common/chat-clear.js';
 import { DomainError } from '../../common/domain-error.js';
-import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { ChatMutationGuard } from '../automation/mutation-guard.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
@@ -26,7 +26,7 @@ interface TranscriptClearOptions {
     'reserveTranscriptSnapshot' | 'releaseTranscriptSnapshot' | 'readChatExecutionControl' | 'withChatExecutionControl'
   >;
   readonly reopenProducer: (chatId: string) => void;
-  readonly chatMutationLock: KeyedPromiseLock;
+  readonly mutationGuard: ChatMutationGuard;
 }
 
 export class TranscriptClearService {
@@ -35,7 +35,7 @@ export class TranscriptClearService {
   async clear(request: ClearChatRequest, signal: AbortSignal): Promise<ClearChatResponse> {
     const { chatId } = request;
     this.#requireChat(chatId);
-    return this.options.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+    return this.options.mutationGuard.run(chatId, 'view-replaced', async beforeMutation => {
       const { ledger } = this.options;
       const entry = this.#requireChat(chatId);
       if (this.options.ownership.hasPending(chatId)) throw ownershipTransferPendingError();
@@ -53,6 +53,7 @@ export class TranscriptClearService {
           if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
           this.#assertUnchanged(request);
           signal.throwIfAborted();
+          beforeMutation();
           ledger.closeProducer(chatId);
           let staging: TranscriptView | null = null;
           try {

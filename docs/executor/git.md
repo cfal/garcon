@@ -19,7 +19,114 @@ Use the executor's paired Noise lanes: `git.getQuickSummary` stays on primary fo
 
 Reuse the existing Git implementation. Do not build a second Git engine or make the controller issue primitive subprocess commands to a worker. Multi-command operations, locks, direct filesystem reads, temporary indexes, and review documents all belong beside the repository.
 
-No repository synchronization, cloning workflow, cross-executor worktree migration, SSH-key forwarding, credential synchronization, GitHub writes beyond review comments, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the executor. Remoting is not an OS sandbox.
+No general repository synchronization, cloning workflow, cross-executor worktree migration, SSH-key forwarding, credential synchronization, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Exact commit transfer and approved PR creation are narrow typed operations described below, not arbitrary shell or GitHub writes. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the executor. Remoting is not an OS sandbox.
+
+## Managed Worktree Primitives
+
+`createManagedWorktree` and `inspectManagedWorktree` operate through the same
+executor-qualified Git service on Local and both remote dial directions. They
+use the bulk lane and journaled reply continuity, not automatic effect replay.
+Creation requires an exact commit ID and absent destination, registered path,
+branch namespace and managed resource marker. Exclusive durable reservations
+cover resource ID, canonical path and branch, including incomplete creations.
+Existing branches (including dangling symbolic refs and unborn branches selected
+by other worktrees) and branch expressions are never adopted by creation.
+Branch names with `=` are rejected before reservation
+because integration binds per-command Git configuration to that name. A
+collision rolls back only the rejecting call's exclusive reservations before
+worktree creation; uncertain persistence retains ownership records. A prepared and
+aborted ref transaction checks namespace availability before reservation, including
+dangling ancestor/descendant symrefs in files and reftable storage. It commits no ref.
+The probe invokes reference-transaction hooks for its preparation and abort;
+those hooks remain trusted executor/repository code.
+
+The runtime writes an owner-only marker under the canonical Git common directory
+before creation and confirms the canonical worktree/admin identity afterward.
+The marker binds the resource and operation IDs, repository identity, path,
+branch and base commit. Inspection validates that binding and reports the
+currently observed HEAD and dirty status, overriding submodule ignore settings.
+A bounded status overflow reports dirty, not clean. It shares repository coordination with
+ordinary Git mutations, but does not exclude same-account external writers.
+Directory identity includes canonical path, device, inode and birthtime. On
+filesystems without birthtime, inode recycling can weaken replacement detection.
+
+An incomplete marker is uncertain, not proof of ownership or non-execution.
+Missing markers return `managed: null`, which is not retry authority. Failed or
+canceled creation retains its marker and never compensates by deleting a branch
+or directory. A new runtime may inspect confirmed ownership without recreating
+the worktree. Explicit controller recovery can adopt independently inspected
+immutable output without reconstructing the old execution lease.
+
+`removeManagedWorktree` requires the original creation operation ID and marker,
+exact repository/worktree identity, branch and expected current HEAD. It rechecks
+cleanliness under repository coordination, then uses non-force Git removal while
+retaining the branch and marker. Ignored files are not dirty and may be removed.
+The runtime brackets removal with executor-wide exclusion of native admissions,
+known uncertain native work, running provider sessions and PTYs. New native
+admissions, PTY creation and Files mutations cannot enter until removal settles;
+in-flight Files mutations retain exclusion through settlement. External writers
+remain trusted and outside this exclusion. A lost
+reply is unknown; ordinary path-only removal is not a recovery substitute.
+
+## Exact Delivery Primitives
+
+`inspectCommit` reads an exact object ID, raw commit tree/parents and optional
+ancestry predicate. It never resolves a branch name into accepted evidence.
+All managed/exact operations disable replacement objects, grafts and lazy fetching,
+and reject shallow and partial-clone/promisor repositories rather than accepting
+incomplete lineage or implicitly fetching evidence.
+Commit inspection bounds the raw commit object (including its message) at 64 KiB
+and rejects misplaced identity headers instead of reporting non-Git lineage.
+`pushExactRef` checks the selected remote's single push URL and an explicit
+expected destination commit (or absence), then conditionally pushes one exact
+commit/ref through the checked named remote, preserving explicit pushurl semantics.
+It does not push tags or recurse into submodules. `fetchExactRef` checks the
+selected fetch URL and remote ref, fetches that advertised source ref, verifies
+the expected object, and rechecks the ref. It does not move local branches,
+tracking refs, bundle refs or `FETCH_HEAD`; configured bundle sources are disabled.
+These requests bind the single resolved directional
+URL, not an interchangeable repository label. Destinations that would be
+rewritten again or reinterpreted as configured/legacy remote names are rejected,
+as are embedded passwords, HTTP userinfo/backslashes and explicit remote-helper
+prefixes. URI transports are limited to HTTPS, HTTP, SSH, Git and file. Mirror
+pushes and remote-helper overrides are rejected before dispatch; inherited push
+options are suppressed.
+Credentials remain in executor-owned helpers/SSH configuration, not manifests.
+Exact mutations do not retry native lock errors. Unknown mutation results require
+inspection, never an automatic retry.
+
+Ref observations request protocol v2 and reject advertised symbolic refs. Standard
+Git leases bind the old object ID, not the destination's direct/symbolic kind.
+Receivers or transports that do not negotiate v2 may hide non-HEAD symbolic refs,
+and a receiver administrator can replace a direct ref after inspection. These operations require
+trusted receiver administration to keep approved destinations direct; they do not
+provide an atomic no-dereference guarantee against the receiver or its hooks.
+Stronger enforcement requires receiver-side policy, not another client preflight.
+
+`integrateCommits` accepts only an exact clean managed-worktree identity and
+expected HEAD/branch. Ordered merges retain unmerged paths in that worktree;
+the engine does not run an extra resolution pass or roll back a partially applied
+integration in a user checkout. The result distinguishes verified integration, retained conflicts and
+unknown outcome. A thrown `GIT_MUTATION_OUTCOME_UNKNOWN` (including lost transport
+or result validation) has the same uncertainty meaning as a `kind: 'unknown'`
+result. Unconfirmed creation is a definite integration rejection before merge.
+Merges explicitly select `ort`, allow fast forwards and disable signature
+verification, rerere and branch-specific merge options, and clear the default
+merge-driver selection. They retain conflicts produced by that merge rather than
+replaying recorded resolutions. Custom merge drivers, attribute-selected drivers
+(including repository, Git administration and executor-global attributes) and
+hooks remain trusted executor/repository behavior; this is not a guarantee against their custom
+resolutions or effects. Integration rejects branch names with `=` as creation does.
+Successful integration verifies all input commits in the
+resulting lineage. These primitives share existing Git coordination and bulk
+RPC continuity; they do not schedule transfers or authorize publication.
+
+Git service calls may supply `GitCallOptions.instanceId` to pin a previously
+observed runtime. Local admission checks the runtime instance; remote admission
+checks the authenticated session instance immediately before sending. A mismatch
+rejects as `not-dispatched` with `STALE_RESOURCE`, without submitting to the replacement runtime.
+The pin is client-side call context, not an RPC payload field. Lost replies after
+dispatch retain the existing unknown-outcome and journal-continuity rules.
 
 ## Original Behavior
 

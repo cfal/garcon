@@ -47,6 +47,9 @@ import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
 import { AgentResumePreparationError } from './agent-resume-preparation-error.js';
 
+import type { ServerPrincipal } from '../lib/http-route-types.js';
+import { assertPermissionDecisionAuthority } from '../agents/permission-authority.js';
+
 const logger = createLogger('commands:session');
 
 export class SessionCommands {
@@ -74,6 +77,7 @@ export class SessionCommands {
         assertAgentHandoffIdle(await this.deps.queue.readChatExecutionControl(input.chatId), false);
         await this.deps.agents.currentTranscriptViewId(input.chatId, signal);
         const target = await this.deps.handoffs.resolveTarget({ chat: source, handoff: input.handoff, signal, deadline });
+        this.deps.mutationGuard.observe(input.chatId, 'execution-settings');
         const preparation = this.deps.handoffs.createPreparation({
           chatId: input.chatId, clientRequestId: input.clientRequestId,
           handoff: input.handoff, source, target, command: null,
@@ -269,15 +273,17 @@ export class SessionCommands {
     return this.support.withChatMutationLock(chatId, () => this.deleteChatLocked(chatId));
   }
 
-  async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
-    return this.support.withChatMutationLock(input.chatId, (deadline) => this.submitPermissionDecisionLocked(input, deadline));
+  async submitPermissionDecision(input: PermissionDecisionInput, principal: ServerPrincipal | null): Promise<CommandAcceptedResponse> {
+    return this.support.withChatMutationLock(input.chatId, (deadline) => this.submitPermissionDecisionLocked(input, deadline, principal));
   }
 
   private async submitPermissionDecisionLocked(
     input: PermissionDecisionInput,
     deadline: number,
+    principal: ServerPrincipal | null,
   ): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
+    assertPermissionDecisionAuthority(this.deps.chats.getChat(input.chatId)?.automationPolicy, principal);
     const ledgerInput = {
       commandType: 'permission-decision',
       chatId: input.chatId,
@@ -316,6 +322,7 @@ export class SessionCommands {
       }
     }
 
+    assertPermissionDecisionAuthority(this.deps.chats.getChat(input.chatId)?.automationPolicy, principal);
     const ledger = await this.deps.ledger.accept(ledgerInput);
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind === 'duplicate') {
@@ -329,9 +336,15 @@ export class SessionCommands {
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
         response: input.response,
-      }, input.control, deadline);
+      }, input.control, deadline, principal);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
     } catch (error) {
+      if (error instanceof DomainError && error.code === 'PERMISSION_DECISION_FORBIDDEN') {
+        await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
+          error: error.message, errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+        });
+        throw error;
+      }
       const failureCode = permissionDecisionFailureCode(error);
       const failure = permissionDecisionError(failureCode);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
@@ -645,6 +658,7 @@ export class SessionCommands {
         previousProjectPath: activeChat.projectPath,
       };
       let relocatedSession: StartedAgentSession | null = null;
+      this.deps.mutationGuard.observe(input.chatId, 'project');
       const updated = await runProjectPathUpdateTransaction({
         chatId: input.chatId,
         agentId: activeChat.agentId,

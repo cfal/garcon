@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../../common/automation.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ProjectTarget } from '$shared/project-resolution';
@@ -6,6 +7,7 @@ import { PromptComposerProjectState } from '../prompt-composer-project-state.sve
 
 function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/project-a',

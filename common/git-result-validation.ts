@@ -1,4 +1,5 @@
 import { isRecord } from './json.js';
+import { isGitObjectId, isManagedWorktreeSnapshot } from './git-managed-worktrees.js';
 import { GitServiceError } from './git-error.js';
 import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
@@ -80,6 +81,15 @@ export function validateGitResult<K extends GitMethod>(method: K, value: unknown
 }
 
 function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
+  if (method === 'integrateCommits') return v.kind === 'unknown' ? str(v.reason)
+    : isManagedWorktreeSnapshot(v.managed) && (v.kind === 'integrated' || v.kind === 'conflicts' && array(str, 1024)(v.paths));
+  if (method === 'inspectCommit') return shape(v, { commit: isGitObjectId, tree: isGitObjectId,
+    parents: array(isGitObjectId, 256), containsAncestor: nullable(bool) });
+  if (method === 'fetchExactRef' || method === 'pushExactRef') return v.success === true && isGitObjectId(v.commit)
+    && typeof v.ref === 'string' && v.ref.startsWith('refs/');
+  if (method === 'createManagedWorktree') return v.success === true && isManagedWorktreeSnapshot(v.managed);
+  if (method === 'inspectManagedWorktree') return v.managed === null || isManagedWorktreeSnapshot(v.managed);
+  if (method === 'removeManagedWorktree') return v.success === true && isManagedWorktreeSnapshot(v.removed) && v.removed.dirty === false;
   if (isGitMutation(method)) {
     if (!shape(v, { success: oneOf(true), output: optional(str), message: optional(str), outputTruncated: optional(bool), worktreePath: optional(str) })) return false;
     return method !== 'commit' || shape(v, { commitScope: oneOf('selected-files', 'whole-index'), indexSynchronized: bool });
@@ -154,7 +164,15 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
     reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
   const state = oneOf('open', 'closed', 'merged');
   let valid: boolean;
-  if (method === 'getStatus') {
+  const published = (v: unknown) => shape(v, { repository: isGhRepositoryIdentity, actor: isGhActorIdentity, number: num, url: str,
+    state, baseBranch: str, baseCommit: isGitObjectId, headBranch: str, headCommit: isGitObjectId, title: str, body: str, draft: bool });
+  if (method === 'getPublicationTarget') {
+    valid = shape(value, { repository: isGhRepositoryIdentity, actor: isGhActorIdentity, baseCommit: isGitObjectId });
+  } else if (method === 'createPullRequest') {
+    valid = published(value);
+  } else if (method === 'findPullRequests') {
+    valid = shape(value, { repository: isGhRepositoryIdentity, actor: isGhActorIdentity, pulls: array(published, 100) });
+  } else if (method === 'getStatus') {
     valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
   } else if (method === 'listPullRequests') {
     valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none'),

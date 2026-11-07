@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../common/automation.js';
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -6,6 +7,10 @@ import { randomUUID } from 'crypto';
 import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.js';
+import { TranscriptOutputCoverage } from '../../ledger/output-coverage.js';
+import { ChatMutationGuard } from '../../automation/mutation-guard.js';
+import { AUTOMATION_PRESENTATION, GUARDED_AUTOMATION_POLICY } from '../../../../common/automation.js';
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
@@ -36,6 +41,12 @@ import { AgentResumeController } from '../../chats/agent-resume-controller.js';
 import { createForkedChat as createForkedChatTransaction } from '../../chats/fork-chat.js';
 import { CommandSupport, CommandValidationError } from '../command-support.js';
 import { parseGarconCommandResult } from '../../../../common/garcon-command-results.js';
+import { WorkflowAttempts } from '../../workflows/attempts.js';
+import { WorkflowResources } from '../../workflows/resources.js';
+import { workflowEffectiveInput, workflowStartInput } from '../../workflows/inputs.js';
+import { managedTargetRequest } from '../../workflows/managed-target.js';
+import { effectFence, fixture as workflowFixture, managedTarget, plan as workflowPlan } from '../../workflows/__tests__/fixture.js';
+import { automationContentDigest } from '../../automation/input.js';
 import {
   COMMAND_CORRELATION_ID_MAX_BYTES,
   QUEUE_ENTRY_ID_MAX_BYTES,
@@ -146,6 +157,7 @@ function agentSettings(ownerId = 'claude', values = {}) {
 function projectedChat(chatId, projectPath = '/repo', source = {}) {
   const agentId = source.agentId ?? 'claude';
   return {
+    presentation: CONVERSATION_PRESENTATION,
     id: chatId,
     agentId,
     model: source.model ?? 'opus',
@@ -679,6 +691,7 @@ function makeService(overrides = {}) {
   const handoffs = { ...defaultHandoffs, ...overrides.handoffs };
   const ledger = overrides.ledger ?? new CommandLedger();
   const transcripts = overrides.transcripts ?? {
+    outputCoverage: new TranscriptOutputCoverage(),
     subscribe: mock(() => () => undefined),
     appendNotice: mock(() => undefined),
     currentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
@@ -746,7 +759,7 @@ function makeService(overrides = {}) {
       snapshot: () => ({ revision: 0, preambles: [] }),
     },
     chatTags,
-    chatMutationLock: overrides.chatMutationLock,
+    mutationGuard: new ChatMutationGuard(overrides.chatMutationLock ?? new KeyedPromiseLock(), overrides.lifecycle ?? new AutomationLifecycle()),
   };
   const service = new TestChatCommandService(dependencies);
   activeServices.push(service);
@@ -785,6 +798,7 @@ function makeRealQueue(
   turnRunnerOverrides = {},
   projectAdmission = { assertAvailable: mock(async () => undefined) },
   controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test'),
+  options = {},
 ) {
   return new ChatExecutionCoordinator(
     {
@@ -802,6 +816,7 @@ function makeRealQueue(
       projectAdmission,
       attachmentAdmission: { assertSupported: () => undefined },
       isControlInputViewCurrent: () => true,
+      ...options,
     },
   );
 }
@@ -871,6 +886,217 @@ describe('ChatCommandService', () => {
     } else {
       process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
     }
+  });
+
+  function automationFixture(overrides = {}) {
+    const lifecycle = new AutomationLifecycle();
+    const projection = makeInputProjection({
+      admitInput: mock(async (_chatId, _message, options) => {
+        options.automation.inputPublished = true;
+        return { inserted: true };
+      }), ...overrides.projection,
+    });
+    const queue = makeRealQueue(projection, {}, undefined, undefined, { automation: lifecycle });
+    const fixture = makeService({ ...overrides, queueService: queue, lifecycle });
+    const automation = fixture.service.createAutomationService({
+      serverInstanceId: 'synthetic-controller', chatIds: { allocate: () => TARGET_CHAT_ID },
+      lifecycle, execution: queue, providerRevision: overrides.providerRevision ?? (() => null),
+      preparationTimeoutMs: overrides.preparationTimeoutMs,
+    });
+    const input = {
+      agentId: 'claude', model: 'opus', agentSettings: agentSettings(), executorId: 'local',
+      projectPath: projectBaseDir, command: 'Synthetic automation input', title: 'Synthetic worker',
+      permissionMode: 'default', thinkingMode: 'none', clientRequestId: 'synthetic-automation',
+      preambles: [], providerRevision: null, presentation: AUTOMATION_PRESENTATION, automationPolicy: GUARDED_AUTOMATION_POLICY,
+    };
+    return { ...fixture, automation, lifecycle, projection, input };
+  }
+
+  it('workflow agent inputs match real neutral preparation at the executor-canonical path', async () => {
+    const preamble = { id: '22222222-2222-4222-8222-222222222222', title: 'Instruction', content: 'Synthetic bounded instruction.', enabled: true,
+      scope: { type: 'global' }, agentIds: [], tagFilter: { mode: 'any', tags: [] } };
+    const core = automationFixture({ preambles: { snapshot: () => ({ revision: 1, preambles: [preamble] }) } });
+    const workflows = workflowFixture();
+    let turn;
+    try {
+      const canonical = path.join(projectBaseDir, 'managed');
+      await fs.mkdir(canonical);
+      const alias = path.join(projectBaseDir, 'alias');
+      await fs.symlink(canonical, alias);
+      const inspected = await inspectProjectDirectory(alias, 'local');
+      expect(inspected).toEqual({ kind: 'available', effectiveProjectKey: canonical });
+      const original = workflowPlan();
+      const task = { ...original.tasks[0], spec: { kind: 'agent', target: { ...original.tasks[0].spec.target, projectPath: projectBaseDir },
+        prompt: '  Synthetic agent prompt.\n', outputs: ['commit'], selection: {
+          agentId: core.input.agentId, model: core.input.model, apiProviderId: null, modelEndpointId: null,
+          modelProtocol: null, providerRevision: null, agentSettings: core.input.agentSettings,
+          permissionMode: 'default', thinkingMode: 'none', preambles: [{ id: preamble.id, contentDigest: automationContentDigest(preamble.content) }],
+        } } };
+      const id = workflows.write({ action: 'create', captainChatId: null, plan: { ...original, tasks: [task] } }).workflowId;
+      workflows.activate(id);
+      const now = () => '2026-01-01T00:00:00.000Z';
+      const attempts = new WorkflowAttempts(workflows.store, { now });
+      const resources = new WorkflowResources(workflows.store, now);
+      let attempt = attempts.reserve(id, 'check');
+      attempts.beginPreparation(attempt.attemptId);
+      const resource = managedTarget(attempt, attempt.attemptId, inspected.effectiveProjectKey);
+      resources.plan({ operationId: resource.operationId, attemptId: attempt.attemptId, kind: 'worktree',
+        resourceKey: resource.resourceKey, payload: JSON.stringify(managedTargetRequest(resource)) });
+      resources.begin(resource.operationId, effectFence());
+      resources.observe(resource.operationId, 'succeeded', JSON.stringify(resource));
+      attempt = attempts.bindTarget(attempt.attemptId, resource);
+      const input = workflowStartInput(attempt, task);
+      const prepared = await core.automation.prepare(input);
+      expect(prepared.kind).toBe('prepared');
+      turn = prepared.turn;
+      expect(turn.effectiveInput).toEqual(workflowEffectiveInput(input));
+      expect(attempts.bindPrepared(attempt.attemptId, turn.key, turn.effectiveInput).dispatchPhase).toBe('prepared');
+      expect(core.chats.addChat).not.toHaveBeenCalled();
+      expect(core.agents.startSession).not.toHaveBeenCalled();
+    } finally { await turn?.cancel(); workflows.cleanup(); }
+  });
+
+  it.each(['cancel', 'expiry', 'shutdown'])('automation %s settles a reservation without publishing a chat or input', async mode => {
+    const fixture = automationFixture({ preparationTimeoutMs: mode === 'expiry' ? 1 : 30_000 });
+    const admission = await fixture.automation.prepare(fixture.input);
+    expect(admission.kind).toBe('prepared');
+    const observed = fixture.automation.waitForTerminal(admission.turn.key, new AbortController().signal);
+    if (mode === 'cancel') await admission.turn.cancel();
+    if (mode === 'shutdown') fixture.automation.beginShutdown();
+    expect(await observed).toMatchObject({ kind: 'failed', certainty: 'not-started' });
+    expect(await admission.turn.start()).toMatchObject({ kind: 'not-started', inputPublished: false });
+    expect(fixture.chats.addChat).not.toHaveBeenCalled();
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(fixture.settings.setSessionName).not.toHaveBeenCalled();
+    expect(fixture.agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('automation consumes its indexed turn once and dispatches after releasing the shared lock', async () => {
+    let held = false;
+    class ObservedLock extends KeyedPromiseLock {
+      runExclusive(key, operation) {
+        return super.runExclusive(key, async () => {
+          held = true;
+          try { return await operation(); } finally { held = false; }
+        });
+      }
+    }
+    const lock = new ObservedLock();
+    const fixture = automationFixture({ chatMutationLock: lock });
+    const admission = await fixture.automation.prepare(fixture.input);
+    expect(admission.kind).toBe('prepared');
+    const { key } = admission.turn;
+    const observed = fixture.automation.waitForTerminal(key, new AbortController().signal);
+    fixture.agents.startSession.mockImplementation(async (_chatId, _command, options) => {
+      expect(held).toBe(false);
+      expect(options).not.toHaveProperty('dispatchDeadline');
+      expect(options.turnId).toBe(key.turnId);
+      const record = await fixture.ledger.getTurnRecord(key.chatId, key.turnId);
+      await fixture.ledger.settleTerminal(record.key, 'finished');
+      await fixture.ledger.markPublicTerminal(key.chatId, key.turnId);
+    });
+    const starting = admission.turn.start();
+    expect(admission.turn.start()).toBe(starting);
+    expect(await starting).toEqual({ kind: 'published' });
+    expect(await observed).toMatchObject({ kind: 'completed' });
+    await fixture.service.waitForBackgroundTasks();
+    expect(admission.turn.start()).toBe(starting);
+    expect(await admission.turn.start()).toEqual({ kind: 'published' });
+    expect(fixture.agents.startSession).toHaveBeenCalledTimes(1);
+    expect(fixture.settings.ensureInNormal).not.toHaveBeenCalled();
+    expect(fixture.settings.recordChatStartup).not.toHaveBeenCalled();
+    expect(fixture.chats.getChat(key.chatId)).toMatchObject({ presentation: AUTOMATION_PRESENTATION, automationPolicy: GUARDED_AUTOMATION_POLICY });
+    expect(admission.turn.control.outputGapped.aborted).toBe(false);
+    fixture.transcripts.outputCoverage.markGap(key.chatId);
+    expect(admission.turn.control.outputGapped.aborted).toBe(true);
+    expect(await fixture.automation.waitForTerminal(key, new AbortController().signal))
+      .toMatchObject({ kind: 'completed', receivedOutputCoverage: 'gapped' });
+    expect(await fixture.automation.stop(key))
+      .toMatchObject({ kind: 'already-settled', result: { kind: 'completed', receivedOutputCoverage: 'gapped' } });
+    admission.turn.control.release();
+    fixture.automation.beginShutdown();
+    expect(await admission.turn.start()).toEqual({ kind: 'published' });
+    expect(fixture.agents.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('automation retains committed input when admission fails after publication', async () => {
+    const fixture = automationFixture({ projection: { admitInput: async (_id, _message, options) => {
+      options.automation.inputPublished = true;
+      throw new Error('Synthetic post-publication failure');
+    } } });
+    const admission = await fixture.automation.prepare(fixture.input);
+    expect(await admission.turn.start()).toMatchObject({ kind: 'not-started', inputPublished: true });
+    expect(await admission.turn.start()).toMatchObject({ kind: 'not-started', inputPublished: true });
+    expect(fixture.chats.getChat(TARGET_CHAT_ID)).not.toBeNull();
+    expect(fixture.chats.removeChat).not.toHaveBeenCalled();
+    expect(fixture.agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('an observer failure compensates unpublished startup without pretending another actor adopted it', async () => {
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const fixture = automationFixture({
+      chats: { flush: async () => { entered.resolve(); await release.promise; } },
+      projection: { admitInput: async (_id, _message, options) => {
+        options.automation.control.revoked.throwIfAborted();
+        options.automation.inputPublished = true;
+        return { inserted: true };
+      } },
+    });
+    const admission = await fixture.automation.prepare(fixture.input);
+    expect(admission.kind).toBe('prepared');
+    const other = fixture.lifecycle.acquire({ ...admission.turn.key, chatId: SOURCE_CHAT_ID });
+    fixture.lifecycle.subscribe(() => { throw new Error('Synthetic observer failure'); });
+    const starting = admission.turn.start();
+    await entered.promise;
+    fixture.lifecycle.observe(SOURCE_CHAT_ID, 'input');
+    release.resolve();
+    expect(await starting).toMatchObject({ kind: 'not-started', inputPublished: false });
+    expect(fixture.chats.getChat(admission.turn.key.chatId)).toBeNull();
+    expect(fixture.agents.startSession).not.toHaveBeenCalled();
+    other.release();
+  });
+
+  it.each(['cancel', 'shutdown'])('automation %s during preparation cannot open the provider dispatch gate', async action => {
+    const entered = deferred();
+    const release = deferred();
+    const fixture = automationFixture({ chats: { flush: async () => { entered.resolve(); await release.promise; } } });
+    const admission = await fixture.automation.prepare(fixture.input);
+    const starting = admission.turn.start();
+    await entered.promise;
+    const canceling = action === 'cancel' ? admission.turn.cancel() : Promise.resolve(fixture.automation.beginShutdown());
+    release.resolve();
+    expect(await starting).toMatchObject({ kind: 'not-started', inputPublished: false });
+    await canceling;
+    expect(fixture.agents.startSession).not.toHaveBeenCalled();
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+  });
+
+  it('rejects provider drift between preparation and consumption without publishing', async () => {
+    let revision = 1;
+    const fixture = automationFixture({ providerRevision: () => revision });
+    const admission = await fixture.automation.prepare({ ...fixture.input, providerRevision: revision });
+    expect(admission.kind).toBe('prepared');
+    expect(admission.turn.effectiveInput.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    revision++;
+    expect(await admission.turn.start()).toEqual({ kind: 'not-started', code: 'API_PROVIDER_CONFIGURATION_CHANGED', inputPublished: false });
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(fixture.agents.startSession).not.toHaveBeenCalled();
+    expect(fixture.chats.getChat(TARGET_CHAT_ID)).toBeNull();
+    expect(await fixture.automation.waitForTerminal(admission.turn.key, new AbortController().signal))
+      .toMatchObject({ kind: 'failed', certainty: 'not-started', detail: 'Provider configuration changed' });
+  });
+
+  it('automation Stop refuses a prior controller and cancels only its exact prepared key', async () => {
+    const fixture = automationFixture();
+    const admission = await fixture.automation.prepare(fixture.input);
+    const { key } = admission.turn;
+    expect(await fixture.automation.stop({ ...key, serverInstanceId: 'previous' }))
+      .toEqual({ kind: 'requires-explicit-chat-stop', chatId: key.chatId });
+    expect(await fixture.automation.stop({ ...key, clientRequestId: 'different' })).toEqual({ kind: 'stale-target' });
+    expect(await fixture.automation.stop(key)).toEqual({ kind: 'not-started' });
+    expect(await admission.turn.start()).toMatchObject({ kind: 'not-started', inputPublished: false });
+    expect(fixture.agents.startSession).not.toHaveBeenCalled();
   });
 
   it('rejects empty commands', async () => {
@@ -4671,6 +4897,22 @@ describe('ChatCommandService', () => {
     );
   });
 
+  it('denies guarded permission retries before ledger lookup or provider effects', async () => {
+    const f = makeService({ session: { automationPolicy: GUARDED_AUTOMATION_POLICY } });
+    const observe = spyOn(f.ledger, 'observe');
+    const accept = spyOn(f.ledger, 'accept');
+    try {
+      for (const principal of [null, undefined, { mode: 'local' }, { mode: 'executor' }]) {
+        await expect(f.service.submitPermissionDecision({ chatId: SOURCE_CHAT_ID,
+          clientRequestId: 'synthetic-denied', permissionOccurrenceId: 'synthetic-occurrence', allow: true }, principal))
+          .rejects.toMatchObject({ code: 'PERMISSION_DECISION_FORBIDDEN', status: 403 });
+      }
+      expect(observe).not.toHaveBeenCalled();
+      expect(accept).not.toHaveBeenCalled();
+      expect(f.agents.resolvePermission).not.toHaveBeenCalled();
+    } finally { observe.mockRestore(); accept.mockRestore(); }
+  });
+
   it('forwards structured permission decision responses to agents', async () => {
     const { service, agents, ledger } = makeService();
     const response = { outcome: { outcome: 'accepted' } };
@@ -4703,7 +4945,7 @@ describe('ChatCommandService', () => {
       allow: true,
       alwaysAllow: false,
       response,
-    }, control, expect.any(Number));
+    }, control, expect.any(Number), undefined);
     const deadline = agents.resolvePermission.mock.calls[0][4];
     expect(deadline).toBeGreaterThanOrEqual(requested + INTERACTIVE_EXECUTOR_WAIT_MS);
     expect(deadline).toBeLessThanOrEqual(performance.now() + INTERACTIVE_EXECUTOR_WAIT_MS);

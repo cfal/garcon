@@ -9,6 +9,7 @@ import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../../common/log.js';
 import { resolveChatTitle } from '../chats/chat-title.js';
 import type { SessionStoppedCallback, TurnFailedCallback } from '../chat-execution/types.js';
+import type { ChatPresentation } from '@garcon/common/automation';
 
 const logger = createLogger('notifications:attention-tracker');
 
@@ -58,7 +59,7 @@ interface SettingsStoreDep {
 }
 
 interface ChatRegistryDep {
-  getChat(chatId: string): { agentId: string; projectPath: string } | null;
+  getChat(chatId: string): { agentId: string; projectPath: string; presentation?: ChatPresentation } | null;
   onChatRemoved?(cb: (chatId: string) => void): void;
 }
 
@@ -325,6 +326,7 @@ export class AttentionTracker {
       const config = (notifications.telegram ?? {}) as Record<string, unknown>;
       const recipientChatId = this.#telegramSettings.getRecipientChatId();
       if (config.enabled !== true || !recipientChatId || !this.#registry.getChat(chatId)) return;
+      if (this.#registry.getChat(chatId)?.presentation?.notifications === 'attention-only') return;
       if (this.#agents.chatExecutionPolicy(chatId) !== 'conversation') return;
       const html = this.#formatMessage(this.#chatMeta(chatId), userMsg, assistantMsg, status);
       const ok = await this.#telegram.send(recipientChatId, html, 'HTML');

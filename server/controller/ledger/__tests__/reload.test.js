@@ -12,6 +12,8 @@ import { TranscriptReloadService } from '../reload.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
+import { ChatMutationGuard } from '../../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.ts';
 import { LedgerFencedError } from '../errors.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
@@ -922,7 +924,7 @@ async function withReload(run, options = {}) {
       replacementLease.current = ledger.openProducer('chat-1', 'test');
     },
     getCarryOverRevision: () => 'carry-v1:0',
-    chatMutationLock,
+    mutationGuard: new ChatMutationGuard(chatMutationLock, new AutomationLifecycle()),
     now: () => TS,
   });
   try {

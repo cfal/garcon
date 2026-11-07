@@ -9,7 +9,7 @@ import {
 import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
-import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { ChatMutationGuard } from '../automation/mutation-guard.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import { LedgerFencedError } from './errors.js';
 import { TranscriptLedgerService } from './service.js';
@@ -31,7 +31,7 @@ export interface TranscriptReloadServiceOptions {
   readonly execution: ReloadExecutionPort;
   readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
-  readonly chatMutationLock: KeyedPromiseLock;
+  readonly mutationGuard: ChatMutationGuard;
   readonly now?: () => string;
 }
 
@@ -52,7 +52,7 @@ export class TranscriptReloadService {
     { signal = new AbortController().signal, onProgress = () => {} }: TranscriptReloadOptions = {},
   ): Promise<TranscriptView> {
     await this.options.adoption.ensure(chatId, signal);
-    return this.options.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+    return this.options.mutationGuard.run(chatId, 'view-replaced', async beforeMutation => {
       const reservation = this.#reserve(chatId);
       try {
         const queue = await this.options.execution.readChatExecutionControl(chatId);
@@ -65,7 +65,7 @@ export class TranscriptReloadService {
           );
         }
         signal.throwIfAborted();
-        return await this.#reloadReserved(chatId, signal, onProgress);
+        return await this.#reloadReserved(chatId, signal, onProgress, beforeMutation);
       } finally {
         await this.options.execution.releaseTranscriptSnapshot(reservation);
       }
@@ -90,6 +90,7 @@ export class TranscriptReloadService {
     chatId: string,
     signal: AbortSignal,
     onProgress: (progress: ChatReloadProgress) => void,
+    beforeMutation: () => void,
   ): Promise<TranscriptView> {
     let entry = this.options.registry.getChat(chatId);
     const current = this.options.ledger.currentView(chatId);
@@ -121,6 +122,8 @@ export class TranscriptReloadService {
     }
     await this.options.registry.flush();
 
+    signal.throwIfAborted();
+    beforeMutation();
     this.options.ledger.closeProducer(chatId);
     let staging: TranscriptView | null = null;
     let replacement: TranscriptView;

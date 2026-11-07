@@ -30,6 +30,7 @@ import { DomainError } from '../../common/domain-error.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.ts';
 import type { QueueExecutionAttempt } from './execution-attempt.ts';
+import type { AutomationControlLease, AutomationLifecycle } from '../automation/lifecycle.js';
 import type { WorkingDirectorySettlementPort } from '../projects/working-directory-settlement.js';
 import type { QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
 import type {
@@ -39,6 +40,7 @@ import type {
 } from './chat-execution-control-transitions.ts';
 
 export interface ChatExecutionCoordinatorOptions {
+  automation?: AutomationLifecycle;
   executionPolicy?: (chatId: string) => 'conversation' | 'literal';
   workingDirectorySettlement?: WorkingDirectorySettlementPort;
   projectAdmission: ProjectAdmissionPort;
@@ -59,6 +61,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'model'
   | 'images'
   | 'excludedResendOrdinals'
+  | 'automation'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   createdAt?: string; userMessagePresentation?: UserMessagePresentation;
@@ -136,6 +139,7 @@ export interface CommandSettlementPort {
     deliveryOutcome?: SteerDeliveryOutcome,
   ): Promise<void>;
   settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
+  recordOperationFailure(command: AcceptedExecutionCommand, error: unknown): void;
   settleDuplicateInput(command: AcceptedExecutionCommand): Promise<void>;
 }
 
@@ -151,6 +155,7 @@ export interface DirectInputPreparationContext {
 }
 
 export interface AcceptedDirectInput {
+  controlLease?: AutomationControlLease;
   command: AcceptedExecutionCommand;
   content: string;
   options: RunAgentTurnOptions;
@@ -409,6 +414,7 @@ export interface ChatExecutionQueries {
 // queue operations that no external consumer needs through a facet.
 export interface ChatExecutionService
   extends ChatExecutionCommands, ChatExecutionLifecycle, ChatExecutionQueries {
+  stopExactTurn(lease: AutomationControlLease): Promise<ChatStopOutcome | 'stale-target'>;
   admitUserInput(
     chatId: string,
     command: string,

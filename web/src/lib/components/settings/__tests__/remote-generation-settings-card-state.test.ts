@@ -18,6 +18,7 @@ function snapshot(): RemoteSettingsSnapshot {
 	return {
 		version: 1,
 		features: {
+			workflows: { enabled: false },
 			transcriptSearch: { enabled: false },
 			agentCommands: {
 				enabled: true,

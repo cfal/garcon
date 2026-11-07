@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
 import { ApiError } from '$lib/api/client.js';
@@ -35,6 +36,7 @@ vi.mock('$shared/client-chat-id', () => ({
 
 function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/workspace/repo',
 		orderGroup: 'normal',
@@ -64,6 +66,7 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 
 function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'fork-chat-id',
 		agentId: 'claude',
 		model: 'sonnet',

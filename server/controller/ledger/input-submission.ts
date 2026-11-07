@@ -13,6 +13,17 @@ import type {
 import { SubmissionConflictError } from './errors.js';
 import { runQuery } from './sqlite-operations.js';
 
+export function inputDetail(input: Pick<LedgerUserInputDetail, 'message' | 'attachments' | 'clientMessageId' | 'steer'>): LedgerUserInputDetail {
+  return {
+    clientMessageId: input.clientMessageId,
+    message: input.message,
+    attachments: input.attachments,
+    steer: input.steer,
+    preambleBoundary: null,
+    preamblePrefixReceipt: null,
+  };
+}
+
 export function readSubmission(
   db: Database,
   viewId: TranscriptViewId,

@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, it, expect, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -6,6 +7,7 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 	const processingPhase =
 		overrides.processingPhase ?? (overrides.isProcessing || overrides.isActive ? 'running' : null);
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'a',
 		agentId: 'claude',
 		model: 'opus',
@@ -32,6 +34,21 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 }
 
 describe('ChatSessionsStore', () => {
+  it('keeps automation addressable without live unread or ordinary recency changes', () => {
+		const store = new ChatSessionsStore();
+		const worker = makeServerSession({ id: 'worker', presentation: { collection: 'automation', notifications: 'attention-only' } });
+		store.upsertFromServer([makeServerSession(), worker]);
+		store.setSelectedChatId('worker');
+		store.patchPreview('worker', 'Synthetic output', '2026-11-01T00:00:00Z');
+		store.patchActivity('worker', '2026-11-02T00:00:00Z');
+		store.patchLastReadAt('worker', '2026-10-01T00:00:00Z');
+		expect(store.selectedChat?.id).toBe('worker');
+		expect(store.byId.worker.isUnread).toBe(false);
+		expect(store.recentChats.map((chat) => chat.id)).toEqual(['a']);
+		store.upsertServerChat({ ...worker, presentation: CONVERSATION_PRESENTATION });
+		expect(store.byId.worker.presentation).toEqual(CONVERSATION_PRESENTATION);
+		expect(store.recentChats.some((chat) => chat.id === 'worker')).toBe(true);
+	});
 	it('remembers a deep-link visit before hydration and prunes absent targets afterward', () => {
 		const store = new ChatSessionsStore();
 		store.setSelectedChatId('deep-link');

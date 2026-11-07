@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
@@ -9,6 +10,7 @@ function occurrence(overrides: Partial<ChatSessionRecord> = {}): ChatBoardOccurr
 		key: 'column:chat-1',
 		columnId: 'column',
 		chat: {
+			presentation: CONVERSATION_PRESENTATION,
 			id: 'chat-1',
 			parentChat: null,
 			projectPath: '/workspace/project',

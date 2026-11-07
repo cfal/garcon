@@ -3,8 +3,16 @@ import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 import type { ChatStopOutcome } from '../../../common/chat-types.js';
 import type { SteerDeliveryOutcome } from '../../../common/chat-command-contracts.ts';
 import type { NativeForkCleanup } from '../agents/session-types.js';
+import type { AutomationTerminalEvidence, ExecutionFailureCertainty } from '../../../common/automation.js';
+
+export interface CommandExecutionEvidence extends AutomationTerminalEvidence {
+  readonly outcome: 'finished' | 'failed' | 'interrupted';
+  readonly origin: 'provider' | 'core';
+  readonly failureCertainty: ExecutionFailureCertainty;
+}
 
 export type CommandLedgerStatus =
+  | 'reserved'
   | 'accepted'
   | 'scheduled'
   | 'running'
@@ -41,6 +49,8 @@ export interface CommandLedgerRecord {
   forkPreparation?: ForkPreparationState;
   stopOutcome?: ChatStopOutcome;
   runTerminalObserved?: true;
+  executionEvidence?: CommandExecutionEvidence;
+  dispatchFailure?: 'not-dispatched' | 'rejected' | 'unknown' | 'untyped';
   turnResult?: CommandTurnResult;
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
@@ -171,6 +181,7 @@ function cloneRecord(record: CommandLedgerRecord): CommandLedgerRecord {
     payload: { ...record.payload },
     ...(record.forkPreparation ? { forkPreparation: { ...record.forkPreparation } } : {}),
     ...(record.turnResult ? { turnResult: { ...record.turnResult } } : {}),
+    ...(record.executionEvidence ? { executionEvidence: structuredClone(record.executionEvidence) } : {}),
   };
 }
 
@@ -276,6 +287,17 @@ export class CommandLedger {
     }
     record.updatedAt = new Date().toISOString();
     return cloneRecord(record);
+  }
+
+  recordExecutionEvidence(chatId: string, turnId: string, evidence: CommandExecutionEvidence): void {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (record && !record.publicTerminalAt) record.executionEvidence = structuredClone(evidence);
+  }
+
+  recordDispatchFailure(key: string, outcome: NonNullable<CommandLedgerRecord['dispatchFailure']>): void {
+    const record = this.#records.get(key);
+    if (record && !record.publicTerminalAt && (record.dispatchFailure === undefined
+      || record.dispatchFailure === 'untyped' || outcome === 'unknown')) record.dispatchFailure = outcome;
   }
 
   async markInterruptedWithoutRunTerminal(
@@ -394,10 +416,36 @@ export class CommandLedger {
   }
 
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
+    return this.#admit(input, 'accepted');
+  }
+
+  reserveStart(input: Omit<LedgerAcceptInput, 'commandType'> & { turnId: string }): LedgerAcceptResult {
+    return this.#admit({ ...input, commandType: 'chat-start' }, 'reserved');
+  }
+
+  consumeStartReservation(key: string, turnId: string): CommandLedgerRecord | null {
+    const record = this.#records.get(key);
+    if (record?.status !== 'reserved' || record.turnId !== turnId) return null;
+    record.status = 'accepted';
+    record.updatedAt = new Date().toISOString();
+    return cloneRecord(record);
+  }
+
+  async cancelStartReservation(key: string): Promise<void> {
+    if (this.#records.get(key)?.status !== 'reserved') return;
+    await this.settleTerminal(key, 'failed', {
+      errorCode: 'AUTOMATION_START_CANCELED',
+      error: 'The prepared start was canceled before publication',
+      retainedPrivateTerminal: true,
+    });
+  }
+
+  #admit(input: LedgerAcceptInput, status: 'accepted' | 'reserved'): LedgerAcceptResult {
     const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
     const payloadHash = commandPayloadHash(input.payload);
     const existing = this.#records.get(key);
     if (existing) {
+      if (status === 'reserved' || existing.status === 'reserved') return { kind: 'conflict', record: cloneRecord(existing) };
       if (existing.payloadHash !== payloadHash) return { kind: 'conflict', record: cloneRecord(existing) };
       if (existing.status === 'failed' && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE) {
         this.#removeTurnIndex(existing);
@@ -416,6 +464,8 @@ export class CommandLedger {
           deliveryOutcome: undefined,
           forkPreparation: undefined,
           runTerminalObserved: undefined,
+          executionEvidence: undefined,
+          dispatchFailure: undefined,
           turnResult: undefined,
           interruptionReason: undefined,
           publicTerminalAt: undefined,
@@ -431,7 +481,7 @@ export class CommandLedger {
     const existingTombstone = this.#steerTombstones.get(key);
     if (existingTombstone) {
       const record = recordFromSteerTombstone(existingTombstone);
-      return existingTombstone.payloadHash === payloadHash
+      return status !== 'reserved' && existingTombstone.payloadHash === payloadHash
         ? { kind: 'duplicate', record }
         : { kind: 'conflict', record };
     }
@@ -463,7 +513,7 @@ export class CommandLedger {
       clientRequestId: input.clientRequestId,
       payloadHash,
       payload: compactCommandPayload(input.payload),
-      status: 'accepted',
+      status,
       acceptedAt: now,
       updatedAt: now,
       turnId: input.turnId,

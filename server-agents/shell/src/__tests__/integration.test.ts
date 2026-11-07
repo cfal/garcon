@@ -81,6 +81,38 @@ describe('Shell integration', () => {
     expect(await integration.readiness.status(new AbortController().signal)).toMatchObject({ ready: true });
   });
 
+  it('retains observed execution evidence when native cleanup throws', async () => {
+    const close = NativeLog.prototype.close;
+    const cleanup = spyOn(NativeLog.prototype, 'close').mockImplementation(function (this: NativeLog) {
+      close.call(this);
+      throw new Error('Synthetic cleanup failure');
+    });
+    try {
+      await integration.execution.start(request);
+      expect(await terminal()).toMatchObject({ outcome: 'failed', commandOutcome: {
+        outcome: 'finished', exitCode: 0, capture: 'incomplete',
+      } });
+    } finally { cleanup.mockRestore(); }
+  });
+
+  it('keeps structured uncertainty when failure handling also loses output', async () => {
+    const execute = spyOn(shellProcess, 'executeShell').mockImplementation(async options => {
+      options.output('stdout', 'Synthetic output');
+      throw new Error('Synthetic process failure');
+    });
+    const append = NativeLog.prototype.append;
+    const persistence = spyOn(NativeLog.prototype, 'append').mockImplementation(function (this: NativeLog, ...args) {
+      if (args[1].type === 'command-output') throw new Error('Synthetic output failure');
+      return append.apply(this, args);
+    });
+    try {
+      await integration.execution.start(request);
+      expect(await terminal()).toMatchObject({ outcome: 'failed', commandOutcome: {
+        outcome: 'unknown', exitCode: null, capture: 'incomplete',
+      } });
+    } finally { execute.mockRestore(); persistence.mockRestore(); }
+  });
+
   it('retains exact input, inert streams and status through native import without duplicate live input', async () => {
     request = { ...request, prompt: '/md printf "<garcon-get-chat-id />\\n"; printf diagnostic >&2\n ' };
     await integration.execution.start(request);
@@ -182,7 +214,8 @@ describe('Shell integration', () => {
   it('reports failed cwd changes and starts a fresh process on resume', async () => {
     const next = join(root, 'next'); await mkdir(next);
     await integration.execution.start({ ...request, prompt: 'export PRIVATE_VALUE=old; cd next; false' });
-    expect(await terminal()).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'reported', path: next } });
+    expect(await terminal()).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'reported', path: next },
+      commandOutcome: { outcome: 'failed', exitCode: 1, signal: null, capture: 'complete', cwd: { kind: 'reported', path: next } } });
     const ref = chat();
     await integration.execution.resume({ ...request, runId: 'run-2', agentSessionId: ref.agentSessionId!, nativeSession: ref.nativeSession,
       projectPath: next, prompt: 'printf "%s" "${PRIVATE_VALUE-fresh}"' });
@@ -452,6 +485,7 @@ describe('Shell integration', () => {
     }
     const ended = await terminal();
     expect(ended.outcome).toBe('failed');
+    expect(ended.commandOutcome).toMatchObject({ outcome: 'finished', exitCode: 0, capture: 'incomplete' });
     expect(ended.error?.message).toContain('Synthetic output persistence failure');
     const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
     const expectedOutput = channel === 'stderr'

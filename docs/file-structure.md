@@ -74,6 +74,12 @@ The controller owns chats, ledgers, queues, schedules, provider configuration/cr
 - `controller/pull-request-reviews/` owns automatic pull request review: the
   SQLite store, the scanner, the runner that starts and settles review chats,
   and the poster. See [Pull request reviews](./pull-request-reviews.md).
+- `controller/workflows/` owns delivery plans, attempts, evidence, approvals,
+  resource claims, and mutation recovery in its private `workflows.sqlite`.
+  Workflow policy consumes neutral core ports; core execution and runtime code
+  must not import it. This durability does not extend the process-local command
+  ledger, queues, or pending chat inputs. Concrete adapters belong inside the
+  workflow domain, with initialization in the controller composition root.
 - `runtime/git/review-patch.ts` constructs compact patch bodies;
   `runtime/gh/pull-request-diff.ts` projects GitHub pull-request diffs.
 - Git operation tests live in named suites under `runtime/git/__tests__/`;

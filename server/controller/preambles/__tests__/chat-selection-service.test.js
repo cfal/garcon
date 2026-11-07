@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ChatRegistry } from '../../chats/store.ts';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
+import { ChatMutationGuard } from '../../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import {
@@ -68,7 +70,7 @@ function makeService(overrides = {}) {
     ledger: ledger,
     preambles: { snapshot: overrides.snapshot ?? (() => preamblesSnapshot) },
     ownershipJournal: { hasPending: () => ownershipPending },
-    chatMutationLock,
+    mutationGuard: new ChatMutationGuard(chatMutationLock, new AutomationLifecycle()),
     selectionAdmissionLock,
     now: () => AT,
     onSelectionCommitted,

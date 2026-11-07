@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../common/automation.js';
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
@@ -11,6 +12,7 @@ function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentCh
 
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		projectPath: '/workspace/project',

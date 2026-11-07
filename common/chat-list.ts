@@ -7,9 +7,11 @@ import { parseParentChatRef, type ParentChatRef } from './chat-parentage.js';
 import { parseChatId } from './chat-id.js';
 import { isRecord } from './json.js';
 import { isExecutorId } from './executors.js';
+import { parseChatPresentation, type ChatPresentation } from './automation.js';
 
 export interface ChatListEntry {
   id: string;
+  presentation: ChatPresentation;
   executorId?: string | null;
   parentChat: ParentChatRef | null;
   agentId: string;
@@ -85,6 +87,8 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   if (!isRecord(value)) fail(`sessions[${index}]`);
   const field = (name: string) => `sessions[${index}].${name}`;
   if (!validChatId(value.id)) fail(field('id'));
+  const presentation = parseChatPresentation(value.presentation);
+  if (!presentation) fail(field('presentation'));
   let parentChat: ParentChatRef | null = null;
   if (value.parentChat !== null) {
     parentChat = parseParentChatRef(value.parentChat);
@@ -146,6 +150,7 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
 
   return {
     id: value.id,
+    presentation,
     ...(executorId === undefined ? {} : { executorId }),
     parentChat,
     agentId,

@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,7 @@ const appCss = readFileSync('src/app.css', 'utf8');
 
 function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/very/long/workspace/projects/feature-branch/app',
 		orderGroup: 'normal',
