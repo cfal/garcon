@@ -111,5 +111,6 @@ test('[TLV5-DISPLAY.07-CHROMIUM-03] rejects held recovery from a view replaced b
     await browserExpect(page.locator(`[data-chat-row-id="${current.transcriptViewId}:${current.messages.at(-1)!.ordinal}"]`)).toBeVisible();
     await browserExpect(page.locator(DISPLAY_FEED)).toHaveAttribute('aria-busy', 'false');
     expect(await stopOldViewSampler!()).toBe(0);
+    await wire.settle();
   });
 }, 120_000);

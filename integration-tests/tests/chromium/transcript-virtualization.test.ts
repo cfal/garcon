@@ -2576,6 +2576,7 @@ async function verifyTouchDragPrepend(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
       );
     }
+    expect(await transcriptEntryCount(fixture.page)).toBeLessThanOrEqual(100);
     if (stopLiveTurn) {
       expect((await stopLiveTurn).outcome).toBe('interrupt-requested');
       await liveAbort;
