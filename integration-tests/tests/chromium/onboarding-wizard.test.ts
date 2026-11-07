@@ -31,9 +31,9 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await browserExpect(wizard.getByRole('heading', { name: 'Choose your theme' })).toBeVisible();
       const titles = [
         'Choose your theme',
-        'Chat list layout',
+        'Arrange your sidebar',
         'Chat display',
-        'Writing preferences',
+        'Writing and behavior',
         "You're all set",
       ];
       for (const [index, title] of titles.entries()) {
@@ -74,7 +74,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         await page.setViewportSize({ width: 320, height: 568 });
         await browserExpect.poll(() => wizard.evaluate(element => element.scrollTop)).toBe(0);
 
-        if (title === 'Chat list layout') {
+        if (title === 'Arrange your sidebar') {
           const grouping = wizard.getByRole('combobox', { name: 'Chat grouping' });
           await browserExpect(grouping).toHaveValue('none');
           expect(await grouping.evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
@@ -104,7 +104,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await page.evaluate(() => document.documentElement.style.setProperty('--interface-font-scale', '1'));
           await page.setViewportSize({ width: 320, height: 568 });
         }
-        if (title === 'Writing preferences') {
+        if (title === 'Writing and behavior') {
           await wizard.getByText('Source', { exact: true }).click();
           await wizard.getByRole('switch', { name: 'Reduce motion', exact: true }).click();
         }

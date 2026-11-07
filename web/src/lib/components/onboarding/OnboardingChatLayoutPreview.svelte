@@ -7,6 +7,7 @@
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface OnboardingChatLayoutPreviewProps {
 		layout: ChatItemLayout;
@@ -16,12 +17,12 @@
 	let { layout, isSelected }: OnboardingChatLayoutPreviewProps = $props();
 
 	const PREVIEW_NOW = new Date('2026-09-04T12:00:00.000Z');
-	const previewSession: ChatSessionRecord = {
+	const previewSession: ChatSessionRecord = $derived({
 		id: 'onboarding-layout-preview',
 		parentChat: null,
 		projectPath: '/workspace/aurora',
 		orderGroup: 'normal',
-		title: 'Release checklist review',
+		title: m.onboarding_preview_title(),
 		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
@@ -38,9 +39,9 @@
 		isUnread: false,
 		status: 'running',
 		agentOwnershipEpoch: null,
-		lastMessage: 'Draft the release notes and verify the upgrade path.',
-		tags: ['release'],
-	};
+		lastMessage: m.onboarding_preview_message(),
+		tags: [m.onboarding_preview_tag()],
+	});
 </script>
 
 <div

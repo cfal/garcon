@@ -27,11 +27,11 @@ describe('OnboardingWizard', () => {
 
 	async function advanceToDonePage() {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Chat list layout' });
+		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await screen.findByRole('heading', { name: 'Writing and behavior' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: "You're all set" });
 		expect(screen.getByText('Your preferences are saved.')).toBeTruthy();
@@ -45,7 +45,7 @@ describe('OnboardingWizard', () => {
 		await waitFor(() => expect(document.activeElement).toBe(themeHeading));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		const layoutHeading = await screen.findByRole('heading', { name: 'Chat list layout' });
+		const layoutHeading = await screen.findByRole('heading', { name: 'Arrange your sidebar' });
 		await waitFor(() => expect(document.activeElement).toBe(layoutHeading));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -70,7 +70,7 @@ describe('OnboardingWizard', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Chat list layout' });
+		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
 		await fireEvent.click(screen.getByRole('radio', { name: /Single line/ }));
 		expect(localSettings.sidebarChatItemLayout).toBe('single-line');
 
@@ -126,7 +126,7 @@ describe('OnboardingWizard', () => {
 		expect(localSettings.sidebarSortMode).toBe('manual');
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await screen.findByRole('heading', { name: 'Writing and behavior' });
 		await fireEvent.click(screen.getByRole('radio', { name: 'Source' }));
 		await fireEvent.click(screen.getByRole('switch', { name: 'Send by Shift+Enter' }));
 		await fireEvent.click(screen.getByRole('switch', { name: 'Auto-scroll' }));
@@ -181,7 +181,7 @@ describe('OnboardingWizard', () => {
 	it('renders real sidebar previews for each layout option and tracks the selection', async () => {
 		const { localSettings } = renderWizard();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Chat list layout' });
+		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
 
 		const previews = document.querySelectorAll('[data-onboarding-layout-preview]');
 		expect(previews).toHaveLength(3);
@@ -233,7 +233,7 @@ describe('OnboardingWizard', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
-		await screen.findByRole('heading', { name: 'Writing preferences' });
+		await screen.findByRole('heading', { name: 'Writing and behavior' });
 	});
 
 	it('announces the current step position', async () => {
