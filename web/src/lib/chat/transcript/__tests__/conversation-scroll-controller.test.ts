@@ -10,6 +10,7 @@ import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { displayCertificate, displayDetail, displayOpen, displayWindow } from './display-fixtures.js';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
+import type { TranscriptMemberPageTarget } from '../transcript-page-progress.js';
 
 const RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS = 180_000;
 
@@ -89,6 +90,7 @@ function expandedTranscriptState(): ActiveTranscriptState {
 
 interface FakeViewport extends ConversationViewportPort {
 	requestCoverage: ReturnType<typeof vi.fn<() => void>>;
+	memberPageTarget: ReturnType<typeof vi.fn<ConversationViewportPort['memberPageTarget']>>;
 	isReady: ReturnType<typeof vi.fn<() => boolean>>;
 	hasCollapsedToolGroups: ReturnType<typeof vi.fn<() => boolean>>;
 	isAtEnd: ReturnType<typeof vi.fn<(threshold?: number) => boolean>>;
@@ -113,6 +115,7 @@ interface FakeViewport extends ConversationViewportPort {
 function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeViewport {
 	return {
 		requestCoverage: vi.fn(),
+		memberPageTarget: vi.fn(() => null),
 		isReady: vi.fn(() => true),
 		hasCollapsedToolGroups: vi.fn(() => false),
 		isAtEnd: vi.fn(() => false),
@@ -212,6 +215,26 @@ describe('ConversationScrollController', () => {
 	afterEach(() => {
 		globalThis.ResizeObserver = originalResizeObserver;
 		vi.useRealTimers();
+	});
+
+	it.each(['earlier', 'later'] as const)('pages an exposed %s member boundary before an exhausted parent edge', async direction => {
+		const target: TranscriptMemberPageTarget = {
+			group: { kind: 'tool-group', firstMember: 1, lastMember: 200, count: 200,
+				base: { afterBreaker: 0, beforeBreaker: 201, firstMember: 1, lastMember: 200, openAtWatermark: false },
+				fragment: { after: 0, through: 200 }, totals: { commands: 200, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] },
+			anchor: { kind: direction === 'earlier' ? 'before' : 'after', ordinal: 100 },
+		};
+		const viewport = fakeViewport();
+		viewport.memberPageTarget.mockImplementation(requested => requested === direction ? target : null);
+		const load = vi.fn<ConversationScrollState['loadEarlierPage']>(async (_chatId, options) => {
+			expect(options?.memberTarget).toEqual(target);
+			expect(await options?.applicationGate?.()).toBe('apply');
+			return 'loaded';
+		});
+		const fixture = controllerFixture({ viewport, state: { loadEarlierPage: load, loadLaterPage: load } });
+		expect(await fixture.controller.requestPage(direction, 'scroll')).toBe('loaded');
+		expect(load).toHaveBeenCalledOnce();
+		expect(fixture.controller.isPinnedToBottom).toBe(false);
 	});
 
 	it('delegates physical end checks and end scrolling to the viewport', () => {

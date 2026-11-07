@@ -86,7 +86,7 @@ describe('PromptComposer focus', () => {
 			hasPrevious: false, hasNext: false, retry: vi.fn(async () => {}), next: vi.fn(async () => {}), previous: vi.fn(async () => {}),
 		} satisfies DisplaySummaryPaging;
 		const view = render(PromptComposerTestHost, { resendPaging });
-		expect(screen.getByText('Updating...').closest('.sr-only')).not.toBeNull();
+		expect(screen.getByText('Updating...').closest('.sr-only')).toBeNull();
 		await view.rerender({ resendPaging: { ...resendPaging, loading: false, updating: false, error: 'Resend unavailable' } });
 		expect(screen.getByText('Resend unavailable').closest('.sr-only')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: /^Retry$/ }));

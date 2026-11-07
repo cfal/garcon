@@ -407,6 +407,7 @@ export class ConversationScrollController {
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.getChatId();
 		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
+		const memberTarget = this.deps.getViewport()?.memberPageTarget(direction) ?? undefined;
 		const requestIntentEpoch = this.#userScrollIntent.epoch;
 		const requestBoundarySignature = this.#pageBoundarySignature(direction);
 
@@ -425,9 +426,10 @@ export class ConversationScrollController {
 			result = await this.#mutatePage(
 				direction,
 				async (applicationGate) => {
+					const options = { applicationGate, ...(memberTarget ? { memberTarget } : {}) };
 					return direction === 'earlier'
-						? this.deps.chatState.loadEarlierPage(chatId, { applicationGate })
-						: this.deps.chatState.loadLaterPage(chatId, { applicationGate });
+						? this.deps.chatState.loadEarlierPage(chatId, options)
+						: this.deps.chatState.loadLaterPage(chatId, options);
 				},
 				reason === 'scroll' ? 'after-native-scroll' : 'immediate',
 			);
@@ -732,6 +734,7 @@ export class ConversationScrollController {
 		) {
 			return false;
 		}
+		if (this.deps.getViewport()?.memberPageTarget(direction)) return true;
 		return direction === 'earlier'
 			? this.deps.chatState.canLoadEarlier
 			: this.deps.chatState.hasLaterMessages;

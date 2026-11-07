@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BashToolUseMessage, CommandOutputMessage, ExitPlanModeToolUseMessage, TranscriptNoticeMessage, UserMessage } from '$shared/chat-types';
+import { BashToolUseMessage, CommandOutputMessage, ExitPlanModeToolUseMessage, PermissionRequestMessage, TranscriptNoticeMessage, UserMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import { displayCertificate, displayDetail, displayRow } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { buildConversationVirtualFeedModel, estimateConversationFeedItemSize, groupContainingRow } from '../conversation-feed-virtual-items.js';
@@ -12,6 +12,30 @@ const permission = (id: string): PendingPermissionRequest => ({ chatId: 'chat-1'
 const build = (input: ReturnType<typeof certifiedFeed>) => buildConversationVirtualFeedModel(input);
 
 describe('certified virtual feed', () => {
+	it('places optimistic inputs after hidden anchors before the next visible row', () => {
+		const input = certifiedFeed([user(10), user(20)], { input: {
+			overlays: [{ kind: 'message', id: 'optimistic:pending', message: new UserMessage('', 'Pending input') }],
+			optimisticAfterOrdinals: new Map([['pending', 15]]),
+		} });
+		input.display = { ...input.display, window: { ...input.display.window!,
+			cutPlacements: [{ id: 'optimistic:pending', placement: 'inline' }] } };
+		expect(build(input).items.flatMap(item => item.kind === 'transcript' ? [item.item.id] : []))
+			.toEqual(['view-1:10', 'optimistic:pending', 'view-1:20']);
+	});
+
+	it.each(['permission', 'plan'] as const)('does not float an actionable %s already rendered as a protected island', kind => {
+		const request = kind === 'permission' ? permission('permission-1') : {
+			...permission('plan:view-1:2'), requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+			planReference: { serverInstanceId: 'instance-1', chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 2 },
+		};
+		const message = kind === 'permission'
+			? new PermissionRequestMessage('', 'permission-1', request.requestedTool) : request.requestedTool;
+		const input = certifiedFeed([displayRow(2, message)], { items: [], display: {
+			protectedRows: [{ certificate: displayCertificate(), detail: displayDetail(2), layout: kind === 'permission' ? 'permission' : 'standard' }],
+		}, input: { pendingPermissions: [request] } });
+		expect(build(input).items.filter(item => item.kind === 'transcript')).toHaveLength(1);
+		expect(build(input).items.filter(item => item.kind === 'permission')).toHaveLength(0);
+	});
 	it('renders a selected plan occurrence once when resident and floats it when absent', () => {
 		const message = new ExitPlanModeToolUseMessage('', 'reused-plan', 'Synthetic plan');
 		const request: PendingPermissionRequest = { chatId: 'chat-1', permissionOccurrenceId: 'plan:view-1:2', requestedTool: message,
@@ -95,9 +119,14 @@ describe('certified virtual feed', () => {
 
 	it('uses server cut placements for permission and optimistic rows between group fragments', () => {
 		const request = { ...permission('permission-1'), transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 } };
-		const input = certifiedFeed([], { items: [displayGroup(1, 2, 2), displayGroup(3, 4, 2)], input: { pendingPermissions: [request] } });
-		input.display = { ...input.display, window: { ...input.display.window!, cutPlacements: [{ id: 'permission:permission-1', placement: 'inline' }] } };
-		expect(build(input).items.slice(1, -1).map(item => item.kind)).toEqual(['tool-group', 'permission', 'tool-group']);
+		const input = certifiedFeed([], { items: [displayGroup(1, 2, 2), displayGroup(3, 4, 2)], input: { pendingPermissions: [request],
+			overlays: [{ kind: 'message', id: 'optimistic:pending', message: new UserMessage('', 'Pending input') }],
+			optimisticAfterOrdinals: new Map([['pending', 2]]),
+		} });
+		input.display = { ...input.display, window: { ...input.display.window!, cutPlacements: [
+			{ id: 'permission:permission-1', placement: 'inline' }, { id: 'optimistic:pending', placement: 'inline' },
+		] } };
+		expect(build(input).items.slice(1, -1).map(item => item.kind)).toEqual(['tool-group', 'transcript', 'permission', 'tool-group']);
 	});
 
 	it('keeps distinct detached permission capabilities reachable without a prepared window', () => {

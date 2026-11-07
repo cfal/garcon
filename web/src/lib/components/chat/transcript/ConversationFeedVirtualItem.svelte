@@ -151,7 +151,7 @@
 {:else if item.kind === 'member-boundary'}
 	<Button variant="ghost" size="sm" class="my-1 text-muted-foreground" onclick={() => onLoadMembers(item.group, item.anchor)}>
 		{#if item.anchor.kind === 'before'}<ChevronUp class="size-4" />{:else}<ChevronDown class="size-4" />{/if}
-		{item.remaining.toLocaleString()} {item.anchor.kind === 'before' ? 'earlier' : 'later'} actions
+		{item.anchor.kind === 'before' ? m.chat_member_earlier({ count: item.remaining, formatted: item.remaining.toLocaleString() }) : m.chat_member_later({ count: item.remaining, formatted: item.remaining.toLocaleString() })}
 	</Button>
 {:else if item.kind === 'transcript'}
 	<div class="flow-root">

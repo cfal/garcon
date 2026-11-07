@@ -251,7 +251,7 @@
 		optimisticAfterOrdinals: chatState.optimisticAfterOrdinals,
 		mutationClock: chatState.feedMutationClock,
 		isLiveWindow: !chatState.hasLaterMessages,
-		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
+		showRefreshError: chatState.loadStatus === 'error',
 		earlierBoundary: chatState.pageStates.earlier.error || chatState.canLoadEarlier && !showEarlierLoadingStatus ? 'visible' : 'hidden',
 		showLaterBoundary: chatState.hasLaterMessages,
 		reserveComposerCapSpace,
@@ -350,7 +350,11 @@
 			const result = await virtualController.waitForLayout({ minimumDataRevision: projection.projectedDataRevision });
 			if (result !== 'settled') return { kind: result === 'superseded' ? 'superseded' : 'waiting' };
 			const fill = await virtualController.measureViewportFill();
-			return fill === 'unsettled' ? { kind: 'waiting' } : { kind: 'settled', covered: fill === 'overflow' };
+			const direction = pinnedToBottom ? 'earlier' : virtualController.readingDirection;
+			const range = virtualController.snapshot.visibleRange;
+			const exposedMemberBoundary = range && projection.model.items.slice(range.startIndex, range.endIndex + 1)
+				.some(item => item.kind === 'member-boundary' && item.anchor.kind === (direction === 'earlier' ? 'before' : 'after'));
+			return fill === 'unsettled' ? { kind: 'waiting' } : { kind: 'settled', covered: fill === 'overflow' && !exposedMemberBoundary };
 		},
 		load: () => {
 			if (chatState.display.phase === 'failed') return Promise.resolve('failed');
@@ -381,6 +385,7 @@
 			const ordinals = keys.flatMap(key => {
 				const index = model.indexByKey.get(key);
 				const item = index === undefined ? undefined : model.items[index];
+				if (item?.kind === 'tool-group') return [item.descriptor.firstMember];
 				return item?.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined ? [item.item.ordinal] : [];
 			});
 			transcript.controller.protect(ordinals);
@@ -504,6 +509,12 @@
 			data-chat-virtual-count={virtualItems.length}
 			data-chat-virtual-model-count={projection.model.items.length}
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
+			data-chat-mutation-revisions={JSON.stringify(chatState.feedMutationClock.lastRevisionByKind)}
+			data-chat-display-view={chatState.display.window?.certificate.transcriptViewId}
+			data-chat-display-watermark={chatState.loadedThroughOrdinal}
+			data-chat-display-details-watermark={chatState.display.detailsCertificate?.watermark}
+			data-chat-display-after={chatState.display.window?.interval.after}
+			data-chat-display-through={chatState.display.window?.interval.through}
 			data-chat-transcript-entry-count={chatState.entries.length}
 			{@attach virtualController.sizer}
 		>

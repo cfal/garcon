@@ -38,6 +38,10 @@
 
 	interface Props {
 		onReady?: (transcript: ActiveTranscriptState) => void;
+		onViewport?: (port: ConversationViewportPort | null) => void;
+		pinnedToBottom?: boolean;
+		onRetry?: () => void;
+		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -62,6 +66,10 @@
 
 	const {
 		onReady,
+		onViewport,
+		pinnedToBottom = true,
+		onRetry,
+		pendingPermissionRequests = [],
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -291,7 +299,8 @@
 
 	<ConversationFeed
 		{chatContext}
-		pendingPermissionRequests={pendingPermissions}
+		pendingPermissionRequests={[...pendingPermissions, ...pendingPermissionRequests]}
+		{onRetry}
 		onPermissionDecision={() => {}}
 		transcript={chatState}
 		agentId="codex"
@@ -299,9 +308,9 @@
 	{isPreparingInitialScroll}
 	onLoadEarlier={retryEarlierPage}
 	isVisible={true}
-	pinnedToBottom={true}
+	{pinnedToBottom}
 		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
-		onViewportPortChange={(port) => (viewportPort = port)}
+		onViewportPortChange={(port) => { viewportPort = port; onViewport?.(port); }}
 />
 {#if showAnnouncementTrigger}
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}

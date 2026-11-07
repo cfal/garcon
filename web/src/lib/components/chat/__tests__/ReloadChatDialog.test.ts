@@ -32,7 +32,7 @@ describe('ReloadChatDialog', () => {
 			screen.getByRole('heading', { name: m.sidebar_chats_reload_confirm_title() }),
 		).toBeTruthy();
 		expect(screen.getByText('Please keep this pending prompt')).toBeTruthy();
-		expect(screen.getByText('1 attachments')).toBeTruthy();
+		expect(screen.getByText('1 attachment')).toBeTruthy();
 		expect(screen.queryByRole('status')).toBeNull();
 
 		await fireEvent.click(
@@ -40,6 +40,15 @@ describe('ReloadChatDialog', () => {
 				name: m.sidebar_chats_reload_confirm_button(),
 			}),
 		);
+		expect(onConfirm).toHaveBeenCalledOnce();
+	});
+
+	it.each([{ candidates: [] }, { candidates: [{ ordinal: 4, preview: 'Older summary', attachmentCount: 0, timestamp: '' }] }])('discloses an incomplete summary without blocking explicit replacement: %j', async ({ candidates }) => {
+		const onConfirm = vi.fn();
+		render(ReloadChatDialog, { open: true, busy: false, cancelling: false, progress: null,
+			candidates, summaryIncomplete: true, onCancel: vi.fn(), onConfirm });
+		expect(screen.getByRole('status').textContent).toBe(m.sidebar_chats_reload_summary_incomplete());
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_chats_reload_confirm_button() }));
 		expect(onConfirm).toHaveBeenCalledOnce();
 	});
 

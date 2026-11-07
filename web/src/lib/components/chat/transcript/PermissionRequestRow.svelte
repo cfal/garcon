@@ -193,6 +193,7 @@
 
 	const planTitle = $derived.by(() => {
 		if (isPending) return m.chat_permission_plan_ready();
+		if (!terminal) return m.chat_permission_plan();
 		if (wasAllowed) return m.chat_permission_plan_approved();
 		if (isResolved) return m.chat_permission_plan_denied();
 		return m.chat_permission_plan_cancelled();

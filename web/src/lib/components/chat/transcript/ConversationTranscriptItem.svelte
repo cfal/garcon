@@ -89,10 +89,7 @@
 		if (message instanceof PermissionRequestMessage) {
 			return renderModel.permissionTerminalByOccurrence.get(message.permissionOccurrenceId);
 		}
-		if (message.type !== 'exit-plan-mode-tool-use') return undefined;
-		const permissionOccurrenceId = `plan:${item.id}`;
-		if (pendingPermissionOccurrences.has(permissionOccurrenceId)) return undefined;
-		return { permissionOccurrenceId, state: 'resolved', allowed: true };
+		return undefined;
 	}
 </script>
 

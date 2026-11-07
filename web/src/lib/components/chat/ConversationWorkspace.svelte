@@ -192,7 +192,7 @@
 		const subagents = [...(subagentPages.page?.entries ?? [])];
 		return { subagents, entries: [{ id: 'root', kind: 'root', name: sessions.selectedChat?.title || 'Root',
 			model: sessions.selectedChat?.model ?? agentState.model, status: selectedIsProcessing ? 'running' : 'idle',
-			statusLabel: selectedIsProcessing ? 'Running' : 'Idle' }, ...subagents] };
+			statusLabel: selectedIsProcessing ? m.chat_subagent_running() : m.chat_subagent_idle() }, ...subagents] };
 	});
 	$effect(() => {
 		const snapshot = chatState.openSnapshot;
@@ -628,7 +628,9 @@
 			throw new Error(m.sidebar_chats_reload_requires_open_chat());
 		}
 		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_already_pending());
-		return reloadDialog.request(chatId, [...chatState.resendCandidates], resendPages.page?.total ?? chatState.resendCandidates.length);
+		const page = resendPages.page;
+		return reloadDialog.request(chatId, page?.rows ?? [], { total: page?.total ?? 0,
+			incomplete: !page || resendPages.updating || resendPages.stale || resendPages.error !== null });
 	}
 
 	async function reloadFromNative(
@@ -869,7 +871,7 @@
 	>
 		{#if planPaging && (planPaging.pendingExitCount > 1 || planPaging.error)}
 			<div class="border-t border-border bg-background text-sm" data-plan-suggestions>
-				<p class="px-3 pt-2 text-muted-foreground">{planPaging.pendingExitCount} pending plans</p>
+				<p class="px-3 pt-2 text-muted-foreground">{m.chat_pending_plan_count({ count: planPaging.pendingExitCount })}</p>
 				<TranscriptSummaryPager paging={planPaging} />
 			</div>
 		{/if}
@@ -939,6 +941,7 @@
 
 	<ReloadChatDialog
 		totalCandidates={reloadDialog.totalCandidates}
+		summaryIncomplete={reloadDialog.summaryIncomplete}
 		open={reloadDialog.open}
 		candidates={reloadDialog.candidates}
 		busy={reloadDialog.running}

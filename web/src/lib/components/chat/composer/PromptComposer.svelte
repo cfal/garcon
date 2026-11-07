@@ -844,9 +844,7 @@
 					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
 				/>
 				{#if resendPaging}
-					<div class:sr-only={resendCandidates.length === 0 && !resendPaging.error && !resendPaging.stale && !resendPaging.hasPrevious && !resendPaging.hasNext}>
-						<TranscriptSummaryPager paging={resendPaging} />
-					</div>
+					<TranscriptSummaryPager paging={resendPaging} />
 				{/if}
 			{/if}
 			<ComposerAttachmentList

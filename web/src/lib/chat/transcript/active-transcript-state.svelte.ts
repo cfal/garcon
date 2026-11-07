@@ -13,7 +13,7 @@ import { ConversationTranscriptOverlayStore, type ConversationTranscriptOverlayV
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
 import type { ActiveTranscriptPort, ChatCursor, ChatLoadMessagesOptions } from './active-transcript-port.js';
-import { idlePageState, type TranscriptPageApplicationGate, type TranscriptPageLoadResult, type TranscriptPageState, type TranscriptWindowTarget, type TranscriptWindowLoadResult } from './transcript-page-progress.js';
+import { idlePageState, type TranscriptPageApplicationGate, type TranscriptPageLoadOptions, type TranscriptPageLoadResult, type TranscriptPageState, type TranscriptWindowTarget, type TranscriptWindowLoadResult } from './transcript-page-progress.js';
 import type { TranscriptRowTarget, TranscriptRowWindowResult } from './transcript-row-navigation.js';
 import type { ChatDisplayRow } from './transcript-row-projection.js';
 import { selectForkAtMessage } from '$lib/chat/actions/fork-at-message-action.js';
@@ -60,15 +60,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		api: Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'> = transcriptDisplayApi,
 		private readonly onInputRepresented?: (view: string, clientMessageId: string, ordinal: number) => void) {
 		this.#sharedOverlay = sharedOverlay;
-		this.controller = new DisplayWindowController(bodyStore, snapshot => {
+		this.controller = new DisplayWindowController(bodyStore, (snapshot, direction) => {
 			const before = this.display.window;
 			this.display = snapshot;
 			this.#rememberNoticeProofs();
 			this.#releaseRepresentedInputs();
 			if (snapshot.window && snapshot.window !== before) {
 				this.lastOrdinal = Math.max(this.lastOrdinal, snapshot.window.sourceHead);
-				this.#mutations.record(before ? 'presentation-structure' : 'initial');
+				if (!direction) this.#mutations.record(before ? 'presentation-structure' : 'initial');
 			}
+			if (direction) this.#mutations.record(direction === 'earlier' ? 'history-earlier' : 'history-later');
 		}, api);
 		this.#stopNoticeTracking = $effect.root(() => {
 			$effect(() => {
@@ -154,10 +155,18 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				...(input.contentMode ? { contentMode: input.contentMode } : {}), ...(input.contentFormat ? { contentFormat: input.contentFormat } : {}) }),
 			awaitingDelivery: input.delivery === 'pending' })), ...this.localNotices];
 	}
-	get visibleRows(): ChatDisplayRow[] { return [...this.#renderModel.items.flatMap(item => item.kind === 'message' ? [item] : []), ...this.overlayRows]; }
+	get visibleRows(): ChatDisplayRow[] {
+		const canonical = this.#renderModel.items.flatMap(item => item.kind === 'message' ? [item] : [])
+			.sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+		return [...canonical, ...this.overlayRows];
+	}
 	get displayRows(): readonly ChatDisplayRow[] { return this.visibleRows; }
 	get displayMessages(): ChatMessage[] { return this.visibleRows.flatMap(row => row.kind === 'message' ? [row.message] : []); }
-	get displayMessageCount(): number { return (this.display.window?.items.length ?? 0) + this.overlayRows.length; }
+	get displayMessageCount(): number {
+		const protectedOrdinals = new Set(this.display.protectedRows.map(row => row.detail.ordinal));
+		const retained = this.#renderModel.items.filter(item => item.kind === 'message' && item.ordinal !== undefined && protectedOrdinals.has(item.ordinal));
+		return (this.display.window?.items.length ?? 0) + retained.length + this.overlayRows.length;
+	}
 	get resendCandidates(): readonly UserRowSummary[] { return this.overlay.includedResendCandidates; }
 	get excludedResendOrdinals(): readonly number[] { return this.overlay.excludedResendOrdinals; }
 	getCursor(): ChatCursor { return { transcriptViewId: this.transcriptViewId, lastOrdinal: this.lastOrdinal }; }
@@ -182,7 +191,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (snapshot.chat.id !== this.activeChatId) return;
 		const replaced = this.transcriptViewId !== '' && this.transcriptViewId !== snapshot.transcriptViewId;
 		if (!this.#navigating || replaced || this.serverInstanceId !== snapshot.serverInstanceId) this.invalidatePendingHistoryLoad();
-		if (replaced) this.windowRevision += 1;
+		if (replaced) {
+			this.windowRevision += 1;
+			this.responseClassOrdinals = emptyResponseClassOrdinals();
+		}
 		this.#committedInputs = new Map([...this.#committedInputs].filter(([, input]) => input.view === snapshot.transcriptViewId));
 		this.openSnapshot = snapshot;
 		this.serverInstanceId = snapshot.serverInstanceId;
@@ -249,18 +261,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#mutations.record('presentation-structure');
 		if (!this.#navigating) this.#configureCuts();
 	}
-	async #loadPage(direction: 'earlier' | 'later', chatId: string, applicationGate?: TranscriptPageApplicationGate): Promise<TranscriptPageLoadResult> {
+	async #loadPage(direction: 'earlier' | 'later', chatId: string, options: TranscriptPageLoadOptions = {}): Promise<TranscriptPageLoadResult> {
 		if (chatId !== this.activeChatId || this.controller.busy) return 'invalidated';
 		const epoch = ++this.#pageEpoch;
 		this.pageStates[direction] = { status: 'loading', error: this.pageStates[direction].error };
-		const result = await this.controller.load(direction, applicationGate);
+		const target = options.memberTarget;
+		const result = target ? await this.controller.extendMembers(target.group, target.anchor, options.applicationGate)
+			: await this.controller.load(direction, options.applicationGate);
 		if (epoch !== this.#pageEpoch) return 'invalidated';
 		this.pageStates[direction] = result === 'failed' ? { status: 'error', error: this.loadError } : idlePageState();
-		if (result === 'loaded') this.#mutations.record(direction === 'earlier' ? 'history-earlier' : 'history-later');
 		return result === 'blocked' ? 'invalidated' : result;
 	}
-	loadEarlierPage(chatId: string, options?: { applicationGate?: TranscriptPageApplicationGate }): Promise<TranscriptPageLoadResult> { return this.#loadPage('earlier', chatId, options?.applicationGate); }
-	loadLaterPage(chatId: string, options?: { applicationGate?: TranscriptPageApplicationGate }): Promise<TranscriptPageLoadResult> { return this.#loadPage('later', chatId, options?.applicationGate); }
+	loadEarlierPage(chatId: string, options?: TranscriptPageLoadOptions): Promise<TranscriptPageLoadResult> { return this.#loadPage('earlier', chatId, options); }
+	loadLaterPage(chatId: string, options?: TranscriptPageLoadOptions): Promise<TranscriptPageLoadResult> { return this.#loadPage('later', chatId, options); }
 	async navigateToWindow(chatId: string, target: TranscriptWindowTarget): Promise<TranscriptWindowLoadResult> {
 		if (chatId !== this.activeChatId) return 'invalidated';
 		this.invalidatePendingWindowNavigation();

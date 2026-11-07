@@ -1,4 +1,5 @@
 import type { TranscriptMessage } from '$shared/chat-view';
+import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
 
 export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
 export type TranscriptPageDirection = 'earlier' | 'later';
@@ -7,6 +8,16 @@ export type TranscriptPageApplicationGate = () => Promise<TranscriptPageApplicat
 export type TranscriptPageStatus = 'idle' | 'loading' | 'error';
 export type TranscriptWindowLoadResult = 'loaded' | 'invalidated' | 'failed';
 export type TranscriptWindowTarget = 'initial' | 'latest';
+
+export interface TranscriptMemberPageTarget {
+	readonly group: GroupDescriptor;
+	readonly anchor: MemberWindowRequest['anchor'];
+}
+
+export interface TranscriptPageLoadOptions {
+	applicationGate?: TranscriptPageApplicationGate;
+	memberTarget?: TranscriptMemberPageTarget;
+}
 
 export interface TranscriptPageState {
 	status: TranscriptPageStatus;

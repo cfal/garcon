@@ -22,7 +22,7 @@ import type { DisplayOpenResponse, DisplayPreparationStatus } from '$shared/tran
 import { transcriptDisplayApi, type TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DisplayBodyStore } from './display-body-store.js';
 import type { CoverageOutcome } from './display-coverage.js';
-import type { TranscriptPageApplicationGate } from './transcript-page-progress.js';
+import type { TranscriptPageApplicationGate, TranscriptPageDirection } from './transcript-page-progress.js';
 import { ApiError } from '$lib/api/client.js';
 
 const RETRYABLE_DISPLAY_ERRORS = new Set(['DISPLAY_BUSY', 'DISPLAY_TIMEOUT', 'DISPLAY_UNAVAILABLE', 'DISPLAY_PREPARING', 'DISPLAY_SUPERSEDED']);
@@ -103,7 +103,7 @@ export class DisplayWindowController {
 
 	constructor(
 		readonly bodies: DisplayBodyStore,
-		private readonly publish: (snapshot: DisplayWindowSnapshot) => void,
+		private readonly publish: (snapshot: DisplayWindowSnapshot, direction?: TranscriptPageDirection) => void,
 		private readonly api: Pick<TranscriptDisplayApi, 'open' | 'window' | 'members' | 'bodies' | 'resolve' | 'retry'> = transcriptDisplayApi,
 	) {}
 
@@ -361,9 +361,9 @@ export class DisplayWindowController {
 		return this.#loadMembers(group, anchor, 'replace');
 	}
 
-	extendMembers(group: GroupDescriptor, anchor: MemberWindowRequest['anchor']): Promise<CoverageOutcome> {
+	extendMembers(group: GroupDescriptor, anchor: MemberWindowRequest['anchor'], applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
 		if (this.#navigationEpoch !== null) return Promise.resolve('blocked');
-		return this.#loadMembers(group, anchor, 'extend');
+		return this.#loadMembers(group, anchor, 'extend', applicationGate);
 	}
 
 	async #loadMembers(group: GroupDescriptor, anchor: MemberWindowRequest['anchor'], mode: 'replace' | 'extend', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
@@ -396,7 +396,8 @@ export class DisplayWindowController {
 			else if (anchor.kind === 'around' && page.ordinals.includes(anchor.ordinal)) anchorOrdinal = anchor.ordinal;
 			if (anchorOrdinal === undefined) return 'exhausted';
 			const expansions = [...others, { anchorOrdinal, openedAt: ++this.#openedAt, page }];
-			await this.#hydrateAndApply(window, expansions, signal, epoch, applicationGate);
+			await this.#hydrateAndApply(window, expansions, signal, epoch, { applicationGate,
+				direction: mode === 'extend' ? anchor.kind === 'before' ? 'earlier' : 'later' : undefined });
 			return 'loaded';
 		});
 	}
@@ -424,7 +425,8 @@ export class DisplayWindowController {
 		const window = this.#snapshot.window;
 		if (!window || this.busy || this.#readingAnchorHold) return;
 		const keep = window.items.map((item, index) => ({ item, index })).filter(({ item }) =>
-			descriptorLast(item) >= firstOrdinal && descriptorFirst(item) <= lastOrdinal);
+			descriptorLast(item) >= firstOrdinal && descriptorFirst(item) <= lastOrdinal
+			|| item.kind === 'tool-group' && this.#protected.has(item.firstMember));
 		if (keep.length === 0) return;
 		const pressured = this.bodies.activeOverBudget || this.residency.budgetException;
 		const margin = pressured ? 0 : 10;
@@ -511,7 +513,7 @@ export class DisplayWindowController {
 			if (mode === 'details') {
 				const current = this.#snapshot;
 				if (!current.window) return 'blocked';
-				await this.#hydrateAndApply(current.window, current.expansions, signal, epoch, applicationGate, response.certificate);
+				await this.#hydrateAndApply(current.window, current.expansions, signal, epoch, { applicationGate, detailsCertificate: response.certificate });
 				this.#refreshGoal = null;
 				if (this.#needsDetailRefresh()) this.#scheduleRefresh(250);
 				return 'loaded';
@@ -528,7 +530,8 @@ export class DisplayWindowController {
 						|| previous.cutPlacements.some(old => old.id === cut.id && old.placement === 'inline') ? 'inline' : 'detached' })) };
 			}
 			const expansions = mode === 'replace' ? await this.#remapExpansions(window, signal) : this.#snapshot.expansions;
-			await this.#hydrateAndApply(window, expansions, signal, epoch, applicationGate, window.certificate, () => assertReadingIntent(expansions));
+			await this.#hydrateAndApply(window, expansions, signal, epoch, { applicationGate,
+				assertApplication: () => assertReadingIntent(expansions), direction: mode === 'replace' ? undefined : mode });
 			if (mode === 'replace') this.#refreshGoal = null;
 			if (this.#needsHeadRefresh()) this.#scheduleRefresh(250);
 			return 'loaded';
@@ -571,7 +574,13 @@ export class DisplayWindowController {
 		return new Map([...this.#snapshot.details].filter(([ordinal]) => seeds.has(ordinal)));
 	}
 
-	async #hydrateAndApply(window: AvailableDisplayWindow, expansions: readonly DisplayExpansion[], signal: AbortSignal, epoch: number, applicationGate?: TranscriptPageApplicationGate, detailsCertificate = window.certificate, assertApplication?: () => void): Promise<void> {
+	async #hydrateAndApply(window: AvailableDisplayWindow, expansions: readonly DisplayExpansion[], signal: AbortSignal, epoch: number, options: {
+		applicationGate?: TranscriptPageApplicationGate;
+		detailsCertificate?: DisplayCertificate;
+		assertApplication?: () => void;
+		direction?: TranscriptPageDirection;
+	} = {}): Promise<void> {
+		let detailsCertificate = options.detailsCertificate ?? window.certificate;
 		const profile = this.#profile!;
 		const previousCertificate = this.#snapshot.detailsCertificate;
 		if (previousCertificate && previousCertificate.watermark > detailsCertificate.watermark
@@ -606,16 +615,16 @@ export class DisplayWindowController {
 					previousDeferred = response.deferredOrdinals.length;
 				}
 			}
-			const gate = applicationGate ?? this.#applicationGate;
+			const gate = options.applicationGate ?? this.#applicationGate;
 			if (gate && await gate() !== 'apply') throw new DOMException('Display application cancelled', 'AbortError');
 			this.#assertCurrent(signal, epoch);
-			assertApplication?.();
+			options.assertApplication?.();
 			const refreshedProtected = this.#captureProtectedRows(represented).map(row => {
 				const detail = details.get(row.detail.ordinal);
 				return detail ? { ...row, certificate: detailsCertificate, detail } : row;
 			});
 			for (const row of protectedRows) details.delete(row.detail.ordinal);
-			this.#commit({ window, expansions, details, detailsCertificate, protectedRows: refreshedProtected, phase: 'available', error: null, revision: this.#snapshot.revision });
+			this.#commit({ window, expansions, details, detailsCertificate, protectedRows: refreshedProtected, phase: 'available', error: null, revision: this.#snapshot.revision }, options.direction);
 			this.#retainBodies();
 		} finally { this.bodies.release(staged); }
 	}
@@ -670,14 +679,14 @@ export class DisplayWindowController {
 		if (!sameDisplayCertificate(actual, expected)) throw new Error('Mismatched display certificate');
 	}
 
-	#commit(snapshot: DisplayWindowSnapshot): void {
+	#commit(snapshot: DisplayWindowSnapshot, direction?: TranscriptPageDirection): void {
 		if (snapshot.phase === 'failed') {
 			if (this.#refreshTimer !== null) clearTimeout(this.#refreshTimer);
 			this.#refreshTimer = null;
 			this.#refreshPending = false;
 		}
 		this.#snapshot = { ...snapshot, revision: this.#snapshot.revision + 1 };
-		this.publish(this.#snapshot);
+		this.publish(this.#snapshot, direction);
 	}
 
 	#run(work: (signal: AbortSignal, epoch: number) => Promise<CoverageOutcome>, mode: 'foreground' | 'details' = 'foreground'): Promise<CoverageOutcome> {
