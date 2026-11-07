@@ -793,6 +793,46 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.currentWindowId).toBe(destination);
 	});
 
+	it('swaps into the fullscreen Chat without exiting fullscreen or changing window tabs', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.showChatInWindow('chat-b', 'window-files');
+		await coordinator.enterWindowFullscreen('window-files');
+		const before = layout.snapshot;
+
+		await coordinator.swapChatIntoWindow('chat-a', 'window-files', 'chat-b');
+
+		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-files');
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-b' });
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({ chatId: 'chat-a' });
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(coordinator.focusedChatId).toBe('chat-a');
+		expect(coordinator.composerAnchorSurfaceId).toBe(chatViewSurfaceId('window-files'));
+	});
+
+	it('falls back to ordinary placement if the dragged Chat is no longer open', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.showChatInWindow('chat-b', 'window-files');
+		const prepareChatSurfaceTransfer = vi.fn();
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		const swapping = coordinator.swapChatIntoWindow('chat-a', 'window-files', 'chat-b');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-c' },
+			]),
+		);
+
+		await swapping;
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-c' });
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({ chatId: 'chat-a' });
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(prepareChatSurfaceTransfer).not.toHaveBeenCalled();
+	});
+
 	it.each(['hidden', 'empty', 'changed', 'missing', 'same', 'mobile'] as const)(
 		'falls back to showing the existing Chat for an ineligible %s swap target',
 		async (scenario) => {
@@ -830,16 +870,30 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 3 });
 		await coordinator.showChatInCurrentWindow('chat-a');
 		await coordinator.showChatInWindow('chat-b', 'window-files');
+		coordinator.noteSurfaceFocus(chatViewSurfaceId('window-main'));
 		const before = layout.snapshot;
-		const publication = { publish: vi.fn(), rollback: vi.fn() };
-		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer: () => publication });
+		const revision = layout.revision;
+		const focusOwner = coordinator.focusOwner;
+		const composerAnchor = coordinator.composerAnchorSurfaceId;
+		const publications = [0, 1].map(() => ({ publish: vi.fn(), rollback: vi.fn() }));
+		const prepareChatSurfaceTransfer = vi
+			.fn()
+			.mockReturnValueOnce(publications[0])
+			.mockReturnValueOnce(publications[1]);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
 		await expect(
 			coordinator.swapChatIntoWindow('chat-a', 'window-files', 'chat-b'),
 		).rejects.toThrow();
 		expect(layout.snapshot).toBe(before);
-		expect(coordinator.currentWindowId).toBe('window-files');
-		expect(publication.publish).toHaveBeenCalledTimes(2);
-		expect(publication.rollback).toHaveBeenCalledTimes(2);
+		expect(layout.revision).toBe(revision);
+		expect(coordinator.focusOwner).toEqual(focusOwner);
+		expect(coordinator.composerAnchorSurfaceId).toBe(composerAnchor);
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(prepareChatSurfaceTransfer).toHaveBeenCalledTimes(2);
+		for (const publication of publications) {
+			expect(publication.publish).toHaveBeenCalledOnce();
+			expect(publication.rollback).toHaveBeenCalledOnce();
+		}
 	});
 
 	it.each(['moved-source', 'changed-target', 'hidden-target'] as const)(
