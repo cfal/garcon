@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AssistantMessage, AskUserQuestionToolUseMessage, BashToolUseMessage, GlobToolUseMessage, PermissionRequestMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
+import { AssistantMessage, AskUserQuestionToolUseMessage, BashToolUseMessage, EditToolUseMessage, GlobToolUseMessage, PermissionRequestMessage, ReadToolUseMessage, ToolResultMessage, UserMessage, WriteToolUseMessage } from '../../../../common/chat-types.js';
 import type { ChatMessage } from '../../../../common/chat-types.js';
-import type { DisplayProfile, DisplayWindowRequest, MemberWindowRequest } from '../../../../common/transcript-display-contract.js';
+import type { DisplayProfile, DisplayWindowRequest, GroupDescriptor, MemberWindowRequest } from '../../../../common/transcript-display-contract.js';
 import { parseDisplayWindowResponse, parseMemberWindowResponse } from '../../../../common/transcript-display-contract.js';
 import { DISPLAY_POLICY_REVISION } from '../../../../common/transcript-display-policy.js';
 import { encodeLedgerDraft, type StoredLedgerRow } from '../../ledger/codec.js';
@@ -196,6 +196,77 @@ describe('persistent transcript display read model', () => {
     const older = query(store, 1, { kind: 'before', cursor: latest.earlier.cursor }, cuts);
     expect(older.items[0]).toMatchObject({ count: 5, firstMember: 1, lastMember: 5 });
     expect(older.earlier.kind).toBe('exhausted-through-watermark');
+  });
+
+  test.each([1, 2, 3])('traverses weighted mixed-category groups and hidden-anchor cuts both ways with limit %s', limit => {
+    const store = create();
+    const edit = (id: string, paths: string[]) => new EditToolUseMessage(at, id, paths[0], 'before', 'after', paths.map(path => ({ path })));
+    const rows = stored([
+      new UserMessage(at, 'Synthetic prompt'),
+      edit('earlier-edit', ['/synthetic/a', '/synthetic/b']),
+      new BashToolUseMessage(at, 'earlier-command', 'true'),
+      new AssistantMessage(at, 'Synthetic boundary'),
+      new ReadToolUseMessage(at, 'first-read', '/synthetic/a'),
+      new BashToolUseMessage(at, 'hidden-anchor', 'true'),
+      edit('later-edit', ['/synthetic/c', '/synthetic/d', '/synthetic/e']),
+      new ReadToolUseMessage(at, 'second-read', '/synthetic/b'),
+      new WriteToolUseMessage(at, 'later-write', '/synthetic/f', 'Synthetic content'),
+      new AssistantMessage(at, 'Synthetic second boundary'),
+      new WriteToolUseMessage(at, 'tail-write', '/synthetic/g', 'Synthetic tail'),
+      new ReadToolUseMessage(at, 'tail-read', '/synthetic/g'),
+    ]);
+    appendDisplayFrame(store, rows, rows.length, 'server');
+    const filtered: DisplayProfile = { ...profile, hiddenToolGroups: ['bash'] };
+    const earlier: GroupDescriptor = { kind: 'tool-group',
+      base: { afterBreaker: 1, beforeBreaker: 4, firstMember: 2, lastMember: 2, openAtWatermark: false },
+      fragment: { after: 1, through: 3 }, firstMember: 2, lastMember: 2, count: 1,
+      totals: { commands: 0, fileReads: 0, fileEdits: 2, other: 0 }, categoryOrder: ['fileEdits'] };
+    const middle: GroupDescriptor = { kind: 'tool-group',
+      base: { afterBreaker: 4, beforeBreaker: 10, firstMember: 5, lastMember: 9, openAtWatermark: false },
+      fragment: { after: 4, through: 9 }, firstMember: 5, lastMember: 9, count: 4,
+      totals: { commands: 0, fileReads: 2, fileEdits: 4, other: 0 }, categoryOrder: ['fileReads', 'fileEdits'] };
+    const tail: GroupDescriptor = { kind: 'tool-group',
+      base: { afterBreaker: 10, beforeBreaker: 13, firstMember: 11, lastMember: 12, openAtWatermark: true },
+      fragment: { after: 10, through: 12 }, firstMember: 11, lastMember: 12, count: 2,
+      totals: { commands: 0, fileReads: 1, fileEdits: 1, other: 0 }, categoryOrder: ['fileEdits', 'fileReads'] };
+    for (const anchorRule of ['raw-position', 'eligible-row'] as const) {
+      const cuts = [{ id: 'synthetic-overlay', afterOrdinal: 6, anchorRule }];
+      const fragments: GroupDescriptor[] = anchorRule === 'eligible-row' ? [middle] : [
+        { ...middle, fragment: { after: 4, through: 6 }, firstMember: 5, lastMember: 5, count: 1,
+          totals: { commands: 0, fileReads: 1, fileEdits: 0, other: 0 }, categoryOrder: ['fileReads'] },
+        { ...middle, fragment: { after: 6, through: 9 }, firstMember: 7, lastMember: 9, count: 3,
+          totals: { commands: 0, fileReads: 1, fileEdits: 4, other: 0 }, categoryOrder: ['fileEdits', 'fileReads'] },
+      ];
+      const expected = [{ kind: 'row', ordinal: 1 }, earlier, { kind: 'row', ordinal: 4 }, ...fragments,
+        { kind: 'row', ordinal: 10 }, tail];
+      const request: DisplayWindowRequest = { chatId: 'chat', transcriptViewId: 'view', policyRevision: DISPLAY_POLICY_REVISION,
+        profile: filtered, cuts, limit, anchor: { kind: 'newest' } };
+      const certificate = displayCertificate('server', request, 12);
+      const engine = new DisplayQuery(store, filtered, 12, cuts, false);
+      for (const direction of ['earlier', 'later'] as const) {
+        let anchor: DisplayWindowRequest['anchor'] = direction === 'earlier' ? { kind: 'newest' }
+          : { kind: 'after', cursor: { certificate, boundaryOrdinal: 0 } };
+        const collected: typeof expected = [];
+        let exhausted = false;
+        for (let pages = 0; pages < expected.length; pages++) {
+          const page = engine.window({ ...request, anchor }, certificate, 12, 12);
+          expect(parseDisplayWindowResponse(page)).toEqual(page);
+          expect(page.certificate).toEqual(certificate);
+          expect(page.items.length).toBeGreaterThan(0);
+          expect(page.items.length).toBeLessThanOrEqual(limit);
+          expect(page.cutPlacements).toEqual([{ id: 'synthetic-overlay', placement: anchorRule === 'raw-position'
+            && page.interval.after <= 6 && page.interval.through >= 6 ? 'inline' : 'detached' }]);
+          const items = page.items.map(item => item.kind === 'row' ? { kind: 'row', ordinal: item.ordinal } : item);
+          if (direction === 'earlier') collected.unshift(...items);
+          else collected.push(...items);
+          const edge = page[direction];
+          if (edge.kind === 'exhausted-through-watermark') { exhausted = true; break; }
+          anchor = { kind: direction === 'earlier' ? 'before' : 'after', cursor: edge.cursor };
+        }
+        expect(exhausted).toBe(true);
+        expect(collected).toEqual(expected);
+      }
+    }
   });
 
   test('prepares positive Bash result eligibility including empty-command failures', () => {

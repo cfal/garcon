@@ -602,20 +602,27 @@ test('invalid auxiliary frontiers are rebuilt without touching the source', asyn
   expect(await display.auxiliary('subagents', { chatId: 'chat', transcriptViewId: view.viewId, limit: 50 })).toMatchObject({ kind: 'preparing' });
 });
 
-test('[TLV5-DISPLAY.09-CORE-UNIT-01] rollback and ordinal regrowth before lazy index admission forces rebuilding', async () => {
+test.each([3, 30])('[TLV5-DISPLAY.09-CORE-UNIT-01] rollback and %i regrown rows before lazy index admission forces rebuilding', async count => {
   const view = seed('chat', 10);
-  await ready(request('chat', view.viewId));
+  const initial = await ready(request('chat', view.viewId));
   await display.close(); ledger.close();
   const db = new Database(path.join(root, 'ledger', 'chat', 'ledger.sqlite'));
   db.run('DELETE FROM transcript_rows WHERE ordinal > 1'); db.close();
   store = new TranscriptLedgerStore(path.join(root, 'ledger'));
   ledger = new TranscriptLedgerService(store);
   const producer = ledger.openProducer('chat', 'synthetic');
-  producer.sink.publish({ type: 'rows', rows: Array.from({ length: 30 }, () => ({ message: new AssistantMessage(at, 'New response') })) });
+  producer.sink.publish({ type: 'rows', rows: Array.from({ length: count }, () => ({ message: new AssistantMessage(at, 'New response') })) });
+  producer.close();
   display = service('server-b');
-  const rebuilt = await ready(request('chat', view.viewId));
-  expect(rebuilt.items).toHaveLength(31);
+  const input = request('chat', view.viewId);
+  const rebuilt = await ready(input);
+  expect(rebuilt.items).toHaveLength(count + 1);
   expect(rebuilt.items.every(item => item.kind === 'row')).toBe(true);
+  if (initial.certificate.watermark > rebuilt.sourceHead) {
+    await expect(display.window({ ...input, atWatermark: initial.certificate.watermark }))
+      .rejects.toMatchObject({ code: 'DISPLAY_STALE_WATERMARK' });
+    expect((await display.window(input)).kind).toBe('available');
+  }
 });
 
 test('deletion fences pending preparation and does not recreate sidecars', async () => {
