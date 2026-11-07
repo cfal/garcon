@@ -107,6 +107,8 @@ export async function verifyFailedDisplayControlsAndLiveWire(fixture: ChromiumFi
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     await collapseCanonicalFilesWindow(page);
     await browserExpect.poll(() => failure.responses).toBeGreaterThan(0);
+    await browserExpect(page.locator(DISPLAY_FEED).getByText('Failed to refresh messages', { exact: true })).toBeVisible();
+    await browserExpect(page.locator(DISPLAY_FEED).getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
     await page.getByRole('radio', { name: /SQLite/ }).check();
     await page.getByRole('button', { name: /Submit answer/ }).click();
     expect((await integration.client.waitForTurnTerminal(chatId, started.turnId)).type).toBe('agent-run-finished');
@@ -114,10 +116,14 @@ export async function verifyFailedDisplayControlsAndLiveWire(fixture: ChromiumFi
     await wire.settle();
     expect(wire.bodies()).toEqual([]);
   } finally { await failure.release(); }
+  const retried = page.waitForResponse(response => response.url().endsWith('/transcript-display/retry')
+    && response.request().postDataJSON().chatId === chatId);
   await page.locator(DISPLAY_FEED).getByRole('button', { name: 'Retry', exact: true }).click();
+  expect((await retried).ok()).toBe(true);
   await page.getByText('Synthetic permission completed', { exact: true }).waitFor();
   await waitForDisplayIdle(page);
   await wire.settle();
+  expect(wire.requests.filter(path => path.endsWith('/transcript-display/retry'))).toHaveLength(1);
   const httpStart = wire.http.length, wsStart = wire.ws.length;
   const pairs = 60;
   environment.model.scriptTurn(Array.from({ length: pairs }, (_, index) =>

@@ -208,6 +208,8 @@ test('confirmed Shell clear works on desktop and mobile while AI clear is reject
         ], async () => {
           await pending.fulfill({ response: rejected });
           windowReleased = true;
+          await browserExpect(page.locator('[data-chat-scroll-viewport]')).toHaveAttribute('aria-busy', 'false');
+          await browserExpect(feed).not.toContainText('synthetic-old-history');
           for (const publish of heldReload!.events) publish();
           heldReload = null;
           await browserExpect(feed).toContainText('synthetic-old-history');

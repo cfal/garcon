@@ -451,6 +451,8 @@ describe('garcon-cli add-row', () => {
         reason: 'reconnect', outstandingClientMessageIds: [] });
       const request = displayRequest(open);
       const window = await fixture.client.waitForDisplayWindow(request);
+      expect(window.items.filter(item => item.kind === 'row').map(item => item.ordinal))
+        .toEqual(expect.arrayContaining([info.ordinal, notice.ordinal, error.ordinal, custom.ordinal]));
       const hydrated = await displayBodies(fixture.client, request, window, [info.ordinal, notice.ordinal, error.ordinal, custom.ordinal]);
       expect(hydrated.bodies.map((entry) => ({
         ordinal: entry.ordinal,

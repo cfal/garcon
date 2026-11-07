@@ -53,8 +53,20 @@ test('[TLV5-DISPLAY.07-CHROMIUM-02][TLV5-UX.11-CHROMIUM-DISPLAY-01] preserves th
       await held.received;
       await wire.reconnect();
     } finally { await held.release(); }
+    const canonical = await integration.client.getMessages(chatId);
+    await browserExpect(page.locator('[data-chat-display-details-watermark]')).toHaveAttribute('data-chat-display-details-watermark', String(canonical.lastOrdinal));
     await waitForDisplayIdle(page);
     await assertAnchor();
+    await page.getByRole('button', { name: 'Scroll to bottom', exact: true }).click();
+    const suffix = canonical.messages.filter(row => (row.message.type === 'user-message' || row.message.type === 'assistant-message')
+      && row.message.content.includes('Synthetic detached suffix'));
+    expect(suffix).toHaveLength(2);
+    for (const row of suffix) await browserExpect(page.locator(`[data-chat-row-id="${canonical.transcriptViewId}:${row.ordinal}"]`)).toHaveCount(1);
+    const positions = await page.locator('[data-chat-row-id]').evaluateAll((rows, ordinals) => rows
+      .filter(row => ordinals.some(ordinal => row.getAttribute('data-chat-row-id')?.endsWith(`:${ordinal}`)))
+      .map(row => ({ id: row.getAttribute('data-chat-row-id'), top: row.getBoundingClientRect().top })), suffix.map(row => row.ordinal));
+    expect(positions.map(row => row.id)).toEqual(suffix.map(row => `${canonical.transcriptViewId}:${row.ordinal}`));
+    expect(positions[0]!.top).toBeLessThan(positions[1]!.top);
     await wire.settle();
     expect(wire.requests).not.toContain('/api/v1/chats/messages');
     expect(await page.locator('[data-chat-row-id]').count()).toBeLessThan(100);
@@ -69,15 +81,35 @@ test('[TLV5-DISPLAY.07-CHROMIUM-03] rejects held recovery from a view replaced b
     await waitForDisplayIdle(page);
     const old = await integration.client.getMessages(chatId);
     const held = await holdDisplayResponse(page, 'window', chatId);
+    let stopOldViewSampler: (() => Promise<number>) | null = null;
     try {
       await wire.reconnect();
       await held.received;
       const replacement = await integration.client.reloadChat(chatId);
       expect(replacement.transcriptViewId).not.toBe(old.transcriptViewId);
+      await browserExpect(page.locator('[data-chat-display-view]')).toHaveAttribute('data-chat-display-view', replacement.transcriptViewId);
+      await browserExpect(page.locator(`[data-chat-row-id^="${old.transcriptViewId}:"]`)).toHaveCount(0);
+      await page.evaluate(view => {
+        const capture = { active: true, oldRows: 0 };
+        Object.assign(window, { __staleViewSampler: capture });
+        const sample = () => {
+          if (!capture.active) return;
+          capture.oldRows += document.querySelectorAll(`[data-chat-row-id^="${view}:"]`).length;
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }, old.transcriptViewId);
+      stopOldViewSampler = () => page.evaluate(async () => {
+        for (let frame = 0; frame < 12; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        const capture = (window as unknown as { __staleViewSampler: { active: boolean; oldRows: number } }).__staleViewSampler;
+        capture.active = false;
+        return capture.oldRows;
+      });
     } finally { await held.release(); }
     const current = await integration.client.getMessages(chatId);
     await browserExpect(page.locator(`[data-chat-row-id^="${old.transcriptViewId}:"]`)).toHaveCount(0);
     await browserExpect(page.locator(`[data-chat-row-id="${current.transcriptViewId}:${current.messages.at(-1)!.ordinal}"]`)).toBeVisible();
     await browserExpect(page.locator(DISPLAY_FEED)).toHaveAttribute('aria-busy', 'false');
+    expect(await stopOldViewSampler!()).toBe(0);
   });
 }, 120_000);

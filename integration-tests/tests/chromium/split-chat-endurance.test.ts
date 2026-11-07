@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AssistantMessage, BashToolUseMessage, ToolResultMessage } from '../../../common/chat-types.js';
@@ -14,7 +15,7 @@ const OUTPUT = join(import.meta.dirname, '../../artifacts/chromium/split-chat-en
 test('keeps split chats bounded through history growth and reconnect and responsive through real turns', async () => {
   await withChromiumFixture('split-chat-endurance', async (fixture, phase) => {
     const { page, integration } = fixture;
-    const chats: { chatId: string; viewId: string; ordinal: number }[] = [];
+    const chats: { chatId: string; viewId: string }[] = [];
     for (const label of ['left', 'right']) {
       const chatId = integration.newChatId();
       const started = await integration.client.startDirectChat({
@@ -23,7 +24,7 @@ test('keeps split chats bounded through history growth and reconnect and respons
       });
       await integration.client.waitForTurnTerminal(chatId, started.turnId);
       const history = await integration.client.getMessages(chatId);
-      chats.push({ chatId, viewId: history.transcriptViewId, ordinal: history.lastOrdinal });
+      chats.push({ chatId, viewId: history.transcriptViewId });
     }
     const layout = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
       { type: 'close-window', windowId: 'window-files' },
@@ -67,9 +68,18 @@ test('keeps split chats bounded through history growth and reconnect and respons
     } finally {
       held.releaseEcho();
     }
-    for (const chat of chats) {
-      const history = await integration.client.getMessages(chat.chatId);
-      chat.ordinal = history.lastOrdinal;
+    phase('sustained compact-head delivery into both visible surfaces');
+    for (let turn = 0; turn < 6; turn++) {
+      for (const [index, chat] of chats.entries()) {
+        const prompt = `Synthetic sustained turn ${index} ${turn}`;
+        const accepted = await integration.client.runDirectChat({ chatId: chat.chatId, content: prompt, agent: integration.directAgents.openAi });
+        await integration.client.waitForTurnTerminal(chat.chatId, accepted.turnId);
+        const panel = page.locator(`[data-conversation-panel="chat-view:${index === 0 ? 'window-main' : 'window-right'}"]`);
+        await browserExpect(panel.getByText(`echo:${prompt}`, { exact: true })).toBeVisible();
+        await browserExpect(panel.getByText(prompt, { exact: true })).toHaveCount(1);
+        await browserExpect(panel.getByText(`echo:${prompt}`, { exact: true })).toHaveCount(1);
+        expect(await page.locator('[data-chat-virtual-item]').count()).toBeLessThan(100);
+      }
     }
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
