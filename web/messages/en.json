@@ -228,26 +228,6 @@
 	"chat_summary_next_page": "Next page",
 	"chat_subagent_running": "Running",
 	"chat_subagent_idle": "Idle",
-	"chat_attachment_count": [
-		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
-			"match": {
-				"countPlural=one": "{count} attachment",
-				"countPlural=other": "{count} attachments"
-			}
-		}
-	],
-	"chat_pending_plan_count": [
-		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
-			"match": {
-				"countPlural=one": "{count} pending plan",
-				"countPlural=other": "{count} pending plans"
-			}
-		}
-	],
 	"chat_member_earlier": [
 		{
 			"declarations": ["input count", "input formatted", "local countPlural = count: plural"],
@@ -473,7 +453,6 @@
 	"chat_new_chat_ultrathink": "Max",
 	"chat_permission_allow_once": "Allow once",
 	"chat_permission_deny": "Deny",
-	"chat_permission_dismiss_plan": "Dismiss",
 	"chat_permission_permission_allowed": "Permission allowed",
 	"chat_permission_permission_cancelled": "Permission request cancelled",
 	"chat_permission_permission_denied": "Permission denied",

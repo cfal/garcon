@@ -5,7 +5,7 @@ import type { ConversationUiPort } from './conversation-ui-state.svelte.js';
 import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
 
 export function planOccurrenceId(view: string, ordinal: number): string { return `plan:${view}:${ordinal}`; }
-export interface PlanPresentationView extends DisplaySummaryPaging { readonly pendingExitCount: number }
+export type PlanPresentationView = DisplaySummaryPaging;
 export interface PlanPresentationPort {
 	isCurrent(request: PlanPresentationRequest): boolean;
 	getPermissionMode(chatId: string): PermissionMode | null;
@@ -153,7 +153,7 @@ export class PlanPresentationController {
 	#publish(chatId: string, refresh: PlanRefresh): void {
 		const snapshot = refresh.snapshot;
 		this.port.conversationUi.setPlanPresentation(chatId, {
-			pendingExitCount: snapshot?.pendingExitCount ?? 0, loading: refresh.loading, updating: refresh.loading, stale: false, error: refresh.error,
+			loading: refresh.loading, updating: refresh.loading, stale: false, error: refresh.error,
 			hasPrevious: refresh.index > 0 || refresh.before.length > 0,
 			hasNext: !!snapshot && (refresh.index + 1 < snapshot.exits.length || snapshot.nextAfterOrdinal !== null),
 			next: () => this.#move(chatId, refresh, 1), previous: () => this.#move(chatId, refresh, -1),

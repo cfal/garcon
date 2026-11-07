@@ -3539,7 +3539,7 @@ describe('ConversationSessionController', () => {
 		},
 	);
 
-	it.each([false, true])('dismisses only plan presentation without executor authority, failure=%s', async (fails) => {
+	it.each([false, true])('acknowledges a new-chat plan choice without executor authority, failure=%s', async (fails) => {
 		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
 		const planReference = { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 };
 		const request: PendingPermissionRequest = {
@@ -3553,14 +3553,16 @@ describe('ConversationSessionController', () => {
 		if (fails) dismiss.mockRejectedValue(new Error('Synthetic dismissal failure'));
 		else dismiss.mockResolvedValue(openSnapshot(transientFeed([], 1)).plan);
 		const controller = new ConversationSessionController(deps);
-		controller.handleExitPlanModeForChat('chat-1', request.permissionOccurrenceId, 'dismiss', '');
+		controller.handleExitPlanModeForChat('chat-1', request.permissionOccurrenceId, 'bypass-new', 'Synthetic plan');
 		await flushPromises();
 		expect(dismiss).toHaveBeenCalledWith(planReference);
 		expect(deps.conversationUi.pendingPermissionRequests).toEqual(fails ? [request] : []);
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockSendPermissionDecision).not.toHaveBeenCalled();
-		expect(deps.conversationUi.finishPlanModeForChat).not.toHaveBeenCalled();
-		expect(deps.agentState.permissionMode).toBe('plan');
+		expect(deps.conversationUi.finishPlanModeForChat).toHaveBeenCalledTimes(fails ? 0 : 1);
+		expect(deps.agentState.permissionMode).toBe(fails ? 'plan' : 'default');
+		expect(deps.appShell.openNewChatDialog).toHaveBeenCalledTimes(fails ? 0 : 1);
+		if (!fails) expect(deps.appShell.openNewChatDialog).toHaveBeenCalledWith({ prefill: 'Implement the following plan:\n\nSynthetic plan' });
 		if (fails) expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', 'Synthetic dismissal failure');
 	});
 

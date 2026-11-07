@@ -55,7 +55,7 @@
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: PlanExitChoice, plan: string) => void;
-		onDismissPlan?: () => void;
+		planSuggestion?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
 		draft?: PermissionQuestionDraft;
 		onDraftChange?: (draft: PermissionQuestionDraft) => void;
@@ -68,7 +68,7 @@
 		actionable = true,
 		onDecision,
 		onExitPlanMode,
-		onDismissPlan,
+		planSuggestion = false,
 		chatContext = null,
 		draft: controlledDraft,
 		onDraftChange,
@@ -380,16 +380,7 @@
 					>
 						{m.chat_permission_yes_approve_edits()}
 					</button>
-					{#if onDismissPlan}
-						<button
-							type="button"
-							onclick={onDismissPlan}
-							class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-neutral-border text-status-neutral-foreground hover:bg-status-neutral/50"
-						>
-							<X class="w-3.5 h-3.5" />
-							{m.chat_permission_dismiss_plan()}
-						</button>
-					{:else}
+					{#if !planSuggestion}
 					<button
 						type="button"
 						disabled={!canAnswer}

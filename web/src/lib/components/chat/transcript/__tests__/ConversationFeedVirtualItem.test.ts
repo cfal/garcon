@@ -19,8 +19,7 @@ describe('ConversationFeedVirtualItem', () => {
 		expect(onExitPlanMode).toHaveBeenLastCalledWith('permission-chat-links', 'bypass-new', expect.stringContaining('[Current]'));
 		expect(screen.queryByRole('button', { name: /^Deny$/ })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Revise plan' })).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: /^Dismiss$/ }));
-		expect(onExitPlanMode).toHaveBeenLastCalledWith('permission-chat-links', 'dismiss', '');
+		expect(screen.queryByRole('button', { name: /^Dismiss$/ })).toBeNull();
 		expect(onPermissionDecision).not.toHaveBeenCalled();
 	});
 

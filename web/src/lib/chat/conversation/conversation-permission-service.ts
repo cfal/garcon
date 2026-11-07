@@ -145,7 +145,6 @@ export class ConversationPermissionService {
 			.find((request) => request.permissionOccurrenceId === permissionOccurrenceId);
 		const permissionControl = request?.control;
 		if (!request) return;
-		if (choice === 'dismiss' && !request.planReference) return;
 		if (choice !== 'deny' && request.planReference) {
 			const reference = request.planReference;
 			const key = JSON.stringify([reference.serverInstanceId, chatId, reference.transcriptViewId, reference.ordinal]);
@@ -220,8 +219,6 @@ export class ConversationPermissionService {
 		};
 
 		switch (choice) {
-			case 'dismiss':
-				return;
 			case 'bypass-new': {
 				const restoreMode = deps.conversationUi.previousPermissionModeFor(chatId) || 'default';
 				deps.conversationUi.finishPlanModeForChat(chatId);

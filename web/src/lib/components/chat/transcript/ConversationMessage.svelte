@@ -99,7 +99,6 @@
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
-		onDismissPlan?: () => void;
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
@@ -130,7 +129,6 @@
 		permissionActionable = false,
 		onPermissionDecision,
 		onExitPlanMode,
-		onDismissPlan,
 		chatContext = null,
 		onForkChat,
 		onClearBefore,
@@ -731,7 +729,7 @@
 						actionable={permissionActionable}
 						onDecision={onPermissionDecision ?? ignorePermissionDecision}
 						{onExitPlanMode}
-						{onDismissPlan}
+						planSuggestion
 						{chatContext}
 						draft={permissionDraft?.(exitPlanPermissionRequest.permissionOccurrenceId)}
 						{acquireTransientActivity}

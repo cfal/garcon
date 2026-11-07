@@ -8,7 +8,7 @@ import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claud
 import { appendDisplayRun } from '../../support/transcript-display-fixture.js';
 import { observeDisplayWire, waitForDisplayIdle } from '../../support/transcript-display-browser.js';
 
-test('plan dismissal and approval work without hydrating historical tool members', async () => {
+test('existing plan choices stay acknowledged without hydrating historical tool members', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
   try {
     await withChromiumFixture('display-plan-consumer', async ({ page, integration }) => {
@@ -35,14 +35,20 @@ test('plan dismissal and approval work without hydrating historical tool members
         await waitForDisplayIdle(page);
       }
 
-      await propose('Synthetic plan to revise');
+      await propose('Synthetic plan for a new session');
       const beforeRevision = environment.model.markRequests();
+      await browserExpect(page.getByRole('button', { name: 'Dismiss', exact: true })).toHaveCount(0);
       const [dismissed] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith('/transcript-display/plan-dismiss')),
-        page.getByRole('button', { name: 'Dismiss', exact: true }).click(),
+        page.getByRole('button', { name: 'Yes, new session + bypass', exact: true }).click(),
       ]);
       expect(dismissed.ok()).toBe(true);
       await browserExpect(page.getByRole('button', { name: 'Yes, bypass permissions', exact: true })).toHaveCount(0);
+      const newChat = page.locator('[data-slot="new-chat-composer"]');
+      await browserExpect(newChat.locator('textarea')).toHaveValue('Implement the following plan:\n\nSynthetic plan for a new session');
+      if (await page.locator('[data-slot="directory-browser-dismiss"]').isVisible()) await page.keyboard.press('Escape');
+      await page.locator('[data-slot="new-chat-form-content"] button[title="Close"]').click();
+      await browserExpect(newChat).toHaveCount(0);
       await page.reload();
       await waitForDisplayIdle(page);
       await browserExpect(page.getByRole('button', { name: 'Yes, bypass permissions', exact: true })).toHaveCount(0);

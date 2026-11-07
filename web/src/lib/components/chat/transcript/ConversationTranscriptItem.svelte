@@ -71,8 +71,6 @@
 		),
 	);
 	const disclosureState = $derived(itemState?.disclosurePort(item.id));
-	const pendingPlan = $derived(pendingPermissionRequests.find(request =>
-		request.permissionOccurrenceId === `plan:${item.id}` && request.planReference && !request.control));
 
 	function permissionActionableFor(message: ChatMessage): boolean {
 		if (message instanceof PermissionRequestMessage) {
@@ -124,8 +122,6 @@
 			permissionActionable={permissionActionableFor(message)}
 			{onPermissionDecision}
 			{onExitPlanMode}
-			onDismissPlan={pendingPlan && onExitPlanMode
-				? () => onExitPlanMode?.(pendingPlan!.permissionOccurrenceId, 'dismiss', '') : undefined}
 			{chatContext}
 			{onForkChat}
 			{onClearBefore}

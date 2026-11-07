@@ -32,7 +32,7 @@ describe('exit-plan permission occurrence rendering', () => {
 		expect(screen.getByText('Plan', { selector: 'span' })).toBeTruthy();
 	});
 
-	it('keeps approval and dismissal on the exact inline presentation occurrence', async () => {
+	it('keeps approval on the exact inline suggestion without adding dismissal or permission decisions', async () => {
 		const onExitPlanMode = vi.fn();
 		render(ExitPlanOccurrenceTestHost, {
 			pendingPermissionRequests: [pendingExitPlan('plan:view-1:1')],
@@ -42,7 +42,8 @@ describe('exit-plan permission occurrence rendering', () => {
 		expect(screen.getByRole('button', { name: 'Yes, approve edits' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Revise plan' })).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-		expect(onExitPlanMode).toHaveBeenCalledWith('plan:view-1:1', 'dismiss', '');
+		expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Yes, approve edits' }));
+		expect(onExitPlanMode).toHaveBeenCalledWith('plan:view-1:1', 'approve-edits', 'Historical plan.');
 	});
 });

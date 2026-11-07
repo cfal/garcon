@@ -133,8 +133,7 @@
 				request={permissionRequestMessage(item.request)}
 				onDecision={onPermissionDecision}
 				{onExitPlanMode}
-				onDismissPlan={item.request.planReference && !item.request.control && onExitPlanMode
-					? () => onExitPlanMode?.(item.request.permissionOccurrenceId, 'dismiss', '') : undefined}
+				planSuggestion={!!item.request.planReference && !item.request.control}
 				{chatContext}
 				draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
 				{acquireTransientActivity}

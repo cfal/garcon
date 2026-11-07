@@ -902,9 +902,8 @@
 		data-conversation-composer-host={composerAnchorSurfaceId}
 		data-reserve-mobile-toolbar={reserveMobileToolbar}
 	>
-		{#if planPaging && (planPaging.pendingExitCount > 1 || planPaging.error)}
+		{#if planPaging && (planPaging.hasPrevious || planPaging.hasNext || planPaging.error)}
 			<div class="border-t border-border bg-background text-sm" data-plan-suggestions>
-				<p class="px-3 pt-2 text-muted-foreground">{m.chat_pending_plan_count({ count: planPaging.pendingExitCount })}</p>
 				<TranscriptSummaryPager paging={planPaging} />
 			</div>
 		{/if}
