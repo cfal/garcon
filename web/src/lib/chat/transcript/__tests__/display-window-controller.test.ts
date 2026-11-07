@@ -293,6 +293,23 @@ it('preserves a cold readiness wake after cancelling its navigation request', as
 	expect(read).toHaveBeenCalledTimes(3);
 });
 
+it.each(['preparing', 'busy'] as const)('keeps a slow retry after cancelling cold %s without readiness', async kind => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce({
+		kind, ...certificate, sourceHead: certificate.watermark, preparedThrough: 0, errorCode: null, retryAfterMs: 1500,
+	}).mockResolvedValue(window());
+	const { controller } = setup({ window: read });
+	const abort = new AbortController(), pending = controller.navigate(20000, abort.signal);
+	await vi.advanceTimersByTimeAsync(1);
+	abort.abort();
+	expect(await pending).toBeNull();
+	await vi.advanceTimersByTimeAsync(1499);
+	expect(read).toHaveBeenCalledOnce();
+	await vi.advanceTimersByTimeAsync(1);
+	expect(read).toHaveBeenCalledTimes(2);
+	expect(read.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'newest' });
+});
+
 it('does not lose readiness published before a preparing navigation response settles', async () => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValue(window());
