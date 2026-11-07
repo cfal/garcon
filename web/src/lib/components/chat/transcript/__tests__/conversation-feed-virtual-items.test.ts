@@ -36,6 +36,15 @@ describe('certified virtual feed', () => {
 		expect(build(input).items.filter(item => item.kind === 'transcript')).toHaveLength(1);
 		expect(build(input).items.filter(item => item.kind === 'permission')).toHaveLength(0);
 	});
+	it('orders hidden-anchor inputs before intervening protected rows', () => {
+		const input = certifiedFeed([user(10), user(18), user(20)], { items: certifiedFeed([user(10), user(20)]).display.window!.items,
+			display: { protectedRows: [{ certificate: displayCertificate(), detail: displayDetail(18), layout: 'standard' }] },
+			input: { overlays: [{ kind: 'message', id: 'optimistic:pending', message: new UserMessage('', 'Pending input') }],
+				optimisticAfterOrdinals: new Map([['pending', 15]]) } });
+		input.display = { ...input.display, window: { ...input.display.window!, cutPlacements: [{ id: 'optimistic:pending', placement: 'inline' }] } };
+		expect(build(input).items.flatMap(item => item.kind === 'transcript' ? [item.item.id] : []))
+			.toEqual(['view-1:10', 'optimistic:pending', 'view-1:18', 'view-1:20']);
+	});
 	it('renders a selected plan occurrence once when resident and floats it when absent', () => {
 		const message = new ExitPlanModeToolUseMessage('', 'reused-plan', 'Synthetic plan');
 		const request: PendingPermissionRequest = { chatId: 'chat-1', permissionOccurrenceId: 'plan:view-1:2', requestedTool: message,
@@ -115,6 +124,21 @@ describe('certified virtual feed', () => {
 		expect(model.indexByRowId.get('view-1:500')).toBeGreaterThan(edges[0]);
 		expect(model.indexByRowId.get('view-1:500')).toBeLessThan(edges[1]);
 		expect(model.indexByRowId.get('view-1:700')).toBeGreaterThan(edges[1]);
+	});
+
+	it('keeps retained summary keys outside the certified interval with gaps and no fabricated members', () => {
+		const group = displayGroup(1, 100, 100);
+		const original = build(certifiedFeed([], { items: [group] })).items.find(item => item.kind === 'tool-group')!;
+		const input = certifiedFeed([user(500)], { display: { protectedGroups: [{ certificate: displayCertificate(), descriptor: group }] },
+			input: { earlierBoundary: 'visible' } });
+		input.display = { ...input.display, window: { ...input.display.window!, interval: { after: 499, through: 500 } } };
+		const model = build(input);
+		const summary = model.items.findIndex(item => item.kind === 'tool-group');
+		expect(model.items[summary]).toEqual(original);
+		expect(model.items[summary - 1].kind).toBe('retained-gap');
+		expect(model.items[summary + 1].kind).toBe('retained-gap');
+		expect(summary).toBeLessThan(model.items.findIndex(item => item.kind === 'earlier-boundary'));
+		expect(model.items.flatMap(item => item.kind === 'transcript' ? [item.item.id] : [])).toEqual(['view-1:500']);
 	});
 
 	it('uses server cut placements for permission and optimistic rows between group fragments', () => {

@@ -1,4 +1,4 @@
-import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
+import type { DisplayCertificate, GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
 import { isHandoffSummaryNoticeDetail, isInterAgentMessageOutcomeNoticeDetail, isInterAgentMessageReceivedNoticeDetail } from '$shared/transcript-notice-details';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import type { ConversationFeedRenderItem, ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
@@ -66,23 +66,11 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 		items.push({ kind: 'transcript', key: key(`transcript:${item.id}`), item, spacingAfter: 'transcript' });
 	};
 	const retained = input.display.protectedRows.map(row => renderByOrdinal.get(row.detail.ordinal)).filter((row): row is NonNullable<typeof row> => !!row).sort((a, b) => a.ordinal! - b.ordinal!);
-	const insertRetained = (through: number) => {
-		for (const row of retained) {
-			if (row.ordinal! > through || rendered.has(row.id)) continue;
-			// Retained islands have no completeness certificate for their intervening spans.
-			if (items.at(-1)?.kind !== 'retained-gap') items.push({ kind: 'retained-gap', key: key(`retained:before:${row.id}`), spacingAfter: 'none' });
-			pushRow(row);
-			items.push({ kind: 'retained-gap', key: key(`retained:after:${row.id}`), spacingAfter: 'none' });
-		}
+	const groupItem = (descriptor: GroupDescriptor, certificate: DisplayCertificate, expanded: boolean): ToolGroupVirtualFeedItem => {
+		const anchorId = `tool-group:${rowId(descriptor.firstMember)}`;
+		return { kind: 'tool-group', key: key(`${certificate.profileKey}:${certificate.cutsKey}:${anchorId}`), anchorId,
+			descriptor, expanded, spacingAfter: expanded ? 'none' : 'transcript' };
 	};
-	items.push({ kind: 'viewport-start-spacer', key: key('prefix:viewport-start-spacer'), spacingAfter: 'none' });
-	if (input.showRefreshError) items.push({ kind: 'refresh-error', key: key('prefix:refresh-error'), spacingAfter: 'none' });
-	if (window) insertRetained(window.interval.after);
-	if (input.earlierBoundary === 'visible' || input.earlierBoundary === 'when-collapsed'
-		&& window?.items.some(item => item.kind === 'tool-group' && !expansionFor(item, input.display.expansions))) {
-		items.push({ kind: 'earlier-boundary', key: key('prefix:earlier-boundary'), spacingAfter: 'none' });
-	}
-	const transcriptStartIndex = items.length;
 	const representedOrdinals = new Set([
 		...(window?.items.flatMap(item => item.kind === 'row' && renderByOrdinal.has(item.ordinal) ? [item.ordinal] : []) ?? []),
 		...retained.map(row => row.ordinal!),
@@ -116,6 +104,31 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 			inserted.add(id);
 		}
 	};
+	const islands = [
+		...retained.map(row => ({ ordinal: row.ordinal!, item: { kind: 'transcript' as const, key: key(`transcript:${row.id}`), item: row, spacingAfter: 'transcript' as const } })),
+		...input.display.protectedGroups.map(group => ({ ordinal: group.descriptor.firstMember, item: groupItem(group.descriptor, group.certificate, false) })),
+	].sort((a, b) => a.ordinal - b.ordinal);
+	const retainedKeys = new Set<string>();
+	const insertRetained = (through: number) => {
+		for (const { ordinal, item } of islands) {
+			if (ordinal > through || retainedKeys.has(item.key)) continue;
+			insertOverlays(ordinal - 1);
+			// Retained islands have no completeness certificate for their intervening spans.
+			if (items.at(-1)?.kind !== 'retained-gap') items.push({ kind: 'retained-gap', key: key(`retained:before:${item.key}`), spacingAfter: 'none' });
+			if (item.kind === 'transcript') pushRow(item.item);
+			else items.push(item);
+			items.push({ kind: 'retained-gap', key: key(`retained:after:${item.key}`), spacingAfter: 'none' });
+			retainedKeys.add(item.key);
+		}
+	};
+	items.push({ kind: 'viewport-start-spacer', key: key('prefix:viewport-start-spacer'), spacingAfter: 'none' });
+	if (input.showRefreshError) items.push({ kind: 'refresh-error', key: key('prefix:refresh-error'), spacingAfter: 'none' });
+	if (window) insertRetained(window.interval.after);
+	if (input.earlierBoundary === 'visible' || input.earlierBoundary === 'when-collapsed'
+		&& window?.items.some(item => item.kind === 'tool-group' && !expansionFor(item, input.display.expansions))) {
+		items.push({ kind: 'earlier-boundary', key: key('prefix:earlier-boundary'), spacingAfter: 'none' });
+	}
+	const transcriptStartIndex = items.length;
 	if (window) insertOverlays(window.interval.after);
 	for (const descriptor of window?.items ?? []) {
 		insertRetained(descriptor.kind === 'row' ? descriptor.ordinal - 1 : descriptor.firstMember - 1);
@@ -125,9 +138,9 @@ export function buildConversationVirtualFeedModel(input: ConversationVirtualFeed
 			if (item) pushRow(item);
 		} else {
 			const expansion = expansionFor(descriptor, input.display.expansions);
-			const anchorId = `tool-group:${rowId(descriptor.firstMember)}`;
-			items.push({ kind: 'tool-group', key: key(`${window!.certificate.profileKey}:${window!.certificate.cutsKey}:${anchorId}`), anchorId,
-				descriptor, expanded: !!expansion, spacingAfter: expansion ? 'none' : 'transcript' });
+			const summary = groupItem(descriptor, window!.certificate, !!expansion);
+			const anchorId = summary.anchorId;
+			items.push(summary);
 			if (expansion) {
 				const page = expansion.page;
 				insertRetained((page.ordinals[0] ?? descriptor.firstMember) - 1);

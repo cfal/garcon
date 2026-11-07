@@ -165,7 +165,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	get displayMessageCount(): number {
 		const protectedOrdinals = new Set(this.display.protectedRows.map(row => row.detail.ordinal));
 		const retained = this.#renderModel.items.filter(item => item.kind === 'message' && item.ordinal !== undefined && protectedOrdinals.has(item.ordinal));
-		return (this.display.window?.items.length ?? 0) + retained.length + this.overlayRows.length;
+		return (this.display.window?.items.length ?? 0) + retained.length + this.display.protectedGroups.length + this.overlayRows.length;
 	}
 	get resendCandidates(): readonly UserRowSummary[] { return this.overlay.includedResendCandidates; }
 	get excludedResendOrdinals(): readonly number[] { return this.overlay.excludedResendOrdinals; }
@@ -264,12 +264,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	async #loadPage(direction: 'earlier' | 'later', chatId: string, options: TranscriptPageLoadOptions = {}): Promise<TranscriptPageLoadResult> {
 		if (chatId !== this.activeChatId || this.controller.busy) return 'invalidated';
 		const epoch = ++this.#pageEpoch;
-		this.pageStates[direction] = { status: 'loading', error: this.pageStates[direction].error };
 		const target = options.memberTarget;
+		if (!target) this.pageStates[direction] = { status: 'loading', error: this.pageStates[direction].error };
 		const result = target ? await this.controller.extendMembers(target.group, target.anchor, options.applicationGate)
 			: await this.controller.load(direction, options.applicationGate);
 		if (epoch !== this.#pageEpoch) return 'invalidated';
-		this.pageStates[direction] = result === 'failed' ? { status: 'error', error: this.loadError } : idlePageState();
+		if (!target) this.pageStates[direction] = result === 'failed' ? { status: 'error', error: this.loadError } : idlePageState();
 		return result === 'blocked' ? 'invalidated' : result;
 	}
 	loadEarlierPage(chatId: string, options?: TranscriptPageLoadOptions): Promise<TranscriptPageLoadResult> { return this.#loadPage('earlier', chatId, options); }

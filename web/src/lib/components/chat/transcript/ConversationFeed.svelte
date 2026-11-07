@@ -382,13 +382,15 @@
 		const transcript = chatState;
 		const pinned = pinnedToBottom;
 		untrack(() => {
+			const groups: number[] = [];
 			const ordinals = keys.flatMap(key => {
 				const index = model.indexByKey.get(key);
 				const item = index === undefined ? undefined : model.items[index];
-				if (item?.kind === 'tool-group') return [item.descriptor.firstMember];
+				if (item?.kind === 'tool-group') groups.push(item.descriptor.firstMember);
 				return item?.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined ? [item.item.ordinal] : [];
 			});
 			transcript.controller.protect(ordinals);
+			transcript.controller.protectGroups(groups);
 			const target = virtualController.captureRestoreTarget(transcript.transcriptViewId, pinned);
 			if (target) transcript.controller.setReadingAnchor(target.kind !== 'end' ? target.ordinal : null, pinned);
 		});
