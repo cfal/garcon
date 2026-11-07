@@ -525,7 +525,12 @@ export class DisplayWindowController {
 			let watermarkRequest: Pick<DisplayWindowRequest, 'atWatermark' | 'requiredThrough'> = {};
 			if (atWatermark !== undefined) watermarkRequest = { atWatermark };
 			else if (fresh) watermarkRequest = { requiredThrough: goal };
-			const response = await this.api.window({ ...identity, profile, cuts, anchor, limit: mode === 'details' ? 1 : 50,
+			const currentWindow = this.#snapshot.window;
+			// Live following refreshes the resident tail without repeatedly readmitting trimmed history.
+			const retainTailSize = mode === 'replace' && anchor.kind === 'newest' && this.#pinned && this.#navigationEpoch === null
+				&& !this.#needsReplace() && currentWindow?.earlier.kind === 'more' && currentWindow.later.kind === 'exhausted-through-watermark';
+			const limit = mode === 'details' ? 1 : retainTailSize ? Math.min(50, currentWindow.items.length || 50) : 50;
+			const response = await this.api.window({ ...identity, profile, cuts, anchor, limit,
 				...watermarkRequest }, signal);
 			this.#assertCurrent(signal, epoch);
 			if (response.kind !== 'available') {
