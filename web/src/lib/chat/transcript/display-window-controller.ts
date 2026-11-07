@@ -809,8 +809,9 @@ export class DisplayWindowController {
 	cancel(): void {
 		this.#replacementPending ||= this.#snapshot.window === null && this.#refreshPending;
 		this.#cancelRequests();
-		if (this.#replacementPending && this.#identity && this.#profile && this.#needsReplace()) this.#scheduleRefresh(0);
-		else this.#clearRefresh();
+		if (this.#replacementPending && this.#identity && this.#profile && this.#needsReplace()) {
+			this.#scheduleRefresh(['preparing', 'lagging', 'busy'].includes(this.#snapshot.phase) ? 1500 : 0);
+		} else this.#clearRefresh();
 	}
 
 	#cancelRequests(): void {
