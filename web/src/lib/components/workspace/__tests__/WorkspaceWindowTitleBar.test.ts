@@ -69,6 +69,7 @@ const {
 		transientLayers: null as TransientLayerRegistry | null,
 		fullscreenWindowId: null as WorkspaceWindowId | null,
 		desktopRoot: null as DesktopWorkspaceNode | null,
+		currentWindowId: 'window-main' as WorkspaceWindowId,
 		windowCount: 1,
 		closeBlocked: true,
 		surfaceCloseBlocked: false,
@@ -107,6 +108,9 @@ vi.mock('$lib/context', () => ({
 		},
 		get windowCount() {
 			return runtime.windowCount;
+		},
+		get currentWindowId() {
+			return runtime.currentWindowId;
 		},
 		isWindowCloseBlocked: () => runtime.closeBlocked,
 		isOtherWindowsCloseBlocked: () => runtime.windowCount < 2 || runtime.closeBlocked,
@@ -354,6 +358,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		runtime.transientLayers = null;
 		runtime.fullscreenWindowId = null;
 		runtime.desktopRoot = null;
+		runtime.currentWindowId = 'window-main';
 		runtime.windowCount = 1;
 		runtime.closeBlocked = true;
 		runtime.surfaceCloseBlocked = false;
@@ -2050,6 +2055,74 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 
 		expect(moveTabToNewWindow).toHaveBeenCalledWith(chatSurface.id, 'window-main', 'right');
+	});
+
+	it.each(['window-main', 'window-two'] as const)(
+		'restores the window-menu trigger only while its window remains current (%s)',
+		async (currentWindowId) => {
+			renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+			const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
+			trigger.focus();
+			await fireEvent.click(trigger);
+			const move = await screen.findByRole('menuitem', {
+				name: m.workspace_move_tab_to_new_window_right(),
+			});
+			move.focus();
+			noteWindowChromeFocus.mockClear();
+			moveTabToNewWindow.mockImplementationOnce(async () => {
+				// Publication precedes the menu's close-auto-focus effect.
+				runtime.currentWindowId = currentWindowId;
+			});
+
+			await fireEvent.click(move);
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+			if (currentWindowId === 'window-main') {
+				expect(document.activeElement).toBe(trigger);
+				expect(noteWindowChromeFocus).toHaveBeenCalled();
+			} else {
+				expect(document.activeElement).not.toBe(trigger);
+				expect(noteWindowChromeFocus).not.toHaveBeenCalled();
+			}
+		},
+	);
+
+	it('does not restore pre-menu focus when its source window is removed', async () => {
+		const previousFocus = document.createElement('button');
+		document.body.append(previousFocus);
+		try {
+			const { unmount } = renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+			previousFocus.focus();
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+			const move = await screen.findByRole('menuitem', {
+				name: m.workspace_move_tab_to_new_window_right(),
+			});
+			move.focus();
+			const restoreFocus = vi.spyOn(previousFocus, 'focus');
+
+			await unmount();
+
+			expect(restoreFocus).not.toHaveBeenCalled();
+		} finally {
+			previousFocus.remove();
+		}
+	});
+
+	it('restores the window-menu trigger on Escape without a focus handoff', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
+		trigger.focus();
+		await fireEvent.click(trigger);
+		const move = await screen.findByRole('menuitem', {
+			name: m.workspace_move_tab_to_new_window_right(),
+		});
+		move.focus();
+
+		await fireEvent.keyDown(move, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+		expect(document.activeElement).toBe(trigger);
+		expect(moveTabToNewWindow).not.toHaveBeenCalled();
 	});
 
 	it('offers every other window as a Chat move destination', async () => {
