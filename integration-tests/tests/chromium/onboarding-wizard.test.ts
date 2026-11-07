@@ -36,6 +36,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         'Writing and behavior',
         "What's next",
       ];
+      const desktopHeights: number[] = [];
       for (const [index, title] of titles.entries()) {
         phase(title);
         await browserExpect(wizard.getByRole('heading', { name: title })).toBeFocused();
@@ -51,17 +52,34 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
             return bounds.y >= 0 && bounds.y + bounds.height <= height + 1;
           }).toBe(true);
           const bounds = (await wizard.boundingBox())!;
+          if (width === 1440) desktopHeights.push(bounds.height);
           expect(bounds.x).toBeGreaterThanOrEqual(0);
           expect(bounds.y).toBeGreaterThanOrEqual(0);
           expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
           expect(bounds.y + bounds.height).toBeLessThanOrEqual(height + 1);
           expect(await wizard.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
           expect(await body.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+          expect(await body.evaluate(element => {
+            const last = element.lastElementChild!;
+            const contentBottom = last.getBoundingClientRect().bottom + element.scrollTop;
+            const bodyBottom = element.getBoundingClientRect().bottom;
+            return bodyBottom <= contentBottom + Number.parseFloat(getComputedStyle(element).paddingBottom) + 1;
+          })).toBe(true);
           await browserExpect(nextButton).toBeInViewport();
+          await browserExpect.poll(() => wizard.evaluate(element => {
+            const buttons = element.querySelectorAll('[data-slot="dialog-footer"] button');
+            const back = buttons[0].getBoundingClientRect();
+            const next = buttons[1].getBoundingClientRect();
+            return Math.abs(back.y + back.height / 2 - next.y - next.height / 2);
+          })).toBeLessThan(1);
           await page.screenshot({ path: join(artifacts, `setup-${index}-${width}.png`) });
         }
 
         await page.setViewportSize({ width: 320, height: 256 });
+        await browserExpect.poll(async () => {
+          const bounds = (await wizard.boundingBox())!;
+          return bounds.y >= 0 && bounds.y + bounds.height <= 256;
+        }).toBe(true);
         await wizard.hover();
         await page.mouse.wheel(0, 1000);
         await browserExpect(nextButton).toBeInViewport({ ratio: 1 });
@@ -113,6 +131,14 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await wizard.getByText('Source', { exact: true }).click();
           await wizard.getByRole('switch', { name: 'Reduce motion', exact: true }).click();
         }
+        if (isDonePage) {
+          await page.evaluate(() => document.documentElement.style.setProperty('--interface-font-scale', String(20 / 14)));
+          await browserExpect(nextButton).toBeInViewport({ ratio: 1 });
+          expect(await nextButton.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+          expect(await wizard.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+          await page.screenshot({ path: join(artifacts, 'setup-done-large-text.png') });
+          await page.evaluate(() => document.documentElement.style.setProperty('--interface-font-scale', '1'));
+        }
         await body.evaluate(element => {
           element.scrollTop = element.scrollHeight;
         });
@@ -124,6 +150,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await browserExpect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
         }
       }
+      expect(Math.max(...desktopHeights) - Math.min(...desktopHeights)).toBeGreaterThan(40);
       await browserExpect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
       await browserExpect.poll(() => page.getByRole('dialog', { name: 'Settings', exact: true }).evaluate(element => element.contains(document.activeElement))).toBe(true);
       await browserExpect(page.getByRole('tab', { name: 'Providers', exact: true })).toHaveAttribute('aria-selected', 'true');

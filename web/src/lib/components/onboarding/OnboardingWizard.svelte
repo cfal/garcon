@@ -79,14 +79,17 @@
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		bind:ref={dialogElement}
-		class="flex h-[38rem] max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
+		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
 	>
 		<Dialog.Header class="shrink-0 px-6 pt-6 pb-4 text-left">
-			<p class="text-xs font-medium text-muted-foreground">
-				{m.onboarding_wizard_title()}
-			</p>
+			<div class="flex items-center justify-between gap-3 pr-6 text-xs text-muted-foreground">
+				<p class="font-medium">{m.onboarding_wizard_title()}</p>
+				<span aria-live="polite" aria-atomic="true">
+					{m.onboarding_step_label({ current: wizard.pageIndex + 1, total: wizard.pageCount })}
+				</span>
+			</div>
 			<Dialog.Title
 				bind:ref={pageTitleElement}
 				tabindex={-1}
@@ -99,7 +102,7 @@
 
 		<div
 			bind:this={pageBodyElement}
-			class="relative min-h-0 flex-1 overflow-y-auto px-6 py-2 [@media(max-height:30rem)]:overflow-visible"
+			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
 		>
 			{#if wizard.pageId === 'theme'}
 				<OnboardingThemePage onSelect={(preference) => ls.set('themePreference', preference)} />
@@ -216,35 +219,23 @@
 		</div>
 
 		<Dialog.Footer
-			class="shrink-0 flex-row flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-4 sm:justify-between"
+			class="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border px-4 py-4 sm:px-6"
 		>
-			<div class="flex items-center gap-2">
-				<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
-					{m.onboarding_back()}
+			<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
+				{m.onboarding_back()}
+			</Button>
+			{#if wizard.isDonePage}
+				<Button
+					class="h-auto min-h-9 min-w-0 justify-self-end whitespace-normal py-2"
+					onclick={() => wizard.finishToProviders()}
+				>
+					{m.onboarding_done_providers()}
 				</Button>
-			</div>
-			<div class="flex flex-wrap items-center justify-end gap-3">
-				<div class="flex items-center gap-1.5" aria-hidden="true">
-					{#each { length: wizard.pageCount } as _, index (index)}
-						<span
-							class={cn(
-								'size-1.5 rounded-full transition-colors',
-								index === wizard.pageIndex ? 'bg-primary' : 'bg-muted-foreground/30',
-							)}
-						></span>
-					{/each}
-				</div>
-				<span class="sr-only" aria-live="polite" aria-atomic="true">
-					{m.onboarding_step_label({ current: wizard.pageIndex + 1, total: wizard.pageCount })}
-				</span>
-				{#if wizard.isDonePage}
-					<Button onclick={() => wizard.finishToProviders()}>
-						{m.onboarding_done_providers()}
-					</Button>
-				{:else}
-					<Button onclick={() => wizard.advance()}>{m.onboarding_continue()}</Button>
-				{/if}
-			</div>
+			{:else}
+				<Button class="justify-self-end" onclick={() => wizard.advance()}
+					>{m.onboarding_continue()}</Button
+				>
+			{/if}
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
