@@ -2,17 +2,15 @@
 import { chromium } from 'playwright';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { originalFontCss, originalFontFamily } from '../support/font-proof-sources.js';
 
 const root = resolve(import.meta.dirname, '../..');
 const output = resolve(process.argv[2] ?? '/projects/font-optimization-evidence/glyphs');
 const quick = process.argv.includes('--quick');
 await mkdir(output, { recursive: true });
-const inventory: { source: { file: string; unicodeRange: string; sha256: string } }[] = await Bun.file(join(root, 'scripts/fonts/inventory.json')).json();
-const familyFor = (file: string) => file.startsWith('Inter') ? 'Inter' : file.startsWith('JetBrains') ? 'JetBrains Mono' : 'Departure Mono';
-const before = inventory.map(({ source: { file } }) => {
-  const family = familyFor(file);
-  return `@font-face {font-family:'Before ${family}';src:url('/source/${file}');font-style:${file.includes('Italic') ? 'italic' : 'normal'};font-weight:${family === 'Inter' ? '100 900' : family === 'JetBrains Mono' ? '100 800' : '400'};font-display:swap;}`;
-}).join('\n');
+const allFonts: { source: { file: string; unicodeRange: string; sha256: string } }[] = await Bun.file(join(root, 'scripts/fonts/inventory.json')).json();
+const inventory = allFonts.filter(({ source }) => originalFontFamily(source.file));
+const before = originalFontCss(inventory.map(({ source }) => source), '/source', 'Before ');
 const after = (await readFile(join(root, 'web/src/lib/theme/font-faces.css'), 'utf8'))
   .replaceAll('./assets/', '/output/')
   .replace(/font-family: '([^']+)'/g, "font-family: 'After $1'");
@@ -31,7 +29,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
   await page.goto(`http://localhost:${server.port}`);
   for (const family of ['Departure Mono', 'JetBrains Mono', 'Inter']) {
-    const faces = inventory.filter(({ source }) => familyFor(source.file) === family);
+    const faces = inventory.filter(({ source }) => originalFontFamily(source.file) === family);
     const points = [...new Set(faces.flatMap(({ source }) => source.unicodeRange.split(', ').flatMap(range => {
       const [start, end = start] = range.slice(2).split('-').map(value => parseInt(value, 16));
       return Array.from({ length: end - start + 1 }, (_, index) => start + index);

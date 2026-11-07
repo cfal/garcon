@@ -105,3 +105,28 @@
 		</div>
 	</fieldset>
 </div>
+
+<div class="mt-4 border-t border-border pt-2">
+	<label
+		class="flex min-h-11 cursor-pointer items-center justify-between gap-4 text-sm font-medium"
+	>
+		{m.settings_sidebar_show_project_path()}
+		<input
+			type="checkbox"
+			class="size-4 shrink-0 focus-visible:outline-2 focus-visible:outline-ring"
+			checked={ls.sidebarShowProjectPath}
+			onchange={(event) => ls.set('sidebarShowProjectPath', event.currentTarget.checked)}
+		/>
+	</label>
+	<label
+		class="flex min-h-11 cursor-pointer items-center justify-between gap-4 text-sm font-medium"
+	>
+		{m.sidebar_actions_dock_sidebar_right()}
+		<input
+			type="checkbox"
+			class="size-4 shrink-0 focus-visible:outline-2 focus-visible:outline-ring"
+			checked={ls.chatListDock === 'right'}
+			onchange={(event) => ls.set('chatListDock', event.currentTarget.checked ? 'right' : 'left')}
+		/>
+	</label>
+</div>

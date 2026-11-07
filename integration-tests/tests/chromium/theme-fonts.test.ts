@@ -210,6 +210,22 @@ test("terminal fonts update without clearing output or replacing the shell", asy
           ),
         ),
       ).toBe(true);
+      for (const [font, family] of [
+        ["ibm-plex-mono", "IBM Plex Mono"],
+        ["source-code-pro", "Source Code Pro"],
+      ] as const) {
+        await setTypography(page, { terminalFont: font });
+        await browserExpect(rows).toHaveCSS("font-family", new RegExp(`^"?${family}"?,`));
+        const facesReady = await page.evaluate(
+          (family) => ["400", "700", "italic 400", "italic 700"].every(
+            (style) => document.fonts.check(`${style} 16px "${family}"`),
+          ),
+          family,
+        );
+        expect(facesReady).toBe(true);
+        await browserExpect(terminal).toHaveAttribute("data-retained-font-terminal", "true");
+        await browserExpect(terminal.locator(".xterm-screen")).toContainText("shell-retained");
+      }
       await setTypography(page, { terminalFont: "system-mono" });
       await browserExpect(rows).toHaveCSS(
         "font-family",

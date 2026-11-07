@@ -2,9 +2,29 @@
 
 Departure Mono and both JetBrains Mono faces are subset by hand and committed. Both Inter faces remain byte-identical copies of the originals because the proposed subsets changed browser metrics and rendering. Normal builds consume the WOFF2 files and CSS directly; they do not install Python, download source fonts, or run font processing. Public CSS family names, `font-display: swap`, fallback stacks, optical sizing, and default/system typography are preserved.
 
+## Additional bundled choices
+
+Seven additional families use the same per-surface preferences, preview, selected-family preloads, and request-driven caching. Defaults are unchanged; only IBM Plex Mono and Source Code Pro join the monospace-only code, diff, file-editor, and terminal choices. Terminal choices retain the existing Nerd Font fallback.
+
+| Family | Weights | Source |
+| --- | --- | --- |
+| Source Sans 3 | Variable 200-900 | Adobe WOFF2 |
+| Atkinson Hyperlegible | 400, 700 | Google Fonts TTF |
+| Source Serif 4 | Variable 200-900 | Adobe WOFF2 |
+| IBM Plex Mono | 400, 500, 600, 700 | IBM complete WOFF2 |
+| Source Code Pro | Variable 200-900 | Adobe WOFF2 |
+| Arimo | Variable 400-700 | Google Fonts TTF |
+| Roboto | Variable 100-900 | Google Fonts TTF |
+
+All seven include normal and italic faces. Their 22 WOFF2 files total **2,720,532 bytes**, downloaded only when used; adding these options does not preload the catalog. Arimo provides an Arial-metric-compatible option; Roboto is the ordinary proportional family, not Roboto Mono. Its CSS alias is `Garcon Roboto` so it does not intercept the platform's `Roboto` in the unchanged system UI fallback stack. Source Serif's optical-size axis and Roboto's width axis remain intact.
+
+The [source manifest](../scripts/fonts/sources.json) pins commits, SHA-256 hashes, and upstream license URLs. Complete OFL notices accompany the sources and ship in [runtime static assets](../web/static/licenses). Adobe and IBM WOFF2 files are copied unchanged. Atkinson, Arimo, and Roboto TTF files are encoded as WOFF2 without subsetting, axis instancing, renaming, or removing glyphs/features/hinting. The checker compares their inventories and font tables, excluding compression-related headers/offsets and obsolete digital signatures. Existing font artifacts remain unchanged; the optimization measurements below describe only the original three families.
+
+The generator also rebuilds the older subsets using the current English message inventory. That inventory has evolved since the original optimization; regeneration can therefore repartition those subsets independently of these new, unsplit families.
+
 ## Sources and inventory
 
-The baseline is `7230e3e98e1139d0b998fc2599ca15b607452ad0`. [Source manifest](../scripts/fonts/sources.json) pins upstream commits and SHA-256 digests matching its five original assets. [Inventory](../scripts/fonts/inventory.json) records original and output bytes, glyph/character counts, axes, GSUB/GPOS features, hint programs/tables, actual cmap ranges, and hashes. OFL licenses are in [sources](../scripts/fonts/sources).
+The baseline is `7230e3e98e1139d0b998fc2599ca15b607452ad0`. [Source manifest](../scripts/fonts/sources.json) pins upstream commits and SHA-256 digests for its five original assets and the 22 additional faces. [Inventory](../scripts/fonts/inventory.json) records original and output bytes, glyph/character counts, axes, GSUB/GPOS features, hint programs/tables, actual cmap ranges, and hashes. OFL licenses are in [sources](../scripts/fonts/sources). The historical font-proof scripts explicitly select only the original five sources; they do not compare the additional families against an unrelated baseline.
 
 | Original face | Bytes | Glyphs | Characters | Original axes (minimum/default/maximum) |
 | --- | ---: | ---: | ---: | --- |

@@ -3,10 +3,12 @@
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 export const ONBOARDING_PAGE_IDS = [
+	'welcome',
 	'theme',
 	'chat-layout',
 	'chat-display',
 	'writing',
+	'transcript-search',
 	'done',
 ] as const;
 export type OnboardingPageId = (typeof ONBOARDING_PAGE_IDS)[number];
@@ -15,6 +17,8 @@ interface OnboardingWizardStateDeps {
 	localSettings: LocalSettingsStore;
 	onClose: () => void;
 	onOpenProviders: () => void;
+	onOpenScheduledPrompts: () => void;
+	onOpenPreambles: () => void;
 }
 
 export class OnboardingWizardState {
@@ -57,5 +61,15 @@ export class OnboardingWizardState {
 	finishToProviders(): void {
 		this.finish();
 		this.#deps.onOpenProviders();
+	}
+
+	finishToScheduledPrompts(): void {
+		this.finish();
+		this.#deps.onOpenScheduledPrompts();
+	}
+
+	finishToPreambles(): void {
+		this.finish();
+		this.#deps.onOpenPreambles();
 	}
 }

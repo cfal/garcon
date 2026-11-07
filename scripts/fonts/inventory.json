@@ -671,5 +671,2423 @@
         "hintedGlyphs": 0
       }
     ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "SourceSans3.woff2",
+      "bytes": 170188,
+      "sha256": "5f16566f7a40d39b339ad26be151fa5a1ab1f0c2574c7a2e619765584a1acbd8",
+      "glyphs": 2478,
+      "characters": 1615,
+      "unicodeRange": "U+0020-007E, U+00A0-0181, U+0186, U+018A, U+018D-0190, U+0192-0194, U+0196-0197, U+019A-019B, U+019E, U+01A0-01A1, U+01AF-01B1, U+01B7, U+01BF-01C3, U+01CD-01DD, U+01E2-01E7, U+01EA-01EB, U+01EE-01F0, U+01F4-01F5, U+01F7-0201, U+0204-0205, U+0208-0209, U+020C-020D, U+0218-0220, U+0222-0223, U+0226-0227, U+0237, U+023A-023E, U+0241-0245, U+0248-0249, U+0250-027B, U+027D-0285, U+0287-0292, U+0294-0295, U+0298-0299, U+029B-029F, U+02A1-02A8, U+02B0-02B4, U+02B7-02B9, U+02BB-02C1, U+02C6-02CC, U+02D0-02DE, U+02E0-02E4, U+02ED, U+0300-030D, U+030F-0313, U+0315, U+0318-0320, U+0323-032A, U+032C, U+032E-0332, U+0334, U+0337-033D, U+0340, U+0342-0345, U+034F, U+0357-0358, U+035C, U+035E-035F, U+0361, U+0374-0375, U+037A, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03D1, U+03D5, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+03F4, U+03F7-03F8, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C4, U+04C7-04C8, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+04F6-04F7, U+1D25, U+1D2C, U+1D2E, U+1D30-1D31, U+1D33-1D3A, U+1D3C, U+1D3E-1D43, U+1D47-1D4B, U+1D4D, U+1D4F-1D52, U+1D56-1D58, U+1D5B, U+1D6F-1D70, U+1D79, U+1D7B, U+1D7F, U+1D9C, U+1DA0, U+1DAC, U+1DAE, U+1DB0, U+1DBB, U+1DBF, U+1DCD, U+1E02-1E03, U+1E06-1E07, U+1E0A-1E11, U+1E16-1E17, U+1E1E-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E56-1E63, U+1E66-1E67, U+1E6A-1E6F, U+1E72-1E73, U+1E7E-1E85, U+1E8E-1E97, U+1E9E-1EF9, U+1F00-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2007, U+2009-200B, U+2010-201E, U+2020-2023, U+2026, U+202F-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-204A, U+2070-2071, U+2074-208E, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+211E, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+21E7, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2236-2237, U+2248, U+2260-2261, U+2264-2265, U+2302-2303, U+2310, U+2318, U+231C-2321, U+2325-2326, U+232B, U+25A0-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+263F-2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713-2714, U+2717-2718, U+2752, U+275B-2760, U+2764, U+27E6-27E9, U+2C60-2C62, U+2C65-2C66, U+2C71, U+2C7D, U+2E18, U+2E22-2E25, U+2E3A-2E3B, U+2E52, U+A71C, U+A722-A725, U+A74E-A74F, U+A75A-A75B, U+A764-A765, U+A779-A787, U+A789, U+A7AD-A7AE, U+A7B3, U+A7B5, U+A7F2-A7F4, U+AB53, U+AB66-AB67, U+FB00-FB04, U+FEFF, U+1F10D-1F10F, U+1F12F, U+1F16A-1F16F, U+1F4A9, U+1F512, U+1F748, U+1F916",
+      "axes": {
+        "wght": [
+          200,
+          200,
+          900
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "aalt",
+          "c2sc",
+          "case",
+          "ccmp",
+          "cv01",
+          "cv02",
+          "cv03",
+          "cv04",
+          "cv05",
+          "cv06",
+          "cv07",
+          "cv08",
+          "cv09",
+          "cv10",
+          "cv11",
+          "cv12",
+          "cv13",
+          "cv14",
+          "cv15",
+          "cv16",
+          "cv17",
+          "cv18",
+          "cv19",
+          "dlig",
+          "dnom",
+          "frac",
+          "hlig",
+          "liga",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "pnum",
+          "salt",
+          "sinf",
+          "smcp",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss08",
+          "ss09",
+          "ss10",
+          "subs",
+          "sups",
+          "titl",
+          "zero"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk",
+          "size"
+        ]
+      },
+      "hintTables": [],
+      "hintTableBytes": {},
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "SourceSans3.woff2",
+        "bytes": 170188,
+        "sha256": "5f16566f7a40d39b339ad26be151fa5a1ab1f0c2574c7a2e619765584a1acbd8",
+        "glyphs": 2478,
+        "characters": 1615,
+        "unicodeRange": "U+0020-007E, U+00A0-0181, U+0186, U+018A, U+018D-0190, U+0192-0194, U+0196-0197, U+019A-019B, U+019E, U+01A0-01A1, U+01AF-01B1, U+01B7, U+01BF-01C3, U+01CD-01DD, U+01E2-01E7, U+01EA-01EB, U+01EE-01F0, U+01F4-01F5, U+01F7-0201, U+0204-0205, U+0208-0209, U+020C-020D, U+0218-0220, U+0222-0223, U+0226-0227, U+0237, U+023A-023E, U+0241-0245, U+0248-0249, U+0250-027B, U+027D-0285, U+0287-0292, U+0294-0295, U+0298-0299, U+029B-029F, U+02A1-02A8, U+02B0-02B4, U+02B7-02B9, U+02BB-02C1, U+02C6-02CC, U+02D0-02DE, U+02E0-02E4, U+02ED, U+0300-030D, U+030F-0313, U+0315, U+0318-0320, U+0323-032A, U+032C, U+032E-0332, U+0334, U+0337-033D, U+0340, U+0342-0345, U+034F, U+0357-0358, U+035C, U+035E-035F, U+0361, U+0374-0375, U+037A, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03D1, U+03D5, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+03F4, U+03F7-03F8, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C4, U+04C7-04C8, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+04F6-04F7, U+1D25, U+1D2C, U+1D2E, U+1D30-1D31, U+1D33-1D3A, U+1D3C, U+1D3E-1D43, U+1D47-1D4B, U+1D4D, U+1D4F-1D52, U+1D56-1D58, U+1D5B, U+1D6F-1D70, U+1D79, U+1D7B, U+1D7F, U+1D9C, U+1DA0, U+1DAC, U+1DAE, U+1DB0, U+1DBB, U+1DBF, U+1DCD, U+1E02-1E03, U+1E06-1E07, U+1E0A-1E11, U+1E16-1E17, U+1E1E-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E56-1E63, U+1E66-1E67, U+1E6A-1E6F, U+1E72-1E73, U+1E7E-1E85, U+1E8E-1E97, U+1E9E-1EF9, U+1F00-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2007, U+2009-200B, U+2010-201E, U+2020-2023, U+2026, U+202F-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-204A, U+2070-2071, U+2074-208E, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+211E, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+21E7, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2236-2237, U+2248, U+2260-2261, U+2264-2265, U+2302-2303, U+2310, U+2318, U+231C-2321, U+2325-2326, U+232B, U+25A0-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+263F-2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713-2714, U+2717-2718, U+2752, U+275B-2760, U+2764, U+27E6-27E9, U+2C60-2C62, U+2C65-2C66, U+2C71, U+2C7D, U+2E18, U+2E22-2E25, U+2E3A-2E3B, U+2E52, U+A71C, U+A722-A725, U+A74E-A74F, U+A75A-A75B, U+A764-A765, U+A779-A787, U+A789, U+A7AD-A7AE, U+A7B3, U+A7B5, U+A7F2-A7F4, U+AB53, U+AB66-AB67, U+FB00-FB04, U+FEFF, U+1F10D-1F10F, U+1F12F, U+1F16A-1F16F, U+1F4A9, U+1F512, U+1F748, U+1F916",
+        "axes": {
+          "wght": [
+            200,
+            200,
+            900
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "aalt",
+            "c2sc",
+            "case",
+            "ccmp",
+            "cv01",
+            "cv02",
+            "cv03",
+            "cv04",
+            "cv05",
+            "cv06",
+            "cv07",
+            "cv08",
+            "cv09",
+            "cv10",
+            "cv11",
+            "cv12",
+            "cv13",
+            "cv14",
+            "cv15",
+            "cv16",
+            "cv17",
+            "cv18",
+            "cv19",
+            "dlig",
+            "dnom",
+            "frac",
+            "hlig",
+            "liga",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "pnum",
+            "salt",
+            "sinf",
+            "smcp",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss08",
+            "ss09",
+            "ss10",
+            "subs",
+            "sups",
+            "titl",
+            "zero"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk",
+            "size"
+          ]
+        },
+        "hintTables": [],
+        "hintTableBytes": {},
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "SourceSans3-Italic.woff2",
+      "bytes": 137996,
+      "sha256": "b4959abc0569392f87c6c6ac612f90e3fe0104d283724189b7d8b6f61af347d3",
+      "glyphs": 1998,
+      "characters": 1615,
+      "unicodeRange": "U+0020-007E, U+00A0-0181, U+0186, U+018A, U+018D-0190, U+0192-0194, U+0196-0197, U+019A-019B, U+019E, U+01A0-01A1, U+01AF-01B1, U+01B7, U+01BF-01C3, U+01CD-01DD, U+01E2-01E7, U+01EA-01EB, U+01EE-01F0, U+01F4-01F5, U+01F7-0201, U+0204-0205, U+0208-0209, U+020C-020D, U+0218-0220, U+0222-0223, U+0226-0227, U+0237, U+023A-023E, U+0241-0245, U+0248-0249, U+0250-027B, U+027D-0285, U+0287-0292, U+0294-0295, U+0298-0299, U+029B-029F, U+02A1-02A8, U+02B0-02B4, U+02B7-02B9, U+02BB-02C1, U+02C6-02CC, U+02D0-02DE, U+02E0-02E4, U+02ED, U+0300-030D, U+030F-0313, U+0315, U+0318-0320, U+0323-032A, U+032C, U+032E-0332, U+0334, U+0337-033D, U+0340, U+0342-0345, U+034F, U+0357-0358, U+035C, U+035E-035F, U+0361, U+0374-0375, U+037A, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03D1, U+03D5, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+03F4, U+03F7-03F8, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C4, U+04C7-04C8, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+04F6-04F7, U+1D25, U+1D2C, U+1D2E, U+1D30-1D31, U+1D33-1D3A, U+1D3C, U+1D3E-1D43, U+1D47-1D4B, U+1D4D, U+1D4F-1D52, U+1D56-1D58, U+1D5B, U+1D6F-1D70, U+1D79, U+1D7B, U+1D7F, U+1D9C, U+1DA0, U+1DAC, U+1DAE, U+1DB0, U+1DBB, U+1DBF, U+1DCD, U+1E02-1E03, U+1E06-1E07, U+1E0A-1E11, U+1E16-1E17, U+1E1E-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E56-1E63, U+1E66-1E67, U+1E6A-1E6F, U+1E72-1E73, U+1E7E-1E85, U+1E8E-1E97, U+1E9E-1EF9, U+1F00-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2007, U+2009-200B, U+2010-201E, U+2020-2023, U+2026, U+202F-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-204A, U+2070-2071, U+2074-208E, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+211E, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+21E7, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2236-2237, U+2248, U+2260-2261, U+2264-2265, U+2302-2303, U+2310, U+2318, U+231C-2321, U+2325-2326, U+232B, U+25A0-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+263F-2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713-2714, U+2717-2718, U+2752, U+275B-2760, U+2764, U+27E6-27E9, U+2C60-2C62, U+2C65-2C66, U+2C71, U+2C7D, U+2E18, U+2E22-2E25, U+2E3A-2E3B, U+2E52, U+A71C, U+A722-A725, U+A74E-A74F, U+A75A-A75B, U+A764-A765, U+A779-A787, U+A789, U+A7AD-A7AE, U+A7B3, U+A7B5, U+A7F2-A7F4, U+AB53, U+AB66-AB67, U+FB00-FB04, U+FEFF, U+1F10D-1F10F, U+1F12F, U+1F16A-1F16F, U+1F4A9, U+1F512, U+1F748, U+1F916",
+      "axes": {
+        "wght": [
+          200,
+          200,
+          900
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "aalt",
+          "case",
+          "ccmp",
+          "cv01",
+          "cv02",
+          "cv03",
+          "cv04",
+          "cv05",
+          "cv06",
+          "cv07",
+          "cv08",
+          "cv09",
+          "cv10",
+          "cv11",
+          "cv12",
+          "cv13",
+          "cv14",
+          "cv15",
+          "cv16",
+          "cv17",
+          "cv18",
+          "cv19",
+          "dlig",
+          "dnom",
+          "frac",
+          "hlig",
+          "liga",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "pnum",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss08",
+          "ss09",
+          "ss10",
+          "subs",
+          "sups",
+          "titl",
+          "zero"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk",
+          "size"
+        ]
+      },
+      "hintTables": [],
+      "hintTableBytes": {},
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "SourceSans3-Italic.woff2",
+        "bytes": 137996,
+        "sha256": "b4959abc0569392f87c6c6ac612f90e3fe0104d283724189b7d8b6f61af347d3",
+        "glyphs": 1998,
+        "characters": 1615,
+        "unicodeRange": "U+0020-007E, U+00A0-0181, U+0186, U+018A, U+018D-0190, U+0192-0194, U+0196-0197, U+019A-019B, U+019E, U+01A0-01A1, U+01AF-01B1, U+01B7, U+01BF-01C3, U+01CD-01DD, U+01E2-01E7, U+01EA-01EB, U+01EE-01F0, U+01F4-01F5, U+01F7-0201, U+0204-0205, U+0208-0209, U+020C-020D, U+0218-0220, U+0222-0223, U+0226-0227, U+0237, U+023A-023E, U+0241-0245, U+0248-0249, U+0250-027B, U+027D-0285, U+0287-0292, U+0294-0295, U+0298-0299, U+029B-029F, U+02A1-02A8, U+02B0-02B4, U+02B7-02B9, U+02BB-02C1, U+02C6-02CC, U+02D0-02DE, U+02E0-02E4, U+02ED, U+0300-030D, U+030F-0313, U+0315, U+0318-0320, U+0323-032A, U+032C, U+032E-0332, U+0334, U+0337-033D, U+0340, U+0342-0345, U+034F, U+0357-0358, U+035C, U+035E-035F, U+0361, U+0374-0375, U+037A, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03D1, U+03D5, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+03F4, U+03F7-03F8, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C4, U+04C7-04C8, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+04F6-04F7, U+1D25, U+1D2C, U+1D2E, U+1D30-1D31, U+1D33-1D3A, U+1D3C, U+1D3E-1D43, U+1D47-1D4B, U+1D4D, U+1D4F-1D52, U+1D56-1D58, U+1D5B, U+1D6F-1D70, U+1D79, U+1D7B, U+1D7F, U+1D9C, U+1DA0, U+1DAC, U+1DAE, U+1DB0, U+1DBB, U+1DBF, U+1DCD, U+1E02-1E03, U+1E06-1E07, U+1E0A-1E11, U+1E16-1E17, U+1E1E-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E56-1E63, U+1E66-1E67, U+1E6A-1E6F, U+1E72-1E73, U+1E7E-1E85, U+1E8E-1E97, U+1E9E-1EF9, U+1F00-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2007, U+2009-200B, U+2010-201E, U+2020-2023, U+2026, U+202F-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-204A, U+2070-2071, U+2074-208E, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+211E, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+21E7, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2236-2237, U+2248, U+2260-2261, U+2264-2265, U+2302-2303, U+2310, U+2318, U+231C-2321, U+2325-2326, U+232B, U+25A0-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+263F-2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713-2714, U+2717-2718, U+2752, U+275B-2760, U+2764, U+27E6-27E9, U+2C60-2C62, U+2C65-2C66, U+2C71, U+2C7D, U+2E18, U+2E22-2E25, U+2E3A-2E3B, U+2E52, U+A71C, U+A722-A725, U+A74E-A74F, U+A75A-A75B, U+A764-A765, U+A779-A787, U+A789, U+A7AD-A7AE, U+A7B3, U+A7B5, U+A7F2-A7F4, U+AB53, U+AB66-AB67, U+FB00-FB04, U+FEFF, U+1F10D-1F10F, U+1F12F, U+1F16A-1F16F, U+1F4A9, U+1F512, U+1F748, U+1F916",
+        "axes": {
+          "wght": [
+            200,
+            200,
+            900
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "aalt",
+            "case",
+            "ccmp",
+            "cv01",
+            "cv02",
+            "cv03",
+            "cv04",
+            "cv05",
+            "cv06",
+            "cv07",
+            "cv08",
+            "cv09",
+            "cv10",
+            "cv11",
+            "cv12",
+            "cv13",
+            "cv14",
+            "cv15",
+            "cv16",
+            "cv17",
+            "cv18",
+            "cv19",
+            "dlig",
+            "dnom",
+            "frac",
+            "hlig",
+            "liga",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "pnum",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss08",
+            "ss09",
+            "ss10",
+            "subs",
+            "sups",
+            "titl",
+            "zero"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk",
+            "size"
+          ]
+        },
+        "hintTables": [],
+        "hintTableBytes": {},
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "AtkinsonHyperlegible-Regular.ttf",
+      "bytes": 54348,
+      "sha256": "7fb917c89019896d0b52ee84b7cbb3304c18cb90b19a62f5e32712bd23e97669",
+      "glyphs": 369,
+      "characters": 342,
+      "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "case",
+          "ccmp",
+          "frac",
+          "locl",
+          "ordn",
+          "pnum",
+          "sups",
+          "tnum"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 108,
+        "fpgm": 3596,
+        "prep": 189,
+        "gasp": 8
+      },
+      "hintedGlyphs": 260
+    },
+    "outputs": [
+      {
+        "file": "AtkinsonHyperlegible-Regular.woff2",
+        "bytes": 23196,
+        "sha256": "2df4ba17804bc7a36f123127966075d8427bff2df58d0d76820c1130bb1a4150",
+        "glyphs": 369,
+        "characters": 342,
+        "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "case",
+            "ccmp",
+            "frac",
+            "locl",
+            "ordn",
+            "pnum",
+            "sups",
+            "tnum"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 108,
+          "fpgm": 3596,
+          "prep": 189,
+          "gasp": 8
+        },
+        "hintedGlyphs": 260
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "AtkinsonHyperlegible-Italic.ttf",
+      "bytes": 54892,
+      "sha256": "021beda4d3c6edfc78872e436d74009f9a1bcb294331908fe5747c61d3dcc514",
+      "glyphs": 368,
+      "characters": 342,
+      "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "case",
+          "ccmp",
+          "frac",
+          "locl",
+          "ordn",
+          "pnum",
+          "sups",
+          "tnum"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 108,
+        "fpgm": 3596,
+        "prep": 189,
+        "gasp": 8
+      },
+      "hintedGlyphs": 256
+    },
+    "outputs": [
+      {
+        "file": "AtkinsonHyperlegible-Italic.woff2",
+        "bytes": 24908,
+        "sha256": "60bedf0954ffa7e7800eddd529b06c7558d09283667c74fef60170d8d241089e",
+        "glyphs": 368,
+        "characters": 342,
+        "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "case",
+            "ccmp",
+            "frac",
+            "locl",
+            "ordn",
+            "pnum",
+            "sups",
+            "tnum"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 108,
+          "fpgm": 3596,
+          "prep": 189,
+          "gasp": 8
+        },
+        "hintedGlyphs": 256
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "AtkinsonHyperlegible-Bold.ttf",
+      "bytes": 55256,
+      "sha256": "5a3b0c8cc8ca545155150b4512a1fa248298df121c50d6557e651e61fbdab92f",
+      "glyphs": 369,
+      "characters": 342,
+      "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "case",
+          "ccmp",
+          "frac",
+          "locl",
+          "ordn",
+          "pnum",
+          "sups",
+          "tnum"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 108,
+        "fpgm": 3596,
+        "prep": 189,
+        "gasp": 8
+      },
+      "hintedGlyphs": 260
+    },
+    "outputs": [
+      {
+        "file": "AtkinsonHyperlegible-Bold.woff2",
+        "bytes": 23776,
+        "sha256": "da8fce41a04f8498fbf79076f92d304b12e70c76f71b143c5dcfb6536c93c075",
+        "glyphs": 369,
+        "characters": 342,
+        "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "case",
+            "ccmp",
+            "frac",
+            "locl",
+            "ordn",
+            "pnum",
+            "sups",
+            "tnum"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 108,
+          "fpgm": 3596,
+          "prep": 189,
+          "gasp": 8
+        },
+        "hintedGlyphs": 260
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "AtkinsonHyperlegible-BoldItalic.ttf",
+      "bytes": 55288,
+      "sha256": "7a46f1b0ef2f64b61065c1a6b5a11fcb9b019b44062d88ba121a083cc39e86bf",
+      "glyphs": 368,
+      "characters": 342,
+      "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "case",
+          "ccmp",
+          "frac",
+          "locl",
+          "ordn",
+          "pnum",
+          "sups",
+          "tnum"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 108,
+        "fpgm": 3596,
+        "prep": 189,
+        "gasp": 8
+      },
+      "hintedGlyphs": 254
+    },
+    "outputs": [
+      {
+        "file": "AtkinsonHyperlegible-BoldItalic.woff2",
+        "bytes": 25160,
+        "sha256": "f27e95143bc12e8f40f955cf86c74e6afef4441abb89d271282ea0f9e93c1fd5",
+        "glyphs": 368,
+        "characters": 342,
+        "unicodeRange": "U+000D, U+0020-007E, U+00A0-0107, U+010A-0113, U+0116-011B, U+011E-0123, U+0126-0127, U+012A-012B, U+012E-012F, U+0131, U+0136-0137, U+013B-013E, U+0141-0148, U+0150-0155, U+0158-015B, U+015E-0165, U+016A-016B, U+016E-0173, U+0178-017E, U+0192, U+0218-021B, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0326-0328, U+0394, U+03A9, U+03BC, U+03C0, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2113, U+2122, U+212E, U+2202, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25CA",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "case",
+            "ccmp",
+            "frac",
+            "locl",
+            "ordn",
+            "pnum",
+            "sups",
+            "tnum"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 108,
+          "fpgm": 3596,
+          "prep": 189,
+          "gasp": 8
+        },
+        "hintedGlyphs": 254
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "SourceSerif4.woff2",
+      "bytes": 429100,
+      "sha256": "940a76eda1388de39d38c8e7a79bf6ea058a387faee0a9f33c8d25c6ba05e1be",
+      "glyphs": 1464,
+      "characters": 919,
+      "unicodeRange": "U+0020-007E, U+00A0-012B, U+012E-0131, U+0134-0165, U+0168-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01E6-01E7, U+01F8-01F9, U+0218-021B, U+0237, U+0251, U+0259, U+0261, U+02B0, U+02B2-02B3, U+02B7-02B8, U+02BB-02BC, U+02BE-02BF, U+02C6-02CC, U+02D8-02DD, U+02E1-02E3, U+0300-0304, U+0306-030C, U+031B, U+0323-0324, U+0326-0329, U+032E, U+0331, U+0374-0375, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C2, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E0C-1E0F, U+1E20-1E21, U+1E24-1E25, U+1E2A-1E2B, U+1E36-1E3B, U+1E3E-1E3F, U+1E42-1E49, U+1E5A-1E63, U+1E6C-1E6F, U+1E80-1E85, U+1E8E-1E8F, U+1E92-1E93, U+1E97, U+1E9E, U+1EA0-1EF9, U+2002-2007, U+2009-200B, U+2010, U+2012-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2025-2026, U+202F-2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+20A1, U+20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2153-2154, U+215B-215E, U+2190-2193, U+2196-2199, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25C6, U+25C9-25CA, U+2610-2611, U+266A, U+2713, U+2752, U+2E3A-2E3B, U+FB00-FB04, U+1F12F, U+1F16A-1F16C",
+      "axes": {
+        "wght": [
+          200,
+          400,
+          900
+        ],
+        "opsz": [
+          8,
+          20,
+          60
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "aalt",
+          "c2sc",
+          "case",
+          "ccmp",
+          "dnom",
+          "frac",
+          "liga",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "pnum",
+          "sinf",
+          "smcp",
+          "ss01",
+          "ss02",
+          "subs",
+          "sups",
+          "tnum",
+          "zero"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [],
+      "hintTableBytes": {},
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "SourceSerif4.woff2",
+        "bytes": 429100,
+        "sha256": "940a76eda1388de39d38c8e7a79bf6ea058a387faee0a9f33c8d25c6ba05e1be",
+        "glyphs": 1464,
+        "characters": 919,
+        "unicodeRange": "U+0020-007E, U+00A0-012B, U+012E-0131, U+0134-0165, U+0168-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01E6-01E7, U+01F8-01F9, U+0218-021B, U+0237, U+0251, U+0259, U+0261, U+02B0, U+02B2-02B3, U+02B7-02B8, U+02BB-02BC, U+02BE-02BF, U+02C6-02CC, U+02D8-02DD, U+02E1-02E3, U+0300-0304, U+0306-030C, U+031B, U+0323-0324, U+0326-0329, U+032E, U+0331, U+0374-0375, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C2, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E0C-1E0F, U+1E20-1E21, U+1E24-1E25, U+1E2A-1E2B, U+1E36-1E3B, U+1E3E-1E3F, U+1E42-1E49, U+1E5A-1E63, U+1E6C-1E6F, U+1E80-1E85, U+1E8E-1E8F, U+1E92-1E93, U+1E97, U+1E9E, U+1EA0-1EF9, U+2002-2007, U+2009-200B, U+2010, U+2012-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2025-2026, U+202F-2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+20A1, U+20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2153-2154, U+215B-215E, U+2190-2193, U+2196-2199, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25C6, U+25C9-25CA, U+2610-2611, U+266A, U+2713, U+2752, U+2E3A-2E3B, U+FB00-FB04, U+1F12F, U+1F16A-1F16C",
+        "axes": {
+          "wght": [
+            200,
+            400,
+            900
+          ],
+          "opsz": [
+            8,
+            20,
+            60
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "aalt",
+            "c2sc",
+            "case",
+            "ccmp",
+            "dnom",
+            "frac",
+            "liga",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "pnum",
+            "sinf",
+            "smcp",
+            "ss01",
+            "ss02",
+            "subs",
+            "sups",
+            "tnum",
+            "zero"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [],
+        "hintTableBytes": {},
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "SourceSerif4-Italic.woff2",
+      "bytes": 346688,
+      "sha256": "9d28b5749a1ad096a295cb607c521bd1af4cd9979b6f37332daf70143149fb44",
+      "glyphs": 1093,
+      "characters": 918,
+      "unicodeRange": "U+0020-007E, U+00A0-012B, U+012E-0131, U+0134-0165, U+0168-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01E6-01E7, U+01F8-01F9, U+0218-021B, U+0237, U+0251, U+0259, U+0261, U+02B0, U+02B2-02B3, U+02B7-02B8, U+02BB-02BC, U+02BE-02BF, U+02C6-02CC, U+02D8-02DD, U+02E1-02E3, U+0300-0304, U+0306-030C, U+031B, U+0323-0324, U+0326-0329, U+032E, U+0331, U+0374-0375, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C2, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E0C-1E0F, U+1E20-1E21, U+1E24-1E25, U+1E2A-1E2B, U+1E36-1E3B, U+1E3E-1E3F, U+1E42-1E49, U+1E5A-1E63, U+1E6C-1E6F, U+1E80-1E85, U+1E8E-1E8F, U+1E92-1E93, U+1E97, U+1E9E, U+1EA0-1EF9, U+2002-2007, U+2009-200B, U+2010, U+2012-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2025-2026, U+202F-2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+20A1, U+20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2153-2154, U+215B-215E, U+2190-2193, U+2196-2199, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25C6, U+25C9-25CA, U+2610-2611, U+266A, U+2713, U+2752, U+2E3A-2E3B, U+FB00-FB04, U+1F12F, U+1F16A-1F16B",
+      "axes": {
+        "wght": [
+          200,
+          400,
+          900
+        ],
+        "opsz": [
+          8,
+          20,
+          60
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "aalt",
+          "case",
+          "ccmp",
+          "dnom",
+          "frac",
+          "liga",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "pnum",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "subs",
+          "sups",
+          "tnum",
+          "zero"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [],
+      "hintTableBytes": {},
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "SourceSerif4-Italic.woff2",
+        "bytes": 346688,
+        "sha256": "9d28b5749a1ad096a295cb607c521bd1af4cd9979b6f37332daf70143149fb44",
+        "glyphs": 1093,
+        "characters": 918,
+        "unicodeRange": "U+0020-007E, U+00A0-012B, U+012E-0131, U+0134-0165, U+0168-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01E6-01E7, U+01F8-01F9, U+0218-021B, U+0237, U+0251, U+0259, U+0261, U+02B0, U+02B2-02B3, U+02B7-02B8, U+02BB-02BC, U+02BE-02BF, U+02C6-02CC, U+02D8-02DD, U+02E1-02E3, U+0300-0304, U+0306-030C, U+031B, U+0323-0324, U+0326-0329, U+032E, U+0331, U+0374-0375, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C2, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E0C-1E0F, U+1E20-1E21, U+1E24-1E25, U+1E2A-1E2B, U+1E36-1E3B, U+1E3E-1E3F, U+1E42-1E49, U+1E5A-1E63, U+1E6C-1E6F, U+1E80-1E85, U+1E8E-1E8F, U+1E92-1E93, U+1E97, U+1E9E, U+1EA0-1EF9, U+2002-2007, U+2009-200B, U+2010, U+2012-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2025-2026, U+202F-2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+20A1, U+20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2153-2154, U+215B-215E, U+2190-2193, U+2196-2199, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25C6, U+25C9-25CA, U+2610-2611, U+266A, U+2713, U+2752, U+2E3A-2E3B, U+FB00-FB04, U+1F12F, U+1F16A-1F16B",
+        "axes": {
+          "wght": [
+            200,
+            400,
+            900
+          ],
+          "opsz": [
+            8,
+            20,
+            60
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "aalt",
+            "case",
+            "ccmp",
+            "dnom",
+            "frac",
+            "liga",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "pnum",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "subs",
+            "sups",
+            "tnum",
+            "zero"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [],
+        "hintTableBytes": {},
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-Regular.woff2",
+      "bytes": 49248,
+      "sha256": "ba204497f16b6d334cee9d1e963a831b73e3a56e1d6300a8489d18df7214b350",
+      "glyphs": 1207,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss08",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 82,
+        "fpgm": 371,
+        "prep": 542,
+        "gasp": 16
+      },
+      "hintedGlyphs": 708
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-Regular.woff2",
+        "bytes": 49248,
+        "sha256": "ba204497f16b6d334cee9d1e963a831b73e3a56e1d6300a8489d18df7214b350",
+        "glyphs": 1207,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss08",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 82,
+          "fpgm": 371,
+          "prep": 542,
+          "gasp": 16
+        },
+        "hintedGlyphs": 708
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-Italic.woff2",
+      "bytes": 53408,
+      "sha256": "2024bf2b08027dcd6d09091385756e327744bbe26b782c411381dffc40ffc622",
+      "glyphs": 1187,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 82,
+        "fpgm": 371,
+        "prep": 542,
+        "gasp": 16
+      },
+      "hintedGlyphs": 696
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-Italic.woff2",
+        "bytes": 53408,
+        "sha256": "2024bf2b08027dcd6d09091385756e327744bbe26b782c411381dffc40ffc622",
+        "glyphs": 1187,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 82,
+          "fpgm": 371,
+          "prep": 542,
+          "gasp": 16
+        },
+        "hintedGlyphs": 696
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-Medium.woff2",
+      "bytes": 50400,
+      "sha256": "33faf307fa6031fb4062276d7320a6d632de890cbb347576fd80cfa01077bc25",
+      "glyphs": 1207,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss08",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 86,
+        "fpgm": 371,
+        "prep": 578,
+        "gasp": 16
+      },
+      "hintedGlyphs": 708
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-Medium.woff2",
+        "bytes": 50400,
+        "sha256": "33faf307fa6031fb4062276d7320a6d632de890cbb347576fd80cfa01077bc25",
+        "glyphs": 1207,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss08",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 86,
+          "fpgm": 371,
+          "prep": 578,
+          "gasp": 16
+        },
+        "hintedGlyphs": 708
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-MediumItalic.woff2",
+      "bytes": 54868,
+      "sha256": "782325462f9a9708e02cb0415445cef7c9b5ee74f8910f33bfd1ab405a3402d2",
+      "glyphs": 1187,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 84,
+        "fpgm": 371,
+        "prep": 544,
+        "gasp": 16
+      },
+      "hintedGlyphs": 696
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-MediumItalic.woff2",
+        "bytes": 54868,
+        "sha256": "782325462f9a9708e02cb0415445cef7c9b5ee74f8910f33bfd1ab405a3402d2",
+        "glyphs": 1187,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 84,
+          "fpgm": 371,
+          "prep": 544,
+          "gasp": 16
+        },
+        "hintedGlyphs": 696
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-SemiBold.woff2",
+      "bytes": 50600,
+      "sha256": "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3",
+      "glyphs": 1207,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss08",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 86,
+        "fpgm": 371,
+        "prep": 586,
+        "gasp": 16
+      },
+      "hintedGlyphs": 709
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-SemiBold.woff2",
+        "bytes": 50600,
+        "sha256": "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3",
+        "glyphs": 1207,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss08",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 86,
+          "fpgm": 371,
+          "prep": 586,
+          "gasp": 16
+        },
+        "hintedGlyphs": 709
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-SemiBoldItalic.woff2",
+      "bytes": 54784,
+      "sha256": "67ad8975ad3cea95517f9dfe6d67fb3e4d87ca7bc4b51fa80e797e375c0cbe71",
+      "glyphs": 1187,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 86,
+        "fpgm": 371,
+        "prep": 546,
+        "gasp": 16
+      },
+      "hintedGlyphs": 697
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-SemiBoldItalic.woff2",
+        "bytes": 54784,
+        "sha256": "67ad8975ad3cea95517f9dfe6d67fb3e4d87ca7bc4b51fa80e797e375c0cbe71",
+        "glyphs": 1187,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 86,
+          "fpgm": 371,
+          "prep": 546,
+          "gasp": 16
+        },
+        "hintedGlyphs": 697
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-Bold.woff2",
+      "bytes": 50380,
+      "sha256": "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d",
+      "glyphs": 1207,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss08",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 86,
+        "fpgm": 371,
+        "prep": 586,
+        "gasp": 16
+      },
+      "hintedGlyphs": 708
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-Bold.woff2",
+        "bytes": 50380,
+        "sha256": "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d",
+        "glyphs": 1207,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss08",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 86,
+          "fpgm": 371,
+          "prep": 586,
+          "gasp": 16
+        },
+        "hintedGlyphs": 708
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "IBMPlexMono-BoldItalic.woff2",
+      "bytes": 54028,
+      "sha256": "03e97fe28d44cc2bdf18d77284046bc9019ee626bdab1f06e7ea64837680824b",
+      "glyphs": 1187,
+      "characters": 1049,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+      "axes": {},
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dnom",
+          "frac",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "ss09",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "mark"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 86,
+        "fpgm": 371,
+        "prep": 586,
+        "gasp": 16
+      },
+      "hintedGlyphs": 697
+    },
+    "outputs": [
+      {
+        "file": "IBMPlexMono-BoldItalic.woff2",
+        "bytes": 54028,
+        "sha256": "03e97fe28d44cc2bdf18d77284046bc9019ee626bdab1f06e7ea64837680824b",
+        "glyphs": 1187,
+        "characters": 1049,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01CD-01DC, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BB-02BC, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-030C, U+0312, U+0315, U+031B, U+0323, U+0326-0328, U+032D-032E, U+0331, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525, U+0E3F, U+1E0C-1E0D, U+1E12-1E13, U+1E24-1E25, U+1E36-1E37, U+1E3C-1E3D, U+1E40-1E47, U+1E4A-1E4B, U+1E62-1E63, U+1E6C-1E6D, U+1E70-1E71, U+1E80-1E85, U+1E92-1E93, U+1E9E, U+1EA0-1EF9, U+2000-200D, U+2010-2015, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2028-2029, U+202F-2030, U+2032-2033, U+2039-203A, U+203E, U+2044, U+205F, U+2070, U+2074-2079, U+2080-2089, U+20A1, U+20A4, U+20A6, U+20A8-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF, U+2113, U+2116, U+2122, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260, U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11, U+3000, U+F6D7-F6D8, U+FB01-FB02, U+FEFF, U+FFFD",
+        "axes": {},
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dnom",
+            "frac",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "ss09",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "mark"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 86,
+          "fpgm": 371,
+          "prep": 586,
+          "gasp": 16
+        },
+        "hintedGlyphs": 697
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "SourceCodePro.woff2",
+      "bytes": 90124,
+      "sha256": "d95dc751b4d82141259f5c00c9838addaadd3b4eac30dd7db4a0da4921d77792",
+      "glyphs": 1568,
+      "characters": 1334,
+      "unicodeRange": "U+0020-007E, U+00A0-0180, U+018A, U+018F, U+0192-0193, U+01A0-01A1, U+01AF-01B0, U+01C2, U+01CD-01DC, U+01E2-01E3, U+01E6-01E7, U+01EA-01EB, U+01F4-01F5, U+01F8-01FF, U+0218-021B, U+0237, U+0243, U+0250-025C, U+025E-0268, U+026A-0276, U+0278-027B, U+027D-027E, U+0280-0284, U+0287-0292, U+0294-0295, U+0298-0299, U+029C-029F, U+02A1-02A2, U+02A4, U+02A6-02A7, U+02B0, U+02B2-02B3, U+02B7-02B9, U+02BB-02BC, U+02BE-02BF, U+02C1, U+02C6-02CC, U+02D0-02D1, U+02D8-02DE, U+02E0-02E4, U+0300-030C, U+030F-0313, U+0318-0320, U+0323-032A, U+032C, U+032E-0331, U+0334, U+0339-033D, U+0341-0345, U+035F, U+0361, U+0374-0375, U+037A, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D0-03D1, U+03D5, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C2, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E06-1E07, U+1E0C-1E11, U+1E16-1E17, U+1E20-1E21, U+1E24-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E58-1E63, U+1E66-1E67, U+1E6C-1E6F, U+1E7E-1E85, U+1E8E-1E97, U+1E9E, U+1EA0-1EF9, U+1FBD-1FC1, U+1FCD-1FCF, U+1FDD-1FDF, U+1FED-1FEF, U+1FFD-1FFE, U+2007, U+2010, U+2012-201E, U+2020-2022, U+2026, U+202F-2030, U+2032-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+2094, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2237, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+231C-2321, U+2500-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713, U+2752, U+2764, U+27E6-27E7, U+2E18, U+2E22-2E25, U+E0A0-E0A2, U+E0B0-E0B3, U+FB01-FB02, U+FEFF, U+1F3B5-1F3B6, U+1F4A9, U+1F512, U+1F916",
+      "axes": {
+        "wght": [
+          200,
+          200,
+          900
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "case",
+          "ccmp",
+          "cv01",
+          "cv02",
+          "cv04",
+          "cv06",
+          "cv07",
+          "cv08",
+          "cv09",
+          "cv10",
+          "cv11",
+          "cv12",
+          "cv14",
+          "cv15",
+          "cv16",
+          "cv17",
+          "dnom",
+          "frac",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "ccmp",
+          "frac",
+          "mark",
+          "mkmk",
+          "size"
+        ]
+      },
+      "hintTables": [],
+      "hintTableBytes": {},
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "SourceCodePro.woff2",
+        "bytes": 90124,
+        "sha256": "d95dc751b4d82141259f5c00c9838addaadd3b4eac30dd7db4a0da4921d77792",
+        "glyphs": 1568,
+        "characters": 1334,
+        "unicodeRange": "U+0020-007E, U+00A0-0180, U+018A, U+018F, U+0192-0193, U+01A0-01A1, U+01AF-01B0, U+01C2, U+01CD-01DC, U+01E2-01E3, U+01E6-01E7, U+01EA-01EB, U+01F4-01F5, U+01F8-01FF, U+0218-021B, U+0237, U+0243, U+0250-025C, U+025E-0268, U+026A-0276, U+0278-027B, U+027D-027E, U+0280-0284, U+0287-0292, U+0294-0295, U+0298-0299, U+029C-029F, U+02A1-02A2, U+02A4, U+02A6-02A7, U+02B0, U+02B2-02B3, U+02B7-02B9, U+02BB-02BC, U+02BE-02BF, U+02C1, U+02C6-02CC, U+02D0-02D1, U+02D8-02DE, U+02E0-02E4, U+0300-030C, U+030F-0313, U+0318-0320, U+0323-032A, U+032C, U+032E-0331, U+0334, U+0339-033D, U+0341-0345, U+035F, U+0361, U+0374-0375, U+037A, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D0-03D1, U+03D5, U+03D7, U+03D9, U+03DB, U+03DD, U+03E1, U+0400-045F, U+0462-0463, U+0472-0475, U+0490-0493, U+0496-049B, U+04A0-04A3, U+04AA-04AB, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0-04C2, U+04CF-04D1, U+04D4-04D9, U+04E2-04E3, U+04E6-04E9, U+04EE-04EF, U+04F2-04F3, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E06-1E07, U+1E0C-1E11, U+1E16-1E17, U+1E20-1E21, U+1E24-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E58-1E63, U+1E66-1E67, U+1E6C-1E6F, U+1E7E-1E85, U+1E8E-1E97, U+1E9E, U+1EA0-1EF9, U+1FBD-1FC1, U+1FCD-1FCF, U+1FDD-1FDF, U+1FED-1FEF, U+1FFD-1FFE, U+2007, U+2010, U+2012-201E, U+2020-2022, U+2026, U+202F-2030, U+2032-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+2094, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2237, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+231C-2321, U+2500-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713, U+2752, U+2764, U+27E6-27E7, U+2E18, U+2E22-2E25, U+E0A0-E0A2, U+E0B0-E0B3, U+FB01-FB02, U+FEFF, U+1F3B5-1F3B6, U+1F4A9, U+1F512, U+1F916",
+        "axes": {
+          "wght": [
+            200,
+            200,
+            900
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "case",
+            "ccmp",
+            "cv01",
+            "cv02",
+            "cv04",
+            "cv06",
+            "cv07",
+            "cv08",
+            "cv09",
+            "cv10",
+            "cv11",
+            "cv12",
+            "cv14",
+            "cv15",
+            "cv16",
+            "cv17",
+            "dnom",
+            "frac",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "ccmp",
+            "frac",
+            "mark",
+            "mkmk",
+            "size"
+          ]
+        },
+        "hintTables": [],
+        "hintTableBytes": {},
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "original",
+    "source": {
+      "file": "SourceCodePro-Italic.woff2",
+      "bytes": 75316,
+      "sha256": "720e47a2e54568db2908bfbb32894c1c298fd948cc8942426987c2d29f7ebd9e",
+      "glyphs": 1271,
+      "characters": 1085,
+      "unicodeRange": "U+0020-007E, U+00A0-0180, U+018A, U+018F, U+0192-0193, U+01A0-01A1, U+01AF-01B0, U+01C2, U+01CD-01DC, U+01E2-01E3, U+01E6-01E7, U+01EA-01EB, U+01F4-01F5, U+01F8-01FF, U+0218-021B, U+0237, U+0243, U+0250-025C, U+025E-0268, U+026A-0276, U+0278-027B, U+027D-027E, U+0280-0284, U+0287-0292, U+0294-0295, U+0298-0299, U+029C-029F, U+02A1-02A2, U+02A4, U+02A6-02A7, U+02B0, U+02B2-02B3, U+02B7-02B9, U+02BB-02BC, U+02BE-02BF, U+02C1, U+02C6-02CC, U+02D0-02D1, U+02D8-02DE, U+02E0-02E4, U+0300-030C, U+030F-0313, U+0318-0320, U+0323-032A, U+032C, U+032E-0331, U+0334, U+0339-033D, U+0341-0345, U+035F, U+0361, U+03C0, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E06-1E07, U+1E0C-1E11, U+1E16-1E17, U+1E20-1E21, U+1E24-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E58-1E63, U+1E66-1E67, U+1E6C-1E6F, U+1E7E-1E85, U+1E8E-1E97, U+1E9E, U+1EA0-1EF9, U+2007, U+2010, U+2012-201E, U+2020-2022, U+2026, U+202F-2030, U+2032-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+2094, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2237, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+231C-2321, U+2500-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713, U+2752, U+2764, U+27E6-27E7, U+2E18, U+2E22-2E25, U+E0A0-E0A2, U+E0B0-E0B3, U+FB01-FB02, U+FEFF, U+1F3B5-1F3B6, U+1F4A9, U+1F512, U+1F916",
+      "axes": {
+        "wght": [
+          200,
+          200,
+          900
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "case",
+          "ccmp",
+          "cv01",
+          "cv02",
+          "cv06",
+          "cv12",
+          "cv14",
+          "cv15",
+          "cv16",
+          "cv17",
+          "dnom",
+          "frac",
+          "locl",
+          "numr",
+          "onum",
+          "ordn",
+          "salt",
+          "sinf",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss05",
+          "ss06",
+          "ss07",
+          "subs",
+          "sups",
+          "zero"
+        ],
+        "GPOS": [
+          "ccmp",
+          "frac",
+          "mark",
+          "mkmk",
+          "size"
+        ]
+      },
+      "hintTables": [],
+      "hintTableBytes": {},
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "SourceCodePro-Italic.woff2",
+        "bytes": 75316,
+        "sha256": "720e47a2e54568db2908bfbb32894c1c298fd948cc8942426987c2d29f7ebd9e",
+        "glyphs": 1271,
+        "characters": 1085,
+        "unicodeRange": "U+0020-007E, U+00A0-0180, U+018A, U+018F, U+0192-0193, U+01A0-01A1, U+01AF-01B0, U+01C2, U+01CD-01DC, U+01E2-01E3, U+01E6-01E7, U+01EA-01EB, U+01F4-01F5, U+01F8-01FF, U+0218-021B, U+0237, U+0243, U+0250-025C, U+025E-0268, U+026A-0276, U+0278-027B, U+027D-027E, U+0280-0284, U+0287-0292, U+0294-0295, U+0298-0299, U+029C-029F, U+02A1-02A2, U+02A4, U+02A6-02A7, U+02B0, U+02B2-02B3, U+02B7-02B9, U+02BB-02BC, U+02BE-02BF, U+02C1, U+02C6-02CC, U+02D0-02D1, U+02D8-02DE, U+02E0-02E4, U+0300-030C, U+030F-0313, U+0318-0320, U+0323-032A, U+032C, U+032E-0331, U+0334, U+0339-033D, U+0341-0345, U+035F, U+0361, U+03C0, U+1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D9C, U+1DA0, U+1DBB, U+1E06-1E07, U+1E0C-1E11, U+1E16-1E17, U+1E20-1E21, U+1E24-1E2B, U+1E32-1E3B, U+1E3E-1E49, U+1E52-1E53, U+1E58-1E63, U+1E66-1E67, U+1E6C-1E6F, U+1E7E-1E85, U+1E8E-1E97, U+1E9E, U+1EA0-1EF9, U+2007, U+2010, U+2012-201E, U+2020-2022, U+2026, U+202F-2030, U+2032-2033, U+2035, U+2039-203A, U+203C-203F, U+2044, U+2047-2049, U+2070-2071, U+2074-2079, U+207D-2089, U+208D-208E, U+2094, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9, U+20AB-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+2105, U+2113, U+2116-2117, U+2120, U+2122, U+2126, U+212E, U+2150-215E, U+2189, U+2190-2199, U+21A8, U+21D0-21D3, U+2200, U+2202-2203, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2237, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+231C-2321, U+2500-25A1, U+25AA-25AC, U+25B2-25BA, U+25BC-25C4, U+25C6, U+25C9-25CC, U+25CF, U+25D8-25D9, U+25E6, U+2610-2611, U+2615, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+2713, U+2752, U+2764, U+27E6-27E7, U+2E18, U+2E22-2E25, U+E0A0-E0A2, U+E0B0-E0B3, U+FB01-FB02, U+FEFF, U+1F3B5-1F3B6, U+1F4A9, U+1F512, U+1F916",
+        "axes": {
+          "wght": [
+            200,
+            200,
+            900
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "case",
+            "ccmp",
+            "cv01",
+            "cv02",
+            "cv06",
+            "cv12",
+            "cv14",
+            "cv15",
+            "cv16",
+            "cv17",
+            "dnom",
+            "frac",
+            "locl",
+            "numr",
+            "onum",
+            "ordn",
+            "salt",
+            "sinf",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss05",
+            "ss06",
+            "ss07",
+            "subs",
+            "sups",
+            "zero"
+          ],
+          "GPOS": [
+            "ccmp",
+            "frac",
+            "mark",
+            "mkmk",
+            "size"
+          ]
+        },
+        "hintTables": [],
+        "hintTableBytes": {},
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "Arimo.ttf",
+      "bytes": 496268,
+      "sha256": "e43898b143ec826ac8cb4034816458a7047fbe0836558de2a1f8c6223ae3e0ca",
+      "glyphs": 3301,
+      "characters": 3010,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-052F, U+0591-05C7, U+05D0-05EA, U+05F0-05F4, U+1AB0-1ABE, U+1C80-1C88, U+1D00-1DF5, U+1DFB-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2000-2064, U+2066-2071, U+2074-208E, U+2090-209C, U+20A0-20BE, U+20F0, U+2100-214F, U+2153-2154, U+215B-215E, U+2184, U+2190-2195, U+21A8, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+2320-2321, U+2500, U+2502, U+250C, U+2510, U+2514, U+2518, U+251C, U+2524, U+252C, U+2534, U+253C, U+2550-256C, U+2580, U+2584, U+2588, U+258C, U+2590-2593, U+25A0-25A1, U+25AA-25AC, U+25B2, U+25BA, U+25BC, U+25C4, U+25CA-25CC, U+25CF, U+25D8-25D9, U+25E6, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+266F, U+2C60-2C7F, U+2DE0-2E42, U+A640-A69F, U+A717-A7AE, U+A7B0-A7B7, U+A7F7-A7FF, U+AB30-AB65, U+F001-F002, U+F005, U+F00A-F00E, U+FB01-FB04, U+FB1D-FB36, U+FB38-FB3C, U+FB3E, U+FB40-FB41, U+FB43-FB44, U+FB46-FB4F, U+FE20-FE2F, U+FEFF, U+FFFC-FFFD",
+      "axes": {
+        "wght": [
+          400,
+          400,
+          700
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dlig",
+          "locl"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "prep": 7,
+        "gasp": 8
+      },
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "Arimo.woff2",
+        "bytes": 222048,
+        "sha256": "0d2f65432c96632bd19360734af6c15d77a55c005e93356814ae7bc0461f2d5e",
+        "glyphs": 3301,
+        "characters": 3010,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-052F, U+0591-05C7, U+05D0-05EA, U+05F0-05F4, U+1AB0-1ABE, U+1C80-1C88, U+1D00-1DF5, U+1DFB-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2000-2064, U+2066-2071, U+2074-208E, U+2090-209C, U+20A0-20BE, U+20F0, U+2100-214F, U+2153-2154, U+215B-215E, U+2184, U+2190-2195, U+21A8, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+2320-2321, U+2500, U+2502, U+250C, U+2510, U+2514, U+2518, U+251C, U+2524, U+252C, U+2534, U+253C, U+2550-256C, U+2580, U+2584, U+2588, U+258C, U+2590-2593, U+25A0-25A1, U+25AA-25AC, U+25B2, U+25BA, U+25BC, U+25C4, U+25CA-25CC, U+25CF, U+25D8-25D9, U+25E6, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+266F, U+2C60-2C7F, U+2DE0-2E42, U+A640-A69F, U+A717-A7AE, U+A7B0-A7B7, U+A7F7-A7FF, U+AB30-AB65, U+F001-F002, U+F005, U+F00A-F00E, U+FB01-FB04, U+FB1D-FB36, U+FB38-FB3C, U+FB3E, U+FB40-FB41, U+FB43-FB44, U+FB46-FB4F, U+FE20-FE2F, U+FEFF, U+FFFC-FFFD",
+        "axes": {
+          "wght": [
+            400,
+            400,
+            700
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dlig",
+            "locl"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "prep": 7,
+          "gasp": 8
+        },
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "Arimo-Italic.ttf",
+      "bytes": 543196,
+      "sha256": "a80fc54fd0233c1dfe298577c4d00f5ae81d5bb83510975e473c47e699b7f4ed",
+      "glyphs": 3306,
+      "characters": 3010,
+      "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-052F, U+0591-05C7, U+05D0-05EA, U+05F0-05F4, U+1AB0-1ABE, U+1C80-1C88, U+1D00-1DF5, U+1DFB-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2000-2064, U+2066-2071, U+2074-208E, U+2090-209C, U+20A0-20BE, U+20F0, U+2100-214F, U+2153-2154, U+215B-215E, U+2184, U+2190-2195, U+21A8, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+2320-2321, U+2500, U+2502, U+250C, U+2510, U+2514, U+2518, U+251C, U+2524, U+252C, U+2534, U+253C, U+2550-256C, U+2580, U+2584, U+2588, U+258C, U+2590-2593, U+25A0-25A1, U+25AA-25AC, U+25B2, U+25BA, U+25BC, U+25C4, U+25CA-25CC, U+25CF, U+25D8-25D9, U+25E6, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+266F, U+2C60-2C7F, U+2DE0-2E42, U+A640-A69F, U+A717-A7AE, U+A7B0-A7B7, U+A7F7-A7FF, U+AB30-AB65, U+F001-F002, U+F005, U+F00A-F00E, U+FB01-FB04, U+FB1D-FB36, U+FB38-FB3C, U+FB3E, U+FB40-FB41, U+FB43-FB44, U+FB46-FB4F, U+FE20-FE2F, U+FEFF, U+FFFC-FFFD",
+      "axes": {
+        "wght": [
+          400,
+          400,
+          700
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "aalt",
+          "ccmp",
+          "dlig",
+          "locl"
+        ],
+        "GPOS": [
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "prep": 7,
+        "gasp": 8
+      },
+      "hintedGlyphs": 0
+    },
+    "outputs": [
+      {
+        "file": "Arimo-Italic.woff2",
+        "bytes": 255920,
+        "sha256": "a9d5da4ebfbe0ba41c284b440ac15dec375be0ba08079e9748ff49ff6ac0066d",
+        "glyphs": 3306,
+        "characters": 3010,
+        "unicodeRange": "U+0000, U+000D, U+0020-007E, U+00A0-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-052F, U+0591-05C7, U+05D0-05EA, U+05F0-05F4, U+1AB0-1ABE, U+1C80-1C88, U+1D00-1DF5, U+1DFB-1F15, U+1F18-1F1D, U+1F20-1F45, U+1F48-1F4D, U+1F50-1F57, U+1F59, U+1F5B, U+1F5D, U+1F5F-1F7D, U+1F80-1FB4, U+1FB6-1FC4, U+1FC6-1FD3, U+1FD6-1FDB, U+1FDD-1FEF, U+1FF2-1FF4, U+1FF6-1FFE, U+2000-2064, U+2066-2071, U+2074-208E, U+2090-209C, U+20A0-20BE, U+20F0, U+2100-214F, U+2153-2154, U+215B-215E, U+2184, U+2190-2195, U+21A8, U+2202, U+2206, U+220F, U+2211-2212, U+2215, U+2219-221A, U+221E-221F, U+2229, U+222B, U+2248, U+2260-2261, U+2264-2265, U+2302, U+2310, U+2320-2321, U+2500, U+2502, U+250C, U+2510, U+2514, U+2518, U+251C, U+2524, U+252C, U+2534, U+253C, U+2550-256C, U+2580, U+2584, U+2588, U+258C, U+2590-2593, U+25A0-25A1, U+25AA-25AC, U+25B2, U+25BA, U+25BC, U+25C4, U+25CA-25CC, U+25CF, U+25D8-25D9, U+25E6, U+263A-263C, U+2640, U+2642, U+2660, U+2663, U+2665-2666, U+266A-266B, U+266F, U+2C60-2C7F, U+2DE0-2E42, U+A640-A69F, U+A717-A7AE, U+A7B0-A7B7, U+A7F7-A7FF, U+AB30-AB65, U+F001-F002, U+F005, U+F00A-F00E, U+FB01-FB04, U+FB1D-FB36, U+FB38-FB3C, U+FB3E, U+FB40-FB41, U+FB43-FB44, U+FB46-FB4F, U+FE20-FE2F, U+FEFF, U+FFFC-FFFD",
+        "axes": {
+          "wght": [
+            400,
+            400,
+            700
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "aalt",
+            "ccmp",
+            "dlig",
+            "locl"
+          ],
+          "GPOS": [
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "prep": 7,
+          "gasp": 8
+        },
+        "hintedGlyphs": 0
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "Roboto.ttf",
+      "bytes": 488584,
+      "sha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134",
+      "glyphs": 1326,
+      "characters": 927,
+      "unicodeRange": "U+0000, U+0002, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01F0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BC, U+02C6-02C7, U+02C9, U+02D8-02DD, U+02F3, U+0300-0301, U+0303, U+0309, U+030F, U+0323, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D1-03D2, U+03D6, U+0400-0486, U+0488-0513, U+1E00-1E01, U+1E3E-1E3F, U+1E80-1E85, U+1E9E, U+1EA0-1EF9, U+1F4D, U+2000-200B, U+2010-2011, U+2013-2015, U+2017-201E, U+2020-2022, U+2025-2027, U+2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2070, U+2074-208E, U+20A3-20A4, U+20A6-20AC, U+20B1, U+20B9-20BA, U+20BC-20BD, U+20C1, U+2105, U+2113, U+2116, U+2122, U+2126, U+212E, U+215B-215E, U+2202, U+2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25CA-25CB, U+25CF, U+EE01-EE02, U+F6C3, U+FB01-FB04, U+FEFF, U+FFFC-FFFD",
+      "axes": {
+        "wght": [
+          100,
+          400,
+          900
+        ],
+        "wdth": [
+          75,
+          100,
+          100
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "c2sc",
+          "ccmp",
+          "dlig",
+          "dnom",
+          "frac",
+          "liga",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "pnum",
+          "smcp",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "subs",
+          "sups",
+          "tnum"
+        ],
+        "GPOS": [
+          "cpsp",
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 254,
+        "fpgm": 3974,
+        "prep": 718,
+        "gasp": 12
+      },
+      "hintedGlyphs": 1095
+    },
+    "outputs": [
+      {
+        "file": "Roboto.woff2",
+        "bytes": 222128,
+        "sha256": "66e3a7dafb09acdf7af615078ae7f281a048d18e37816dd093c4722a37b8c884",
+        "glyphs": 1326,
+        "characters": 927,
+        "unicodeRange": "U+0000, U+0002, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01F0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BC, U+02C6-02C7, U+02C9, U+02D8-02DD, U+02F3, U+0300-0301, U+0303, U+0309, U+030F, U+0323, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D1-03D2, U+03D6, U+0400-0486, U+0488-0513, U+1E00-1E01, U+1E3E-1E3F, U+1E80-1E85, U+1E9E, U+1EA0-1EF9, U+1F4D, U+2000-200B, U+2010-2011, U+2013-2015, U+2017-201E, U+2020-2022, U+2025-2027, U+2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2070, U+2074-208E, U+20A3-20A4, U+20A6-20AC, U+20B1, U+20B9-20BA, U+20BC-20BD, U+20C1, U+2105, U+2113, U+2116, U+2122, U+2126, U+212E, U+215B-215E, U+2202, U+2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25CA-25CB, U+25CF, U+EE01-EE02, U+F6C3, U+FB01-FB04, U+FEFF, U+FFFC-FFFD",
+        "axes": {
+          "wght": [
+            100,
+            400,
+            900
+          ],
+          "wdth": [
+            75,
+            100,
+            100
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "c2sc",
+            "ccmp",
+            "dlig",
+            "dnom",
+            "frac",
+            "liga",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "pnum",
+            "smcp",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "subs",
+            "sups",
+            "tnum"
+          ],
+          "GPOS": [
+            "cpsp",
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 254,
+          "fpgm": 3974,
+          "prep": 718,
+          "gasp": 12
+        },
+        "hintedGlyphs": 1095
+      }
+    ]
+  },
+  {
+    "strategy": "woff2",
+    "source": {
+      "file": "Roboto-Italic.ttf",
+      "bytes": 530944,
+      "sha256": "9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182",
+      "glyphs": 1326,
+      "characters": 927,
+      "unicodeRange": "U+0000, U+0002, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01F0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BC, U+02C6-02C7, U+02C9, U+02D8-02DD, U+02F3, U+0300-0301, U+0303, U+0309, U+030F, U+0323, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D1-03D2, U+03D6, U+0400-0486, U+0488-0513, U+1E00-1E01, U+1E3E-1E3F, U+1E80-1E85, U+1E9E, U+1EA0-1EF9, U+1F4D, U+2000-200B, U+2010-2011, U+2013-2015, U+2017-201E, U+2020-2022, U+2025-2027, U+2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2070, U+2074-208E, U+20A3-20A4, U+20A6-20AC, U+20B1, U+20B9-20BA, U+20BC-20BD, U+20C1, U+2105, U+2113, U+2116, U+2122, U+2126, U+212E, U+215B-215E, U+2202, U+2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25CA-25CB, U+25CF, U+EE01-EE02, U+F6C3, U+FB01-FB04, U+FEFF, U+FFFC-FFFD",
+      "axes": {
+        "wght": [
+          100,
+          400,
+          900
+        ],
+        "wdth": [
+          75,
+          100,
+          100
+        ]
+      },
+      "features": {
+        "GSUB": [
+          "c2sc",
+          "ccmp",
+          "dlig",
+          "dnom",
+          "frac",
+          "liga",
+          "lnum",
+          "locl",
+          "numr",
+          "onum",
+          "pnum",
+          "smcp",
+          "ss01",
+          "ss02",
+          "ss03",
+          "ss04",
+          "ss05",
+          "ss06",
+          "ss07",
+          "subs",
+          "sups",
+          "tnum"
+        ],
+        "GPOS": [
+          "cpsp",
+          "kern",
+          "mark",
+          "mkmk"
+        ]
+      },
+      "hintTables": [
+        "cvt ",
+        "fpgm",
+        "prep",
+        "gasp"
+      ],
+      "hintTableBytes": {
+        "cvt ": 254,
+        "fpgm": 3974,
+        "prep": 718,
+        "gasp": 12
+      },
+      "hintedGlyphs": 1095
+    },
+    "outputs": [
+      {
+        "file": "Roboto-Italic.woff2",
+        "bytes": 256268,
+        "sha256": "2dc56cdfec77b8e00e430c27740af6c6c3c94c363eb027031d4486e60594cf03",
+        "glyphs": 1326,
+        "characters": 927,
+        "unicodeRange": "U+0000, U+0002, U+000D, U+0020-007E, U+00A0-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01F0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+02BC, U+02C6-02C7, U+02C9, U+02D8-02DD, U+02F3, U+0300-0301, U+0303, U+0309, U+030F, U+0323, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03CE, U+03D1-03D2, U+03D6, U+0400-0486, U+0488-0513, U+1E00-1E01, U+1E3E-1E3F, U+1E80-1E85, U+1E9E, U+1EA0-1EF9, U+1F4D, U+2000-200B, U+2010-2011, U+2013-2015, U+2017-201E, U+2020-2022, U+2025-2027, U+2030, U+2032-2033, U+2039-203A, U+203C, U+2044, U+2070, U+2074-208E, U+20A3-20A4, U+20A6-20AC, U+20B1, U+20B9-20BA, U+20BC-20BD, U+20C1, U+2105, U+2113, U+2116, U+2122, U+2126, U+212E, U+215B-215E, U+2202, U+2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+25A0, U+25CA-25CB, U+25CF, U+EE01-EE02, U+F6C3, U+FB01-FB04, U+FEFF, U+FFFC-FFFD",
+        "axes": {
+          "wght": [
+            100,
+            400,
+            900
+          ],
+          "wdth": [
+            75,
+            100,
+            100
+          ]
+        },
+        "features": {
+          "GSUB": [
+            "c2sc",
+            "ccmp",
+            "dlig",
+            "dnom",
+            "frac",
+            "liga",
+            "lnum",
+            "locl",
+            "numr",
+            "onum",
+            "pnum",
+            "smcp",
+            "ss01",
+            "ss02",
+            "ss03",
+            "ss04",
+            "ss05",
+            "ss06",
+            "ss07",
+            "subs",
+            "sups",
+            "tnum"
+          ],
+          "GPOS": [
+            "cpsp",
+            "kern",
+            "mark",
+            "mkmk"
+          ]
+        },
+        "hintTables": [
+          "cvt ",
+          "fpgm",
+          "prep",
+          "gasp"
+        ],
+        "hintTableBytes": {
+          "cvt ": 254,
+          "fpgm": 3974,
+          "prep": 718,
+          "gasp": 12
+        },
+        "hintedGlyphs": 1095
+      }
+    ]
   }
 ]

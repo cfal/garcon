@@ -20,7 +20,7 @@ afterEach(() => {
 	else Reflect.deleteProperty(document, 'fonts');
 });
 
-describe('Departure font loading', () => {
+describe('bundled font loading', () => {
 	it.each([true, false])(
 		'shares the request and checks matching faces (loaded: %s)',
 		async (loaded) => {
@@ -30,7 +30,11 @@ describe('Departure font loading', () => {
 			const first = loadFont('departure-mono');
 			expect(loadFont('departure-mono')).toBe(first);
 			await expect(first).resolves.toBe(loaded);
-			expect(load).toHaveBeenCalledExactlyOnceWith('400 16px "Departure Mono"');
+			expect(load.mock.calls).toEqual(
+				['400', '700', 'italic 400', 'italic 700'].map((style) => [
+					`${style} 16px "Departure Mono"`,
+				]),
+			);
 		},
 	);
 
@@ -62,17 +66,48 @@ describe('Departure font loading', () => {
 		expect(retry).not.toBe(failed);
 		await expect(retry).resolves.toBe(true);
 		expect(loadFont('jetbrains-mono')).toBe(retry);
-		expect(load).toHaveBeenCalledTimes(2);
+		expect(load).toHaveBeenCalledTimes(8);
 	});
 
-	it('loads only the selected bundled face and leaves system choices alone', async () => {
+	it('loads every style of each bundled family and leaves system choices alone', async () => {
 		const load = vi.fn().mockResolvedValue([{ status: 'loaded' }]);
 		installFonts(load);
-		const { loadFont } = await import('../fonts.js');
-		await loadFont('system-serif');
+		const { loadFont, BUNDLED_FONT_FAMILIES, FONT_OPTIONS, parseFontPreference } =
+			await import('../fonts.js');
+		for (const font of ['default', 'system-sans', 'system-serif', 'system-mono'] as const)
+			await loadFont(font);
 		expect(load).not.toHaveBeenCalled();
-		await loadFont('jetbrains-mono');
-		await loadFont('inter');
-		expect(load.mock.calls).toEqual([['400 16px "JetBrains Mono"'], ['400 16px "Inter"']]);
+		for (const font of FONT_OPTIONS) {
+			expect(parseFontPreference(font)).toBe(font);
+			await loadFont(font);
+		}
+		expect(load.mock.calls).toEqual(
+			Object.values(BUNDLED_FONT_FAMILIES).flatMap((family) =>
+				['400', '700', 'italic 400', 'italic 700'].map((style) => [`${style} 16px ${family}`]),
+			),
+		);
+	});
+
+	it('does not publish a font while its bold face is still loading', async () => {
+		vi.useFakeTimers();
+		const bold = Promise.withResolvers<Pick<FontFace, 'status'>[]>();
+		const loadedFaces = [{ status: 'loaded' } satisfies Pick<FontFace, 'status'>];
+		const load = vi
+			.fn()
+			.mockImplementation((font: string) =>
+				font.startsWith('700 ') ? bold.promise : Promise.resolve(loadedFaces),
+			);
+		installFonts(load);
+		const { loadFont } = await import('../fonts.js');
+		let resolved = false;
+		const loading = loadFont('ibm-plex-mono').then((loaded) => {
+			resolved = true;
+			return loaded;
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(resolved).toBe(false);
+		expect(load).toHaveBeenCalledWith('700 16px "IBM Plex Mono"');
+		bold.resolve(loadedFaces);
+		await expect(loading).resolves.toBe(true);
 	});
 });
