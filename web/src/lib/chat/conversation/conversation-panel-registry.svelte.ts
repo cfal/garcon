@@ -920,7 +920,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	markChatStale(chatId: string): void {
-		this.#inactiveWindows.removeChat(chatId);
+		this.#inactiveWindows.evictChatWindows(chatId);
 		this.markChatDirty(chatId);
 	}
 

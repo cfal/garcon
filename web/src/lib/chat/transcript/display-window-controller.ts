@@ -137,7 +137,7 @@ export class DisplayWindowController {
 		this.#parked = false;
 		this.bodies.setParked(this, false);
 		if (this.#navigationEpoch === null) this.configure({ ...profile, bashRevision: open.display.bashRevision }, this.#cuts);
-		else this.#pendingBashRevision = open.display.bashRevision;
+		else if (open.display.bashRevision !== this.#profile?.bashRevision) this.#pendingBashRevision ??= open.display.bashRevision;
 	}
 
 	configure(profile: DisplayProfile, cuts: readonly DisplayCut[]): void {
@@ -187,7 +187,7 @@ export class DisplayWindowController {
 			this.configure({ ...this.#profile, bashRevision }, this.#cuts);
 			return;
 		}
-		if (phase === 'available' && (this.#snapshot.phase !== 'available' || this.#needsHeadRefresh() || this.#needsDetailRefresh())) this.#scheduleRefresh(0, 'readiness');
+		if (phase === 'available' && (this.#snapshot.phase !== 'available' || this.#needsReplace() || this.#needsHeadRefresh() || this.#needsDetailRefresh())) this.#scheduleRefresh(0, 'readiness');
 	}
 
 	#needsReplace(): boolean {
@@ -319,16 +319,16 @@ export class DisplayWindowController {
 			return completed ? resolution : null;
 		} catch (error) {
 			if (!current()) return null;
+			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
+				try {
+					const changed = await this.#reopenMetadata(signal, epoch);
+					if (!current()) return null;
+					if (!changed) await this.#waitForNavigationReadiness(this.#readinessRevision);
+					return current() ? this.#navigate(target, signal, ownsNavigation) : null;
+				} catch (reopenError) { if (!current()) return null; error = reopenError; }
+			}
 			if (error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW') return typeof target === 'number'
 				? { kind: 'stale-view', ordinal: target, landedOrdinal: null } : null;
-			if (error instanceof ApiError && error.errorCode === 'DISPLAY_REVISION_CHANGED') {
-				let changed: boolean;
-				try { changed = await this.#reopenMetadata(signal, epoch); }
-				catch (reopenError) { if (!current()) return null; throw reopenError; }
-				if (!current()) return null;
-				if (!changed) await this.#waitForNavigationReadiness(this.#readinessRevision);
-				return current() ? this.#navigate(target, signal, ownsNavigation) : null;
-			}
 			if (error instanceof ApiError && RETRYABLE_DISPLAY_ERRORS.has(error.errorCode ?? '')) {
 				await this.#waitForNavigationReadiness(this.#readinessRevision);
 				return current() ? this.#navigate(target, signal, ownsNavigation) : null;
@@ -799,6 +799,12 @@ export class DisplayWindowController {
 	}
 
 	cancel(): void {
+		const refreshPending = this.#pendingBashRevision !== null || this.#refreshPending;
+		this.#cancelRequests();
+		if (refreshPending && this.#identity && this.#profile && this.#needsReplace()) this.#scheduleRefresh(0, 'readiness');
+	}
+
+	#cancelRequests(): void {
 		this.#epoch += 1;
 		if (this.#pendingBashRevision && this.#profile) this.#profile = { ...this.#profile, bashRevision: this.#pendingBashRevision };
 		this.#pendingBashRevision = null;
@@ -819,10 +825,10 @@ export class DisplayWindowController {
 		if (this.#snapshot.phase === 'requesting') this.#commit({ ...this.#snapshot, phase: this.#snapshot.window ? 'available' : 'idle', error: null });
 	}
 
-	park(): void { this.cancel(); this.#readingAnchorHold = null; this.#applicationGate = undefined; this.#parked = true; this.bodies.setParked(this, true); }
+	park(): void { this.#cancelRequests(); this.#readingAnchorHold = null; this.#applicationGate = undefined; this.#parked = true; this.bodies.setParked(this, true); }
 	activate(): void { this.#parked = false; this.bodies.setParked(this, false); this.#scheduleRefresh(0); }
 	reset(): void {
-		this.cancel();
+		this.#cancelRequests();
 		this.#readingAnchorHold = null;
 		this.#identity = null;
 		this.#profile = null;

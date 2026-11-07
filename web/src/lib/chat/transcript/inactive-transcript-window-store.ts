@@ -76,6 +76,7 @@ export class InactiveTranscriptWindowStore {
 			else window.transcript.applySharedOverlayMutation(mutation);
 		}
 	}
+	evictChatWindows(chatId: string): void { for (const window of this.#windows.values()) if (window.chatId === chatId) this.#evict(this.#key(window.surfaceId, chatId)); }
 	removeChat(chatId: string): void { for (const target of this.#targets.values()) if (target.chatId === chatId) this.discard(target.surfaceId, chatId); }
 	pruneSurfaces(ids: ReadonlySet<string>): void { for (const target of this.#targets.values()) if (!ids.has(target.surfaceId)) this.discard(target.surfaceId, target.chatId); }
 	clear(): void { for (const window of this.#windows.values()) window.transcript.dispose(); this.#windows.clear(); this.#targets.clear(); }
