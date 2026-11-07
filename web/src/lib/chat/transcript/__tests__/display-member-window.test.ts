@@ -240,6 +240,55 @@ it('publishes an expansion only after deferred member bodies finish loading', as
 	expect(f.bodies.count).toBe(0);
 });
 
+it.each(['collapse', 'park', 'replace-view'] as const)('reclaims partially staged bodies after %s without releasing other owners', async action => {
+	const whole = group(1, 1000), f = fixture([whole]);
+	await f.controller.refresh();
+	const certificate = f.controller.snapshot.window!.certificate;
+	const requested = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
+	const bodies = f.api.bodies.getMockImplementation()!;
+	f.api.bodies.mockImplementationOnce(async (...args) => {
+		const response = await bodies(...args);
+		return { ...response, bodies: response.bodies.slice(0, 25), deferredOrdinals: response.bodies.slice(25).map(row => row.ordinal) };
+	}).mockImplementationOnce(async (...args) => {
+		const response = await bodies(...args);
+		requested.resolve();
+		await released.promise;
+		return response;
+	});
+	const expanding = f.controller.expand(whole);
+	await requested.promise;
+	const sibling = {}, replacement = {};
+	const currentIdentity = { ...certificate, transcriptViewId: 'view-2' };
+	const currentBody = { ordinal: 1, submissionClientMessageId: null,
+		message: new BashToolUseMessage('2026-01-01T00:00:00.000Z', 'replacement-tool', 'echo replacement') };
+	try {
+		expect(f.bodies.count).toBe(25);
+		const sharedBody = f.bodies.get(certificate, 1);
+		f.bodies.retain(sibling, certificate, [1]);
+		f.bodies.retain(replacement, currentIdentity, [1]);
+		f.bodies.put(currentIdentity, [currentBody]);
+		if (action === 'collapse') f.controller.collapse(whole);
+		else if (action === 'park') f.controller.park();
+		else f.controller.installOpen(displayOpen('chat-1', 'view-2', 40_000), displayProfile);
+		expect(f.api.bodies.mock.calls[1][1]?.aborted).toBe(true);
+		released.resolve();
+		expect(await expanding).toBe('blocked');
+		expect(f.controller.snapshot.expansions).toEqual([]);
+		expect(f.controller.snapshot.details.size).toBe(0);
+		expect(f.bodies.count).toBe(2);
+		expect(f.bodies.get(certificate, 1)).toBe(sharedBody);
+		expect(f.bodies.get(certificate, 25)).toBeUndefined();
+		expect(f.bodies.get(certificate, 50)).toBeUndefined();
+		expect(f.bodies.get(currentIdentity, 1)).toBe(currentBody);
+		expect(f.api.bodies).toHaveBeenCalledTimes(2);
+	} finally {
+		released.resolve();
+		await expanding;
+		f.bodies.release(sibling);
+		f.bodies.release(replacement);
+	}
+});
+
 it('stops non-progressing hydration, releases staged bodies and allows a later expansion', async () => {
 	const whole = group(1, 1000), f = fixture([whole]);
 	await f.controller.refresh();

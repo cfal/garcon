@@ -135,6 +135,25 @@ test.each(['write', 'weighted-edit'] as const)('appends only the suffix to an op
   } finally { producer.close(); }
 });
 
+test('continues at the cursor watermark after appends without an explicit atWatermark', async () => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  const initial = await ready(input);
+  const latest = await ready({ ...input, limit: 1 });
+  if (latest.earlier.kind !== 'more') throw new Error('Expected earlier history');
+  const producer = ledger.openProducer('chat', 'synthetic');
+  try {
+    producer.sink.publish({ type: 'rows', rows: [
+      { message: new WriteToolUseMessage(at, 'synthetic-later-write', '/synthetic/later.txt', 'Synthetic later content') },
+    ] });
+    const advanced = await ready(input);
+    expect(advanced.certificate.watermark).toBe(initial.certificate.watermark + 1);
+    const continued = parseDisplayWindowResponse(await display.window({ ...input,
+      anchor: { kind: 'before', cursor: latest.earlier.cursor } }));
+    expect(continued).toMatchObject({ kind: 'available', certificate: initial.certificate,
+      sourceHead: advanced.sourceHead, items: initial.items.slice(0, -1), earlier: { kind: 'exhausted-through-watermark' } });
+  } finally { producer.close(); }
+});
+
 test('Bash timeouts fail only the matching profile, retry explicitly and retire obsolete revisions', async () => {
   patterns = [{ mode: 'regex', pattern: '^(a+)+$' }];
   display.settingsChanged();
@@ -255,9 +274,13 @@ test('retry retires cached handles before rebuilding a missing warm sidecar', as
   expect(ledger.highWatermark('chat').ordinal).toBe(before.sourceHead);
 });
 
-test.each(['missing', 'invalid'] as const)('retrying a %s sidecar fences an already completed read from the retired generation', async condition => {
+test.each((['missing', 'invalid'] as const).flatMap(condition =>
+  (['window', 'body-plan', 'hydrate'] as const).map(stage => [condition, stage] as const)))
+('retrying a %s sidecar fences an already completed %s read from the retired generation', async (condition, stage) => {
   const view = seed('chat', 2), input = request('chat', view.viewId);
-  await ready(input);
+  const initial = await ready(input);
+  const bodyRequest = { certificate: initial.certificate, profile: input.profile, cuts: [],
+    seedOrdinals: [2], residentOrdinals: [], limitBodies: 50, estimatedByteBudget: 10000 };
   const original = DisplayWorkerClient.prototype.request;
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   let held = false, invalidate = false;
@@ -267,10 +290,10 @@ test.each(['missing', 'invalid'] as const)('retrying a %s sidecar fences an alre
       throw Object.assign(new Error('Synthetic invalid sidecar'), { code: 'DISPLAY_STORE_INVALID' });
     }
     const result = await original.call(this, task, ...args);
-    if (task.kind === 'window' && !held) { held = true; entered.resolve(); await release.promise; }
+    if (task.kind === stage && !held) { held = true; entered.resolve(); await release.promise; }
     return result;
   });
-  const pending = display.window(input);
+  const pending = stage === 'window' ? display.window(input) : display.bodies(bodyRequest);
   try {
     await entered.promise;
     if (condition === 'missing') await rm(await sidecar());
@@ -279,6 +302,10 @@ test.each(['missing', 'invalid'] as const)('retrying a %s sidecar fences an alre
     expect((await ready(input)).items[1]).toMatchObject({ count: 2 });
     release.resolve();
     await expect(pending).rejects.toMatchObject({ code: 'DISPLAY_SUPERSEDED' });
+    if (stage !== 'window') {
+      const fresh = parseBodyDependencyResponse(JSON.parse(await display.bodies(bodyRequest)));
+      expect(fresh.bodies.map(row => row.ordinal)).toEqual([2, 3]);
+    }
   } finally { release.resolve(); await pending.catch(() => undefined); worker.mockRestore(); }
 });
 

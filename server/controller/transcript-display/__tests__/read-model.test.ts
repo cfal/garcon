@@ -142,6 +142,48 @@ describe('persistent transcript display read model', () => {
     expect(planBodyRead(store, { ...request, certificate: { ...request.certificate, watermark: 5 } }).details[0].pairedResult).toBe(4);
   });
 
+  test.each([1, 4, 13])('preserves orphan results and question-wrapper FIFO across run and frame boundaries of %s rows', frameSize => {
+    const store = create();
+    const question = () => new AskUserQuestionToolUseMessage(at, 'reused', 'Synthetic question', []);
+    const rows = stored([
+      new ToolResultMessage(at, 'reused', 'Synthetic orphan'),
+      new PermissionRequestMessage(at, 'first-question', question()),
+      new BashToolUseMessage(at, 'reused', 'true'),
+      question(), question(), question(),
+      new PermissionRequestMessage(at, 'second-question', question()),
+      new PermissionRequestMessage(at, 'third-question', question()),
+    ]);
+    const ended = { kind: 'run-ended' as const, at, outcome: 'finished' as const, origin: 'provider' as const };
+    rows.push({ view_id: 'view', ordinal: 9, kind: ended.kind, at, client_message_id: null,
+      payload_json: encodeLedgerDraft(ended).payloadJson });
+    rows.push(...stored(Array.from({ length: 4 }, (_, index) => new ToolResultMessage(at, 'reused', `Synthetic result ${index}`)), 10));
+    for (let offset = 0; offset < rows.length; offset += frameSize) {
+      appendDisplayFrame(store, rows.slice(offset, offset + frameSize), rows.length, 'server');
+    }
+    expect(store.all('SELECT use_ordinal, result_ordinal, wrapper_ordinal FROM tool_pair ORDER BY use_ordinal')).toEqual([
+      { use_ordinal: 3, result_ordinal: 10, wrapper_ordinal: null },
+      { use_ordinal: 4, result_ordinal: 11, wrapper_ordinal: 2 },
+      { use_ordinal: 5, result_ordinal: 12, wrapper_ordinal: 7 },
+      { use_ordinal: 6, result_ordinal: 13, wrapper_ordinal: 8 },
+    ]);
+    const request = { certificate: displayCertificate('server', { chatId: 'chat', transcriptViewId: 'view', profile, cuts: [] }, 9),
+      profile, cuts: [], seedOrdinals: [1, 4, 5, 6], residentOrdinals: [], limitBodies: 20, estimatedByteBudget: 10000 };
+    expect(planBodyRead(store, request).details.map(detail => detail.pairedResult)).toEqual([null, null, null, null]);
+    const latest = planBodyRead(store, { ...request, certificate: { ...request.certificate, watermark: 13 } });
+    expect(latest.details.map(detail => [detail.pairedResult, detail.questionWrapper])).toEqual([
+      [null, null], [11, 2], [12, 7], [13, 8],
+    ]);
+  });
+
+  test.each(['before', 'after'] as const)('rejects %s cursors inside a collapsed group', kind => {
+    const store = create();
+    const rows = stored(Array.from({ length: 12 }, (_, i) => new BashToolUseMessage(at, `tool-${i}`, 'true')));
+    appendDisplayFrame(store, rows, rows.length, 'server');
+    const initial = query(store);
+    expect(() => query(store, 50, { kind, cursor: { certificate: initial.certificate, boundaryOrdinal: 6 } }))
+      .toThrow('Display cursor clips a group');
+  });
+
   test('splits aggregate runs at overlay positions and pages complete fragments', () => {
     const store = create();
     const rows = stored(Array.from({ length: 12 }, (_, i) => new BashToolUseMessage(at, `tool-${i}`, 'true')));
