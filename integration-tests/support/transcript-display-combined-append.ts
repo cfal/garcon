@@ -2,18 +2,19 @@ import { expect } from 'bun:test';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
+import { isToolUseMessage } from '../../common/chat-types.js';
 import type { ChromiumFixture } from './chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from './chromium-workspace.js';
 import { claudeText, claudeToolUse } from './fake-claude-model.js';
 import { liveClaudeRunRequest, liveClaudeStartRequest } from './live-claude.js';
+import { seedLocalSettings } from './local-settings-seed.js';
 import type { ScriptedClaudeTestEnvironment } from './scripted-claude.js';
 import { appendDisplayHistory } from './transcript-display-fixture.js';
 import { DISPLAY_FEED, observeDisplayWire, waitForDisplayIdle } from './transcript-display-browser.js';
 
-export async function verifyCombinedAppend(
+async function openCombinedAppendChat(
   { page, integration }: ChromiumFixture,
   environment: ScriptedClaudeTestEnvironment,
-  browser: 'chromium' | 'webkit',
   width: number,
 ) {
   await page.setViewportSize({ width, height: 900 });
@@ -29,6 +30,17 @@ export async function verifyCombinedAppend(
   await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
   if (width >= 1024) await collapseCanonicalFilesWindow(page);
   await waitForDisplayIdle(page);
+  return { chatId, wire };
+}
+
+export async function verifyCombinedAppend(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+  browser: 'chromium' | 'webkit',
+  width: number,
+) {
+  const { page, integration } = fixture;
+  const { chatId, wire } = await openCombinedAppendChat(fixture, environment, width);
 
   const edit = (index: number) => claudeToolUse(`synthetic-write-${index}`, 'Write', {
     file_path: join(integration.dirs.project, `synthetic-${index}.txt`), content: `Synthetic file ${index}\n`,
@@ -109,4 +121,85 @@ export async function verifyCombinedAppend(
     expect(wire.requests).not.toContain('/api/v1/chats/transcript-display/members');
     environment.model.assertSettled();
   } finally { third.release(); completion.release(); }
+}
+
+export async function verifyCombinedSummaryWrap(
+  fixture: ChromiumFixture,
+  environment: ScriptedClaudeTestEnvironment,
+  browser: 'chromium' | 'webkit',
+) {
+  const { page, integration } = fixture;
+  await page.addInitScript(seedLocalSettings, { chatFeedFontSize: '18' });
+  const { chatId, wire } = await openCombinedAppendChat(fixture, environment, 320);
+  const paths = [1, 2].map(index => join(integration.dirs.project, `synthetic-wrap-${index}.txt`));
+  environment.model.scriptTurn(paths.map((filePath, index) => claudeToolUse(`synthetic-wrap-write-${index}`, 'Write', {
+    file_path: filePath, content: `Synthetic wrap file ${index}\n`,
+  })));
+  const moreTools = environment.model.scriptHeldTurn([
+    ...paths.map((filePath, index) => claudeToolUse(`synthetic-wrap-read-${index}`, 'Read', { file_path: filePath })),
+    claudeToolUse('synthetic-wrap-command', 'Bash', { command: 'true' }),
+  ]);
+  const completion = environment.model.scriptHeldTurn([claudeText('Synthetic wrapping complete')]);
+  try {
+    const turn = await integration.client.runChat(liveClaudeRunRequest({ chatId,
+      command: 'Write and read two synthetic files, then run a command', permissionMode: 'bypassPermissions' }));
+    await moreTools.requested;
+    const feed = page.locator(DISPLAY_FEED);
+    const group = feed.locator('[data-chat-tool-group]');
+    await browserExpect(group).toHaveCount(1);
+    await browserExpect(group).toHaveText('Edit 2 files');
+    await browserExpect(group).toHaveCSS('font-size', '18px');
+    await waitForDisplayIdle(page);
+    await browserExpect(feed).toHaveAttribute('data-chat-pinned-to-bottom', 'true');
+    expect(await feed.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    const beforeHeight = await group.evaluate(element => element.getBoundingClientRect().height);
+    const artifacts = join(import.meta.dirname, '../artifacts', browser);
+    await mkdir(artifacts, { recursive: true });
+    await page.screenshot({ path: join(artifacts, 'combined-wrap-before.png') });
+    await feed.evaluate(element => {
+      const group = element.querySelector('[data-chat-tool-group]')!;
+      const capture = { active: true, frames: 0, failures: [] as string[], labels: [] as string[] };
+      Object.assign(window, { __combinedWrap: capture });
+      const sample = () => {
+        if (!capture.active) return;
+        capture.frames++;
+        const label = group.textContent?.trim() ?? '';
+        if (capture.labels.at(-1) !== label) capture.labels.push(label);
+        if (element.getAttribute('data-chat-pinned-to-bottom') !== 'true') capture.failures.push('Lost bottom-follow intent');
+        if (element.querySelector('[data-chat-tool-group]') !== group) capture.failures.push('Replaced the combined row');
+        if (element.querySelector('[data-transcript-page-boundary="later"]')) capture.failures.push('Flashed later history');
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    moreTools.release();
+    await completion.requested;
+    const wrappedLabel = 'Edit 2 files, read 2 files, execute a command';
+    await browserExpect(group).toHaveText(wrappedLabel);
+    await waitForDisplayIdle(page);
+    const capture = await page.evaluate(() => {
+      const capture = (window as unknown as { __combinedWrap: { active: boolean; frames: number; failures: string[]; labels: string[] } }).__combinedWrap;
+      capture.active = false;
+      return capture;
+    });
+    expect(capture.frames).toBeGreaterThan(10);
+    expect(capture.labels[0]).toBe('Edit 2 files');
+    expect(capture.labels.at(-1)).toBe(wrappedLabel);
+    expect(capture.failures).toEqual([]);
+    expect(await group.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(beforeHeight + 10);
+    await browserExpect(group).toBeInViewport();
+    expect(await feed.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: join(artifacts, 'combined-wrap-after.png') });
+    completion.release();
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await browserExpect(feed.getByText('Synthetic wrapping complete', { exact: true })).toBeVisible();
+    await waitForDisplayIdle(page);
+    await browserExpect(feed).toHaveAttribute('data-chat-pinned-to-bottom', 'true');
+    expect(await feed.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1);
+    await wire.settle();
+    expect(wire.bodies().filter(row => isToolUseMessage(row.message) || row.message.type === 'tool-result')).toEqual([]);
+    expect(wire.requests).not.toContain('/api/v1/chats/messages');
+    expect(wire.requests).not.toContain('/api/v1/chats/transcript-display/members');
+    environment.model.assertSettled();
+  } finally { moreTools.release(); completion.release(); }
 }
