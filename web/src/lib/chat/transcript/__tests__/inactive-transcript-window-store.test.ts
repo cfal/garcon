@@ -69,6 +69,8 @@ describe('InactiveTranscriptWindowStore', () => {
 		const usage = vi.spyOn(window.bodyStore, 'usage');
 		await park(store, 'left', 'chat-1', window);
 		expect(usage).toHaveBeenCalledWith(window.controller);
+		expect(stringify).toHaveBeenCalledWith([window.display.window, window.display.expansions, window.display.protectedRows,
+			window.display.protectedGroups, [...window.display.details.values()]]);
 		expect(stringify.mock.results.every(result => result.type === 'return' && !result.value.includes('"content"'))).toBe(true);
 		expect(store.size).toBe(1);
 	});

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { BashToolUseMessage } from '$shared/chat-types';
-import type { GroupDescriptor } from '$shared/transcript-display-contract';
+import type { DisplayDescriptor, GroupDescriptor } from '$shared/transcript-display-contract';
 import { displayCutsKey } from '$shared/transcript-display-contract';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DisplayBodyStore } from '../display-body-store.js';
@@ -16,7 +16,7 @@ function group(first: number, last: number): GroupDescriptor {
 const controllers: DisplayWindowController[] = [];
 afterEach(() => { controllers.splice(0).forEach(controller => controller.dispose()); vi.useRealTimers(); });
 
-function fixture(initialGroups: GroupDescriptor[], limits = { count: 2000, bytes: 48 * 1024 * 1024 }) {
+function fixture(initialGroups: DisplayDescriptor[], limits = { count: 2000, bytes: 48 * 1024 * 1024 }) {
 	let groups = initialGroups;
 	const open = displayOpen('chat-1', 'view-1', 40_000), bodies = new DisplayBodyStore(limits);
 	const api = {
@@ -44,7 +44,7 @@ function fixture(initialGroups: GroupDescriptor[], limits = { count: 2000, bytes
 	const controller = new DisplayWindowController(bodies, () => {}, api);
 	controllers.push(controller);
 	controller.installOpen(open, displayProfile);
-	return { controller, api, bodies, replace(next: GroupDescriptor[]) { groups = next; } };
+	return { controller, api, bodies, replace(next: DisplayDescriptor[]) { groups = next; } };
 }
 
 it('retains one bounded anchor window across append, parking, and overlapping filters', async () => {
@@ -248,21 +248,77 @@ it('keeps a protected summary through trimming without hydrating its members', a
 	const f = fixture(groups);
 	await f.controller.refresh();
 	f.controller.setReadingAnchor(3901, false);
-	f.controller.protect([1]);
+	f.controller.protectGroups([1]);
 	f.controller.trim(3901, 3999);
-	expect(f.controller.snapshot.window!.items).toContainEqual(groups[0]);
+	expect(f.controller.snapshot.protectedGroups.map(group => group.descriptor)).toEqual([groups[0]]);
+	expect(f.controller.snapshot.window!.items).toEqual(groups.slice(29));
+	expect(f.controller.snapshot.window!.items).not.toContainEqual(groups[1]);
 	expect(f.api.members).not.toHaveBeenCalled();
 	expect(f.api.bodies).not.toHaveBeenCalled();
-	f.controller.protect([]);
+	f.controller.protectGroups([]);
 	f.controller.trim(3901, 3999);
+	expect(f.controller.snapshot.protectedGroups).toEqual([]);
 	expect(f.controller.snapshot.window!.items).not.toContainEqual(groups[0]);
 	expect(f.controller.snapshot.window!.earlier.kind).toBe('more');
 });
 
-it('stages member continuation behind the caller application gate', async () => {
+it.each([false, true])('releases intervening bodies and retains only the focused summary island, pressured=%s', async pressured => {
+	const groups = Array.from({ length: 40 }, (_, index) => group(index * 100 + 1, index * 100 + 99));
+	const items = groups.flatMap<DisplayDescriptor>(descriptor => [descriptor, { kind: 'row', ordinal: descriptor.lastMember + 1,
+		messageType: 'bash-tool-use', layout: 'standard', estimatedBodyBytes: 100, permissionOccurrenceId: null }]);
+	const f = fixture(items, { count: pressured ? 1 : 2000, bytes: 48 * 1024 * 1024 });
+	await f.controller.refresh();
+	await f.controller.expand(groups[0]);
+	f.controller.protectGroups([1]);
+	f.controller.setReadingAnchor(3901, false);
+	f.controller.trim(3901, 4000);
+	expect(f.controller.snapshot.window!.items).toEqual(items.slice(pressured ? 78 : 68));
+	expect(f.controller.snapshot.protectedGroups.map(group => group.descriptor)).toEqual([groups[0]]);
+	expect(f.controller.snapshot.expansions).toEqual([]);
+	expect(f.controller.snapshot.protectedRows).toEqual([]);
+	expect(f.bodies.count).toBe(pressured ? 1 : 6);
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 1)).toBeUndefined();
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 200)).toBeUndefined();
+});
+
+it('readmits a retained summary before expansion without reusing its old certificate', async () => {
+	const groups = Array.from({ length: 40 }, (_, index) => group(index * 100 + 1, index * 100 + 99));
+	const f = fixture(groups);
+	await f.controller.refresh();
+	f.controller.protectGroups([1]);
+	f.controller.setReadingAnchor(3901, false);
+	f.controller.trim(3901, 3999);
+	f.replace([groups[0]]);
+	expect(await f.controller.expand(groups[0])).toBe('loaded');
+	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 1 });
+	expect(f.controller.snapshot.protectedGroups).toEqual([]);
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
+	f.controller.collapse(groups[0]);
+	expect(f.controller.snapshot.protectedRows).toEqual([]);
+	expect(f.bodies.count).toBe(0);
+});
+
+it('retains a summary acquired during hydration and releases it on replacement', async () => {
+	const whole = group(1, 99), f = fixture([whole]);
+	await f.controller.refresh();
+	const held = Promise.withResolvers<'apply'>(), entered = Promise.withResolvers<void>();
+	f.controller.setApplicationGate(() => { entered.resolve(); return held.promise; });
+	f.replace([]);
+	const refresh = f.controller.refresh();
+	await entered.promise;
+	f.controller.protectGroups([1]);
+	held.resolve('apply');
+	expect(await refresh).toBe('loaded');
+	expect(f.controller.snapshot.protectedGroups.map(group => group.descriptor)).toEqual([whole]);
+	f.controller.installOpen(displayOpen('chat-1', 'view-2', 40_000), displayProfile);
+	expect(f.controller.snapshot.protectedGroups).toEqual([]);
+});
+
+it.each([false, true])('stages member continuation behind the caller application gate, profileChanged=%s', async profileChanged => {
 	const whole = group(1, 200), f = fixture([whole]);
 	await f.controller.refresh();
 	await f.controller.expand(whole);
+	if (profileChanged) f.controller.configure({ ...displayProfile, showThinking: false }, []);
 	const held = Promise.withResolvers<'apply'>(), entered = Promise.withResolvers<void>();
 	const before = f.controller.snapshot.expansions;
 	const loading = f.controller.extendMembers(whole, { kind: 'after', ordinal: 50 }, () => { entered.resolve(); return held.promise; });

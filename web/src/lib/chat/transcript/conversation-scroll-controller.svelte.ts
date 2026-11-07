@@ -406,8 +406,8 @@ export class ConversationScrollController {
 		reason: PageRequestReason,
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.getChatId();
-		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
-		const memberTarget = this.deps.getViewport()?.memberPageTarget(direction) ?? undefined;
+		if (!chatId || !this.#canRequestPage(direction, reason)) return 'invalidated';
+		const memberTarget = reason === 'scroll' ? this.deps.getViewport()?.memberPageTarget(direction) ?? undefined : undefined;
 		const requestIntentEpoch = this.#userScrollIntent.epoch;
 		const requestBoundarySignature = this.#pageBoundarySignature(direction);
 
@@ -725,16 +725,18 @@ export class ConversationScrollController {
 		void this.requestPage(direction, 'scroll');
 	}
 
-	#canRequestPage(direction: TranscriptPageDirection, allowRetry = false): boolean {
+	#canRequestPage(direction: TranscriptPageDirection, reason: PageRequestReason = 'scroll'): boolean {
+		if (this.#activeTargetNavigations > 0 || this.#isPageMutationInProgress) return false;
+		if (reason === 'scroll' && this.deps.chatState.loadStatus === 'error') return false;
+		if (reason === 'scroll' && this.deps.getViewport()?.memberPageTarget(direction)) {
+			return !this.deps.chatState.isLoadingMessages;
+		}
 		if (
-			this.#activeTargetNavigations > 0 ||
-			this.#isPageMutationInProgress ||
 			this.deps.chatState.pageStates[direction].status === 'loading' ||
-			(!allowRetry && this.deps.chatState.pageStates[direction].status === 'error')
+			(reason !== 'button' && this.deps.chatState.pageStates[direction].status === 'error')
 		) {
 			return false;
 		}
-		if (this.deps.getViewport()?.memberPageTarget(direction)) return true;
 		return direction === 'earlier'
 			? this.deps.chatState.canLoadEarlier
 			: this.deps.chatState.hasLaterMessages;

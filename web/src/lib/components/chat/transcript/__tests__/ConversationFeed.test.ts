@@ -184,6 +184,43 @@ describe('ConversationFeed', () => {
 		expect(transcript.hasLaterMessages).toBe(true);
 	});
 
+	it('keeps a focused summary mounted when filtering empties the certified window', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		const remoteSettingsStore = new RemoteSettingsStore();
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'bash-filter', remoteSettingsStore, onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		const snapshot = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}');
+		const newValue = JSON.stringify({ ...snapshot, combineToolUseMessages: true });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+		window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_STORAGE_KEYS.localSettings, newValue, storageArea: localStorage }));
+		const group = await screen.findByRole('button', { name: 'Execute a command' });
+		group.focus();
+		await fireEvent.focusIn(group);
+		await tick();
+		remoteSettingsStore.applySnapshot(makeRemoteSettingsSnapshot({ version: 1, ui: { hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }] } }));
+		await waitFor(() => expect(transcript.display.window?.items).toHaveLength(0));
+		expect(transcript.display.protectedGroups).toHaveLength(1);
+		expect(transcript.display.protectedRows).toHaveLength(0);
+		expect(container.querySelector('[data-chat-virtual-sizer]')).not.toBeNull();
+		expect(container.querySelector('[data-chat-tool-group]')).toBe(group);
+	});
+
+	it('classifies a profile replacement caused by boundary demand in its first projection', async () => {
+		const projected = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation', onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		const profile = transcript.display.window!.certificate.profileKey;
+		transcript.configureDisplay({ combine: false, showThinking: false, hiddenToolGroups: [] });
+		const revision = transcript.feedMutationClock.dataRevision;
+		projected.mockClear();
+		await transcript.loadEarlierPage('chat-1');
+		await tick();
+		const changed = projected.mock.calls.find(([input]) => input.display.window && input.display.window.certificate.profileKey !== profile)?.[0];
+		expect(changed).toBeDefined();
+		expect(changed!.mutationClock.lastRevisionByKind['history-earlier']).toBeGreaterThan(revision);
+	});
+
 	it.each(['explicit', 'coverage'])('classifies earlier history in the same projection as its %s prepend', async entry => {
 		const projected = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');
 		const mounted = Promise.withResolvers<ActiveTranscriptState>();
@@ -210,6 +247,9 @@ describe('ConversationFeed', () => {
 		expect(group.hasAttribute('aria-controls')).toBe(false);
 		expect(group.firstElementChild?.querySelector('svg')).not.toBeNull();
 		expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0);
+		group.focus();
+		await fireEvent.focusIn(group);
+		await tick();
 		await fireEvent.click(group);
 		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
 		expect(group.getAttribute('aria-expanded')).toBe('true');
@@ -296,7 +336,7 @@ describe('ConversationFeed', () => {
 			get: () => Number.parseFloat(container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')?.style.height ?? '0') });
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
 		const group = await screen.findByRole('button', { name: 'Execute 2000 commands' });
-		const protect = vi.spyOn(transcript.controller, 'protect');
+		const protect = vi.spyOn(transcript.controller, 'protectGroups');
 		group.focus();
 		await fireEvent.focusIn(group);
 		await waitFor(() => expect(protect).toHaveBeenCalledWith([1]));

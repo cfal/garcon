@@ -373,7 +373,7 @@ export class ConversationSessionController {
 		try {
 			if (transcript.display.phase === 'failed') {
 				const result = await transcript.controller.retry();
-				if (result === 'blocked' || transcript.activeChatId !== chatId) return;
+				if (result === 'superseded' || transcript.activeChatId !== chatId) return;
 			}
 			await this.#loadChat(chatId, { restoreBottom: false }, transcript, loadPanelSnapshot);
 		} catch {

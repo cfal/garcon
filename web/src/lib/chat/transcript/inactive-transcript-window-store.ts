@@ -25,7 +25,7 @@ export class InactiveTranscriptWindowStore {
 		if (window.transcript.visibleOptimisticInputs.length) { window.transcript.dispose(); return; }
 		const details = [...snapshot.details.values(), ...snapshot.protectedRows.map(row => row.detail)];
 		const usage = window.transcript.bodyStore.usage(window.transcript.controller);
-		const bytes = usage.bytes + JSON.stringify([snapshot.window, snapshot.expansions, snapshot.protectedRows, details]).length * 2;
+		const bytes = usage.bytes + JSON.stringify([snapshot.window, snapshot.expansions, snapshot.protectedRows, snapshot.protectedGroups, details]).length * 2;
 		if (!snapshot.window || usage.count > this.limits.messages || bytes > this.limits.bytes) { window.transcript.dispose(); return; }
 		window.transcript.controller.park();
 		this.#windows.set(this.#key(window.surfaceId, window.chatId), { ...window, count: usage.count, bytes });

@@ -66,6 +66,29 @@ it('[TLV5-DISPLAY.01-WEB-UNIT-01] ships no collapsed member bodies and resolves 
 	expect(store.count).toBe(1);
 });
 
+it.each(['retry', 'refresh'] as const)('distinguishes cancellation during %s from ongoing preparation', async stage => {
+	const { controller, api } = setup();
+	await controller.refresh();
+	const held = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
+	if (stage === 'retry') api.retry = async () => { entered.resolve(); await held.promise; return { success: true }; };
+	else api.window = async () => { entered.resolve(); await held.promise; return window(); };
+	const pending = controller.retry();
+	await entered.promise;
+	controller.cancel();
+	held.resolve();
+	expect(await pending).toBe('superseded');
+});
+
+it('reports a retry that is still preparing as blocked, not superseded', async () => {
+	const { controller, api } = setup();
+	await controller.refresh();
+	api.window = async () => ({ kind: 'preparing', serverInstanceId: 'instance', chatId: 'chat', transcriptViewId: 'view',
+		policyRevision: 1, profileKey: certificate.profileKey, bashRevision: 'patterns', sourceHead: 40002,
+		preparedThrough: 0, errorCode: null, retryAfterMs: 1500 });
+	expect(await controller.retry()).toBe('blocked');
+	expect(controller.snapshot.phase).toBe('preparing');
+});
+
 it('replaces an in-flight old profile when a same-view open carries a new revision', async () => {
 	vi.useFakeTimers();
 	const old = Promise.withResolvers<AvailableDisplayWindow>();

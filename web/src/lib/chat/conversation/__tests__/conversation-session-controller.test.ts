@@ -1674,13 +1674,13 @@ describe('ConversationSessionController', () => {
 		panelTranscript.dispose();
 	});
 
-	it('retries failed display preparation before reopening the panel', async () => {
+	it.each(['loaded', 'blocked'] as const)('retries failed display preparation before reopening the panel, result=%s', async result => {
 		const { deps } = createDeps();
 		const transcript = new ActiveTranscriptState();
 		transcript.activateChat('chat-1');
 		transcript.display = { ...transcript.display, phase: 'failed', error: 'DISPLAY_FILTER_TIMEOUT' };
 		const calls: string[] = [];
-		vi.spyOn(transcript.controller, 'retry').mockImplementation(async () => { calls.push('retry'); return 'loaded'; });
+		vi.spyOn(transcript.controller, 'retry').mockImplementation(async () => { calls.push('retry'); return result; });
 		const open = vi.fn(async () => { calls.push('open'); return true; });
 		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
 		expect(calls).toEqual(['retry', 'open']);
@@ -1692,12 +1692,12 @@ describe('ConversationSessionController', () => {
 		const transcript = new ActiveTranscriptState();
 		transcript.activateChat('chat-1');
 		transcript.display = { ...transcript.display, phase: 'failed', error: 'DISPLAY_FILTER_TIMEOUT' };
-		const retry = Promise.withResolvers<'loaded' | 'blocked'>();
+		const retry = Promise.withResolvers<'loaded' | 'superseded'>();
 		vi.spyOn(transcript.controller, 'retry').mockReturnValue(retry.promise);
 		const open = vi.fn(async () => true);
 		const pending = new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
 		if (supersession === 'chat-switch') transcript.activateChat('chat-2');
-		retry.resolve(supersession === 'cancelled' ? 'blocked' : 'loaded');
+		retry.resolve(supersession === 'cancelled' ? 'superseded' : 'loaded');
 		await pending;
 		expect(open).not.toHaveBeenCalled();
 		expect(transcript.activeChatId).toBe(supersession === 'chat-switch' ? 'chat-2' : 'chat-1');

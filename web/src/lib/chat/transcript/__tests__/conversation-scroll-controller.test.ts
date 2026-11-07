@@ -232,9 +232,37 @@ describe('ConversationScrollController', () => {
 			return 'loaded';
 		});
 		const fixture = controllerFixture({ viewport, state: { loadEarlierPage: load, loadLaterPage: load } });
+		expect(await fixture.controller.requestPage(direction, 'button')).toBe('invalidated');
+		expect(load).not.toHaveBeenCalled();
 		expect(await fixture.controller.requestPage(direction, 'scroll')).toBe('loaded');
 		expect(load).toHaveBeenCalledOnce();
 		expect(fixture.controller.isPinnedToBottom).toBe(false);
+		fixture.state.loadStatus = 'error';
+		expect(await fixture.controller.requestPage(direction, 'scroll')).toBe('invalidated');
+		viewport.memberPageTarget.mockReturnValue(null);
+		fixture.state.canLoadEarlier = true;
+		fixture.state.hasLaterMessages = true;
+		expect(await fixture.controller.requestPage(direction, 'scroll')).toBe('invalidated');
+		expect(load).toHaveBeenCalledOnce();
+	});
+
+	it.each(['earlier', 'later'] as const)('keeps explicit %s parent paging and retry separate from member demand', async direction => {
+		const viewport = fakeViewport();
+		viewport.memberPageTarget.mockReturnValue({
+			group: { kind: 'tool-group', firstMember: 1, lastMember: 200, count: 200,
+				base: { afterBreaker: 0, beforeBreaker: 201, firstMember: 1, lastMember: 200, openAtWatermark: false },
+				fragment: { after: 0, through: 200 }, totals: { commands: 200, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] },
+			anchor: { kind: direction === 'earlier' ? 'before' : 'after', ordinal: 100 },
+		});
+		const load = vi.fn<ConversationScrollState['loadEarlierPage']>(async (_chatId, options) => {
+			expect(options?.memberTarget).toBeUndefined();
+			return 'loaded';
+		});
+		const fixture = controllerFixture({ viewport, state: { canLoadEarlier: true, hasLaterMessages: true, loadEarlierPage: load, loadLaterPage: load } });
+		expect(await fixture.controller.requestPage(direction, 'button')).toBe('loaded');
+		fixture.state.pageStates[direction] = { status: 'error', error: 'Parent read failed' };
+		expect(await fixture.controller.requestPage(direction, 'button')).toBe('loaded');
+		expect(load).toHaveBeenCalledTimes(2);
 	});
 
 	it('delegates physical end checks and end scrolling to the viewport', () => {

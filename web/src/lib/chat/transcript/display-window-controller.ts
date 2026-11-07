@@ -39,6 +39,7 @@ export interface DisplayWindowSnapshot {
 	readonly details: ReadonlyMap<number, RowDetails>;
 	readonly detailsCertificate: DisplayCertificate | null;
 	readonly protectedRows: readonly ProtectedDisplayRow[];
+	readonly protectedGroups: readonly ProtectedDisplayGroup[];
 	readonly phase: 'idle' | 'requesting' | 'available' | 'preparing' | 'lagging' | 'busy' | 'failed';
 	readonly error: string | null;
 	readonly revision: number;
@@ -48,12 +49,16 @@ export interface ProtectedDisplayRow {
 	readonly detail: RowDetails;
 	readonly layout: RowDescriptor['layout'];
 }
+export interface ProtectedDisplayGroup {
+	readonly certificate: DisplayCertificate;
+	readonly descriptor: GroupDescriptor;
+}
 type DisplayWindowOpen = Pick<DisplayOpenResponse, 'serverInstanceId' | 'transcriptViewId' | 'sourceHead' | 'display'>
 	& { readonly chat: Pick<DisplayOpenResponse['chat'], 'id'> };
 type DisplayNavigationResolution = DisplayTargetResolution | { kind: 'stale-view'; ordinal: number; landedOrdinal: null };
 
 export const emptyDisplayWindow = (): DisplayWindowSnapshot => ({
-	window: null, expansions: [], details: new Map(), detailsCertificate: null, protectedRows: [], phase: 'idle', error: null, revision: 0,
+	window: null, expansions: [], details: new Map(), detailsCertificate: null, protectedRows: [], protectedGroups: [], phase: 'idle', error: null, revision: 0,
 });
 
 export function descriptorFirst(item: DisplayDescriptor): number {
@@ -98,6 +103,7 @@ export class DisplayWindowController {
 	#wakeNavigation: (() => void) | null = null;
 	#openedAt = 0;
 	#protected = new Set<number>();
+	#protectedGroups = new Set<number>();
 	#applicationGate: TranscriptPageApplicationGate | undefined;
 	#errorCode: string | null = null;
 
@@ -114,7 +120,7 @@ export class DisplayWindowController {
 	get busy(): boolean { return this.#request !== null || this.#navigationEpoch !== null; }
 	get parked(): boolean { return this.#parked; }
 	get residency() {
-		const usage = this.bodies.usage(this), descriptors = this.#snapshot.window?.items.length ?? 0;
+		const usage = this.bodies.usage(this), descriptors = (this.#snapshot.window?.items.length ?? 0) + this.#snapshot.protectedGroups.length;
 		return { ...usage, descriptors, protectedRows: this.#snapshot.protectedRows.length,
 			budgetException: usage.count > 500 || usage.bytes > 12 * 1024 * 1024 || descriptors > 512 };
 	}
@@ -201,20 +207,25 @@ export class DisplayWindowController {
 			&& (this.#pinned || !window || window.later.kind !== 'more');
 	}
 
-	async retry(): Promise<CoverageOutcome> {
-		if (!this.#identity) return 'blocked';
+	async retry(): Promise<CoverageOutcome | 'superseded'> {
+		if (!this.#identity) return 'superseded';
 		const epoch = this.#epoch;
 		await this.api.retry(this.#identity);
 		if (this.#request) await this.#request;
-		if (epoch !== this.#epoch) return 'blocked';
-		return this.refresh();
+		if (epoch !== this.#epoch) return 'superseded';
+		const result = await this.refresh();
+		return epoch === this.#epoch ? result : 'superseded';
 	}
 
 	refresh(): Promise<CoverageOutcome> {
+		return this.#refreshWindow();
+	}
+
+	#refreshWindow(applicationGate?: TranscriptPageApplicationGate, direction?: TranscriptPageDirection): Promise<CoverageOutcome> {
 		if (this.#navigationEpoch !== null) return Promise.resolve('blocked');
 		const anchor: WindowAnchor = this.#pinned || this.#anchor === null
 			? { kind: 'newest' } : { kind: 'around', ordinal: this.#anchor };
-		return this.#loadWindow(anchor, 'replace');
+		return this.#loadWindow(anchor, 'replace', { applicationGate, direction });
 	}
 
 	async navigateWindow(target: 'initial' | 'latest'): Promise<CoverageOutcome> {
@@ -224,15 +235,15 @@ export class DisplayWindowController {
 
 	load(direction: 'earlier' | 'later', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
 		if (this.#navigationEpoch !== null) return Promise.resolve('blocked');
-		if (this.#needsReplace()) return this.refresh();
+		if (this.#needsReplace()) return this.#refreshWindow(applicationGate, direction);
 		const window = this.#snapshot.window;
-		if (!window) return this.refresh();
+		if (!window) return this.#refreshWindow(applicationGate, direction);
 		const edge = direction === 'earlier' ? window.earlier : window.later;
 		if (edge.kind !== 'more') {
-			if (direction === 'later' && window.certificate.watermark < this.#head) return this.refresh();
+			if (direction === 'later' && window.certificate.watermark < this.#head) return this.#refreshWindow(applicationGate, direction);
 			return Promise.resolve('exhausted');
 		}
-		return this.#loadWindow({ kind: direction === 'earlier' ? 'before' : 'after', cursor: edge.cursor }, direction, applicationGate);
+		return this.#loadWindow({ kind: direction === 'earlier' ? 'before' : 'after', cursor: edge.cursor }, direction, { applicationGate });
 	}
 
 	async navigate(ordinal: number, signal?: AbortSignal, ownsNavigation: () => boolean = () => true): Promise<DisplayNavigationResolution | null> {
@@ -263,7 +274,7 @@ export class DisplayWindowController {
 				this.#pinned = target === 'latest';
 				const anchor: WindowAnchor = target === 'initial' ? { kind: 'around', ordinal: 1 } : { kind: 'newest' };
 				const requiredThrough = target === 'initial' ? Math.min(1, this.#head) : this.#head;
-				const result = await this.#navigationRequest(() => this.#loadWindow(anchor, 'replace', gate, undefined, requiredThrough), current);
+				const result = await this.#navigationRequest(() => this.#loadWindow(anchor, 'replace', { applicationGate: gate, requiredThrough }), current);
 				completed = current() && result === 'loaded';
 				if (completed) this.#navigationAnchor = null;
 				return completed ? 'loaded' : null;
@@ -276,7 +287,7 @@ export class DisplayWindowController {
 			}
 			this.#anchor = ordinal;
 			this.#pinned = false;
-			if (await this.#navigationRequest(() => this.#loadWindow({ kind: 'around', ordinal }, 'replace', gate, undefined, ordinal), current) !== 'loaded') {
+			if (await this.#navigationRequest(() => this.#loadWindow({ kind: 'around', ordinal }, 'replace', { applicationGate: gate, requiredThrough: ordinal }), current) !== 'loaded') {
 				return this.#errorCode === 'STALE_TRANSCRIPT_VIEW' ? { kind: 'stale-view', ordinal, landedOrdinal: null } : null;
 			}
 			let window = this.#snapshot.window;
@@ -296,7 +307,7 @@ export class DisplayWindowController {
 			if (landed !== null && (resolution.kind === 'group-member' || resolution.kind === 'attached-detail' || resolution.kind === 'filtered')) {
 				if (!window.items.some(item => landed >= descriptorFirst(item) && landed <= descriptorLast(item))) {
 					const watermark = window.certificate.watermark;
-					if (await this.#navigationRequest(() => this.#loadWindow({ kind: 'around', ordinal: landed }, 'replace', gate, watermark), current) !== 'loaded') return null;
+					if (await this.#navigationRequest(() => this.#loadWindow({ kind: 'around', ordinal: landed }, 'replace', { applicationGate: gate, atWatermark: watermark }), current) !== 'loaded') return null;
 					window = this.#snapshot.window!;
 				}
 				const group = window.items.find((item): item is GroupDescriptor => item.kind === 'tool-group'
@@ -376,13 +387,20 @@ export class DisplayWindowController {
 
 	async #loadMembers(group: GroupDescriptor, anchor: MemberWindowRequest['anchor'], mode: 'replace' | 'extend', applicationGate?: TranscriptPageApplicationGate): Promise<CoverageOutcome> {
 		const epoch = this.#epoch;
+		const direction = mode === 'extend' ? anchor.kind === 'before' ? 'earlier' : 'later' : undefined;
 		if (this.#request) await this.#request;
 		if (epoch !== this.#epoch) return 'blocked';
-		if (this.#needsReplace() && await this.refresh() !== 'loaded') return 'blocked';
+		if (this.#needsReplace() && await this.#refreshWindow(applicationGate, direction) !== 'loaded') return 'blocked';
 		if (epoch !== this.#epoch) return 'blocked';
 		const anchorOrdinal = anchor.kind === 'first' ? group.firstMember : anchor.ordinal;
-		const currentGroup = this.#snapshot.window?.items.find((item): item is GroupDescriptor => item.kind === 'tool-group'
+		const findGroup = () => this.#snapshot.window?.items.find((item): item is GroupDescriptor => item.kind === 'tool-group'
 			&& anchorOrdinal > item.fragment.after && anchorOrdinal <= item.fragment.through);
+		if (!findGroup() && this.#snapshot.protectedGroups.some(retained => retained.descriptor.firstMember === group.firstMember)) {
+			this.setReadingAnchor(anchorOrdinal, false);
+			if (await this.#loadWindow({ kind: 'around', ordinal: anchorOrdinal }, 'replace', { applicationGate, requiredThrough: this.#head, direction }) !== 'loaded') return 'blocked';
+			if (epoch !== this.#epoch) return 'blocked';
+		}
+		const currentGroup = findGroup();
 		if (!currentGroup) return 'blocked';
 		group = currentGroup;
 		return this.#run(async (signal, epoch) => {
@@ -404,8 +422,7 @@ export class DisplayWindowController {
 			else if (anchor.kind === 'around' && page.ordinals.includes(anchor.ordinal)) anchorOrdinal = anchor.ordinal;
 			if (anchorOrdinal === undefined) return 'exhausted';
 			const expansions = [...others, { anchorOrdinal, openedAt: ++this.#openedAt, page }];
-			await this.#hydrateAndApply(window, expansions, signal, epoch, { applicationGate,
-				direction: mode === 'extend' ? anchor.kind === 'before' ? 'earlier' : 'later' : undefined });
+			await this.#hydrateAndApply(window, expansions, signal, epoch, { applicationGate, direction });
 			return 'loaded';
 		});
 	}
@@ -429,12 +446,17 @@ export class DisplayWindowController {
 		}
 	}
 
+	protectGroups(firstMembers: readonly number[]): void {
+		this.#protectedGroups = new Set(firstMembers);
+		const protectedGroups = this.#snapshot.protectedGroups.filter(group => this.#protectedGroups.has(group.descriptor.firstMember));
+		if (protectedGroups.length !== this.#snapshot.protectedGroups.length) this.#commit({ ...this.#snapshot, protectedGroups });
+	}
+
 	trim(firstOrdinal: number, lastOrdinal: number, visibleRowOrdinals: readonly number[] = [firstOrdinal, lastOrdinal]): void {
 		const window = this.#snapshot.window;
 		if (!window || this.busy || this.#readingAnchorHold) return;
 		const keep = window.items.map((item, index) => ({ item, index })).filter(({ item }) =>
-			descriptorLast(item) >= firstOrdinal && descriptorFirst(item) <= lastOrdinal
-			|| item.kind === 'tool-group' && this.#protected.has(item.firstMember));
+			descriptorLast(item) >= firstOrdinal && descriptorFirst(item) <= lastOrdinal);
 		if (keep.length === 0) return;
 		const pressured = this.bodies.activeOverBudget || this.residency.budgetException;
 		const margin = pressured ? 0 : 10;
@@ -453,7 +475,7 @@ export class DisplayWindowController {
 		if (start === 0 && end === window.items.length && expansions.every((expansion, index) => expansion === this.#snapshot.expansions[index])) return;
 		const details = this.#retainedDetails(next, expansions);
 		const protectedRows = this.#captureProtectedRows(new Set(details.keys()));
-		this.#commit({ ...this.#snapshot, window: next, expansions, protectedRows, details });
+		this.#commit({ ...this.#snapshot, window: next, expansions, protectedRows, protectedGroups: this.#captureProtectedGroups(next), details });
 		this.#retainBodies();
 	}
 
@@ -476,7 +498,13 @@ export class DisplayWindowController {
 				later: end < ordinals.length ? { afterOrdinal: retained.at(-1)!, remaining: (page.later?.remaining ?? 0) + ordinals.length - end } : page.later } };
 	}
 
-	#loadWindow(anchor: WindowAnchor, mode: 'replace' | 'earlier' | 'later' | 'details', applicationGate?: TranscriptPageApplicationGate, atWatermark?: number, requiredThrough?: number): Promise<CoverageOutcome> {
+	#loadWindow(anchor: WindowAnchor, mode: 'replace' | 'earlier' | 'later' | 'details', options: {
+		applicationGate?: TranscriptPageApplicationGate;
+		atWatermark?: number;
+		requiredThrough?: number;
+		direction?: TranscriptPageDirection;
+	} = {}): Promise<CoverageOutcome> {
+		const { applicationGate, atWatermark, requiredThrough, direction } = options;
 		return this.#run(async (signal, epoch) => {
 			const identity = this.#identity, profile = this.#profile, cuts = this.#cuts;
 			if (!identity || !profile) return 'blocked';
@@ -539,7 +567,7 @@ export class DisplayWindowController {
 			}
 			const expansions = mode === 'replace' ? await this.#remapExpansions(window, signal) : this.#snapshot.expansions;
 			await this.#hydrateAndApply(window, expansions, signal, epoch, { applicationGate,
-				assertApplication: () => assertReadingIntent(expansions), direction: mode === 'replace' ? undefined : mode });
+				assertApplication: () => assertReadingIntent(expansions), direction: direction ?? (mode === 'replace' ? undefined : mode) });
 			if (mode === 'replace') this.#refreshGoal = null;
 			if (this.#needsHeadRefresh()) this.#scheduleRefresh(250);
 			return 'loaded';
@@ -632,7 +660,8 @@ export class DisplayWindowController {
 				return detail ? { ...row, certificate: detailsCertificate, detail } : row;
 			});
 			for (const row of protectedRows) details.delete(row.detail.ordinal);
-			this.#commit({ window, expansions, details, detailsCertificate, protectedRows: refreshedProtected, phase: 'available', error: null, revision: this.#snapshot.revision }, options.direction);
+			this.#commit({ window, expansions, details, detailsCertificate, protectedRows: refreshedProtected,
+				protectedGroups: this.#captureProtectedGroups(window), phase: 'available', error: null, revision: this.#snapshot.revision }, options.direction);
 			this.#retainBodies();
 		} finally { this.bodies.release(staged); }
 	}
@@ -648,6 +677,17 @@ export class DisplayWindowController {
 			rows.set(ordinal, { certificate: this.#snapshot.detailsCertificate ?? window.certificate, detail, layout: descriptor?.kind === 'row' ? descriptor.layout : 'standard' });
 		}
 		return [...rows.values()].filter(row => !represented.has(row.detail.ordinal));
+	}
+
+	#captureProtectedGroups(next: AvailableDisplayWindow): ProtectedDisplayGroup[] {
+		const window = this.#snapshot.window;
+		if (!window) return [];
+		const groups = new Map(this.#snapshot.protectedGroups.map(group => [group.descriptor.firstMember, group]));
+		for (const descriptor of window.items) {
+			if (descriptor.kind === 'tool-group') groups.set(descriptor.firstMember, { certificate: window.certificate, descriptor });
+		}
+		return [...groups.values()].filter(({ descriptor }) => this.#protectedGroups.has(descriptor.firstMember)
+			&& !next.items.some(item => descriptor.firstMember >= descriptorFirst(item) && descriptor.firstMember <= descriptorLast(item)));
 	}
 
 	#retainBodies(): void {
@@ -791,6 +831,7 @@ export class DisplayWindowController {
 		this.#anchor = null;
 		this.#pinned = true;
 		this.#protected.clear();
+		this.#protectedGroups.clear();
 		this.bodies.release(this);
 		this.#commit(emptyDisplayWindow());
 	}

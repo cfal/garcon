@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import { ChatDisplayStateUpdatedMessage, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
-import { displayCutsKey, displayProfileKey } from '$shared/transcript-display-contract';
+import { displayCutsKey, displayProfileKey, type GroupDescriptor } from '$shared/transcript-display-contract';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { DisplayBodyStore } from '../display-body-store.js';
 import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 import { diagnosticDigest } from '../local-notice.js';
 import * as apiClient from '$lib/api/client.js';
-import { displayOpen, displayRow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
+import { displayCertificate, displayOpen, displayRow, displayWindow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
 
 const transcripts: ActiveTranscriptState[] = [];
 afterEach(() => { for (const transcript of transcripts.splice(0)) transcript.dispose(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -130,6 +131,42 @@ describe('ActiveTranscriptState display authority', () => {
 		held.resolve();
 		expect(await retry).toBe('loaded');
 		expect(transcript.pageStates[direction]).toEqual({ status: 'idle', error: null });
+		expect(transcript.loadError).toBeNull();
+	});
+
+	it.each(['earlier', 'later'] as const)('classifies a %s profile-refresh redirect synchronously and respects its gate', async direction => {
+		const { transcript } = setup(100);
+		await transcript.loadMessages('chat-1');
+		transcript.configureDisplay({ combine: false, showThinking: false, hiddenToolGroups: [] });
+		const revision = transcript.feedMutationClock.dataRevision;
+		const held = Promise.withResolvers<'apply'>(), entered = Promise.withResolvers<void>();
+		const gate = () => { entered.resolve(); return held.promise; };
+		const load = direction === 'earlier' ? transcript.loadEarlierPage('chat-1', { applicationGate: gate }) : transcript.loadLaterPage('chat-1', { applicationGate: gate });
+		const received = await Promise.race([entered.promise.then(() => 'gated'), load.then(() => 'ungated')]);
+		expect(received).toBe('gated');
+		expect(transcript.feedMutationClock.dataRevision).toBe(revision);
+		held.resolve('apply');
+		expect(await load).toBe('loaded');
+		expect(transcript.feedMutationClock.lastRevisionByKind[direction === 'earlier' ? 'history-earlier' : 'history-later']).toBeGreaterThan(revision);
+	});
+
+	it('does not assign member failure or recovery to a parent history edge', async () => {
+		const { transcript, api, open } = setup(200);
+		const group: GroupDescriptor = { kind: 'tool-group', firstMember: 1, lastMember: 200, count: 200,
+			base: { afterBreaker: 0, beforeBreaker: 201, firstMember: 1, lastMember: 200, openAtWatermark: false },
+			fragment: { after: 0, through: 200 }, totals: { commands: 200, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] };
+		api.window.mockResolvedValue(displayWindow([group], displayCertificate(open)));
+		const members = vi.spyOn(transcriptDisplayApi, 'members').mockImplementation(async request => ({ certificate: request.certificate,
+			base: request.base, fragment: request.fragment, ordinals: [101], earlier: { beforeOrdinal: 101, remaining: 100 }, later: null }));
+		await transcript.loadMessages('chat-1');
+		members.mockRejectedValueOnce(new Error('Member read failed'));
+		const memberTarget = { group, anchor: { kind: 'after' as const, ordinal: 100 } };
+		expect(await transcript.loadLaterPage('chat-1', { memberTarget })).toBe('failed');
+		expect(transcript.pageStates.later).toEqual({ status: 'idle', error: null });
+		expect(transcript.loadError).toBe('Member read failed');
+		transcript.pageStates.later = { status: 'error', error: 'Parent read failed' };
+		expect(await transcript.loadLaterPage('chat-1', { memberTarget })).toBe('loaded');
+		expect(transcript.pageStates.later).toEqual({ status: 'error', error: 'Parent read failed' });
 		expect(transcript.loadError).toBeNull();
 	});
 
