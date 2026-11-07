@@ -106,10 +106,18 @@ describe('scoped typography preferences', () => {
 	);
 
 	it.each(TYPOGRAPHY_SURFACES)('enforces font eligibility for $id', ({ id, fontKey }) => {
-		const mono = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id);
+		const monospaceOnly = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id);
+		const monospaceChoices = new Set([
+			'default',
+			'system-mono',
+			'departure-mono',
+			'jetbrains-mono',
+			'ibm-plex-mono',
+			'source-code-pro',
+		]);
 		for (const font of FONT_OPTIONS) {
-			const expected =
-				mono && ['system-sans', 'system-serif', 'inter'].includes(font) ? 'default' : font;
+			const eligible = !monospaceOnly || monospaceChoices.has(font);
+			const expected = eligible ? font : 'default';
 			expect(parseSurfaceFont(id, font)).toBe(expected);
 			expect(parseTypographyPreferences({ [fontKey]: font })[fontKey]).toBe(expected);
 		}
