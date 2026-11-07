@@ -71,7 +71,7 @@ describe('OnboardingWizardState', () => {
 		expect(wizard.pageIndex).toBe(ONBOARDING_PAGE_IDS.length - 1);
 
 		wizard.back();
-		expect(wizard.pageId).toBe('writing');
+		expect(wizard.pageId).toBe('transcript-search');
 	});
 
 	it('finishes by closing, or closes and opens providers', () => {

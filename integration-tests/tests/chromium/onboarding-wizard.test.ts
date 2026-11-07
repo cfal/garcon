@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import type { Page } from 'playwright';
+import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 
 async function expectUsableWorkspace(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
@@ -14,13 +15,14 @@ async function expectUsableWorkspace(page: Page): Promise<void> {
 }
 
 test('fresh-browser setup persists choices, fits small screens, and stays dismissed on reload', async () => {
-  await withChromiumFixture('fresh-browser-setup', async ({ browser, integration, watchBrowserErrors, assertNoBrowserErrors }, phase) => {
+  await withChromiumFixture('fresh-browser-setup', async ({ browser, integration, watchBrowserErrors, assertNoBrowserErrors, withExpectedConsoleErrors }, phase) => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
     watchBrowserErrors(context);
     const page = await context.newPage();
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     try {
+      await integration.client.updateSettings({ features: { transcriptSearch: { enabled: false } } });
       await page.goto(`${integration.garcon.baseUrl}/login`);
       await page.getByLabel('Username', { exact: true }).fill(integration.garcon.credentials!.username);
       await page.getByLabel('Password', { exact: true }).fill(integration.garcon.credentials!.password);
@@ -35,6 +37,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         'Arrange your sidebar',
         'Chat display',
         'Writing and behavior',
+        'Search your conversations',
         "What's next",
       ];
       const desktopHeights: number[] = [];
@@ -73,6 +76,9 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
             const next = buttons[1].getBoundingClientRect();
             return Math.abs(back.y + back.height / 2 - next.y - next.height / 2);
           })).toBeLessThan(1);
+          if (title === 'Search your conversations') {
+            await browserExpect(wizard.getByRole('switch', { name: 'Transcript search', exact: true })).toBeInViewport({ ratio: 1 });
+          }
           await page.screenshot({ path: join(artifacts, `setup-${index}-${width}.png`) });
         }
 
@@ -132,6 +138,29 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await wizard.getByText('Source', { exact: true }).click();
           await wizard.getByRole('switch', { name: 'Reduce motion', exact: true }).click();
         }
+        if (title === 'Search your conversations') {
+          const toggle = wizard.getByRole('switch', { name: 'Transcript search', exact: true });
+          await browserExpect(toggle).toBeEnabled();
+          await browserExpect(toggle).toBeChecked();
+          expect((await integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).features.transcriptSearch.enabled).toBe(true);
+          await withExpectedConsoleErrors([/Failed to load resource: the server responded with a status of 503 .*/], async () => {
+            await page.route('**/api/v1/app/settings', route => route.fulfill({
+              status: 503, json: { error: 'Synthetic settings failure' },
+            }), { times: 1 });
+            await toggle.focus();
+            await toggle.click();
+            await browserExpect(wizard.getByRole('alert')).toHaveText("Couldn't update transcript search. Please try again.");
+            await browserExpect(toggle).toBeChecked();
+            await browserExpect(toggle).toBeFocused();
+          });
+          await wizard.getByRole('button', { name: 'Retry', exact: true }).click();
+          await browserExpect(toggle).toBeEnabled();
+          await browserExpect(toggle).not.toBeChecked();
+          await browserExpect(toggle).toBeFocused();
+          await wizard.getByRole('button', { name: 'Back', exact: true }).click();
+          await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+          await browserExpect(toggle).not.toBeChecked();
+        }
         if (isDonePage) {
           await page.evaluate(() => document.documentElement.style.setProperty('--interface-font-scale', String(20 / 14)));
           await browserExpect(nextButton).toBeInViewport({ ratio: 1 });
@@ -160,6 +189,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.reload();
       await expectUsableWorkspace(page);
+      expect((await integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).features.transcriptSearch.enabled).toBe(false);
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pref_local_settings')!))).toMatchObject({
         sidebarGrouping: 'project',
         sidebarSortMode: 'manual',

@@ -5,7 +5,7 @@
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
-	import { getAppShell, getLocalSettings } from '$lib/context';
+	import { getAppShell, getLocalSettings, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
 	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
@@ -18,9 +18,12 @@
 	import OnboardingWritingPage from './OnboardingWritingPage.svelte';
 	import OnboardingThemePage from './OnboardingThemePage.svelte';
 	import OnboardingWelcomePage from './OnboardingWelcomePage.svelte';
+	import OnboardingTranscriptSearchPage from './OnboardingTranscriptSearchPage.svelte';
+	import { OnboardingTranscriptSearchState } from './onboarding-transcript-search-state.svelte.js';
 
 	const appShell = getAppShell();
 	const ls = getLocalSettings();
+	const transcriptSearch = new OnboardingTranscriptSearchState(getRemoteSettings());
 	const wizard = new OnboardingWizardState({
 		localSettings: ls,
 		onClose: () => appShell.closeOnboardingWizard(),
@@ -63,6 +66,10 @@
 			description: m.onboarding_chat_display_description,
 		},
 		writing: { title: m.onboarding_writing_title, description: m.onboarding_writing_description },
+		'transcript-search': {
+			title: m.onboarding_search_title,
+			description: m.onboarding_search_description,
+		},
 		done: { title: m.onboarding_done_title, description: m.onboarding_done_description },
 	};
 
@@ -174,6 +181,8 @@
 				</div>
 			{:else if wizard.pageId === 'writing'}
 				<OnboardingWritingPage />
+			{:else if wizard.pageId === 'transcript-search'}
+				<OnboardingTranscriptSearchPage search={transcriptSearch} />
 			{:else}
 				<div class="divide-y divide-border">
 					<button
@@ -236,7 +245,10 @@
 					{m.onboarding_done_providers()}
 				</Button>
 			{:else}
-				<Button class="justify-self-end" onclick={() => wizard.advance()}
+				<Button
+					class="justify-self-end"
+					onclick={() => wizard.advance()}
+					disabled={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving}
 					>{m.onboarding_continue()}</Button
 				>
 			{/if}

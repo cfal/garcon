@@ -8,6 +8,7 @@ export const ONBOARDING_PAGE_IDS = [
 	'chat-layout',
 	'chat-display',
 	'writing',
+	'transcript-search',
 	'done',
 ] as const;
 export type OnboardingPageId = (typeof ONBOARDING_PAGE_IDS)[number];

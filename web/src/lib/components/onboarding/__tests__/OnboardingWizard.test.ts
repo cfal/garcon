@@ -1,10 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
+import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import { updateRemoteSettings } from '$lib/api/settings.js';
+import {
+	makeRemoteSettingsSnapshot,
+	mockRemoteSettingsUpdate,
+} from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
 import { DARK_THEME_PROFILES, LIGHT_THEME_PROFILES } from '$lib/theme/themes.js';
 
 const OnboardingWizardTestHost = (await import('./OnboardingWizardTestHost.svelte')).default;
+
+vi.mock('$lib/api/settings.js', () => ({
+	getRemoteSettings: vi.fn(),
+	updateRemoteSettings: vi.fn(),
+}));
 
 async function waitForAnimationFrames(count: number): Promise<void> {
 	for (let index = 0; index < count; index += 1) {
@@ -15,14 +26,18 @@ async function waitForAnimationFrames(count: number): Promise<void> {
 describe('OnboardingWizard', () => {
 	beforeEach(() => {
 		localStorage.clear();
+		vi.clearAllMocks();
 	});
 
 	function renderWizard() {
 		const appShell = createAppShellStore();
 		const localSettings = createLocalSettingsStore();
+		const remoteSettings = new RemoteSettingsStore();
+		remoteSettings.applySnapshot(makeRemoteSettingsSnapshot());
+		mockRemoteSettingsUpdate(remoteSettings);
 		appShell.openOnboardingWizard();
-		render(OnboardingWizardTestHost, { appShell, localSettings });
-		return { appShell, localSettings };
+		render(OnboardingWizardTestHost, { appShell, localSettings, remoteSettings });
+		return { appShell, localSettings, remoteSettings };
 	}
 
 	async function advanceToThemePage() {
@@ -31,14 +46,28 @@ describe('OnboardingWizard', () => {
 		await screen.findByRole('heading', { name: 'Choose your theme' });
 	}
 
-	async function advanceToDonePage() {
+	async function visitSearchPage() {
 		await advanceToThemePage();
-		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Chat display' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Writing and behavior' });
+		for (const title of [
+			'Arrange your sidebar',
+			'Chat display',
+			'Writing and behavior',
+			'Search your conversations',
+		]) {
+			await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+			await screen.findByRole('heading', { name: title });
+		}
+	}
+
+	async function advanceToSearchPage() {
+		await visitSearchPage();
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false),
+		);
+	}
+
+	async function advanceToDonePage() {
+		await advanceToSearchPage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: "What's next" });
 		expect(
@@ -54,6 +83,7 @@ describe('OnboardingWizard', () => {
 		await waitFor(() => expect(document.activeElement).toBe(welcomeHeading));
 		expect(screen.getByText(/PC in your mom's basement/)).toBeTruthy();
 		expect(screen.getByText(/conversations from another computer/)).toBeTruthy();
+		expect(updateRemoteSettings).not.toHaveBeenCalled();
 		await advanceToThemePage();
 		const themeHeading = screen.getByRole('heading', { name: 'Choose your theme' });
 		await waitFor(() => expect(document.activeElement).toBe(themeHeading));
@@ -243,6 +273,79 @@ describe('OnboardingWizard', () => {
 		expect(previewFor('compact').getAttribute('data-selected')).toBe('false');
 	});
 
+	it('enables workspace transcript search and retains an explicit opt-out across pages', async () => {
+		const { remoteSettings } = renderWizard();
+		await advanceToSearchPage();
+		const toggle = screen.getByRole('switch', { name: 'Transcript search' });
+		expect(toggle.getAttribute('aria-checked')).toBe('true');
+		expect(updateRemoteSettings).toHaveBeenCalledExactlyOnceWith({
+			features: { transcriptSearch: { enabled: true } },
+		});
+		expect(screen.getByRole('link', { name: /garcon-captain/ }).getAttribute('href')).toBe(
+			'https://github.com/cfal/garcon-skills',
+		);
+		expect(screen.getByText('"Find the chat where I discussed topic A"')).toBeTruthy();
+		await fireEvent.click(toggle);
+		await waitFor(() =>
+			expect(remoteSettings.snapshot?.features.transcriptSearch.enabled).toBe(false),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		expect(
+			screen.getByRole('switch', { name: 'Transcript search' }).getAttribute('aria-checked'),
+		).toBe('false');
+		expect(updateRemoteSettings).toHaveBeenCalledTimes(2);
+	});
+
+	it('blocks Continue but keeps Back and Close available while search is saving', async () => {
+		renderWizard();
+		const saved = Promise.withResolvers<Awaited<ReturnType<typeof updateRemoteSettings>>>();
+		vi.mocked(updateRemoteSettings).mockReturnValueOnce(saved.promise);
+		await visitSearchPage();
+		expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(true);
+		expect(screen.getByRole('button', { name: 'Back' }).hasAttribute('disabled')).toBe(false);
+		expect(screen.getByRole('button', { name: 'Close' }).hasAttribute('disabled')).toBe(false);
+		const snapshot = makeRemoteSettingsSnapshot();
+		snapshot.features.transcriptSearch.enabled = true;
+		saved.resolve({ success: true, settings: snapshot });
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false),
+		);
+	});
+
+	it('keeps the switch on after a failed opt-out and returns Retry focus to it', async () => {
+		const { remoteSettings } = renderWizard();
+		await advanceToSearchPage();
+		const toggle = screen.getByRole('switch', { name: 'Transcript search' });
+		toggle.focus();
+		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Save failed'));
+		await fireEvent.click(toggle);
+		await screen.findByRole('alert');
+		expect(toggle.getAttribute('aria-checked')).toBe('true');
+		expect(remoteSettings.snapshot?.features.transcriptSearch.enabled).toBe(true);
+		expect(document.activeElement).toBe(toggle);
+		const retry = screen.getByRole('button', { name: 'Retry' });
+		retry.focus();
+		await fireEvent.click(retry);
+		await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'));
+		expect(document.activeElement).toBe(toggle);
+		expect(remoteSettings.snapshot?.features.transcriptSearch.enabled).toBe(false);
+	});
+
+	it('shows a search save failure and retries without pretending it succeeded', async () => {
+		renderWizard();
+		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Settings are unavailable.'));
+		await advanceToSearchPage();
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			"Couldn't update transcript search. Please try again.",
+		);
+		const toggle = screen.getByRole('switch', { name: 'Transcript search' });
+		expect(toggle.getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('true'));
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
 	it('makes provider setup the only final primary action', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();
@@ -282,24 +385,24 @@ describe('OnboardingWizard', () => {
 		},
 	);
 
-	it('returns from the done page to revise writing preferences', async () => {
+	it('returns from the done page to revise transcript search', async () => {
 		renderWizard();
 		await advanceToDonePage();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
-		await screen.findByRole('heading', { name: 'Writing and behavior' });
+		await screen.findByRole('heading', { name: 'Search your conversations' });
 	});
 
 	it('announces the current step position', async () => {
 		renderWizard();
 		await screen.findByRole('heading', { name: 'Welcome to Garcon' });
-		const stepStatus = screen.getByText('Step 1 of 6');
+		const stepStatus = screen.getByText('Step 1 of 7');
 		expect(stepStatus.getAttribute('aria-live')).toBe('polite');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 6'));
+		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 7'));
 	});
 
 	it('restarts on the welcome page after closing', async () => {
