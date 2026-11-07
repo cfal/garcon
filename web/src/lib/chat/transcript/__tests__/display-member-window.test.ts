@@ -47,18 +47,46 @@ function fixture(initialGroups: DisplayDescriptor[], limits = { count: 2000, byt
 	return { controller, api, bodies, replace(next: DisplayDescriptor[]) { groups = next; } };
 }
 
-it('retains one bounded anchor window across append, parking, and overlapping filters', async () => {
+it('updates an appended group summary and continuation without admitting the new members', async () => {
+	vi.useFakeTimers();
+	const initial = group(1, 40000);
+	const whole = { ...initial, base: { ...initial.base, openAtWatermark: true } }, f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole, { kind: 'around', ordinal: 500 });
+	const before = f.controller.snapshot.expansions[0];
+	const next = { ...group(1, 40001), base: { ...whole.base, beforeBreaker: 40002, lastMember: 40001 } };
+	f.api.window.mockImplementationOnce(async request => displayWindow([next], {
+		...displayCertificate(displayOpen('chat-1', 'view-1', 40001), request.profile),
+		cutsKey: displayCutsKey(request.cuts),
+	}));
+	f.controller.observeHead('view-1', 40001);
+	await vi.advanceTimersByTimeAsync(250);
+	expect(f.controller.snapshot.window?.items).toEqual([next]);
+	expect(f.controller.snapshot.expansions).toHaveLength(1);
+	expect(f.controller.snapshot.expansions[0]).toMatchObject({
+		anchorOrdinal: 500, openedAt: before.openedAt,
+		page: { certificate: { watermark: 40001 }, ordinals: before.page.ordinals,
+			earlier: before.page.earlier, later: { afterOrdinal: 524, remaining: 39477 } },
+	});
+	expect(f.api.members).toHaveBeenCalledTimes(2);
+	expect(f.api.members.mock.calls.at(-1)?.[0]).toMatchObject({ anchor: { kind: 'around', ordinal: 500 }, limit: 50 });
+	expect(f.api.bodies.mock.calls.at(-1)?.[0]).toMatchObject({ seedOrdinals: before.page.ordinals, residentOrdinals: before.page.ordinals });
+	expect(f.bodies.count).toBe(50);
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 40001)).toBeUndefined();
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(f.api.window).toHaveBeenCalledTimes(2);
+	expect(f.api.members).toHaveBeenCalledTimes(2);
+});
+
+it('retains one bounded anchor window across parking and overlapping filters', async () => {
 	const f = fixture([group(1, 1000)]);
 	await f.controller.refresh(); await f.controller.expand(group(1, 1000), { kind: 'around', ordinal: 500 });
 	f.controller.park();
 	expect(f.controller.snapshot.expansions[0].anchorOrdinal).toBe(500);
 	f.controller.activate();
-	f.replace([group(1, 2000)]);
+	f.replace([group(550, 1000)]);
 	await f.controller.refresh();
 	expect(f.controller.snapshot.expansions).toHaveLength(1);
-	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
-	f.replace([group(550, 2000)]);
-	await f.controller.refresh();
 	expect(f.controller.snapshot.expansions[0].anchorOrdinal).toBe(550);
 	expect(f.controller.snapshot.expansions[0].page.ordinals).toContain(550);
 	expect(f.bodies.count).toBe(50);

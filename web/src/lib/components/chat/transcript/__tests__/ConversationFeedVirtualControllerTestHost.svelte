@@ -33,6 +33,7 @@
 		appendGroup(): Promise<void>;
 		filterFirstGroupMember(): Promise<void>;
 		retainFirst(): Promise<void>;
+		retainFirstWithoutLayoutChange(): Promise<void>;
 	}
 
 	interface Props {
@@ -267,6 +268,7 @@
 			appendGroup,
 			filterFirstGroupMember,
 			retainFirst,
+			retainFirstWithoutLayoutChange,
 		});
 	});
 
@@ -357,6 +359,12 @@
 	async function retainFirst(): Promise<void> {
 		retainedFirst = true;
 		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
+	}
+
+	async function retainFirstWithoutLayoutChange(): Promise<void> {
+		retainedFirst = true;
 		contentRevision += 1;
 		await tick();
 	}
