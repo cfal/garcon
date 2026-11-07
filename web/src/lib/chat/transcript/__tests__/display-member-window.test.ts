@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { BashToolUseMessage } from '$shared/chat-types';
 import type { DisplayDescriptor, GroupDescriptor, RowDescriptor } from '$shared/transcript-display-contract';
-import { displayCutsKey } from '$shared/transcript-display-contract';
+import { displayCutsKey, parseMemberWindowRequest } from '$shared/transcript-display-contract';
 import type { TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DisplayBodyStore } from '../display-body-store.js';
 import { DisplayWindowController } from '../display-window-controller.js';
@@ -9,7 +9,7 @@ import { displayCertificate, displayDetail, displayOpen, displayProfile, display
 
 function group(first: number, last: number): GroupDescriptor {
 	return { kind: 'tool-group', firstMember: first, lastMember: last, count: last - first + 1,
-		base: { afterBreaker: first - 1, beforeBreaker: last + 1, firstMember: first, lastMember: last, openAtWatermark: false },
+		base: { afterBreaker: first - 1, beforeBreaker: last + 1, firstMember: first, lastMember: last, openAtWatermark: last === 40_000 },
 		fragment: { after: first - 1, through: last }, totals: { commands: last - first + 1, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] };
 }
 
@@ -24,11 +24,14 @@ function fixture(initialGroups: DisplayDescriptor[], limits = { count: 2000, byt
 		window: vi.fn<TranscriptDisplayApi['window']>(async request => displayWindow(groups,
 			{ ...displayCertificate(open, request.profile), cutsKey: displayCutsKey(request.cuts) })),
 		members: vi.fn<TranscriptDisplayApi['members']>(async request => {
-			const first = request.fragment.after + 1, last = request.fragment.through;
+			parseMemberWindowRequest(request);
+			const first = Math.max(request.base.firstMember, request.fragment.after + 1);
+			const last = Math.min(request.base.lastMember, request.fragment.through);
 			const anchor = request.anchor;
-			const start = anchor.kind === 'first' ? first : Math.max(first, Math.min(last - request.limit + 1,
-				anchor.ordinal + (anchor.kind === 'after' ? 1 : anchor.kind === 'before' ? -request.limit : -25)));
-			const ordinals = Array.from({ length: Math.min(request.limit, last - start + 1) }, (_, index) => start + index);
+			const end = anchor.kind === 'before' ? Math.min(last, anchor.ordinal - 1) : last;
+			const start = anchor.kind === 'first' ? first : Math.max(first,
+				anchor.kind === 'before' ? end - request.limit + 1 : anchor.ordinal + (anchor.kind === 'after' ? 1 : -Math.floor(request.limit / 2)));
+			const ordinals = Array.from({ length: Math.max(0, Math.min(request.limit, end - start + 1)) }, (_, index) => start + index);
 			return { certificate: request.certificate, base: request.base, fragment: request.fragment, ordinals,
 				earlier: start > first ? { beforeOrdinal: start, remaining: start - first } : null,
 				later: ordinals.at(-1)! < last ? { afterOrdinal: ordinals.at(-1)!, remaining: last - ordinals.at(-1)! } : null };
@@ -69,7 +72,6 @@ it('updates an appended group summary and continuation without admitting the new
 			earlier: before.page.earlier, later: { afterOrdinal: 524, remaining: 39477 } },
 	});
 	expect(f.api.members).toHaveBeenCalledTimes(2);
-	expect(f.api.members.mock.calls.at(-1)?.[0]).toMatchObject({ anchor: { kind: 'around', ordinal: 500 }, limit: 50 });
 	expect(f.api.bodies.mock.calls.at(-1)?.[0]).toMatchObject({ seedOrdinals: before.page.ordinals, residentOrdinals: before.page.ordinals });
 	expect(f.bodies.count).toBe(50);
 	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 40001)).toBeUndefined();
@@ -157,6 +159,83 @@ it('retains one bounded anchor window across parking and overlapping filters', a
 	expect(f.bodies.count).toBe(50);
 });
 
+it('remaps a filtered interior anchor to the nearest surviving member', async () => {
+	const whole = group(1, 1000), f = fixture([whole], { count: 5, bytes: 48 * 1024 * 1024 });
+	await f.controller.refresh();
+	await f.controller.expand(whole, { kind: 'around', ordinal: 500 });
+	f.controller.trim(whole.firstMember, whole.lastMember, [500, 501, 502, 503, 504]);
+	const previous = f.controller.snapshot.expansions[0];
+	expect(previous.page.ordinals).toEqual([500, 501, 502, 503, 504]);
+	const surviving = [470, 505, 530];
+	const filtered = { ...whole, base: { ...whole.base, firstMember: 470, lastMember: 530 }, firstMember: 470, lastMember: 530,
+		count: 3, totals: { commands: 3, fileReads: 0, fileEdits: 0, other: 0 } };
+	f.replace([filtered]);
+	f.api.members.mockImplementationOnce(async request => ({ certificate: request.certificate, base: request.base,
+		fragment: request.fragment, ordinals: surviving, earlier: null, later: null }));
+	f.controller.configure({ ...displayProfile, bashRevision: 'filtered' }, []);
+	await f.controller.refresh();
+	expect(f.api.members.mock.calls.at(-1)?.[0]).toMatchObject({ anchor: { kind: 'around', ordinal: 500 }, limit: 50 });
+	expect(f.controller.snapshot.expansions).toHaveLength(1);
+	expect(f.controller.snapshot.expansions[0]).toMatchObject({ anchorOrdinal: 505, openedAt: previous.openedAt,
+		page: { ordinals: surviving } });
+	expect(f.bodies.count).toBe(3);
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 500)).toBeUndefined();
+});
+
+it.each([[800, 900], [50, 250]])('suspends expansion when only members %i and %i survive outside the previous extent', async (first, last) => {
+	const old = group(100, 200);
+	const whole = { ...old, base: { ...old.base, afterBreaker: 0, beforeBreaker: 1001 }, fragment: { after: 0, through: 1000 } };
+	const f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole, { kind: 'around', ordinal: 150 });
+	const next = group(first, last);
+	f.replace([{ ...next, base: { ...next.base, afterBreaker: 0, beforeBreaker: 1001 }, fragment: whole.fragment,
+		count: 2, totals: { commands: 2, fileReads: 0, fileEdits: 0, other: 0 } }]);
+	f.api.members.mockImplementationOnce(async request => ({ certificate: request.certificate, base: request.base,
+		fragment: request.fragment, ordinals: [first, last], earlier: null, later: null }));
+	f.controller.configure({ ...displayProfile, bashRevision: 'filtered' }, []);
+	await f.controller.refresh();
+	expect(f.controller.snapshot.expansions).toEqual([]);
+	expect(f.api.members).toHaveBeenCalledTimes(first > 200 ? 1 : 2);
+	expect(f.bodies.count).toBe(0);
+});
+
+it('preserves a pressure-trimmed member window on append instead of fetching and evicting it again', async () => {
+	vi.useFakeTimers();
+	const initial = group(39901, 40000);
+	const whole = { ...initial, base: { ...initial.base, openAtWatermark: true } }, f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole, { kind: 'around', ordinal: 39950 });
+	const visible = [39970, 39971, 39972, 39973, 39974];
+	const pressure = vi.spyOn(f.bodies, 'activeOverBudget', 'get').mockReturnValue(true);
+	try {
+		f.controller.trim(whole.firstMember, whole.lastMember, visible);
+		pressure.mockRestore();
+		const previous = f.controller.snapshot.expansions[0];
+		expect(previous.page.ordinals).toEqual(visible);
+		expect(f.bodies.count).toBe(5);
+		expect(f.bodies.activeOverBudget).toBe(false);
+		for (const head of [40001, 40002]) {
+			const next = group(39901, head);
+			const growing = { ...next, base: { ...next.base, openAtWatermark: true } };
+			f.api.window.mockImplementationOnce(async request => displayWindow([growing], {
+				...displayCertificate(displayOpen('chat-1', 'view-1', head), request.profile), cutsKey: displayCutsKey(request.cuts),
+			}));
+			f.api.bodies.mockClear();
+			f.controller.observeHead('view-1', head);
+			await vi.advanceTimersByTimeAsync(250);
+			expect(f.controller.snapshot.expansions[0]).toMatchObject({ anchorOrdinal: previous.anchorOrdinal, openedAt: previous.openedAt,
+				page: { ordinals: visible, earlier: previous.page.earlier, later: { afterOrdinal: 39974, remaining: head - 39974 } } });
+			const hydrated: Awaited<ReturnType<TranscriptDisplayApi['bodies']>>[] = await Promise.all(f.api.bodies.mock.results.map(result => result.value));
+			expect(hydrated.flatMap(response => response.bodies)).toEqual([]);
+			expect(f.bodies.count).toBe(5);
+			f.controller.trim(growing.firstMember, growing.lastMember, visible);
+		}
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(f.api.window).toHaveBeenCalledTimes(3);
+	} finally { pressure.mockRestore(); }
+});
+
 it('[TLV5-DISPLAY.05-WEB-UNIT-01] expands only the anchor-containing fragment when an overlay splits a group', async () => {
 	const whole = group(1, 1000), f = fixture([whole]);
 	await f.controller.refresh(); await f.controller.expand(whole, { kind: 'around', ordinal: 700 });
@@ -185,6 +264,57 @@ it.each(['row', 'summary', 'fragment-summary'] as const)('[TLV5-DISPLAY.05-WEB-U
 	expect(f.controller.snapshot.expansions).toHaveLength(1);
 	expect(f.controller.snapshot.expansions[0].anchorOrdinal).toBe(100);
 	expect(f.bodies.count).toBe(50);
+});
+
+it.each(['reading-member', 'reading-summary', 'latest-expansion'] as const)('merges unprotected expansions using the %s', async priority => {
+	const left = group(1, 500), right = group(502, 1000), f = fixture([left, right]);
+	await f.controller.refresh();
+	await f.controller.expand(left, { kind: 'around', ordinal: 100 });
+	await f.controller.expand(right, { kind: 'around', ordinal: 700 });
+	const reading = priority !== 'latest-expansion';
+	const selected = f.controller.snapshot.expansions[reading ? 0 : 1];
+	if (reading) f.controller.setReadingAnchor(priority === 'reading-member' ? 100 : left.firstMember, false);
+	f.replace([group(1, 1000)]);
+	f.controller.configure({ ...displayProfile, showThinking: false }, []);
+	await f.controller.refresh();
+	expect(f.controller.snapshot.expansions).toHaveLength(1);
+	expect(f.controller.snapshot.expansions[0]).toMatchObject({ anchorOrdinal: selected.anchorOrdinal, openedAt: selected.openedAt });
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toContain(selected.anchorOrdinal);
+	expect(f.bodies.count).toBe(50);
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, reading ? 700 : 100)).toBeUndefined();
+});
+
+it.each([false, true])('keeps a surviving fragment expansion after filtering its newer sibling, straddling=%s', async straddling => {
+	const whole = group(1, 1000);
+	const left = { ...group(1, 500), base: whole.base }, right = { ...group(501, 1000), base: whole.base };
+	const f = fixture([left, right]);
+	await f.controller.refresh();
+	await f.controller.expand(left, { kind: 'around', ordinal: 100 });
+	await f.controller.expand(right, { kind: 'around', ordinal: 700 });
+	const retained = f.controller.snapshot.expansions[0];
+	const merged = group(1, straddling ? 1005 : 500);
+	f.replace([{ ...merged, base: { ...merged.base, beforeBreaker: 1011 }, fragment: { after: 0, through: 1010 },
+		count: straddling ? 501 : 500, totals: { commands: straddling ? 501 : 500, fileReads: 0, fileEdits: 0, other: 0 } }]);
+	f.api.members.mockClear();
+	f.api.members.mockImplementation(async request => {
+		parseMemberWindowRequest(request);
+		const preferred = request.anchor.kind === 'around' && request.anchor.ordinal === 700;
+		expect(request.anchor).toEqual({ kind: 'around', ordinal: preferred ? 700 : 100 });
+		return { certificate: request.certificate, base: request.base, fragment: request.fragment,
+			ordinals: preferred ? [...Array.from({ length: 25 }, (_, index) => index + 476), 1005] : retained.page.ordinals,
+			earlier: preferred ? { beforeOrdinal: 476, remaining: 475 } : { beforeOrdinal: 75, remaining: 74 },
+			later: preferred ? null : { afterOrdinal: 124, remaining: straddling ? 377 : 376 } };
+	});
+	f.controller.configure({ ...displayProfile, bashRevision: 'filtered' }, []);
+	await f.controller.refresh();
+	expect(f.controller.snapshot.expansions).toHaveLength(1);
+	expect(f.controller.snapshot.expansions[0]).toMatchObject({ anchorOrdinal: 100, openedAt: retained.openedAt,
+		page: { ordinals: retained.page.ordinals } });
+	expect(f.api.members.mock.calls.map(([request]) => request.anchor)).toEqual(straddling
+		? [{ kind: 'around', ordinal: 700 }, { kind: 'around', ordinal: 100 }] : [{ kind: 'around', ordinal: 100 }]);
+	expect(f.bodies.count).toBe(50);
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 700)).toBeUndefined();
+	expect(f.bodies.get(f.controller.snapshot.window!.certificate, 1005)).toBeUndefined();
 });
 
 it('preserves no-op configuration identity and clears expansions on view replacement', async () => {
@@ -444,7 +574,8 @@ it.each(['expand', 'extend'] as const)('readmits a retained summary before %s wi
 	expect(f.api.members.mock.calls.at(-1)![0].certificate).toEqual(f.controller.snapshot.window!.certificate);
 	expect(f.api.members.mock.calls.at(-1)![0].certificate.profileKey).not.toBe(oldCertificate.profileKey);
 	expect(f.controller.snapshot.protectedGroups).toEqual([]);
-	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toEqual(action === 'expand'
+		? Array.from({ length: 50 }, (_, index) => index + 1) : Array.from({ length: 49 }, (_, index) => index + 51));
 	f.controller.collapse(groups[0]);
 	expect(f.controller.snapshot.protectedRows).toEqual([]);
 	expect(f.bodies.count).toBe(0);

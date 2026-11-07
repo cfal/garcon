@@ -605,23 +605,42 @@ export class DisplayWindowController {
 			? { ...expansion, anchorOrdinal: this.#anchor } : expansion);
 		const isProtected = (expansion: DisplayExpansion) => expansion.page.ordinals.some(ordinal => this.#protected.has(ordinal))
 			|| [...this.#protectedGroups].some(ordinal => ordinal > expansion.page.fragment.after && ordinal <= expansion.page.fragment.through);
+		const ownsReadingAnchor = (expansion: DisplayExpansion) => this.#anchor !== null
+			&& this.#anchor > expansion.page.fragment.after && this.#anchor <= expansion.page.fragment.through;
 		const remapped: DisplayExpansion[] = [];
 		for (const group of window.items) {
 			if (group.kind !== 'tool-group') continue;
-			const candidates = intents.filter(expansion => expansionFor(group, [expansion])
-				|| (expansion.page.base.afterBreaker < group.lastMember && expansion.page.base.beforeBreaker > group.firstMember));
+			const candidates = intents.filter(expansion => Math.max(expansion.page.base.firstMember, expansion.page.fragment.after + 1) <= group.lastMember
+				&& Math.min(expansion.page.base.lastMember, expansion.page.fragment.through) >= group.firstMember);
 			candidates.sort((a, b) => Number(isProtected(b)) - Number(isProtected(a))
-				|| Number(b.anchorOrdinal === this.#anchor) - Number(a.anchorOrdinal === this.#anchor) || b.openedAt - a.openedAt);
-			const intent = candidates.find(candidate => !remapped.some(accepted => accepted.openedAt === candidate.openedAt));
-			if (!intent) continue;
-			// A split follows its anchor; a filter may move that anchor to a surviving member.
-			const containing = window.items.some(item => item.kind === 'tool-group' && expansionFor(item, [intent]));
-			if (containing && !expansionFor(group, [intent])) continue;
-			const ordinal = Math.max(group.firstMember, Math.min(group.lastMember, intent.anchorOrdinal));
-			const page = await this.api.members({ certificate: window.certificate, profile, cuts: this.#cuts,
-				base: group.base, fragment: group.fragment, anchor: { kind: 'around', ordinal }, limit: 50 }, signal);
-			this.#assertCertificate(page.certificate, window.certificate);
-			if (page.ordinals.length) remapped.push({ ...intent, anchorOrdinal: ordinal, page });
+				|| Number(ownsReadingAnchor(b)) - Number(ownsReadingAnchor(a)) || b.openedAt - a.openedAt);
+			for (const intent of candidates) {
+				if (remapped.some(accepted => accepted.openedAt === intent.openedAt)) continue;
+				// A split follows its anchor; a filter may move that anchor to a surviving member.
+				const containing = window.items.some(item => item.kind === 'tool-group' && expansionFor(item, [intent]));
+				if (containing && !expansionFor(group, [intent])) continue;
+				const ordinal = Math.max(group.firstMember, Math.min(group.lastMember, intent.anchorOrdinal));
+				const previous = intent.page;
+				// Compatible appends preserve trimmed pages instead of refetching their evicted overscan.
+				const retainMembers = previous.ordinals.length > 0 && previous.ordinals.length <= 50
+					&& sameDisplayCertificate({ ...previous.certificate, watermark: window.certificate.watermark }, window.certificate)
+					&& group.fragment.after === previous.fragment.after && group.fragment.through >= previous.fragment.through;
+				const page = await this.api.members({ certificate: window.certificate, profile, cuts: this.#cuts,
+					base: group.base, fragment: group.fragment,
+					anchor: { kind: 'around', ordinal: retainMembers ? previous.ordinals[Math.floor(previous.ordinals.length / 2)] : ordinal },
+					limit: retainMembers ? previous.ordinals.length : 50 }, signal);
+				this.#assertCertificate(page.certificate, window.certificate);
+				const first = Math.max(previous.base.firstMember, previous.fragment.after + 1);
+				const last = Math.min(previous.base.lastMember, previous.fragment.through);
+				let anchorOrdinal: number | undefined;
+				for (const member of page.ordinals) {
+					if (member >= first && member <= last && (anchorOrdinal === undefined
+						|| Math.abs(member - ordinal) < Math.abs(anchorOrdinal - ordinal))) anchorOrdinal = member;
+				}
+				if (anchorOrdinal === undefined) continue;
+				remapped.push({ ...intent, anchorOrdinal, page });
+				break;
+			}
 		}
 		return remapped;
 	}
