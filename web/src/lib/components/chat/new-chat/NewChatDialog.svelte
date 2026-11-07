@@ -54,7 +54,7 @@
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),
 			// which would immediately trigger the directory browser overlay.
-			// The form's reseed effect handles focusing the textarea instead.
+			// The form focuses the textarea after its startup defaults load.
 			e.preventDefault();
 		}}
 	>

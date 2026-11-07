@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-for (const executionBackend of ['in-process', 'remote-controller-dials'] as const) {
+for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`scheduled task actions preserve order and prepare editable chats (${executionBackend})`, async () => {
     await withChromiumFixture(`scheduled-actions-${executionBackend}`, async ({ page, integration }, phase) => {
       const { client } = integration;
@@ -49,8 +49,21 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
         const before = await client.getScheduledPrompts();
         await row('Second task').getByRole('button', { name: 'Prompt actions' }).click();
         if (screenshots) await page.screenshot({ path: join(screenshots, `${executionBackend}-menu-${viewport.width}.png`) });
+        const releaseRender = Promise.withResolvers<void>();
+        await page.route('**/api/v1/scheduled-prompts/render', async route => {
+          await releaseRender.promise;
+          await route.continue();
+        }, { times: 1 });
+        const renderRequested = page.waitForRequest('**/api/v1/scheduled-prompts/render');
         const rendering = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/scheduled-prompts/render');
-        await page.getByRole('menuitem', { name: 'Open in new chat', exact: true }).click();
+        try {
+          await page.getByRole('menuitem', { name: 'Open in new chat', exact: true }).click();
+          await renderRequested;
+          await browserExpect(list.getByRole('button', { name: 'Add Prompt', exact: true })).toBeDisabled();
+        } finally {
+          releaseRender.resolve();
+          await rendering;
+        }
         const rendered = await (await rendering).json();
         const prompt = page.getByPlaceholder('How can I help you today?');
         await browserExpect(list).toHaveCount(0);

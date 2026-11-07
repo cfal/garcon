@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -120,6 +121,36 @@ describe('ScheduledPromptsSection', () => {
 		const seed = onOpenInNewChat.mock.calls[0][0];
 		expect(seed.prefill).toBe(`Review ${seed.prospectiveChatId}`);
 		expect(seed.startup).toMatchObject({ executorId: 'local', projectPath: '/workspace/project', agentId: 'claude', model: 'opus' });
+	});
+
+	it.each(['success', 'failure'] as const)('blocks a new scheduled draft until chat preparation settles with %s', async outcome => {
+		const pending = Promise.withResolvers<void>();
+		const onOpenInNewChat = vi.fn();
+		vi.mocked(renderScheduledPrompt).mockImplementation(async request => {
+			await pending.promise;
+			return { success: true, chatId: request.chatId, expandedText: 'Review task' };
+		});
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor], chats: [],
+			prompts: [prompt('a', 'Review task', newChat())], onOpenInNewChat,
+		});
+		const addPrompt = screen.getByRole('button', { name: 'Add Prompt' }) as HTMLButtonElement;
+		expect(addPrompt.disabled).toBe(false);
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new chat' }));
+		try {
+			addPrompt.click();
+			await tick();
+			expect(screen.queryByText('Scheduled prompt editor')).toBeNull();
+			expect(addPrompt.disabled).toBe(true);
+			expect(onOpenInNewChat).not.toHaveBeenCalled();
+		} finally {
+			if (outcome === 'success') pending.resolve();
+			else pending.reject(new Error('Synthetic render failure'));
+		}
+		await vi.waitFor(() => expect(addPrompt.disabled).toBe(false));
+		if (outcome === 'success') expect(onOpenInNewChat).toHaveBeenCalledOnce();
+		else expect(screen.getByRole('alert').textContent).toBe('Synthetic render failure');
 	});
 
 	it('shows where each prompt runs once a remote executor is configured', () => {

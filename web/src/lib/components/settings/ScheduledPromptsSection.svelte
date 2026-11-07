@@ -202,7 +202,7 @@
 <div class="space-y-4">
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<div class="flex items-center gap-2">
-			<Button onclick={openCreate} disabled={!prompts.hasLoaded}>
+			<Button onclick={openCreate} disabled={!prompts.hasLoaded || newChat.isOpening}>
 				<Plus class="mr-2 h-4 w-4" />
 				{m.scheduled_prompts_add_prompt()}
 			</Button>
