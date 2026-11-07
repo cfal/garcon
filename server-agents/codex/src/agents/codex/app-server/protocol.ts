@@ -198,7 +198,8 @@ export type CodexThreadItem = {
 } & (
   | { type: 'userMessage'; id: string; content: CodexUserInput[]; clientId?: string | null }
   | { type: 'hookPrompt'; id: string; fragments: unknown[] }
-  | { type: 'agentMessage'; id: string; text: string; phase?: CodexMessagePhase | null; memoryCitation: unknown }
+  | { type: 'agentMessage'; id: string; text: string; phase?: CodexMessagePhase | null; memoryCitation: unknown;
+      delivery?: 'async' | null; questions?: unknown }
   | { type: 'plan'; id: string; text: string }
   | { type: 'reasoning'; id: string; summary: string[]; content: string[] }
   | {

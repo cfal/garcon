@@ -3,7 +3,7 @@ import {
   isPreambleApplicationNoticeDetail,
   isPublicationGapNoticeDetail,
 } from '../../../common/transcript-notice-details.js';
-import type { ChatMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, type ChatMessage } from '../../../common/chat-types.js';
 import type { LedgerConversationRow, LedgerRow, LedgerRowDraft } from './contracts.js';
 import { isConversationalLedgerRow, isPresentationOnlyProviderRow } from './contracts.js';
 
@@ -41,7 +41,11 @@ export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowD
     }
     if (row.kind === 'provider-row') {
       if (isPresentationOnlyProviderRow(row)) return [];
-      return [{ kind: 'provider-row', at: row.at, message: row.message, providerMeta: null }];
+      // Copied questions are display history, not replyable sources in the new binding.
+      const message = row.message.type === 'assistant-message' && row.message.questions
+        ? new AssistantMessage(row.message.timestamp, row.message.content)
+        : row.message;
+      return [{ kind: 'provider-row', at: row.at, message, providerMeta: null }];
     }
     if (
       row.kind === 'notice'

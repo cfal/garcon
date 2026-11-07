@@ -3,6 +3,7 @@
 // these shapes, and the frontend renders them directly.
 
 import { isRecord } from './json.js';
+import { parseAsyncQuestionSet, type AsyncQuestionSet, type AsyncQuestionReply } from './async-user-questions.js';
 import { normalizeAskUserQuestionDecisionResponse, type AskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 import {
   commandOutcomeText, isCommandOutputData,
@@ -53,6 +54,7 @@ export interface ChatProcessingEntry {
 }
 
 export interface ChatMessageMetadata {
+  questionReply?: AsyncQuestionReply;
   contentMode?: 'literal';
   contentFormat?: 'plain' | 'markdown';
   clientRequestId?: string;
@@ -83,7 +85,7 @@ export class UserMessage {
 
 export class AssistantMessage {
   readonly type = 'assistant-message' as const;
-  constructor(public timestamp: string, public content: string) {}
+  constructor(public timestamp: string, public content: string, public questions?: AsyncQuestionSet) {}
 }
 
 export class CommandOutputMessage {
@@ -1188,7 +1190,7 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
       );
     }
     case 'assistant-message':
-      return new AssistantMessage(str(data.timestamp), str(data.content));
+      return new AssistantMessage(str(data.timestamp), str(data.content), parseAsyncQuestionSet(data.questions));
     case 'command-output': {
       const context = data.context === null ? null : parseCommandOutputContext(data.context);
       if ((data.context !== null && !context) || !isCommandOutputData(data)) return null;

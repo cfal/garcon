@@ -1259,6 +1259,7 @@ export class CodexAppServerRuntime {
     if (params.turn.status === 'completed') {
       const message = params.turn.items.findLast((item) =>
         item.type === 'agentMessage'
+        && item.delivery !== 'async'
         && (item.phase === 'final_answer' || item.phase === null || item.phase === undefined));
       if (message?.type === 'agentMessage') {
         this.#finalResponses.set(operation, { type: 'text', text: message.text });

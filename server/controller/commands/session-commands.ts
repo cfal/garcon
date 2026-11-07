@@ -140,6 +140,7 @@ export class SessionCommands {
 
   private async submitRunLocked(input: SubmitRunInput, deadline: number): Promise<AgentTurnCommandResponse> {
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
+    this.support.assertQuestionReply(input, input.command);
     const normalizedInput = {
       chatId: input.chatId,
       transcriptViewId: input.transcriptViewId,

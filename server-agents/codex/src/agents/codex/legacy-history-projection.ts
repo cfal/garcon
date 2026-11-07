@@ -17,6 +17,7 @@ const MAX_PENDING_CALLS = 10_000;
 export class LegacyCodexProjection {
   readonly #hiddenWaitCallIds = new Set<string>();
   readonly #questionCalls = new Map<string, readonly AskUserQuestionPrompt[]>();
+  readonly #asyncQuestionCalls = new Set<string>();
   readonly #codeModeResultToolIds = new Map<string, string>();
 
   project(
@@ -27,6 +28,14 @@ export class LegacyCodexProjection {
     const callId = string(payload?.call_id);
     if (callId && (payload?.type === 'function_call' || payload?.type === 'custom_tool_call')) {
       this.#questionCalls.delete(callId);
+      this.#asyncQuestionCalls.delete(callId);
+      if (payload.type === 'function_call' && payload.name === 'request_user_input_async') {
+        this.#asyncQuestionCalls.add(callId);
+        if (this.#asyncQuestionCalls.size > MAX_PENDING_CALLS) {
+          this.#asyncQuestionCalls.delete(this.#asyncQuestionCalls.values().next().value!);
+        }
+        return emptyResult();
+      }
       if (payload.type === 'function_call' && payload.name === 'request_user_input') {
         const normalized = normalizeCodexJsonlEntry(entry, context);
         const tool = normalized?.canonical[0];
@@ -42,6 +51,10 @@ export class LegacyCodexProjection {
       return emptyResult();
     }
     if (isToolOutput(payload)) {
+      if (callId && this.#asyncQuestionCalls.delete(callId)) {
+        const acknowledgement = parseArguments(payload?.output);
+        if (acknowledgement.accepted === true && Object.keys(acknowledgement).length === 1) return emptyResult();
+      }
       if (callId && this.#hiddenWaitCallIds.delete(callId)) return emptyResult();
       const questions = callId ? this.#questionCalls.get(callId) : undefined;
       if (callId && questions) {
