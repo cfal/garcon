@@ -117,7 +117,8 @@
 	}
 
 	function skip(): void {
-		if (canAnswer && isPending) onSkip?.();
+		if (!canAnswer || !isPending) return;
+		onSkip?.();
 	}
 </script>
 
@@ -131,9 +132,9 @@
 	{#each questions as question (question.id)}
 		<fieldset class="min-w-0 space-y-2">
 			<legend class="space-y-1 text-xs font-medium text-foreground break-words">
-				{#if question.header}<span class="block text-[10px] uppercase text-muted-foreground"
-						>{question.header}</span
-					>{/if}
+				{#if question.header}
+					<span class="block text-[10px] uppercase text-muted-foreground">{question.header}</span>
+				{/if}
 				<span class="block whitespace-pre-wrap">{question.prompt}</span>
 			</legend>
 			<div class="grid gap-1.5">
@@ -149,11 +150,11 @@
 							onchange={(event) => select(question, option.id, event.currentTarget.checked)}
 							class="mt-0.5 size-3.5 shrink-0 accent-current"
 						/>
-						<span class="min-w-0 space-y-0.5 break-words"
-							><span class="block whitespace-pre-wrap font-medium">{option.label}</span>
-							{#if option.description}<span class="block whitespace-pre-wrap text-muted-foreground"
-									>{option.description}</span
-								>{/if}
+						<span class="min-w-0 space-y-0.5 break-words">
+							<span class="block whitespace-pre-wrap font-medium">{option.label}</span>
+							{#if option.description}
+								<span class="block whitespace-pre-wrap text-muted-foreground">{option.description}</span>
+							{/if}
 						</span>
 					</label>
 				{/each}
@@ -174,7 +175,9 @@
 			</div>
 			{#if (textMode(question) || notesMode(question)) && (isPending || Object.hasOwn(texts, question.id))}
 				{#if !isPending && !question.isSecret}
-					{#if notesMode(question)}<div class="text-xs text-muted-foreground">{notesLabel}</div>{/if}
+					{#if notesMode(question)}
+						<div class="text-xs text-muted-foreground">{notesLabel}</div>
+					{/if}
 					<p class="whitespace-pre-wrap break-words text-sm text-foreground">
 						{answerText(question.id)}
 					</p>
@@ -221,9 +224,11 @@
 	{/if}
 	{#if isPending}
 		<div class="flex flex-wrap gap-2">
-			{#if !canAnswer}<div class="basis-full text-xs text-muted-foreground" role="status">
+			{#if !canAnswer}
+				<div class="basis-full text-xs text-muted-foreground" role="status">
 					{m.chat_permission_waiting_for_executor()}
-				</div>{/if}
+				</div>
+			{/if}
 			<button
 				type="submit"
 				disabled={!canAnswer || !valid}

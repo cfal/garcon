@@ -92,10 +92,12 @@
 	const recordedQuestionAnswers = $derived.by(() => {
 		const answers = new Map<string, string>();
 		for (const entry of panel.transcript.entries) {
-			const reply = entry.message.type === 'user-message' ? entry.message.metadata?.questionReply : undefined;
-			if (reply?.source?.chatId === chat.id && reply.source.transcriptViewId === panel.transcript.transcriptViewId) {
-				answers.set(JSON.stringify([reply.source.ordinal, reply.questionId]), reply.answer);
-			}
+			if (entry.message.type !== 'user-message') continue;
+			const reply = entry.message.metadata?.questionReply;
+			const source = reply?.source;
+			if (!reply || !source || source.chatId !== chat.id) continue;
+			if (source.transcriptViewId !== panel.transcript.transcriptViewId) continue;
+			answers.set(JSON.stringify([source.ordinal, reply.questionId]), reply.answer);
 		}
 		return answers;
 	});
