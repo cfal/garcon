@@ -17,6 +17,7 @@
 	import OnboardingSidebarPage from './OnboardingSidebarPage.svelte';
 	import OnboardingWritingPage from './OnboardingWritingPage.svelte';
 	import OnboardingThemePage from './OnboardingThemePage.svelte';
+	import OnboardingWelcomePage from './OnboardingWelcomePage.svelte';
 
 	const appShell = getAppShell();
 	const ls = getLocalSettings();
@@ -51,6 +52,7 @@
 	});
 
 	const pageText: Record<OnboardingPageId, { title: () => string; description: () => string }> = {
+		welcome: { title: m.onboarding_welcome_title, description: m.onboarding_welcome_description },
 		theme: { title: m.onboarding_theme_title, description: m.onboarding_theme_description },
 		'chat-layout': {
 			title: m.onboarding_layout_title,
@@ -104,7 +106,9 @@
 			bind:this={pageBodyElement}
 			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
 		>
-			{#if wizard.pageId === 'theme'}
+			{#if wizard.pageId === 'welcome'}
+				<OnboardingWelcomePage />
+			{:else if wizard.pageId === 'theme'}
 				<OnboardingThemePage onSelect={(preference) => ls.set('themePreference', preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
 				<OnboardingSidebarPage />

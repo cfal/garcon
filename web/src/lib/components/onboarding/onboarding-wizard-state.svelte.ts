@@ -3,6 +3,7 @@
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 export const ONBOARDING_PAGE_IDS = [
+	'welcome',
 	'theme',
 	'chat-layout',
 	'chat-display',

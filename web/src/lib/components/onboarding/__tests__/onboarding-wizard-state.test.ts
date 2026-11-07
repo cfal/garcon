@@ -58,7 +58,7 @@ describe('OnboardingWizardState', () => {
 	it('walks the paged flow in order and clamps at the edges', () => {
 		const { wizard } = createWizard();
 
-		expect(wizard.pageId).toBe('theme');
+		expect(wizard.pageId).toBe('welcome');
 		wizard.back();
 		expect(wizard.pageIndex).toBe(0);
 

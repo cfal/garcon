@@ -25,7 +25,14 @@ describe('OnboardingWizard', () => {
 		return { appShell, localSettings };
 	}
 
+	async function advanceToThemePage() {
+		await screen.findByRole('heading', { name: 'Welcome to Garcon' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+	}
+
 	async function advanceToDonePage() {
+		await advanceToThemePage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -42,8 +49,13 @@ describe('OnboardingWizard', () => {
 	it('advances through the pages and moves focus to each page heading', async () => {
 		renderWizard();
 
-		const themeHeading = await screen.findByRole('heading', { name: 'Choose your theme' });
+		const welcomeHeading = await screen.findByRole('heading', { name: 'Welcome to Garcon' });
 		await waitForAnimationFrames(2);
+		await waitFor(() => expect(document.activeElement).toBe(welcomeHeading));
+		expect(screen.getByText(/PC in your mom's basement/)).toBeTruthy();
+		expect(screen.getByText(/conversations from another computer/)).toBeTruthy();
+		await advanceToThemePage();
+		const themeHeading = screen.getByRole('heading', { name: 'Choose your theme' });
 		await waitFor(() => expect(document.activeElement).toBe(themeHeading));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -56,7 +68,7 @@ describe('OnboardingWizard', () => {
 
 	it('writes theme and display selections to local settings', async () => {
 		const { localSettings } = renderWizard();
-		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await advanceToThemePage();
 
 		await fireEvent.click(screen.getByRole('radio', { name: /Use one theme/ }));
 		expect(localSettings.themePreference).toEqual({
@@ -101,7 +113,7 @@ describe('OnboardingWizard', () => {
 
 	it('limits System slots to compatible concrete themes', async () => {
 		const { localSettings } = renderWizard();
-		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await advanceToThemePage();
 
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
@@ -124,6 +136,7 @@ describe('OnboardingWizard', () => {
 
 	it('persists sidebar organization and writing preferences without leaving setup', async () => {
 		const { localSettings } = renderWizard();
+		await advanceToThemePage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		const grouping = screen.getByRole('combobox', { name: 'Chat grouping' });
 		const projectPath = screen.getByRole('checkbox', { name: 'Show project path' });
@@ -167,7 +180,7 @@ describe('OnboardingWizard', () => {
 
 	it('dismisses automatic setup even when closing before making any selection', async () => {
 		const { appShell, localSettings } = renderWizard();
-		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await screen.findByRole('heading', { name: 'Welcome to Garcon' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 		expect(appShell.showOnboardingWizard).toBe(false);
 		expect(localSettings.hadSavedSettingsOnLoad).toBe(false);
@@ -178,7 +191,7 @@ describe('OnboardingWizard', () => {
 
 	it('previews a fixed family and pairs it when following System', async () => {
 		const { localSettings } = renderWizard();
-		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await advanceToThemePage();
 		await fireEvent.click(screen.getByRole('radio', { name: /Use one theme/ }));
 		await fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), {
 			target: { value: 'rose-dark' },
@@ -201,6 +214,7 @@ describe('OnboardingWizard', () => {
 
 	it('renders real sidebar previews for each layout option and tracks the selection', async () => {
 		const { localSettings } = renderWizard();
+		await advanceToThemePage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
 
@@ -279,23 +293,23 @@ describe('OnboardingWizard', () => {
 
 	it('announces the current step position', async () => {
 		renderWizard();
-		await screen.findByRole('heading', { name: 'Choose your theme' });
-		const stepStatus = screen.getByText('Step 1 of 5');
+		await screen.findByRole('heading', { name: 'Welcome to Garcon' });
+		const stepStatus = screen.getByText('Step 1 of 6');
 		expect(stepStatus.getAttribute('aria-live')).toBe('polite');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 5'));
+		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 6'));
 	});
 
-	it('restarts on the theme page after closing', async () => {
+	it('restarts on the welcome page after closing', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
 		appShell.openOnboardingWizard();
 
-		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await screen.findByRole('heading', { name: 'Welcome to Garcon' });
 		expect(screen.queryByRole('heading', { name: "What's next" })).toBeNull();
 	});
 });

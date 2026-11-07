@@ -28,8 +28,9 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
       const wizard = page.getByRole('dialog');
       const body = wizard.locator('div.overflow-y-auto');
-      await browserExpect(wizard.getByRole('heading', { name: 'Choose your theme' })).toBeVisible();
+      await browserExpect(wizard.getByRole('heading', { name: 'Welcome to Garcon' })).toBeVisible();
       const titles = [
+        'Welcome to Garcon',
         'Choose your theme',
         'Arrange your sidebar',
         'Chat display',
@@ -174,7 +175,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
       await page.getByRole('tab', { name: 'Behavior', exact: true }).click();
       await page.getByRole('button', { name: 'Restart setup wizard', exact: true }).click();
-      await browserExpect(wizard.getByRole('heading', { name: 'Choose your theme' })).toBeVisible();
+      await browserExpect(wizard.getByRole('heading', { name: 'Welcome to Garcon' })).toBeVisible();
       await page.keyboard.press('Escape');
       await browserExpect(wizard).toHaveCount(0);
       await page.reload();
@@ -209,7 +210,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await expectUsableWorkspace(page);
       await page.evaluate(() => localStorage.removeItem('pref_local_settings'));
       await page.reload();
-      await browserExpect(wizard.getByRole('heading', { name: 'Choose your theme' })).toBeVisible();
+      await browserExpect(wizard.getByRole('heading', { name: 'Welcome to Garcon' })).toBeVisible();
       await wizard.getByRole('button', { name: 'Close', exact: true }).click();
       await page.reload();
       await expectUsableWorkspace(page);
