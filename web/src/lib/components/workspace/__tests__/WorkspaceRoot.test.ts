@@ -364,6 +364,31 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 			runtime.currentWindowId = destinationWindowId;
 			return surfaceId;
 		}),
+		swapChatIntoWindow: vi.fn(
+			async (chatId: string, windowId: WorkspaceWindowId, expectedChatId: string) => {
+				const source = findWorkspaceChatPlacement(layout.snapshot, chatId);
+				if (!source) throw new Error('Expected placed Chat');
+				const destinationSurfaceId = chatViewSurfaceId(windowId);
+				const publications = [
+					chatSurfaceTransferPort?.prepareChatSurfaceTransfer({
+						sourceSurfaceId: source.surfaceId,
+						destinationSurfaceId,
+						chatId,
+					}),
+					chatSurfaceTransferPort?.prepareChatSurfaceTransfer({
+						sourceSurfaceId: destinationSurfaceId,
+						destinationSurfaceId: source.surfaceId,
+						chatId: expectedChatId,
+					}),
+				];
+				for (const publication of publications) publication?.publish();
+				commit([
+					{ type: 'swap-window-chats', firstWindowId: source.windowId, secondWindowId: windowId },
+				]);
+				await focusSurface(destinationSurfaceId);
+				return destinationSurfaceId;
+			},
+		),
 		openChatInNewWindow: vi.fn(
 			async (chatId: string, targetWindowId: WorkspaceWindowId, edge: WorkspaceWindowEdge) => {
 				const existing = findWorkspaceChatPlacement(layout.snapshot, chatId);
@@ -887,8 +912,9 @@ describe('WorkspaceRoot', () => {
 		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(2);
 	});
 
-	it('shows an existing sidebar Chat instead of replacing an occupied destination', async () => {
-		const { layout, windowDnd, workspace } = installContext();
+	it.each([true, false])('previews and applies the chat-swap preference: %s', async (enabled) => {
+		const { layout, windowDnd, workspace, localSettings } = installContext();
+		localSettings.set('swapDraggedOpenChats', enabled);
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
@@ -913,14 +939,20 @@ describe('WorkspaceRoot', () => {
 		await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
 		expect(
 			destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-		).toBe(m.workspace_show_existing_chat());
+		).toBe(enabled ? m.workspace_drop_zone_swap_chats() : m.workspace_show_existing_chat());
 		await fireEvent(destination, positionedDragEvent('drop', 50, 50));
 
-		await waitFor(() =>
-			expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-a', 'window-2'),
-		);
-		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
-		expect(layout.surface(chatViewSurfaceId('window-2'))).toMatchObject({ chatId: 'chat-b' });
+		await waitFor(() => {
+			if (enabled)
+				expect(workspace.swapChatIntoWindow).toHaveBeenCalledWith('chat-a', 'window-2', 'chat-b');
+			else expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-a', 'window-2');
+		});
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({
+			chatId: enabled ? 'chat-b' : 'chat-a',
+		});
+		expect(layout.surface(chatViewSurfaceId('window-2'))).toMatchObject({
+			chatId: enabled ? 'chat-a' : 'chat-b',
+		});
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, chatViewSurfaceId('window-main'))).toBe(
 			'window-main',
 		);

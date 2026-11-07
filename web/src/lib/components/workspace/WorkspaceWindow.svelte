@@ -11,11 +11,13 @@
 		getChatSessions,
 		getConversationPanels,
 		getNotifications,
+		getLocalSettings,
 		getWorkspaceCoordinator,
 		getWorkspaceWindowDnd,
 	} from '$lib/context';
 	import type { WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
 	import { resolveWorkspaceWindowCenterDropResult } from '$lib/workspace/window-dnd.svelte.js';
+	import { resolveWorkspaceChatSwap } from '$lib/workspace/workspace-chat-placement.js';
 	import {
 		WORKSPACE_WINDOW_DROP_ZONES,
 		type WorkspaceWindowDropZonePresentation,
@@ -74,6 +76,7 @@
 	const conversationPanels = getConversationPanels();
 	const notifications = getNotifications();
 	const dnd = getWorkspaceWindowDnd();
+	const localSettings = getLocalSettings();
 	const snapshot = $derived(workspace.layout.snapshot);
 	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
 	const activeChatIsLive = $derived(isCurrent && activeSurface?.type === 'chat');
@@ -114,6 +117,13 @@
 		const target = dnd.activeTarget;
 		return target?.kind === 'window' && target.windowId === workspaceWindow.id ? target : null;
 	});
+	const chatSwap = $derived(
+		localSettings.swapDraggedOpenChats &&
+			dnd.payload?.kind === 'chat' &&
+			activeDropTarget?.zone === 'center'
+			? resolveWorkspaceChatSwap(snapshot, dnd.payload.chatId, workspaceWindow.id)
+			: null,
+	);
 	const activeResultInset = $derived(
 		activeDropTarget
 			? (WORKSPACE_WINDOW_DROP_ZONES.find((entry) => entry.zone === activeDropTarget.zone)
@@ -156,6 +166,7 @@
 				return m.workspace_drop_zone_exit_fullscreen();
 		}
 		if (dnd.payload?.kind === 'chat' && dnd.hasChatPlacement(dnd.payload.chatId)) {
+			if (chatSwap) return m.workspace_drop_zone_swap_chats();
 			return m.workspace_show_existing_chat();
 		}
 		if (
@@ -185,7 +196,18 @@
 		try {
 			if (commit.payload.kind === 'chat') {
 				if (commit.target.zone === 'center') {
-					await workspace.showChatInWindow(commit.payload.chatId, workspaceWindow.id);
+					const swap = localSettings.swapDraggedOpenChats
+						? resolveWorkspaceChatSwap(snapshot, commit.payload.chatId, workspaceWindow.id)
+						: null;
+					if (swap) {
+						await workspace.swapChatIntoWindow(
+							commit.payload.chatId,
+							workspaceWindow.id,
+							swap.displacedChatId,
+						);
+					} else {
+						await workspace.showChatInWindow(commit.payload.chatId, workspaceWindow.id);
+					}
 				} else {
 					await workspace.openChatInNewWindow(
 						commit.payload.chatId,

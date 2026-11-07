@@ -419,6 +419,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.showInWindow(chatId, windowId);
 	}
 
+	swapChatIntoWindow(chatId: string, windowId: WorkspaceWindowId, expectedChatId: string) {
+		return this.#chatPlacement.swapIntoWindow(chatId, windowId, expectedChatId);
+	}
+
 	async openChatInNewWindow(
 		chatId: string,
 		targetWindowId?: WorkspaceWindowId,

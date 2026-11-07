@@ -94,6 +94,57 @@ function tabs(snapshot: WorkspaceLayoutSnapshot, windowId: WorkspaceWindowId): r
 }
 
 describe('workspace layout reducer', () => {
+	it('swaps only Chat bindings, preserving hidden tabs, MRU, geometry and mobile references', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
+			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'chat-b' },
+			{ type: 'activate-window-tab', windowId: 'window-files', surfaceId: 'singleton:files' },
+			{ type: 'set-fullscreen-window', windowId: 'window-main' },
+		]);
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'swap-window-chats', firstWindowId: 'window-main', secondWindowId: 'window-files' },
+		]);
+		expect(next).toEqual({
+			...base,
+			surfaces: {
+				...base.surfaces,
+				'chat-view:window-main': { id: 'chat-view:window-main', type: 'chat', chatId: 'chat-b' },
+				'chat-view:window-files': { id: 'chat-view:window-files', type: 'chat', chatId: 'chat-a' },
+			},
+		});
+		expect(next.desktopRoot).toBe(base.desktopRoot);
+		expect(
+			reduceWorkspaceLayout(next, [
+				{ type: 'swap-window-chats', firstWindowId: 'window-main', secondWindowId: 'window-files' },
+			]),
+		).toEqual(base);
+	});
+
+	it.each(['window-main', 'window-files', 'window-missing'] as const)(
+		'rejects a swap with an identical, Chat-less or missing window: %s',
+		(secondWindowId) => {
+			const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+				{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
+			]);
+			expect(() =>
+				reduceWorkspaceLayout(base, [
+					{ type: 'swap-window-chats', firstWindowId: 'window-main', secondWindowId },
+				]),
+			).toThrow();
+		},
+	);
+
+	it('rejects swapping an unassigned Chat view', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'chat-b' },
+		]);
+		expect(() =>
+			reduceWorkspaceLayout(base, [
+				{ type: 'swap-window-chats', firstWindowId: 'window-main', secondWindowId: 'window-files' },
+			]),
+		).toThrow('Workspace Chat view is empty');
+	});
+
 	it('replaces the current window Chat in place and activates its stable tab', () => {
 		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{

@@ -396,6 +396,23 @@ function rekeyChatSurfaceReferences(
 	};
 }
 
+function swapWindowChats(
+	snapshot: WorkspaceLayoutSnapshot,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'swap-window-chats' }>,
+): WorkspaceLayoutSnapshot {
+	const first = movableWindowChat(snapshot, mutation.firstWindowId);
+	const second = movableWindowChat(snapshot, mutation.secondWindowId);
+	if (first.surfaceId === second.surfaceId) throw new Error('Chat swaps require distinct windows');
+	return {
+		...snapshot,
+		surfaces: {
+			...snapshot.surfaces,
+			[first.surfaceId]: { id: first.surfaceId, type: 'chat', chatId: second.chatId },
+			[second.surfaceId]: { id: second.surfaceId, type: 'chat', chatId: first.chatId },
+		},
+	};
+}
+
 function moveTab(
 	snapshot: WorkspaceLayoutSnapshot,
 	mutation: Extract<WorkspaceLayoutMutation, { type: 'move-tab' }>,
@@ -662,6 +679,8 @@ function applyMutation(
 			return replaceSurface(snapshot, mutation);
 		case 'swap-terminal-placements':
 			return swapTerminalPlacements(snapshot, mutation);
+		case 'swap-window-chats':
+			return swapWindowChats(snapshot, mutation);
 		case 'activate-window-tab': {
 			const workspaceWindow = windowNodeById(snapshot.desktopRoot, mutation.windowId);
 			if (!workspaceWindow) {

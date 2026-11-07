@@ -28,6 +28,7 @@ import {
 	windowNodeById,
 } from './window-tree.js';
 import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
+import { isDesktopWindowPresented } from './visible-presentations.js';
 
 export interface WorkspaceChatPlacement {
 	surfaceId: ChatViewSurfaceId;
@@ -50,6 +51,26 @@ export function findWorkspaceChatPlacement(
 
 interface ReservationSet<T> {
 	has(value: T): boolean;
+}
+
+export function resolveWorkspaceChatSwap(
+	snapshot: WorkspaceLayoutSnapshot,
+	chatId: string,
+	windowId: WorkspaceWindowId,
+): {
+	source: WorkspaceChatPlacement;
+	destination: WorkspaceChatPlacement;
+	displacedChatId: string;
+} | null {
+	const source = findWorkspaceChatPlacement(snapshot, chatId);
+	if (!source || source.windowId === windowId || !isDesktopWindowPresented(snapshot, windowId))
+		return null;
+	const destinationWindow = windowNodeById(snapshot.desktopRoot, windowId);
+	const surfaceId = chatViewSurfaceId(windowId);
+	const surface = snapshot.surfaces[surfaceId];
+	if (destinationWindow?.tabs.activeId !== surfaceId || surface?.type !== 'chat' || !surface.chatId)
+		return null;
+	return { source, destination: { surfaceId, windowId }, displacedChatId: surface.chatId };
 }
 
 interface WorkspaceChatPlacementServiceDeps {
@@ -101,6 +122,71 @@ export class WorkspaceChatPlacementService {
 		return this.#show(chatId, (latest) =>
 			windowNodeById(latest.desktopRoot, windowId) ? windowId : null,
 		);
+	}
+
+	async swapIntoWindow(
+		chatId: string,
+		windowId: WorkspaceWindowId,
+		expectedChatId: string,
+	): Promise<ChatViewSurfaceId> {
+		let publications: WorkspacePublication[] = [];
+		const destination = await this.#commitPlacement(
+			(latest) => {
+				publications = [];
+				const swap = this.deps.isMobile()
+					? null
+					: resolveWorkspaceChatSwap(latest, chatId, windowId);
+				if (
+					swap &&
+					swap.displacedChatId === expectedChatId &&
+					this.#isAvailable(swap.source) &&
+					this.#isAvailable(swap.destination)
+				) {
+					for (const transfer of [
+						{
+							sourceSurfaceId: swap.source.surfaceId,
+							destinationSurfaceId: swap.destination.surfaceId,
+							chatId,
+						},
+						{
+							sourceSurfaceId: swap.destination.surfaceId,
+							destinationSurfaceId: swap.source.surfaceId,
+							chatId: swap.displacedChatId,
+						},
+					]) {
+						const publication = this.deps.prepareChatSurfaceTransfer(transfer);
+						if (publication) publications.push(publication);
+					}
+					return {
+						destination: swap.destination,
+						mutations: [
+							{
+								type: 'swap-window-chats',
+								firstWindowId: swap.source.windowId,
+								secondWindowId: windowId,
+							},
+						],
+					};
+				}
+				return (
+					this.#existingPlacementPlan(latest, chatId) ??
+					(windowNodeById(latest.desktopRoot, windowId)
+						? this.#setWindowChatPlan(windowId, chatId)
+						: { destination: null, mutations: [] })
+				);
+			},
+			{
+				publication: {
+					publish: () => {
+						for (const publication of publications) publication.publish();
+					},
+					rollback: () => {
+						for (const publication of publications) publication.rollback();
+					},
+				},
+			},
+		);
+		return destination.surfaceId;
 	}
 
 	async openInNewWindow(
