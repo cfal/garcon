@@ -41,8 +41,7 @@ function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date, options:
 		total: 1,
 		onEdit: vi.fn(),
 		onRemove: vi.fn(),
-		onMoveUp: vi.fn(),
-		onMoveDown: vi.fn(),
+		onMove: vi.fn(),
 	});
 }
 
@@ -56,6 +55,22 @@ function slotText(container: HTMLElement, slot: string): string {
 }
 
 describe('ScheduledPromptRow', () => {
+	it.each([0, 1, 2])('disables endpoint moves at their boundaries (index %s)', async index => {
+		const onMove = vi.fn();
+		render(ScheduledPromptRow, {
+			scheduledPrompt: makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }),
+			currentTime: new Date(), index, total: 3,
+			onToggle: vi.fn(), onEdit: vi.fn(), onRemove: vi.fn(), onMove,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		const top = screen.getByRole('menuitem', { name: 'Move to top' });
+		const bottom = screen.getByRole('menuitem', { name: 'Move to bottom' });
+		expect(top.hasAttribute('data-disabled')).toBe(index === 0);
+		expect(bottom.hasAttribute('data-disabled')).toBe(index === 2);
+		await fireEvent.click(index === 0 ? bottom : top);
+		expect(onMove).toHaveBeenCalledWith(index === 0 ? 'bottom' : 'top');
+	});
+
 	it('uses a static task name as the heading and retains a muted prompt preview', () => {
 		const prompt = { ...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), name: 'Daily {{current_date}} review' };
 		renderRow(prompt, new Date('2030-01-01T00:00:00.000Z'));
@@ -262,8 +277,7 @@ describe('ScheduledPromptRow', () => {
 			onToggle: vi.fn(),
 			onEdit: vi.fn(),
 			onRemove: vi.fn(),
-			onMoveUp: vi.fn(),
-			onMoveDown: vi.fn(),
+			onMove: vi.fn(),
 		});
 
 		expect(slotText(container, 'scheduled-prompt-next-run')).toMatch(/ · due now$/);

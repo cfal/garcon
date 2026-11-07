@@ -20,6 +20,9 @@
 	import ScheduledRunOutcomeIcon from './ScheduledRunOutcomeIcon.svelte';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
+	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
+	import type { ScheduledPromptMoveDirection } from '$lib/scheduling/scheduled-prompts-store.svelte';
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -50,8 +53,7 @@
 		onToggle: () => void;
 		onEdit: () => void;
 		onRemove: () => void;
-		onMoveUp: () => void;
-		onMoveDown: () => void;
+		onMove: (direction: ScheduledPromptMoveDirection) => void;
 		onOpenChat?: (chatId: string) => void;
 	}
 
@@ -69,8 +71,7 @@
 		onToggle,
 		onEdit,
 		onRemove,
-		onMoveUp,
-		onMoveDown,
+		onMove,
 		onOpenChat,
 	}: Props = $props();
 
@@ -216,13 +217,21 @@
 					<EllipsisVertical class="h-4 w-4" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
-					<DropdownMenuItem onclick={onMoveUp} disabled={index === 0}>
+					<DropdownMenuItem onclick={() => onMove('top')} disabled={index === 0}>
+						<ArrowUpToLine class="h-4 w-4" />
+						{m.scheduled_prompts_move_top()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onMove('up')} disabled={index === 0}>
 						<ArrowUp class="h-4 w-4" />
 						{m.scheduled_prompts_move_up()}
 					</DropdownMenuItem>
-					<DropdownMenuItem onclick={onMoveDown} disabled={index === total - 1}>
+					<DropdownMenuItem onclick={() => onMove('down')} disabled={index === total - 1}>
 						<ArrowDown class="h-4 w-4" />
 						{m.scheduled_prompts_move_down()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onMove('bottom')} disabled={index === total - 1}>
+						<ArrowDownToLine class="h-4 w-4" />
+						{m.scheduled_prompts_move_bottom()}
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem variant="destructive" onclick={onRemove}>

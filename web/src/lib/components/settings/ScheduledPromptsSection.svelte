@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { getChatSessions, getExecutors, getScheduledPrompts } from '$lib/context';
 	import { scheduledPromptExecutorId } from '$lib/scheduling/scheduled-prompt-executor.js';
+	import type { ScheduledPromptMoveDirection } from '$lib/scheduling/scheduled-prompts-store.svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		ScheduledPrompt,
@@ -140,7 +141,7 @@
 		}
 	}
 
-	async function move(scheduledPrompt: ScheduledPrompt, direction: 'up' | 'down'): Promise<void> {
+	async function move(scheduledPrompt: ScheduledPrompt, direction: ScheduledPromptMoveDirection): Promise<void> {
 		if (movingPromptId || togglingPromptId) return;
 		movingPromptId = scheduledPrompt.id;
 		operationError = null;
@@ -242,8 +243,7 @@
 							removeError = null;
 							removePrompt = scheduledPrompt;
 						}}
-						onMoveUp={() => void move(scheduledPrompt, 'up')}
-						onMoveDown={() => void move(scheduledPrompt, 'down')}
+						onMove={(direction) => void move(scheduledPrompt, direction)}
 						{onOpenChat}
 					/>
 					{#snippet failed()}

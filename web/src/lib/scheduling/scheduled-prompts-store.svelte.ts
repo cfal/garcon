@@ -14,6 +14,7 @@ import type {
 } from '$shared/scheduled-prompts';
 
 export type ScheduledPromptsStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type ScheduledPromptMoveDirection = 'up' | 'down' | 'top' | 'bottom';
 
 export interface ScheduledPromptsStoreDeps {
 	get?: typeof getScheduledPrompts;
@@ -152,13 +153,19 @@ export class ScheduledPromptsStore {
 		}
 	}
 
-	async move(id: string, direction: 'up' | 'down'): Promise<void> {
+	async move(id: string, direction: ScheduledPromptMoveDirection): Promise<void> {
 		const snapshot = await this.#requireSnapshot();
 		const index = snapshot.prompts.findIndex((scheduledPrompt) => scheduledPrompt.id === id);
-		const target = direction === 'up' ? index - 1 : index + 1;
-		if (index < 0 || target < 0 || target >= snapshot.prompts.length) return;
+		const target = {
+			up: index - 1,
+			down: index + 1,
+			top: 0,
+			bottom: snapshot.prompts.length - 1,
+		}[direction];
+		if (index < 0 || target < 0 || target >= snapshot.prompts.length || target === index) return;
 		const prompts = [...snapshot.prompts];
-		[prompts[index], prompts[target]] = [prompts[target], prompts[index]];
+		const [moved] = prompts.splice(index, 1);
+		prompts.splice(target, 0, moved);
 		const optimisticMarker = this.#localRevision + 1;
 		this.#localRevision = optimisticMarker;
 		this.snapshot = { ...snapshot, prompts };

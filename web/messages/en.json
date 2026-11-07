@@ -2171,6 +2171,8 @@
 	"scheduled_prompts_missing_chat_target": "Missing chat: {id}",
 	"scheduled_prompts_move_down": "Move prompt down",
 	"scheduled_prompts_move_up": "Move prompt up",
+	"scheduled_prompts_move_top": "Move to top",
+	"scheduled_prompts_move_bottom": "Move to bottom",
 	"scheduled_prompts_new_chat": "New chat",
 	"scheduled_prompts_new_chat_description": "Create a chat for each run.",
 	"scheduled_prompts_new_chat_id_help": "Use {token} for the chat this task creates each run.",
