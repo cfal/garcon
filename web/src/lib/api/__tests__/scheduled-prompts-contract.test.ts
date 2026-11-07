@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt, setScheduledPromptEnabled } from '../scheduled-prompts';
+import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt, setScheduledPromptEnabled, renderScheduledPrompt } from '../scheduled-prompts';
+import { parseChatId } from '$shared/chat-id';
 import {
 	SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
 	normalizeScheduledPromptTarget,
@@ -37,6 +38,21 @@ describe('scheduled prompts API contract', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+	});
+
+	it('renders a template for the prospective chat and rejects mismatched or malformed replies', async () => {
+		const request = { chatId: parseChatId('1000000000000001'), prompt: 'For {{chat_id}}' };
+		const response = { success: true, chatId: request.chatId, expandedText: `For ${request.chatId}` };
+		fetchMock.mockResolvedValueOnce(Response.json(response));
+		expect(await renderScheduledPrompt(request)).toEqual(response);
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/scheduled-prompts/render');
+		expect(options.method).toBe('POST');
+		expect(JSON.parse(options.body)).toEqual(request);
+		for (const invalid of [{ ...response, chatId: '1000000000000002' }, { ...response, expandedText: 1 }]) {
+			fetchMock.mockResolvedValueOnce(Response.json(invalid));
+			await expect(renderScheduledPrompt(request)).rejects.toThrow('Invalid scheduled prompt rendering response');
+		}
 	});
 
 	it('sends typed enablement and normalizes the persisted state', async () => {

@@ -28,6 +28,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Folder from '@lucide/svelte/icons/folder';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import SquarePen from '@lucide/svelte/icons/square-pen';
 	import ExecutorPill from '$lib/components/shared/ExecutorPill.svelte';
 	import Pause from '@lucide/svelte/icons/pause';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -55,6 +56,7 @@
 		onRemove: () => void;
 		onMove: (direction: ScheduledPromptMoveDirection) => void;
 		onOpenChat?: (chatId: string) => void;
+		onOpenInNewChat?: () => void;
 	}
 
 	let {
@@ -73,6 +75,7 @@
 		onRemove,
 		onMove,
 		onOpenChat,
+		onOpenInNewChat,
 	}: Props = $props();
 
 	let enabled = $derived(scheduledPrompt.enabled !== false);
@@ -217,6 +220,11 @@
 					<EllipsisVertical class="h-4 w-4" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
+					<DropdownMenuItem onclick={onOpenInNewChat} disabled={!onOpenInNewChat}>
+						<SquarePen class="h-4 w-4" />
+						{m.scheduled_prompts_open_new_chat()}
+					</DropdownMenuItem>
+					<DropdownMenuSeparator />
 					<DropdownMenuItem onclick={() => onMove('top')} disabled={index === 0}>
 						<ArrowUpToLine class="h-4 w-4" />
 						{m.scheduled_prompts_move_top()}

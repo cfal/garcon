@@ -29,6 +29,7 @@ interface RowOptions {
 	toggling?: boolean;
 	disabled?: boolean;
 	onOpenChat?: (chatId: string) => void;
+	onOpenInNewChat?: () => void;
 }
 
 function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date, options: RowOptions = {}) {
@@ -55,6 +56,18 @@ function slotText(container: HTMLElement, slot: string): string {
 }
 
 describe('ScheduledPromptRow', () => {
+	it.each([false, true])('exposes Open in new chat only when its target can be copied (available: %s)', async available => {
+		const onOpenInNewChat = vi.fn();
+		renderRow(makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), new Date(), {
+			onOpenInNewChat: available ? onOpenInNewChat : undefined,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		const item = screen.getByRole('menuitem', { name: 'Open in new chat' });
+		expect(item.hasAttribute('data-disabled')).toBe(!available);
+		await fireEvent.click(item);
+		expect(onOpenInNewChat).toHaveBeenCalledTimes(available ? 1 : 0);
+	});
+
 	it.each([0, 1, 2])('disables endpoint moves at their boundaries (index %s)', async index => {
 		const onMove = vi.fn();
 		render(ScheduledPromptRow, {

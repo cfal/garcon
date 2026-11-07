@@ -5,6 +5,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import ScheduledPromptsSection from './ScheduledPromptsSection.svelte';
 	import ScheduledPromptHeader from './ScheduledPromptHeader.svelte';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 
 	const appShell = getAppShell();
 
@@ -15,6 +16,11 @@
 	function openChat(chatId: string): void {
 		appShell.closeScheduledPrompts();
 		void gotoChat(chatId);
+	}
+
+	function openInNewChat(seed: NewChatDialogSeed): void {
+		appShell.closeScheduledPrompts();
+		appShell.openNewChatDialog(seed);
 	}
 </script>
 
@@ -30,7 +36,12 @@
 		/>
 
 		<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-			<ScheduledPromptsSection active={appShell.showScheduledPrompts} onOpenChat={openChat} />
+			<ScheduledPromptsSection
+				active={appShell.showScheduledPrompts}
+				onOpenChat={openChat}
+				onOpenInNewChat={openInNewChat}
+				newChatRequestId={appShell.newChatDialogRequestId}
+			/>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>

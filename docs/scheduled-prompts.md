@@ -8,6 +8,24 @@ When a recurring prompt resumes, its next run uses the first future slot on its 
 
 The controller owns enablement in `scheduled-prompts.json`. Records without an `enabled` field load as enabled. `PUT /api/v1/scheduled-prompts/enabled` accepts `{ expectedRevision, id, enabled }` and returns the existing mutation snapshot envelope. Revision conflicts require refresh; the browser retains the saved switch value until persistence succeeds. The same handlers serve browser, direct CLI, and authorized executor-gateway requests.
 
+## Row Actions
+
+The row menu supports **Move to top**, **Move to bottom**, and **Open in new chat**.
+Opening prepares an editable prompt without running or changing the schedule.
+Runtime variables expand once using the prospective new chat ID and controller
+time, shared with snippet expansion; subsequent edits are sent as ordinary text.
+Saved new-chat execution settings and preamble choices are copied. Existing-chat
+tasks copy the current execution settings, without history, and use New Chat's
+default preambles. Missing or stale literal targets cannot be copied. Explicit
+unavailable executors remain selected and cannot start until repaired.
+Task names and scheduled custom titles are not applied to manual chats.
+
+`POST /api/v1/scheduled-prompts/render` accepts `{ chatId, prompt }` and returns
+`{ success: true, chatId, expandedText }`. This authenticated, read-only browser
+helper does not reconcile schedules, register IDs, or contact executors. Like
+`/in` and `/reorder`, it is not part of the CLI forwarding allowlist. Existing
+HTTP, CLI, and executor-link contracts are unchanged; no migration is required.
+
 ## CLI Management
 
 `garcon-cli schedule` supports list, show, history, create, update, enable,

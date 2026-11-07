@@ -2,6 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ChatListEntry } from '$shared/chat-list';
+import { renderScheduledPrompt } from '$lib/api/scheduled-prompts';
+import { createExecutorStartupFixture } from '$lib/chat/new-chat/__tests__/executor-startup-fixture';
 import type {
 	ScheduledPrompt,
 	ScheduledPromptRunLogEntry,
@@ -9,6 +11,7 @@ import type {
 } from '$shared/scheduled-prompts';
 
 vi.mock('../ScheduledPromptDialog.svelte', async () => import('./ScheduledPromptDialogTestStub.svelte'));
+vi.mock('$lib/api/scheduled-prompts', () => ({ renderScheduledPrompt: vi.fn() }));
 
 const ScheduledPromptsSectionTestHost = (await import('./ScheduledPromptsSectionTestHost.svelte'))
 	.default;
@@ -82,6 +85,43 @@ function executorPill(title: string): string | null {
 }
 
 describe('ScheduledPromptsSection', () => {
+	it('loads a cold remote catalog before enabling an unguarded existing-chat copy', async () => {
+		const { modelCatalog, remoteCatalog } = createExecutorStartupFixture();
+		const metadata = remoteCatalog.agentMetadata;
+		remoteCatalog.agentMetadata = {};
+		const discovery = Promise.withResolvers<void>();
+		vi.mocked(remoteCatalog.refreshIfStale).mockImplementation(async () => {
+			await discovery.promise;
+			remoteCatalog.agentMetadata = metadata;
+		});
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor, remoteExecutor], modelCatalog,
+			chats: [chat('chat-remote', remoteExecutor.id)],
+			prompts: [prompt('remote-existing', 'Remote existing chat', existingChat('chat-remote'))],
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		expect(screen.getByRole('menuitem', { name: 'Open in new chat' }).getAttribute('aria-disabled')).toBe('true');
+		expect(remoteCatalog.refreshIfStale).toHaveBeenCalledOnce();
+		expect(modelCatalog.refreshIfStale).not.toHaveBeenCalled();
+		discovery.resolve();
+		await vi.waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open in new chat' }).getAttribute('aria-disabled')).not.toBe('true'));
+	});
+
+	it('prepares an editable new-chat seed from the row without changing the schedule', async () => {
+		const onOpenInNewChat = vi.fn();
+		vi.mocked(renderScheduledPrompt).mockImplementation(async request => ({ success: true, chatId: request.chatId, expandedText: `Review ${request.chatId}` }));
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor], chats: [],
+			prompts: [prompt('a', 'Review {{chat_id}}', newChat())], onOpenInNewChat,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new chat' }));
+		await vi.waitFor(() => expect(onOpenInNewChat).toHaveBeenCalledOnce());
+		const seed = onOpenInNewChat.mock.calls[0][0];
+		expect(seed.prefill).toBe(`Review ${seed.prospectiveChatId}`);
+		expect(seed.startup).toMatchObject({ executorId: 'local', projectPath: '/workspace/project', agentId: 'claude', model: 'opus' });
+	});
+
 	it('shows where each prompt runs once a remote executor is configured', () => {
 		render(ScheduledPromptsSectionTestHost, {
 			executors: [localExecutor, remoteExecutor],

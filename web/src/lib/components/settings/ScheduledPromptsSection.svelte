@@ -1,6 +1,10 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { getChatSessions, getExecutors, getScheduledPrompts } from '$lib/context';
+	import { getChatSessions, getExecutors, getModelCatalog, getScheduledPrompts } from '$lib/context';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
+	import { canOpenScheduledPromptInNewChat, scheduledPromptStartup } from '$lib/scheduling/scheduled-prompt-new-chat';
+	import { ScheduledPromptNewChatController } from '$lib/scheduling/scheduled-prompt-new-chat-controller.svelte';
 	import { scheduledPromptExecutorId } from '$lib/scheduling/scheduled-prompt-executor.js';
 	import type { ScheduledPromptMoveDirection } from '$lib/scheduling/scheduled-prompts-store.svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -26,12 +30,45 @@
 	interface Props {
 		active: boolean;
 		onOpenChat: (chatId: string) => void;
+		onOpenInNewChat: (seed: NewChatDialogSeed) => void;
+		newChatRequestId?: number;
 	}
 
-	let { active, onOpenChat }: Props = $props();
+	let { active, onOpenChat, onOpenInNewChat, newChatRequestId = 0 }: Props = $props();
 	const prompts = getScheduledPrompts();
 	const sessions = getChatSessions();
 	const executors = getExecutors();
+	const modelCatalog = getModelCatalog();
+	function sourceChat(prompt: ScheduledPrompt) {
+		return prompt.target.type === 'existing-chat' ? sessions.byId[prompt.target.chatId] : undefined;
+	}
+	function executionPolicy(prompt: ScheduledPrompt) {
+		const chat = sourceChat(prompt);
+		return chat ? modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy : undefined;
+	}
+	const newChat = new ScheduledPromptNewChatController({
+		get active() { return active; },
+		get newChatRequestId() { return newChatRequestId; },
+		startupFor: (prompt) => scheduledPromptStartup(prompt, sourceChat(prompt), executionPolicy(prompt)),
+		open: (seed) => onOpenInNewChat(seed),
+	});
+	$effect(() => {
+		active;
+		newChatRequestId;
+		return () => newChat.cancel();
+	});
+	$effect(() => {
+		if (!active) return;
+		const executorIds = new Set(prompts.prompts.flatMap((prompt) => {
+			const chat = sourceChat(prompt);
+			return chat && executors.isReady(chat.executorId) ? [chat.executorId] : [];
+		}));
+		untrack(() => {
+			for (const executorId of executorIds) {
+				void modelCatalog.forExecutor(executorId).refreshIfStale().catch(() => {});
+			}
+		});
+	});
 	let formOpen = $state(false);
 	let editingPrompt = $state<ScheduledPrompt | null>(null);
 	let removePrompt = $state<ScheduledPrompt | null>(null);
@@ -186,6 +223,11 @@
 			{operationError}
 		</p>
 	{/if}
+	{#if newChat.error}
+		<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+			{newChat.error}
+		</p>
+	{/if}
 	{#if prompts.hasLoaded && prompts.error}
 		<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
 			{prompts.error}
@@ -235,7 +277,7 @@
 						lastRunChatId={lastRun?.outcome === 'created-chat'
 							? openableChatId(lastRun.chatId)
 							: null}
-						disabled={movingPromptId !== null || togglingPromptId !== null}
+						disabled={movingPromptId !== null || togglingPromptId !== null || newChat.openingPromptId !== null}
 						toggling={togglingPromptId === scheduledPrompt.id}
 						onToggle={() => void toggle(scheduledPrompt)}
 						onEdit={() => openEdit(scheduledPrompt)}
@@ -244,6 +286,8 @@
 							removePrompt = scheduledPrompt;
 						}}
 						onMove={(direction) => void move(scheduledPrompt, direction)}
+						onOpenInNewChat={canOpenScheduledPromptInNewChat(scheduledPrompt, existingChat, executionPolicy(scheduledPrompt))
+							? () => void newChat.open(scheduledPrompt) : undefined}
 						{onOpenChat}
 					/>
 					{#snippet failed()}
