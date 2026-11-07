@@ -4,6 +4,7 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 import { displayCertificate, displayDetail, displayRow } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { buildConversationVirtualFeedModel, estimateConversationFeedItemSize, groupContainingRow } from '../conversation-feed-virtual-items.js';
 import { certifiedFeed, displayGroup } from './display-feed-fixtures.js';
+import { remapConversationAnchor } from '../conversation-feed-anchor-remapping.js';
 
 const user = (ordinal: number) => displayRow(ordinal, new UserMessage('', `Message ${ordinal}`));
 const bash = (ordinal: number) => displayRow(ordinal, new BashToolUseMessage('', 'reused-tool-id', 'true'));
@@ -12,6 +13,19 @@ const permission = (id: string): PendingPermissionRequest => ({ chatId: 'chat-1'
 const build = (input: ReturnType<typeof certifiedFeed>) => buildConversationVirtualFeedModel(input);
 
 describe('certified virtual feed', () => {
+	it.each(['direct', 'semantic', 'fallback'] as const)('excludes retained summary islands from %s anchor remapping', match => {
+		const group = displayGroup(10, 20, 11), row = certifiedFeed([user(100)]).display.window!.items[0];
+		const previous = build(certifiedFeed([user(100)], { items: [group, row] }));
+		const next = build(certifiedFeed([user(100)], { display: {
+			protectedGroups: [{ certificate: displayCertificate(), descriptor: match === 'semantic' ? displayGroup(11, 20, 10) : group }],
+		} }));
+		const groupKey = previous.items.find(item => item.kind === 'tool-group')!.key;
+		const rowKey = previous.items[previous.indexByRowId.get('view-1:100')!].key;
+		const selected = remapConversationAnchor({ key: match === 'fallback' ? 'removed' : groupKey,
+			viewportOffset: 0, fallbackKeys: [groupKey, rowKey] }, previous, next);
+		expect(selected?.anchor.key).toBe(rowKey);
+		expect(selected?.anchor.fallbackKeys).not.toContain(next.items.find(item => item.kind === 'tool-group')!.key);
+	});
 	it('places optimistic inputs after hidden anchors before the next visible row', () => {
 		const input = certifiedFeed([user(10), user(20)], { input: {
 			overlays: [{ kind: 'message', id: 'optimistic:pending', message: new UserMessage('', 'Pending input') }],

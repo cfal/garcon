@@ -34,6 +34,7 @@ interface ControllerExposure {
 	prependGroup(): Promise<void>;
 	appendGroup(): Promise<void>;
 	filterFirstGroupMember(): Promise<void>;
+	retainFirst(): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -324,6 +325,17 @@ describe('ConversationFeedVirtualController', () => {
 			expect(replacement).not.toBe(oldButton);
 			expect(document.activeElement).toBe(replacement);
 		});
+	});
+
+	it('remaps reading context when a focused certified summary becomes a retained island', async () => {
+		const { exposure } = await renderController({ groupFocusMode: true, groupTailCount: 8, initialPinned: false });
+		const button = exposure.viewport()!.querySelector<HTMLButtonElement>('[data-chat-tool-group]')!;
+		button.focus();
+		const before = exposure.transactions.length;
+		await exposure.retainFirst();
+		await settleController();
+		expect(exposure.transactions.slice(before).find(record => record.source === 'items')).toMatchObject({ anchorKind: 'item', anchorIndex: 1 });
+		expect(document.activeElement).toBe(button);
 	});
 
 	it('retries an initially rejected geometry publication', async () => {

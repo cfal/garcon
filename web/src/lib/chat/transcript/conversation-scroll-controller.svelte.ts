@@ -729,7 +729,7 @@ export class ConversationScrollController {
 		if (this.#activeTargetNavigations > 0 || this.#isPageMutationInProgress) return false;
 		if (reason === 'scroll' && this.deps.chatState.loadStatus === 'error') return false;
 		if (reason === 'scroll' && this.deps.getViewport()?.memberPageTarget(direction)) {
-			return !this.deps.chatState.isRequestingDisplay;
+			return this.deps.chatState.canLoadMembers;
 		}
 		if (
 			this.deps.chatState.pageStates[direction].status === 'loading' ||

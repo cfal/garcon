@@ -106,7 +106,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	get isDisplayBehindHead(): boolean { return this.display.window !== null && this.loadedThroughOrdinal < this.lastOrdinal; }
 	get canLoadEarlier(): boolean { return this.hasEarlierMessages; }
 	get isLoadingMessages(): boolean { return this.#opening || ['requesting', 'preparing', 'lagging', 'busy'].includes(this.display.phase); }
-	get isRequestingDisplay(): boolean { return this.controller.busy; }
+	get canLoadMembers(): boolean { return this.controller.canLoadMembers; }
 	get loadError(): string | null { return this.#openError ?? this.display.error; }
 	get loadStatus(): ChatLoadStatus {
 		if (this.loadError || this.display.phase === 'failed') return 'error';
