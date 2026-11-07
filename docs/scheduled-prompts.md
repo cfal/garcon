@@ -17,7 +17,8 @@ time, shared with snippet expansion; subsequent edits are sent as ordinary text.
 Saved new-chat execution settings and preamble choices are copied. Existing-chat
 tasks copy the current execution settings, without history, and use New Chat's
 default preambles. Missing or stale literal targets cannot be copied. Explicit
-unavailable executors remain selected and cannot start until repaired.
+unavailable executors or mismatched model routing remain selected and cannot
+start until explicitly repaired.
 Task names and scheduled custom titles are not applied to manual chats.
 
 `POST /api/v1/scheduled-prompts/render` accepts `{ chatId, prompt }` and returns

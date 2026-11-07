@@ -653,17 +653,20 @@ export class ModelSelectorState {
 		const committedModelValue = currentModelValue(this.modelCatalog, this.value);
 		const committedThinkingMode = normalizeThinkingMode(this.value.thinkingMode);
 		const draftThinkingMode = normalizeThinkingMode(this.draftThinkingMode);
-		const selectedEndpointId = this.modelCatalog.getModelForSelection(
+		const selection = this.modelCatalog.selectionFor(
 			this.draftAgentId,
 			this.draftModelValue,
-		)?.endpointId ?? null;
-		const endpointChanged = this.#draftTargetChanged
-			&& selectedEndpointId !== (this.value.modelEndpointId ?? null);
+		);
+		const routingChanged = this.#draftTargetChanged && (
+			selection.apiProviderId !== (this.value.apiProviderId ?? null) ||
+			selection.modelEndpointId !== (this.value.modelEndpointId ?? null) ||
+			selection.modelProtocol !== (this.value.modelProtocol ?? null)
+		);
 		if (
 			this.executorId === effectiveExecutorId(this.value.executorId) &&
 			this.draftAgentId === this.value.agentId &&
 			this.draftModelValue === committedModelValue &&
-			!endpointChanged &&
+			!routingChanged &&
 			(!this.effortSelectionEnabled || draftThinkingMode === committedThinkingMode)
 		) {
 			return;

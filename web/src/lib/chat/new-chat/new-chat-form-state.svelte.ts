@@ -31,6 +31,7 @@ import {
 } from './new-chat-executor-preferences';
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
 import type { NewChatStartupSeed } from './new-chat-seed';
+import { resolveNewChatModelSelection } from './new-chat-model-selection';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -272,10 +273,9 @@ export class NewChatFormState {
 	}
 
 	get resolvedModelSelection(): ResolvedModelSelection | null {
-		const modelValue = this.modelValue;
-		const endpointId = this.modelSelectionTarget?.modelEndpointId;
-		if (!this.#modelCatalog.getModelForSelection(this.agentId, modelValue, endpointId)) return null;
-		return this.#modelCatalog.selectionFor(this.agentId, modelValue, endpointId);
+		return resolveNewChatModelSelection(
+			this.#modelCatalog, this.agentId, this.modelValue, this.modelSelectionTarget,
+		);
 	}
 
 	get modelSelectionPending(): boolean {

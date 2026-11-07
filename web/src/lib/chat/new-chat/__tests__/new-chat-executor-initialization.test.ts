@@ -97,6 +97,59 @@ describe('new chat executor initialization', () => {
 		expect(form.buildConfig()).toMatchObject({ permissionMode: 'default', thinkingMode: 'none' });
 	});
 
+	it.each(['worker-edited', 'endpoint-b:worker-edited'])('accepts equivalent saved endpoint model identities: %s', async model => {
+		const { form, remoteCatalog } = fixture();
+		remoteCatalog.agentModels.claude.push({
+			value: 'endpoint-b:worker-edited', label: 'Routed worker model', rawModel: 'worker-edited',
+			apiProviderId: 'provider-b', endpointId: 'endpoint-b', protocol: 'openai-compatible',
+		});
+		const routing = { apiProviderId: 'provider-b', modelEndpointId: 'endpoint-b', modelProtocol: 'openai-compatible' as const };
+		form.restoreStartup({
+			model, ...routing, executorId: remoteExecutor.id, agentId: 'claude', projectPath: '/worker/seed',
+			permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+			preambleChoice: { mode: 'defaults' },
+		});
+		await form.loadSettingsAndModels();
+		form.validationStatus = 'valid';
+		form.firstMessage = 'Synthetic routed prompt';
+		expect(form.modelSelectionTarget).toEqual({ model, ...routing });
+		expect(form.modelSelectionError).toBeNull();
+		expect(form.canSubmit).toBe(true);
+		expect(form.buildConfig()).toMatchObject({ model: 'worker-edited', ...routing });
+	});
+
+	it.each([
+		{ apiProviderId: 'provider-a', modelEndpointId: 'endpoint-b', modelProtocol: 'openai-compatible' },
+		{ apiProviderId: 'provider-a', modelEndpointId: null, modelProtocol: null },
+		{ apiProviderId: 'provider-b', modelEndpointId: 'endpoint-b', modelProtocol: 'anthropic-messages' },
+	] as const)('blocks inconsistent restored routing without substituting the catalog selection: %j', async routing => {
+		const { form, remoteCatalog } = fixture();
+		const routedModel = {
+			value: 'routed-worker-model', label: 'Routed worker model', rawModel: 'worker-edited',
+			apiProviderId: 'provider-b', endpointId: 'endpoint-b', protocol: 'openai-compatible' as const,
+		};
+		remoteCatalog.agentModels.claude.push(routedModel);
+		const selection = { model: 'worker-edited', ...routing };
+		form.restoreStartup({
+			...selection, executorId: remoteExecutor.id, agentId: 'claude', projectPath: '/worker/seed',
+			permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+			preambleChoice: { mode: 'defaults' },
+		});
+		await form.loadSettingsAndModels();
+		form.validationStatus = 'valid';
+		form.firstMessage = 'Synthetic routed prompt';
+		expect(form.modelSelectionTarget).toEqual(selection);
+		expect(form.canSubmit).toBe(false);
+		expect(form.modelSelectionError).not.toBeNull();
+		expect(form.buildConfig()).toBeNull();
+		form.selectModel(routedModel.value);
+		expect(form.canSubmit).toBe(true);
+		expect(form.buildConfig()).toMatchObject({
+			model: 'worker-edited', apiProviderId: 'provider-b',
+			modelEndpointId: 'endpoint-b', modelProtocol: 'openai-compatible',
+		});
+	});
+
 	it('restores the last executor before resolving its path, agent and model', async () => {
 		const { form, modelCatalog, remoteCatalog } = fixture();
 		await form.loadSettingsAndModels();
