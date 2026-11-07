@@ -23,6 +23,7 @@ export class WorkspaceTransitionArbiter {
 		plan: WorkspaceMutationPlan,
 		hooks: {
 			beforePublish?: (next: WorkspaceLayoutSnapshot, base: WorkspaceLayoutSnapshot) => void;
+			afterPublish?: (next: WorkspaceLayoutSnapshot) => void;
 			publishFailed?: () => void;
 		} = {},
 		options: { retryPublishFailure?: boolean } = {},
@@ -34,6 +35,7 @@ export class WorkspaceTransitionArbiter {
 			hooks.publishFailed?.();
 		};
 		return this.#queue.enqueue(() => {
+			let committed = false;
 			try {
 				while (true) {
 					const revision = this.layout.revision;
@@ -41,12 +43,16 @@ export class WorkspaceTransitionArbiter {
 					const mutations = typeof plan === 'function' ? plan(snapshot) : plan;
 					if (mutations.length === 0) {
 						hooks.beforePublish?.(snapshot, snapshot);
+						committed = true;
+						hooks.afterPublish?.(snapshot);
 						return true;
 					}
 					const next = reduceWorkspaceLayout(snapshot, mutations);
 					hooks.beforePublish?.(next, snapshot);
 					const published = this.commitPort.publish(revision, next);
 					if (published) {
+						committed = true;
+						hooks.afterPublish?.(next);
 						return true;
 					}
 					notifyFailure();
@@ -56,6 +62,8 @@ export class WorkspaceTransitionArbiter {
 					failureNotified = false;
 				}
 			} catch (error) {
+				// Published layouts cannot be rolled back by a failed success observer.
+				if (committed) throw error;
 				try {
 					notifyFailure();
 				} catch (rollbackError) {
