@@ -17,6 +17,7 @@ import {
 	fileSurfaceId,
 	portableSingletonDescriptor,
 	terminalSurfaceId,
+	type WorkspaceLayoutMutation,
 	type WorkspaceWindowId,
 } from '../surface-types';
 import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
@@ -740,9 +741,9 @@ describe('WorkspaceCoordinator', () => {
 		const publications = [0, 1].map(() => ({ publish: vi.fn(), rollback: vi.fn() }));
 		let transferIndex = 0;
 		const prepareChatSurfaceTransfer = vi.fn((_transfer: ChatSurfaceTransfer) => {
-			expect(publications.every((publication) => publication.publish.mock.calls.length === 0)).toBe(
-				true,
-			);
+			for (const publication of publications) {
+				expect(publication.publish).not.toHaveBeenCalled();
+			}
 			return publications[transferIndex++];
 		});
 		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
@@ -815,12 +816,9 @@ describe('WorkspaceCoordinator', () => {
 			const before = layout.snapshot.surfaces;
 			const prepareChatSurfaceTransfer = vi.fn();
 			coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
-			const target =
-				scenario === 'missing'
-					? 'window-missing'
-					: scenario === 'same'
-						? 'window-main'
-						: 'window-files';
+			let target: WorkspaceWindowId = 'window-files';
+			if (scenario === 'missing') target = 'window-missing';
+			else if (scenario === 'same') target = 'window-main';
 			await coordinator.swapChatIntoWindow('chat-a', target, 'chat-b');
 			expect(layout.snapshot.surfaces).toEqual(before);
 			expect(coordinator.focusedChatId).toBe('chat-a');
@@ -851,35 +849,33 @@ describe('WorkspaceCoordinator', () => {
 			await coordinator.showChatInCurrentWindow('chat-a');
 			const destination = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
 			const swapping = coordinator.swapChatIntoWindow('chat-a', destination, 'chat-b');
-			layout.publish(
-				layout.revision,
-				reduceWorkspaceLayout(
-					layout.snapshot,
-					scenario === 'moved-source'
-						? [
-								{
-									type: 'move-chat-to-window',
-									sourceWindowId: 'window-main',
-									destinationWindowId: 'window-files',
-								},
-							]
-						: scenario === 'changed-target'
-							? [{ type: 'set-window-chat', windowId: destination, chatId: 'chat-c' }]
-							: [{ type: 'set-fullscreen-window', windowId: 'window-main' }],
-				),
-			);
+			let mutation: WorkspaceLayoutMutation;
+			let expectedWindowId: WorkspaceWindowId = 'window-main';
+			let expectedDestinationChatId = 'chat-b';
+			switch (scenario) {
+				case 'moved-source':
+					mutation = {
+						type: 'move-chat-to-window',
+						sourceWindowId: 'window-main',
+						destinationWindowId: 'window-files',
+					};
+					expectedWindowId = destination;
+					expectedDestinationChatId = 'chat-a';
+					break;
+				case 'changed-target':
+					mutation = { type: 'set-window-chat', windowId: destination, chatId: 'chat-c' };
+					expectedDestinationChatId = 'chat-c';
+					break;
+				case 'hidden-target':
+					mutation = { type: 'set-fullscreen-window', windowId: 'window-main' };
+					break;
+			}
+			layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [mutation]));
 			await swapping;
 			expect(coordinator.focusedChatId).toBe('chat-a');
-			expect(coordinator.currentWindowId).toBe(
-				scenario === 'moved-source' ? destination : 'window-main',
-			);
+			expect(coordinator.currentWindowId).toBe(expectedWindowId);
 			expect(layout.surface(chatViewSurfaceId(destination))).toMatchObject({
-				chatId:
-					scenario === 'moved-source'
-						? 'chat-a'
-						: scenario === 'changed-target'
-							? 'chat-c'
-							: 'chat-b',
+				chatId: expectedDestinationChatId,
 			});
 			if (scenario === 'moved-source') {
 				expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({

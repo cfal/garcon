@@ -469,25 +469,28 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const preserveDestination = destinationPanel?.chatId === transfer.chatId;
 		const pendingSource = this.#pendingSurfaceTransfers.get(transfer.sourceSurfaceId);
 		// A hidden Chat can move again before its previous transfer is consumed.
-		const source = pendingSource?.chatId === transfer.chatId ? pendingSource : null;
-		const target = source?.target ?? this.#captureSurfaceTransferTarget(transfer);
-		let previous: PendingSurfaceTransfer | undefined;
+		const sourceTransfer = pendingSource?.chatId === transfer.chatId ? pendingSource : null;
+		const target = sourceTransfer?.target ?? this.#captureSurfaceTransferTarget(transfer);
+		let previousTransfer: PendingSurfaceTransfer | undefined;
 
 		return {
 			publish: () => {
 				if (preserveDestination) return;
-				previous = this.#pendingSurfaceTransfers.get(transfer.destinationSurfaceId);
+				previousTransfer = this.#pendingSurfaceTransfers.get(transfer.destinationSurfaceId);
 				this.#pendingSurfaceTransfers.set(transfer.destinationSurfaceId, {
 					token,
 					chatId: transfer.chatId,
 					target,
-					sourceSurfaceId: source?.sourceSurfaceId ?? transfer.sourceSurfaceId,
+					sourceSurfaceId: sourceTransfer?.sourceSurfaceId ?? transfer.sourceSurfaceId,
 				});
 			},
 			rollback: () => {
-				if (this.#pendingSurfaceTransfers.get(transfer.destinationSurfaceId)?.token === token) {
-					if (previous) this.#pendingSurfaceTransfers.set(transfer.destinationSurfaceId, previous);
-					else this.#pendingSurfaceTransfers.delete(transfer.destinationSurfaceId);
+				if (this.#pendingSurfaceTransfers.get(transfer.destinationSurfaceId)?.token !== token)
+					return;
+				if (previousTransfer) {
+					this.#pendingSurfaceTransfers.set(transfer.destinationSurfaceId, previousTransfer);
+				} else {
+					this.#pendingSurfaceTransfers.delete(transfer.destinationSurfaceId);
 				}
 			},
 		};

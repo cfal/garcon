@@ -137,43 +137,43 @@ export class WorkspaceChatPlacementService {
 					? null
 					: resolveWorkspaceChatSwap(latest, chatId, windowId);
 				if (
-					swap &&
-					swap.displacedChatId === expectedChatId &&
-					this.#isAvailable(swap.source) &&
-					this.#isAvailable(swap.destination)
+					!swap ||
+					swap.displacedChatId !== expectedChatId ||
+					!this.#isAvailable(swap.source) ||
+					!this.#isAvailable(swap.destination)
 				) {
-					for (const transfer of [
-						{
-							sourceSurfaceId: swap.source.surfaceId,
-							destinationSurfaceId: swap.destination.surfaceId,
-							chatId,
-						},
-						{
-							sourceSurfaceId: swap.destination.surfaceId,
-							destinationSurfaceId: swap.source.surfaceId,
-							chatId: swap.displacedChatId,
-						},
-					]) {
-						const publication = this.deps.prepareChatSurfaceTransfer(transfer);
-						if (publication) publications.push(publication);
+					const existing = this.#existingPlacementPlan(latest, chatId);
+					if (existing) return existing;
+					if (!windowNodeById(latest.desktopRoot, windowId)) {
+						return { destination: null, mutations: [] };
 					}
-					return {
-						destination: swap.destination,
-						mutations: [
-							{
-								type: 'swap-window-chats',
-								firstWindowId: swap.source.windowId,
-								secondWindowId: windowId,
-							},
-						],
-					};
+					return this.#setWindowChatPlan(windowId, chatId);
 				}
-				return (
-					this.#existingPlacementPlan(latest, chatId) ??
-					(windowNodeById(latest.desktopRoot, windowId)
-						? this.#setWindowChatPlan(windowId, chatId)
-						: { destination: null, mutations: [] })
-				);
+				for (const transfer of [
+					{
+						sourceSurfaceId: swap.source.surfaceId,
+						destinationSurfaceId: swap.destination.surfaceId,
+						chatId,
+					},
+					{
+						sourceSurfaceId: swap.destination.surfaceId,
+						destinationSurfaceId: swap.source.surfaceId,
+						chatId: swap.displacedChatId,
+					},
+				]) {
+					const publication = this.deps.prepareChatSurfaceTransfer(transfer);
+					if (publication) publications.push(publication);
+				}
+				return {
+					destination: swap.destination,
+					mutations: [
+						{
+							type: 'swap-window-chats',
+							firstWindowId: swap.source.windowId,
+							secondWindowId: windowId,
+						},
+					],
+				};
 			},
 			{
 				publication: {

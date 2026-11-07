@@ -45,23 +45,23 @@ test('reuses a chat in another window while the anchor is reserved', async () =>
 	await expect(service.openBeside('1780000000000001', 'window-files')).resolves.toBe('window-main');
 });
 
-test.each(['source-window', 'destination-window', 'source-surface', 'destination-surface'])(
-	'checks the %s reservation before preparing either swap transfer',
-	async (reservation) => {
+test.each([
+	{ windowId: 'window-main', kind: 'window' },
+	{ windowId: 'window-files', kind: 'window' },
+	{ windowId: 'window-main', kind: 'surface' },
+	{ windowId: 'window-files', kind: 'surface' },
+] as const)(
+	'checks the $kind reservation in $windowId before preparing either swap transfer',
+	async ({ windowId, kind }) => {
 		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
 			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'chat-b' },
 		]);
-		const windowId = reservation.startsWith('source') ? 'window-main' : 'window-files';
 		const prepareChatSurfaceTransfer = vi.fn(() => null);
 		const present = vi.fn();
 		const deps = {
-			surfaceReservations: new Set(
-				reservation.endsWith('surface') ? [chatViewSurfaceId(windowId)] : [],
-			),
-			windowReservations: new Set<WorkspaceWindowId>(
-				reservation.endsWith('window') ? [windowId] : [],
-			),
+			surfaceReservations: new Set(kind === 'surface' ? [chatViewSurfaceId(windowId)] : []),
+			windowReservations: new Set<WorkspaceWindowId>(kind === 'window' ? [windowId] : []),
 			isMobile: () => false,
 			lastFocusedWindowId: () => 'window-files' as const,
 			resolveWindowId: (_snapshot, preferred) => preferred ?? 'window-main',
@@ -87,8 +87,7 @@ test.each(['source-window', 'destination-window', 'source-surface', 'destination
 			'window-files',
 			'chat-b',
 		);
-		if (reservation.startsWith('source'))
-			await expect(swapping).rejects.toThrow('Failed to open view');
+		if (windowId === 'window-main') await expect(swapping).rejects.toThrow('Failed to open view');
 		else {
 			await expect(swapping).resolves.toBe(CANONICAL_CHAT_SURFACE_ID);
 			expect(present).toHaveBeenCalledWith(CANONICAL_CHAT_SURFACE_ID);

@@ -118,10 +118,8 @@
 		return target?.kind === 'window' && target.windowId === workspaceWindow.id ? target : null;
 	});
 	const chatSwap = $derived(
-		localSettings.swapDraggedOpenChats &&
-			dnd.payload?.kind === 'chat' &&
-			activeDropTarget?.zone === 'center'
-			? resolveWorkspaceChatSwap(snapshot, dnd.payload.chatId, workspaceWindow.id)
+		dnd.payload?.kind === 'chat' && activeDropTarget?.zone === 'center'
+			? resolveChatSwap(dnd.payload.chatId)
 			: null,
 	);
 	const activeResultInset = $derived(
@@ -137,6 +135,11 @@
 	const dropLayerTopPx = $derived(
 		dnd.payload?.kind === 'chat' ? undefined : titlebarMetrics.heightPx,
 	);
+
+	function resolveChatSwap(chatId: string) {
+		if (!localSettings.swapDraggedOpenChats) return null;
+		return resolveWorkspaceChatSwap(snapshot, chatId, workspaceWindow.id);
+	}
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
 		switch (zone.zone) {
@@ -165,8 +168,8 @@
 			case 'fullscreen':
 				return m.workspace_drop_zone_exit_fullscreen();
 		}
+		if (chatSwap) return m.workspace_drop_zone_swap_chats();
 		if (dnd.payload?.kind === 'chat' && dnd.hasChatPlacement(dnd.payload.chatId)) {
-			if (chatSwap) return m.workspace_drop_zone_swap_chats();
 			return m.workspace_show_existing_chat();
 		}
 		if (
@@ -196,9 +199,7 @@
 		try {
 			if (commit.payload.kind === 'chat') {
 				if (commit.target.zone === 'center') {
-					const swap = localSettings.swapDraggedOpenChats
-						? resolveWorkspaceChatSwap(snapshot, commit.payload.chatId, workspaceWindow.id)
-						: null;
+					const swap = resolveChatSwap(commit.payload.chatId);
 					if (swap) {
 						await workspace.swapChatIntoWindow(
 							commit.payload.chatId,
