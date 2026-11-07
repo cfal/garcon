@@ -969,9 +969,19 @@ describe('ConversationPanelRegistry', () => {
 		const hidden = [presentation(right, 'chat-2')];
 		registry.prepareForReconcile(hidden);
 		registry.reconcile(hidden);
-		for (const [incoming, outgoing] of [
-			['chat-1', 'chat-2'],
-			['chat-2', 'chat-1'],
+		for (const { incoming, outgoing, transcript, viewportOffset } of [
+			{
+				incoming: 'chat-1',
+				outgoing: 'chat-2',
+				transcript: first.transcript,
+				viewportOffset: -11,
+			},
+			{
+				incoming: 'chat-2',
+				outgoing: 'chat-1',
+				transcript: second.transcript,
+				viewportOffset: -22,
+			},
 		]) {
 			const publications = [
 				registry.prepareChatSurfaceTransfer({
@@ -990,9 +1000,8 @@ describe('ConversationPanelRegistry', () => {
 			registry.prepareForReconcile(visible);
 			registry.reconcile(visible);
 			const panel = registry.panel(right)!;
-			expect(panel.transcript).toBe(incoming === 'chat-1' ? first.transcript : second.transcript);
+			expect(panel.transcript).toBe(transcript);
 			const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
-			const viewportOffset = incoming === 'chat-1' ? -11 : -22;
 			panel.attachPresentation(
 				port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset }),
 			);
@@ -1024,14 +1033,14 @@ describe('ConversationPanelRegistry', () => {
 			});
 			const ids = ['chat-view:window-left', 'chat-view:window-right'] as const;
 			registry.reconcile(ids.map((id, index) => presentation(id, `chat-${index + 1}`, 'deferred')));
-			const transfers = ids.map((id, index) =>
+			const publications = ids.map((id, index) =>
 				registry.prepareChatSurfaceTransfer({
 					sourceSurfaceId: id,
 					destinationSurfaceId: ids[1 - index],
 					chatId: `chat-${index + 1}`,
 				}),
 			);
-			for (const transfer of transfers) transfer.publish();
+			for (const publication of publications) publication.publish();
 			const swapped = ids.map((id, index) => presentation(id, `chat-${2 - index}`, 'deferred'));
 			registry.prepareForReconcile(swapped);
 			registry.reconcile(swapped);
@@ -1119,14 +1128,14 @@ describe('ConversationPanelRegistry', () => {
 				originals.map((panel) => registry.loadChatSnapshot(panel.chatId, { minimumLimit: 200 })),
 			);
 			await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(2));
-			const transfers = ids.map((id, index) =>
+			const publications = ids.map((id, index) =>
 				registry.prepareChatSurfaceTransfer({
 					sourceSurfaceId: id,
 					destinationSurfaceId: ids[1 - index],
 					chatId: `chat-${index + 1}`,
 				}),
 			);
-			for (const transfer of transfers) transfer.publish();
+			for (const publication of publications) publication.publish();
 			const swapped = ids.map((id, index) => presentation(id, `chat-${2 - index}`));
 			registry.prepareForReconcile(swapped);
 			registry.reconcile(swapped);
@@ -1180,9 +1189,12 @@ describe('ConversationPanelRegistry', () => {
 		},
 	);
 
-	it.each(['replacement', 'superseded'] as const)(
-		'preserves the correct pending transfer when the %s publication rolls back',
-		async (rollback) => {
+	it.each([
+		{ rollback: 'replacement', chatId: 'chat-1', viewportOffset: -11 },
+		{ rollback: 'superseded', chatId: 'chat-2', viewportOffset: -22 },
+	])(
+		'preserves the correct pending transfer when the $rollback publication rolls back',
+		async ({ rollback, chatId, viewportOffset }) => {
 			const { cache, registry } = fixture();
 			seed(cache, 'chat-1');
 			seed(cache, 'chat-2');
@@ -1214,8 +1226,6 @@ describe('ConversationPanelRegistry', () => {
 			replacement.publish();
 			if (rollback === 'replacement') replacement.rollback();
 			else original.rollback();
-			const chatId = rollback === 'replacement' ? 'chat-1' : 'chat-2';
-			const viewportOffset = rollback === 'replacement' ? -11 : -22;
 			registry.reconcile([presentation('chat-view:window-hidden', chatId)]);
 			const panel = registry.panel('chat-view:window-hidden')!;
 			const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');

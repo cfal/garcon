@@ -1770,6 +1770,12 @@ describe('Chromium workspace windows', () => {
           });
           const content = (label: string) =>
             `${label} ${'Synthetic wrapping transcript content. '.repeat(100)}`;
+          const waitForEcho = (windowId: string, label: string) =>
+            conversationPanel(page, windowId)
+              .getByText(`echo:${content(label)}`, { exact: true })
+              .waitFor();
+          const attachmentButton = (name: string) =>
+            page.getByRole('button', { name: `Remove attachment ${name}`, exact: true });
           const chatA = await createChat(fixture, content('swap-a'));
           const chatB = await createChat(fixture, content('swap-b'));
           await openChat(fixture, chatA);
@@ -1786,9 +1792,7 @@ describe('Chromium workspace windows', () => {
             mimeType: 'text/markdown',
             buffer: Buffer.from('Synthetic attachment A'),
           });
-          await page
-            .getByRole('button', { name: 'Remove attachment draft-a.md', exact: true })
-            .waitFor();
+          await attachmentButton('draft-a.md').waitFor();
           const composerElement = await composer.elementHandle();
           await dragChatToWindow(page, {
             chatId: chatB,
@@ -1796,18 +1800,14 @@ describe('Chromium workspace windows', () => {
             target: 'center',
             expectedLabel: 'Add as tab',
           });
-          await conversationPanel(page, destination)
-            .getByText(`echo:${content('swap-b')}`, { exact: true })
-            .waitFor();
+          await waitForEcho(destination, 'swap-b');
           await composer.fill('Synthetic draft B');
           await attachments.setInputFiles({
             name: 'draft-b.md',
             mimeType: 'text/markdown',
             buffer: Buffer.from('Synthetic attachment B'),
           });
-          await page
-            .getByRole('button', { name: 'Remove attachment draft-b.md', exact: true })
-            .waitFor();
+          await attachmentButton('draft-b.md').waitFor();
           const viewport = (windowId: string) =>
             conversationPanel(page, windowId).locator('[data-chat-scroll-viewport]');
           await viewport(source).evaluate((element) => {
@@ -1854,9 +1854,7 @@ describe('Chromium workspace windows', () => {
             expectedLabel: 'Swap chats',
           });
           await waitForCurrentWorkspaceWindow(page, destination);
-          await conversationPanel(page, destination)
-            .getByText(`echo:${content('swap-a')}`, { exact: true })
-            .waitFor();
+          await waitForEcho(destination, 'swap-a');
           if (hiddenSource) {
             markPhase('repeatedly swapping the hidden Chat without revealing its tab');
             for (const [chatId, marker, draft] of [
@@ -1872,9 +1870,7 @@ describe('Chromium workspace windows', () => {
                 target: 'center',
                 expectedLabel: 'Swap chats',
               });
-              await conversationPanel(page, destination)
-                .getByText(`echo:${content(marker)}`, { exact: true })
-                .waitFor();
+              await waitForEcho(destination, marker);
               if (chatId === chatB) await waitForChatReadingPosition(page, destination, reading);
               expect(await composer.inputValue()).toBe(draft);
               expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
@@ -1883,27 +1879,17 @@ describe('Chromium workspace windows', () => {
               'singleton:chat-map',
             );
             await page.locator(`[id="${source}-tab-chat-view:${source}"]`).click();
-            await conversationPanel(page, source)
-              .getByText(`echo:${content('swap-b')}`, { exact: true })
-              .waitFor();
+            await waitForEcho(source, 'swap-b');
             await page
               .locator(`[data-workspace-window-titlebar="${destination}"]`)
               .click({ position: { x: 3, y: 3 } });
             await waitForCurrentWorkspaceWindow(page, destination);
           }
-          await conversationPanel(page, source)
-            .getByText(`echo:${content('swap-b')}`, { exact: true })
-            .waitFor();
+          await waitForEcho(source, 'swap-b');
           expect(await composer.inputValue()).toBe('Synthetic draft A');
           expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
-          await page
-            .getByRole('button', { name: 'Remove attachment draft-a.md', exact: true })
-            .waitFor();
-          expect(
-            await page
-              .getByRole('button', { name: 'Remove attachment draft-b.md', exact: true })
-              .count(),
-          ).toBe(0);
+          await attachmentButton('draft-a.md').waitFor();
+          expect(await attachmentButton('draft-b.md').count()).toBe(0);
           expect(
             await sourceWindow.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.id)),
           ).toEqual(sourceTabIds);
@@ -1927,14 +1913,8 @@ describe('Chromium workspace windows', () => {
             await waitForCurrentWorkspaceWindow(page, windowId);
             expect(await composer.inputValue()).toBe(draft);
             expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
-            await page
-              .getByRole('button', { name: `Remove attachment ${attachment}`, exact: true })
-              .waitFor();
-            expect(
-              await page
-                .getByRole('button', { name: `Remove attachment ${otherAttachment}`, exact: true })
-                .count(),
-            ).toBe(0);
+            await attachmentButton(attachment).waitFor();
+            expect(await attachmentButton(otherAttachment).count()).toBe(0);
           }
           markPhase('restoring the swapped layout after reload');
           await page.waitForFunction(
@@ -1957,12 +1937,8 @@ describe('Chromium workspace windows', () => {
             { source, destination, chatA, chatB },
           );
           await page.reload({ waitUntil: 'domcontentloaded' });
-          await conversationPanel(page, source)
-            .getByText(`echo:${content('swap-b')}`, { exact: true })
-            .waitFor();
-          await conversationPanel(page, destination)
-            .getByText(`echo:${content('swap-a')}`, { exact: true })
-            .waitFor();
+          await waitForEcho(source, 'swap-b');
+          await waitForEcho(destination, 'swap-a');
           expect(await page.locator(WINDOW_SELECTOR).count()).toBe(2);
           fixture.assertNoBrowserErrors();
         },

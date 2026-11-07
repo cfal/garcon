@@ -539,6 +539,10 @@ function positionedDragEvent(type: string, clientX: number, clientY: number): Dr
 	return event;
 }
 
+function dropResultText(scope: ParentNode): string | undefined {
+	return scope.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim();
+}
+
 function panelPresentation(
 	target: ReturnType<ConversationPanelPresentationPort['captureRestoreTarget']>,
 ): ConversationPanelPresentationPort {
@@ -944,14 +948,14 @@ describe('WorkspaceRoot', () => {
 			await tick();
 
 			await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
-			expect(
-				destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-			).toBe(initial ? m.workspace_drop_zone_swap_chats() : m.workspace_show_existing_chat());
+			expect(dropResultText(destination)).toBe(
+				initial ? m.workspace_drop_zone_swap_chats() : m.workspace_show_existing_chat(),
+			);
 			localSettings.set('swapDraggedOpenChats', enabled);
 			await tick();
-			expect(
-				destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-			).toBe(enabled ? m.workspace_drop_zone_swap_chats() : m.workspace_show_existing_chat());
+			expect(dropResultText(destination)).toBe(
+				enabled ? m.workspace_drop_zone_swap_chats() : m.workspace_show_existing_chat(),
+			);
 			await fireEvent(destination, positionedDragEvent('drop', 50, 50));
 
 			await waitFor(() => {
@@ -999,9 +1003,7 @@ describe('WorkspaceRoot', () => {
 			vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
 			windowDnd.beginChatDrag('chat-a');
 			await fireEvent(destination, positionedDragEvent('dragover', x, y));
-			expect(
-				destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-			).toBe(m.workspace_show_existing_chat());
+			expect(dropResultText(destination)).toBe(m.workspace_show_existing_chat());
 
 			await fireEvent(destination, positionedDragEvent('drop', x, y));
 
@@ -1027,9 +1029,7 @@ describe('WorkspaceRoot', () => {
 		vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
 		windowDnd.beginChatDrag('chat-a');
 		await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
-		expect(
-			destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-		).toBe(m.workspace_drop_zone_swap_chats());
+		expect(dropResultText(destination)).toBe(m.workspace_drop_zone_swap_chats());
 
 		layout.publish(
 			layout.revision,
@@ -1038,9 +1038,7 @@ describe('WorkspaceRoot', () => {
 			]),
 		);
 		await tick();
-		expect(
-			destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-		).toBe(m.workspace_show_existing_chat());
+		expect(dropResultText(destination)).toBe(m.workspace_show_existing_chat());
 		await fireEvent(destination, positionedDragEvent('drop', 50, 50));
 
 		expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-a', 'window-files');
