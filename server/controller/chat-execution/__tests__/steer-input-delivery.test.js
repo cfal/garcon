@@ -9,6 +9,10 @@ const OPTIONS = {
   clientMessageId: 'message-steer',
   transcriptViewId: 'view-1',
 };
+const QUESTION_OPTIONS = { ...OPTIONS, questionReply: {
+  questionId: 'question', question: 'Which environment?', answer: 'Staging',
+  source: { chatId: CHAT_ID, transcriptViewId: OPTIONS.transcriptViewId, ordinal: 1 },
+} };
 
 function scaffold({ providerTarget = {} } = {}) {
   const ownership = new ExecutionOwnership();
@@ -40,7 +44,7 @@ describe('SteerInputDelivery', () => {
 
     expect(target?.providerTarget).toBeNull();
     await expect(delivery.deliver(
-      CHAT_ID, 'guidance', 'guidance', OPTIONS, target, afterPendingRegistered,
+      CHAT_ID, 'guidance', 'guidance', QUESTION_OPTIONS, target, afterPendingRegistered,
     )).rejects.toMatchObject({ code: 'STEER_TURN_UNAVAILABLE', status: 409 });
     expect(admitInput).not.toHaveBeenCalled();
     expect(afterPendingRegistered).not.toHaveBeenCalled();
@@ -63,5 +67,27 @@ describe('SteerInputDelivery', () => {
     expect(afterPendingRegistered).toHaveBeenCalledWith('turn-1');
     expect(turnRunner.steerInput.mock.calls[0][1]).toBe('guidance with context');
     expect(discardPreparedInput).toHaveBeenCalledWith(CHAT_ID, 'message-steer');
+  });
+
+  it.each(['no-active-turn', 'turn-changed'])('does not authorize resubmitting an admitted question after %s', async reason => {
+    const { delivery, turnRunner, admitInput } = scaffold();
+    const target = await delivery.captureTarget(CHAT_ID);
+    turnRunner.steerInput.mockImplementation(async () => ({ kind: 'rejected', reason }));
+    await expect(delivery.deliver(
+      CHAT_ID, 'answer', 'answer', QUESTION_OPTIONS, target, async () => undefined,
+    )).rejects.toMatchObject({ code: 'STEER_NOT_DELIVERED', outcome: 'not-sent' });
+    expect(admitInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not authorize another route when the captured turn settles after question admission', async () => {
+    const { delivery, turnRunner, admitInput, discardPreparedInput } = scaffold();
+    const target = await delivery.captureTarget(CHAT_ID);
+    await expect(delivery.deliver(
+      CHAT_ID, 'answer', 'answer', QUESTION_OPTIONS, target,
+      async () => target.attempt.markSettled(),
+    )).rejects.toMatchObject({ code: 'STEER_NOT_DELIVERED', outcome: 'not-sent' });
+    expect(admitInput).toHaveBeenCalledTimes(1);
+    expect(turnRunner.steerInput).not.toHaveBeenCalled();
+    expect(discardPreparedInput).toHaveBeenCalledWith(CHAT_ID, OPTIONS.clientMessageId);
   });
 });

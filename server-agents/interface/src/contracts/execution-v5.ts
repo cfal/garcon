@@ -1,3 +1,4 @@
+import type { AsyncQuestionReply } from '@garcon/common/async-user-questions';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
@@ -24,6 +25,7 @@ export interface AgentExecutionContextV5 {
     readonly clientMessageId: string | null;
     readonly timestamp: string;
     readonly presentation?: UserMessagePresentation;
+    readonly questionReply?: AsyncQuestionReply;
   };
 }
 

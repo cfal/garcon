@@ -1,3 +1,4 @@
+import type { AsyncQuestionReply } from '@garcon/common/async-user-questions';
 import type { AgentAttachment, AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ApiProtocol } from '@garcon/common/api-providers';
@@ -159,6 +160,7 @@ export interface RunAgentTurnRequest {
 }
 
 export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'> & {
+  questionReply?: AsyncQuestionReply;
   clientRequestId?: string;
   clientMessageId?: string;
   transcriptViewId?: string;
@@ -188,6 +190,7 @@ export interface StartSessionOptions {
 }
 
 export interface AgentSteerOptions {
+  readonly questionReply?: AsyncQuestionReply;
   readonly clientRequestId: string;
   readonly clientMessageId: string;
   readonly transcriptViewId: string;

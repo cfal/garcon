@@ -14,6 +14,8 @@
     "./agents": "./agents.ts",
     "./attachments": "./attachments.ts",
     "./ask-user-question-response": "./ask-user-question-response.ts",
+    "./async-user-questions": "./async-user-questions.ts",
+    "./run-or-steer": "./run-or-steer.ts",
     "./api-provider-templates": "./api-provider-templates.ts",
     "./api-providers": "./api-providers.ts",
     "./chat-command-contracts": "./chat-command-contracts.ts",

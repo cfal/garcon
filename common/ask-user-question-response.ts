@@ -78,18 +78,25 @@ export function askUserQuestionDecisionValidationError(
   }
   if (!allow) return 'An answered question response must allow the request';
 
+  return askUserQuestionAnswersValidationError(questions, response.answers);
+}
+
+export function askUserQuestionAnswersValidationError(
+  questions: readonly AskUserQuestionPrompt[],
+  answers: readonly AskUserQuestionAnswerPayload[],
+): string | null {
   const questionIds = new Set(questions.map((question) => question.id));
   if (questionIds.size !== questions.length) {
     return 'The pending question request contains duplicate question IDs';
   }
 
-  const answersById = new Map(response.answers.map((answer) => [answer.questionId, answer]));
-  for (const answer of response.answers) {
+  const answersById = new Map(answers.map((answer) => [answer.questionId, answer]));
+  for (const answer of answers) {
     if (!questionIds.has(answer.questionId)) {
       return `Structured answers contain an unknown question ID: ${answer.questionId}`;
     }
   }
-  if (answersById.size !== questions.length || answersById.size !== response.answers.length) {
+  if (answersById.size !== questions.length || answersById.size !== answers.length) {
     return 'Structured answers must answer every pending question exactly once';
   }
 

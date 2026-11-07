@@ -92,6 +92,7 @@ export interface LiveCodexTestEnvironment {
 }
 
 interface LiveCodexTestEnvironmentOptions {
+  supportedTools?: readonly string[];
   upstreamUrl?: string;
   // Scripted-model environments proxy to a local fake, so any placeholder key works and no
   // credential needs to exist in the environment.
@@ -270,6 +271,7 @@ export async function startLiveCodexTestEnvironment(
             ...model,
             slug: testingModel,
             tool_mode: options.toolMode ?? model.tool_mode,
+            experimental_supported_tools: options.supportedTools ?? model.experimental_supported_tools,
             multi_agent_version: workspaceOptions.multiAgentVersion ?? model.multi_agent_version,
           })),
         };

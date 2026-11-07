@@ -2175,7 +2175,9 @@ It is never automatic and is the sole full-transcript replacement path:
    (covered by the staging view's submission unique index) and every
    `agent-switch` boundary, so the record of which agent produced which
    stretch of the conversation survives reload rather than being lost
-   with the owner that wrote it. It also preserves the durable carryover
+   with the owner that wrote it. Frozen assistant rows retain their text but
+   drop optional conversational-question data, so copies never become reply
+   sources. The projection also preserves the durable carryover
    quarantine and typed preamble-application notices, when present, because
    Reload cannot repair prior loss or discard immutable application title
    snapshots from earlier bindings. The current-session `session` row (3.4)

@@ -999,6 +999,21 @@ ID. `--json` emits one versioned envelope with the exact receipt, delivery,
 parent relationship, server instance, and workspace. Garcon bounds run/steer
 race retries and reports ambiguity rather than risking duplicate delivery.
 
+Codex's asynchronous questions are conversational messages, not pending
+permissions. In the browser, each inline question can be answered independently
+while the agent continues working. Answers use the same steer-or-start policy
+as `resume-async --allow-steer`, never a queue or `permission-answer`. The CLI
+can send a contextual textual answer through `resume-async --allow-steer`;
+there is no separate question-selection command.
+
+Submitted answers remain ordinary transcript messages. A recorded answer or
+successful steer does not prove the model read it. Questions remain replyable
+after a turn ends, but controls from a previous agent ownership are read-only.
+Unsent form drafts and local dismissal survive chat switches within the tab,
+not browser reloads. Native Reload preserves structured questions when native
+history provides them; ambiguous legacy records stay text rather than guessed
+interactive forms.
+
 CLI exit codes:
 
 | Code | Meaning |

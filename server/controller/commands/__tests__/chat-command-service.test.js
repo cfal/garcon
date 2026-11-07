@@ -6938,6 +6938,9 @@ describe('ChatCommandService', () => {
         clientMessageId: input.clientMessageId,
         userMessagePresentation: null,
         whenTurnUnavailable: 'reject',
+        questionReply: null,
+        expectedAgentId: null,
+        expectedAgentOwnershipEpoch: null,
       },
     });
     await ledger.settleTerminal(accepted.record.key, 'finished', { turnId: 'turn-compact' });

@@ -41,6 +41,14 @@ function functionOutput(callId, output) {
 }
 
 describe('LegacyCodexProjection questions', () => {
+  it('hides asynchronous publication acknowledgements without fabricating an answer', () => {
+    const projection = new LegacyCodexProjection();
+    expect(projection.project(functionCall('async', 'request_user_input_async'), {}).canonical).toEqual([]);
+    expect(projection.project(functionOutput('async', '{"accepted":true}'), {}).canonical).toEqual([]);
+    projection.project(functionCall('failure', 'request_user_input_async'), {});
+    expect(projection.project(functionOutput('failure', 'Invalid question title'), {}).canonical[0].content)
+      .toEqual({ raw: 'Invalid question title' });
+  });
   it.each([
     'request_user_input is unavailable in Default mode',
     'request_user_input was cancelled before receiving a response',
@@ -74,7 +82,7 @@ describe('LegacyCodexProjection questions', () => {
   it.each(['custom_tool', 'request_user_input_async'])('does not treat %s as a synchronous question', (name) => {
     const projection = new LegacyCodexProjection();
     const call = projection.project(functionCall('ordinary', name), {});
-    expect(call.canonical[0].type).not.toBe('ask-user-question-tool-use');
+    expect(call.canonical[0]?.type).not.toBe('ask-user-question-tool-use');
     const result = projection.project(functionOutput('ordinary', '{"answers":{}}'), {});
     expect(result.canonical[0].content).toEqual({ answers: {} });
   });
