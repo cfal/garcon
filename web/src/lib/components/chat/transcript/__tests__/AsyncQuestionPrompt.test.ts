@@ -140,6 +140,27 @@ it('bounds draft retention and prunes replaced views and deleted chats', () => {
 	expect(controller.get(key)).toBeUndefined();
 });
 
+it('refreshes eviction recency on edits and dismissals, but not reads or capacity checks', () => {
+	const { controller } = fixture();
+	const draft = { selectedQuestionOptions: {} };
+	const keyAt = (ordinal: number) => asyncQuestionDraftKey(target, ordinal, question.id);
+	for (let ordinal = 1; ordinal <= 200; ordinal++) {
+		controller.edit(keyAt(ordinal), target, draft);
+	}
+	controller.edit(keyAt(1), target, draft);
+	controller.dismiss(keyAt(2), target, draft);
+	expect(controller.get(keyAt(3))).toBeDefined();
+	expect(controller.canRetain(keyAt(3))).toBe(true);
+	expect(controller.canRetain(keyAt(201))).toBe(true);
+	controller.edit(keyAt(201), target, draft);
+
+	expect(controller.get(keyAt(1))).toStrictEqual({ target, draft });
+	expect(controller.get(keyAt(2))).toStrictEqual({ target, draft, dismissed: true });
+	expect(controller.get(keyAt(3))).toBeUndefined();
+	expect(controller.get(keyAt(4))).toBeDefined();
+	expect(controller.get(keyAt(201))).toBeDefined();
+});
+
 it('retains the sending fence under draft eviction pressure', async () => {
 	const { controller, send } = fixture();
 	const delivery = Promise.withResolvers<'steer'>();

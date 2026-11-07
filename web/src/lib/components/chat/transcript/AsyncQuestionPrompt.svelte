@@ -24,7 +24,8 @@
 	const replyable = $derived(Boolean(ordinal && panel?.canReply(ordinal)));
 	const sending = $derived(entry?.status === 'sending');
 	const hasCapacity = $derived(panel?.controller.canRetain(key) ?? true);
-	const canAnswer = $derived(Boolean(!sending && hasCapacity && ordinal && panel?.canSubmit(ordinal)));
+	const editable = $derived(!sending && hasCapacity);
+	const canAnswer = $derived(Boolean(editable && ordinal && panel?.canSubmit(ordinal)));
 	const collapsed = $derived(entry?.dismissed || entry?.status === 'sent' || (recorded !== undefined && !entry?.draft));
 	const replyLabel = $derived(recorded !== undefined || entry?.status === 'sent' ? m.chat_async_reply_again() : m.chat_async_reply());
 	const draft = $derived<QuestionDraft>(entry?.draft ?? {
@@ -32,11 +33,13 @@
 	});
 
 	function edit(next: QuestionDraft): void {
-		if (target && panel && !sending) panel.controller.edit(key, target, next);
+		if (!target || !panel || sending) return;
+		panel.controller.edit(key, target, next);
 	}
 
 	function dismiss(): void {
-		if (target && panel && !sending) panel.controller.dismiss(key, target, draft);
+		if (!target || !panel || sending) return;
+		panel.controller.dismiss(key, target, draft);
 	}
 
 	function submit(answers: AskUserQuestionAnswerPayload[]): void {
@@ -74,7 +77,7 @@
 		<QuestionForm
 			questions={[question]}
 			{formId}
-			isPending={!sending && hasCapacity}
+			isPending={editable}
 			{canAnswer}
 			{draft}
 			onDraftChange={edit}
@@ -83,7 +86,7 @@
 		/>
 		<button
 			type="button"
-			disabled={sending || !hasCapacity}
+			disabled={!editable}
 			title={m.chat_async_dismiss_question()}
 			aria-label={m.chat_async_dismiss_question()}
 			class="inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent disabled:opacity-50"

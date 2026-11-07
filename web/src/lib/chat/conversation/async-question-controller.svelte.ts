@@ -28,17 +28,26 @@ export class AsyncQuestionController {
 	}
 
 	canRetain(key: string): boolean {
-		return this.#drafts.has(key) || this.#drafts.size < MAX_RETAINED_DRAFTS
-			|| [...this.#drafts.values()].some(entry => entry.status !== 'sending');
+		return this.#drafts.has(key)
+			|| this.#drafts.size < MAX_RETAINED_DRAFTS
+			|| this.#oldestEvictableKey() !== undefined;
+	}
+
+	#oldestEvictableKey(): string | undefined {
+		// Pending entries retain the duplicate-submit fence until delivery settles.
+		for (const [key, entry] of this.#drafts) {
+			if (entry.status !== 'sending') return key;
+		}
+		return undefined;
 	}
 
 	#set(key: string, entry: AsyncQuestionDraft): boolean {
 		if (!this.#drafts.has(key) && this.#drafts.size >= MAX_RETAINED_DRAFTS) {
-			const evictable = [...this.#drafts].find(([, draft]) => draft.status !== 'sending');
-			if (!evictable) return false;
-			this.#drafts.delete(evictable[0]);
+			const evictableKey = this.#oldestEvictableKey();
+			if (evictableKey === undefined) return false;
+			this.#drafts.delete(evictableKey);
 		}
-		// Pending entries retain the duplicate-submit fence until delivery settles.
+		// Re-insertion refreshes recency without mutating an in-flight entry.
 		this.#drafts.delete(key);
 		this.#drafts.set(key, entry);
 		return true;
@@ -50,8 +59,9 @@ export class AsyncQuestionController {
 	}
 
 	dismiss(key: string, target: AsyncQuestionTarget, draft: QuestionDraft): void {
-		if (this.get(key)?.status === 'sending') return;
-		this.#set(key, { ...this.get(key), target, draft, dismissed: true });
+		const entry = this.get(key);
+		if (entry?.status === 'sending') return;
+		this.#set(key, { ...entry, target, draft, dismissed: true });
 	}
 
 	retainView(chatId: string, view: string): void {
@@ -69,12 +79,16 @@ export class AsyncQuestionController {
 	}
 
 	async submit(
-		target: AsyncQuestionTarget, ordinal: number, question: AsyncQuestionPrompt, answer: string,
+		target: AsyncQuestionTarget,
+		ordinal: number,
+		question: AsyncQuestionPrompt,
+		answer: string,
 		excludedResendOrdinals: readonly number[] = [],
 	): Promise<void> {
 		const key = asyncQuestionDraftKey(target, ordinal, question.id);
-		if (this.get(key)?.status === 'sending') return;
-		const pending: AsyncQuestionDraft = { ...this.get(key), target, status: 'sending' };
+		const entry = this.get(key);
+		if (entry?.status === 'sending') return;
+		const pending: AsyncQuestionDraft = { ...entry, target, status: 'sending' };
 		if (!this.#set(key, pending)) return;
 		const reply: AsyncQuestionReply = {
 			questionId: question.id,
