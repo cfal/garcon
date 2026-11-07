@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdir, mkdtemp, open, readdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, BashToolUseMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
+import { AssistantMessage, BashToolUseMessage, EditToolUseMessage, ToolResultMessage, UserMessage, WriteToolUseMessage } from '../../../../common/chat-types.js';
 import { parseBodyDependencyResponse, parseDisplayWindowResponse, type AvailableDisplayWindow, type DisplayWindowRequest } from '../../../../common/transcript-display-contract.js';
 import { DISPLAY_POLICY_REVISION } from '../../../../common/transcript-display-policy.js';
 import type { HiddenBashCommandPattern } from '../../../../common/hidden-bash-command-patterns.js';
@@ -90,6 +90,48 @@ test('real workers prepare bounded windows, hydrate selected details and reuse a
     expect(extended.certificate.watermark).toBe(initial.certificate.watermark + 1);
     expect(extended.items.slice(0, -1)).toEqual(initial.items);
     expect(display.metrics.rows).toBe(1);
+  } finally { producer.close(); }
+});
+
+test.each(['write', 'weighted-edit'] as const)('appends only the suffix to an open group and preserves earlier watermark summaries: %s', async kind => {
+  const view = seed('chat', 600), input = request('chat', view.viewId);
+  const producer = ledger.openProducer('chat', 'synthetic');
+  try {
+    producer.sink.publish({ type: 'rows', rows: [
+      { message: new WriteToolUseMessage(at, 'write-1', '/synthetic/one.txt', 'Synthetic one') },
+      { message: new ToolResultMessage(at, 'write-1', 'Synthetic success') },
+      { message: new WriteToolUseMessage(at, 'write-2', '/synthetic/two.txt', 'Synthetic two') },
+      { message: new ToolResultMessage(at, 'write-2', 'Synthetic success') },
+    ] });
+    const initial = await ready(input);
+    const rowsPrepared = display.metrics.rows;
+    expect(initial.items.at(-1)).toMatchObject({ kind: 'tool-group', count: 2,
+      totals: { fileEdits: 2 }, base: { openAtWatermark: true } });
+    producer.sink.publish({ type: 'rows', rows: [{ message: kind === 'write'
+      ? new WriteToolUseMessage(at, 'write-3', '/synthetic/three.txt', 'Synthetic three')
+      : new EditToolUseMessage(at, 'edit-3', undefined, undefined, undefined,
+        [{ path: '/synthetic/three.txt' }, { path: '/synthetic/four.txt' }]) }] });
+    const extended = await ready(input);
+    expect(display.metrics.rows - rowsPrepared).toBe(1);
+    expect(extended.certificate.watermark).toBe(initial.certificate.watermark + 1);
+    expect(extended.items.slice(0, -1)).toEqual(initial.items.slice(0, -1));
+    expect(extended.items.at(-1)).toMatchObject({ kind: 'tool-group', count: 3,
+      totals: { fileEdits: kind === 'write' ? 3 : 4 }, categoryOrder: ['fileEdits'],
+      base: { openAtWatermark: true } });
+    expect(extended.later.kind).toBe('exhausted-through-watermark');
+    const originalGroup = initial.items.at(-1), growingGroup = extended.items.at(-1);
+    if (originalGroup?.kind !== 'tool-group' || growingGroup?.kind !== 'tool-group') throw new Error('Expected final groups');
+    expect(growingGroup.firstMember).toBe(originalGroup.firstMember);
+    expect(growingGroup.lastMember).toBe(extended.certificate.watermark);
+
+    producer.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Synthetic completion') }] });
+    const completed = await ready(input);
+    expect(completed.items.at(-2)).toMatchObject({ count: 3, base: { openAtWatermark: false } });
+    for (const prior of [initial, extended]) {
+      const historical = parseDisplayWindowResponse(await display.window({ ...input, atWatermark: prior.certificate.watermark }));
+      expect(historical).toMatchObject({ kind: 'available', certificate: prior.certificate, items: prior.items,
+        later: { kind: 'exhausted-through-watermark' } });
+    }
   } finally { producer.close(); }
 });
 

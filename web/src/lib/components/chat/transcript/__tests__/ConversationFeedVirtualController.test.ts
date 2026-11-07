@@ -35,6 +35,7 @@ interface ControllerExposure {
 	appendGroup(): Promise<void>;
 	filterFirstGroupMember(): Promise<void>;
 	retainFirst(): Promise<void>;
+	retainFirstWithoutLayoutChange(): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -325,6 +326,30 @@ describe('ConversationFeedVirtualController', () => {
 			expect(replacement).not.toBe(oldButton);
 			expect(document.activeElement).toBe(replacement);
 		});
+	});
+
+	it.each(['group', 'row'] as const)('refreshes reading eligibility when a %s becomes retained without a geometry change', async kind => {
+		const { exposure } = await renderController({ groupFocusMode: kind === 'group', groupTailCount: 8, initialPinned: false });
+		const viewport = exposure.viewport()!;
+		viewport.scrollTop = 0;
+		for (const row of viewport.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')) {
+			row.getBoundingClientRect = () => new DOMRect(0, Number(row.dataset.index) * 40 - viewport.scrollTop, 400, 40);
+		}
+		viewport.dispatchEvent(new Event('scroll'));
+		await settleController();
+		const geometry = exposure.controller.snapshot;
+		const before = exposure.transactions.length;
+		await exposure.retainFirstWithoutLayoutChange();
+		await settleController();
+		expect(exposure.controller.snapshot).toBe(geometry);
+		expect(exposure.transactions.slice(before).filter(record => record.source === 'items')).toEqual([]);
+		const target = { kind: 'row', transcriptViewId: 'view-1', ordinal: kind === 'group' ? 10 : 2, viewportOffset: 40 };
+		expect(exposure.controller.captureRestoreTarget('view-1', false)).toEqual(target);
+		await exposure.hide();
+		await exposure.showAtLayout(400, 40);
+		await settleController();
+		expect(viewport.scrollTop).toBe(0);
+		expect(exposure.controller.captureRestoreTarget('view-1', false)).toEqual(target);
 	});
 
 	it('remaps reading context when a focused certified summary becomes a retained island', async () => {
