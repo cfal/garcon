@@ -11,6 +11,16 @@ const ScheduledPromptsDialogTestHost = (await import('./ScheduledPromptsDialogTe
 	.default;
 
 describe('ScheduledPromptsDialog', () => {
+	it('closes the task list before opening the seeded New Chat dialog', async () => {
+		const appShell = createAppShellStore();
+		appShell.openScheduledPrompts();
+		render(ScheduledPromptsDialogTestHost, { appShell });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open in new chat' }));
+		expect(appShell.showScheduledPrompts).toBe(false);
+		expect(appShell.newChatDialogOpen).toBe(true);
+		expect(appShell.newChatDialogSeed).toEqual({ prefill: 'Synthetic prompt' });
+	});
+
 	it('uses a maximized mobile frame and closes through app shell state', async () => {
 		const appShell = createAppShellStore();
 		appShell.openScheduledPrompts();

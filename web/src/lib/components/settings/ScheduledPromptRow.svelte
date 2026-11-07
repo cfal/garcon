@@ -20,11 +20,15 @@
 	import ScheduledRunOutcomeIcon from './ScheduledRunOutcomeIcon.svelte';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
+	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
+	import type { ScheduledPromptMoveDirection } from '$lib/scheduling/scheduled-prompts-store.svelte';
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Folder from '@lucide/svelte/icons/folder';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import SquarePen from '@lucide/svelte/icons/square-pen';
 	import ExecutorPill from '$lib/components/shared/ExecutorPill.svelte';
 	import Pause from '@lucide/svelte/icons/pause';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -50,9 +54,9 @@
 		onToggle: () => void;
 		onEdit: () => void;
 		onRemove: () => void;
-		onMoveUp: () => void;
-		onMoveDown: () => void;
+		onMove: (direction: ScheduledPromptMoveDirection) => void;
 		onOpenChat?: (chatId: string) => void;
+		onOpenInNewChat?: () => void;
 	}
 
 	let {
@@ -69,9 +73,9 @@
 		onToggle,
 		onEdit,
 		onRemove,
-		onMoveUp,
-		onMoveDown,
+		onMove,
 		onOpenChat,
+		onOpenInNewChat,
 	}: Props = $props();
 
 	let enabled = $derived(scheduledPrompt.enabled !== false);
@@ -216,13 +220,26 @@
 					<EllipsisVertical class="h-4 w-4" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
-					<DropdownMenuItem onclick={onMoveUp} disabled={index === 0}>
+					<DropdownMenuItem onclick={onOpenInNewChat} disabled={!onOpenInNewChat}>
+						<SquarePen class="h-4 w-4" />
+						{m.scheduled_prompts_open_new_chat()}
+					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+					<DropdownMenuItem onclick={() => onMove('top')} disabled={index === 0}>
+						<ArrowUpToLine class="h-4 w-4" />
+						{m.scheduled_prompts_move_top()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onMove('up')} disabled={index === 0}>
 						<ArrowUp class="h-4 w-4" />
 						{m.scheduled_prompts_move_up()}
 					</DropdownMenuItem>
-					<DropdownMenuItem onclick={onMoveDown} disabled={index === total - 1}>
+					<DropdownMenuItem onclick={() => onMove('down')} disabled={index === total - 1}>
 						<ArrowDown class="h-4 w-4" />
 						{m.scheduled_prompts_move_down()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onMove('bottom')} disabled={index === total - 1}>
+						<ArrowDownToLine class="h-4 w-4" />
+						{m.scheduled_prompts_move_bottom()}
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem variant="destructive" onclick={onRemove}>

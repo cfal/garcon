@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ScheduledPromptsStore } from '../scheduled-prompts-store.svelte';
+import { ScheduledPromptsStore, type ScheduledPromptMoveDirection } from '../scheduled-prompts-store.svelte';
+import { ApiError } from '$lib/api/client';
 import type { ScheduledPromptsMutationResponse, ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
 
 function scheduledPrompt(id: string) {
@@ -19,6 +20,67 @@ function snapshot(revision: number, ids: string[]): ScheduledPromptsSnapshot {
 }
 
 describe('ScheduledPromptsStore', () => {
+	it.each([
+		['c', 'top', ['c', 'a', 'b', 'd']],
+		['b', 'bottom', ['a', 'c', 'd', 'b']],
+		['c', 'up', ['a', 'c', 'b', 'd']],
+		['b', 'down', ['a', 'c', 'b', 'd']],
+	] satisfies [string, ScheduledPromptMoveDirection, string[]][])(
+		'moves %s %s without changing the relative order of other prompts', async (id, direction, ids) => {
+			const pending = Promise.withResolvers<ScheduledPromptsMutationResponse>();
+			const reorder = vi.fn(() => pending.promise);
+			const store = new ScheduledPromptsStore({ reorder });
+			store.applySnapshot(snapshot(2, ['a', 'b', 'c', 'd']));
+			const moving = store.move(id, direction);
+			await vi.waitFor(() => expect(reorder).toHaveBeenCalledOnce());
+			expect(store.prompts.map(prompt => prompt.id)).toEqual(ids);
+			expect(reorder).toHaveBeenCalledWith({ expectedRevision: 2, orderedPromptIds: ids });
+			pending.resolve({ success: true, snapshot: snapshot(3, ids) });
+			await moving;
+			expect(store.snapshot).toEqual(snapshot(3, ids));
+		},
+	);
+
+	it('does not submit boundary, missing-ID, or singleton moves', async () => {
+		const reorder = vi.fn();
+		const store = new ScheduledPromptsStore({ reorder });
+		store.applySnapshot(snapshot(2, ['a', 'b']));
+		for (const direction of ['up', 'top'] as const) await store.move('a', direction);
+		for (const direction of ['down', 'bottom'] as const) await store.move('b', direction);
+		for (const direction of ['up', 'down', 'top', 'bottom'] as const) await store.move('missing', direction);
+		store.applySnapshot(snapshot(3, ['a']));
+		await store.move('a', 'top');
+		await store.move('a', 'bottom');
+		expect(reorder).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])('rolls back a failed move unless a newer snapshot arrived (%s)', async newer => {
+		const pending = Promise.withResolvers<ScheduledPromptsMutationResponse>();
+		const reorder = vi.fn(() => pending.promise);
+		const store = new ScheduledPromptsStore({ reorder });
+		const original = snapshot(2, ['a', 'b', 'c']);
+		store.applySnapshot(original);
+		const moving = store.move('c', 'top');
+		const failure = expect(moving).rejects.toThrow('Save failed');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledOnce());
+		const latest = snapshot(3, ['b', 'c', 'a']);
+		if (newer) store.applySnapshot(latest);
+		pending.reject(new Error('Save failed'));
+		await failure;
+		expect(store.snapshot).toEqual(newer ? latest : original);
+	});
+
+	it('refreshes after an endpoint move conflicts without retrying the mutation', async () => {
+		const reorder = vi.fn().mockRejectedValue(new ApiError(409, 'Refresh and try again'));
+		const get = vi.fn().mockResolvedValue(snapshot(4, ['c', 'b', 'a']));
+		const store = new ScheduledPromptsStore({ reorder, get });
+		store.applySnapshot(snapshot(2, ['a', 'b', 'c']));
+		await expect(store.move('a', 'bottom')).rejects.toThrow();
+		expect(reorder).toHaveBeenCalledOnce();
+		expect(get).toHaveBeenCalledOnce();
+		expect(store.snapshot).toEqual(snapshot(4, ['c', 'b', 'a']));
+	});
+
 	it('honors queued invalidation after a failed refresh', async () => {
 		let rejectRead!: (error: Error) => void;
 		const get = vi.fn()

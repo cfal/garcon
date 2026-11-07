@@ -30,10 +30,15 @@ import {
 	newChatExecutorPreferences,
 } from './new-chat-executor-preferences';
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
+import type { NewChatStartupSeed } from './new-chat-seed';
+import { resolveNewChatModelSelection } from './new-chat-model-selection';
+import type { ChatId } from '$shared/chat-id';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
 	executionDefaultsForAgent,
+	isPermissionModeSupported,
+	isThinkingModeSupported,
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
 } from '$shared/execution-defaults';
@@ -225,6 +230,7 @@ export class NewChatFormState {
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
+			!this.executionModeError &&
 			!this.attachmentError &&
 			canSubmitNewChat(
 				this.nonblankPath,
@@ -268,10 +274,9 @@ export class NewChatFormState {
 	}
 
 	get resolvedModelSelection(): ResolvedModelSelection | null {
-		const modelValue = this.modelValue;
-		const endpointId = this.modelSelectionTarget?.modelEndpointId;
-		if (!this.#modelCatalog.getModelForSelection(this.agentId, modelValue, endpointId)) return null;
-		return this.#modelCatalog.selectionFor(this.agentId, modelValue, endpointId);
+		return resolveNewChatModelSelection(
+			this.#modelCatalog, this.agentId, this.modelValue, this.modelSelectionTarget,
+		);
 	}
 
 	get modelSelectionPending(): boolean {
@@ -292,6 +297,20 @@ export class NewChatFormState {
 			return this.#modelCatalog.error ?? m.model_selector_unavailable();
 		if (this.resolvedModelSelection) return null;
 		return m.model_selector_unavailable();
+	}
+
+	get agentSelectionError(): string | null {
+		return this.settingsLoaded && this.modelCatalogValidated && !this.#selectableAgentIds.includes(this.agentId)
+			? m.chat_new_chat_errors_agent_unavailable() : null;
+	}
+
+	get executionModeError(): string | null {
+		if (!this.modelCatalogValidated) return null;
+		if (!isPermissionModeSupported(this.permissionMode, this.permissionModes) ||
+			!isThinkingModeSupported(this.thinkingMode, this.thinkingModes)) {
+			return m.chat_new_chat_errors_execution_modes_unavailable();
+		}
+		return null;
 	}
 
 	get attachmentError(): string | null {
@@ -747,7 +766,7 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
-		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.attachmentError)
+		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.executionModeError || this.attachmentError)
 			return null;
 		if (!this.nonblankPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
@@ -777,8 +796,8 @@ export class NewChatFormState {
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
-			permissionMode: normalizeSupportedPermissionMode(this.permissionMode, this.permissionModes),
-			thinkingMode: normalizeSupportedThinkingMode(this.thinkingMode, this.thinkingModes),
+			permissionMode: this.permissionMode,
+			thinkingMode: this.thinkingMode,
 			agentSettings: this.agentSettings,
 			firstMessage: this.firstMessage,
 			initialImages: this.attachedImages,
@@ -789,10 +808,27 @@ export class NewChatFormState {
 
 	// Reseed / reset
 
+	restoreStartup(seed: NewChatStartupSeed): void {
+		this.selectExecutor(seed.executorId);
+		this.restoreSelection(seed.agentId, {
+			model: seed.model,
+			apiProviderId: seed.apiProviderId,
+			modelEndpointId: seed.modelEndpointId,
+			modelProtocol: seed.modelProtocol,
+		});
+		this.projectPath = seed.projectPath;
+		this.restoreExecutionModes(seed.permissionMode, seed.thinkingMode);
+		this.replaceAgentSettingsById(seed.agentSettingsById);
+		this.chatTags = [...seed.tags];
+		this.showTagInput = false;
+		this.preambles.restoreChoice(seed.preambleChoice);
+		this.validateChangedPath();
+	}
+
 	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
-	reseed(prefill: string): void {
+	reseed(prefill: string, prospectiveChatId?: ChatId): void {
 		this.#pathCompletion.reset();
-		const retained = this.#options.promptDraft?.seed(prefill);
+		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
 		this.#images.images = [...(retained?.attachments ?? [])];
 		this.#contentRevision += 1;

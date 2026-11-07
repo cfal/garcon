@@ -3,6 +3,8 @@
 // and survive only for the page lifetime.
 
 import { createRandomId } from '$lib/utils/random-id';
+import { parseChatId, type ChatId } from '$shared/chat-id';
+import { createClientChatId } from '$shared/client-chat-id';
 import {
 	chatDraftStorageKey,
 	getLocalStorageItem,
@@ -17,42 +19,49 @@ const SLOT_KEY = chatDraftStorageKey('new-chat');
 export interface NewChatPromptDraftContent {
 	readonly text: string;
 	readonly attachments: readonly File[];
+	readonly prospectiveChatId?: ChatId;
 }
 
-function storedText(slot: string | null): string {
-	if (!slot) return '';
+function storedContent(slot: string | null): Omit<NewChatPromptDraftContent, 'attachments'> {
+	const content: { text: string; prospectiveChatId?: ChatId } = { text: '' };
+	if (!slot) return content;
 	try {
 		const value: unknown = JSON.parse(slot);
-		return value !== null && typeof value === 'object' && 'text' in value &&
-			typeof value.text === 'string' ? value.text : '';
+		if (value !== null && typeof value === 'object' && 'text' in value && typeof value.text === 'string') {
+			content.text = value.text;
+			if ('prospectiveChatId' in value) content.prospectiveChatId = parseChatId(value.prospectiveChatId);
+		}
 	} catch {
-		return '';
+		// An invalid ID must not discard otherwise valid prompt text.
 	}
+	return content;
 }
 
 /** Owns the shared slot and retains page-local content when storage is unavailable. */
 export class NewChatPromptDraftStore {
 	#knownSlot: string | null = null;
-	#text = '';
+	#content: Omit<NewChatPromptDraftContent, 'attachments'> = { text: '' };
 	#attachments: readonly File[] = [];
 
 	read(): NewChatPromptDraftContent {
 		const slot = getLocalStorageItem(SLOT_KEY);
 		if (slot !== this.#knownSlot) {
-			this.#text = storedText(slot);
+			this.#content = storedContent(slot);
 			this.#attachments = [];
 		}
 		this.#knownSlot = slot;
-		return { text: this.#text, attachments: this.#attachments };
+		return { ...this.#content, attachments: this.#attachments };
 	}
 
 	/** Returns false when another tab has replaced the last observed revision. */
-	write(text: string, attachments: readonly File[]): boolean {
+	write(text: string, attachments: readonly File[], prospectiveChatId?: ChatId): boolean {
 		const previous = getLocalStorageItem(SLOT_KEY);
 		if (previous !== this.#knownSlot) return false;
+		const hasContent = Boolean(text.trim() || attachments.length);
+		const content = { text, ...(hasContent && prospectiveChatId ? { prospectiveChatId } : {}) };
 		// Each edit changes identity even when only the page-local attachments change.
-		const next = text.trim() || attachments.length
-			? JSON.stringify({ revision: createRandomId(), text })
+		const next = hasContent
+			? JSON.stringify({ revision: createRandomId(), ...content })
 			: null;
 		if (next === null) removeLocalStorageItem(SLOT_KEY);
 		else setLocalStorageItem(SLOT_KEY, next);
@@ -60,7 +69,7 @@ export class NewChatPromptDraftStore {
 		if (observed !== next && observed !== previous) return false;
 		this.#knownSlot = observed;
 		// Failed persistence still retains the unsent content for this page's lifetime.
-		this.#text = text;
+		this.#content = content;
 		this.#attachments = [...attachments];
 		return true;
 	}
@@ -77,26 +86,34 @@ export class NewChatPromptDraft {
 	// older unsent draft, once another tab's draft holds the slot, and once the content has
 	// started a chat.
 	#ownsSlot = false;
+	#prospectiveChatId: ChatId | undefined;
 
 	constructor(store: NewChatPromptDraftStore) {
 		this.#store = store;
 	}
 
 	/** Returns the retained draft to seed the form, or null when an explicit prefill replaces it. */
-	seed(prefill: string): NewChatPromptDraftContent | null {
+	seed(prefill: string, prospectiveChatId?: ChatId): NewChatPromptDraftContent | null {
 		const retained = this.#store.read();
 		if (prefill) {
+			this.#prospectiveChatId = prospectiveChatId;
 			// An edited prefill may take an empty slot, but never replaces an older unsent draft.
 			this.#ownsSlot = !retained.text.trim() && retained.attachments.length === 0;
 			return null;
 		}
 		this.#ownsSlot = true;
+		this.#prospectiveChatId = retained.prospectiveChatId;
 		return retained;
+	}
+
+	ensureProspectiveChatId(): ChatId {
+		return this.#prospectiveChatId ??= createClientChatId();
 	}
 
 	/** Records edited form content as the retained draft. */
 	retain(text: string, attachments: readonly File[]): void {
-		if (this.#ownsSlot) this.#ownsSlot = this.#store.write(text, attachments);
+		if (!text.trim() && attachments.length === 0) this.#prospectiveChatId = undefined;
+		if (this.#ownsSlot) this.#ownsSlot = this.#store.write(text, attachments, this.#prospectiveChatId);
 	}
 
 	/** Drops the retained draft once the form content has started a chat. */

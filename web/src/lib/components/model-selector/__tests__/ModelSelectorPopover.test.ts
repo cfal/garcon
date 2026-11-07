@@ -414,6 +414,38 @@ describe('ModelSelectorPopover', () => {
 		})));
 	});
 
+	it.each([
+		{ apiProviderId: 'wrong-provider', modelProtocol: 'anthropic-messages' as const },
+		{ apiProviderId: 'acme', modelProtocol: 'openai-compatible' as const },
+	])('repairs mismatched routing when explicitly reselecting the displayed model: %j', async routing => {
+		const onChange = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'endpoint-model', modelEndpointId: 'acme-claude', ...routing },
+			mode: { agent: 'select', source: 'select', surface: 'settings' },
+			includeEndpointModel: true, onChange,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Endpoint Model/ }));
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
+		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+			model: 'endpoint-model', apiProviderId: 'acme',
+			modelEndpointId: 'acme-claude', modelProtocol: 'anthropic-messages',
+		}));
+	});
+
+	it.each(['endpoint-model', 'acme-claude:endpoint-model'])('does not emit when reselecting correct endpoint routing: %s', async model => {
+		const onChange = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model, apiProviderId: 'acme', modelEndpointId: 'acme-claude', modelProtocol: 'anthropic-messages' },
+			mode: { agent: 'select', source: 'select', surface: 'settings' },
+			includeEndpointModel: true, onChange,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Endpoint Model/ }));
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
 	it('allows explicitly selecting the live endpoint for a stale model name', async () => {
 		const onChange = vi.fn();
 
