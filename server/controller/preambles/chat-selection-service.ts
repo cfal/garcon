@@ -320,7 +320,7 @@ export class ChatPreambleSelectionService {
   #notifySelectionCommitted(chatId: string, revision: number): void {
     // Only partial outcomes reach this hook: a committed notice's invalidation
     // is scheduled by the server event wiring directly behind the notice's own
-    // chat-messages fanout. With no committed row, the invalidation goes out
+    // committed-row fanout. With no committed row, the invalidation goes out
     // immediately and synchronously.
     this.deps.onSelectionCommitted?.(chatId, revision);
   }

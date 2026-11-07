@@ -35,14 +35,17 @@ describe('Lightpanda delegated startup', () => {
       compacting.releaseText('<summary>Synthetic browser context.</summary>');
       await waitForStartOutcome(integration, parent, 'completed', cursor);
       await app.waitForChatProcessing(false);
-      await fixture.page.waitForFunction((chatId) => {
+      const startedPage = await integration.client.waitForMessages(accepted.chatId, page => page.messages.some(({ message }) =>
+        message.type === 'transcript-notice' && message.detail?.type === 'agent-start-progress' && message.detail.phase === 'started'));
+      const startedRow = startedPage.messages.find(({ message }) => message.type === 'transcript-notice'
+        && message.detail?.type === 'agent-start-progress' && message.detail.phase === 'started')!;
+      await fixture.page.waitForFunction((chatId, ordinal) => {
         const browser = globalThis as typeof globalThis & {
           __garconSpaWsEvents?: import('../../../common/ws-events.js').ServerWsMessage[];
         };
-        return browser.__garconSpaWsEvents?.some((event) => event.type === 'chat-messages'
-          && event.chatId === chatId && event.messages.some(({ message }) => message.type === 'transcript-notice'
-            && message.detail?.type === 'agent-start-progress' && message.detail.phase === 'started'));
-      }, {}, accepted.chatId);
+        return browser.__garconSpaWsEvents?.some((event) => event.type === 'chat-transcript-head-updated'
+          && event.chatId === chatId && event.sourceHead >= ordinal);
+      }, {}, accepted.chatId, startedRow.ordinal);
       fixture.assertNoBrowserErrors();
     });
   }, 120_000);

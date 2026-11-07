@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import ConversationFeed from '../ConversationFeed.svelte';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import { feedDisplayApi } from './feed-display-api.js';
+	import type { TranscriptMessage } from '$shared/chat-view';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
@@ -35,6 +37,11 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		onReady?: (transcript: ActiveTranscriptState) => void;
+		onViewport?: (port: ConversationViewportPort | null) => void;
+		pinnedToBottom?: boolean;
+		onRetry?: () => void;
+		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -58,6 +65,11 @@
 	}
 
 	const {
+		onReady,
+		onViewport,
+		pinnedToBottom = true,
+		onRetry,
+		pendingPermissionRequests = [],
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -70,7 +82,27 @@
 	const initialChatContext = untrack(() => chatContext);
 	const pendingPermissions: PendingPermissionRequest[] = [];
 
-	const chatState = new ActiveTranscriptState();
+	const source = feedDisplayApi();
+	const chatState = new ActiveTranscriptState(undefined, null, source.api);
+	let fixtureReady = $state(false);
+	let initialized = false;
+	function installRows(chatId: string, view: string, rows: readonly TranscriptMessage[], options: {
+		lastOrdinal: number; pageOldestOrdinal: number | null; nextBeforeOrdinal: number | null; hasMore: boolean;
+	}): void {
+		if (chatState.activeChatId !== chatId) chatState.activateChat(chatId);
+		chatState.configureDisplay({ combine: false, showThinking: true, hiddenToolGroups: [] });
+		const open = source.replace(chatId, view, rows, Math.max(options.lastOrdinal, chatState.lastOrdinal), initialTranscriptScenario === 'loading-later');
+		chatState.installOpen(open);
+		fixtureReady = false;
+		void chatState.controller.refresh().then(async () => {
+			await tick();
+			if (!initialized) viewportPort?.restoreInitialEnd();
+			initialized = true;
+			await viewportPort?.waitForLayout();
+			fixtureReady = true;
+			onReady?.(chatState);
+		});
+	}
 	let viewportPort: ConversationViewportPort | null = null;
 	let navigationResult = $state('idle');
 	async function navigateToTool(ordinal: number, presentation = false): Promise<void> {
@@ -80,7 +112,7 @@
 		}) ?? 'not-ready';
 	}
 	if (initialTranscriptScenario === 'file-links') {
-		chatState.replaceGeneration(initialChatContext.chatId, 'generation-1', [
+		installRows(initialChatContext.chatId, 'generation-1', [
 			{ ordinal: 1, message: new AssistantMessage('2026-07-01T00:00:00.000Z', '[Message file](./message.txt)') },
 		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
 		pendingPermissions.push({
@@ -89,7 +121,7 @@
 			requestedTool: new ExitPlanModeToolUseMessage('2026-07-01T00:00:00.000Z', 'synthetic-tool', '[Permission file](./plan.txt)'),
 		});
 	} else if (initialTranscriptScenario === 'row-ids') {
-		chatState.replaceGeneration(
+		installRows(
 			'chat-1',
 			'generation-1',
 			[
@@ -114,7 +146,7 @@
 		});
 	} else if (initialTranscriptScenario === 'tool-run' || initialTranscriptScenario === 'large-tool-run') {
 		const count = initialTranscriptScenario === 'large-tool-run' ? 2_000 : 3;
-		chatState.replaceGeneration(
+		installRows(
 			'chat-1',
 			'generation-1',
 			Array.from({ length: count }, (_, index) => ({
@@ -123,9 +155,8 @@
 			})),
 			{ lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
-		chatState.revealAllLoadedMessages();
 	} else if (initialTranscriptScenario === 'bash-filter') {
-		chatState.replaceGeneration(
+		installRows(
 			'chat-1',
 			'generation-1',
 			[
@@ -165,7 +196,7 @@
 			ordinal: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
-		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+		installRows('chat-1', 'generation-1', messages, {
 			lastOrdinal: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -180,13 +211,7 @@
 		if (initialTranscriptScenario === 'error-earlier') {
 			chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
 		}
-		if (
-			initialTranscriptScenario === 'twenty-thousand' ||
-			initialTranscriptScenario === 'count-shrink' ||
-			initialTranscriptScenario === 'count-shrink-survivors'
-		) {
-			chatState.revealAllLoadedMessages();
-		}
+
 	}
 
 	function shrinkTranscript(): void {
@@ -194,13 +219,12 @@
 			ordinal: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
-		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+		installRows('chat-1', 'generation-1', messages, {
 			lastOrdinal: messages.length,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		chatState.revealAllLoadedMessages();
 	}
 
 	function shrinkTranscriptKeepingTail(): void {
@@ -208,13 +232,12 @@
 			ordinal: index + 101,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 101}`),
 		}));
-		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+		installRows('chat-1', 'generation-1', messages, {
 			lastOrdinal: 120,
 			pageOldestOrdinal: 101,
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		chatState.revealAllLoadedMessages();
 	}
 
 	function showInterleavedEarlierError(): void {
@@ -237,6 +260,14 @@
 	localSettings.combineToolUseMessages = false;
 	setLocalSettings(localSettings);
 	setRemoteSettings(untrack(() => remoteSettingsStore));
+	$effect(() => {
+		const patterns = remoteSettingsStore.snapshot?.ui.hiddenBashCommandPatterns ?? [];
+		if (initialTranscriptScenario !== 'bash-filter') return;
+		untrack(() => {
+			source.hideBash(patterns.length > 0);
+			chatState.controller.ready(JSON.stringify(patterns), 'available');
+		});
+	});
 	const appShell = createAppShellStore();
 	appShell.projectBasePath = '/workspace';
 	let sidebarRecenterRequestCount = $state(0);
@@ -262,12 +293,14 @@
 	onDestroy(() => {
 		unsubscribeSidebarRecenter();
 		localSettings.destroy();
+		chatState.dispose();
 	});
 </script>
 
 	<ConversationFeed
 		{chatContext}
-		pendingPermissionRequests={pendingPermissions}
+		pendingPermissionRequests={[...pendingPermissions, ...pendingPermissionRequests]}
+		{onRetry}
 		onPermissionDecision={() => {}}
 		transcript={chatState}
 		agentId="codex"
@@ -275,9 +308,9 @@
 	{isPreparingInitialScroll}
 	onLoadEarlier={retryEarlierPage}
 	isVisible={true}
-	pinnedToBottom={true}
+	{pinnedToBottom}
 		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
-		onViewportPortChange={(port) => (viewportPort = port)}
+		onViewportPortChange={(port) => { viewportPort = port; onViewport?.(port); }}
 />
 {#if showAnnouncementTrigger}
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
@@ -302,3 +335,4 @@
 	<button onclick={showInterleavedEarlierError}>Show earlier error</button>
 {/if}
 <div data-testid="sidebar-recenter-request-count">{sidebarRecenterRequestCount}</div>
+<span data-testid="feed-fixture-ready" data-ready={fixtureReady}></span>

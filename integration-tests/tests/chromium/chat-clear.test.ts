@@ -2,7 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
+import type { Route } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { Deferred, withTimeout } from '../../support/deferred.js';
+import { displayWindowRequest } from '../../support/transcript-display-browser.js';
+import { parseResendSnapshot, parseSubagentSummaryPage } from '../../../common/transcript-display-auxiliary.js';
 
 test('Notes formats and Clear before message preserve the selected suffix and composer draft', async () => {
   await withChromiumFixture('notes-clear-before', async ({ page, integration, assertNoBrowserErrors }, phase) => {
@@ -60,12 +64,13 @@ test('Notes formats and Clear before message preserve the selected suffix and co
 }, 180_000);
 
 test('confirmed Shell clear works on desktop and mobile while AI clear is rejected without dispatch', async () => {
-  await withChromiumFixture('chat-clear', async ({ page, integration, assertNoBrowserErrors }, phase) => {
+  await withChromiumFixture('chat-clear', async ({ page, integration, failedResponses, assertNoBrowserErrors, withExpectedConsoleErrors }, phase) => {
     const { client } = integration;
     let dropReplacement = false;
     let droppedReplacements = 0;
     let clearPosts = 0;
     let loseAcknowledgement = false;
+    let heldReload: { chatId: string; received: Deferred<void>; events: (() => void)[] } | null = null;
     await page.route('**/api/v1/chats/clear', async route => {
       clearPosts += 1;
       if (!loseAcknowledgement) return route.continue();
@@ -76,7 +81,12 @@ test('confirmed Shell clear works on desktop and mobile while AI clear is reject
     await page.routeWebSocket(/\/ws(?:\?|$)/, route => {
       const server = route.connectToServer();
       server.onMessage(message => {
-        if (dropReplacement && JSON.parse(String(message)).type === 'chat-transcript-replaced') {
+        const event = JSON.parse(String(message));
+        const replaced = event.type === 'chat-transcript-replaced';
+        if (heldReload && event.chatId === heldReload.chatId) {
+          heldReload.events.push(() => route.send(message));
+          if (replaced) heldReload.received.resolve();
+        } else if (dropReplacement && replaced) {
           droppedReplacements += 1;
         } else route.send(message);
       });
@@ -153,15 +163,70 @@ test('confirmed Shell clear works on desktop and mobile while AI clear is reject
       await browserExpect(feed).not.toContainText('synthetic-old-history');
       if (loseAcknowledgement) await browserExpect(page.getByText('Clear could not be confirmed.', { exact: false })).toBeVisible();
       expect(clearPosts).toBe(previousPosts + 1);
-      expect((await client.getMessages(chatId)).messages).toEqual([]);
+      const cleared = await client.getMessages(chatId);
+      expect(cleared.messages).toEqual([]);
       if (dropReplacement) await browserExpect.poll(() => droppedReplacements).toBeGreaterThan(0);
       dropReplacement = false;
       loseAcknowledgement = false;
-      await page.reload();
-      await browserExpect(editor).toBeVisible();
-      await browserExpect(feed).not.toContainText('synthetic-old-history');
-      await client.reloadChat(chatId);
-      await browserExpect(feed).toContainText('synthetic-old-history');
+      assertNoBrowserErrors();
+      // Exercises a display read crossing Reload before the replacement event arrives.
+      const captured = new Deferred<Route>();
+      const windowPath = '**/api/v1/chats/transcript-display/window';
+      const holdWindow = async (route: Route) => {
+        const input = displayWindowRequest(route.request().postData());
+        if (input.chatId === chatId && input.transcriptViewId === cleared.transcriptViewId
+          && captured.resolve(route)) return;
+        await route.continue();
+      };
+      await page.route(windowPath, holdWindow);
+      let windowReleased = false;
+      try {
+        // Settles independent summaries before forcing only the window read across Reload.
+        const summaries = [
+          ['resend', parseResendSnapshot],
+          ['subagents', parseSubagentSummaryPage],
+        ] as const;
+        const summariesReady = summaries.map(([operation, parse]) => page.waitForResponse(async response => {
+          if (!response.url().endsWith(`/transcript-display/${operation}`) || response.status() !== 200) return false;
+          const summary = parse(await response.json());
+          return summary.chatId === chatId && summary.transcriptViewId === cleared.transcriptViewId
+            && ('processingPhase' in summary ? summary.processingPhase === null
+              : summary.kind === 'available' && summary.watermark === summary.sourceHead);
+        }));
+        await Promise.all([page.reload(), ...summariesReady]);
+        await browserExpect(editor).toBeVisible();
+        await browserExpect(feed).not.toContainText('synthetic-old-history');
+        const pending = await withTimeout(captured.promise, 20_000, () => 'Missing held display window');
+        heldReload = { chatId, received: new Deferred(), events: [] };
+        await client.reloadChat(chatId);
+        await withTimeout(heldReload.received.promise, 20_000, () => 'Missing Reload replacement');
+        const rejected = await pending.fetch();
+        expect(rejected.status()).toBe(409);
+        expect(await rejected.json()).toMatchObject({ errorCode: 'STALE_TRANSCRIPT_VIEW' });
+        const failedBefore = failedResponses.length;
+        await withExpectedConsoleErrors([
+          'Failed to load resource: the server responded with a status of 409 (Conflict)',
+        ], async () => {
+          await pending.fulfill({ response: rejected });
+          windowReleased = true;
+          await browserExpect(page.locator('[data-chat-scroll-viewport]')).toHaveAttribute('aria-busy', 'false');
+          await browserExpect(feed).not.toContainText('synthetic-old-history');
+          for (const publish of heldReload!.events) publish();
+          heldReload = null;
+          await browserExpect(feed).toContainText('synthetic-old-history');
+          // Supersession can cancel the fetch before Chromium reports the rejected response.
+          const rejectedResponses = failedResponses.slice(failedBefore);
+          expect(rejectedResponses.length).toBeLessThanOrEqual(1);
+          for (const response of rejectedResponses) {
+            expect(response).toBe(`409 POST ${integration.garcon.baseUrl}/api/v1/chats/transcript-display/window`);
+          }
+        });
+      } finally {
+        if (!windowReleased && captured.settled) await (await captured.promise).abort();
+        for (const publish of heldReload?.events ?? []) publish();
+        heldReload = null;
+        await page.unroute(windowPath, holdWindow);
+      }
     }
     assertNoBrowserErrors();
   });

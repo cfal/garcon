@@ -183,7 +183,7 @@ test('the latest message stays in view while the composer grows over a long tran
       const viewport = page.locator('[data-chat-scroll-viewport]').first();
       const distanceFromBottom = () => viewport.evaluate(node => Math.round(node.scrollHeight - node.scrollTop - node.clientHeight));
       await input.waitFor();
-      expect(await viewport.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+      await browserExpect.poll(() => viewport.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
       // The draft is saved per chat, so each pass starts from an empty composer.
       await input.fill('');
       await browserExpect.poll(distanceFromBottom).toBeLessThanOrEqual(1);

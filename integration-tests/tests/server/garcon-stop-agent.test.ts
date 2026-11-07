@@ -1,7 +1,7 @@
 import { cliConnectionArguments } from '../../support/cli-fixture.js';
 import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
-import type { ChatMessagesMessage, ServerWsMessage } from '../../../common/ws-events.js';
+import type { ServerWsMessage } from '../../../common/ws-events.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import { withCliFixture, type IntegrationFixture } from '../../support/cli-fixture.js';
@@ -10,15 +10,15 @@ import { throwingRejectionOf } from '../../support/promise-assertions.js';
 const WORKSPACE = 'stop-agent';
 
 async function childOutcome(fixture: IntegrationFixture, parent: string, ref: string, status: string, afterIndex: number) {
-  const event = await fixture.client.waitForEvent(
-    (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
-      && event.messages.some(({ message }) => message.type === 'transcript-notice'
+  const event = await fixture.client.waitForMessages(parent,
+        (event) => event.messages.some(({ message }) => message.type === 'transcript-notice'
         && message.detail && 'ref' in message.detail && message.detail.ref === ref
         && 'status' in message.detail && message.detail.status === status),
-    `child ${ref} ${status}`, { afterIndex },
-  );
+        { afterOrdinal: fixture.client.observedHead(parent, afterIndex), description: `child ${ref} ${status}` },
+      );
   const detail = messagesOfType(event.messages, 'transcript-notice').find((message) =>
-    message.detail && 'ref' in message.detail && message.detail.ref === ref)?.detail;
+    message.detail && 'ref' in message.detail && message.detail.ref === ref
+    && 'status' in message.detail && message.detail.status === status)?.detail;
   if (!detail || !('chatId' in detail) || typeof detail.chatId !== 'string') throw new Error('Missing child identity');
   return detail;
 }

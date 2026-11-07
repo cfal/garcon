@@ -3,6 +3,18 @@ import { canPersistBrowserData } from './browser-data-lifetime';
 export const CHAT_TRANSCRIPT_SNAPSHOT_PREFIX = 'chat_snapshot_';
 export const CHAT_TRANSCRIPT_INDEX_KEY = 'chat_snapshot_index_v3';
 
+export function purgeLegacyTranscriptSnapshots(): boolean {
+	try {
+		for (let index = localStorage.length - 1; index >= 0; index--) {
+			const key = localStorage.key(index);
+			if (key?.startsWith(CHAT_TRANSCRIPT_SNAPSHOT_PREFIX)) localStorage.removeItem(key);
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 interface TranscriptIndexEntry {
 	chatId: string;
 	lastAccessedAt?: string;

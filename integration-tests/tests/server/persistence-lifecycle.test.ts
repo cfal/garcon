@@ -307,8 +307,9 @@ describe('persistence lifecycle', () => {
       expect(countUserContent(restored.messages, 'ephemeral-active')).toBe(1);
       const reloaded = await fixture.client.reloadChat(chatId);
       expect(reloaded.transcriptViewId).not.toBe(restored.transcriptViewId);
-      expect(userContents(reloaded.messages)).toEqual(['ephemeral-active']);
-      expect(assistantContents(reloaded.messages)).toEqual([]);
+      const reloadedPage = await fixture.client.getMessages(chatId, { transcriptViewId: reloaded.transcriptViewId, beforeOrdinal: reloaded.lastOrdinal + 1 });
+      expect(userContents(reloadedPage.messages)).toEqual(['ephemeral-active']);
+      expect(assistantContents(reloadedPage.messages)).toEqual([]);
 
       const next = await fixture.client.runDirectChat({
         chatId,

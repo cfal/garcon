@@ -1,8 +1,8 @@
 import { SvelteMap } from 'svelte/reactivity';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate } from '$shared/chat-view';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
+import { diagnosticDigest } from './local-notice.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
-import { echoedClientMessageOrdinals } from './transcript-row-projection.js';
 import { createRandomId } from '$lib/utils/random-id';
 
 const SERVER_NOTICE_RETENTION_LIMIT = 8;
@@ -24,13 +24,6 @@ export interface ConversationTranscriptOverlayView {
 	readonly resendCandidates: readonly ResendCandidate[];
 	readonly includedResendCandidates: readonly ResendCandidate[];
 	readonly excludedResendOrdinals: readonly number[];
-}
-
-export interface CommittedOverlayBatch {
-	readonly chatId: string;
-	readonly messages: readonly TranscriptMessage[];
-	readonly resendCandidates: readonly ResendCandidate[];
-	readonly noticeRevision: number;
 }
 
 function feedMutation(feedStructureChanged: boolean): ConversationTranscriptOverlayMutation {
@@ -78,6 +71,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		source: OverlayNotice['source'],
 		noticeType: LocalNoticeType,
 		content: string,
+		transcriptBarrier?: LocalNoticeRow['transcriptBarrier'],
 	): ConversationTranscriptOverlayMutation {
 		const previous = this.#notices.at(-1);
 		if (
@@ -95,6 +89,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			timestamp: new Date().toISOString(),
 			revision: ++this.#noticeRevision,
 			source,
+			transcriptBarrier,
 		};
 		let notices = [...this.#notices, notice];
 		if (source === 'server') {
@@ -106,11 +101,23 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			}
 		}
 		this.#notices = notices;
+		if (transcriptBarrier && (noticeType === 'error' || noticeType === 'warning')) {
+			void diagnosticDigest(content).then(contentDigest => {
+				this.#notices = this.#notices.map(current => current.id === notice.id ? { ...current, contentDigest } : current);
+			}).catch(() => {});
+		}
 		return feedMutation(true);
 	}
 
 	clearNoticesThrough(revision = this.#noticeRevision): ConversationTranscriptOverlayMutation {
 		const next = this.#notices.filter((notice) => notice.revision > revision);
+		if (next.length === this.#notices.length) return feedMutation(false);
+		this.#notices = next;
+		return feedMutation(true);
+	}
+
+	clearStatusNotices(): ConversationTranscriptOverlayMutation {
+		const next = this.#notices.filter(notice => notice.noticeType !== 'info' && notice.noticeType !== 'progress');
 		if (next.length === this.#notices.length) return feedMutation(false);
 		this.#notices = next;
 		return feedMutation(true);
@@ -163,7 +170,9 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	replaceResendCandidates(
 		candidates: readonly ResendCandidate[],
 	): ConversationTranscriptOverlayMutation {
-		this.#installResendCandidates(candidates);
+		this.#resendCandidates = [...candidates];
+		const offered = new Set(candidates.map(candidate => candidate.ordinal));
+		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter(ordinal => offered.has(ordinal));
 		return feedMutation(false);
 	}
 
@@ -184,54 +193,23 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return feedMutation(false);
 	}
 
-	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
-		let feedStructureChanged = false;
-		const notices = this.#notices.filter((notice) => notice.revision > batch.noticeRevision);
-		if (notices.length !== this.#notices.length) {
-			this.#notices = notices;
-			feedStructureChanged = true;
+	advanceOptimisticAnchors(clientMessageId: string, ordinal: number): ConversationTranscriptOverlayMutation {
+		const index = this.#optimisticInputs.findIndex(input => input.clientMessageId === clientMessageId);
+		if (index < 0) return feedMutation(false);
+		const anchors = new Map(this.#optimisticAfterOrdinals);
+		let changed = false;
+		for (const input of this.#optimisticInputs.slice(index + 1)) {
+			if ((anchors.get(input.clientMessageId) ?? 0) >= ordinal) continue;
+			anchors.set(input.clientMessageId, ordinal);
+			changed = true;
 		}
-
-		const echoed = echoedClientMessageOrdinals(batch.messages);
-		if (echoed.size > 0) {
-			const ordinals = new Map(this.#optimisticAfterOrdinals);
-			const remaining: OptimisticUserInput[] = [];
-			let latestPriorEchoOrdinal: number | undefined;
-			for (const input of this.#optimisticInputs) {
-				const echoOrdinal = echoed.get(input.clientMessageId);
-				if (echoOrdinal !== undefined) {
-					latestPriorEchoOrdinal = Math.max(latestPriorEchoOrdinal ?? 0, echoOrdinal);
-					ordinals.delete(input.clientMessageId);
-					continue;
-				}
-				if (latestPriorEchoOrdinal !== undefined) {
-					ordinals.set(
-						input.clientMessageId,
-						Math.max(ordinals.get(input.clientMessageId) ?? 0, latestPriorEchoOrdinal),
-					);
-				}
-				remaining.push(input);
-			}
-			if (remaining.length !== this.#optimisticInputs.length) {
-				this.#optimisticInputs = remaining;
-				this.#optimisticAfterOrdinals = ordinals;
-				feedStructureChanged = true;
-			}
-		}
-
-		this.#installResendCandidates(batch.resendCandidates);
-		return feedMutation(feedStructureChanged);
+		if (changed) this.#optimisticAfterOrdinals = anchors;
+		return feedMutation(changed);
 	}
 
-	#installResendCandidates(candidates: readonly ResendCandidate[]): void {
-		this.#resendCandidates = candidates.map((candidate) => ({
-			...candidate,
-			attachmentNames: [...candidate.attachmentNames],
-		}));
-		const available = new Set(candidates.map((candidate) => candidate.ordinal));
-		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter((ordinal) =>
-			available.has(ordinal),
-		);
+	acknowledgeInput(clientMessageId: string, ordinal: number): ConversationTranscriptOverlayMutation {
+		this.advanceOptimisticAnchors(clientMessageId, ordinal);
+		return this.clearOptimisticInput(clientMessageId);
 	}
 
 	resetForTranscriptReplacement(): ConversationTranscriptOverlayMutation {
@@ -274,12 +252,17 @@ export class ConversationTranscriptOverlayStore {
 		chatId: string,
 		noticeType: LocalNoticeType,
 		content: string,
+		transcriptBarrier?: LocalNoticeRow['transcriptBarrier'],
 	): ConversationTranscriptOverlayMutation {
-		return this.#entry(chatId).appendNotice('server', noticeType, content);
+		return this.#entry(chatId).appendNotice('server', noticeType, content, transcriptBarrier);
 	}
 
 	clearNoticesThrough(chatId: string, revision?: number): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).clearNoticesThrough(revision);
+	}
+
+	clearStatusNotices(chatId: string): ConversationTranscriptOverlayMutation {
+		return this.#entries.get(chatId)?.clearStatusNotices() ?? feedMutation(false);
 	}
 
 	upsertOptimisticInput(
@@ -319,8 +302,16 @@ export class ConversationTranscriptOverlayStore {
 		return this.#entry(chatId).clearResendExclusions();
 	}
 
-	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
-		return this.#entry(batch.chatId).applyCommittedBatch(batch);
+	resetResendCandidates(): void {
+		for (const entry of this.#entries.values()) entry.replaceResendCandidates([]);
+	}
+
+	acknowledgeInput(chatId: string, clientMessageId: string, ordinal: number): ConversationTranscriptOverlayMutation {
+		return this.#entry(chatId).acknowledgeInput(clientMessageId, ordinal);
+	}
+
+	advanceOptimisticAnchors(chatId: string, clientMessageId: string, ordinal: number): ConversationTranscriptOverlayMutation {
+		return this.#entry(chatId).advanceOptimisticAnchors(clientMessageId, ordinal);
 	}
 
 	resetForTranscriptReplacement(chatId: string): ConversationTranscriptOverlayMutation {

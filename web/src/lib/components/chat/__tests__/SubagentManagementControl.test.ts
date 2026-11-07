@@ -2,6 +2,22 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest';
 import SubagentManagementControl from '../SubagentManagementControl.svelte';
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
+import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+
+function makePaging(overrides: Partial<DisplaySummaryPaging> = {}): DisplaySummaryPaging {
+	return {
+		loading: false,
+		updating: false,
+		stale: false,
+		error: null,
+		hasPrevious: false,
+		hasNext: false,
+		retry: vi.fn(async () => {}),
+		next: vi.fn(async () => {}),
+		previous: vi.fn(async () => {}),
+		...overrides,
+	};
+}
 
 function makeModel(): SubagentManagementModel {
 	return {
@@ -22,7 +38,7 @@ function makeModel(): SubagentManagementModel {
 				statusLabel: 'Waiting',
 				model: 'gpt-5.5',
 				lastActionLabel: 'Waiting',
-				anchorId: 'tool-input-tool-subagent-1',
+				anchorOrdinal: 7,
 			},
 		],
 		subagents: [
@@ -34,7 +50,7 @@ function makeModel(): SubagentManagementModel {
 				statusLabel: 'Waiting',
 				model: 'gpt-5.5',
 				lastActionLabel: 'Waiting',
-				anchorId: 'tool-input-tool-subagent-1',
+				anchorOrdinal: 7,
 			},
 		],
 	};
@@ -82,7 +98,7 @@ describe('SubagentManagementControl', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
 		await fireEvent.click(await screen.findByRole('button', { name: /review-auth/ }));
 
-		expect(onJumpToTool).toHaveBeenCalledWith('tool-input-tool-subagent-1');
+		expect(onJumpToTool).toHaveBeenCalledWith(7);
 		await waitFor(() => expect(screen.queryByText('Main chat')).toBeNull());
 	});
 
@@ -94,5 +110,38 @@ describe('SubagentManagementControl', () => {
 		const { container } = render(SubagentManagementControl, { model });
 
 		expect(container.firstElementChild).toBeNull();
+	});
+
+	it('keeps an empty summary hidden while loading and after it settles', async () => {
+		const model = { entries: [], subagents: [] } satisfies SubagentManagementModel;
+		const { container, rerender } = render(SubagentManagementControl, {
+			model,
+			paging: makePaging({ loading: true, updating: true }),
+		});
+
+		expect(container.firstElementChild).toBeNull();
+		await rerender({ model, paging: makePaging() });
+		expect(container.firstElementChild).toBeNull();
+	});
+
+	it('keeps existing agents available while their summary updates', async () => {
+		render(SubagentManagementControl, {
+			model: makeModel(),
+			paging: makePaging({ loading: true, updating: true }),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+		expect(await screen.findByRole('button', { name: /review-auth/ })).toBeTruthy();
+		expect(screen.getByRole('status').textContent).toBe('Updating...');
+	});
+
+	it('keeps failed empty summaries accessible for retry', async () => {
+		const paging = makePaging({ error: 'Synthetic summary failure' });
+		render(SubagentManagementControl, { model: { entries: [], subagents: [] }, paging });
+
+		await fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+		expect(await screen.findByText('Synthetic summary failure')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(paging.retry).toHaveBeenCalledOnce();
 	});
 });

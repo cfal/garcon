@@ -80,6 +80,22 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it('renders the complete resend list without paging or status controls and keeps the input mounted', async () => {
+		const view = render(PromptComposerTestHost);
+		const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(input, 'Synthetic draft', 4);
+		const resendCandidates = Array.from({ length: 150 }, (_, index) => ({ ordinal: index + 1,
+			content: `Synthetic candidate ${index}`, attachmentNames: [] }));
+		await view.rerender({ resendCandidates });
+		expect(screen.getAllByRole('button', { name: /^Don't resend / })).toHaveLength(150);
+		expect(screen.queryByRole('button', { name: /^(Previous page|Next page|Resend status)$/ })).toBeNull();
+		await view.rerender({ resendCandidates: [] });
+		expect(screen.queryByRole('button', { name: /^Don't resend / })).toBeNull();
+		expect(screen.getByRole('textbox')).toBe(input);
+		expect(input.value).toBe('Synthetic draft');
+		expect(input.selectionStart).toBe(4);
+	});
+
 	it.each(['in', 'rename', 'move', 'tag', 'fork'])(
 		'completes the literal /%s app command without provider discovery or submission', async name => {
 			const onsubmit = vi.fn();

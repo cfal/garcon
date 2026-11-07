@@ -1,12 +1,12 @@
 // Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
-import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
+import { handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
 import { literalInputFormat } from '$shared/input-format';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
-	INITIAL_VISIBLE_MESSAGES,
 	type ChatLoadMessagesOptions,
+	type ActiveTranscriptState,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
@@ -291,11 +291,7 @@ export class ConversationSessionController {
 			deps.setInitialBottomRestorePending(selected.status === 'draft' ? null : chatId);
 		}
 
-		// Restores cached messages immediately while the server round-trip completes.
-		const restored = deps.chatState.activateChat(chatId);
-		if (!preservesMountedPresentation && restored) {
-			requestAnimationFrame(() => deps.scrollToBottom());
-		}
+		deps.chatState.activateChat(chatId);
 
 		deps.conversationUi.activateTransientFeed(chatId);
 		if (!preservesMountedPresentation) deps.setIsViewportPinnedToBottom(true);
@@ -354,14 +350,13 @@ export class ConversationSessionController {
 		}
 
 		this.loadChat(chatId, {
-			minimumMessageLimit: restored?.count ?? 0,
 			restoreBottom: !preservesMountedPresentation,
 		});
 	}
 
 	async loadChat(
 		chatId: string,
-		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
+		options: { restoreBottom?: boolean } = {},
 	): Promise<void> {
 		try {
 			await this.#loadChat(chatId, options);
@@ -372,10 +367,14 @@ export class ConversationSessionController {
 
 	async loadPanelChat(
 		chatId: string,
-		transcript: SessionTranscriptLoadTarget,
+		transcript: SessionTranscriptLoadTarget & Pick<ActiveTranscriptState, 'display' | 'controller'>,
 		loadPanelSnapshot: PanelTranscriptSnapshotLoader,
 	): Promise<void> {
 		try {
+			if (transcript.display.phase === 'failed' || transcript.display.error !== null) {
+				const result = await transcript.controller.retry();
+				if (result === 'superseded' || transcript.activeChatId !== chatId) return;
+			}
 			await this.#loadChat(chatId, { restoreBottom: false }, transcript, loadPanelSnapshot);
 		} catch {
 			// Leaves the panel's load error visible for another explicit retry.
@@ -384,38 +383,19 @@ export class ConversationSessionController {
 
 	async #loadChat(
 		chatId: string,
-		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
+		options: { restoreBottom?: boolean } = {},
 		transcript: SessionTranscriptLoadTarget = this.deps.chatState,
 		loadPanelSnapshot?: PanelTranscriptSnapshotLoader,
 	): Promise<void> {
 		const { deps } = this;
-		let minimumMessageLimit =
-			options.minimumMessageLimit ??
-			Math.min(transcript.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
-
-		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
-		// The primary restore happens earlier in handleChatSwitch.
-		if (transcript.chatMessages.length === 0) {
-			const restored = transcript.activateChat(chatId);
-			minimumMessageLimit = Math.max(minimumMessageLimit, restored?.count ?? 0);
-		}
-
-		if (options.restoreBottom !== false && transcript.chatMessages.length > 0) {
-			this.#requestBottomRestore(chatId);
-		}
-
-		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
-		const loadOptions: ChatLoadMessagesOptions = {
-			minimumLimit: minimumMessageLimit,
-			purpose: 'activation',
-		};
+		if (transcript.activeChatId !== chatId) transcript.activateChat(chatId);
+		const loadOptions: ChatLoadMessagesOptions = { purpose: 'activation' };
 		if (loadPanelSnapshot) {
 			const loaded = await loadPanelSnapshot(loadOptions);
 			if (!loaded) return;
 		} else {
 			await transcript.loadMessages(chatId, loadOptions);
 		}
-		transcript.transcriptCache.markValidated(chatId);
 		if (deps.sessions.selectedChatId !== chatId) return;
 
 		if (options.restoreBottom !== false) this.#requestBottomRestore(chatId);
@@ -429,16 +409,13 @@ export class ConversationSessionController {
 			deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
 		}
 
-		const initialSnapshot = await initialSnapshotPromise;
-		const loadedCursor = transcript.transcriptCache.readAppliedCursor(chatId);
-		if (
-			deps.sessions.selectedChatId === chatId &&
-			initialSnapshot?.chat.id === chatId &&
-			initialSnapshot.transcript.availability === 'available' &&
-			initialSnapshot.transcript.transcriptViewId === loadedCursor?.transcriptViewId
-		) {
+		const initialSnapshot = transcript.openSnapshot;
+		if (deps.sessions.selectedChatId === chatId && initialSnapshot?.chat.id === chatId
+			&& initialSnapshot.transcriptViewId === transcript.getCursor().transcriptViewId) {
 			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
+			deps.conversationUi.setExecutionControlFromRefresh(chatId, initialSnapshot.control);
 		}
+
 	}
 
 	#requestBottomRestore(chatId: string): void {

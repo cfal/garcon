@@ -52,11 +52,29 @@ the retained session row remains in the binding until replacement. Repeated Clea
 consolidates evidence once; native Reload reconstructs ordinary pairs and drops
 the retained field, preventing double-counting.
 
-Status: revision 41 integrated design. Supersedes
+Status: revision 42 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 42 replaces browser raw-history projection and WebSocket body replay
+with a controller-owned, disposable display read model. The ledger remains the
+sole authority. A fixed builder/reader Worker pair prepares a separate SQLite
+index from bounded acknowledged stored-row frames. Certified display and member
+windows describe a complete prefix under a profile and watermark; selected
+bodies and later-changing details are read separately. Compact head, exact input
+acknowledgement, and plan notifications precede terminal publication, without
+waiting for index readiness. Both combined and individual-row modes use this
+path. Persistent measured coverage replaces the ten-demand allowance. Settled
+working-region retention protects interaction islands and replaces distant
+unloaded ranges with certified continuations. Parking marks windows dirty rather
+than replaying bodies. This supersedes revision 39's client-only grouping, raw
+cache, and no-active-trimming rules. Raw HTTP history, CLI, exports, search,
+provider publication, and execution authority retain their separate contracts.
+The detailed schema, algorithms, budgets, and release gates are specified in
+`../TRANSCRIPT_DISPLAY_READ_MODEL_DESIGN.md`; implementation verification is
+tracked there, not implied by this normative amendment.
 
 Revision 41 lets remote producer bindings survive an executor disconnect
 and bounds whole-history work. The worker's process-level producer relay
@@ -634,18 +652,27 @@ The decisions:
   ordinary core transcript read surface touches provider-native storage or any
   integration-private storage. Integrations own their native execution history
   and may read it to resume provider work; that is not transcript serving.
+  The browser display index is a separate, rebuildable ledger read fold, never
+  an authoritative transcript or an execution dependency (section 9).
 - **L2 Append-only view.** Within a transcript view, stored rows are
   never modified, removed, reordered, or re-addressed. The view-wide
   ordinal is dense and never reused. Equal-content rows are distinct by
   address. Ordinary appends preserve `transcriptViewId`, rotate no
   generation, and invalidate no cursor.
+  A disposable index reused after process restart validates its frontier
+  against the source head captured before new appends and an exact stored-row
+  fingerprint. Source rollback followed by ordinal regrowth cannot validate an
+  older derived prefix merely by reaching its former head.
 - **L3 Durable before visible.** `publish()` and every core-originated
   append validate, canonicalize, and commit synchronously before
   returning; acceptance and durability are the same point. Broadcast
   happens after commit, through the existing per-chat server-event
-  queue, preserving the established chat-messages-before-terminal-derived
-  broadcast contract; a crash before broadcast is harmless because
-  reconnect reads the committed rows. Committed means durable across
+  queue. Compact head, exact `clientMessageId` acknowledgement, and plan facts
+  through a terminal's committed ordinal flush before terminal-driven
+  processing/session/run events. Replacement and control publication obey the
+  same ordering. Display readiness is not a lifecycle barrier. A crash before
+  notification is recovered by a bounded display open plus outstanding-ID
+  lookup, not raw body replay. Committed means durable across
   process crash; durability across OS or power failure follows the
   configured `synchronous` level and the accepted-loss posture (4.3).
   Everything tentative, including the future-turn queue and resend
@@ -717,22 +744,24 @@ The decisions:
   latency is an accepted operational stall, never a buffering
   justification. A durable handoff decision immediately fences command
   admission and producer publication; transcript, search, and other read
-  surfaces remain available throughout. The browser never trims either edge
-  of the active interval while a user reads or a page/scroll mutation is in
-  flight. With combined tool use enabled, a bounded inactive window may keep
-  the loaded interval and reading target across chat switches. A browser
-  reload, an evicted window, or a non-combined switch uses the bounded recent
-  cache instead; a replaced transcript view requires its new snapshot.
-  Section 4.4 defines that lifecycle. No live-edge timer participates in
-  correctness, and memory eviction never truncates the ledger.
+  surfaces remain available throughout. The browser may release distant
+  unprotected descriptors and bodies only after layout and native-scroll
+  settlement, preserving its semantic reading anchor. Focus, selection, open
+  controls, navigation, and optimistic rows remain protected. Bounded parked
+  windows retain certified geometry inputs and semantic targets, not DOM or raw
+  replay state. Cold restoration fetches a bounded certified window; replacement
+  requires a new view-qualified snapshot. Section 4.4 defines this lifecycle.
+  No live-edge prune timer participates in correctness, and memory eviction
+  never truncates the ledger.
 - **L8 View stability.** `transcriptViewId` changes only through manual
   full reload. Every page, event, search result, and cursor is qualified
   by it; requests qualified by a replaced view receive a typed
   stale-view error whether or not its rows still exist. There are no
   exceptions: shares are snapshot artifacts, not ledger readers.
-- **L9 Advisory drift detection.** A successful active newest-history load
+- **L9 Advisory drift detection.** A successful active display open (or an
+  explicitly activating raw-history read by an independent consumer)
   returns before scheduling one point-in-time bounded tail read of the chat's
-  current binding. Older pages, replay continuations, background reads,
+  current binding. Display refreshes, members, details, reconnect, background reads,
   provider dispatch, timers, and startup never schedule it. The probe
   obligation: the reported relevant-entry timestamp must be no later than
   core's append time for any entry Garcon observed; a provider that cannot
@@ -1162,7 +1191,8 @@ CREATE INDEX transcript_session_rows
   idle chat's WAL from growing unbounded.
 - HTTP history paging performs exactly one bounded raw-row keyset query on
   the `(view_id, ordinal)` primary key per request; there is no offset,
-  presentation-sized scan loop, or sidecar index. The request `limit` is a
+  presentation-sized scan loop, or sidecar dependency in this raw API. The
+  independent browser display API uses its derived index (section 9). The request `limit` is a
   raw-row budget, not a promise to return that many rendered messages. The
   newest page is
   `SELECT ... WHERE view_id = ? ORDER BY ordinal DESC LIMIT ?`; older pages
@@ -1197,9 +1227,9 @@ CREATE INDEX transcript_session_rows
 ### 4.4 Execution model, operations, and failure handling
 
 - Core uses `bun:sqlite` directly, synchronously, behind the ledger port
-  and the existing per-chat serialization. No Worker is introduced until
-  measured event-loop latency warrants one; the search Worker's
-  bulk-indexing rationale does not transfer to small per-event commits.
+  and the existing per-chat serialization. The display builder and reader
+  Workers own only derived writes/queries and bounded body presentation; they
+  never open the source ledger or participate in its commit transaction.
 - SQLite WAL recovery is normal startup behavior. There are no
   clean-shutdown markers and no routine `quick_check`; corruption
   surfaces lazily as `SQLITE_CORRUPT` (or another ledger failure) on
@@ -1217,35 +1247,33 @@ CREATE INDEX transcript_session_rows
 - Live backups use SQLite's backup API or `VACUUM INTO`; copying only
   `ledger.sqlite` while the WAL may contain commits is not a valid
   backup.
-- The durable ledger is paged from disk. The selected chat may hold an
-  expanded active interval without mutation-time trimming. With combined tool
-  use enabled, the browser parks the transcript data and semantic reading
-  target for a recently inactive `(surfaceId, chatId)` window, not its panel,
-  DOM, or virtual measurements. Up to four parked windows share limits of
-  8,000 messages and 24 MiB of estimated payload. Whole-window eviction does
-  not trim a retained interval down to a misleading tool-only tail. Collapsing
-  a tool run changes only presentation; each member retains its distinct
-  view-qualified ordinal address and returns as an individual row on expansion.
-  Parked windows receive background commits and ordered reconnect replay.
-  Activation validates the chat, view, and cached frontier before restoring
-  the loaded interval. Disabling combination, view replacement, stale
-  continuity, chat deletion, permanent surface removal, and root teardown
-  discard parked state.
-  A manual transcript Reload has no old parked state to restore. With
-  combination disabled, or after a cache miss, switch-time restoration still
-  uses the bounded recent cache.
-  That cache persists the raw earlier-page continuation independently of its
-  oldest visible ordinal, so an all-hidden page remains resumable. Evicting
-  memory never truncates the ledger: older rows remain pageable.
-- An initially underfilled feed with collapsed tool groups starts measured
-  refill after its activation snapshot settles. Each compressed logical page
-  demands at most 200 presented messages, with at most ten automatic demands
-  per panel controller and chat/view; a logical demand may require multiple
-  bounded raw HTTP reads.
-  Cached-row reveals do not consume that allowance. The loop stops when
-  measured content fills the viewport, history ends, ownership changes, or the
-  allowance is exhausted. Manual paging remains available. Non-combined
-  initial restoration and its page size are unchanged.
+- Display preparation runs outside source commits in one supervised builder,
+  with a separate reader. Frames are at most 256 rows or an estimated 2 MiB,
+  with one oversized row alone and one acknowledged frame outstanding. Jobs
+  finish finite captured goals before pursuing later appends. Eight visible
+  frames yield a maintenance turn when eligible. Explicitly opened or already
+  prepared current views may advance; background notifications do not adopt or
+  prepare unopened chats. Derived failure never fences the source or controls.
+- Each surface retains a measured working region and bounded anchored member
+  pages. Immutable bodies share explicit leases; details carry their own
+  watermark. After settlement, distant unprotected leases are released and
+  unloaded ranges retain certified continuations. Protected/oversized rows
+  and multiple visible minimum regions may exceed soft budgets explicitly;
+  release reclaims the exception rather than causing a fetch/evict loop.
+- Up to four inactive `(surfaceId, chatId)` windows share limits of 8,000
+  resident bodies and 24 MiB estimated payload. They retain descriptors,
+  member anchors, certificates and semantic position, not DOM or measurements.
+  Background heads only mark them dirty. Whole-window eviction preserves a
+  small restoration target. Replacement, deletion, server-instance change,
+  permanent surface removal and root teardown retire the appropriate state.
+  There is no persistent raw browser cache or raw reconnect cursor.
+- Measured coverage is a persistent obligation in both display modes, including
+  detached readers. Accepted data, readiness, profile/overlay changes, resize,
+  visibility and native-scroll settlement wake it. It stops only on measured
+  coverage, certified exhaustion, explicit failure/resource limitation, or
+  superseding navigation/disposal, never a lifetime request allowance. Member
+  demand follows reading direction before an unrelated parent edge. A valid
+  captured-watermark response can make progress behind a moving source head.
 
 ## 5. Producer Boundary
 
@@ -1879,6 +1907,54 @@ model context, carryover, or export.
   is filtered at this shared server boundary. Turn state derives from
   `run-ended` rows and live execution state. Late content renders in observed
   order.
+  Browser projection uses a disposable per-chat/view display index under
+  `<controller-data-root>/transcript-display/`, owned by
+  `server/controller/transcript-display/`. Structural extraction resolves
+  FIFO use/result occurrences over the complete canonical prefix, including
+  hidden rows and boundaries outside the resident window. Filtered adjacency,
+  seven hide groups, thinking, exact Bash-pattern revisions, weighted category
+  totals, and overlay cuts produce certified descriptors at watermark W.
+  Empty eligible output is certified exhaustion, not unfinished preparation.
+  Non-combined mode uses the same index and exposes eligible rows individually.
+  Around-target queries resolve both run boundaries; a cursor inside a group
+  cannot manufacture a truncated summary. Expansion retrieves a bounded member
+  page around an ordinal. Split follows its anchor; merge retains the protected
+  or reading intent; no all-member array crosses the browser boundary.
+  Immutable body identity remains `(chat, view, ordinal)`, additionally fenced
+  by server instance in browser memory. Result, question-wrapper, permission
+  terminal, command-format and diagnostic-tail evidence are W-qualified.
+  Detached geometry remains stable while bounded resident details revalidate
+  at a newer certificate. Historical controls never confer permission authority.
+  Compact source-head events carry bounded activity/preview, response-class
+  ordinals, and plan/auxiliary revisions; exact submission acknowledgements are
+  separate. Reconnect opens active surfaces independently, resolves at most 32
+  outstanding submission IDs, and fetches only their bounded working windows.
+  It never transfers the raw gap. An acknowledged optimistic body remains on
+  each surface until that surface represents its canonical replacement.
+  User navigation/recall and subagent summaries have explicit paged read folds
+  rather than depending on resident member bodies. Resend chips and the Reload
+  warning read one complete source-qualified candidate snapshot through the
+  existing registry resend fold, independent of display preparation. The snapshot
+  preserves full candidate text and attachment names; its count and aggregate
+  bytes are an explicit exception to display-window budgets. Reads occur only
+  on selected idle-composer demand and source/activation changes, never through
+  body-bearing broadcasts or display-readiness polling. Processing suppression
+  and source failure are distinct from a successful empty candidate list.
+  Exclusions remain ephemeral and survive refresh while their candidates remain
+  offered; view/process replacement invalidates them. No resend pager or new
+  composer status control is required. Subagent
+  generations publish atomically and paged stale results require explicit
+  refresh. Plan presentation is process-ephemeral, canonically addressed,
+  independently readable during index lag, and dismissed by an instance/view
+  qualified presentation operation. Real permission decisions remain on the
+  existing transient control path.
+  Missing/corrupt derived files rebuild after recovery-head and fingerprint
+  validation; replacement/deletion synchronously fence generations before
+  asynchronous handle retirement. Regex failure fails the exact revision and
+  requires explicit retry or settings change, never silently weakened filters.
+  Only one writer survives retirement at a time. Derived quota pressure evicts
+  inactive derived files, never source data. Ordinary raw HTTP history, CLI,
+  shares, export, search, and execution folds do not depend on this index.
 - **Search** indexes conversational content only, keyed
   `(chatId, transcriptViewId, ordinal)` with an appended-through
   watermark; normal appends index only the suffix; nothing is ever
@@ -2962,7 +3038,8 @@ The catalog cites this revision, but its inventory is not repeated here.
   against the single active sink; publish commits inline and no ledger
   transaction spans an `await` (asserted via an instrumented ledger
   port); broadcast ordering through the per-chat server-event queue
-  preserves the chat-messages-before-terminal-derived contract;
+  preserves compact-head/ack/plan-before-terminal publication without waiting
+  for display preparation;
   publish-versus-close is decided by synchronous execution order;
   staging failure issues a fresh current-view sink; the per-flow
   teardown preconditions.
@@ -3148,26 +3225,31 @@ The catalog cites this revision, but its inventory is not repeated here.
   cutover and preserves the current view; the corresponding target-seed
   failure remains fatal to a native-fidelity fork. A successfully opened,
   validly empty native session remains a valid zero-row import.
-- **HTTP paging and browser retention**: an expected view is rejected before
+- **Raw HTTP paging**: an expected view is rejected before
   any high-watermark or page scan; each HTTP request reads at most its raw-row
   budget and returns the specified raw ceiling and `nextBeforeOrdinal`,
   including a lifecycle-only page with no rendered messages. One case places a
   visible row behind a hidden run substantially longer than the raw budget and
   proves every response is bounded, continuation strictly decreases across
-  several requests, and the visible row is eventually delivered. The client
-  validates chat, view, limit, ordinal bounds, strict order, and continuation
-  progress before mutation. The bounded cache persists the raw earlier cursor
-  independently of visible rows; a hidden-only page remains resumable after
-  switch-away/back and storage hydration. Active append, prepend, append-page,
-  and programmatic scroll mutations never trim either edge under a reader.
-  Combined-tool chat switching preserves an eligible bounded inactive window
-  and its reading target without fetching already-loaded history. An evicted,
-  invalidated, reloaded, or non-combined chat restores the bounded recent cache
-  in exact order and can page earlier rows again. A
-  fake-time case retains a bottom-pinned expanded transcript beyond the old
-  180-second interval, and a static assertion proves the timer,
-  `history-pruned`, and immediate-compaction machinery are absent. Compact and
-  wide Chromium coverage locks final-row visibility and position.
+  several requests, and the visible row is eventually delivered. This contract
+  remains independent of browser projection.
+- **Display and retention**: full-prefix reference parity across all 512 local
+  profiles and Bash revisions; exact FIFO/wrapper correlation across frame and
+  conversational boundaries; both-sided around-target extents; W-qualified
+  details, reversal evidence, and private-row rejection; source rollback and
+  regrowth, lost acknowledgements, pruning/replacement/deletion races, worker
+  retirement and explicit retry; fair preparation without blocking source
+  publication. Browser tests preserve detached geometry, measured coverage
+  beyond any fixed demand count, bounded deep-member navigation, protected
+  islands, independent surfaces, same-ID optimistic replacement during lag,
+  restart-inert permissions, plan selection, and secondary consumers with empty
+  member-body caches. Real Chromium/WebKit gates measure actual HTTP/WS bytes,
+  DOM selection/native momentum, mobile/desktop geometry, and rapid switching.
+  Warm parking never hydrates background bodies; eviction retains a semantic
+  target and cold return uses bounded display reads. A 200,000-pair scale gate
+  and two-growing-chat/pathological-regex workload measure query work, memory,
+  ready-reader responsiveness and retirement latency. Required gates are
+  obligations, not claims of completed verification.
 - **OpenCode V1 compaction**: the owned process does not force autocompaction
   off and preserves operator overrides; the session-latest continuation map
   and plugin remain absent. Scripted fixtures prove threshold and first-turn
@@ -3352,7 +3434,7 @@ Direct plan without requiring another implementation or migration.
    evidence, no durable run attribution, and no producer acceptance-capacity
    protocol; commit failures fence; a later activation may warn about crash
    loss where newer native evidence exists, and manual reload repairs it. HTTP
-   pages and WebSocket replay frames have their own bounded transport
+   pages and certified display/member/body requests have their own bounded transport
    contracts; those are not producer flow control.
 2. `publish()` commits synchronously: acceptance and durability are the
    same point; no ledger transaction spans an `await`; observed order is
@@ -3518,21 +3600,24 @@ Direct plan without requiring another implementation or migration.
     target-chat creation builds the ledger fully and registers
     last, with unregistered-directory startup cleanup and fork-orphan
     provider artifacts as a named accepted loss.
-22. HTTP history paging validates an expected view before reading, performs one
+22. Raw HTTP history paging validates an expected view before reading, performs one
     bounded raw-row keyset query, reports `pageNewestOrdinal` as the clamped raw
     interval ceiling, and returns the oldest raw ordinal as
     `nextBeforeOrdinal` when more dense rows precede it, even when no messages
-    render. The client owns visible-row demand: it validates every response and
+    render. Independent raw consumers own demand: they validate every response and
     follows strictly decreasing ordinals until it has enough rows or reaches
     null. No opaque cursor, presentation-sized server scan, second existence
-    query, or third transcript identity exists.
-23. The selected browser transcript never trims either edge during active
-    append, paging, or scroll mutations. Combined-tool mode may park bounded
-    inactive transcript windows and their reading targets for warm chat
-    returns. Browser reload, an ineligible or invalidated window, and
-    non-combined mode restore the bounded recent cache, including its raw
-    earlier-page continuation, and page older rows from the ledger. The
-    three-minute live-edge prune timer and its state machine are deleted.
+    query, or third transcript identity exists. This raw API is independent of
+    the certified browser display API; the browser does not aggregate hidden
+    raw pages to fill a viewport.
+23. Both browser display modes retain measured working regions, bounded member
+    pages and protected islands. Trimming waits for layout/native-scroll
+    settlement, restores semantic anchors and leaves certified continuations.
+    Soft budgets allow observable protected/oversized exceptions. Bounded
+    parked windows receive dirty heads only; cold return fetches a certified
+    window rather than restoring a persistent raw cache. Coverage is a
+    persistent measured obligation, not a ten-demand allowance. The retired
+    three-minute live-edge prune timer remains absent.
 24. Pinned OpenCode V1 automatic compaction is marker-routed: OpenCode marks
     its compaction control and continuation parts, the runtime adopts them
     into the owning turn's route, and a successful summary publishes one

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
-	import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
-	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { UserMessage } from '$shared/chat-types';
+	import { certifiedFeed, displayGroup } from './display-feed-fixtures.js';
 	import { virtualItems, type VirtualTransactionRecord } from '$lib/virt/virtual-list-types.js';
 	import type {
 		ConversationFeedProjection,
@@ -31,6 +31,9 @@
 		showAtLayout(viewportWidth: number, itemSize: number): Promise<void>;
 		prependGroup(): Promise<void>;
 		appendGroup(): Promise<void>;
+		filterFirstGroupMember(): Promise<void>;
+		retainFirst(): Promise<void>;
+		retainFirstWithoutLayoutChange(): Promise<void>;
 	}
 
 	interface Props {
@@ -39,6 +42,7 @@
 		groupFocusMode?: boolean;
 		groupTailCount?: number;
 		initialPinned?: boolean;
+		retainedFirst?: boolean;
 	}
 
 	let {
@@ -47,6 +51,7 @@
 		groupFocusMode = false,
 		groupTailCount = 0,
 		initialPinned = true,
+		retainedFirst = false,
 	}: Props = $props();
 	let itemCount = $state(12);
 	let firstItemNumber = $state(0);
@@ -61,13 +66,14 @@
 	let visible = $state(true);
 	let viewportWidth = $state(400);
 	let groupMembers = $state.raw(['b', 'c']);
+	let groupAfter = $state(1);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let virtualRoot: HTMLDivElement | null = $state(null);
 	let scrollbarDragActive = false;
 	let releaseGroupFocus: (() => void) | null = null;
 	let initialEndRestoredCount = 0;
 	const transactions: VirtualTransactionRecord[] = [];
-	const renderModel = buildConversationFeedRenderModel([]);
+	const renderModel = certifiedFeed([]).renderModel;
 
 	const keys = $derived(groupFocusMode
 		? [
@@ -80,18 +86,11 @@
 			));
 	const model = $derived.by((): ConversationVirtualFeedModel => {
 		if (groupFocusMode) {
-			const members: ConversationVirtualFeedItem[] = groupMembers.map((id, index) => ({
-				kind: 'transcript',
-				key: JSON.stringify([surfaceIdentity, id]),
-				item: {
-					kind: 'message', id, index, ordinal: index + 1,
-					message: new BashToolUseMessage('2026-08-03T00:00:00.000Z', id, 'pwd'),
-				},
-				spacingAfter: 'none',
-			}));
 			const group: ConversationVirtualFeedItem = {
 				kind: 'tool-group', key: keys[0], anchorId: keys[0],
-				members: members.filter((member) => member.kind === 'transcript'),
+				descriptor: { ...displayGroup(groupMembers[0].charCodeAt(0) - 96, groupMembers.at(-1)!.charCodeAt(0) - 96, groupMembers.length),
+					fragment: { after: groupAfter, through: groupMembers.at(-1)!.charCodeAt(0) - 96 } },
+				retained: retainedFirst ? true : undefined,
 				expanded: false, spacingAfter: 'none',
 			};
 			const tail: TranscriptVirtualFeedItem[] = keys.slice(1).map((key, index) => ({
@@ -106,18 +105,16 @@
 			const items = [group, ...tail];
 			return {
 				items,
+				transcriptViewId: 'view',
 				indexByKey: new Map(keys.map((key, index) => [key, index])),
 				indexByRowId: new Map([
-					...groupMembers.map((id): [string, number] => [id, 0]),
 					...tail.map((item, index): [string, number] => [item.item.id, index + 1]),
 				]),
 				targetByDomAnchorId: new Map(),
-				memberRowIdByDomAnchorId: new Map(),
 				representativeRowIdByKey: new Map([
-					[keys[0], groupMembers[0]],
+					[keys[0], `view:${groupMembers[0].charCodeAt(0) - 96}`],
 					...tail.map((item): [string, string] => [item.key, item.item.id]),
 				]),
-				collapsedGroupByMemberRowId: new Map(),
 				transcriptStartIndex: 0,
 				transcriptEndIndex: items.length,
 			};
@@ -125,6 +122,7 @@
 		const items: ConversationVirtualFeedItem[] = keys.map((key, index) => ({
 			kind: 'transcript',
 			key,
+			retained: retainedFirst && index === 0 ? true : undefined,
 			item: {
 				kind: 'message',
 				id: `row-${index}`,
@@ -136,12 +134,11 @@
 		}));
 		return {
 			items,
+			transcriptViewId: 'view',
 			indexByKey: new Map(keys.map((key, index) => [key, index])),
 			indexByRowId: new Map(),
 			targetByDomAnchorId: new Map(),
-			memberRowIdByDomAnchorId: new Map(),
 			representativeRowIdByKey: new Map(keys.map((key, index) => [key, `row-${index}`])),
-			collapsedGroupByMemberRowId: new Map(),
 			transcriptStartIndex: 0,
 			transcriptEndIndex: items.length,
 		};
@@ -269,6 +266,9 @@
 			showAtLayout,
 			prependGroup,
 			appendGroup,
+			filterFirstGroupMember,
+			retainFirst,
+			retainFirstWithoutLayoutChange,
 		});
 	});
 
@@ -336,6 +336,7 @@
 
 	async function prependGroup(): Promise<void> {
 		groupMembers = ['a', ...groupMembers];
+		groupAfter = 0;
 		geometryRevision += 1;
 		contentRevision += 1;
 		await tick();
@@ -344,6 +345,26 @@
 	async function appendGroup(): Promise<void> {
 		groupMembers = [...groupMembers, 'd'];
 		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
+	}
+
+	async function filterFirstGroupMember(): Promise<void> {
+		groupMembers = groupMembers.slice(1);
+		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
+	}
+
+	async function retainFirst(): Promise<void> {
+		retainedFirst = true;
+		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
+	}
+
+	async function retainFirstWithoutLayoutChange(): Promise<void> {
+		retainedFirst = true;
 		contentRevision += 1;
 		await tick();
 	}

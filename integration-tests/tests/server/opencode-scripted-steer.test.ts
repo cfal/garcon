@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
@@ -84,10 +83,12 @@ describe.skipIf(process.platform !== 'linux')('scripted OpenCode steering', () =
 
       const committedSteer = await fixture.client.waitForCommittedUserInput(
         chatId,
-        steerPrompt,
+        steerRequest.clientMessageId,
         { afterIndex: pendingCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expect(committedSteer.messages).toHaveLength(1);
+      const steerRows = (await fixture.client.getMessages(chatId)).messages.filter(entry => entry.ordinal === committedSteer.ordinal);
+      expect(steerRows).toHaveLength(1);
+      expect(steerRows[0]?.message).toMatchObject({ type: 'user-message', metadata: { clientMessageId: steerRequest.clientMessageId } });
 
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
@@ -146,16 +147,13 @@ describe.skipIf(process.platform !== 'linux')('scripted OpenCode steering', () =
           command: marker('CHAT_ID_FIRST_PROMPT'),
         }));
 
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-            && event.chatId === chatId
-            && event.messages.some((entry) => (
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
             )),
-          `OpenCode chat ID disclosure for ${chatId}`,
-          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `OpenCode chat ID disclosure for ${chatId}` },
+      );
         await writeFile(releasePath, 'release', 'utf8');
 
         const steeredRequest = await steeredHeld.requested;

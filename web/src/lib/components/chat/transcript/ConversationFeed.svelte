@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import ConversationFeedVirtualRow from './ConversationFeedVirtualRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import { getLocalSettings, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import { getLocalSettings, getModelCatalog } from '$lib/context';
 	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
@@ -25,8 +25,11 @@
 		canShowForkAtMessageAction,
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
-	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
-	import { createHiddenBashCommandMatcherCache } from '$lib/chat/transcript/hidden-bash-commands.js';
+	import { HIDEABLE_TOOL_GROUPS } from '$shared/transcript-display-policy';
+	import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
+	import { DisplayCoverage } from '$lib/chat/transcript/display-coverage.js';
+	import { nextConversationCoverage } from './conversation-feed-coverage.js';
+	import { groupContainingRow } from './conversation-feed-virtual-items.js';
 	import {
 		conversationScrollbarScrollDirection,
 		conversationScrollbarTrackDirection,
@@ -40,7 +43,6 @@
 	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
-	import { ConversationToolGroupState } from './ConversationToolGroupState.svelte.js';
 	import { virtualItems as selectVirtualItems } from '$lib/virt/virtual-list-types.js';
 	import {
 		ConversationFeedAnnouncementBatcher,
@@ -48,8 +50,6 @@
 	} from './conversation-feed-announcer.js';
 
 	const EMPTY_PENDING_PERMISSIONS: PendingPermissionRequest[] = [];
-	const EMPTY_TOOL_MEMBER_IDS: ReadonlySet<string> = new Set();
-	const EMPTY_PROTECTED_KEYS: readonly string[] = [];
 
 	interface Props {
 		chatContext: ConversationMessageChatContext;
@@ -116,8 +116,6 @@
 
 	const chatState = $derived(transcript);
 	const localSettings = getLocalSettings();
-	const remoteSettings = getRemoteSettings();
-	const hiddenBashCommandMatcherFor = createHiddenBashCommandMatcherCache();
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(chatContext.executorId));
 
@@ -201,93 +199,64 @@
 			(request) => !request.chatId || request.chatId === chatState.activeChatId,
 		),
 	);
-	const projectedPendingPermissionRequests = $derived(
-		visiblePendingPermissionRequests(chatState.visibleRows, activePendingPermissionRequests),
-	);
 	const projectionState = new ConversationFeedProjectionState();
 	const retention = new ConversationFeedRetentionState();
 	const itemState = new ConversationFeedItemState();
-	const toolGroups = new ConversationToolGroupState();
-	const revealWaiters = new Map<
-		symbol,
-		{ rowId: string; surfaceIdentity: string; resolve: (result: 'applied' | 'cancelled') => void }
-	>();
 
-	function settleRevealWaiters(applied: boolean): void {
-		for (const [token, waiter] of revealWaiters) {
-			const index = projection.model.indexByRowId.get(waiter.rowId);
-			const item = index === undefined ? undefined : projection.model.items[index];
-			if (
-				applied &&
-				waiter.surfaceIdentity === surfaceIdentity &&
-				item?.kind === 'transcript' &&
-				item.item.id === waiter.rowId
-			) {
-				waiter.resolve('applied');
-			} else {
-				waiter.resolve('cancelled');
-			}
-			revealWaiters.delete(token);
+	async function revealToolGroup(rowId: string): Promise<'applied' | 'cancelled'> {
+		const group = groupContainingRow(projection.model, rowId);
+		if (!group) return 'cancelled';
+		const ordinal = Number(rowId.slice(chatState.transcriptViewId.length + 1));
+		const result = await chatState.expandGroup(group.descriptor, { kind: 'around', ordinal });
+		await tick();
+		return result === 'loaded' ? 'applied' : 'cancelled';
+	}
+
+	function toggleToolGroup(group: GroupDescriptor, expanded: boolean): void {
+		if (expanded) void chatState.expandGroup(group);
+		else {
+			retention.closeAllTransients();
+			chatState.collapseGroup(group);
 		}
 	}
 
-	function revealToolGroup(rowId: string): Promise<'applied' | 'cancelled'> {
-		return new Promise((resolve) => {
-			const token = Symbol('tool-group-reveal');
-			revealWaiters.set(token, { rowId, surfaceIdentity, resolve });
-			toolGroups.setExpanded([rowId], true);
-		});
+	function loadMembers(group: GroupDescriptor, anchor: MemberWindowRequest['anchor']): void {
+		void chatState.controller.extendMembers(group, anchor);
 	}
 
-	function toggleToolGroup(memberIds: readonly string[], expanded: boolean): void {
-		if (!expanded) retention.closeAllTransients();
-		toolGroups.setExpanded(memberIds, expanded);
-	}
 	const announcerState = new ConversationFeedAnnouncerState();
 	let announcement = $state.raw({ sequence: 0, text: '' });
 	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
 		announcement = { sequence: announcement.sequence + 1, text };
 	});
-	const hiddenBashCommands = $derived(
-		hiddenBashCommandMatcherFor(remoteSettings.snapshot?.ui.hiddenBashCommandPatterns ?? []),
-	);
-	function earlierBoundaryMode(): ConversationFeedProjectionInput['earlierBoundary'] {
-		if (
-			chatState.pageStates.earlier.status === 'error' ||
-			(chatState.pageStates.earlier.status === 'loading' &&
-				chatState.pageStates.earlier.error !== null)
-		) {
-			return 'visible';
-		}
-		if (localSettings.combineToolUseMessages && chatState.canLoadEarlier) {
-			return 'when-collapsed';
-		}
-		return 'hidden';
-	}
+	$effect(() => {
+		const profile = {
+			combine: localSettings.combineToolUseMessages,
+			showThinking: localSettings.showThinking,
+			hiddenToolGroups: HIDEABLE_TOOL_GROUPS.filter(group =>
+				group.toolTypes.some(type => localSettings.hiddenToolTypes.includes(type))).map(group => group.id),
+		};
+		const cuts = activePendingPermissionRequests.flatMap(request =>
+			request.transcript?.transcriptViewId === chatState.transcriptViewId
+				? [{ id: `permission:${request.permissionOccurrenceId}`, afterOrdinal: request.transcript.afterOrdinal, anchorRule: 'eligible-row' as const }]
+				: []);
+		untrack(() => chatState.configureDisplay(profile, cuts));
+	});
+
 	const projectionInput: ConversationFeedProjectionInput = $derived({
 		surfaceIdentity,
-		rows: chatState.visibleRows,
+		display: chatState.display,
+		renderModel: chatState.renderModel,
+		overlays: chatState.overlayRows,
+		optimisticAfterOrdinals: chatState.optimisticAfterOrdinals,
 		mutationClock: chatState.feedMutationClock,
-		hiddenToolTypes: localSettings.hiddenToolTypes,
-		hiddenBashCommands,
-		showThinking: localSettings.showThinking,
-		combineToolUseMessages: localSettings.combineToolUseMessages,
-		expandedToolMemberIds: localSettings.combineToolUseMessages
-			? toolGroups.expandedMemberIds
-			: EMPTY_TOOL_MEMBER_IDS,
-		protectedVirtualKeys: localSettings.combineToolUseMessages
-			? retention.retainedKeys
-			: EMPTY_PROTECTED_KEYS,
 		isLiveWindow: !chatState.hasLaterMessages,
-		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
-		earlierBoundary: earlierBoundaryMode(),
-		showLaterBoundary: chatState.hasLaterMessages || chatState.pageStates.later.status !== 'idle',
+		showRefreshError: chatState.loadStatus === 'error',
+		earlierBoundary: chatState.pageStates.earlier.error || chatState.canLoadEarlier && !showEarlierLoadingStatus ? 'visible' : 'hidden',
+		showLaterBoundary: chatState.hasLaterMessages,
 		reserveComposerCapSpace,
-		transcriptViewId: chatState.getCursor().transcriptViewId,
-		pendingPermissions:
-			projectedPendingPermissionRequests.length > 0 && onPermissionDecision
-				? projectedPendingPermissionRequests
-				: EMPTY_PENDING_PERMISSIONS,
+		transcriptViewId: chatState.transcriptViewId,
+		pendingPermissions: onPermissionDecision ? activePendingPermissionRequests : EMPTY_PENDING_PERMISSIONS,
 	});
 	let projection = $state.raw(projectionState.reconcile(untrack(() => projectionInput)));
 	let virtualRoot: HTMLDivElement | null = $state(null);
@@ -296,13 +265,13 @@
 		const input = {
 			surfaceIdentity,
 			rows: chatState.visibleRows,
-			mutationClock: chatState.feedMutationClock,
+			watermark: chatState.loadedThroughOrdinal,
+			initialHead: chatState.openSnapshot?.sourceHead ?? 0,
+			sourceHead: chatState.lastOrdinal,
+			responseClassOrdinals: chatState.responseClassOrdinals,
 			visible: isVisible && announcementsEnabled,
 			pinnedToBottom,
-			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
-			hiddenToolTypes: localSettings.hiddenToolTypes,
-			hiddenBashCommands,
 			floatingPermissionOccurrences: projectionInput.pendingPermissions.map(
 				(request) => request.permissionOccurrenceId,
 			),
@@ -313,6 +282,7 @@
 		});
 	});
 
+	let coverage: DisplayCoverage | undefined;
 	const virtualController = new ConversationFeedVirtualController({
 		get model() {
 			return projection.model;
@@ -339,17 +309,16 @@
 			return retention;
 		},
 		onInitialEndRestored: () => onInitialEndRestored?.(),
+		onTransaction: () => coverage?.wake(),
+		onCoverageRequested: () => coverage?.wake(),
 		revealToolGroup,
+		revealRowDetail: rowId => itemState.disclosurePort(rowId).setOpen('tool-result', 'attached', true, false),
 	});
 	const virtualSnapshot = $derived(virtualController.snapshot);
 	const renderedIndexes = $derived(virtualController.renderedIndexes(virtualSnapshot));
 	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
 
 	$effect.pre(() => {
-		toolGroups.reconcile(
-			surfaceIdentity,
-			new Set(chatState.visibleRows.map((row) => row.id)),
-		);
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
 			activePendingPermissionRequests.map((request) => request.permissionOccurrenceId),
@@ -362,17 +331,89 @@
 				scrollbarDragActive: scrollbarPointerY !== null,
 			});
 			if (!applied) {
-				settleRevealWaiters(false);
 				return;
 			}
 			projection = nextProjection;
-			settleRevealWaiters(true);
 			itemState.reconcile(
 				input.surfaceIdentity,
-				new Set(input.rows.map((row) => row.id)),
+				new Set([...input.renderModel.items, ...input.overlays].map((row) => row.id)),
 				pendingPermissionOccurrences,
 			);
 		});
+	});
+
+	coverage = new DisplayCoverage({
+		isVisible: () => isVisible,
+		measure: async () => {
+			if (chatState.controller.busy || !chatState.display.window || virtualController.ownsScrollPosition()) return { kind: 'waiting' };
+			if (chatState.display.window.items.length === 0) return { kind: 'settled', covered: false };
+			const result = await virtualController.waitForLayout({ minimumDataRevision: projection.projectedDataRevision });
+			if (result !== 'settled') return { kind: result === 'superseded' ? 'superseded' : 'waiting' };
+			const fill = await virtualController.measureViewportFill();
+			const direction = pinnedToBottom ? 'earlier' : virtualController.readingDirection;
+			const range = virtualController.snapshot.visibleRange;
+			const exposedMemberBoundary = range && projection.model.items.slice(range.startIndex, range.endIndex + 1)
+				.some(item => item.kind === 'member-boundary' && item.anchor.kind === (direction === 'earlier' ? 'before' : 'after'));
+			return fill === 'unsettled' ? { kind: 'waiting' } : { kind: 'settled', covered: fill === 'overflow' && !exposedMemberBoundary };
+		},
+		load: () => {
+			if (chatState.display.phase === 'failed') return Promise.resolve('failed');
+			if (chatState.display.phase !== 'available') return Promise.resolve('blocked');
+			const demand = nextConversationCoverage(projection.model, virtualSnapshot.visibleRange,
+				pinnedToBottom ? 'earlier' : virtualController.readingDirection,
+				{ earlier: chatState.canLoadEarlier, later: chatState.hasLaterMessages });
+			if (!demand) return Promise.resolve('exhausted');
+			return typeof demand === 'string' ? chatState.controller.load(demand)
+				: chatState.controller.extendMembers(demand.group, demand.anchor);
+		},
+	});
+
+	$effect(() => {
+		chatState.display.revision;
+		isVisible;
+		virtualSnapshot.revision;
+		untrack(() => coverage?.wake());
+	});
+
+	$effect(() => {
+		const keys = retention.retainedKeys;
+		const range = virtualSnapshot.visibleRange;
+		const model = projection.model;
+		const transcript = chatState;
+		const pinned = pinnedToBottom;
+		untrack(() => {
+			const groups: number[] = [];
+			const ordinals = keys.flatMap(key => {
+				const index = model.indexByKey.get(key);
+				const item = index === undefined ? undefined : model.items[index];
+				if (item?.kind === 'tool-group') groups.push(item.descriptor.firstMember);
+				return item?.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined ? [item.item.ordinal] : [];
+			});
+			transcript.controller.protect(ordinals);
+			transcript.controller.protectGroups(groups);
+			const target = virtualController.captureRestoreTarget(transcript.transcriptViewId, pinned);
+			if (target) transcript.controller.setReadingAnchor(target.kind !== 'end' ? target.ordinal : null, pinned);
+		});
+		if (!range || virtualController.ownsScrollPosition() || !isVisible) return;
+		let cancelled = false;
+		void virtualController.waitForLayout().then(result => {
+			if (cancelled || result !== 'settled' || virtualController.ownsScrollPosition()) return;
+			const visibleItems = model.items.slice(range.startIndex, range.endIndex + 1);
+			const ordinals: number[] = [];
+			const rows: number[] = [];
+			for (const item of visibleItems) {
+				if (item.kind === 'tool-group') {
+					ordinals.push(item.descriptor.firstMember, item.descriptor.lastMember);
+				} else if (item.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined) {
+					ordinals.push(item.item.ordinal);
+					rows.push(item.item.ordinal);
+				}
+			}
+			if (ordinals.length) {
+				transcript.controller.trim(Math.min(...ordinals), Math.max(...ordinals), rows);
+			}
+		});
+		return () => { cancelled = true; };
 	});
 
 	$effect(() => {
@@ -421,8 +462,8 @@
 	});
 
 	onDestroy(() => {
+		coverage?.dispose();
 		virtualController.destroy();
-		settleRevealWaiters(false);
 		retention.clear();
 		projectionState.reset();
 		itemState.clear();
@@ -432,14 +473,14 @@
 </script>
 
 {#snippet feedContent()}
-	{#if chatState.isLoadingMessages && chatState.displayMessageCount === 0}
+	{#if chatState.isLoadingMessages && chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<Loader2 class="h-4 w-4 animate-spin" />
 				<p>{m.chat_chat_loading_chat_messages()}</p>
 			</div>
 		</div>
-	{:else if chatState.loadStatus === 'error' && chatState.displayMessageCount === 0}
+	{:else if chatState.loadStatus === 'error' && chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<TriangleAlert class="h-4 w-4 text-destructive" />
@@ -455,7 +496,7 @@
 				</Button>
 			{/if}
 		</div>
-	{:else if chatState.displayMessageCount === 0}
+	{:else if chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<p class="text-sm">{m.chat_messages_no_messages()}</p>
 			<p class="text-xs mt-1">{m.chat_messages_send_first_message()}</p>
@@ -470,6 +511,12 @@
 			data-chat-virtual-count={virtualItems.length}
 			data-chat-virtual-model-count={projection.model.items.length}
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
+			data-chat-mutation-revisions={JSON.stringify(chatState.feedMutationClock.lastRevisionByKind)}
+			data-chat-display-view={chatState.display.window?.certificate.transcriptViewId}
+			data-chat-display-watermark={chatState.loadedThroughOrdinal}
+			data-chat-display-details-watermark={chatState.display.detailsCertificate?.watermark}
+			data-chat-display-after={chatState.display.window?.interval.after}
+			data-chat-display-through={chatState.display.window?.interval.through}
 			data-chat-transcript-entry-count={chatState.entries.length}
 			{@attach virtualController.sizer}
 		>
@@ -484,7 +531,6 @@
 						{retention}
 						{itemState}
 						renderModel={projection.renderModel}
-						showThinking={localSettings.showThinking}
 						{pendingPermissionRequests}
 						{chatContext}
 						earlierPageState={chatState.pageStates.earlier}
@@ -501,6 +547,7 @@
 						{onGenerateTitleFromMessage}
 						canForkAtMessageNow={canUseForkAtMessage}
 						onToggleToolGroup={toggleToolGroup}
+						onLoadMembers={loadMembers}
 					/>
 				{/if}
 			{/each}

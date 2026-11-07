@@ -7,7 +7,9 @@ import { PullRequestReviewsInvalidatedMessage, TicketsInvalidatedMessage } from 
 import { isErrorCode } from '../../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { wireExecutorAvailability } from './executors/availability-wiring.js';
-import { createTranscriptEventFanout } from './ledger/event-fanout.js';
+import { createTranscriptEventFanout, type TranscriptEventFanout } from './ledger/event-fanout.js';
+import type { ChatPlanPresentationStore } from './transcript-display/plan-presentation.js';
+import { ChatTranscriptHeadUpdatedMessage, emptyResponseClassOrdinals } from '../../common/transcript-display-events.js';
 import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
@@ -55,6 +57,8 @@ import {
   PreamblesInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
   ChatBoardsInvalidatedMessage,
+  ChatDisplayStateUpdatedMessage,
+  type ServerWsMessage,
 } from '../../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -99,6 +103,8 @@ export interface ServerEventWiringDeps {
   metadata: MetadataIndex;
   currentTranscriptMessagePages(chatId: string): AsyncIterable<readonly ChatMessage[]>;
   transientFeeds: ChatTransientFeedStore;
+  planPresentation: ChatPlanPresentationStore;
+  auxiliaryRevision(chatId: string, viewId: string): number;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
@@ -123,9 +129,11 @@ export interface ServerEventWiring {
     detail?: ChatOperationalNoticeMessage['detail'],
   ): void;
   // Scheduled through the per-chat task queue so the invalidation follows the
-  // committed update notice's own chat-messages fanout.
+  // committed update notice's own committed-row fanout.
   notifyChatPreamblesInvalidated(chatId: string, revision: number): void;
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
+  broadcastDisplayState(status: ChatDisplayStateUpdatedMessage): void;
+  notifyPlanPresentationChanged(chatId: string, viewId: string, sourceHead: number, revision: number): void;
   broadcastTicketsInvalidated(revision: number): void;
   broadcastPullRequestReviewsInvalidated(revision: number): void;
   broadcastApiProvidersInvalidated(): void;
@@ -145,6 +153,8 @@ export function wireServerEvents({
   metadata,
   currentTranscriptMessagePages,
   transientFeeds,
+  planPresentation,
+  auxiliaryRevision,
   commandLedger,
   shareStore,
   telegramNotifier,
@@ -156,8 +166,23 @@ export function wireServerEvents({
   pullRequestReviews,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
-  const broadcast = (payload: unknown) =>
-    server.publish('chat', JSON.stringify(payload));
+  let transcriptFanout: TranscriptEventFanout | undefined;
+  const broadcast = (payload: ServerWsMessage) => {
+    switch (payload.type) {
+      case 'chat-processing-updated':
+      case 'chat-session-created':
+      case 'chat-session-stopped':
+      case 'agent-run-finished':
+      case 'agent-run-failed':
+      case 'chat-execution-control-updated':
+      case 'chat-preambles-invalidated':
+        transcriptFanout?.flush(payload.chatId);
+        break;
+      case 'chat-list-refresh-requested':
+        if (payload.chatId) transcriptFanout?.flush(payload.chatId);
+    }
+    return server.publish('chat', JSON.stringify(payload));
+  };
   const recentTurnFailures = new Map<string, number>();
   const inlineTerminalReleases = new Set<string>();
   const chatTaskTails = new Map<string, Promise<void>>();
@@ -199,6 +224,7 @@ export function wireServerEvents({
     while (activeChatTasks.size > 0) {
       await Promise.all([...activeChatTasks]);
     }
+    transcriptFanout?.flushAll();
     if (hasChatTaskError) {
       const error = firstChatTaskError;
       firstChatTaskError = undefined;
@@ -381,7 +407,8 @@ export function wireServerEvents({
 
   const chatExists = (chatId: string) => chatRegistry.hasChat(chatId);
 
-  const transcriptFanout = createTranscriptEventFanout({
+  transcriptFanout = createTranscriptEventFanout({
+    serverInstanceId: transientFeeds.serverInstanceId,
     chatExists,
     schedule: (chatId, task) => {
       void scheduleChatTask(chatId, 'transcript commit fanout', task);
@@ -393,9 +420,8 @@ export function wireServerEvents({
     replaceMetadata: async (chatId, viewId) => {
       await metadata.replaceFromTranscriptView(chatId, viewId, currentTranscriptMessagePages(chatId));
     },
-    resendCandidates: (chatId) => processing.phase(chatId) === null
-      ? agentRegistry.resendCandidates(chatId)
-      : [],
+    planRevision: (chatId, viewId) => planPresentation.snapshot(chatId, viewId).revision,
+    auxiliaryRevision,
   });
   const publishTransientFeedMutation = (applied: AppliedTransientFeedEvent) => {
     if (applied.kind === 'unchanged') return;
@@ -415,11 +441,9 @@ export function wireServerEvents({
   });
   agentRegistry.onTranscriptCommitted(async (event) => {
     if (event.type === 'view-replaced') metadata.invalidateTranscriptView(event.chatId);
-    transcriptFanout(event);
-    // A committed Preambles-updated notice invalidates the per-chat selection
-    // cache. Scheduling here, immediately after the fanout has enqueued the
-    // notice's chat-messages task on the per-chat queue, fixes the broadcast
-    // order deterministically: messages first, invalidation second.
+    transcriptFanout!(event);
+    // Invalidates selection state through the same per-chat queue that handles
+    // the committed notice, without waiting for display preparation.
     if (event.type === 'rows') {
       for (const row of event.rows) {
         if (
@@ -610,6 +634,7 @@ export function wireServerEvents({
     if (processing.phase(chatId) !== null) publishProcessing(chatId);
   });
   chatRegistry.onChatRemoved((chatId, removalReason) => {
+    transcriptFanout?.forget(chatId);
     agentRegistry.discardTurn(chatId);
     transientFeeds.deleteChat(chatId);
     deleteSearchChat(chatId);
@@ -650,12 +675,8 @@ export function wireServerEvents({
   });
 
   queue.onExecutionControlUpdated((chatId, controlState) => {
-    broadcast(
-      new ChatExecutionControlUpdatedMessage(
-        chatId,
-        toClientChatExecutionControlState(controlState),
-      ),
-    );
+    const message = new ChatExecutionControlUpdatedMessage(chatId, toClientChatExecutionControlState(controlState));
+    void scheduleChatTask(chatId, 'execution control publication', () => { broadcast(message); });
   });
   queue.onSessionStopped((chatId, outcome, intent, interruptedTurn) => {
     logger.info('queue: Stop resolved', {
@@ -712,6 +733,14 @@ export function wireServerEvents({
     notifyChatPreamblesInvalidated,
     broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void {
       broadcast(new TranscriptSearchStatusMessage(status));
+    },
+    broadcastDisplayState: broadcast,
+    notifyPlanPresentationChanged(chatId, viewId, sourceHead, revision) {
+      void scheduleChatTask(chatId, 'plan presentation invalidation', () => {
+        transcriptFanout?.flush(chatId);
+        if (chatExists(chatId)) broadcast(new ChatTranscriptHeadUpdatedMessage(transientFeeds.serverInstanceId,
+          chatId, viewId, sourceHead, null, null, emptyResponseClassOrdinals(), revision, auxiliaryRevision(chatId, viewId)));
+      });
     },
     broadcastTicketsInvalidated(revision: number): void {
       broadcast(new TicketsInvalidatedMessage(revision));

@@ -3,7 +3,8 @@
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { ToolDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
+import { TOOL_STRUCTURE, type ToolType } from '$shared/transcript-display-policy.js';
+import type { ToolDisplayRule, ToolVisualRule } from '$lib/chat/tools/tool-display-contract.js';
 import {
 	diffProps,
 	extractContentString,
@@ -82,9 +83,8 @@ function fallbackDisplayName(type: string): string {
 		.join(' ');
 }
 
-const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
+const EXIT_PLAN_MODE_RULE: ToolVisualRule = {
 	input: {
-		mode: 'collapsible',
 		label: m.chat_tool_implementation_plan(),
 		title: m.chat_tool_implementation_plan(),
 		defaultOpen: true,
@@ -93,14 +93,10 @@ const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
 			content: String(input.plan ?? '').replace(/\\n/g, '\n') || String(input.plan ?? ''),
 		}),
 	},
-	result: {
-		hidden: true,
-	},
 };
 
-const WEB_SEARCH_RULE: ToolDisplayRule = {
+const WEB_SEARCH_RULE: ToolVisualRule = {
 	input: {
-		mode: 'inline',
 		label: 'WebSearch',
 		getValue: (input) => String(input.query ?? ''),
 		action: 'jumpToResult',
@@ -112,7 +108,6 @@ const WEB_SEARCH_RULE: ToolDisplayRule = {
 		},
 	},
 	result: {
-		mode: 'collapsible',
 		defaultOpen: false,
 		contentKind: 'text',
 		getContentProps: (result) => ({
@@ -122,9 +117,8 @@ const WEB_SEARCH_RULE: ToolDisplayRule = {
 	},
 };
 
-const WEB_FETCH_RULE: ToolDisplayRule = {
+const WEB_FETCH_RULE: ToolVisualRule = {
 	input: {
-		mode: 'inline',
 		label: m.chat_tool_web_fetch_label(),
 		getValue: (input) => String(input.url ?? ''),
 		getSecondary: (input) => webFetchSecondaryPresenter(input),
@@ -137,7 +131,6 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 		},
 	},
 	result: {
-		mode: 'collapsible',
 		defaultOpen: false,
 		contentKind: 'text',
 		getContentProps: (result) => ({
@@ -147,25 +140,22 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 	},
 };
 
-const TOOL_SEARCH_RULE: ToolDisplayRule = {
+const TOOL_SEARCH_RULE: ToolVisualRule = {
 	input: {
-		mode: 'inline',
 		label: 'ToolSearch',
 		getValue: (input) => String(input.query ?? ''),
 		action: 'jumpToResult',
 	},
 	result: {
-		mode: 'collapsible',
 		defaultOpen: false,
 		contentKind: 'text',
 		getContentProps: (result) => ({ content: extractContentString(result?.content) }),
 	},
 };
 
-function parametersToolRule(label: string): ToolDisplayRule {
+function parametersToolRule(label: string): ToolVisualRule {
 	return {
 		input: {
-			mode: 'collapsible',
 			label,
 			title: m.chat_tool_parameters(),
 			defaultOpen: false,
@@ -173,7 +163,6 @@ function parametersToolRule(label: string): ToolDisplayRule {
 			getContentProps: (input) => ({ content: JSON.stringify(input, null, 2), format: 'code' }),
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
@@ -286,18 +275,13 @@ function codexSubagentMarkdown(input: Record<string, unknown>): string {
 	return lines.join('\n\n');
 }
 
-export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
+const TOOL_VISUAL_REGISTRY: Record<ToolType | 'default', ToolVisualRule> = {
 	'bash-tool-use': {
-		input: { mode: 'inline' },
-		result: {
-			hideOnSuccess: true,
-			mode: 'special',
-		},
+		input: {},
 	},
 
 	'exec-tool-use': {
 		input: {
-			mode: 'inline',
 			getLabel: (input) => {
 				const language = String(input.language ?? '').trim();
 				return language ? `Exec ${language}` : 'Exec';
@@ -308,24 +292,16 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			style: 'terminal',
 			wrapText: true,
 		},
-		result: {
-			mode: 'special',
-		},
 	},
 
 	'wait-tool-use': {
 		input: {
-			mode: 'hidden',
 			label: 'Wait',
-		},
-		result: {
-			hidden: true,
 		},
 	},
 
 	'read-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Read',
 			getValue: (input) => String(input.filePath ?? ''),
 			getSecondary: (input) => readRangePresenter(input),
@@ -336,14 +312,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				border: 'border-border',
 			},
 		},
-		result: {
-			hidden: true,
-		},
 	},
 
 	'list-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'List',
 			getValue: (input) => String(input.path ?? m.chat_tool_current_directory()),
 			action: 'none',
@@ -353,14 +325,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				border: 'border-border',
 			},
 		},
-		result: {
-			hideOnSuccess: true,
-		},
 	},
 
 	'edit-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Edit',
 			title: (input) => {
 				const fp = input.filePath as string | undefined;
@@ -390,14 +358,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				return diffProps(input, 'Edit', 'gray');
 			},
 		},
-		result: {
-			hideOnSuccess: true,
-		},
 	},
 
 	'write-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Write',
 			title: fileTitlePresenter,
 			defaultOpen: false,
@@ -411,14 +375,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				badgeColor: 'green',
 			}),
 		},
-		result: {
-			hideOnSuccess: true,
-		},
 	},
 
 	'apply-patch-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'ApplyPatch',
 			title: fileTitlePresenter,
 			defaultOpen: false,
@@ -439,14 +399,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				return diffProps(input, m.chat_tool_badge_patch(), 'gray');
 			},
 		},
-		result: {
-			hideOnSuccess: true,
-		},
 	},
 
 	'grep-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Grep',
 			getValue: (input) => {
 				const rawPath = String(input.path ?? '');
@@ -466,7 +422,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			title: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
@@ -492,7 +447,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'glob-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Glob',
 			getValue: (input) => String(input.pattern ?? ''),
 			getSecondary: (input) => (input.path ? `in ${input.path}` : undefined),
@@ -505,7 +459,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			title: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
@@ -529,7 +482,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'todo-write-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'TodoWrite',
 			title: m.chat_tool_updating_todo_list(),
 			defaultOpen: true,
@@ -539,7 +491,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			}),
 		},
 		result: {
-			mode: 'collapsible',
 			contentKind: 'successMessage',
 			getMessage: () => m.chat_tool_todo_list_updated(),
 		},
@@ -547,7 +498,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'todo-read-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'TodoRead',
 			getValue: () => m.chat_tool_reading_list(),
 			action: 'none',
@@ -557,7 +507,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			contentKind: 'todoList',
 			getContentProps: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
@@ -569,7 +518,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'task-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Task',
 			title: (input) => {
 				const agent = String(input.subagentType || m.chat_tool_agent());
@@ -592,7 +540,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			title: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
 				return Array.isArray(content.items)
@@ -617,7 +564,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'codex-subagent-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Subagent',
 			title: codexSubagentTitle,
 			defaultOpen: true,
@@ -630,7 +576,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			title: 'Subagent result',
 			defaultOpen: true,
 			contentKind: 'markdown',
@@ -642,11 +587,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'enter-plan-mode-tool-use': {
 		input: {
-			mode: 'hidden',
 			label: 'EnterPlanMode',
-		},
-		result: {
-			hidden: true,
 		},
 	},
 
@@ -654,21 +595,13 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'ask-user-question-tool-use': {
 		input: {
-			mode: 'hidden',
 			label: 'Question',
-		},
-		result: {
-			hidden: true,
 		},
 	},
 
 	'cursor-create-plan-tool-use': {
 		input: {
-			mode: 'hidden',
 			label: 'Plan',
-		},
-		result: {
-			hidden: true,
 		},
 	},
 
@@ -678,17 +611,12 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'write-stdin-tool-use': {
 		input: {
-			mode: 'hidden',
 			label: 'WriteStdin',
-		},
-		result: {
-			hidden: true,
 		},
 	},
 
 	'update-plan-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'UpdatePlan',
 			title: m.chat_tool_updating_plan(),
 			defaultOpen: false,
@@ -698,7 +626,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			}),
 		},
 		result: {
-			mode: 'collapsible',
 			contentKind: 'successMessage',
 			getMessage: () => m.chat_tool_plan_updated(),
 		},
@@ -706,7 +633,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'amp-finder-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Search',
 			getValue: (input) => String(input.query ?? ''),
 			action: 'jumpToResult',
@@ -715,7 +641,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'markdown',
 			getContentProps: (result) => ({
@@ -726,7 +651,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'amp-oracle-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Oracle',
 			title: (input) =>
 				m.chat_tool_oracle_title({
@@ -751,7 +675,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: true,
 			title: m.chat_tool_oracle_response(),
 			contentKind: 'markdown',
@@ -763,7 +686,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'amp-librarian-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Librarian',
 			title: (input) =>
 				m.chat_tool_librarian_title({
@@ -781,7 +703,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: true,
 			title: m.chat_tool_librarian_response(),
 			contentKind: 'markdown',
@@ -793,7 +714,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'amp-skill-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Skill',
 			getValue: (input) => String(input.name ?? ''),
 			action: 'none',
@@ -801,14 +721,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				border: 'border-status-info-border',
 			},
 		},
-		result: {
-			hidden: true,
-		},
 	},
 
 	'amp-mermaid-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Diagram',
 			getValue: () => m.chat_tool_rendering(),
 			action: 'none',
@@ -817,14 +733,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				border: 'border-status-neutral-border',
 			},
 		},
-		result: {
-			hidden: true,
-		},
 	},
 
 	'amp-handoff-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Handoff',
 			getValue: (input) => truncate(String(input.goal ?? ''), 60),
 			action: 'none',
@@ -833,14 +745,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				border: 'border-status-info-border',
 			},
 		},
-		result: {
-			hidden: true,
-		},
 	},
 
 	'amp-look-at-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Analyze',
 			getValue: (input) =>
 				String(input.path ?? '')
@@ -853,14 +761,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				border: 'border-border',
 			},
 		},
-		result: {
-			hidden: true,
-		},
 	},
 
 	'amp-find-thread-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Threads',
 			getValue: (input) => truncate(String(input.query ?? ''), 60),
 			action: 'none',
@@ -870,7 +774,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (result) => ({
@@ -882,7 +785,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'amp-read-thread-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Thread',
 			getValue: (input) => String(input.threadId ?? 'reading'),
 			getSecondary: (input) => truncate(String(input.goal ?? ''), 60),
@@ -893,7 +795,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'markdown',
 			getContentProps: (result) => ({
@@ -904,7 +805,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'amp-task-list-tool-use': {
 		input: {
-			mode: 'inline',
 			label: 'Tasks',
 			getValue: (input) => {
 				const action = String(input.action ?? '');
@@ -928,7 +828,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 		},
 		result: {
-			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (result) => ({
@@ -945,7 +844,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'request-permissions-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Permissions',
 			title: m.chat_tool_requested_permissions(),
 			defaultOpen: true,
@@ -955,14 +853,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				format: 'code',
 			}),
 		},
-		result: {
-			hidden: true,
-		},
 	},
 
 	'unknown-tool-use': {
 		input: {
-			mode: 'collapsible',
 			label: 'Tool',
 			title: m.chat_tool_parameters(),
 			defaultOpen: false,
@@ -974,7 +868,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			}),
 		},
 		result: {
-			mode: 'collapsible',
 			contentKind: 'text',
 			getContentProps: (result) => ({
 				content: extractContentString(result?.content),
@@ -985,7 +878,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	default: {
 		input: {
-			mode: 'collapsible',
 			label: 'Tool',
 			title: m.chat_tool_parameters(),
 			defaultOpen: false,
@@ -996,7 +888,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			}),
 		},
 		result: {
-			mode: 'collapsible',
 			contentKind: 'text',
 			getContentProps: (result) => ({
 				content: extractContentString(result?.content),
@@ -1005,6 +896,16 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 };
+
+export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = Object.fromEntries(
+	Object.entries(TOOL_VISUAL_REGISTRY).map(([type, visual]) => {
+		const structure = TOOL_STRUCTURE[type as ToolType | 'default'];
+		return [type, {
+			input: { ...visual.input, ...structure.input },
+			result: { ...visual.result, ...structure.result },
+		}];
+	}),
+);
 
 export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 	if (toolMessage.type === 'unknown-tool-use') {

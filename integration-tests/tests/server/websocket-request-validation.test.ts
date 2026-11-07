@@ -14,7 +14,7 @@ test('missing chat IDs receive correlated validation errors on the public socket
         socket.onopen = () => resolve();
         socket.onerror = () => reject(new Error('Primary socket failed to open'));
       }), 5_000, () => 'Primary socket did not open');
-      for (const type of ['chat-subscribe', 'chat-reload']) {
+      for (const type of ['chat-reload']) {
         for (const chatId of [undefined, null, '', 123]) {
           const clientRequestId = `${type}-${String(chatId)}`;
           const response = new Promise<unknown>((resolve) => {

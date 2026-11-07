@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createQueuedInput,
@@ -30,7 +30,6 @@ import {
 import {
 	ActiveTranscriptState,
 	type ChatLoadMessagesOptions,
-	type ChatRestoreResult,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import {
 	AssistantMessage,
@@ -66,6 +65,13 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/ch
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+import type { DisplayOpenResponse } from '$shared/transcript-display-open';
+import { displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
+import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
+import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
@@ -302,6 +308,14 @@ function chatSnapshot(
 	};
 }
 
+function openSnapshot(snapshot: ChatTransientFeedSnapshot, head = 28): DisplayOpenResponse {
+	return {
+		...displayOpen(snapshot.chatId, snapshot.transcriptViewId, head, snapshot.serverInstanceId),
+		chat: chatSnapshot(snapshot).chat,
+		transientFeed: snapshot,
+	};
+}
+
 function controlWithQueue(
 	queue: Partial<ChatQueueState> = {},
 	control: Partial<Omit<ChatExecutionControlState, 'queue'>> = {},
@@ -345,6 +359,10 @@ function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
 	const chatState = {
 		activeChatId: chat.id,
+		serverInstanceId: 'server-instance-test',
+		openSnapshot: null as DisplayOpenResponse | null,
+		forkSelection: vi.fn((ordinal: number): { ordinal: number; transcriptViewId: string; clientMessageId: string | null } | null => chatState.entries.some(row => row.ordinal === ordinal)
+			? { ordinal, transcriptViewId: chatState.getCursor().transcriptViewId, clientMessageId: null } : null),
 		entries: [] as TranscriptMessage[],
 		chatMessages: [] as ChatMessage[],
 		localNotices: [] as (LocalNoticeRow & { revision: number })[],
@@ -376,7 +394,7 @@ function createDeps(chat = createRunningChat()) {
 			chatState.localNotices = [];
 			chatState.optimisticUserInputs = [];
 		}),
-		activateChat: vi.fn<() => ChatRestoreResult | null>(() => null),
+		activateChat: vi.fn<() => void>(),
 		loadMessages: vi.fn<SessionControllerDeps['chatState']['loadMessages']>(
 			() => new Promise<ChatMessage[]>(() => {}),
 		),
@@ -462,14 +480,6 @@ function createDeps(chat = createRunningChat()) {
 				(input) => input.clientMessageId !== clientMessageId,
 			);
 		}),
-		transcriptCache: {
-			markValidated: vi.fn(),
-			readAppliedCursor: vi.fn(() => ({
-				transcriptViewId: 'generation-1',
-				lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
-				stale: false,
-			})),
-		},
 	};
 	const conversationUi = {
 		pendingPermissionRequests: [] as PendingPermissionRequest[],
@@ -891,7 +901,7 @@ describe('ConversationSessionController', () => {
 				vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'replacement-view' });
 			} else {
 				vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
-				mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0, 'replacement-view')));
+				vi.spyOn(transcriptDisplayApi, 'open').mockResolvedValue(displayOpen('chat-1', 'replacement-view', 0));
 			}
 			const calls: string[] = [];
 			deps.chatState.recoverViewReplacement.mockImplementation(async () => {
@@ -917,9 +927,9 @@ describe('ConversationSessionController', () => {
 		const { deps } = createClearDeps();
 		deps.composerState.inputText = '/clear';
 		vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
-		const snapshot = chatSnapshot(transientFeed([], 0, viewId));
-		if (viewId === 'unavailable') mockGetChatSnapshot.mockRejectedValue(new Error('offline'));
-		else mockGetChatSnapshot.mockResolvedValue(snapshot);
+		const open = vi.spyOn(transcriptDisplayApi, 'open');
+		if (viewId === 'unavailable') open.mockRejectedValue(new Error('offline'));
+		else open.mockResolvedValue(displayOpen('chat-1', viewId, 0));
 		const controller = new ConversationSessionController(deps);
 		await controller.submitForChat('chat-1');
 		deps.composerState.inputText = 'New draft';
@@ -927,7 +937,7 @@ describe('ConversationSessionController', () => {
 		await controller.clearHistory.confirm();
 		await controller.clearHistory.confirm();
 		expect(clearChat).toHaveBeenCalledTimes(1);
-		expect(mockGetChatSnapshot).toHaveBeenCalledWith('chat-1', 1);
+		expect(open).toHaveBeenCalledWith({ chatId: 'chat-1', reason: 'reconnect', outstandingClientMessageIds: [] });
 		expect(controller.clearHistory.isOpen).toBe(false);
 		expect(deps.composerState.inputText).toBe('New draft');
 		if (viewId === 'replacement-view') {
@@ -942,7 +952,7 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/clear';
 		const pending = deferred<Awaited<ReturnType<typeof clearChat>>>();
 		vi.mocked(clearChat).mockReturnValue(pending.promise);
-		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0, 'replacement-view')));
+		vi.spyOn(transcriptDisplayApi, 'open').mockResolvedValue(displayOpen('chat-1', 'replacement-view', 0));
 		const controller = new ConversationSessionController(deps);
 		await controller.submitForChat('chat-1');
 		const confirmation = controller.clearHistory.confirm();
@@ -1000,6 +1010,7 @@ describe('ConversationSessionController', () => {
 			control: emptyControl(),
 		});
 	});
+	afterEach(() => vi.restoreAllMocks());
 
 	it('permits literal executor selections only for drafts, even when the initial model is available', () => {
 		const { deps } = createDeps();
@@ -1349,7 +1360,6 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitchIfChanged('chat-1');
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			minimumLimit: 0,
 			purpose: 'activation',
 		});
 	});
@@ -1647,35 +1657,87 @@ describe('ConversationSessionController', () => {
 			await panelTranscript.loadMessages('chat-1', options);
 			return true;
 		});
-		const markValidated = vi.spyOn(panelTranscript.transcriptCache, 'markValidated');
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue([]);
 		const controller = new ConversationSessionController(deps);
 
 		await controller.loadPanelChat('chat-1', panelTranscript, loadPanelSnapshot);
 
 		expect(loadPanelSnapshot).toHaveBeenCalledWith({
-			minimumLimit: 0,
 			purpose: 'activation',
 		});
 		expect(panelLoad).toHaveBeenCalledWith('chat-1', {
-			minimumLimit: 0,
 			purpose: 'activation',
 		});
-		expect(markValidated).toHaveBeenCalledWith('chat-1');
+		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.scrollToBottom).not.toHaveBeenCalled();
+		panelTranscript.dispose();
+	});
+
+	it.each(['loaded', 'blocked'] as const)('retries failed display preparation before reopening the panel, result=%s', async result => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase: 'failed', error: 'DISPLAY_FILTER_TIMEOUT' };
+		const calls: string[] = [];
+		vi.spyOn(transcript.controller, 'retry').mockImplementation(async () => { calls.push('retry'); return result; });
+		const open = vi.fn(async () => { calls.push('open'); return true; });
+		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		expect(calls).toEqual(['retry', 'open']);
+		transcript.dispose();
+	});
+
+	it.each(['requesting', 'available', 'idle'] as const)('retries a retained display failure while %s', async phase => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase, error: 'DISPLAY_STORE_INVALID' };
+		const calls: string[] = [];
+		vi.spyOn(transcript.controller, 'retry').mockImplementation(async () => { calls.push('retry'); return 'loaded'; });
+		const open = vi.fn(async () => { calls.push('open'); return true; });
+		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		expect(calls).toEqual(['retry', 'open']);
+		transcript.dispose();
+	});
+
+	it('reopens a healthy requesting display without retrying its preparation', async () => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase: 'requesting', error: null };
+		const retry = vi.spyOn(transcript.controller, 'retry');
+		const open = vi.fn(async () => true);
+		await new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		expect(retry).not.toHaveBeenCalled();
+		expect(open).toHaveBeenCalledOnce();
+		transcript.dispose();
+	});
+
+	it.each(['chat-switch', 'cancelled'] as const)('does not reopen after a held display retry is superseded by %s', async supersession => {
+		const { deps } = createDeps();
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.display = { ...transcript.display, phase: 'failed', error: 'DISPLAY_FILTER_TIMEOUT' };
+		const retry = Promise.withResolvers<'loaded' | 'superseded'>();
+		vi.spyOn(transcript.controller, 'retry').mockReturnValue(retry.promise);
+		const open = vi.fn(async () => true);
+		const pending = new ConversationSessionController(deps).loadPanelChat('chat-1', transcript, open);
+		if (supersession === 'chat-switch') transcript.activateChat('chat-2');
+		retry.resolve(supersession === 'cancelled' ? 'superseded' : 'loaded');
+		await pending;
+		expect(open).not.toHaveBeenCalled();
+		expect(transcript.activeChatId).toBe(supersession === 'chat-switch' ? 'chat-2' : 'chat-1');
+		transcript.dispose();
 	});
 
 	it('restores a selected chat live permission capability with its initial snapshot', async () => {
 		const permission = transientPermission('permission-live', 'run-live', 28);
-		mockGetChatSnapshot.mockResolvedValue(
-			chatSnapshot(transientFeed([permission], 1), [{ ordinal: 28, message: permission.message }]),
-		);
 		const conversationUi = new ConversationUiState();
 		conversationUi.activateTransientFeed('chat-1');
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		deps.chatState.loadMessages = vi.fn(async () => {
 			deps.chatState.chatMessages = [permission.message];
+			deps.chatState.openSnapshot = openSnapshot(transientFeed([permission], 1));
 			return [permission.message];
 		});
 		const controller = new ConversationSessionController({ ...deps, conversationUi });
@@ -1683,7 +1745,7 @@ describe('ConversationSessionController', () => {
 		await controller.loadChat('chat-1');
 
 		expect(deps.chatState.chatMessages).toEqual([permission.message]);
-		expect(mockGetChatSnapshot).toHaveBeenCalledWith('chat-1', 1);
+		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
 		expect(conversationUi.pendingPermissionRequests).toMatchObject([
 			{
 				permissionOccurrenceId: 'permission-live',
@@ -1699,11 +1761,8 @@ describe('ConversationSessionController', () => {
 		]);
 	});
 
-	it('validates a selected snapshot against the shared cursor after its load target changes', async () => {
+	it('restores controls from the admitted display snapshot rather than a separate history cursor', async () => {
 		const permission = transientPermission('permission-panel', 'run-panel', 28);
-		mockGetChatSnapshot.mockResolvedValue(
-			chatSnapshot(transientFeed([permission], 1), [{ ordinal: 28, message: permission.message }]),
-		);
 		const conversationUi = new ConversationUiState();
 		conversationUi.activateTransientFeed('chat-1');
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
@@ -1712,11 +1771,13 @@ describe('ConversationSessionController', () => {
 			lastOrdinal: 0,
 		});
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue([permission.message]);
+		deps.chatState.openSnapshot = openSnapshot(transientFeed([permission], 1));
 		const controller = new ConversationSessionController({ ...deps, conversationUi });
 
 		await controller.loadChat('chat-1');
 
-		expect(deps.chatState.transcriptCache.readAppliedCursor).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.getCursor).toHaveBeenCalled();
+		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
 		expect(conversationUi.pendingPermissionRequests).toMatchObject([
 			{
 				permissionOccurrenceId: 'permission-panel',
@@ -1729,15 +1790,17 @@ describe('ConversationSessionController', () => {
 	it('does not let a delayed initial snapshot overwrite a newer live transient mutation', async () => {
 		const initialPermission = transientPermission('permission-initial', 'run-live', 28);
 		const newerPermission = transientPermission('permission-newer', 'run-live', 29);
-		const delayedSnapshot = deferred<ChatSnapshotResponse>();
-		mockGetChatSnapshot.mockReturnValue(delayedSnapshot.promise);
+		const delayedSnapshot = deferred<DisplayOpenResponse>();
 		const conversationUi = new ConversationUiState();
 		conversationUi.activateTransientFeed('chat-1');
 		expect(
 			conversationUi.setTransientFeedFromSnapshot(transientFeed([initialPermission], 1)),
 		).toMatchObject({ kind: 'applied' });
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		deps.chatState.loadMessages = vi.fn().mockResolvedValue([initialPermission.message]);
+		deps.chatState.loadMessages = vi.fn(async () => {
+			deps.chatState.openSnapshot = await delayedSnapshot.promise;
+			return [initialPermission.message];
+		});
 		const controller = new ConversationSessionController({ ...deps, conversationUi });
 
 		const load = controller.loadChat('chat-1');
@@ -1751,9 +1814,7 @@ describe('ConversationSessionController', () => {
 		};
 		expect(conversationUi.applyTransientFeedMutation(mutation)).toMatchObject({ kind: 'applied' });
 		delayedSnapshot.resolve(
-			chatSnapshot(transientFeed([initialPermission], 1), [
-				{ ordinal: 28, message: initialPermission.message },
-			]),
+			openSnapshot(transientFeed([initialPermission], 1)),
 		);
 		await load;
 
@@ -1774,11 +1835,10 @@ describe('ConversationSessionController', () => {
 			28,
 			'generation-replaced',
 		);
-		mockGetChatSnapshot.mockResolvedValue(
-			chatSnapshot(transientFeed([replacedViewPermission], 1, 'generation-replaced'), [
-				{ ordinal: 28, message: replacedViewPermission.message },
-			]),
-		);
+		deps.chatState.loadMessages.mockImplementation(async () => {
+			deps.chatState.openSnapshot = openSnapshot(transientFeed([replacedViewPermission], 1, 'generation-replaced'));
+			return [replacedViewPermission.message];
+		});
 		await controller.loadChat('chat-1');
 
 		expect(conversationUi.getTransientFeed('chat-1')).toMatchObject({
@@ -1789,9 +1849,8 @@ describe('ConversationSessionController', () => {
 				{ permissionOccurrenceId: 'permission-newer' },
 			],
 		});
-		expect(mockGetChatSnapshot).toHaveBeenNthCalledWith(1, 'chat-1', 1);
-		expect(mockGetChatSnapshot).toHaveBeenNthCalledWith(2, 'chat-1', 1);
-		expect(mockGetChatSnapshot).toHaveBeenCalledTimes(2);
+		expect(deps.chatState.loadMessages).toHaveBeenCalledTimes(2);
+		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
 	});
 
 	it('does not restore the bottom after the user navigates during transcript revalidation', async () => {
@@ -1830,14 +1889,13 @@ describe('ConversationSessionController', () => {
 		}
 	});
 
-	it('validates restored transcripts with a matching message limit on chat switch', () => {
+	it('loads an activation snapshot regardless of the existing message count on chat switch', () => {
 		const { deps } = createDeps();
 		deps.chatState.activateChat = vi.fn(() => {
 			deps.chatState.chatMessages = Array.from(
 				{ length: 75 },
 				(_, index) => new AssistantMessage('2026-05-14T00:00:00.000Z', `cached ${index}`),
 			);
-			return { count: 75, stale: false };
 		});
 		deps.chatState.loadMessages = vi.fn(() => new Promise<never>(() => {}));
 		const controller = new ConversationSessionController(deps);
@@ -1845,7 +1903,6 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			minimumLimit: 75,
 			purpose: 'activation',
 		});
 	});
@@ -1866,7 +1923,6 @@ describe('ConversationSessionController', () => {
 		expect(deps.setIsViewportPinnedToBottom).not.toHaveBeenCalled();
 		expect(deps.scrollToBottom).not.toHaveBeenCalled();
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			minimumLimit: 0,
 			purpose: 'activation',
 		});
 		expect(deps.composerState.restoreDraft).toHaveBeenCalledWith('chat-1');
@@ -2387,12 +2443,9 @@ describe('ConversationSessionController', () => {
 		panelTranscript.activeChatId = '123';
 		panelTranscript.transcriptViewId = 'generation-panel';
 		panelTranscript.lastOrdinal = 4;
-		panelTranscript.entries = [
-			{
-				ordinal: 4,
-				message: new AssistantMessage('2026-07-17T00:00:00.000Z', 'Clicked panel'),
-			},
-		];
+		const selection = vi.spyOn(panelTranscript, 'forkSelection').mockReturnValue({
+			ordinal: 4, transcriptViewId: 'generation-panel', clientMessageId: null,
+		});
 		mockForkChat.mockResolvedValue({
 			success: true,
 			chat: createServerEntry('456'),
@@ -2400,6 +2453,7 @@ describe('ConversationSessionController', () => {
 		const controller = new ConversationSessionController(deps);
 
 		await controller.forkChat('123', 4, panelTranscript);
+		expect(selection).toHaveBeenCalledWith(4);
 
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: '123',
@@ -2408,6 +2462,7 @@ describe('ConversationSessionController', () => {
 			transcriptViewId: 'generation-panel',
 			clientRequestId: expect.any(String),
 		});
+		panelTranscript.dispose();
 	});
 
 	it('keeps an optimistic user message until the committed ledger echo arrives', async () => {
@@ -3484,6 +3539,119 @@ describe('ConversationSessionController', () => {
 		},
 	);
 
+	it.each([false, true])('dismisses only plan presentation without executor authority, failure=%s', async (fails) => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		const planReference = { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 };
+		const request: PendingPermissionRequest = {
+			permissionOccurrenceId: 'plan-exit-1', planReference,
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		};
+		deps.conversationUi.pendingPermissionRequests = [request];
+		deps.canSubmitToExecutor.mockReturnValue(false);
+		deps.agentState.permissionMode = 'plan';
+		const dismiss = vi.spyOn(transcriptDisplayApi, 'dismissPlan');
+		if (fails) dismiss.mockRejectedValue(new Error('Synthetic dismissal failure'));
+		else dismiss.mockResolvedValue(openSnapshot(transientFeed([], 1)).plan);
+		const controller = new ConversationSessionController(deps);
+		controller.handleExitPlanModeForChat('chat-1', request.permissionOccurrenceId, 'dismiss', '');
+		await flushPromises();
+		expect(dismiss).toHaveBeenCalledWith(planReference);
+		expect(deps.conversationUi.pendingPermissionRequests).toEqual(fails ? [request] : []);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockSendPermissionDecision).not.toHaveBeenCalled();
+		expect(deps.conversationUi.finishPlanModeForChat).not.toHaveBeenCalled();
+		expect(deps.agentState.permissionMode).toBe('plan');
+		if (fails) expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', 'Synthetic dismissal failure');
+	});
+
+	it.each([false, true])('fences a held plan dismissal by server authority, restarted=%s', async restarted => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		const conversationUi = new ConversationUiState();
+		conversationUi.confirmExecutionControlSocketInstance('server-instance-test');
+		conversationUi.setExecutionControlFromRefresh('chat-1', openSnapshot(transientFeed([], 1)).control);
+		conversationUi.activateTransientFeed('chat-1');
+		conversationUi.updatePendingPermissionsForChat('chat-1', [{
+			permissionOccurrenceId: 'plan-exit-1',
+			planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 },
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		}]);
+		const held = deferred<ReturnType<typeof openSnapshot>['plan']>();
+		vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockReturnValue(held.promise);
+		deps.agentState.permissionMode = 'plan';
+		const controller = new ConversationSessionController({ ...deps, conversationUi });
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'bypass', 'Synthetic plan');
+		conversationUi.markExecutionControlSocketDisconnected();
+		if (restarted) conversationUi.confirmExecutionControlSocketInstance('replacement-instance');
+		held.resolve(openSnapshot(transientFeed([], 1)).plan);
+		await flushPromises();
+		expect(deps.agentState.permissionMode).toBe(restarted ? 'plan' : 'bypassPermissions');
+		expect(mockRunChat).toHaveBeenCalledTimes(restarted ? 0 : 1);
+	});
+
+	it.each(['bypass', 'approve-edits', 'bypass-new'])('fences held %s when HTTP admits a replacement before the socket', async choice => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		const conversationUi = new ConversationUiState();
+		conversationUi.confirmExecutionControlSocketInstance('server-instance-test');
+		conversationUi.setExecutionControlFromRefresh('chat-1', openSnapshot(transientFeed([], 1)).control);
+		conversationUi.updatePendingPermissionsForChat('chat-1', [{ permissionOccurrenceId: 'plan-exit-1',
+			planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 },
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan') }]);
+		let snapshot = openSnapshot(transientFeed([], 1));
+		const registry = new ConversationPanelRegistry({ bodies: new DisplayBodyStore(), overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: vi.fn() },
+			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => null,
+			openTranscript: async () => snapshot,
+			onOpen: open => conversationUi.setExecutionControlFromRefresh('chat-1', open.control) });
+		const chatState = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-1' });
+		chatState.activeChatId = 'chat-1';
+		const held = deferred<DisplayOpenResponse['plan']>();
+		vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockReturnValue(held.promise);
+		try {
+			await registry.loadChatSnapshot('chat-1');
+			deps.agentState.permissionMode = 'plan';
+			const controller = new ConversationSessionController({ ...deps, chatState, conversationUi });
+			controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', choice, 'Synthetic plan');
+			snapshot = displayOpen('chat-1', 'generation-1', 28, 'replacement-instance');
+			await registry.loadChatSnapshot('chat-1');
+			expect(conversationUi.isExecutionControlSocketInstanceConfirmed('server-instance-test')).toBe(true);
+			expect(conversationUi.getExecutionControl('chat-1')?.serverInstanceId).toBe('server-instance-test');
+			held.resolve(openSnapshot(transientFeed([], 1)).plan);
+			await flushPromises();
+			expect(deps.agentState.permissionMode).toBe('plan');
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(deps.appShell.openNewChatDialog).not.toHaveBeenCalled();
+			chatState.activeChatId = null;
+			expect(chatState.serverInstanceId).toBe('replacement-instance');
+		} finally { held.resolve(snapshot.plan); registry.destroy(); chatState.destroy(); }
+	});
+
+	it('single-flights concurrent choices for the same plan occurrence and allows dismissal retry', async () => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'plan' }));
+		deps.conversationUi.pendingPermissionRequests = [{
+			permissionOccurrenceId: 'plan-exit-1',
+			planReference: { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 },
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
+		}];
+		const held = deferred<ReturnType<typeof openSnapshot>['plan']>();
+		const dismiss = vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockReturnValue(held.promise);
+		const controller = new ConversationSessionController(deps);
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'bypass-new', 'Synthetic plan');
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'approve-edits', 'Synthetic plan');
+		expect(dismiss).toHaveBeenCalledOnce();
+		held.reject(new Error('Synthetic dismissal failure'));
+		await flushPromises();
+		expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(1);
+		expect(deps.appShell.openNewChatDialog).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		dismiss.mockResolvedValue(openSnapshot(transientFeed([], 1)).plan);
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'bypass-new', 'Synthetic plan');
+		controller.handleExitPlanModeForChat('chat-1', 'plan-exit-1', 'approve-edits', 'Synthetic plan');
+		await flushPromises();
+		expect(dismiss).toHaveBeenCalledTimes(2);
+		expect(deps.appShell.openNewChatDialog).toHaveBeenCalledOnce();
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
 	it('resumes approved plans with the target chat settings', async () => {
 		mockRunChat.mockResolvedValueOnce({
 			success: true,
@@ -3519,6 +3687,12 @@ describe('ConversationSessionController', () => {
 			modelEndpointId: 'endpoint-default',
 			modelProtocol: 'openai-compatible',
 		});
+		const planReference = { serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 28 };
+		deps.conversationUi.pendingPermissionRequests = [{
+			permissionOccurrenceId: 'plan-exit-1', planReference,
+			requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Use the approved design.'),
+		}];
+		const dismiss = vi.spyOn(transcriptDisplayApi, 'dismissPlan').mockResolvedValue(openSnapshot(transientFeed([], 1)).plan);
 		const controller = new ConversationSessionController(deps);
 
 		controller.handleExitPlanModeForChat(
@@ -3527,7 +3701,8 @@ describe('ConversationSessionController', () => {
 			'bypass',
 			'Use the approved design.',
 		);
-		await flushPromises();
+		await vi.waitFor(() => expect(mockRunChat).toHaveBeenCalledOnce());
+		expect(dismiss).toHaveBeenCalledWith(planReference);
 
 		expect(mockRunChat).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -5239,7 +5414,7 @@ describe('ConversationSessionController', () => {
 		const loaded = [new AssistantMessage('2026-05-14T00:00:00.000Z', 'older server snapshot')];
 		const { deps } = createDeps();
 		deps.chatState.optimisticUserInputs = [optimistic];
-		deps.chatState.activateChat = vi.fn(() => null);
+		deps.chatState.activateChat = vi.fn();
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue(loaded);
 		const controller = new ConversationSessionController(deps);
 

@@ -2,6 +2,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DisplayWindowController } from '$lib/chat/transcript/display-window-controller.js';
+import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
+import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
+import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { BashToolUseMessage } from '$shared/chat-types';
+
+async function ready() {
+	await waitFor(() => expect(screen.getByTestId('feed-fixture-ready').getAttribute('data-ready')).toBe('true'));
+}
+
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
 import {
 	installResizeObserverHarness,
@@ -18,6 +29,7 @@ async function showFeedScrollbar(container: HTMLElement): Promise<{
 	thumb: HTMLElement;
 	viewport: HTMLElement;
 }> {
+	await ready();
 	const root = container.querySelector<HTMLElement>('[data-scroll-area-root]');
 	const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
 	const content = container.querySelector<HTMLElement>('[data-scroll-area-content]');
@@ -123,6 +135,107 @@ describe('ConversationFeed', () => {
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
 	});
 
+	it('shows initial failure and retry alongside an actionable permission', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		const retry = vi.fn();
+		render(ConversationFeedTestHost, { transcriptScenario: 'tool-run', onReady: mounted.resolve, onRetry: retry,
+			pendingPermissionRequests: [{ chatId: 'chat-1', permissionOccurrenceId: 'pending-permission',
+				requestedTool: new BashToolUseMessage('', 'tool-1', 'true'),
+				control: { serverInstanceId: 'instance-1', chatId: 'chat-1', runId: 'run-1', permissionOccurrenceId: 'pending-permission' } }],
+		});
+		const transcript = await mounted.promise;
+		transcript.clearMessages();
+		transcript.failOpen(new Error('Synthetic display failure'));
+		await screen.findByText('Permission required');
+		await screen.findByText('Synthetic display failure');
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(retry).toHaveBeenCalledOnce();
+	});
+
+	it('keeps a focused protected row mounted when filtering empties the certified window', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		const remoteSettingsStore = new RemoteSettingsStore();
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'bash-filter', remoteSettingsStore, onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		const protect = vi.spyOn(transcript.controller, 'protect');
+		const row = await waitFor(() => {
+			const element = container.querySelector<HTMLElement>('[data-chat-row-id="generation-1:1"]');
+			expect(element).not.toBeNull();
+			return element!;
+		});
+		row.focus();
+		await fireEvent.focusIn(row);
+		await tick();
+		expect(protect).toHaveBeenCalledWith([1]);
+		remoteSettingsStore.applySnapshot(makeRemoteSettingsSnapshot({ version: 1, ui: { hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }] } }));
+		await waitFor(() => expect(transcript.display.window?.items).toHaveLength(0));
+		expect(transcript.display.protectedRows).toHaveLength(1);
+		expect(container.querySelector('[data-chat-virtual-sizer]')).not.toBeNull();
+		expect(container.querySelector('[data-chat-row-id="generation-1:1"]')).toBe(row);
+	});
+
+	it('admits explicit initial navigation while the mounted feed is still pinned', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation', onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		expect(transcript.entries[0].ordinal).toBeGreaterThan(1);
+		expect(await transcript.navigateToWindow('chat-1', 'initial')).toBe('loaded');
+		expect(transcript.entries[0].ordinal).toBe(1);
+		expect(transcript.hasLaterMessages).toBe(true);
+	});
+
+	it('keeps a focused summary mounted when filtering empties the certified window', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		const remoteSettingsStore = new RemoteSettingsStore();
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'bash-filter', remoteSettingsStore, onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		const snapshot = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}');
+		const newValue = JSON.stringify({ ...snapshot, combineToolUseMessages: true });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+		window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_STORAGE_KEYS.localSettings, newValue, storageArea: localStorage }));
+		const group = await screen.findByRole('button', { name: 'Execute a command' });
+		group.focus();
+		await fireEvent.focusIn(group);
+		await tick();
+		remoteSettingsStore.applySnapshot(makeRemoteSettingsSnapshot({ version: 1, ui: { hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }] } }));
+		await waitFor(() => expect(transcript.display.window?.items).toHaveLength(0));
+		expect(transcript.display.protectedGroups).toHaveLength(1);
+		expect(transcript.display.protectedRows).toHaveLength(0);
+		expect(container.querySelector('[data-chat-virtual-sizer]')).not.toBeNull();
+		expect(container.querySelector('[data-chat-tool-group]')).toBe(group);
+	});
+
+	it('classifies a profile replacement caused by boundary demand in its first projection', async () => {
+		const projected = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation', onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		const profile = transcript.display.window!.certificate.profileKey;
+		transcript.configureDisplay({ combine: false, showThinking: false, hiddenToolGroups: [] });
+		const revision = transcript.feedMutationClock.dataRevision;
+		projected.mockClear();
+		await transcript.loadEarlierPage('chat-1');
+		await tick();
+		const changed = projected.mock.calls.find(([input]) => input.display.window && input.display.window.certificate.profileKey !== profile)?.[0];
+		expect(changed).toBeDefined();
+		expect(changed!.mutationClock.lastRevisionByKind['history-earlier']).toBeGreaterThan(revision);
+	});
+
+	it.each(['explicit', 'coverage'])('classifies earlier history in the same projection as its %s prepend', async entry => {
+		const projected = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation', onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		const after = transcript.display.window!.interval.after;
+		const revision = transcript.feedMutationClock.dataRevision;
+		projected.mockClear();
+		await (entry === 'explicit' ? transcript.loadEarlierPage('chat-1') : transcript.controller.load('earlier'));
+		await tick();
+		const changed = projected.mock.calls.find(([input]) => input.display.window && input.display.window.interval.after < after)?.[0];
+		expect(changed).toBeDefined();
+		expect(changed!.mutationClock.lastRevisionByKind['history-earlier']).toBeGreaterThan(revision);
+	});
+
 	it('combines ordinary tool rows behind an accessible disclosure without changing the off path', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
 		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
@@ -134,6 +247,9 @@ describe('ConversationFeed', () => {
 		expect(group.hasAttribute('aria-controls')).toBe(false);
 		expect(group.firstElementChild?.querySelector('svg')).not.toBeNull();
 		expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0);
+		group.focus();
+		await fireEvent.focusIn(group);
+		await tick();
 		await fireEvent.click(group);
 		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
 		expect(group.getAttribute('aria-expanded')).toBe('true');
@@ -186,16 +302,59 @@ describe('ConversationFeed', () => {
 	it('keeps a large expanded tool run individually virtualized', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'large-tool-run' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
-		const group = await screen.findByRole('button', { name: 'Execute 200 commands' });
-		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
-		expect(Number(container.querySelector('[data-chat-virtual-sizer]')?.getAttribute('data-chat-virtual-model-count'))).toBe(4);
+		const group = await screen.findByRole('button', { name: 'Execute 2000 commands' });
+		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
+		expect(Number(container.querySelector('[data-chat-virtual-sizer]')?.getAttribute('data-chat-virtual-model-count'))).toBe(3);
 		await fireEvent.click(group);
 		await waitFor(() => {
 			const sizer = container.querySelector('[data-chat-virtual-sizer]');
-			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(203);
+			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(54);
 			expect(Number(sizer?.getAttribute('data-chat-virtual-count'))).toBeLessThan(100);
 		});
 		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
+	});
+
+	it('continues exposed members despite viewport overflow without hydrating the entire run', async () => {
+		vi.spyOn(ConversationFeedVirtualController.prototype, 'measureViewportFill').mockResolvedValue('overflow');
+		const rectangle = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = rectangle.call(this);
+			const item = this.closest<HTMLElement>('[data-chat-virtual-item]');
+			if (!item && !this.hasAttribute('data-chat-virtual-sizer')) return rect;
+			const scroller = this.closest<HTMLElement>('[data-chat-scroll-viewport]');
+			const top = (item ? Number(item.style.transform.match(/translateY\(([^p]+)px\)/)?.[1] ?? 0) : 0) - (scroller?.scrollTop ?? 0);
+			return { ...rect, top, bottom: top + rect.height, y: top };
+		});
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		let viewport: ConversationViewportPort | null = null;
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'large-tool-run', pinnedToBottom: false,
+			onReady: mounted.resolve, onViewport: port => { viewport = port; } });
+		const transcript = await mounted.promise;
+		const parentLoad = vi.spyOn(transcript.controller, 'load');
+		const scroller = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]')!;
+		Object.defineProperty(scroller, 'scrollHeight', { configurable: true,
+			get: () => Number.parseFloat(container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')?.style.height ?? '0') });
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		const group = await screen.findByRole('button', { name: 'Execute 2000 commands' });
+		const protect = vi.spyOn(transcript.controller, 'protectGroups');
+		group.focus();
+		await fireEvent.focusIn(group);
+		await waitFor(() => expect(protect).toHaveBeenCalledWith([1]));
+		await fireEvent.click(group);
+		await waitFor(() => expect(transcript.display.expansions[0]?.page.ordinals).toHaveLength(50));
+		await viewport!.waitForLayout();
+		const extend = vi.spyOn(transcript.controller, 'extendMembers');
+		viewport!.cancelForUserIntent('later');
+		scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+		await fireEvent.scroll(scroller);
+		await viewport!.waitForLayout();
+		expect(viewport!.ownsScrollPosition()).toBe(false);
+		viewport!.requestCoverage();
+		await waitFor(() => expect(extend).toHaveBeenCalledWith(expect.objectContaining({ firstMember: 1 }), { kind: 'after', ordinal: 50 }));
+		await waitFor(() => expect(transcript.display.expansions[0].page.ordinals).toContain(51));
+		expect(parentLoad).not.toHaveBeenCalled();
+		expect(transcript.display.expansions[0].page.ordinals.length).toBeLessThanOrEqual(100);
+		expect(container.querySelectorAll('[data-chat-row-id]').length).toBeLessThan(100);
 	});
 
 	it('restores a collapsed summary but reveals exact durable members for row navigation', async () => {
@@ -282,6 +441,7 @@ describe('ConversationFeed', () => {
 		await waitFor(() =>
 			expect(populated.container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy(),
 		);
+		await ready();
 		const populatedContent = populated.container.querySelector('[data-chat-feed-content]');
 		expect(populatedContent?.classList.contains('min-h-full')).toBe(true);
 		expect(populatedContent?.classList.contains('justify-end')).toBe(true);
@@ -314,6 +474,7 @@ describe('ConversationFeed', () => {
 			expect(scrollbar.className).toContain('invisible');
 		}
 
+		await ready();
 		await rerender({ isPreparingInitialScroll: false });
 		expect(viewport.getAttribute('aria-busy')).toBe('false');
 		expect(content.className).not.toContain('invisible');
@@ -347,6 +508,7 @@ describe('ConversationFeed', () => {
 		expect(scrollbar.isConnected).toBe(true);
 		expect(onUserScrollIntent).not.toHaveBeenCalled();
 
+		const beforePreferenceChange = viewport.scrollTop;
 		const newValue = JSON.stringify({ autoHideChatScrollbar: false });
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
 		window.dispatchEvent(
@@ -359,7 +521,7 @@ describe('ConversationFeed', () => {
 		await tick();
 		expect(container.querySelector('[data-chat-scrollbar-auto-hide="false"]')).not.toBeNull();
 		expect(container.querySelector('[data-chat-scroll-viewport]')).toBe(viewport);
-		expect(viewport.scrollTop).toBe(100);
+		expect(viewport.scrollTop).toBe(beforePreferenceChange);
 		expect(onUserScrollIntent).not.toHaveBeenCalled();
 	});
 
@@ -434,11 +596,12 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBeNull();
 	});
 
-	it('shows automatic earlier loading outside virtual geometry', () => {
+	it('shows automatic earlier loading outside virtual geometry', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'loading-earlier',
 		});
 		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+		await ready();
 		const indicator = container.querySelector<HTMLElement>('[data-chat-earlier-loading-indicator]');
 
 		expect(indicator?.textContent).toContain('Loading earlier messages...');
@@ -465,6 +628,7 @@ describe('ConversationFeed', () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'loading-later',
 		});
+		await ready();
 		const transcript = container.querySelector('[data-chat-row-id]');
 		const boundary = container.querySelector('[data-transcript-page-boundary="later"]');
 
@@ -482,6 +646,7 @@ describe('ConversationFeed', () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'error-earlier',
 		});
+		await ready();
 		const retry = await screen.findByRole('button', { name: 'Retry earlier messages' });
 		const boundary = container.querySelector('[data-transcript-page-boundary="earlier"]');
 		const transcript = container.querySelector('[data-chat-row-id]');
@@ -540,10 +705,11 @@ describe('ConversationFeed', () => {
 		expect(status?.firstElementChild).not.toBe(firstNode);
 	});
 
-	it('renders a bounded virtual range instead of every loaded transcript row', () => {
+	it('renders a bounded virtual range instead of every loaded transcript row', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'local-truncation',
 		});
+		await ready();
 		const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
 		const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 		expect(mountedItems).toBeGreaterThan(0);
@@ -559,8 +725,9 @@ describe('ConversationFeed', () => {
 		await waitFor(
 			() => {
 				const sizer = container.querySelector('[data-chat-virtual-sizer]');
-				expect(sizer?.getAttribute('data-chat-transcript-entry-count')).toBe('200');
-				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('202');
+				expect(Number(sizer?.getAttribute('data-chat-transcript-entry-count'))).toBeGreaterThan(0);
+				expect(Number(sizer?.getAttribute('data-chat-transcript-entry-count'))).toBeLessThanOrEqual(50);
+				expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBeLessThanOrEqual(54);
 				const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
 				const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 				expect(mountedItems).toBeGreaterThan(0);
@@ -572,6 +739,7 @@ describe('ConversationFeed', () => {
 	});
 
 	it('ignores a connected stale row measurement after the item count shrinks', async () => {
+		vi.spyOn(DisplayWindowController.prototype, 'trim').mockImplementation(() => {});
 		let staleRow: HTMLElement | null = null;
 		try {
 			const { container } = render(ConversationFeedTestHost, {
@@ -582,8 +750,9 @@ describe('ConversationFeed', () => {
 					container
 						.querySelector('[data-chat-virtual-sizer]')
 						?.getAttribute('data-chat-virtual-model-count'),
-				).toBe('122'),
+				).toBe('53'),
 			);
+			await ready();
 			const mountedRows = [
 				...container.querySelectorAll<HTMLElement>('[data-chat-virtual-item]'),
 			].filter((item) => item.querySelector('[data-chat-row-id]'));
@@ -629,6 +798,7 @@ describe('ConversationFeed', () => {
 	});
 
 	it('preserves measured survivor geometry across count shrink and a later publication', async () => {
+		vi.spyOn(DisplayWindowController.prototype, 'trim').mockImplementation(() => {});
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'count-shrink-survivors',
 		});
@@ -637,8 +807,9 @@ describe('ConversationFeed', () => {
 				container
 					.querySelector('[data-chat-virtual-sizer]')
 					?.getAttribute('data-chat-virtual-model-count'),
-			).toBe('122'),
+			).toBe('53'),
 		);
+		await ready();
 		const measuredRow = container
 			.querySelector('[data-chat-row-id="generation-1:120"]')
 			?.closest<HTMLElement>('[data-chat-virtual-item]');

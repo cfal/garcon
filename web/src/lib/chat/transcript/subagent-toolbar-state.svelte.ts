@@ -1,8 +1,10 @@
 import type { SubagentManagementModel } from './subagent-management.js';
+import type { DisplaySummaryPaging } from './display-summary-controller.svelte.js';
 
 export interface SubagentToolbarSource {
 	readonly model: SubagentManagementModel;
-	jumpToTool(anchorId: string): void;
+	readonly paging?: DisplaySummaryPaging;
+	jumpToTool(ordinal: number): void;
 }
 
 export class SubagentToolbarState {
@@ -22,7 +24,9 @@ export class SubagentToolbarState {
 		return this.#source?.model ?? null;
 	}
 
-	jumpToTool(anchorId: string): void {
-		this.#source?.jumpToTool(anchorId);
+	get paging(): DisplaySummaryPaging | undefined { return this.#source?.paging; }
+
+	jumpToTool(ordinal: number): void {
+		this.#source?.jumpToTool(ordinal);
 	}
 }

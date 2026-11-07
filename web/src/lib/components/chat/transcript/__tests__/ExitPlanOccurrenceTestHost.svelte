@@ -2,7 +2,7 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onDestroy } from 'svelte';
 	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
-	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { certifiedFeed } from './display-feed-fixtures.js';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings, setNotifications } from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
@@ -28,9 +28,7 @@
 		'plan-1',
 		'Historical plan.',
 	);
-	const renderModel = buildConversationFeedRenderModel([
-		{ kind: 'message', id: 'view-1:1', ordinal: 1, message },
-	]);
+	const renderModel = certifiedFeed([{ ordinal: 1, message }]).renderModel;
 	const item = renderModel.items[0]!;
 
 	const chatSessions = createChatSessionsStore();

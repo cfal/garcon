@@ -96,7 +96,8 @@
 		onThinkingModeChange,
 		onAgentSettingChange,
 		resendCandidates = [],
-		recallPrompts = [],
+		recallSource = null,
+		onRecallError = () => {},
 		recallIdentity = null,
 		onExcludeResendCandidate,
 		directAdmissionPending = false,
@@ -148,23 +149,15 @@
 	const markdown = new PromptComposerMarkdownController({
 		ui,
 		composer: composerState,
-		get chatId() {
-			return sessions.selectedChatId;
-		},
-		get textarea() {
-			return textarea;
-		},
-		get canFormat() {
-			return canFormat;
-		},
+		get chatId() { return sessions.selectedChatId; },
+		get textarea() { return textarea; },
+		get canFormat() { return canFormat; },
 		get sourcePaletteOpen() {
 			return fileMenuVisible || slashMenuVisible || ui.snippetPalette.isOpen;
 		},
 		get acceptsMarkdown() { return markdownInput; },
 		get preferredMode() { return localSettings.composerInputMode; },
-		get interactionGeneration() {
-			return workspaceShortcuts.userInteractionGeneration;
-		},
+		get interactionGeneration() { return workspaceShortcuts.userInteractionGeneration; },
 		get snippetTrigger() { return conversationInput ? localSettings.snippetTrigger : ''; },
 		onChange: updateDraft,
 		onSourceCaret: updateTriggers,
@@ -174,8 +167,10 @@
 	});
 	const promptRecall = new PromptComposerRecallController({
 		getIdentity: () => recallIdentity,
-		getPrompts: () => recallPrompts,
+		getSource: () => recallSource,
+		onError: message => onRecallError(message),
 		getText: () => composerState.inputText,
+		getDraftRevision: () => composerState.contentRevision,
 		getTextarea: () => textarea,
 		canRecall: () => !isDisabled && isVisible,
 		setText: updateDraft,
@@ -183,6 +178,7 @@
 	$effect(() => {
 		void recallIdentity;
 		promptRecall.reset();
+		return () => promptRecall.reset();
 	});
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
@@ -209,12 +205,8 @@
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
 	);
 	const projectState = new PromptComposerProjectState({
-		get selectedChat() {
-			return sessions.selectedChat;
-		},
-		get completionDemand() {
-			return (filesAvailable && ui.showFileMenu) || ui.showSlashMenu;
-		},
+		get selectedChat() { return sessions.selectedChat; },
+		get completionDemand() { return (filesAvailable && ui.showFileMenu) || ui.showSlashMenu; },
 		projectResolution,
 		get executionTarget() {
 			return {

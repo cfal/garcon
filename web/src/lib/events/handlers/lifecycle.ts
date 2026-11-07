@@ -30,7 +30,6 @@ export interface LifecycleContext {
 	onNavigateToChat: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
-	markChatTranscriptValidated: (chatId: string) => void;
 	notifyCompletion: (chatId: string) => void;
 }
 
@@ -54,10 +53,6 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 		ctx.clearPendingChatId();
 	}
 
-	if (completedChatId && !runFailed) {
-		ctx.markChatTranscriptValidated(completedChatId);
-	}
-
 	if (agentRunSucceeded(msg) && !successorIsProcessing) ctx.notifyCompletion(msg.chatId);
 
 	// Preserve plan-exit permission requests across turn boundaries
@@ -74,6 +69,6 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 
 	ctx.appendServerNotice(msg.chatId, 'error', msg.error || m.chat_notice_agent_error());
 	if (!successorIsProcessing && errorChatId) {
-		ctx.conversationUi.clearPendingPermissionsForChat(errorChatId);
+		ctx.conversationUi.clearTurnPermissionRequestsForChat(errorChatId);
 	}
 }

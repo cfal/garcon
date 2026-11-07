@@ -18,6 +18,16 @@ describe('ReloadChatDialogState', () => {
 		expect(dialog.open).toBe(false);
 	});
 
+	it('captures unavailable reads separately from a complete candidate list', async () => {
+		const dialog = new ReloadChatDialogState();
+		const requested = dialog.request('chat-1', CANDIDATES, { incomplete: true });
+		expect(dialog.candidates).toEqual(CANDIDATES);
+		expect(dialog.summaryIncomplete).toBe(true);
+		dialog.cancel();
+		await requested;
+		expect(dialog.summaryIncomplete).toBe(false);
+	});
+
 	it('tracks progress while running and settles after the reload', async () => {
 		const dialog = new ReloadChatDialogState();
 		const requested = dialog.request('chat-1', []);

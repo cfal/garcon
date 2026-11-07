@@ -4,7 +4,7 @@ import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/
 import type { JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
-import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
+import type { PromptRecallSource } from '$lib/chat/composer/prompt-recall';
 
 export interface PromptComposerProps {
 	onsubmit: () => void;
@@ -15,7 +15,8 @@ export interface PromptComposerProps {
 	onThinkingModeChange?: (mode: ThinkingMode) => void;
 	onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 	resendCandidates?: readonly ResendCandidate[];
-	recallPrompts?: readonly RecallPrompt[];
+	recallSource?: PromptRecallSource | null;
+	onRecallError?: (message: string) => void;
 	recallIdentity?: string | null;
 	onExcludeResendCandidate?: (ordinal: number) => void;
 	directAdmissionPending?: boolean;

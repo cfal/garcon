@@ -440,7 +440,7 @@ describe('scripted Claude persistence', () => {
       }));
       await held.requested;
       const queueCursor = fixture.client.markEvents();
-      await fixture.client.enqueueNew(chatId, queuedPrompt);
+      const queuedSubmission443 = await fixture.client.enqueueNew(chatId, queuedPrompt);
       held.release();
 
       expect((await fixture.client.waitForTurnTerminal(chatId, source.turnId, {
@@ -449,7 +449,7 @@ describe('scripted Claude persistence', () => {
       })).type).toBe('agent-run-finished');
       const queuedInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        queuedPrompt,
+        queuedSubmission443.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {

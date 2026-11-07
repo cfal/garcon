@@ -2,7 +2,6 @@ import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type {
-  ChatMessagesMessage,
   ChatSessionStoppedMessage,
 } from '../../../common/ws-events.js';
 import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
@@ -44,6 +43,7 @@ import {
   type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { latestInterruptedTerminal, type InterruptedTerminal } from '../../support/ledger-assertions.js';
 
 // Stop flows through the real binary: Garcon's abort reaches OpenCode's session.abort, the
 // active model request or shell tool dies, and no provider failure is fabricated for a
@@ -103,6 +103,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         fixture.client.eventsSince(stopCursor),
         chatId,
         active.turnId,
+        latestInterruptedTerminal(fixture.dirs.workspace, chatId),
       );
 
       // Stop confirms the request, not provider quiescence. The held response must stay
@@ -126,14 +127,6 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         afterIndex: recoveryCursor,
       });
 
-      // No late assistant output landed under the stopped turn.
-      expect(fixture.client.eventsSince(stopCursor).some((event) =>
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && event.messages.some((entry) =>
-          entry.message.type === 'assistant-message'
-          && entry.message.content.includes(stoppedReply))
-      )).toBe(false);
       expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
         .not.toContain(stoppedReply);
       testEnvironment.model.assertSettled();
@@ -200,18 +193,15 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         fixture.client.eventsSince(stopCursor),
         chatId,
         active.turnId,
+        latestInterruptedTerminal(fixture.dirs.workspace, chatId),
       );
       await waitForAbortedAssistant(fixture, chatId);
       await waitForProcessesExit(processIdentities);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'bash-tool-use'
             && entry.message.command === command),
-        'OpenCode aborted tool publication',
-        { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, stopCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'OpenCode aborted tool publication' },
       );
       // Both the command shell and its active child died before the completion marker.
       expect(await rejectionOf(access(join(fixture.dirs.project, 'stop-completed.marker')))).toMatchObject({ code: 'ENOENT' });
@@ -501,6 +491,7 @@ function expectOpenCodeStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,
   turnId: string,
+  terminal: InterruptedTerminal,
 ): void {
   const stopping = events.findIndex((event) =>
     event.type === 'chat-processing-updated'
@@ -516,9 +507,10 @@ function expectOpenCodeStoppedTurnEventOrder(
     && event.intent === 'stop'
     && event.outcome === 'interrupt-requested');
   const interruption = events.findIndex((event) =>
-    event.type === 'chat-messages'
+    event.type === 'chat-transcript-head-updated'
     && event.chatId === chatId
-    && event.turnId === turnId);
+    && event.transcriptViewId === terminal.transcriptViewId
+    && event.sourceHead >= terminal.ordinal);
 
   expect(interruption).toBeGreaterThanOrEqual(0);
   expect(stopped).toBeGreaterThan(interruption);

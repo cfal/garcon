@@ -100,7 +100,7 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   const raw = record(value, 'chat snapshot');
   const observedAt = canonicalTimestamp(raw.observedAt, 'observedAt');
   const messageLimit = boundedInteger(raw.messageLimit, 'messageLimit');
-  const chat = parseChat(raw.chat);
+  const chat = parseChatSnapshotChat(raw.chat);
   const processingPhase = raw.processingPhase === null
     ? null
     : CHAT_PROCESSING_PHASES.find((phase) => phase === raw.processingPhase) ?? fail('processingPhase is invalid');
@@ -126,7 +126,7 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   };
 }
 
-function parseChat(value: unknown): ChatSnapshotChat {
+export function parseChatSnapshotChat(value: unknown): ChatSnapshotChat {
   const raw = record(value, 'chat');
   let id: string;
   try {

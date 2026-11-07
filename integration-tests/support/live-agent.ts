@@ -62,23 +62,14 @@ function expectVisibleResponseBeforeSettlement(input: {
   events: readonly ServerWsMessage[];
   chatId: string;
   turnId: string | undefined;
-  marker?: string;
+  responseIndex: number;
 }): void {
   const processingStarted = input.events.findIndex((event) =>
     event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
     && event.phase !== null);
-  const assistantResponse = input.events.findIndex((event) =>
-    event.type === 'chat-messages'
-    && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'assistant-message'
-      && (
-        input.marker === undefined
-        || entry.message.content.includes(input.marker)
-      )));
   const processingStopped = input.events.findIndex((event, index) =>
-    index > assistantResponse
+    index > input.responseIndex
     && event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
     && event.phase === null);
@@ -88,9 +79,9 @@ function expectVisibleResponseBeforeSettlement(input: {
     && event.turnId === input.turnId);
 
   expect(processingStarted).toBeGreaterThanOrEqual(0);
-  expect(assistantResponse).toBeGreaterThan(processingStarted);
-  expect(processingStopped).toBeGreaterThan(assistantResponse);
-  expect(terminal).toBeGreaterThan(assistantResponse);
+  expect(input.responseIndex).toBeGreaterThan(processingStarted);
+  expect(processingStopped).toBeGreaterThan(input.responseIndex);
+  expect(terminal).toBeGreaterThan(input.responseIndex);
 }
 
 // Controller reservations and remote native stops can outlive the browser's terminal event.
@@ -221,31 +212,36 @@ export async function reloadUntilNativeStableAfterPrompt(
 }
 
 export async function waitForVisibleResponse(input: {
-  fixture: IntegrationFixture;
+  fixture: { client: Pick<GarconTestClient, 'waitForTurnTerminal' | 'getMessages' | 'eventsSince' | 'waitForProcessing'> };
   chatId: string;
   turnId: string | undefined;
   marker?: string;
   afterIndex: number;
 }): Promise<void> {
-  expectFinished((await input.fixture.client.waitForTurnTerminal(
+  const terminal = await input.fixture.client.waitForTurnTerminal(
     input.chatId,
     input.turnId,
     { afterIndex: input.afterIndex, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-  )).type);
+  );
+  expectFinished(terminal.type);
+  const page = await input.fixture.client.getMessages(input.chatId);
+  // HTTP history may already contain a queued turn's reply; notification order identifies the response.
   const assistantResponse = input.fixture.client.eventsSince(input.afterIndex).findIndex((event) =>
-    event.type === 'chat-messages'
+    event.type === 'chat-transcript-head-updated'
     && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'assistant-message'
+    && event.transcriptViewId === page.transcriptViewId
+    && page.messages.some((entry) => entry.ordinal === event.responseClassOrdinals.assistant
+      && entry.message.type === 'assistant-message'
       && (input.marker === undefined || entry.message.content.includes(input.marker))));
+  if (assistantResponse < 0) throw new Error('Expected assistant response absent from committed HTTP history or notifications');
   await input.fixture.client.waitForProcessing(input.chatId, false, {
-    afterIndex: input.afterIndex + Math.max(assistantResponse + 1, 0),
+    afterIndex: input.afterIndex + assistantResponse + 1,
     timeoutMs: LIVE_TURN_TIMEOUT_MS,
   });
   expectVisibleResponseBeforeSettlement({
     events: input.fixture.client.eventsSince(input.afterIndex),
     chatId: input.chatId,
-    turnId: input.turnId,
-    marker: input.marker,
+    turnId: terminal.turnId,
+    responseIndex: assistantResponse,
   });
 }

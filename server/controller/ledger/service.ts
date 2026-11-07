@@ -33,7 +33,6 @@ import type {
   LedgerRowDraft,
   LedgerRunEndedRow,
   LedgerSessionRow,
-  LedgerUserInputDetail,
   TranscriptPage,
   TranscriptNativeActivityState,
   TranscriptView,
@@ -56,8 +55,10 @@ import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
+import type { StoredLedgerRow } from './codec.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
+import { inputDetail, inputKey } from './input-submission.js';
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
@@ -573,6 +574,28 @@ export class TranscriptLedgerService {
     return this.#store.rowPagesThrough(chatId, watermark, fromOrdinal, signal);
   }
 
+  recoveredHead(chatId: string): TranscriptWatermark | null {
+    return this.#store.recoveredHead(chatId);
+  }
+
+  submissionOrdinals(chatId: string, viewId: TranscriptViewId, clientMessageIds: readonly string[]) {
+    return this.#store.submissionOrdinals(chatId, viewId, clientMessageIds);
+  }
+
+  withStoredRowFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
+    consume: (frames: AsyncIterable<readonly StoredLedgerRow[]>) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.#store.withStoredRowFrames(chatId, watermark, fromOrdinal, consume, signal);
+  }
+
+  storedRowsByOrdinals(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[]): readonly StoredLedgerRow[] {
+    return this.#store.storedRowsByOrdinals(chatId, watermark, ordinals);
+  }
+
+  withStoredRowsByOrdinals<T>(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[],
+    consume: (rows: readonly StoredLedgerRow[]) => Promise<T>): Promise<T> {
+    return this.#store.withStoredRowsByOrdinals(chatId, watermark, ordinals, consume);
+  }
+
   withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {
     return this.#store.withStoredRowsThrough(chatId, watermark, work, signal);
   }
@@ -963,26 +986,6 @@ export class TranscriptLedgerService {
       }
     });
   }
-}
-
-function inputKey(chatId: string, clientMessageId: string): string {
-  return `${chatId}\u0000${clientMessageId}`;
-}
-
-function inputDetail(input: {
-  readonly message: UserMessage;
-  readonly attachments: readonly AgentAttachment[];
-  readonly clientMessageId: string | null;
-  readonly steer: boolean;
-}): LedgerUserInputDetail {
-  return {
-    clientMessageId: input.clientMessageId,
-    message: input.message,
-    attachments: input.attachments,
-    steer: input.steer,
-    preambleBoundary: null,
-    preamblePrefixReceipt: null,
-  };
 }
 
 function timestampAtOrAfter(candidate: string, floor: string | null): string {

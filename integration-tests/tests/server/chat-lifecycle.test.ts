@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type {
-  ChatMessagesMessage,
   ChatTitleUpdatedMessage,
 } from '../../../common/ws-events.js';
 import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
+import type { TranscriptMessage } from '../../../common/chat-view.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -17,6 +17,7 @@ import { rejectionOf } from '../../support/promise-assertions.js';
 
 function expectSuccessfulTurnContract(
   events: readonly ServerWsMessage[],
+  messages: readonly TranscriptMessage[],
   input: {
     chatId: string;
     content: string;
@@ -37,21 +38,15 @@ function expectSuccessfulTurnContract(
     phase: 'running',
   }));
 
-  const userEvent = events.find((event): event is ChatMessagesMessage =>
-    event.type === 'chat-messages'
+  const user = messages.find((entry) =>
+    entry.message.type === 'user-message' && entry.message.metadata?.clientMessageId === input.clientMessageId);
+  expect(user?.message).toMatchObject({ content: input.content, metadata: { clientMessageId: input.clientMessageId } });
+  const userEvent = events.find((event) =>
+    event.type === 'chat-input-committed'
     && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'user-message' && entry.message.content === input.content));
+    && event.clientMessageId === input.clientMessageId);
   expect(userEvent).toMatchObject({
-    clientRequestId: undefined,
-    turnId: undefined,
-  });
-  const user = userEvent?.messages.find((entry) =>
-    entry.message.type === 'user-message' && entry.message.content === input.content);
-  expect(user?.message).toMatchObject({
-    metadata: {
-      clientMessageId: input.clientMessageId,
-    },
+    ordinal: user?.ordinal,
   });
   expect(user?.message.type === 'user-message'
     ? user.message.metadata?.clientRequestId
@@ -60,11 +55,13 @@ function expectSuccessfulTurnContract(
     ? user.message.metadata?.turnId
     : undefined).toBeUndefined();
 
+  const assistant = messages.find((entry) => entry.message.type === 'assistant-message'
+    && entry.message.content === input.assistantContent);
+  expect(assistant).toBeDefined();
   const assistantIndex = events.findIndex((event) =>
-    event.type === 'chat-messages'
+    event.type === 'chat-transcript-head-updated'
     && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'assistant-message' && entry.message.content === input.assistantContent));
+    && event.responseClassOrdinals.assistant >= assistant!.ordinal);
   const terminalIndex = events.findIndex((event) =>
     event.type === 'agent-run-finished'
     && event.chatId === input.chatId
@@ -120,9 +117,9 @@ describe('chat lifecycle', () => {
         clientMessageId,
         turnId: accepted.turnId!,
       };
-      expectSuccessfulTurnContract(fixture.client.eventsSince(eventCursor), turnContract);
-      expectSuccessfulTurnContract(observer.eventsSince(observerCursor), turnContract);
       const transcript = await fixture.client.getMessages(chatId);
+      expectSuccessfulTurnContract(fixture.client.eventsSince(eventCursor), transcript.messages, turnContract);
+      expectSuccessfulTurnContract(observer.eventsSince(observerCursor), transcript.messages, turnContract);
       expect(userContents(transcript.messages)).toEqual(['hello-integration']);
       expect(assistantContents(transcript.messages)).toEqual(['echo:hello-integration']);
       expect(countUserContent(transcript.messages, 'hello-integration')).toBe(1);
@@ -520,13 +517,8 @@ describe('chat lifecycle', () => {
 
       const rejectedEvents = fixture.client.eventsSince(cursor);
       expect(rejectedEvents.some((event) =>
-        event.type === 'chat-messages'
-        && (
-          event.clientRequestId === rejectedRequestId
-          || event.messages.some((entry) =>
-            entry.message.type === 'user-message'
-            && entry.message.content === 'admission-rejected')
-        ))).toBe(false);
+        event.type === 'chat-input-committed' && event.chatId === chatId
+        && event.clientMessageId === rejectedMessageId)).toBe(false);
       const whileHeld = await fixture.client.getMessages(chatId);
       expect(userContents(whileHeld.messages)).toEqual(['admission-first']);
       expect(whileHeld.resendCandidates).toEqual([]);
@@ -538,13 +530,8 @@ describe('chat lifecycle', () => {
       await fixture.client.ping();
       const afterTerminal = fixture.client.eventsSince(cursor);
       expect(afterTerminal.some((event) =>
-        event.type === 'chat-messages'
-        && (
-          event.clientRequestId === rejectedRequestId
-          || event.messages.some((entry) =>
-            entry.message.type === 'user-message'
-            && entry.message.content === 'admission-rejected')
-        ))).toBe(false);
+        event.type === 'chat-input-committed' && event.chatId === chatId
+        && event.clientMessageId === rejectedMessageId)).toBe(false);
       const afterTerminalMessages = await fixture.client.getMessages(chatId);
       expect(countUserContent(afterTerminalMessages.messages, 'admission-rejected')).toBe(0);
 

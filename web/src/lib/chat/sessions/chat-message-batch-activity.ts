@@ -1,57 +1,12 @@
-import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import type { ChatTranscriptHeadUpdatedMessage } from '$shared/transcript-display-events';
+
+export function applyTranscriptHeadActivity(sessions: ChatMessageBatchActivityPort, head: ChatTranscriptHeadUpdatedMessage): string | null {
+	if (head.preview) sessions.patchPreview(head.chatId, head.preview.text, head.presentedActivityAt ?? head.preview.timestamp);
+	else if (head.presentedActivityAt) sessions.patchActivity(head.chatId, head.presentedActivityAt);
+	return head.presentedActivityAt;
+}
 
 export interface ChatMessageBatchActivityPort {
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchActivity(chatId: string, timestamp: string): void;
-}
-
-export function extractPreviewFirstLine(text: string): string {
-	if (!text) return '';
-	const newline = text.indexOf('\n');
-	if (newline < 0) return text.trim();
-	return text.slice(0, newline).trim();
-}
-
-// Selects the same conversational preview types as durable chat metadata.
-export function selectPreviewFromBatch(
-	messages: readonly ChatMessage[],
-): { content: string; timestamp: string } | null {
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const message = messages[index];
-		if (message instanceof AssistantMessage || message instanceof UserMessage || message.type === 'command-output') {
-			return {
-				content: extractPreviewFirstLine(String(message.content || '')).slice(0, 200),
-				timestamp: message.timestamp,
-			};
-		}
-	}
-	return null;
-}
-
-export function selectLatestActivityTimestampFromBatch(
-	messages: readonly ChatMessage[],
-): string | null {
-	let latestTimestamp: string | null = null;
-	for (const message of messages) {
-		const timestamp = message.timestamp;
-		if (timestamp && (!latestTimestamp || timestamp > latestTimestamp)) {
-			latestTimestamp = timestamp;
-		}
-	}
-	return latestTimestamp;
-}
-
-export function applyChatMessageBatchActivity(
-	sessions: ChatMessageBatchActivityPort,
-	chatId: string,
-	messages: readonly ChatMessage[],
-): string | null {
-	const preview = selectPreviewFromBatch(messages);
-	const activityTimestamp = selectLatestActivityTimestampFromBatch(messages);
-	if (preview) {
-		sessions.patchPreview(chatId, preview.content, activityTimestamp ?? preview.timestamp);
-	} else if (activityTimestamp) {
-		sessions.patchActivity(chatId, activityTimestamp);
-	}
-	return activityTimestamp;
 }

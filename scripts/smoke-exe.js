@@ -5,6 +5,8 @@ import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../server-agents/pi/src/agents/pi/__tests__/model-discovery-fixture.js';
+import { parseDisplayOpenResponse } from '../common/transcript-display-open.js';
+import { parseBodyDependencyResponse, parseDisplayWindowResponse } from '../common/transcript-display-contract.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -278,6 +280,35 @@ async function assertCompiledTranscriptRendering(url, chatId, getServerOutput, a
   }
 }
 
+async function assertCompiledTranscriptDisplay(url, chatId, apiFetch) {
+  const post = async (operation, body) => {
+    const response = await apiFetch(`${url}/api/v1/chats/transcript-display/${operation}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`Compiled display ${operation} failed (${response.status}): ${await response.text()}`);
+    return response.json();
+  };
+  const open = parseDisplayOpenResponse(await post('open', { chatId, reason: 'activate', outstandingClientMessageIds: [] }));
+  const profile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: open.display.bashRevision };
+  const request = { chatId, transcriptViewId: open.transcriptViewId, policyRevision: open.display.policyRevision,
+    profile, cuts: [], anchor: { kind: 'newest' }, requiredThrough: open.sourceHead, limit: 50 };
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  for (;;) {
+    const window = parseDisplayWindowResponse(await post('window', request));
+    if (window.kind === 'available') {
+      const bodies = parseBodyDependencyResponse(await post('bodies', { certificate: window.certificate, profile,
+        cuts: [], seedOrdinals: window.items.flatMap(item => item.kind === 'row' ? [item.ordinal] : []),
+        residentOrdinals: [], limitBodies: 200, estimatedByteBudget: 2 * 1024 * 1024 }));
+      if (!bodies.bodies.some(row => row.message.type === 'user-message' && row.message.content === 'embeddedworkertoken')) {
+        throw new Error('Compiled display workers did not hydrate the synthetic source.');
+      }
+      return;
+    }
+    if (window.kind === 'failed' || Date.now() >= deadline) throw new Error(`Compiled display preparation: ${window.kind} (${window.errorCode})`);
+    await delay(100);
+  }
+}
+
 function getHostTarget() {
   return `${process.platform}-${process.arch}`;
 }
@@ -461,6 +492,7 @@ async function run() {
     );
     await assertCompiledTokenFitting(started.url, SMOKE_CHAT_ID, started.getOutput, apiFetch);
     await assertCompiledTranscriptRendering(started.url, SMOKE_CHAT_ID, started.getOutput, apiFetch);
+    await assertCompiledTranscriptDisplay(started.url, SMOKE_CHAT_ID, apiFetch);
     await stopProcess(child);
 
     child = spawnServer();
@@ -472,6 +504,7 @@ async function run() {
       started.getOutput,
       apiFetch,
     );
+    await assertCompiledTranscriptDisplay(started.url, SMOKE_CHAT_ID, apiFetch);
   } finally {
     await stopProcess(child);
     await rm(workspaceDir, { recursive: true, force: true });

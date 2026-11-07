@@ -394,13 +394,13 @@ describe.skipIf(process.platform !== 'linux')('OpenCode against a scripted model
       expect(JSON.stringify(result?.content)).toContain(toolMarker);
 
       const events = fixture.client.eventsSince(cursor);
-      const lastMessages = events.map((event, index) => ({ event, index }))
-        .filter(({ event }) => event.type === 'chat-messages' && event.chatId === chatId)
+      const lastHead = events.map((event, index) => ({ event, index }))
+        .filter(({ event }) => event.type === 'chat-transcript-head-updated' && event.chatId === chatId)
         .at(-1);
       const terminalIndex = events.findIndex((event) =>
         event.type === 'agent-run-finished' && event.chatId === chatId);
-      if (!lastMessages) throw new Error('Turn delivered no chat-messages events.');
-      expect(terminalIndex).toBeGreaterThan(lastMessages.index);
+      if (!lastHead) throw new Error('Turn delivered no transcript head.');
+      expect(terminalIndex).toBeGreaterThan(lastHead.index);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);

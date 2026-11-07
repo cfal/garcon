@@ -59,7 +59,7 @@ export async function navigateTranscriptRowViewport(
 	if (!current()) return 'cancelled';
 	const result = await loadWindow(current);
 	if (!current()) return 'cancelled';
-	if (result !== 'loaded') return result;
+	if (typeof result === 'string') return result;
 	port.windowLoaded();
 	await tick();
 	if (!current()) return 'cancelled';
@@ -67,10 +67,11 @@ export async function navigateTranscriptRowViewport(
 	const viewport = port.viewport();
 	if (!viewport) return 'unavailable';
 	const scrolled = await viewport.scrollToTarget(
-		{ kind: 'row', id: `${target.transcriptViewId}:${target.ordinal}` },
+		{ kind: 'row', id: `${target.transcriptViewId}:${result.landedOrdinal}`, ...(result.revealDetail ? { revealDetail: true } : {}) },
 		{ align: 'center' },
 	);
 	if (!current()) return 'cancelled';
 	if (port.viewId() !== target.transcriptViewId) return 'view-changed';
-	return scrolled === 'completed' || scrolled === 'cancelled' ? scrolled : 'unavailable';
+	if (scrolled === 'completed') return result.targetMatched ? 'completed' : 'unavailable';
+	return scrolled === 'cancelled' ? scrolled : 'unavailable';
 }

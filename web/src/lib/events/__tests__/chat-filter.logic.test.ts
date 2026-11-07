@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { filterByChat } from '../chat-filter';
+import { ChatTranscriptHeadUpdatedMessage, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
 
 describe('filterByChat', () => {
 	const ctx = {
@@ -85,10 +86,10 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
-	it('processes chat-messages globally so background transcript state can update', () => {
+	it('processes compact heads globally so background previews and dirty windows can update', () => {
 		const result = filterByChat(
-			'chat-messages',
-			{ type: 'chat-messages', chatId: 'chat-b' } as never,
+			'chat-transcript-head-updated',
+			new ChatTranscriptHeadUpdatedMessage('instance-1', 'chat-b', 'view-1', 1, null, null, emptyResponseClassOrdinals(), 0, 1),
 			ctx,
 		);
 		expect(result).toEqual({ action: 'process' });

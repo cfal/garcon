@@ -86,6 +86,7 @@ export interface PendingPermissionRequest {
 	chatId?: string | null;
 	receivedAt?: Date;
 	control?: import('$shared/chat-transient-feed').ChatTransientControlAction;
+	planReference?: import('$shared/transcript-display-open').PlanPresentationRequest & { ordinal: number };
 	transcript?: {
 		transcriptViewId: string;
 		afterOrdinal: number;

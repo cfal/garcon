@@ -271,13 +271,7 @@ describe('Codex against a scripted model', () => {
       expect(assistantContents(settled.messages).filter((content) => content === continuedReply))
         .toHaveLength(1);
 
-      const emitted = fixture.client.eventsSince(continuedCursor)
-        .flatMap((event) => (
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-            ? event.messages
-            : []
-        ));
+      const emitted = settled.messages.filter(entry => entry.ordinal > fixture.client.observedHead(chatId, continuedCursor));
       expect(messagesOfType(emitted, 'bash-tool-use')
         .filter((message) => message.toolId === commandCallId)).toHaveLength(1);
       expect(messagesOfType(emitted, 'tool-result')

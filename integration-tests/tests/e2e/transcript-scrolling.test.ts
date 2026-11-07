@@ -3,6 +3,8 @@ import type { Page } from "puppeteer-core";
 import { withE2eFixture, type E2eFixture } from "../../support/e2e-fixture.js";
 import type { ConfiguredDirectTestAgent } from "../../support/garcon-client.js";
 import { SpaDriver } from "../../support/spa-driver.js";
+import { recordDisplayWindows, recordedDisplayWindows } from "../../support/lightpanda-display-windows.js";
+import type { AvailableDisplayWindow } from "../../../common/transcript-display-contract.js";
 
 const FEED_SELECTOR = "[data-chat-scroll-viewport]";
 const SIZER_SELECTOR = "[data-chat-virtual-sizer]";
@@ -65,7 +67,8 @@ async function installPageRequestGate(page: Page): Promise<void> {
       const requestUrl = input instanceof Request ? input.url : String(input);
       const url = new URL(requestUrl, globalThis.location.href);
       const isPageRequest =
-        url.pathname === "/api/v1/chats/messages" && url.searchParams.has("beforeOrdinal");
+        url.pathname === "/api/v1/chats/transcript-display/window" &&
+        typeof init?.body === 'string' && JSON.parse(init.body).anchor?.kind === 'before';
       if (!isPageRequest) return nativeFetch(input, init);
       gate.requestCount += 1;
       if (gate.armed) {
@@ -116,18 +119,12 @@ async function pageRequestCount(page: Page): Promise<number> {
   );
 }
 
-async function requestEarlierPageByScroll(
+async function requestEarlierPage(
   page: Page,
 ): Promise<void> {
-  const requestCountBeforeScroll = await pageRequestCount(page);
-  await page.$eval(FEED_SELECTOR, (feedElement) => {
-    const feed = feedElement as HTMLElement;
-    // Reports keyboard intent before applying its scroll; Lightpanda clamps the
-    // desired offset to its reported top edge instead of exposing native extent.
-    const target = feed.clientHeight * 1.5;
-    feed.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "PageUp" }));
-    feed.scrollTop = target;
-    feed.dispatchEvent(new Event("scroll", { bubbles: true }));
+  const requestCountBefore = await pageRequestCount(page);
+  await page.$eval('[data-transcript-page-boundary="earlier"] button', (button) => {
+    (button as HTMLButtonElement).click();
   });
   await page.waitForFunction(
     (previousCount) => {
@@ -139,7 +136,7 @@ async function requestEarlierPageByScroll(
       return requestCount > previousCount;
     },
     { timeout: 20_000 },
-    requestCountBeforeScroll,
+    requestCountBefore,
   );
 }
 
@@ -180,6 +177,9 @@ async function waitForTranscriptIdle(page: Page): Promise<void> {
     { timeout: 20_000 },
     { selector: FEED_SELECTOR },
   );
+  // The page transaction settles its reading anchor after publishing the idle state.
+  await page.evaluate(() => new Promise<void>(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
 async function waitForModelCount(page: Page, minimum: number): Promise<void> {
@@ -203,7 +203,22 @@ async function virtualTranscriptSnapshot(page: Page): Promise<VirtualTranscriptS
   }), { sizer: SIZER_SELECTOR, item: ITEM_SELECTOR });
 }
 
-describe("Lightpanda transcript scrolling", () => {
+async function availableWindows(page: Page): Promise<AvailableDisplayWindow[]> {
+  return (await recordedDisplayWindows(page)).flatMap(read =>
+    read.response?.kind === 'available' ? [read.response] : []);
+}
+
+async function waitForEarlierWindow(page: Page, before: number): Promise<void> {
+  await page.waitForFunction((boundary) => {
+    const reads = (globalThis as typeof globalThis & {
+      __displayWindowReads?: Array<{ response: AvailableDisplayWindow | null }>;
+    }).__displayWindowReads ?? [];
+    return reads.some(read => read.response?.kind === 'available' && read.response.interval.after < boundary);
+  }, { timeout: 20_000 }, before);
+  await waitForTranscriptIdle(page);
+}
+
+describe("Lightpanda transcript paging", () => {
   test("[TLV5-PAGE.07-LIGHTPANDA-01] pages earlier history while keeping the virtual DOM bounded", async () => {
     await withE2eFixture("transcript-scrolling", async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
@@ -214,24 +229,30 @@ describe("Lightpanda transcript scrolling", () => {
       await fixture.page.setViewport({ width: 1_280, height: 800 });
       const chatId = await seedDirectChat(fixture, app, turns);
 
+      await recordDisplayWindows(fixture.page);
       await app.openChat(chatId);
       await fixture.waitForSpaWebSocket();
-      await waitForModelCount(fixture.page, 50);
+      await waitForModelCount(fixture.page, 1);
       // The initial paint gate now holds aria-busy through the staged reveal and end
       // restoration, so readiness is awaited instead of asserted immediately.
       await waitForTranscriptIdle(fixture.page);
       await installPageRequestGate(fixture.page);
 
       const initial = await virtualTranscriptSnapshot(fixture.page);
+      const initialWindow = (await availableWindows(fixture.page)).at(-1)!;
+      expect(initialWindow.items).toHaveLength(50);
+      expect(initialWindow.earlier.kind).toBe('more');
+      expect(initialWindow.later.kind).toBe('exhausted-through-watermark');
       expect(initial.busy).toBe(false);
-      expect(initial.modelCount).toBeGreaterThanOrEqual(50);
-      expect(initial.mountedCount).toBeLessThan(initial.modelCount);
+      // The virtual model also includes two spacers and the earlier boundary.
+      expect(initial.modelCount).toBe(initialWindow.items.length + 3);
+      expect(initial.mountedCount).toBeLessThanOrEqual(initial.modelCount);
       expect(initial.mountedCount).toBeLessThan(60);
       expect(await app.hasButton("Load more")).toBe(false);
-      expect(await app.hasButton("Load earlier messages")).toBe(false);
+      expect(await app.hasButton("Load earlier messages")).toBe(true);
 
       await setPageRequestGate(fixture.page, true);
-      await requestEarlierPageByScroll(fixture.page);
+      await requestEarlierPage(fixture.page);
       await fixture.page.waitForFunction(
         ({ selector }) =>
           document.querySelector<HTMLElement>(selector)?.getAttribute("aria-busy") === "true",
@@ -239,14 +260,14 @@ describe("Lightpanda transcript scrolling", () => {
         { selector: FEED_SELECTOR },
       );
       expect((await virtualTranscriptSnapshot(fixture.page)).busy).toBe(true);
-      await fixture.page.waitForSelector('[data-chat-earlier-loading-indicator]');
+      await app.waitForText("Loading earlier messages...");
       expect(await app.hasButton("Load earlier messages")).toBe(false);
       await releasePageRequest(fixture.page);
-      await waitForModelCount(fixture.page, initial.modelCount + 50);
+      await waitForEarlierWindow(fixture.page, initialWindow.interval.after);
 
       const expanded = await virtualTranscriptSnapshot(fixture.page);
       expect(expanded.busy).toBe(false);
-      expect(expanded.mountedCount).toBeLessThan(expanded.modelCount);
+      expect(expanded.mountedCount).toBeLessThanOrEqual(expanded.modelCount);
       expect(expanded.mountedCount).toBeLessThan(60);
       expect(await pageRequestCount(fixture.page)).toBeGreaterThan(0);
       expect(await app.hasButton("Load more")).toBe(false);
@@ -323,28 +344,38 @@ describe("Lightpanda transcript scrolling", () => {
 
       await fixture.integration.restartGarcon();
       await fixture.page.setViewport({ width: 1_280, height: 800 });
+      await recordDisplayWindows(fixture.page);
       await app.openChat(chatId);
       await fixture.waitForSpaWebSocket();
-      await waitForModelCount(fixture.page, 50);
+      await waitForModelCount(fixture.page, 1);
       await waitForTranscriptIdle(fixture.page);
       await installPageRequestGate(fixture.page);
 
       const initial = await virtualTranscriptSnapshot(fixture.page);
-      expect(initial.modelCount).toBeGreaterThanOrEqual(50);
-      await app.waitForExactTextCount(`echo:${thirdEra.at(-1)}`, 1);
-
-      await requestEarlierPageByScroll(fixture.page);
-      await waitForModelCount(fixture.page, initial.modelCount + 50);
-      await waitForTranscriptIdle(fixture.page);
-      await requestEarlierPageByScroll(fixture.page);
-      const expectedCompleteModelCount =
-        initial.modelCount - 50 + expectedUsers.length * 2 + handoffRows;
-      await waitForModelCount(fixture.page, expectedCompleteModelCount);
-      await waitForTranscriptIdle(fixture.page);
+      let oldest = (await availableWindows(fixture.page)).at(-1)!;
+      expect(oldest.items).toHaveLength(50);
+      expect(oldest.earlier.kind).toBe('more');
+      expect(oldest.later.kind).toBe('exhausted-through-watermark');
+      // The virtual model also includes two spacers and the earlier boundary.
+      expect(initial.modelCount).toBe(oldest.items.length + 3);
+      for (let page = 0; oldest.earlier.kind === 'more'; page += 1) {
+        expect(page).toBeLessThan(expectedUsers.length);
+        await requestEarlierPage(fixture.page);
+        await waitForEarlierWindow(fixture.page, oldest.interval.after);
+        oldest = (await availableWindows(fixture.page)).reduce((first, window) =>
+          window.interval.after < first.interval.after ? window : first);
+        expect((await virtualTranscriptSnapshot(fixture.page)).mountedCount).toBeLessThan(60);
+      }
+      const readOrdinals = new Set((await availableWindows(fixture.page)).flatMap(window =>
+        window.items.map(item => {
+          if (item.kind !== 'row') throw new Error('Unexpected tool group in conversational history');
+          return item.ordinal;
+        })));
+      expect(readOrdinals.size).toBe(expectedUsers.length * 2 + handoffRows);
 
       const loaded = await virtualTranscriptSnapshot(fixture.page);
-      expect(loaded.modelCount).toBe(expectedCompleteModelCount);
-      expect(loaded.mountedCount).toBeLessThan(loaded.modelCount);
+      expect(loaded.modelCount).toBeLessThan(readOrdinals.size);
+      expect(loaded.mountedCount).toBeLessThanOrEqual(loaded.modelCount);
       expect(await pageRequestCount(fixture.page)).toBeGreaterThan(1);
 
       await app.clickButton("Window actions");

@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   countUserContent,
@@ -175,24 +174,7 @@ describe('fork-run lifecycle', () => {
         clientRequestId,
       });
 
-      const targetUserEvent = fixture.client.eventsSince(cursor).find(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === targetChatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'user-message'
-            && entry.message.content === 'fork-target-new'
-            && entry.message.metadata?.clientMessageId === clientMessageId),
-      );
-      expect(targetUserEvent).toBeDefined();
-      const targetEventUser = targetUserEvent?.messages.find((entry) =>
-        entry.message.type === 'user-message'
-        && entry.message.content === 'fork-target-new');
-      expect(targetEventUser?.message.type === 'user-message'
-        ? targetEventUser.message.metadata
-        : null).toMatchObject({
-        clientMessageId,
-      });
+      const committed = await fixture.client.waitForCommittedUserInput(targetChatId, clientMessageId, { afterIndex: cursor });
       const source = await fixture.client.getMessages(sourceChatId);
       const target = await fixture.client.getMessages(targetChatId);
       expect(userContents(source.messages)).toEqual(['fork-source-first', 'fork-source-second']);
@@ -214,6 +196,7 @@ describe('fork-run lifecycle', () => {
       const finalTargetUser = target.messages.find((entry) =>
         entry.message.type === 'user-message'
         && entry.message.content === 'fork-target-new');
+      expect(committed).toMatchObject({ transcriptViewId: target.transcriptViewId, ordinal: finalTargetUser?.ordinal });
       expect(finalTargetUser?.message.type === 'user-message'
         ? finalTargetUser.message.metadata
         : null).toMatchObject({

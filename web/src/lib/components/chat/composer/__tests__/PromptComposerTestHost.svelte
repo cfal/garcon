@@ -59,7 +59,8 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
-	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
+	import type { PromptRecallSource } from '$lib/chat/composer/prompt-recall';
+	import type { ResendCandidate } from '$shared/chat-view';
 	import type { InputFormatByModel } from '$shared/input-format';
 	import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 	import {
@@ -68,7 +69,8 @@
 	} from '$shared/attachments';
 
 	interface Props {
-		recallPrompts?: readonly RecallPrompt[];
+		resendCandidates?: readonly ResendCandidate[];
+		recallPrompts?: readonly { ordinal: number; content: string }[];
 		selectedExecutorId?: string;
 		executors?: readonly ExecutorSnapshot[];
 		catalog?: ModelCatalogStore;
@@ -111,6 +113,7 @@
 	}
 
 	let {
+		resendCandidates,
 		recallPrompts = [],
 		selectedExecutorId = 'local',
 		executors: executorSnapshots,
@@ -154,6 +157,14 @@
 	}: Props = $props();
 
 	let composerNotice = $state.raw<ComposerAvailabilityNoticePresentation | null>(null);
+	const recallSource: PromptRecallSource = {
+		list: async () => recallPrompts.map(({ ordinal }) => ({ ordinal, watermark: ordinal })),
+		load: async ({ ordinal }) => {
+			const prompt = recallPrompts.find(candidate => candidate.ordinal === ordinal);
+			if (!prompt) throw new Error('Prompt unavailable');
+			return prompt.content;
+		},
+	};
 	const chatDrafts = new ChatDraftStore();
 	const composer = new ComposerState(chatDrafts, {
 		get activeChatId() {
@@ -550,7 +561,8 @@
 	{onCommit}
 />
 <PromptComposer
-	{recallPrompts}
+	{recallSource}
+	onRecallError={message => notifications.error(message)}
 	recallIdentity={`${selectedChatId}:synthetic-view`}
 	{onsubmit}
 	{onSteerPreferredSubmit}
@@ -564,7 +576,7 @@
 		composerNotice = notice;
 		onAvailabilityNoticeChange?.(notice);
 	}}
-	resendCandidates={transcript.resendCandidates}
+	resendCandidates={resendCandidates ?? transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />
 

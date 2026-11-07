@@ -1,1079 +1,181 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-	AssistantMessage,
-	CommandOutputMessage,
-	CommandResultMessage,
-	BashToolUseMessage,
-	CliRowMessage,
-	ExternalToolUseMessage,
-	McpToolUseMessage,
-	PermissionRequestMessage,
-	ToolResultMessage,
-	TranscriptNoticeMessage,
-	UnknownToolUseMessage,
-	UserMessage,
-	WaitToolUseMessage,
-	type ChatMessage,
-} from '$shared/chat-types';
-import {
-	announcementForAppendedRow,
-	CHAT_FEED_ANNOUNCEMENT_BATCH_MS,
-	ConversationFeedAnnouncementBatcher,
-	ConversationFeedAnnouncerState,
-	plainAnnouncementText,
-} from '../conversation-feed-announcer';
-import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations';
-import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands';
+import { AssistantMessage, BashToolUseMessage, CliRowMessage, CommandOutputMessage, CommandResultMessage,
+	ExternalToolUseMessage, McpToolUseMessage, PermissionRequestMessage, ToolResultMessage, UnknownToolUseMessage, UserMessage, WaitToolUseMessage,
+	type ChatMessage } from '$shared/chat-types';
+import { emptyResponseClassOrdinals, type ResponseClassOrdinals } from '$shared/transcript-display-events';
+import type { ChatDisplayRow } from '$lib/chat/transcript/transcript-row-projection.js';
+import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS, ConversationFeedAnnouncementBatcher, ConversationFeedAnnouncerState,
+	announcementForAppendedRow, plainAnnouncementText } from '../conversation-feed-announcer.js';
 
-function clock(
-	dataRevision: number,
-	liveAppendRevision = 0,
-	presentationRevision = 0,
-	responseRevisions: Readonly<Record<string, number>> = liveAppendRevision > 0
-		? { 'assistant-message': liveAppendRevision }
-		: {},
-): ConversationFeedMutationClock {
-	return {
-		dataRevision,
-		lastResponseRevisionByMessageType: responseRevisions,
-		lastRevisionByKind: {
-			initial: 0,
-			'live-append': liveAppendRevision,
-			'history-earlier': 0,
-			'history-later': 0,
-			replacement: 0,
-			'presentation-structure': presentationRevision,
-		},
-	};
+const row = (ordinal: number, message: ChatMessage): ChatDisplayRow => ({ kind: 'message', id: `view:${ordinal}`, ordinal, message });
+const assistant = (ordinal: number, text: string) => row(ordinal, new AssistantMessage('', text));
+const permission = (ordinal: number, id = 'permission-1') => row(ordinal, new PermissionRequestMessage('', id, new BashToolUseMessage('', 'tool-1', 'true')));
+const responses = (values: Partial<ResponseClassOrdinals> = {}): ResponseClassOrdinals => ({ ...emptyResponseClassOrdinals(), ...values });
+function input(overrides: Partial<Parameters<ConversationFeedAnnouncerState['reconcile']>[0]> = {}) {
+	return { surfaceIdentity: 'chat:view', rows: [assistant(1, 'Existing')], watermark: 1, initialHead: 1, sourceHead: 1,
+		responseClassOrdinals: responses({ assistant: 1 }), visible: true, pinnedToBottom: true,
+		detachedStatus: 'New response available', floatingPermissionOccurrences: [], ...overrides };
+}
+function initialized() {
+	const announcer = new ConversationFeedAnnouncerState();
+	expect(announcer.reconcile(input())).toBe('');
+	return announcer;
 }
 
-function assistantRow(id: string, content: string) {
-	return {
-		kind: 'message' as const,
-		id,
-		seq: Number(id),
-		message: new AssistantMessage('2026-01-01T00:00:00.000Z', content),
-	};
-}
-
-function messageRow(id: string, message: ChatMessage) {
-	return { kind: 'message' as const, id, seq: Number(id), message };
-}
-
-const enabled = {
-	visible: true,
-	pinnedToBottom: true,
-	isLiveWindow: true,
-	detachedStatus: 'New response available',
-	hiddenToolTypes: [] as string[],
-	hiddenBashCommands: null,
-	floatingPermissionOccurrences: [] as string[],
-};
-
-describe('ConversationFeedAnnouncerState', () => {
-	it('announces bounded command evidence without Markdown normalization', () => {
-		const source = '  > file; printf "**literal**"\n';
-		expect(announcementForAppendedRow(messageRow('1', new UserMessage('', source, undefined, { contentMode: 'literal' })), [])).toBe(source);
-		expect(announcementForAppendedRow(messageRow('2', new CommandOutputMessage('', 'command-1', 'stderr', 'plain',
-			source, { executorId: 'local', projectPath: '/workspace' })), [])).toBe(source);
-		expect(announcementForAppendedRow(messageRow('3', new CommandResultMessage('', 'command-1', {
-			outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' },
-		})), [])).toBeNull();
+describe('certified feed announcements', () => {
+	it.each([false, true])('does not consume future permission lineage before it can be announced, floating=%s', floating => {
+		const announcer = initialized();
+		const future = input({ rows: [permission(2)], sourceHead: 2 });
+		expect(announcer.reconcile(future)).toBeNull();
+		expect(announcer.reconcile({ ...future, watermark: floating ? 1 : 2,
+			floatingPermissionOccurrences: floating ? ['permission-1'] : [] })).toBe('Permission required');
+		expect(announcer.reconcile({ ...future, watermark: 2, floatingPermissionOccurrences: ['permission-1'] })).toBeNull();
+	});
+	it('announces newly accepted rows, not descriptor refreshes or historical member hydration', () => {
+		const announcer = initialized();
+		const next = input({ rows: [assistant(1, 'Existing'), assistant(2, '**New** response')], watermark: 2, sourceHead: 2,
+			responseClassOrdinals: responses({ assistant: 2 }) });
+		expect(announcer.reconcile(next)).toBe('New response');
+		expect(announcer.reconcile(next)).toBeNull();
+		expect(announcer.reconcile({ ...next, rows: [row(1, new BashToolUseMessage('', 'tool-1', 'true')), ...next.rows] })).toBeNull();
 	});
 
-	it.each(['error', 'warning'] as const)('announces a durable %s once and keeps missing-result fallback', noticeType => {
-		const initial = assistantRow('1', 'initial');
-		const message = new CommandResultMessage('', 'command-1', {
-			outcome: noticeType === 'error' ? 'failed' : 'finished',
-			exitCode: noticeType === 'error' ? 127 : 0, signal: null,
-			capture: noticeType === 'error' ? 'complete' : 'truncated', cwd: { kind: 'reported', path: '/workspace' },
-		});
-		const result = messageRow('2', message);
-		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType, content: message.content, timestamp: '' };
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial], mutationClock: clock(1), ...enabled });
-		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result], mutationClock: clock(2, 2), ...enabled })).toBe(message.content);
-		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBeNull();
-		announcer.reconcile({ surfaceIdentity: 'other', rows: [initial], mutationClock: clock(1), ...enabled });
-		expect(announcer.reconcile({ surfaceIdentity: 'other', rows: [initial, notice], mutationClock: clock(2, 0, 2), ...enabled })).toBe(plainAnnouncementText(message.content));
+	it('waits for hydration after a live head notification', () => {
+		const announcer = initialized();
+		const head = input({ sourceHead: 2, responseClassOrdinals: responses({ assistant: 2 }) });
+		expect(announcer.reconcile(head)).toBeNull();
+		expect(announcer.reconcile({ ...head, watermark: 2, rows: [assistant(2, 'Prepared response')] })).toBe('Prepared response');
 	});
 
-	it('announces the error once when its durable notice has no announcement', () => {
-		const initial = assistantRow('1', 'initial');
-		const message = new TranscriptNoticeMessage('', 'Working directory save failed');
-		const diagnostic = messageRow('2', message);
-		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType: 'error' as const, content: message.content, timestamp: '' };
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial], mutationClock: clock(1), ...enabled });
-		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, diagnostic], mutationClock: clock(2, 2), ...enabled })).toBeNull();
-		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, diagnostic, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBe(message.content);
+	it('does not announce filtered or collapsed member bodies merely because the head advances', () => {
+		const announcer = initialized();
+		const head = input({ sourceHead: 1000, watermark: 1000, responseClassOrdinals: responses({ tool: 999 }) });
+		expect(announcer.reconcile(head)).toBeNull();
+		expect(announcer.reconcile({ ...head, rows: [row(500, new BashToolUseMessage('', 'tool-1', 'true'))] })).toBeNull();
 	});
 
-	it('does not announce the initial or replacement transcript', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing')],
-				mutationClock: clock(1),
-				...enabled,
-			}),
-		).toBe('');
+	it('reports detached progress once without speaking subsequent catch-up bodies', () => {
+		const announcer = initialized();
+		const detached = input({ pinnedToBottom: false, sourceHead: 2, responseClassOrdinals: responses({ assistant: 2 }) });
+		expect(announcer.reconcile(detached)).toBe('New response available');
+		expect(announcer.reconcile({ ...detached, sourceHead: 3, responseClassOrdinals: responses({ assistant: 3 }) })).toBeNull();
+		expect(announcer.reconcile({ ...detached, pinnedToBottom: true, sourceHead: 3, watermark: 3, rows: [assistant(3, 'Already notified')] })).toBe('');
 	});
 
-	it('announces only newly appended visible conversation text at the live end', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), assistantRow('2', 'new response')],
-				mutationClock: clock(2, 2),
-				...enabled,
-			}),
-		).toBe('new response');
+	it('consumes head progress while hidden even when the index has not hydrated it', () => {
+		const announcer = initialized();
+		const hidden = input({ visible: false, sourceHead: 5, responseClassOrdinals: responses({ assistant: 5 }) });
+		expect(announcer.reconcile(hidden)).toBe('');
+		expect(announcer.reconcile({ ...hidden, visible: true })).toBeNull();
+		expect(announcer.reconcile({ ...hidden, visible: true, watermark: 5, rows: [assistant(5, 'Hidden response')] })).toBeNull();
+		expect(announcer.reconcile(input({ sourceHead: 6, watermark: 6, rows: [assistant(6, 'Visible response')], responseClassOrdinals: responses({ assistant: 6 }) }))).toBe('Visible response');
 	});
 
-	it('acknowledges hidden and detached appends without replaying them later', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), assistantRow('2', 'while detached')],
-				mutationClock: clock(2, 2),
-				...enabled,
-				visible: false,
-				pinnedToBottom: false,
-			}),
-		).toBe('');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), assistantRow('2', 'while detached')],
-				mutationClock: clock(2, 2),
-				...enabled,
-			}),
-		).toBeNull();
+	it('suppresses cold activation and reconnect history through the admitted open head', () => {
+		const announcer = initialized();
+		const opening = input({ initialHead: 100, sourceHead: 100, responseClassOrdinals: responses({ assistant: 99 }) });
+		expect(announcer.reconcile(opening)).toBeNull();
+		expect(announcer.reconcile({ ...opening, watermark: 100, rows: [assistant(99, 'Historical')] })).toBeNull();
 	});
 
-	it('emits one concise status while visibly detached', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), assistantRow('2', 'first unseen response')],
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-			}),
-		).toBe('New response available');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					assistantRow('2', 'first unseen response'),
-					assistantRow('3', 'second unseen response'),
-				],
-				mutationClock: clock(3, 3),
-				...enabled,
-				pinnedToBottom: false,
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					assistantRow('2', 'first unseen response'),
-					assistantRow('3', 'second unseen response'),
-				],
-				mutationClock: clock(3, 3),
-				...enabled,
-			}),
-		).toBe('');
+	it('resets announcement identity on chat and view changes', () => {
+		const announcer = initialized();
+		expect(announcer.reconcile(input({ sourceHead: 50, watermark: 50, rows: [assistant(50, 'First chat')] }))).toBe('First chat');
+		expect(announcer.reconcile(input({ surfaceIdentity: 'different:view' }))).toBe('');
+		expect(announcer.reconcile(input({ surfaceIdentity: 'different:view', sourceHead: 2, watermark: 2, rows: [assistant(2, 'Second chat')] }))).toBe('Second chat');
 	});
 
-	it('announces live responses and permissions while viewing an older window', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBe('New response available');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(3, 3),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBeNull();
-
-		const permissionAnnouncer = new ConversationFeedAnnouncerState();
-		permissionAnnouncer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-		expect(
-			permissionAnnouncer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(1),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBe('New response available');
+	it.each([true, false])('does not repeat optimistic input after its durable echo (visible=%s)', visible => {
+		const announcer = initialized();
+		const message = new UserMessage('', 'Send once', undefined, { clientMessageId: 'input-1' });
+		const pending: ChatDisplayRow = { kind: 'message', id: 'optimistic:input-1', message };
+		expect(announcer.reconcile(input({ rows: [pending], visible }))).toBe(visible ? 'Send once' : '');
+		expect(announcer.reconcile(input({ rows: [pending] }))).toBeNull();
+		expect(announcer.reconcile(input({ rows: [row(2, message)], watermark: 2, sourceHead: 2 }))).toBeNull();
 	});
 
-	it('filters historical response status through the visible tool contract', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2, 0, { 'wait-tool-use': 2 }),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(3, 3, 0, { 'bash-tool-use': 3 }),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-				hiddenToolTypes: ['bash-tool-use'],
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(4, 4, 0, { 'bash-tool-use': 4 }),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBe('New response available');
+	it.each([true, false])('does not repeat a floating permission after durable hydration (visible=%s)', visible => {
+		const announcer = initialized();
+		expect(announcer.reconcile(input({ floatingPermissionOccurrences: ['permission-1'], visible }))).toBe(visible ? 'Permission required' : '');
+		expect(announcer.reconcile(input({ rows: [permission(2)], watermark: 2, sourceHead: 2 }))).toBeNull();
+		expect(announcer.reconcile(input({ rows: [permission(3, 'permission-2')], watermark: 3, sourceHead: 3 }))).toBe('Permission required');
 	});
 
-	it('keeps detached response status type-based when command content is unavailable', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		const hiddenBashCommands = compileHiddenBashCommandPatterns([
-			{ pattern: 'git *', mode: 'glob' },
-		]);
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-			hiddenBashCommands,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2, 0, { 'bash-tool-use': 2 }),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-				hiddenBashCommands,
-			}),
-		).toBe('New response available');
+	it('deduplicates a capability that appears in the same projection as its durable request', () => {
+		const announcer = initialized();
+		expect(announcer.reconcile(input({ rows: [permission(2)], watermark: 2, sourceHead: 2, floatingPermissionOccurrences: ['permission-1'] }))).toBe('Permission required');
 	});
 
-	it.each([
-		'wait-tool-use',
-		'unknown-tool-use',
-		'external-tool-use',
-		'mcp-tool-use',
-		'thinking',
-		'error',
-	])('does not announce suppressed historical response type %s', (messageType) => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2, 0, { [messageType]: 2 }),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBeNull();
+	it('retains active permission lineage when older history exceeds its bounded cache', () => {
+		const announcer = initialized();
+		announcer.reconcile(input({ floatingPermissionOccurrences: ['permission-1'] }));
+		const rows = Array.from({ length: 513 }, (_, index) => permission(index + 2, `historical-${index}`));
+		announcer.reconcile(input({ rows, watermark: 514, sourceHead: 514, floatingPermissionOccurrences: ['permission-1'], visible: false }));
+		expect(announcer.reconcile(input({ rows: [...rows, permission(515)], watermark: 515, sourceHead: 515 }))).toBeNull();
 	});
 
-	it('checks each historical response type against its own revision', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(2, 0, 0, { 'assistant-message': 1 }),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(3, 3, 0, {
-					'assistant-message': 1,
-					'wait-tool-use': 3,
-				}),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(4, 4, 0, {
-					'assistant-message': 4,
-					'wait-tool-use': 3,
-				}),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBe('New response available');
+	it('announces local notices without requiring a new canonical watermark', () => {
+		const announcer = initialized();
+		const notice: ChatDisplayRow = { kind: 'local-notice', id: 'notice-1', noticeType: 'info', content: '**Working**', timestamp: '' };
+		expect(announcer.reconcile(input({ rows: [notice] }))).toBe('Working');
+		expect(announcer.reconcile(input({ rows: [] }))).toBeNull();
+		expect(announcer.reconcile(input({ rows: [notice] }))).toBeNull();
 	});
 
-	it('announces a historical batch containing suppressed and visible response types', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2, 0, {
-					'assistant-message': 2,
-					'wait-tool-use': 2,
-				}),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBe('New response available');
+	it('preserves literal command punctuation and CLI presentation semantics', () => {
+		const output = new CommandOutputMessage('', 'command', 'stdout', 'plain', 'file_name **literal**', null);
+		expect(announcementForAppendedRow(row(1, output))).toBe('file_name **literal**');
+		expect(announcementForAppendedRow(row(1, new UserMessage('', 'file_name', undefined, { contentMode: 'literal' })))).toBe('file_name');
+		expect(announcementForAppendedRow(row(1, new UserMessage('', '**Complete**', undefined, undefined, { origin: 'cli', style: 'info', title: 'Status' })))).toBe('CLI info: Status. Complete');
+		expect(announcementForAppendedRow(row(1, new CliRowMessage('', '**Complete**', { style: 'notice' }, 'markdown', 'Deploy')))).toBe('CLI notice: Deploy. Complete');
 	});
 
-	it('allows a new detached status after returning from a historical window', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const olderRows = [assistantRow('1', 'older response')];
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: olderRows,
-			mutationClock: clock(1),
-			...enabled,
-			pinnedToBottom: false,
-			isLiveWindow: false,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-				isLiveWindow: false,
-			}),
-		).toBe('New response available');
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: olderRows,
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-			}),
-		).toBe('');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [...olderRows, assistantRow('2', 'new live response')],
-				mutationClock: clock(3, 3),
-				...enabled,
-				pinnedToBottom: false,
-			}),
-		).toBe('New response available');
+	it('keeps private tool labels and intrinsically silent results out of speech', () => {
+		const messages = [new UnknownToolUseMessage('', 'tool', 'private_name', {}), new ExternalToolUseMessage('', 'tool', 'private_name', {}, 'provider'),
+			new McpToolUseMessage('', 'tool', 'server', 'private_tool', {}), new WaitToolUseMessage('', 'tool', 'execution'), new ToolResultMessage('', 'tool', {}, false),
+			new CommandResultMessage('', 'command', { outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' } })];
+		for (const message of messages) expect(announcementForAppendedRow(row(1, message))).toBeNull();
+		expect(announcementForAppendedRow(row(1, new BashToolUseMessage('', 'tool', 'true')))).toBe('Bash');
 	});
 
-	it('treats visible tool output as a detached response update', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		const firstTool = messageRow('2', new BashToolUseMessage('', 'tool-1', 'pwd'));
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), firstTool],
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-			}),
-		).toBe('New response available');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					firstTool,
-					messageRow('3', new BashToolUseMessage('', 'tool-2', 'ls')),
-				],
-				mutationClock: clock(3, 3),
-				...enabled,
-				pinnedToBottom: false,
-			}),
-		).toBeNull();
-	});
-
-	it('does not treat suppressed tool output as a detached response update', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					messageRow('2', new BashToolUseMessage('', 'tool-1', 'pwd')),
-				],
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-				hiddenToolTypes: ['bash-tool-use'],
-			}),
-		).toBeNull();
-	});
-
-	it('does not announce or treat as a response bash output hidden by a command pattern', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		const hiddenBashCommands = compileHiddenBashCommandPatterns([
-			{ pattern: 'git *', mode: 'glob' },
-		]);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					messageRow('2', new BashToolUseMessage('', 'tool-1', 'git status')),
-				],
-				mutationClock: clock(2, 2),
-				...enabled,
-				pinnedToBottom: false,
-				hiddenBashCommands,
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					messageRow('2', new BashToolUseMessage('', 'tool-1', 'git status')),
-				],
-				mutationClock: clock(2, 2),
-				...enabled,
-				hiddenBashCommands,
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					messageRow('2', new BashToolUseMessage('', 'tool-1', 'git status')),
-					messageRow('3', new BashToolUseMessage('', 'tool-2', 'pwd')),
-				],
-				mutationClock: clock(3, 3),
-				...enabled,
-				hiddenBashCommands,
-			}),
-		).toBe('Bash');
-	});
-
-	it('announces only the newly streamed suffix at the live end', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'Hello')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'Hello world')],
-				mutationClock: clock(2, 2),
-				...enabled,
-			}),
-		).toBe('world');
-	});
-
-	it('flattens Markdown without exposing formatting punctuation', () => {
-		expect(plainAnnouncementText('## See [the file](/tmp/file) and `value`')).toBe(
-			'See the file and value',
-		);
-		expect(plainAnnouncementText('Before\n```ts\nconst value = 1;\n```\nafter')).toBe(
-			'Before Code block after',
-		);
-	});
-
-	it('announces user text, local notices, known tools, and permission requests', () => {
-		expect(announcementForAppendedRow(messageRow('1', new UserMessage('', 'hello')), [])).toBe(
-			'hello',
-		);
-		expect(
-			announcementForAppendedRow(messageRow('4', new UserMessage(
-				'',
-				'consultation complete',
-				undefined,
-				undefined,
-				{ origin: 'cli', style: 'info', title: 'Status' },
-			)), []),
-		).toBe('CLI info: Status. consultation complete');
-		expect(
-			announcementForAppendedRow(messageRow('5', new CliRowMessage(
-				'',
-				'**deployment complete**',
-				{ style: 'notice' },
-				'markdown',
-				'Deploy',
-			)), []),
-		).toBe('CLI notice: Deploy. deployment complete');
-		expect(
-			announcementForAppendedRow(
-				{
-					kind: 'local-notice',
-					id: 'notice',
-					noticeType: 'info',
-					content: '**updated**',
-					timestamp: '',
-				},
-				[],
-			),
-		).toBe('updated');
-		expect(
-			announcementForAppendedRow(messageRow('2', new BashToolUseMessage('', 'tool-1', 'pwd')), []),
-		).toBe('Bash');
-		expect(
-			announcementForAppendedRow(
-				messageRow(
-					'3',
-					new PermissionRequestMessage(
-						'',
-						'incarnation-1',
-						new BashToolUseMessage('', 'tool-2', 'rm file'),
-					),
-				),
-				[],
-			),
-		).toBe('Permission required');
-	});
-
-	it('suppresses hidden, terminal, unknown, external, MCP, and nonvisual tools', () => {
-		expect(
-			announcementForAppendedRow(messageRow('1', new BashToolUseMessage('', 'tool-1', 'pwd')), [
-				'bash-tool-use',
-			]),
-		).toBeNull();
-		expect(
-			announcementForAppendedRow(
-				messageRow('2', new WaitToolUseMessage('', 'tool-2', 'execution-1')),
-				[],
-			),
-		).toBeNull();
-		expect(
-			announcementForAppendedRow(
-				messageRow('3', new UnknownToolUseMessage('', 'tool-3', 'secret_provider_name', {})),
-				[],
-			),
-		).toBeNull();
-		expect(
-			announcementForAppendedRow(
-				messageRow('4', new ExternalToolUseMessage('', 'tool-4', 'secret', {}, 'provider')),
-				[],
-			),
-		).toBeNull();
-		expect(
-			announcementForAppendedRow(
-				messageRow('5', new McpToolUseMessage('', 'tool-5', 'server', 'private_tool', {})),
-				[],
-			),
-		).toBeNull();
-		expect(
-			announcementForAppendedRow(
-				messageRow('6', new ToolResultMessage('', 'tool-1', {}, false)),
-				[],
-			),
-		).toBeNull();
-	});
-
-	it('announces appended local notices and floating permissions without virtual mount events', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					{
-						kind: 'local-notice',
-						id: 'notice',
-						noticeType: 'info',
-						content: 'Working',
-						timestamp: '',
-					},
-				],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-			}),
-		).toBe('Working');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [
-					assistantRow('1', 'existing'),
-					{
-						kind: 'local-notice',
-						id: 'notice',
-						noticeType: 'info',
-						content: 'Working',
-						timestamp: '',
-					},
-				],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBe('Permission required');
-	});
-
-	it('announces the newest row when a large live batch trims the previous tail', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		const replacementWindow = Array.from({ length: 200 }, (_, index) =>
-			assistantRow(String(index + 2), `response ${index + 2}`),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: replacementWindow,
-				mutationClock: clock(2, 2),
-				...enabled,
-			}),
-		).toBe('response 201');
-	});
-
-	it('does not repeat a pending user message when its durable echo replaces it', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		const pending = messageRow(
-			'2',
-			new UserMessage('', 'send once', undefined, { clientRequestId: 'request-1' }),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), pending],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-			}),
-		).toBe('send once');
-		const durable = { ...pending, id: '3', ordinal: 3 };
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), durable],
-				mutationClock: clock(3, 3, 2),
-				...enabled,
-			}),
-		).toBeNull();
-	});
-
-	it('does not repeat a floating permission when its transcript row replaces it', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing')],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBe('Permission required');
-		const permission = messageRow(
-			'2',
-			new PermissionRequestMessage(
-				'',
-				'incarnation-1',
-				new BashToolUseMessage('', 'tool-1', 'pwd'),
-			),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), permission],
-				mutationClock: clock(3, 3, 2),
-				...enabled,
-			}),
-		).toBeNull();
-	});
-
-	it('announces distinct permission occurrences independently', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		const existing = assistantRow('1', 'existing');
-		const first = messageRow(
-			'2',
-			new PermissionRequestMessage(
-				'',
-				'incarnation-1',
-				new BashToolUseMessage('', 'tool-1', 'printf first'),
-			),
-		);
-		const second = messageRow(
-			'3',
-			new PermissionRequestMessage(
-				'',
-				'incarnation-2',
-				new BashToolUseMessage('', 'tool-2', 'printf second'),
-			),
-		);
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [existing],
-			mutationClock: clock(1),
-			...enabled,
-		});
-
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [existing, first],
-				mutationClock: clock(2, 2, 2),
-				...enabled,
-			}),
-		).toBe('Permission required');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [existing, first, second],
-				mutationClock: clock(3, 3, 2),
-				...enabled,
-			}),
-		).toBe('Permission required');
-	});
-
-	it('does not replay a hidden pending user message after its durable echo arrives', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		const pending = messageRow(
-			'2',
-			new UserMessage('', 'send once', undefined, { clientRequestId: 'request-1' }),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), pending],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-				visible: false,
-			}),
-		).toBe('');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), pending],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-			}),
-		).toBeNull();
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), { ...pending, id: '3', ordinal: 3 }],
-				mutationClock: clock(3, 3, 2),
-				...enabled,
-			}),
-		).toBeNull();
-	});
-
-	it('does not replay a hidden floating permission after its transcript row arrives', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing')],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-				visible: false,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBe('');
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing')],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBeNull();
-		const permission = messageRow(
-			'2',
-			new PermissionRequestMessage(
-				'',
-				'incarnation-1',
-				new BashToolUseMessage('', 'tool-1', 'pwd'),
-			),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), permission],
-				mutationClock: clock(3, 3, 2),
-				...enabled,
-			}),
-		).toBeNull();
-	});
-
-	it('retains an active floating permission lineage at the bounded history limit', () => {
-		const announcer = new ConversationFeedAnnouncerState();
-		announcer.reconcile({
-			surfaceIdentity: 'chat:generation',
-			rows: [assistantRow('1', 'existing')],
-			mutationClock: clock(1),
-			...enabled,
-		});
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing')],
-				mutationClock: clock(2, 0, 2),
-				...enabled,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBe('Permission required');
-
-		const historicalPermissions = Array.from({ length: 513 }, (_, index) =>
-			messageRow(
-				String(index + 2),
-				new PermissionRequestMessage(
-					'',
-					`incarnation-history-${index}`,
-					new BashToolUseMessage('', `tool-${index}`, 'pwd'),
-				),
-			),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), ...historicalPermissions],
-				mutationClock: clock(3, 3, 2),
-				...enabled,
-				visible: false,
-				floatingPermissionOccurrences: ['incarnation-1'],
-			}),
-		).toBe('');
-
-		const durablePermission = messageRow(
-			'515',
-			new PermissionRequestMessage(
-				'',
-				'incarnation-1',
-				new BashToolUseMessage('', 'tool-active', 'pwd'),
-			),
-		);
-		expect(
-			announcer.reconcile({
-				surfaceIdentity: 'chat:generation',
-				rows: [assistantRow('1', 'existing'), ...historicalPermissions, durablePermission],
-				mutationClock: clock(4, 4, 2),
-				...enabled,
-			}),
-		).toBeNull();
+	it('flattens Markdown, links, and code blocks without punctuation noise', () => {
+		expect(plainAnnouncementText('## See [the file](/workspace/file) and `value`')).toBe('See the file and value');
+		expect(plainAnnouncementText('Before\n```ts\nconst value = 1;\n```\nafter')).toBe('Before Code block after');
 	});
 });
 
 describe('ConversationFeedAnnouncementBatcher', () => {
 	beforeEach(() => vi.useFakeTimers());
 	afterEach(() => vi.useRealTimers());
-
-	it('batches rapid streamed fragments without splitting words', () => {
+	it('batches rapid discrete announcements on the original deadline', () => {
 		const publish = vi.fn<(text: string) => void>();
 		const batcher = new ConversationFeedAnnouncementBatcher(publish);
-
-		batcher.enqueue({
-			kind: 'announce',
-			chunks: [{ kind: 'stream', rowId: 'assistant-1', source: 'hel' }],
-		});
+		batcher.enqueue({ kind: 'announce', chunks: ['First response'] });
 		vi.advanceTimersByTime(100);
-		batcher.enqueue({
-			kind: 'announce',
-			chunks: [{ kind: 'stream', rowId: 'assistant-1', source: 'lo world' }],
-		});
-
+		batcher.enqueue({ kind: 'announce', chunks: ['Second response'] });
 		expect(publish).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS - 100);
-		expect(publish).toHaveBeenCalledOnce();
-		expect(publish).toHaveBeenCalledWith('hello world');
+		expect(publish).toHaveBeenCalledExactlyOnceWith('First response\nSecond response');
+		batcher.destroy();
 	});
-
-	it('keeps distinct rows and actions as separate semantic chunks', () => {
+	it('keeps distinct rows and commands separate', () => {
 		const publish = vi.fn<(text: string) => void>();
 		const batcher = new ConversationFeedAnnouncementBatcher(publish);
-
-		batcher.enqueue({
-			kind: 'announce',
-			chunks: [
-				{ kind: 'stream', rowId: 'assistant-1', source: 'First response' },
-				{ kind: 'discrete', text: 'Permission required' },
-				{ kind: 'stream', rowId: 'assistant-2', source: 'Second response' },
-			],
-		});
+		batcher.enqueue({ kind: 'announce', chunks: ['First response', 'Permission required', 'Second response'] });
 		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
-
 		expect(publish).toHaveBeenCalledWith('First response\nPermission required\nSecond response');
+		batcher.destroy();
 	});
-
-	it('cancels queued speech when the announcement surface clears', () => {
+	it('cancels pending speech when hidden or destroyed', () => {
 		const publish = vi.fn<(text: string) => void>();
 		const batcher = new ConversationFeedAnnouncementBatcher(publish);
-		batcher.enqueue({
-			kind: 'announce',
-			chunks: [{ kind: 'stream', rowId: 'assistant-1', source: 'stale response' }],
-		});
-
+		const update = { kind: 'announce' as const, chunks: ['Stale'] };
+		batcher.enqueue(update);
 		batcher.enqueue({ kind: 'clear' });
-		expect(publish).toHaveBeenCalledOnce();
-		expect(publish).toHaveBeenCalledWith('');
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+		expect(publish).toHaveBeenCalledExactlyOnceWith('');
+		batcher.enqueue(update);
+		batcher.destroy();
 		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
 		expect(publish).toHaveBeenCalledOnce();
 	});

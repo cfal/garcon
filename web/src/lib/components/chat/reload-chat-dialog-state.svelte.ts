@@ -8,6 +8,7 @@ import type {
 interface PendingReload {
 	readonly chatId: string;
 	readonly candidates: readonly ResendCandidate[];
+	readonly summaryIncomplete: boolean;
 	readonly complete: () => void;
 	readonly fail: (error: unknown) => void;
 }
@@ -32,6 +33,7 @@ export class ReloadChatDialogState {
 	get candidates(): readonly ResendCandidate[] {
 		return this.#pending?.candidates ?? [];
 	}
+	get summaryIncomplete(): boolean { return this.#pending?.summaryIncomplete ?? false; }
 
 	get running(): boolean {
 		return this.#cancellation !== null;
@@ -46,9 +48,9 @@ export class ReloadChatDialogState {
 	}
 
 	/** Opens the confirmation. Settles when it is dismissed or the reload ends. */
-	request(chatId: string, candidates: readonly ResendCandidate[]): Promise<void> {
+	request(chatId: string, candidates: readonly ResendCandidate[], summary: { incomplete?: boolean } = {}): Promise<void> {
 		return new Promise<void>((complete, fail) => {
-			this.#pending = { chatId, candidates, complete, fail };
+			this.#pending = { chatId, candidates, summaryIncomplete: summary.incomplete ?? false, complete, fail };
 		});
 	}
 

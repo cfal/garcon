@@ -60,3 +60,8 @@ export interface ToolDisplayRule {
 	input: ToolInputDisplayRule;
 	result?: ToolResultDisplayRule;
 }
+
+export interface ToolVisualRule {
+	input: Omit<ToolInputDisplayRule, 'mode'>;
+	result?: Omit<ToolResultDisplayRule, 'hidden' | 'hideOnSuccess' | 'mode'>;
+}

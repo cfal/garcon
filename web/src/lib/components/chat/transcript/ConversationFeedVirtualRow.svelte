@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
 	import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 	import ConversationFeedVirtualItem from './ConversationFeedVirtualItem.svelte';
 	import type { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
@@ -26,7 +27,6 @@
 		controller: ConversationFeedVirtualController;
 		retention: ConversationFeedRetentionState;
 		renderModel: ConversationFeedRenderModel;
-		showThinking: boolean;
 		pendingPermissionRequests: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		earlierPageState: TranscriptPageState;
@@ -43,7 +43,8 @@
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;
 		itemState: ConversationFeedItemState;
-		onToggleToolGroup?: (memberIds: readonly string[], expanded: boolean) => void;
+		onToggleToolGroup?: (group: GroupDescriptor, expanded: boolean) => void;
+		onLoadMembers?: (group: GroupDescriptor, anchor: MemberWindowRequest['anchor']) => void;
 	}
 
 	let {
@@ -52,7 +53,6 @@
 		controller,
 		retention,
 		renderModel,
-		showThinking,
 		pendingPermissionRequests,
 		chatContext = null,
 		earlierPageState,
@@ -70,6 +70,7 @@
 		canForkAtMessageNow,
 		itemState,
 		onToggleToolGroup = () => {},
+		onLoadMembers = () => {},
 	}: Props = $props();
 
 	let wrapper: HTMLDivElement;
@@ -104,7 +105,6 @@
 		<ConversationFeedVirtualItem
 			{item}
 			{renderModel}
-			{showThinking}
 			{pendingPermissionRequests}
 			{chatContext}
 			{earlierPageState}
@@ -122,6 +122,7 @@
 			{canForkAtMessageNow}
 			{itemState}
 			{onToggleToolGroup}
+			{onLoadMembers}
 			acquireTransientActivity={(close) => retention.acquireTransient(item.key, close)}
 		/>
 		{#snippet failed(error)}

@@ -16,8 +16,6 @@ import type {
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
-import { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
-import { fillConversationViewport } from './conversation-viewport-auto-fill.js';
 import { observeConversationQueueResize } from './conversation-queue-resize.js';
 import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type {
@@ -57,16 +55,13 @@ export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
 	isScrollingToBottom = $state(false);
-	#isAutoFillingViewport = $state(false);
 	#isViewportAtStart = $state(true);
-	#refillViewportAfterCurrentFill = false;
-	#compressedAutoFillBudget = new ConversationCompressedAutoFillBudget();
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
 	#initialBottomPaintChatId = $state<string | null>(null);
 	#userScrollIntent: UserScrollIntent = { epoch: 0, direction: null, receivedAt: 0 };
 	#consumedIntentEpoch: Record<TranscriptPageDirection, number> = { earlier: 0, later: 0 };
-	#laterBoundaryArmed = true;
+	#laterBoundaryRequestSignature: string | null = null;
 	#earlierBoundaryRequestSignature: string | null = null;
 	#followLiveRequiresIntentAfter = 0;
 	#previousLogicalOffset: number | null = null;
@@ -84,6 +79,12 @@ export class ConversationScrollController {
 	constructor(private deps: ConversationScrollControllerDeps) {
 		this.#nativeScrollSettlement = new ConversationNativeScrollSettlement((activity) => {
 			this.deps.getViewport()?.setNativeScrollActivity(activity);
+			if (activity === 'idle') this.deps.getViewport()?.requestCoverage();
+		});
+		deps.chatState.setDisplayApplicationGate(async () => {
+			const chatId = deps.getChatId();
+			const settled = await this.#nativeScrollSettlement.waitUntilIdle();
+			return settled === 'settled' && this.#isViewportVisible && deps.getChatId() === chatId ? 'apply' : 'invalidated';
 		});
 		this.#lastObservedFeedChatId = deps.getChatId();
 		this.#lastObservedTranscriptViewId = deps.chatState.transcriptViewId;
@@ -119,12 +120,14 @@ export class ConversationScrollController {
 			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? this.#previousLogicalOffset;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
+		this.#expireUserScrollIntent();
 	}
 
 	async scrollToLatest(): Promise<void> {
 		const chatId = this.deps.getChatId();
 		if (!chatId) return;
-		if (!this.deps.chatState.hasLaterMessages && !this.isScrollingToTop) {
+		this.deps.onUserScrollIntent();
+		if (!this.deps.chatState.hasLaterMessages && !this.deps.chatState.isDisplayBehindHead && !this.isScrollingToTop) {
 			this.scrollToBottom();
 			return;
 		}
@@ -210,6 +213,7 @@ export class ConversationScrollController {
 		direction: TranscriptPageDirection | null = null,
 		source: UserScrollIntentSource = 'other',
 	): void {
+		this.deps.onUserScrollIntent();
 		if (source === 'other') this.cancelNativeScroll();
 		this.#deferredLiveEdgeIntent = null;
 		this.#nativeScrollHandoff = null;
@@ -282,7 +286,7 @@ export class ConversationScrollController {
 
 	reconcileInitialBottomRestore(autoScrollToBottom: boolean): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.getChatId()) return;
-		if (this.#isAutoFillingViewport || this.#activeTargetNavigations > 0) return;
+		if (this.#activeTargetNavigations > 0) return;
 		if (
 			!autoScrollToBottom ||
 			this.deps.chatState.loadStatus === 'empty' ||
@@ -303,6 +307,7 @@ export class ConversationScrollController {
 	async scrollToTop(): Promise<void> {
 		const chatId = this.deps.getChatId();
 		if (!chatId || this.isScrollingToTop) return;
+		this.deps.onUserScrollIntent();
 
 		this.cancelNativeScroll();
 		this.isScrollingToTop = true;
@@ -370,7 +375,10 @@ export class ConversationScrollController {
 		const nearBottom = this.isNearBottom();
 		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
 		if (this.deps.chatState.hasLaterMessages) {
-			this.#preserveHistoryBrowsing();
+			if (!this.isPinnedToBottom || (hasRecentUserScrollIntent && this.#userScrollIntent.direction === 'earlier'
+				&& this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter)) {
+				this.#preserveHistoryBrowsing();
+			}
 		} else if (
 			hasRecentUserScrollIntent &&
 			this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter
@@ -398,17 +406,13 @@ export class ConversationScrollController {
 		reason: PageRequestReason,
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.getChatId();
-		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
+		if (!chatId || !this.#canRequestPage(direction, reason)) return 'invalidated';
+		const memberTarget = reason === 'scroll' ? this.deps.getViewport()?.memberPageTarget(direction) ?? undefined : undefined;
 		const requestIntentEpoch = this.#userScrollIntent.epoch;
-		const requestBoundarySignature =
-			direction === 'earlier' ? this.#earlierBoundarySignature() : null;
+		const requestBoundarySignature = this.#pageBoundarySignature(direction);
 
-		// Records the crossed boundary before awaiting data. Earlier history advances
-		// its signature, while later paging re-arms only after leaving or continuing.
-		if (direction === 'later') this.#laterBoundaryArmed = false;
-		if (requestBoundarySignature) {
-			this.#earlierBoundaryRequestSignature = requestBoundarySignature;
-		}
+		if (direction === 'later') this.#laterBoundaryRequestSignature = requestBoundarySignature;
+		else this.#earlierBoundaryRequestSignature = requestBoundarySignature;
 		// Requires a fresh post-page downward gesture before near-end geometry resumes live following.
 		this.#followLiveRequiresIntentAfter = Math.max(
 			this.#followLiveRequiresIntentAfter,
@@ -422,13 +426,10 @@ export class ConversationScrollController {
 			result = await this.#mutatePage(
 				direction,
 				async (applicationGate) => {
-					if (direction === 'earlier' && this.deps.chatState.hasEarlierRowsToReveal) {
-						if (applicationGate && (await applicationGate()) !== 'apply') return 'invalidated';
-						if (this.deps.chatState.revealEarlierLoadedRows()) return 'loaded';
-					}
+					const options = { applicationGate, ...(memberTarget ? { memberTarget } : {}) };
 					return direction === 'earlier'
-						? this.deps.chatState.loadEarlierPage(chatId, { applicationGate })
-						: this.deps.chatState.loadLaterPage(chatId, { applicationGate });
+						? this.deps.chatState.loadEarlierPage(chatId, options)
+						: this.deps.chatState.loadLaterPage(chatId, options);
 				},
 				reason === 'scroll' ? 'after-native-scroll' : 'immediate',
 			);
@@ -463,39 +464,18 @@ export class ConversationScrollController {
 		) {
 			this.#earlierBoundaryRequestSignature = null;
 		}
+		if (direction === 'later' && result === 'invalidated' && this.#laterBoundaryRequestSignature === requestBoundarySignature) {
+			this.#laterBoundaryRequestSignature = null;
+		}
 		this.#syncBoundaryLatch(direction);
 		if (reason === 'button') this.#preserveHistoryBrowsing();
 		if (continuedPageIntent && this.#isNearPageBoundary(direction) && result === 'loaded') {
-			if (direction === 'later') this.#laterBoundaryArmed = true;
+			if (direction === 'later') this.#laterBoundaryRequestSignature = null;
 			this.#handleBoundaryProximity(direction, true);
 		}
 		return result;
 	}
 
-	async loadEarlierPageForNavigator(chatId: string): Promise<TranscriptPageLoadResult> {
-		const viewport = this.deps.getViewport();
-		if (!viewport || this.deps.getChatId() !== chatId) return 'invalidated';
-		const operationEpoch = this.#beginViewportOperation();
-		const shouldRemainPinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
-		const result = await this.deps.chatState.loadEarlierPage(chatId);
-		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
-			return result === 'loaded' ? 'invalidated' : result;
-		}
-		const layout = await viewport.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		if (layout !== 'settled' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
-			return 'invalidated';
-		}
-		if (shouldRemainPinned) {
-			viewport.scrollToEnd();
-			this.deps.chatState.isUserScrolledUp = false;
-			this.setPinnedToBottom(true);
-		} else {
-			this.#preserveHistoryBrowsing();
-		}
-		return 'loaded';
-	}
 
 	async jumpToMessageRow(
 		target: UserMessageNavigatorTarget,
@@ -521,7 +501,7 @@ export class ConversationScrollController {
 					viewId: () => this.deps.chatState.transcriptViewId,
 					viewport: this.deps.getViewport,
 					preserveHistoryBrowsing: () => this.#preserveHistoryBrowsing(),
-					setPinned: (pinned) => this.setPinnedToBottom(pinned),
+					setPinned: (pinned) => this.setPinnedToBottom(pinned && !this.deps.chatState.hasLaterMessages),
 				},
 			);
 			shouldResumeAutoFill = result === 'completed';
@@ -577,7 +557,7 @@ export class ConversationScrollController {
 			const completed = Boolean(
 				result === 'completed' && this.#isCurrentViewportOperation(chatId, operationEpoch),
 			);
-			if (completed) this.setPinnedToBottom(viewport.isAtEnd());
+			if (completed) this.setPinnedToBottom(viewport.isAtEnd() && !this.deps.chatState.hasLaterMessages);
 			shouldResumeAutoFill = completed;
 			return completed;
 		} finally {
@@ -586,52 +566,7 @@ export class ConversationScrollController {
 	}
 
 	async fillUnderfilledViewport(): Promise<void> {
-		const chatId = this.deps.getChatId();
-		if (
-			!chatId ||
-			!this.#isViewportVisible ||
-			this.#isAutoFillingViewport ||
-			this.#activeTargetNavigations > 0
-		) {
-			return;
-		}
-		if (!this.deps.chatState.hasLaterMessages) {
-			if (this.deps.chatState.isUserScrolledUp) return;
-		} else {
-			this.#preserveHistoryBrowsing();
-		}
-
-		const viewport = this.deps.getViewport();
-		if (!viewport) return;
-		const transcriptViewId = this.deps.chatState.transcriptViewId;
-		const intentEpoch = this.#userScrollIntent.epoch;
-		const ownsFill = () =>
-			this.deps.getChatId() === chatId &&
-			this.deps.chatState.transcriptViewId === transcriptViewId &&
-			this.#isViewportVisible &&
-			this.#userScrollIntent.epoch === intentEpoch &&
-			this.#activeTargetNavigations === 0;
-		this.#isAutoFillingViewport = true;
-		try {
-			await fillConversationViewport({
-				chatId,
-				transcriptViewId,
-				viewport,
-				chatState: this.deps.chatState,
-				budget: this.#compressedAutoFillBudget,
-				isCurrent: ownsFill,
-				canRequestPage: (direction) => this.#canRequestPage(direction),
-				mutatePage: (direction, load) => this.#mutatePage(direction, load),
-				waitForCurrentLayout: () => this.#waitForCurrentLayout('loaded'),
-				isPinnedToBottom: () => this.isPinnedToBottom,
-			});
-		} finally {
-			this.#isAutoFillingViewport = false;
-			if (this.#refillViewportAfterCurrentFill) {
-				this.#refillViewportAfterCurrentFill = false;
-				void this.fillUnderfilledViewport();
-			}
-		}
+		if (this.deps.getChatId() && this.#isViewportVisible && this.#activeTargetNavigations === 0) this.deps.getViewport()?.requestCoverage();
 	}
 
 	observeQueueResize(): (() => void) | undefined {
@@ -736,16 +671,9 @@ export class ConversationScrollController {
 					this.#isCurrentViewportOperation(chatId, operationEpoch)
 					? 'apply'
 					: 'invalidated';
-			})();
+			})().finally(() => { decision = null; });
 			return decision;
 		};
-	}
-
-	async #waitForCurrentLayout(result: TranscriptPageLoadResult): Promise<TranscriptPageLoadResult> {
-		const layout = await this.deps.getViewport()?.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		return layout === 'settled' ? result : 'invalidated';
 	}
 
 	#syncViewportStart(position?: ConversationViewportPosition | null): void {
@@ -776,13 +704,13 @@ export class ConversationScrollController {
 	#handleBoundaryProximity(direction: TranscriptPageDirection, isNearBoundary: boolean): void {
 		if (!isNearBoundary) {
 			if (direction === 'earlier') this.#earlierBoundaryRequestSignature = null;
-			else this.#laterBoundaryArmed = true;
+			else this.#laterBoundaryRequestSignature = null;
 			return;
 		}
 		if (!this.#canRequestPage(direction)) return;
 		if (direction === 'earlier') {
-			if (this.#earlierBoundaryRequestSignature === this.#earlierBoundarySignature()) return;
-		} else if (!this.#laterBoundaryArmed) {
+			if (this.#earlierBoundaryRequestSignature === this.#pageBoundarySignature(direction)) return;
+		} else if (this.#laterBoundaryRequestSignature === this.#pageBoundarySignature(direction)) {
 			return;
 		}
 		const intent = this.#userScrollIntent;
@@ -793,17 +721,19 @@ export class ConversationScrollController {
 		if (!hasEligibleIntent) {
 			return;
 		}
-		if (direction === 'later') this.#laterBoundaryArmed = false;
 		this.#consumedIntentEpoch[direction] = intent.epoch;
 		void this.requestPage(direction, 'scroll');
 	}
 
-	#canRequestPage(direction: TranscriptPageDirection, allowRetry = false): boolean {
+	#canRequestPage(direction: TranscriptPageDirection, reason: PageRequestReason = 'scroll'): boolean {
+		if (this.#activeTargetNavigations > 0 || this.#isPageMutationInProgress) return false;
+		if (reason === 'scroll' && this.deps.chatState.loadStatus === 'error') return false;
+		if (reason === 'scroll' && this.deps.getViewport()?.memberPageTarget(direction)) {
+			return this.deps.chatState.canLoadMembers;
+		}
 		if (
-			this.#activeTargetNavigations > 0 ||
-			this.#isPageMutationInProgress ||
 			this.deps.chatState.pageStates[direction].status === 'loading' ||
-			(!allowRetry && this.deps.chatState.pageStates[direction].status === 'error')
+			(reason !== 'button' && this.deps.chatState.pageStates[direction].status === 'error')
 		) {
 			return false;
 		}
@@ -815,7 +745,7 @@ export class ConversationScrollController {
 	#syncBoundaryLatch(direction: TranscriptPageDirection): void {
 		if (this.#isNearPageBoundary(direction)) return;
 		if (direction === 'earlier') this.#earlierBoundaryRequestSignature = null;
-		else this.#laterBoundaryArmed = true;
+		else this.#laterBoundaryRequestSignature = null;
 	}
 
 	#isNearPageBoundary(
@@ -835,12 +765,12 @@ export class ConversationScrollController {
 		});
 	}
 
-	#earlierBoundarySignature(): string {
+	#pageBoundarySignature(direction: TranscriptPageDirection): string {
 		return [
 			this.deps.getChatId() ?? '',
 			this.deps.chatState.transcriptViewId,
 			this.deps.chatState.windowRevision,
-			this.deps.chatState.feedMutationClock.lastRevisionByKind['history-earlier'],
+			this.deps.chatState.feedMutationClock.lastRevisionByKind[direction === 'earlier' ? 'history-earlier' : 'history-later'],
 		].join(':');
 	}
 
@@ -865,11 +795,7 @@ export class ConversationScrollController {
 		this.#activeTargetNavigations -= 1;
 		if (this.#activeTargetNavigations > 0 || !this.#resumeAutoFillAfterTargets) return;
 		this.#resumeAutoFillAfterTargets = false;
-		if (this.#isAutoFillingViewport) {
-			this.#refillViewportAfterCurrentFill = true;
-		} else {
-			void this.fillUnderfilledViewport();
-		}
+		void this.fillUnderfilledViewport();
 	}
 
 	async #navigateToWindow(
@@ -896,7 +822,7 @@ export class ConversationScrollController {
 		this.#nativeScrollHandoff = null;
 		const epoch = this.#userScrollIntent.epoch;
 		this.#consumedIntentEpoch = { earlier: epoch, later: epoch };
-		this.#laterBoundaryArmed = true;
+		this.#laterBoundaryRequestSignature = null;
 		this.#earlierBoundaryRequestSignature = null;
 		this.#followLiveRequiresIntentAfter = epoch;
 		this.#previousLogicalOffset =

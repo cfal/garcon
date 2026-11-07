@@ -6,9 +6,10 @@ export type ConversationScrollState = Pick<
 	| 'canLoadEarlier'
 	| 'displayMessageCount'
 	| 'feedMutationClock'
-	| 'hasEarlierRowsToReveal'
 	| 'hasLaterMessages'
+	| 'isDisplayBehindHead'
 	| 'isLoadingMessages'
+	| 'canLoadMembers'
 	| 'isUserScrolledUp'
 	| 'invalidatePendingHistoryLoad'
 	| 'invalidatePendingWindowNavigation'
@@ -17,7 +18,7 @@ export type ConversationScrollState = Pick<
 	| 'loadStatus'
 	| 'navigateToWindow'
 	| 'pageStates'
-	| 'revealEarlierLoadedRows'
+	| 'setDisplayApplicationGate'
 	| 'transcriptViewId'
 	| 'windowRevision'
 >;
@@ -28,4 +29,5 @@ export interface ConversationScrollControllerDeps {
 	getQueueContainer: () => HTMLDivElement | undefined;
 	chatState: ConversationScrollState;
 	getChatId: () => string | null;
+	onUserScrollIntent: () => void;
 }

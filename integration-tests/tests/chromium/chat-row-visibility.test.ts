@@ -261,12 +261,15 @@ async function cardColors(
   });
 }
 
-async function waitForTrackedContent(page: Page, content: string): Promise<void> {
+async function waitForTrackedHead(page: Page, row: AddChatRowResponse): Promise<void> {
   await page.waitForFunction(
-    (expected) => JSON.stringify(
-      (globalThis as BrowserScope).__chatRowSocketTracker?.frames ?? [],
-    ).includes(expected),
-    content,
+    ({ transcriptViewId, ordinal }) => ((globalThis as BrowserScope).__chatRowSocketTracker?.frames ?? []).some(frame => {
+      if (!frame || typeof frame !== 'object') return false;
+      const event = frame as Record<string, unknown>;
+      return event.type === 'chat-transcript-head-updated' && event.transcriptViewId === transcriptViewId
+        && Number(event.sourceHead) >= ordinal;
+    }),
+    row,
   );
 }
 
@@ -280,34 +283,15 @@ async function trackerSnapshot(page: Page): Promise<{ frameCount: number; openCo
   });
 }
 
-async function waitForReplayRows(
+async function waitForDisplayRows(
   page: Page,
-  afterFrame: number,
   transcriptViewId: string,
   ordinals: readonly number[],
 ): Promise<void> {
   await page.waitForFunction(
-    ({ afterFrame, transcriptViewId, ordinals }) => (
-      ((globalThis as BrowserScope).__chatRowSocketTracker?.frames ?? [])
-        .slice(afterFrame)
-        .some((frame) => {
-          if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return false;
-          const record = frame as Record<string, unknown>;
-          if (
-            record.type !== 'chat-subscribed'
-            || record.transcriptViewId !== transcriptViewId
-            || !Array.isArray(record.messages)
-          ) return false;
-          const replayed = new Set(record.messages.flatMap((entry) => (
-            entry && typeof entry === 'object' && !Array.isArray(entry)
-              && Number.isSafeInteger((entry as Record<string, unknown>).ordinal)
-              ? [Number((entry as Record<string, unknown>).ordinal)]
-              : []
-          )));
-          return ordinals.every((ordinal) => replayed.has(ordinal));
-        })
-    ),
-    { afterFrame, transcriptViewId, ordinals },
+    ({ transcriptViewId, ordinals }) => ordinals.every(ordinal =>
+      document.querySelector(`[data-chat-row-id="${CSS.escape(`${transcriptViewId}:${ordinal}`)}"]`)),
+    { transcriptViewId, ordinals },
   );
 }
 
@@ -690,14 +674,7 @@ describe('Chromium transcript chat rows', () => {
         expect(await cardColors(fixture.page, custom)).not.toEqual(
           await cardColors(fixture.page, info),
         );
-        await waitForTrackedContent(observerPage, infoContent);
-        await waitForTrackedContent(observerPage, noticeContent);
-        await waitForTrackedContent(observerPage, errorContent);
-        await waitForTrackedContent(observerPage, customRenderedContent);
-        await waitForTrackedContent(observerPage, infoTitle);
-        await waitForTrackedContent(observerPage, noticeTitle);
-        await waitForTrackedContent(observerPage, errorTitle);
-        await waitForTrackedContent(observerPage, customTitle);
+        for (const row of [info, notice, error, custom]) await waitForTrackedHead(observerPage, row);
         await expectComposerStable(fixture.page, 'chat row draft remains stable');
 
         markPhase('restoring the warmed background transcript');
@@ -841,7 +818,7 @@ describe('Chromium transcript chat rows', () => {
         }
         expect(missedError.ordinal).toBe(missedNotice.ordinal + 1);
 
-        markPhase('verifying fixed-watermark replay and exact-once rendering');
+        markPhase('verifying bounded display recovery and exact-once rendering');
         await fixture.page.waitForFunction(
           (previous) => (
             ((globalThis as BrowserScope).__chatRowSocketTracker?.openCount ?? 0) > previous
@@ -854,15 +831,13 @@ describe('Chromium transcript chat rows', () => {
           ),
           observerTracker.openCount,
         );
-        await waitForReplayRows(
+        await waitForDisplayRows(
           fixture.page,
-          activeTracker.frameCount,
           target.transcriptViewId,
           [missedNotice.ordinal, missedError.ordinal],
         );
-        await waitForReplayRows(
+        await waitForDisplayRows(
           observerPage,
-          observerTracker.frameCount,
           target.transcriptViewId,
           [missedNotice.ordinal, missedError.ordinal],
         );

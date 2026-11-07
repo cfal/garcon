@@ -151,9 +151,10 @@ describe('transcript ledger read-fold matrix', () => {
         broadcast: (message) => broadcasts.push(message),
         updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
-        resendCandidates: () => [],
+        serverInstanceId: 'instance-1', planRevision: () => 0, auxiliaryRevision: () => 0,
       });
       fanout({ type: 'rows', chatId: CHAT_ID, viewId: VIEW_ID, rows });
+      fanout.flushAll();
 
       expect(metadataUpdates.map(conversationalText)).toEqual([
         'repeated payload',
@@ -162,12 +163,14 @@ describe('transcript ledger read-fold matrix', () => {
         'repeated payload',
         'repeated payload',
       ]);
-      expect(broadcasts).toEqual([expect.objectContaining({
+      expect(broadcasts.filter(event => event.type === 'chat-input-committed').map(event => [event.clientMessageId, event.ordinal]))
+        .toEqual(rows.filter(row => row.kind === 'user-input').map(row => [row.detail.clientMessageId, row.ordinal]));
+      expect(broadcasts.filter(event => event.type === 'chat-transcript-head-updated')).toEqual([expect.objectContaining({
         transcriptViewId: VIEW_ID,
-        firstOrdinal: 1,
-        lastOrdinal: 15,
-        messages: rendered,
+        sourceHead: 15,
+        preview: expect.objectContaining({ ordinal: 15, text: 'repeated payload' }),
       })]);
+      expect(broadcasts.every(event => !('messages' in event))).toBe(true);
     } finally {
       ledger.close();
       await rm(root, { recursive: true, force: true });
@@ -292,7 +295,7 @@ describe('transcript ledger read-fold matrix', () => {
         broadcast: () => undefined,
         updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
-        resendCandidates: () => [],
+        serverInstanceId: 'instance-1', planRevision: () => 0, auxiliaryRevision: () => 0,
       });
       fanout({ type: 'rows', chatId: CHAT_ID, viewId: VIEW_ID, rows });
       expect(metadataUpdates.map(conversationalText)).toEqual(['visible prompt']);
@@ -567,7 +570,7 @@ describe('transcript ledger read-fold matrix', () => {
         broadcast: (message) => broadcasts.push(message),
         updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
-        resendCandidates: () => [],
+        serverInstanceId: 'instance-1', planRevision: () => 0, auxiliaryRevision: () => 0,
       });
       fanout({
         type: 'rows',
@@ -577,43 +580,14 @@ describe('transcript ledger read-fold matrix', () => {
       });
 
       expect(metadataUpdates).toEqual([]);
+      fanout.flushAll();
       expect(broadcasts).toEqual([expect.objectContaining({
-        firstOrdinal: 2,
-        lastOrdinal: 5,
-        messages: [
-          {
-            ordinal: 2,
-            message: new CliRowMessage(
-              CHAT_ROW_AT,
-              'presentation information',
-              { style: 'info' },
-              'plain',
-              'Consultation checkpoint',
-            ),
-          },
-          {
-            ordinal: 3,
-            message: new CliRowMessage(
-              CHAT_ROW_AT,
-              'presentation notice',
-              { style: 'notice' },
-              'markdown',
-              'Presentation checkpoint',
-            ),
-          },
-          {
-            ordinal: 4,
-            message: new CliRowMessage(
-              CHAT_ROW_AT,
-              'chat row error',
-              { style: 'error' },
-              'plain',
-              'Failure checkpoint',
-            ),
-          },
-          { ordinal: 5, message: new ErrorMessage(AT, 'provider error') },
-        ],
+        type: 'chat-transcript-head-updated',
+        sourceHead: 5,
+        preview: null,
+        responseClassOrdinals: expect.objectContaining({ error: 5 }),
       })]);
+      expect(broadcasts.every(event => !('messages' in event))).toBe(true);
     } finally {
       ledger.close();
       await rm(root, { recursive: true, force: true });

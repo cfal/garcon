@@ -7,6 +7,7 @@ import type {
 } from '$shared/chat-command-contracts';
 import { ApiError } from '$lib/api/client.js';
 import { sendPermissionDecision } from '$lib/api/chats.js';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
 	CommandOutcomeUnknownError,
@@ -39,6 +40,8 @@ export interface ConversationPermissionServiceOptions {
 // Owns what happens after the user answers a permission prompt, including the plan-approval
 // choices that resume the turn with a different permission mode.
 export class ConversationPermissionService {
+	#pendingPlanChoices = new Set<string>();
+
 	constructor(private readonly options: ConversationPermissionServiceOptions) {}
 
 	handlePermissionDecision(
@@ -114,6 +117,11 @@ export class ConversationPermissionService {
 		choice: string,
 		plan: string,
 	): void {
+		void this.#applyPlanChoice(chatId, permissionOccurrenceId, choice, plan).catch(error => {
+			this.options.deps.chatState.appendLocalNoticeForChat(chatId, 'error', errorDetail(error));
+		});
+	}
+	async #applyPlanChoice(chatId: string, permissionOccurrenceId: string, choice: string, plan: string): Promise<void> {
 		const { deps } = this.options;
 		const chat = deps.sessions.byId[chatId];
 		if (!chat) return;
@@ -132,9 +140,28 @@ export class ConversationPermissionService {
 			);
 			return;
 		}
-		const permissionControl = deps.conversationUi
+		const request = deps.conversationUi
 			.pendingPermissionsFor(chatId)
-			.find((request) => request.permissionOccurrenceId === permissionOccurrenceId)?.control;
+			.find((request) => request.permissionOccurrenceId === permissionOccurrenceId);
+		const permissionControl = request?.control;
+		if (!request) return;
+		if (choice === 'dismiss' && !request.planReference) return;
+		if (choice !== 'deny' && request.planReference) {
+			const reference = request.planReference;
+			const key = JSON.stringify([reference.serverInstanceId, chatId, reference.transcriptViewId, reference.ordinal]);
+			if (this.#pendingPlanChoices.has(key)) return;
+			this.#pendingPlanChoices.add(key);
+			try {
+				await transcriptDisplayApi.dismissPlan(reference);
+				if (!deps.sessions.byId[chatId]
+					|| deps.chatState.serverInstanceId !== reference.serverInstanceId
+					|| (!deps.conversationUi.isExecutionControlSocketInstanceConfirmed(reference.serverInstanceId)
+						&& deps.conversationUi.getExecutionControl(chatId)?.serverInstanceId !== reference.serverInstanceId)
+					|| deps.chatState.getCursorForChat(chatId).transcriptViewId !== reference.transcriptViewId) return;
+			} finally {
+				this.#pendingPlanChoices.delete(key);
+			}
+		}
 		// A denial is a permission decision, so its prompt stays until the server accepts it.
 		if (choice !== 'deny') this.#forgetPendingPermission(chatId, permissionOccurrenceId);
 
@@ -193,6 +220,8 @@ export class ConversationPermissionService {
 		};
 
 		switch (choice) {
+			case 'dismiss':
+				return;
 			case 'bypass-new': {
 				const restoreMode = deps.conversationUi.previousPermissionModeFor(chatId) || 'default';
 				deps.conversationUi.finishPlanModeForChat(chatId);

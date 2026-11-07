@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -148,11 +147,10 @@ describe('scripted Pi provider failures', () => {
         expect(JSON.stringify(requests[2]!.body.messages)).toContain('Only summarize information explicitly present above');
         expect(JSON.stringify(requests[3]!.body.messages)).toContain(summary);
         expect(JSON.stringify(requests[3]!.body.messages)).toContain(turnSummary);
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
-            && event.messages.some(({ message }) => message.type === 'compaction' && message.summary.includes(summary)),
-          'overflow compaction boundary', { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some(({ message }) => message.type === 'compaction' && message.summary.includes(summary)),
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'overflow compaction boundary' },
+      );
         expect(fixture.client.eventsSince(cursor).some((event) =>
           (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
           && event.chatId === chatId)).toBe(false);
@@ -250,12 +248,10 @@ describe('scripted Pi provider failures', () => {
       testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message: 'server_busy' });
       const cursor = fixture.client.markEvents();
       const retrying = await fixture.client.runChat(scriptedPiRunRequest({ chatId, command: marker('RETRY_STOP') }));
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) => entry.message.type === 'error'
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => entry.message.type === 'error'
             && JSON.stringify(entry.message).includes('server_busy')),
-        'retryable provider error', { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'retryable provider error' },
       );
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
       const stopped = await fixture.client.stopChat({ clientRequestId: crypto.randomUUID(), chatId });

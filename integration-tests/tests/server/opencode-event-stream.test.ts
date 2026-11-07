@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { assistantContents } from '../../support/chat-assertions.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import {
@@ -156,12 +157,7 @@ describe.skipIf(process.platform !== 'linux')('OpenCode global event stream thro
       // The successor response proves that OpenCode cancelled the held request and started a
       // new one. Releasing earlier lets the retired response beat the provider abort.
       held.release();
-      // The successor terminal is a stream-order barrier after the provider's late completion.
-      expect(fixture.client.eventsSince(cursor).slice(terminalIndex + 1).some((event) =>
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && event.turnId === turn.turnId
-      )).toBe(false);
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).not.toContain(heldReply);
       const native = await openCodeNativeSession(fixture, chatId);
       const rows = readOpenCodeSessionRows(native);
       expect(rows.parts.some((row) =>

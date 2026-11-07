@@ -57,6 +57,19 @@ import {
 } from '../../common/chat-snapshot.js';
 import type { TransientFeedRow } from '../../common/chat-transient-feed.js';
 import {
+  parseBodyDependencyResponse, parseDisplayTargetResolution, parseDisplayWindowResponse, parseMemberWindowResponse,
+  type BodyDependencyRequest, type DisplayWindowRequest, type MemberWindowRequest,
+} from '../../common/transcript-display-contract.js';
+import {
+  parseDisplayOpenResponse, parsePlanPresentationDetail, parsePlanPresentationSnapshot,
+  type DisplayOpenRequest, type PlanPresentationRequest,
+} from '../../common/transcript-display-open.js';
+import {
+  parseResendSnapshot, parseSubagentSummaryPage, parseUserRowPage,
+  type DisplayAuxiliaryRequest, type ResendSnapshotRequest,
+} from '../../common/transcript-display-auxiliary.js';
+import type { ChatInputCommittedMessage, ChatTranscriptHeadUpdatedMessage } from '../../common/transcript-display-events.js';
+import {
   parseReorderChatResponse,
   parseSortChatOrderResponse,
   type ReorderChatRequest,
@@ -98,17 +111,14 @@ import {
   ChatTransientFeedMutationMessage,
   type AgentRunFailedMessage,
   type AgentRunFinishedMessage,
-  type ChatMessagesMessage,
   type ChatReloadedMessage,
   type ChatProcessingUpdatedMessage,
-  type ChatSubscribedMessage,
   type ClientRequestErrorMessage,
   type ReconnectStateMessage,
   type WsPongMessage,
 } from '../../common/ws-events.js';
 import {
   ChatReloadRequest,
-  ChatSubscribeRequest,
   ReconnectStateQueryRequest,
   WsPingRequest,
   type ClientWsMessage,
@@ -213,8 +223,6 @@ export interface GarconTestClientOptions {
   redactSensitiveDiagnostics?: boolean;
   requestTimeoutMs?: number;
 }
-
-export type CommittedUserInputMessage = ChatMessagesMessage;
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
@@ -814,12 +822,14 @@ export class GarconTestClient {
   async enqueue(
     request: Omit<QueueEntryCreateCommandRequest, 'transcriptViewId' | 'clientMessageId'>
       & { transcriptViewId?: string; clientMessageId?: string },
-  ): Promise<QueueEntryCommandResponse> {
-    return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', {
+  ): Promise<QueueEntryCommandResponse & { clientMessageId: string }> {
+    const clientMessageId = request.clientMessageId ?? crypto.randomUUID();
+    const response = await this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', {
       ...request,
-      clientMessageId: request.clientMessageId ?? crypto.randomUUID(),
+      clientMessageId,
       transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
     });
+    return { ...response, clientMessageId };
   }
 
   async steer(
@@ -842,7 +852,7 @@ export class GarconTestClient {
     });
   }
 
-  enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {
+  enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse & { clientMessageId: string }> {
     return this.enqueue({ chatId, content, clientRequestId: crypto.randomUUID() });
   }
 
@@ -975,35 +985,93 @@ export class GarconTestClient {
     );
   }
 
-  async subscribe(
+  async openDisplay(request: DisplayOpenRequest) {
+    return parseDisplayOpenResponse(await this.post('/api/v1/chats/transcript-display/open', request));
+  }
+
+  async displayWindow(request: DisplayWindowRequest) {
+    return parseDisplayWindowResponse(await this.post('/api/v1/chats/transcript-display/window', request));
+  }
+
+  async displayMembers(request: MemberWindowRequest) {
+    return parseMemberWindowResponse(await this.post('/api/v1/chats/transcript-display/members', request));
+  }
+
+  async displayBodies(request: BodyDependencyRequest) {
+    return parseBodyDependencyResponse(await this.post('/api/v1/chats/transcript-display/bodies', request));
+  }
+
+  async resolveDisplay(request: DisplayWindowRequest) {
+    return parseDisplayTargetResolution(await this.post('/api/v1/chats/transcript-display/resolve', request));
+  }
+
+  async displayUserRows(request: DisplayAuxiliaryRequest) {
+    return parseUserRowPage(await this.post('/api/v1/chats/transcript-display/user-rows', request));
+  }
+
+  async displayResend(request: ResendSnapshotRequest) {
+    return parseResendSnapshot(await this.post('/api/v1/chats/transcript-display/resend', request));
+  }
+
+  async displaySubagents(request: DisplayAuxiliaryRequest) {
+    return parseSubagentSummaryPage(await this.post('/api/v1/chats/transcript-display/subagents', request));
+  }
+
+  async displayPlan(request: PlanPresentationRequest) {
+    return parsePlanPresentationSnapshot(await this.post('/api/v1/chats/transcript-display/plan', request));
+  }
+
+  async displayPlanDetail(request: PlanPresentationRequest) {
+    return parsePlanPresentationDetail(await this.post('/api/v1/chats/transcript-display/plan-detail', request));
+  }
+
+  async waitForDisplayWindow(request: DisplayWindowRequest, timeoutMs = REQUEST_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const result = await this.displayWindow(request);
+      if (result.kind === 'available') return result;
+      if (result.kind === 'failed' || Date.now() >= deadline) {
+        throw new Error(`Display window ${request.chatId}: ${result.kind} (${result.errorCode})`);
+      }
+      await Bun.sleep(Math.max(25, Math.min(result.retryAfterMs ?? 100, 500)));
+    }
+  }
+
+  async waitForMessages(
     chatId: string,
-    transcriptViewId: string,
-    afterOrdinal: number,
-    throughOrdinal?: number,
-  ): Promise<ChatSubscribedMessage> {
-    const clientRequestId = crypto.randomUUID();
-    const afterIndex = this.markEvents();
-    const request = new ChatSubscribeRequest(
-      clientRequestId,
-      chatId,
-      transcriptViewId,
-      afterOrdinal,
-      throughOrdinal,
+    predicate: (page: ChatMessagesPage) => boolean,
+    options: { timeoutMs?: number; limit?: number; description?: string; afterOrdinal?: number } = {},
+  ): Promise<ChatMessagesPage> {
+    const deadline = Date.now() + (options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+    for (;;) {
+      const response = await this.getMessages(chatId, { limit: options.limit ?? 200 });
+      const page = { ...response, messages: response.messages.filter((entry) => entry.ordinal > (options.afterOrdinal ?? 0)) };
+      if (predicate(page)) return page;
+      if (Date.now() >= deadline) throw new Error(`Timed out reading ${chatId}: ${options.description ?? 'transcript predicate'}`);
+      await Bun.sleep(100);
+    }
+  }
+
+  observedHead(chatId: string, beforeIndex = this.markEvents()): number {
+    let head = 0;
+    for (const { parsed } of this.#eventRecords.slice(0, beforeIndex)) {
+      if ('chatId' in parsed && parsed.chatId === chatId) {
+        if (parsed.type === 'chat-transcript-replaced') head = 0;
+        if (parsed.type === 'chat-transcript-head-updated') head = Math.max(head, parsed.sourceHead);
+      }
+    }
+    return head;
+  }
+
+  async waitForHead(
+    chatId: string, throughOrdinal: number,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<ChatTranscriptHeadUpdatedMessage> {
+    return this.waitForEvent(
+      (message): message is ChatTranscriptHeadUpdatedMessage => message.type === 'chat-transcript-head-updated'
+        && message.chatId === chatId && message.sourceHead >= throughOrdinal,
+      `${chatId} head through ${throughOrdinal}`, options,
     );
-    this.sendWs(request);
-    const outcome = await this.waitForEvent(
-      (message): message is ChatSubscribedMessage | ClientRequestErrorMessage =>
-        (message.type === 'chat-subscribed' && message.clientRequestId === clientRequestId)
-        || (
-          message.type === 'client-request-error'
-          && message.clientRequestId === clientRequestId
-          && message.requestType === 'chat-subscribe'
-        ),
-      `chat-subscribed ${clientRequestId}`,
-      { afterIndex },
-    );
-    if (outcome.type === 'client-request-error') throw new GarconWsRequestError(outcome);
-    return outcome;
   }
 
   async reloadChat(chatId: string): Promise<ChatReloadedMessage> {
@@ -1042,16 +1110,15 @@ export class GarconTestClient {
 
   async waitForCommittedUserInput(
     chatId: string,
-    content: string,
+    clientMessageId: string,
     options: { afterIndex?: number; timeoutMs?: number } = {},
-  ): Promise<CommittedUserInputMessage> {
+  ): Promise<ChatInputCommittedMessage> {
     return await this.waitForEvent(
-      (message): message is CommittedUserInputMessage =>
-        message.type === 'chat-messages'
+      (message): message is ChatInputCommittedMessage =>
+        message.type === 'chat-input-committed'
         && message.chatId === chatId
-        && message.messages.some((entry) =>
-          entry.message.type === 'user-message' && entry.message.content === content),
-      `committed user input ${content}`,
+        && message.clientMessageId === clientMessageId,
+      `committed user input ${clientMessageId}`,
       options,
     );
   }

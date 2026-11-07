@@ -6,7 +6,6 @@ import {
 } from '$shared/ws-events';
 import { ChatReloadCancelRequest } from '$shared/ws-requests';
 import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { WsProgressRequest, WsRequestProgress } from '$lib/ws/connection.svelte.js';
 import { WsRequestError } from '$lib/ws/ws-request-error.js';
 
@@ -36,7 +35,6 @@ export type ChatReloadOutcome = 'reloaded' | 'cancelled';
  */
 export async function reloadChatFromNative(
 	ws: ChatReloadPort,
-	chatState: ActiveTranscriptState,
 	chatId: string,
 	options: ChatReloadOptions,
 ): Promise<ChatReloadOutcome> {
@@ -70,13 +68,5 @@ export async function reloadChatFromNative(
 		throw new Error('Unexpected chat reload response');
 	}
 
-	chatState.replaceGeneration(chatId, message.transcriptViewId, message.messages, {
-		lastOrdinal: message.lastOrdinal,
-		pageOldestOrdinal: message.pageOldestOrdinal,
-		pageNewestOrdinal: message.pageNewestOrdinal,
-		nextBeforeOrdinal: message.nextBeforeOrdinal,
-		hasMore: message.hasMore,
-	});
-	chatState.transcriptCache.markValidated(chatId);
 	return 'reloaded';
 }

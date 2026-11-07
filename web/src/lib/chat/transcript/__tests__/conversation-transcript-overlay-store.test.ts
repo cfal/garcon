@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { UserMessage } from '$shared/chat-types';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate } from '$shared/chat-view';
 import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
 function candidate(ordinal: number): ResendCandidate {
@@ -17,16 +16,17 @@ function optimistic(clientMessageId: string) {
 	};
 }
 
-function echoed(clientMessageId: string, ordinal: number): TranscriptMessage {
-	return {
-		ordinal,
-		message: new UserMessage('2026-08-30T00:00:01.000Z', 'committed input', undefined, {
-			clientMessageId,
-		}),
-	};
-}
 
 describe('ConversationTranscriptOverlayStore', () => {
+	it('[TLV5-A07-WEB-UNIT-01] a fresh client restores resend candidates excluded only in the old client', () => {
+		const prior = new ConversationTranscriptOverlayStore();
+		prior.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);
+		prior.excludeResendCandidate('chat-1', 1);
+		expect(prior.forChat('chat-1').includedResendCandidates).toEqual([candidate(2)]);
+		const fresh = new ConversationTranscriptOverlayStore();
+		fresh.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);
+		expect(fresh.forChat('chat-1').includedResendCandidates).toEqual([candidate(1), candidate(2)]);
+	});
 	it('reads a missing chat without creating reactive state', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 
@@ -53,7 +53,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(other.notices).toHaveLength(0);
 	});
 
-	it('clears only overlays captured by an applied batch', () => {
+	it('acknowledges exact inputs independently of notice and resend presentation', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 2);
 		overlays.upsertOptimisticInput('chat-1', optimistic('input-2'), 2);
@@ -62,12 +62,9 @@ describe('ConversationTranscriptOverlayStore', () => {
 		overlays.appendLocalNotice('chat-1', 'error', 'after');
 		overlays.excludeResendCandidate('chat-1', 1);
 
-		const mutation = overlays.applyCommittedBatch({
-			chatId: 'chat-1',
-			messages: [echoed('input-1', 3)],
-			resendCandidates: [candidate(3)],
-			noticeRevision: capturedRevision,
-		});
+		const mutation = overlays.acknowledgeInput('chat-1', 'input-1', 3);
+		overlays.clearNoticesThrough('chat-1', capturedRevision);
+		overlays.replaceResendCandidates('chat-1', [candidate(3)]);
 		const view = overlays.forChat('chat-1');
 
 		expect(mutation.feedStructureChanged).toBe(true);
@@ -122,7 +119,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		]);
 	});
 
-	it('preserves stable resend exclusions until their candidate departs', () => {
+	it('preserves exclusions while candidates remain offered and prunes them after a complete refresh', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		overlays.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);
 		overlays.excludeResendCandidate('chat-1', 1);
@@ -131,6 +128,10 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(overlays.forChat('chat-1').includedResendCandidates).toEqual([candidate(2)]);
 
 		overlays.replaceResendCandidates('chat-1', [candidate(2)]);
+		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([]);
+		overlays.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);
+		expect(overlays.forChat('chat-1').includedResendCandidates).toEqual([candidate(1), candidate(2)]);
+		overlays.clearResendExclusions('chat-1');
 		expect(overlays.forChat('chat-1').excludedResendOrdinals).toEqual([]);
 	});
 
@@ -172,12 +173,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 			'native history changed',
 		]);
 
-		overlays.applyCommittedBatch({
-			chatId: 'chat-1',
-			messages: [echoed('input-1', 1)],
-			resendCandidates: [],
-			noticeRevision: revision,
-		});
+		overlays.clearNoticesThrough('chat-1', revision);
 		overlays.appendServerNotice('chat-1', 'warning', 'native history changed');
 
 		expect(overlays.forChat('chat-1').notices).toHaveLength(1);

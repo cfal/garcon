@@ -3,10 +3,7 @@ import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, Us
 import type { CommandOutcome } from '$shared/command-output.js';
 import type { ChatDisplayRow } from '../transcript-row-projection.js';
 import { commandResultPresentation } from '../command-result-presentation.js';
-import { buildConversationFeedRenderModel, conversationFeedItemLayout } from '../conversation-feed-items.js';
-import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
-import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
-import { ActiveTranscriptPresentationState } from '../active-transcript-presentation-state.svelte.js';
+import { buildConversationFeedRenderModel, conversationFeedItemLayout } from './reference/conversation-feed-items.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const complete: CommandOutcome = {
@@ -67,19 +64,6 @@ describe('command result presentation', () => {
 			.toEqual(['standard', 'standard', 'standard', 'standard']);
 	});
 
-	it.each(['pending', 'delivered'] as const)('keeps prior failures single during %s follow-up delivery', delivery => {
-		const overlays = new ConversationTranscriptOverlayStore();
-		const transcript = new ActiveTranscriptPresentationState(overlays.forChat('chat-1'));
-		transcript.transcriptViewId = 'view';
-		transcript.entries = [{ ordinal: 3, message: failed }];
-		overlays.appendServerNotice('chat-1', 'error', failed.content);
-		expect(layouts(transcript.visibleRows)).toEqual(['standard', 'hidden']);
-
-		overlays.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'next-input',
-			content: 'true', createdAt: at, contentMode: 'literal', delivery }, 3);
-		expect(layouts(transcript.visibleRows)).toEqual(['standard', 'standard']);
-		expect(transcript.entries[0].message).toBe(failed);
-	});
 
 	it.each(['warning', 'error'] as const)('suppresses an exact %s duplicate of a durable warning', noticeType => {
 		for (const diagnostic of [
@@ -104,15 +88,4 @@ describe('command result presentation', () => {
 		expect(layouts([resultRow, nextInput, second, notice])).toEqual(['standard', 'standard', 'standard', 'hidden']);
 	});
 
-	it('rebuilds if newly loaded evidence changes a notice disposition', () => {
-		const controller = new ConversationFeedRenderModelController();
-		controller.reconcile('surface', [notice]);
-		const loaded = controller.reconcileDetailed('surface', [resultRow, notice]);
-		expect(loaded.change.kind).toBe('rebuilt');
-		expect(loaded.model.items.map(conversationFeedItemLayout)).toEqual(['standard', 'hidden']);
-		const appended = controller.reconcileDetailed('surface', [resultRow, notice,
-			{ kind: 'message', id: 'view:4', message: new UserMessage(at, 'next') }]);
-		expect(appended.change.kind).toBe('rebuilt');
-		expect(appended.model.items.map(conversationFeedItemLayout)).toEqual(['standard', 'standard', 'standard']);
-	});
 });

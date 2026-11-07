@@ -117,6 +117,19 @@ describe('AgentRegistry session cache', () => {
     expect(message.metadata?.contentFormat).toBeUndefined();
   });
 
+  it('keeps complete resend candidates behind the existing literal and missing-integration guards', () => {
+    const registry = createRegistry();
+    registry.admitQueuedInput(CHAT_ID, new UserMessage(AT, 'Synthetic unanswered input'), {
+      clientRequestId: 'resend-request', clientMessageId: 'resend-input', turnId: 'resend-turn',
+    });
+    expect(registry.resendCandidates(CHAT_ID)).toEqual(ledger.resendCandidates(CHAT_ID));
+    expect(registry.resendCandidates(CHAT_ID)).toHaveLength(1);
+    for (const integration of [null, { literalExecution: {} }]) {
+      const guarded = createRegistry(undefined, undefined, { get: () => integration });
+      expect(guarded.resendCandidates(CHAT_ID)).toEqual([]);
+    }
+  });
+
   it('reports steering support only for integrations the executor has reported', () => {
     const known = { steerable: { steering: {} }, plain: { steering: null } };
     const registry = createRegistry(undefined, undefined, {

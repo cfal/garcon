@@ -222,10 +222,58 @@
 	"chat_empty_shortcut_hint": "or press",
 	"chat_feed_failed_to_load": "Failed to load messages",
 	"chat_feed_failed_to_refresh": "Failed to refresh messages",
+	"chat_summary_updating": "Updating...",
+	"chat_summary_new_updates": "New updates",
+	"chat_summary_previous_page": "Previous page",
+	"chat_summary_next_page": "Next page",
+	"chat_subagent_running": "Running",
+	"chat_subagent_idle": "Idle",
+	"chat_attachment_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{count} attachment",
+				"countPlural=other": "{count} attachments"
+			}
+		}
+	],
+	"chat_pending_plan_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{count} pending plan",
+				"countPlural=other": "{count} pending plans"
+			}
+		}
+	],
+	"chat_member_earlier": [
+		{
+			"declarations": ["input count", "input formatted", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{formatted} earlier action",
+				"countPlural=other": "{formatted} earlier actions"
+			}
+		}
+	],
+	"chat_member_later": [
+		{
+			"declarations": ["input count", "input formatted", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{formatted} later action",
+				"countPlural=other": "{formatted} later actions"
+			}
+		}
+	],
 	"chat_history_unavailable": "Archived history for this chat is unavailable.",
 	"chat_feed_announcement_code_block": "Code block",
 	"chat_feed_new_response_available": "New response available",
 	"chat_feed_retry": "Retry",
+	"chat_feed_retained_boundary": "Retained history boundary",
+	"chat_tool_result": "Result",
 	"chat_workspace_select_project": "Select a project to start chatting",
 	"chat_chat_loading_chat_messages": "Loading messages...",
 	"chat_transcript_load_earlier": "Load earlier messages",
@@ -423,6 +471,7 @@
 	"chat_new_chat_ultrathink": "Max",
 	"chat_permission_allow_once": "Allow once",
 	"chat_permission_deny": "Deny",
+	"chat_permission_dismiss_plan": "Dismiss",
 	"chat_permission_permission_allowed": "Permission allowed",
 	"chat_permission_permission_cancelled": "Permission request cancelled",
 	"chat_permission_permission_denied": "Permission denied",
@@ -2356,6 +2405,7 @@
 	"sidebar_chats_reload_confirm_title": "Replace this transcript?",
 	"sidebar_chats_reload_confirm_description": "This replaces the displayed history with the provider's native history. CLI message titles and styles in the current native segment may be lost. This cannot be undone.",
 	"sidebar_chats_reload_confirm_resend": "These unsent messages will be removed from the current transcript:",
+	"sidebar_chats_reload_summary_incomplete": "The unsent-message summary is not current. Replacement may remove unsent messages not listed here.",
 	"sidebar_chats_reload_confirm_button": "Replace transcript",
 	"sidebar_chats_reload_progress_preparing": "Preparing to reload...",
 	"sidebar_chats_reload_progress_reading": "Reading native history: {count} messages",

@@ -2,7 +2,7 @@ import type {
 	ActiveTranscriptPort,
 	ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
@@ -18,6 +18,7 @@ type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'activeChatId'
 	| 'entries'
+	| 'forkSelection'
 	| 'chatMessages'
 	| 'getCursor'
 	| 'isUserScrolledUp'
@@ -31,7 +32,8 @@ type SessionTranscriptState = Pick<
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+	readonly serverInstanceId: string;
+	readonly openSnapshot: DisplayOpenResponse | null;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
 	getKnownHeadForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
@@ -49,7 +51,7 @@ export type SessionTranscriptLoadTarget = Pick<
 	ActiveTranscriptPort,
 	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+	readonly openSnapshot: DisplayOpenResponse | null;
 };
 
 export type PanelTranscriptSnapshotLoader = (options: ChatLoadMessagesOptions) => Promise<boolean>;

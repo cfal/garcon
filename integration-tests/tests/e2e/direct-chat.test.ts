@@ -34,10 +34,11 @@ async function holdFirstChatStart(page: Page): Promise<void> {
 
       const url = new URL(inputUrl, globalThis.location.href);
       const gate = scope.__garconDraftStartRequestGate;
-      if (gate && url.pathname === '/api/v1/chats/messages') {
+      if (gate && url.pathname === '/api/v1/chats/transcript-display/open') {
+        const request = JSON.parse(String(init?.body));
         gate.messageRequests.push({
-          chatId: url.searchParams.get('chatId'),
-          purpose: url.searchParams.get('purpose'),
+          chatId: request.chatId,
+          purpose: request.reason,
         });
       }
       if (gate && url.pathname === '/api/v1/chats/start') {
@@ -136,7 +137,7 @@ describe('Lightpanda direct chat', () => {
       expect(gate.messageRequests).toHaveLength(1);
       expect(gate.messageRequests[0]).toEqual({
         chatId: expect.any(String),
-        purpose: null,
+        purpose: 'activate',
       });
       expect(await app.exactTextCount('Failed to refresh messages')).toBe(0);
       expect(await app.exactTextCount('Session not found')).toBe(0);

@@ -35,6 +35,8 @@
 		closeTransients: () => {},
 	};
 	const viewport: ConversationViewportPort = {
+		requestCoverage: () => {},
+		memberPageTarget: () => null,
 		isReady: () => true,
 		hasCollapsedToolGroups: () => false,
 		isAtEnd: () => false,

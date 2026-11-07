@@ -3,6 +3,7 @@ import type { Page, Route } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
+import { displayWindowRequest } from '../../support/transcript-display-browser.js';
 import { createTicketSource } from '../../support/ticket-source-fixture.js';
 import type { TicketSource } from '../../../common/tickets.js';
 
@@ -34,16 +35,19 @@ for (const width of [1440, 390]) {
       expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
       await openActivity(page, ticketId);
       await page.setViewportSize({ width, height: 900 });
-      const targeted: URL[] = [];
+      const targeted: ReturnType<typeof displayWindowRequest>[] = [];
       page.on('request', (request) => {
         const url = new URL(request.url());
-        if (url.pathname === '/api/v1/chats/messages' && url.searchParams.has('beforeOrdinal')) targeted.push(url);
+        if (url.pathname === '/api/v1/chats/transcript-display/window') {
+          const input = displayWindowRequest(request.postData());
+          if (input.anchor.kind === 'around' && input.anchor.ordinal === target.ordinal) targeted.push(input);
+        }
       });
       await page.getByRole('button', { name: 'Open source', exact: true }).click();
       await expectTargetVisible(page, target);
       expect(await composer.inputValue()).toBe('Synthetic unsent source draft.');
-      expect(targeted).toHaveLength(1);
-      expect(targeted[0]!.searchParams.get('beforeOrdinal')).toBe(String(target.ordinal + 1));
+      expect(targeted, JSON.stringify(targeted)).toHaveLength(1);
+      expect(targeted[0]!.anchor).toEqual({ kind: 'around', ordinal: target.ordinal });
       assertNoBrowserErrors();
     });
   });
@@ -57,12 +61,12 @@ test('a reload between lookup and page load opens the chat without reusing the o
     const { chatId, ticketId, target } = await createTicketSource(integration, 110);
     const requestStarted = new Deferred<Route>();
     page.on('request', (request) => {
-      if (new URL(request.url()).pathname === '/api/v1/chats/messages') messageUrls.push(request.url());
+      if (new URL(request.url()).pathname === '/api/v1/chats/transcript-display/window') messageUrls.push(request.url());
     });
-    await context.route('**/api/v1/chats/messages?*', async (route) => {
+    await context.route('**/api/v1/chats/transcript-display/window', async (route) => {
       interceptedUrls.push(route.request().url());
-      const query = new URL(route.request().url()).searchParams;
-      if (query.get('chatId') === chatId && query.get('beforeOrdinal') === String(target.ordinal + 1)) {
+      const query = displayWindowRequest(route.request().postData());
+      if (query.chatId === chatId && (query.anchor.kind === 'around' && query.anchor.ordinal === target.ordinal)) {
         requests++;
         if (requestStarted.resolve(route)) return;
       }
@@ -88,7 +92,8 @@ test('a reload between lookup and page load opens the chat without reusing the o
     await page.locator('[data-chat-scroll-viewport]').waitFor();
     expect(requests).toBe(1);
     expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
-    expect(browserErrors.splice(0)).toEqual(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
+    expect(browserErrors.splice(0).filter((error) => error !==
+      'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)')).toEqual([]);
   }, async ({ page }) => ({
     requests,
     messageUrls,
@@ -143,9 +148,9 @@ test('a held source navigation cannot steal focus after rapid chat switches', as
     const responseHeld = new Promise<void>((resolve) => { release = resolve; });
     let finished!: () => void;
     const requestFinished = new Promise<void>((resolve) => { finished = resolve; });
-    await page.route('**/api/v1/chats/messages?*', async (route) => {
-      const query = new URL(route.request().url()).searchParams;
-      if (query.get('chatId') !== chatId || query.get('beforeOrdinal') !== String(target.ordinal + 1)) {
+    await page.route('**/api/v1/chats/transcript-display/window', async (route) => {
+      const query = displayWindowRequest(route.request().postData());
+      if (query.chatId !== chatId || (query.anchor.kind !== 'around' || query.anchor.ordinal !== target.ordinal)) {
         await route.continue();
         return;
       }
@@ -189,9 +194,9 @@ test('a held target page reports its deadline once without installing the late r
     const responseHeld = new Promise<void>((resolve) => { release = resolve; });
     let finished!: () => void;
     const requestFinished = new Promise<void>((resolve) => { finished = resolve; });
-    await page.route('**/api/v1/chats/messages?*', async (route) => {
-      const query = new URL(route.request().url()).searchParams;
-      if (query.get('beforeOrdinal') !== String(target.ordinal + 1)) {
+    await page.route('**/api/v1/chats/transcript-display/window', async (route) => {
+      const query = displayWindowRequest(route.request().postData());
+      if ((query.anchor.kind !== 'around' || query.anchor.ordinal !== target.ordinal)) {
         await route.continue();
         return;
       }

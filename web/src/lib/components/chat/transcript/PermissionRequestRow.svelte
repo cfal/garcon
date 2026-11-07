@@ -55,6 +55,7 @@
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: PlanExitChoice, plan: string) => void;
+		onDismissPlan?: () => void;
 		chatContext?: ConversationMessageChatContext | null;
 		draft?: PermissionQuestionDraft;
 		onDraftChange?: (draft: PermissionQuestionDraft) => void;
@@ -67,6 +68,7 @@
 		actionable = true,
 		onDecision,
 		onExitPlanMode,
+		onDismissPlan,
 		chatContext = null,
 		draft: controlledDraft,
 		onDraftChange,
@@ -191,6 +193,7 @@
 
 	const planTitle = $derived.by(() => {
 		if (isPending) return m.chat_permission_plan_ready();
+		if (!terminal) return m.chat_permission_plan();
 		if (wasAllowed) return m.chat_permission_plan_approved();
 		if (isResolved) return m.chat_permission_plan_denied();
 		return m.chat_permission_plan_cancelled();
@@ -377,6 +380,16 @@
 					>
 						{m.chat_permission_yes_approve_edits()}
 					</button>
+					{#if onDismissPlan}
+						<button
+							type="button"
+							onclick={onDismissPlan}
+							class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-neutral-border text-status-neutral-foreground hover:bg-status-neutral/50"
+						>
+							<X class="w-3.5 h-3.5" />
+							{m.chat_permission_dismiss_plan()}
+						</button>
+					{:else}
 					<button
 						type="button"
 						disabled={!canAnswer}
@@ -399,6 +412,7 @@
 						<X class="w-3.5 h-3.5" />
 						{m.chat_permission_deny()}
 					</button>
+					{/if}
 				</div>
 			{/if}
 		{/snippet}

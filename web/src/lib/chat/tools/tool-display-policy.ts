@@ -3,6 +3,7 @@
 // independently of the registry data.
 
 import type { ToolPayload, ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
+import { hasEmptyRequiredInput } from '$shared/transcript-display-policy.js';
 import type { ToolUseChatMessage } from '$shared/chat-types';
 import { extractContentString } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -20,25 +21,6 @@ const FAILED_RESULT_RULE: ToolResultDisplayRule = {
 		return { content: text || extractContentString(result.content), format: 'plain' };
 	},
 };
-
-function hasEmptyRequiredInput(tool: ToolUseChatMessage | undefined): boolean {
-	switch (tool?.type) {
-		case 'bash-tool-use':
-			return tool.command === '';
-		case 'claude-tool-search-tool-use':
-			return tool.query === '';
-		case 'claude-monitor-tool-use':
-			return tool.description === '';
-		case 'exec-tool-use':
-			return tool.code === '';
-		case 'read-tool-use':
-		case 'write-tool-use':
-		case 'edit-tool-use':
-			return tool.filePath === '';
-		default:
-			return false;
-	}
-}
 
 export function resolveToolResultDisplayRule(
 	rule: ToolDisplayRule,

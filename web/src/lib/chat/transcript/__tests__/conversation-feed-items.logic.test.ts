@@ -20,14 +20,14 @@ import {
 	WriteToolUseMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
-import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
+import { compileHiddenBashCommandPatterns } from '$shared/transcript-display-matcher.js';
 import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
 	conversationFeedItemLayout,
 	filterHiddenToolRenderItems,
 	visiblePendingPermissionRequests,
-} from '$lib/chat/transcript/conversation-feed-items.js';
+} from './reference/conversation-feed-items.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
