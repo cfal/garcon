@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, type Locator, type Page } from 'playwright';
 import type { PersistedWorkspaceLayoutV2 } from '../../../common/workspace-layout.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import {
   closeChromiumBrowser,
   withChromiumFixture,
@@ -33,6 +34,29 @@ async function waitForCurrentWorkspaceWindow(page: Page, windowId: string): Prom
         .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
         ?.getAttribute('data-workspace-window-current') === 'true',
     windowId,
+  );
+}
+
+async function waitForChatReadingPosition(
+  page: Page,
+  windowId: string,
+  reading: { rowId: string; offset: number },
+): Promise<void> {
+  await page.waitForFunction(
+    ({ id, reading }) => {
+      const viewport = document.querySelector<HTMLElement>(
+        `[data-conversation-panel="chat-view:${id}"] [data-chat-scroll-viewport]`,
+      );
+      const row = viewport?.querySelector<HTMLElement>(`[data-chat-row-id="${reading.rowId}"]`);
+      return (
+        viewport &&
+        row &&
+        Math.abs(
+          row.getBoundingClientRect().top - viewport.getBoundingClientRect().top - reading.offset,
+        ) < 3
+      );
+    },
+    { id: windowId, reading },
   );
 }
 
@@ -1729,146 +1753,222 @@ describe('Chromium workspace windows', () => {
     });
   });
 
-  test('swaps open sidebar Chats by default while retaining drafts, reading positions, and layout', async () => {
-    await withChromiumFixture('workspace-chat-swap', async (fixture, markPhase) => {
-      const { page } = fixture;
-      const content = (label: string) =>
-        `${label} ${'Synthetic wrapping transcript content. '.repeat(100)}`;
-      const chatA = await createChat(fixture, content('swap-a'));
-      const chatB = await createChat(fixture, content('swap-b'));
-      await openChat(fixture, chatA);
-      const source = await page
-        .locator('[data-workspace-window-current="true"]')
-        .getAttribute('data-workspace-window-id');
-      if (!source) throw new Error('Missing source Chat window');
-      const destination = await canonicalFilesWindowId(page);
-      const composer = page.locator('textarea[placeholder="Reply..."]');
-      await composer.fill('Synthetic draft A');
-      const composerElement = await composer.elementHandle();
-      await dragChatToWindow(page, {
-        chatId: chatB,
-        windowId: destination,
-        target: 'center',
-        expectedLabel: 'Add as tab',
-      });
-      await conversationPanel(page, destination)
-        .getByText(`echo:${content('swap-b')}`, { exact: true })
-        .waitFor();
-      await composer.fill('Synthetic draft B');
-      const viewport = (windowId: string) =>
-        conversationPanel(page, windowId).locator('[data-chat-scroll-viewport]');
-      await viewport(source).evaluate((element) => {
-        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
-        element.scrollTop = element.scrollHeight;
-        element.dispatchEvent(new Event('scroll'));
-      });
-      await viewport(destination).evaluate((element) => {
-        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-        element.scrollTop = 180;
-        element.dispatchEvent(new Event('scroll'));
-      });
-      await page.waitForFunction((id) => {
-        const element = document.querySelector<HTMLElement>(
-          `[data-conversation-panel="chat-view:${id}"] [data-chat-scroll-viewport]`,
-        );
-        return element?.scrollTop === 180 && element.dataset.chatPinnedToBottom === 'false';
-      }, destination);
-      const reading = await viewport(destination).evaluate((element) => {
-        const row = [...element.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
-          (item) => item.getBoundingClientRect().bottom > element.getBoundingClientRect().top,
-        );
-        if (!row) throw new Error('Missing reading anchor');
-        return {
-          rowId: row.dataset.chatRowId!,
-          offset: row.getBoundingClientRect().top - element.getBoundingClientRect().top,
-        };
-      });
+  test.each([
+    { retain: false, hiddenSource: false },
+    { retain: true, hiddenSource: false },
+    { retain: false, hiddenSource: true },
+    { retain: true, hiddenSource: true },
+  ])(
+    'swaps open sidebar Chats while retaining drafts, attachments, reading positions, and layout: %j',
+    async ({ retain, hiddenSource }) => {
+      await withChromiumFixture(
+        `workspace-chat-swap-${retain}-${hiddenSource}`,
+        async (fixture, markPhase) => {
+          const { page } = fixture;
+          await fixture.context.addInitScript(seedLocalSettings, {
+            combineToolUseMessages: retain,
+          });
+          const content = (label: string) =>
+            `${label} ${'Synthetic wrapping transcript content. '.repeat(100)}`;
+          const chatA = await createChat(fixture, content('swap-a'));
+          const chatB = await createChat(fixture, content('swap-b'));
+          await openChat(fixture, chatA);
+          const source = await page
+            .locator('[data-workspace-window-current="true"]')
+            .getAttribute('data-workspace-window-id');
+          if (!source) throw new Error('Missing source Chat window');
+          const destination = await canonicalFilesWindowId(page);
+          const composer = page.locator('textarea[placeholder="Reply..."]');
+          await composer.fill('Synthetic draft A');
+          const attachments = page.locator('[data-composer] input[type="file"]');
+          await attachments.setInputFiles({
+            name: 'draft-a.md',
+            mimeType: 'text/markdown',
+            buffer: Buffer.from('Synthetic attachment A'),
+          });
+          await page
+            .getByRole('button', { name: 'Remove attachment draft-a.md', exact: true })
+            .waitFor();
+          const composerElement = await composer.elementHandle();
+          await dragChatToWindow(page, {
+            chatId: chatB,
+            windowId: destination,
+            target: 'center',
+            expectedLabel: 'Add as tab',
+          });
+          await conversationPanel(page, destination)
+            .getByText(`echo:${content('swap-b')}`, { exact: true })
+            .waitFor();
+          await composer.fill('Synthetic draft B');
+          await attachments.setInputFiles({
+            name: 'draft-b.md',
+            mimeType: 'text/markdown',
+            buffer: Buffer.from('Synthetic attachment B'),
+          });
+          await page
+            .getByRole('button', { name: 'Remove attachment draft-b.md', exact: true })
+            .waitFor();
+          const viewport = (windowId: string) =>
+            conversationPanel(page, windowId).locator('[data-chat-scroll-viewport]');
+          await viewport(source).evaluate((element) => {
+            element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
+            element.scrollTop = element.scrollHeight;
+            element.dispatchEvent(new Event('scroll'));
+          });
+          await viewport(destination).evaluate((element) => {
+            element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+            element.scrollTop = 180;
+            element.dispatchEvent(new Event('scroll'));
+          });
+          await page.waitForFunction((id) => {
+            const element = document.querySelector<HTMLElement>(
+              `[data-conversation-panel="chat-view:${id}"] [data-chat-scroll-viewport]`,
+            );
+            return element?.scrollTop === 180 && element.dataset.chatPinnedToBottom === 'false';
+          }, destination);
+          const reading = await viewport(destination).evaluate((element) => {
+            const row = [...element.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
+              (item) => item.getBoundingClientRect().bottom > element.getBoundingClientRect().top,
+            );
+            if (!row) throw new Error('Missing reading anchor');
+            return {
+              rowId: row.dataset.chatRowId!,
+              offset: row.getBoundingClientRect().top - element.getBoundingClientRect().top,
+            };
+          });
 
-      markPhase('swapping two populated Chat windows');
-      await dragChatToWindow(page, {
-        chatId: chatA,
-        windowId: destination,
-        target: 'center',
-        expectedLabel: 'Swap chats',
-      });
-      await waitForCurrentWorkspaceWindow(page, destination);
-      await conversationPanel(page, destination)
-        .getByText(`echo:${content('swap-a')}`, { exact: true })
-        .waitFor();
-      await conversationPanel(page, source)
-        .getByText(`echo:${content('swap-b')}`, { exact: true })
-        .waitFor();
-      expect(await composer.inputValue()).toBe('Synthetic draft A');
-      expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
-      await page.waitForFunction(
-        ({ id, reading }) => {
-          const viewport = document.querySelector<HTMLElement>(
-            `[data-conversation-panel="chat-view:${id}"] [data-chat-scroll-viewport]`,
-          );
-          const row = viewport?.querySelector<HTMLElement>(`[data-chat-row-id="${reading.rowId}"]`);
-          return (
-            viewport &&
-            row &&
-            Math.abs(
-              row.getBoundingClientRect().top -
-                viewport.getBoundingClientRect().top -
-                reading.offset,
-            ) < 3
-          );
-        },
-        { id: source, reading },
-      );
-      await page.waitForFunction((id) => {
-        const element = document.querySelector<HTMLElement>(
-          `[data-conversation-panel="chat-view:${id}"] [data-chat-scroll-viewport]`,
-        );
-        return element && element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
-      }, destination);
-
-      markPhase('switching focus without remounting the composer or mixing drafts');
-      for (const [windowId, draft] of [
-        [source, 'Synthetic draft B'],
-        [destination, 'Synthetic draft A'],
-        [source, 'Synthetic draft B'],
-      ]) {
-        await page
-          .locator(`[data-workspace-window-titlebar="${windowId}"]`)
-          .click({ position: { x: 3, y: 3 } });
-        await waitForCurrentWorkspaceWindow(page, windowId);
-        expect(await composer.inputValue()).toBe(draft);
-        expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
-      }
-      markPhase('restoring the swapped layout after reload');
-      await page.waitForFunction(
-        ({ source, destination, chatA, chatB }) => {
-          const layout: PersistedWorkspaceLayoutV2 | null = JSON.parse(
-            localStorage.getItem('workspace_layout_v2') ?? 'null',
-          );
-          const pending = layout ? [layout.root] : [];
-          const assignments = new Map<string, string | null>();
-          for (const item of pending) {
-            if (item.type === 'partition') pending.push(...item.children);
-            else
-              assignments.set(
-                item.id,
-                item.order.find((surface) => surface.type === 'chat')?.chatId ?? null,
-              );
+          if (hiddenSource) {
+            await openWindowTab(page, source, 'Open Chat Map');
+            await conversationPanel(page, source).waitFor({ state: 'hidden' });
           }
-          return assignments.get(source) === chatB && assignments.get(destination) === chatA;
+          const sourceWindow = page.locator(`[data-workspace-window-id="${source}"]`);
+          const sourceTabIds = await sourceWindow
+            .getByRole('tab')
+            .evaluateAll((tabs) => tabs.map((tab) => tab.id));
+
+          markPhase('swapping two populated Chat windows');
+          await dragChatToWindow(page, {
+            chatId: chatA,
+            windowId: destination,
+            target: 'center',
+            expectedLabel: 'Swap chats',
+          });
+          await waitForCurrentWorkspaceWindow(page, destination);
+          await conversationPanel(page, destination)
+            .getByText(`echo:${content('swap-a')}`, { exact: true })
+            .waitFor();
+          if (hiddenSource) {
+            markPhase('repeatedly swapping the hidden Chat without revealing its tab');
+            for (const [chatId, marker, draft] of [
+              [chatB, 'swap-b', 'Synthetic draft B'],
+              [chatA, 'swap-a', 'Synthetic draft A'],
+            ]) {
+              expect(await sourceWindow.getAttribute('data-workspace-window-active-surface')).toBe(
+                'singleton:chat-map',
+              );
+              await dragChatToWindow(page, {
+                chatId,
+                windowId: destination,
+                target: 'center',
+                expectedLabel: 'Swap chats',
+              });
+              await conversationPanel(page, destination)
+                .getByText(`echo:${content(marker)}`, { exact: true })
+                .waitFor();
+              if (chatId === chatB) await waitForChatReadingPosition(page, destination, reading);
+              expect(await composer.inputValue()).toBe(draft);
+              expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
+            }
+            expect(await sourceWindow.getAttribute('data-workspace-window-active-surface')).toBe(
+              'singleton:chat-map',
+            );
+            await page.locator(`[id="${source}-tab-chat-view:${source}"]`).click();
+            await conversationPanel(page, source)
+              .getByText(`echo:${content('swap-b')}`, { exact: true })
+              .waitFor();
+            await page
+              .locator(`[data-workspace-window-titlebar="${destination}"]`)
+              .click({ position: { x: 3, y: 3 } });
+            await waitForCurrentWorkspaceWindow(page, destination);
+          }
+          await conversationPanel(page, source)
+            .getByText(`echo:${content('swap-b')}`, { exact: true })
+            .waitFor();
+          expect(await composer.inputValue()).toBe('Synthetic draft A');
+          expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
+          await page
+            .getByRole('button', { name: 'Remove attachment draft-a.md', exact: true })
+            .waitFor();
+          expect(
+            await page
+              .getByRole('button', { name: 'Remove attachment draft-b.md', exact: true })
+              .count(),
+          ).toBe(0);
+          expect(
+            await sourceWindow.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.id)),
+          ).toEqual(sourceTabIds);
+          await waitForChatReadingPosition(page, source, reading);
+          await page.waitForFunction((id) => {
+            const element = document.querySelector<HTMLElement>(
+              `[data-conversation-panel="chat-view:${id}"] [data-chat-scroll-viewport]`,
+            );
+            return element && element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
+          }, destination);
+
+          markPhase('switching focus without remounting the composer or mixing drafts');
+          for (const [windowId, draft, attachment, otherAttachment] of [
+            [source, 'Synthetic draft B', 'draft-b.md', 'draft-a.md'],
+            [destination, 'Synthetic draft A', 'draft-a.md', 'draft-b.md'],
+            [source, 'Synthetic draft B', 'draft-b.md', 'draft-a.md'],
+          ]) {
+            await page
+              .locator(`[data-workspace-window-titlebar="${windowId}"]`)
+              .click({ position: { x: 3, y: 3 } });
+            await waitForCurrentWorkspaceWindow(page, windowId);
+            expect(await composer.inputValue()).toBe(draft);
+            expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
+            await page
+              .getByRole('button', { name: `Remove attachment ${attachment}`, exact: true })
+              .waitFor();
+            expect(
+              await page
+                .getByRole('button', { name: `Remove attachment ${otherAttachment}`, exact: true })
+                .count(),
+            ).toBe(0);
+          }
+          markPhase('restoring the swapped layout after reload');
+          await page.waitForFunction(
+            ({ source, destination, chatA, chatB }) => {
+              const layout: PersistedWorkspaceLayoutV2 | null = JSON.parse(
+                localStorage.getItem('workspace_layout_v2') ?? 'null',
+              );
+              const pending = layout ? [layout.root] : [];
+              const assignments = new Map<string, string | null>();
+              for (const item of pending) {
+                if (item.type === 'partition') pending.push(...item.children);
+                else
+                  assignments.set(
+                    item.id,
+                    item.order.find((surface) => surface.type === 'chat')?.chatId ?? null,
+                  );
+              }
+              return assignments.get(source) === chatB && assignments.get(destination) === chatA;
+            },
+            { source, destination, chatA, chatB },
+          );
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await conversationPanel(page, source)
+            .getByText(`echo:${content('swap-b')}`, { exact: true })
+            .waitFor();
+          await conversationPanel(page, destination)
+            .getByText(`echo:${content('swap-a')}`, { exact: true })
+            .waitFor();
+          expect(await page.locator(WINDOW_SELECTOR).count()).toBe(2);
+          fixture.assertNoBrowserErrors();
         },
-        { source, destination, chatA, chatB },
       );
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await conversationPanel(page, source)
-        .getByText(`echo:${content('swap-b')}`, { exact: true })
-        .waitFor();
-      await conversationPanel(page, destination)
-        .getByText(`echo:${content('swap-a')}`, { exact: true })
-        .waitFor();
-      expect(await page.locator(WINDOW_SELECTOR).count()).toBe(2);
-      fixture.assertNoBrowserErrors();
-    });
-  });
+    },
+  );
 
   test('protects split scrollbars on hybrid-pointer desktops', async () => {
     const browser = await chromium.launch({
