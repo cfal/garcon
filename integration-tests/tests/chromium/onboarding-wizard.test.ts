@@ -34,14 +34,14 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         'Arrange your sidebar',
         'Chat display',
         'Writing and behavior',
-        "You're all set",
+        "What's next",
       ];
       for (const [index, title] of titles.entries()) {
         phase(title);
         await browserExpect(wizard.getByRole('heading', { name: title })).toBeFocused();
         const isDonePage = index === titles.length - 1;
         const nextButton = wizard.getByRole('button', {
-          name: isDonePage ? 'Start using Garcon' : 'Continue',
+          name: isDonePage ? 'Set up API providers' : 'Continue',
           exact: true,
         });
         for (const [width, height] of [[1440, 900], [900, 500], [390, 844], [320, 568]]) {
@@ -124,7 +124,11 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           await browserExpect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
         }
       }
-      await browserExpect(wizard).toHaveCount(0);
+      await browserExpect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+      await browserExpect.poll(() => page.getByRole('dialog', { name: 'Settings', exact: true }).evaluate(element => element.contains(document.activeElement))).toBe(true);
+      await browserExpect(page.getByRole('tab', { name: 'Providers', exact: true })).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('Escape');
+      await browserExpect(page.getByRole('dialog')).toHaveCount(0);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.reload();
       await expectUsableWorkspace(page);
@@ -148,6 +152,24 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await browserExpect(wizard).toHaveCount(0);
       await page.reload();
       await expectUsableWorkspace(page);
+
+      for (const [button, dialog] of [['Scheduled Tasks', 'Scheduled Prompts'], ['Preambles', 'Preambles']]) {
+        phase(`final shortcut: ${button}`);
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+        await page.getByRole('tab', { name: 'Behavior', exact: true }).click();
+        await page.getByRole('button', { name: 'Restart setup wizard', exact: true }).click();
+        for (const title of titles.slice(0, -1)) {
+          await browserExpect(wizard.getByRole('heading', { name: title })).toBeVisible();
+          await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+        }
+        await wizard.getByRole('button', { name: button, exact: true }).click();
+        const destination = page.getByRole('dialog', { name: dialog, exact: true });
+        await browserExpect(destination).toBeVisible();
+        await browserExpect.poll(() => destination.evaluate(element => element.contains(document.activeElement))).toBe(true);
+        await page.keyboard.press('Escape');
+        await expectUsableWorkspace(page);
+      }
 
       phase('existing preferences and cleared storage');
       await page.evaluate(() => {

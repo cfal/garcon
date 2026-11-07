@@ -9,13 +9,44 @@ function createWizard() {
 	localSettingsStores.push(localSettings);
 	const onClose = vi.fn();
 	const onOpenProviders = vi.fn();
-	const wizard = new OnboardingWizardState({ localSettings, onClose, onOpenProviders });
-	return { localSettings, wizard, onClose, onOpenProviders };
+	const onOpenScheduledPrompts = vi.fn();
+	const onOpenPreambles = vi.fn();
+	const wizard = new OnboardingWizardState({
+		localSettings,
+		onClose,
+		onOpenProviders,
+		onOpenScheduledPrompts,
+		onOpenPreambles,
+	});
+	return {
+		localSettings,
+		wizard,
+		onClose,
+		onOpenProviders,
+		onOpenScheduledPrompts,
+		onOpenPreambles,
+	};
 }
 
 describe('OnboardingWizardState', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it.each([
+		['finishToProviders', 'onOpenProviders'],
+		['finishToScheduledPrompts', 'onOpenScheduledPrompts'],
+		['finishToPreambles', 'onOpenPreambles'],
+	] as const)('saves and closes before navigating with %s', (action, callback) => {
+		const setup = createWizard();
+		setup[callback].mockImplementation(() => {
+			expect(setup.onClose).toHaveBeenCalledOnce();
+			const restored = createLocalSettingsStore();
+			expect(restored.hadSavedSettingsOnLoad).toBe(true);
+			restored.destroy();
+		});
+		setup.wizard[action]();
+		expect(setup[callback]).toHaveBeenCalledOnce();
 	});
 
 	afterEach(() => {

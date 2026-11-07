@@ -33,8 +33,10 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Writing and behavior' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: "You're all set" });
-		expect(screen.getByText('Your preferences are saved.')).toBeTruthy();
+		await screen.findByRole('heading', { name: "What's next" });
+		expect(
+			screen.getByText('Review your API providers, then put your workspace to work.'),
+		).toBeTruthy();
 	}
 
 	it('advances through the pages and moves focus to each page heading', async () => {
@@ -227,9 +229,10 @@ describe('OnboardingWizard', () => {
 		expect(previewFor('compact').getAttribute('data-selected')).toBe('false');
 	});
 
-	it('finishes by closing the wizard, or closes into provider settings', async () => {
+	it('makes provider setup the only final primary action', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();
+		expect(screen.queryByRole('button', { name: 'Start using Garcon' })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Set up API providers' }));
 		expect(appShell.showOnboardingWizard).toBe(false);
@@ -237,14 +240,33 @@ describe('OnboardingWizard', () => {
 		expect(appShell.settingsTab).toBe('providers');
 	});
 
-	it('closes on the done page primary action', async () => {
+	it('can still close from the done page without opening settings', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Start using Garcon' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 		expect(appShell.showOnboardingWizard).toBe(false);
 		expect(appShell.showSettings).toBe(false);
 	});
+
+	it.each([
+		['Scheduled Tasks', 'showScheduledPrompts', 'Send prompts later or on a recurring schedule.'],
+		['Preambles', 'showPreambles', 'Reuse instructions across chats.'],
+	] as const)(
+		'opens %s from the final page and persists preferences',
+		async (name, property, description) => {
+			const { appShell } = renderWizard();
+			await advanceToDonePage();
+			expect(screen.getByText(description)).toBeTruthy();
+			await fireEvent.click(screen.getByRole('button', { name }));
+			expect(appShell.showOnboardingWizard).toBe(false);
+			expect(appShell[property]).toBe(true);
+			expect(appShell.showSettings).toBe(false);
+			const restored = createLocalSettingsStore();
+			expect(restored.hadSavedSettingsOnLoad).toBe(true);
+			restored.destroy();
+		},
+	);
 
 	it('returns from the done page to revise writing preferences', async () => {
 		renderWizard();
@@ -269,11 +291,11 @@ describe('OnboardingWizard', () => {
 	it('restarts on the theme page after closing', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();
-		await fireEvent.click(screen.getByRole('button', { name: 'Start using Garcon' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
 		appShell.openOnboardingWizard();
 
 		await screen.findByRole('heading', { name: 'Choose your theme' });
-		expect(screen.queryByRole('heading', { name: "You're all set" })).toBeNull();
+		expect(screen.queryByRole('heading', { name: "What's next" })).toBeNull();
 	});
 });

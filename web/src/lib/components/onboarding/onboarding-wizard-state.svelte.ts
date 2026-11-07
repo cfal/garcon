@@ -15,6 +15,8 @@ interface OnboardingWizardStateDeps {
 	localSettings: LocalSettingsStore;
 	onClose: () => void;
 	onOpenProviders: () => void;
+	onOpenScheduledPrompts: () => void;
+	onOpenPreambles: () => void;
 }
 
 export class OnboardingWizardState {
@@ -57,5 +59,15 @@ export class OnboardingWizardState {
 	finishToProviders(): void {
 		this.finish();
 		this.#deps.onOpenProviders();
+	}
+
+	finishToScheduledPrompts(): void {
+		this.finish();
+		this.#deps.onOpenScheduledPrompts();
+	}
+
+	finishToPreambles(): void {
+		this.finish();
+		this.#deps.onOpenPreambles();
 	}
 }

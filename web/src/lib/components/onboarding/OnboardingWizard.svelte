@@ -2,7 +2,9 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import CheckIcon from '@lucide/svelte/icons/check';
+	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import { getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
@@ -22,6 +24,8 @@
 		localSettings: ls,
 		onClose: () => appShell.closeOnboardingWizard(),
 		onOpenProviders: () => appShell.openSettings('providers'),
+		onOpenScheduledPrompts: () => appShell.openScheduledPrompts(),
+		onOpenPreambles: () => appShell.openPreambles(),
 	});
 
 	function handleOpenChange(open: boolean) {
@@ -164,12 +168,49 @@
 			{:else if wizard.pageId === 'writing'}
 				<OnboardingWritingPage />
 			{:else}
-				<div class="flex flex-col items-center gap-3 py-6 text-center">
-					<span
-						class="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary"
+				<div class="divide-y divide-border">
+					<button
+						type="button"
+						class="flex w-full items-center gap-3 rounded-md px-2 py-4 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+						onclick={() => wizard.finishToScheduledPrompts()}
+						aria-labelledby="onboarding-scheduled-title"
+						aria-describedby="onboarding-scheduled-description"
 					>
-						<CheckIcon class="size-6" />
-					</span>
+						<CalendarClockIcon class="size-5 shrink-0 text-muted-foreground" />
+						<span class="min-w-0 flex-1">
+							<span id="onboarding-scheduled-title" class="block text-sm font-medium"
+								>{m.onboarding_scheduled_tasks()}</span
+							>
+							<span
+								id="onboarding-scheduled-description"
+								class="mt-1 block text-sm text-muted-foreground"
+							>
+								{m.onboarding_scheduled_tasks_description()}
+							</span>
+						</span>
+						<ArrowRightIcon class="size-4 shrink-0 text-muted-foreground" />
+					</button>
+					<button
+						type="button"
+						class="flex w-full items-center gap-3 rounded-md px-2 py-4 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+						onclick={() => wizard.finishToPreambles()}
+						aria-labelledby="onboarding-preambles-title"
+						aria-describedby="onboarding-preambles-description"
+					>
+						<FileTextIcon class="size-5 shrink-0 text-muted-foreground" />
+						<span class="min-w-0 flex-1">
+							<span id="onboarding-preambles-title" class="block text-sm font-medium"
+								>{m.preambles_title()}</span
+							>
+							<span
+								id="onboarding-preambles-description"
+								class="mt-1 block text-sm text-muted-foreground"
+							>
+								{m.onboarding_preambles_description()}
+							</span>
+						</span>
+						<ArrowRightIcon class="size-4 shrink-0 text-muted-foreground" />
+					</button>
 				</div>
 			{/if}
 		</div>
@@ -197,10 +238,9 @@
 					{m.onboarding_step_label({ current: wizard.pageIndex + 1, total: wizard.pageCount })}
 				</span>
 				{#if wizard.isDonePage}
-					<Button variant="outline" onclick={() => wizard.finishToProviders()}>
+					<Button onclick={() => wizard.finishToProviders()}>
 						{m.onboarding_done_providers()}
 					</Button>
-					<Button onclick={() => wizard.finish()}>{m.onboarding_done_start()}</Button>
 				{:else}
 					<Button onclick={() => wizard.advance()}>{m.onboarding_continue()}</Button>
 				{/if}
