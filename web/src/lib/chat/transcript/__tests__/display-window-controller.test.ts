@@ -441,6 +441,89 @@ it.each([
 	expect(controller.snapshot.detailsCertificate?.bashRevision).toBe('patterns-2');
 });
 
+it.each(['abort', 'repeat-cancel', 'ownership', 'park', 'reset', 'dispose'] as const)('settles deferred revision demand after navigation ends by %s', async ending => {
+	vi.useFakeTimers();
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => ({ ...window(), certificate: {
+		...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+	} }));
+	const { controller, api } = setup({ window: read });
+	const held = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
+	const members = api.members;
+	api.members = async request => { entered.resolve(); await held.promise; return members(request); };
+	const abort = new AbortController();
+	let owned = true;
+	const pending = controller.navigate(20000, abort.signal, () => owned);
+	await entered.promise;
+	controller.ready('patterns-2');
+	if (ending === 'abort') abort.abort();
+	else if (ending === 'repeat-cancel') { abort.abort(); controller.cancel(); }
+	else if (ending === 'ownership') owned = false;
+	else controller[ending]();
+	held.resolve();
+	expect(await pending).toBeNull();
+	await vi.advanceTimersByTimeAsync(5000);
+	if (ending === 'abort' || ending === 'repeat-cancel' || ending === 'ownership') {
+		expect(read).toHaveBeenCalledTimes(2);
+		expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+	} else {
+		expect(read).toHaveBeenCalledOnce();
+		if (ending === 'park') {
+			controller.activate();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+		}
+	}
+});
+
+it.each(['readiness-then-old-open', 'unchanged-then-new-open'] as const)('settles deferred revisions in order %s', async order => {
+	vi.useFakeTimers();
+	const open = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const read = vi.fn<TranscriptDisplayApi['window']>(async request => ({ ...window(), certificate: {
+		...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+	} }));
+	const { controller, api } = setup({ window: read });
+	const members = api.members;
+	api.members = vi.fn<TranscriptDisplayApi['members']>().mockImplementationOnce(async request => {
+		if (order === 'readiness-then-old-open') {
+			controller.ready('patterns-2');
+			controller.installOpen(open, profile);
+		} else {
+			controller.installOpen(open, profile);
+			controller.installOpen({ ...open, display: { ...open.display, bashRevision: 'patterns-2' } }, profile);
+		}
+		return members(request);
+	}).mockImplementation(members);
+	expect(await controller.navigate(20000)).toMatchObject({ kind: 'group-member', landedOrdinal: 20000 });
+	await vi.advanceTimersByTimeAsync(1);
+	expect(controller.snapshot.window?.certificate.bashRevision).toBe('patterns-2');
+});
+
+it.each(['network', 'stale-view', 'busy'] as const)('handles a %s metadata reopen failure during member revision recovery', async failure => {
+	vi.useFakeTimers();
+	const fresh = displayOpen('chat', 'view', certificate.watermark, 'instance');
+	const error = failure === 'network' ? new Error('Synthetic open failure') : failure === 'stale-view'
+		? new ApiError(409, 'View replaced', 'STALE_TRANSCRIPT_VIEW') : new ApiError(503, 'Busy', 'DISPLAY_BUSY');
+	const open = vi.fn<TranscriptDisplayApi['open']>().mockRejectedValueOnce(error)
+		.mockResolvedValue({ ...fresh, display: { ...fresh.display, bashRevision: 'patterns-2' } });
+	const { controller, api } = setup({ open, window: async request => ({ ...window(), certificate: {
+		...certificate, bashRevision: request.profile.bashRevision, profileKey: displayProfileKey(request.profile),
+	} }) });
+	const members = api.members;
+	api.members = async request => {
+		if (request.certificate.bashRevision === 'patterns') throw new ApiError(409, 'Changed', 'DISPLAY_REVISION_CHANGED');
+		return members(request);
+	};
+	const pending = controller.navigate(20000).catch(error => error);
+	await vi.advanceTimersByTimeAsync(1600);
+	const result = await pending;
+	if (failure === 'network') {
+		expect(result).toBe(error);
+		expect(controller.snapshot).toMatchObject({ phase: 'failed', error: error.message });
+	} else if (failure === 'stale-view') expect(result).toEqual({ kind: 'stale-view', ordinal: 20000, landedOrdinal: null });
+	else expect(result).toMatchObject({ kind: 'group-member', landedOrdinal: 20000 });
+	expect(controller.busy).toBe(false);
+});
+
 it('retries a superseded display job without failing the surface', async () => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>()

@@ -85,7 +85,7 @@ describe('display surface registry', () => {
 		expect(overlays.forChat('chat-1').notices.map(notice => notice.noticeType)).toEqual(['warning', 'error']);
 	});
 
-	it.each(['before-parking', 'while-parked'] as const)('preserves a per-chat reading target across surface reuse with input eviction %s', async timing => {
+	it.each(['before-parking', 'while-parked', 'stale'] as const)('preserves a per-chat reading target across surface reuse with eviction %s', async timing => {
 		const { registry, api } = fixture();
 		registry.reconcile([presentation(left)]);
 		await registry.loadChatSnapshot('chat-1');
@@ -97,6 +97,7 @@ describe('display surface registry', () => {
 		registry.reconcile([presentation(left, 'chat-2')]);
 		await registry.loadChatSnapshot('chat-2');
 		if (timing === 'while-parked') registry.upsertOptimisticInput('chat-1', pendingInput);
+		if (timing === 'stale') registry.markChatStale('chat-1');
 		registry.prepareForReconcile([presentation(left)]);
 		registry.reconcile([presentation(left)]);
 		const restored = registry.panel(left)!;
@@ -471,6 +472,38 @@ describe('display surface registry', () => {
 		await registry.loadChatSnapshot('chat-1');
 		expect(registry.panel(left)).toBe(source);
 		expect(registry.panel(right)!.transcript).not.toBe(source.transcript);
+	});
+
+	it('transfers and consumes a saved reading target after budget eviction of its parked window', async () => {
+		const { registry, api, bodies } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const original = registry.panel(left)!.transcript;
+		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 };
+		registry.panel(left)!.attachPresentation(port(target));
+		for (let index = 2; index <= 6; index++) {
+			const chatId = `chat-${index}`;
+			api.replace([displayRow(1)], displayOpen(chatId, 'view-1', 1));
+			registry.prepareForReconcile([presentation(left, chatId)]);
+			registry.reconcile([presentation(left, chatId)]);
+			await registry.loadChatSnapshot(chatId);
+		}
+		expect(bodies.usage(original.controller).count).toBe(0);
+		registry.prepareChatSurfaceTransfer({ sourceSurfaceId: left, destinationSurfaceId: right, chatId: 'chat-1' }).publish();
+		registry.prepareForReconcile([presentation(left, 'chat-6'), presentation(right)]);
+		registry.reconcile([presentation(left, 'chat-6'), presentation(right)]);
+		const destination = registry.panel(right)!;
+		expect(destination.transcript).not.toBe(original);
+		expect(destination.scroll.isPinnedToBottom).toBe(false);
+		const jump = vi.spyOn(destination.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		destination.attachPresentation(port({ kind: 'end' }));
+		await registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' }, { viewportOffset: -12 }));
+		registry.prepareForReconcile([presentation(left), presentation(right)]);
+		registry.reconcile([presentation(left), presentation(right)]);
+		expect(registry.panel(left)!.scroll.isPinnedToBottom).toBe(true);
+		await registry.loadChatSnapshot('chat-1');
 	});
 
 	it('prunes a permanently removed surface and its parked leases and reading target', async () => {
