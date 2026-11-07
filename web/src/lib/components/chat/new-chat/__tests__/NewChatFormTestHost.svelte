@@ -18,8 +18,10 @@
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
@@ -46,6 +48,7 @@
 	} from '$shared/attachments';
 
 	interface Props {
+		seed?: NewChatDialogSeed;
 		composerInputMode?: 'source' | 'formatted';
 		executorSnapshots?: readonly ExecutorSnapshot[];
 		onExecutors?: (store: ExecutorsStore) => void;
@@ -70,6 +73,7 @@
 	}
 
 	let {
+		seed,
 		executorSnapshots,
 		onExecutors,
 		onRemoteSettings,
@@ -125,16 +129,8 @@
 	setPreambles(preambles);
 	setCanonicalWorkspaceLayout();
 
-	let seedListener = () => {};
-	const appShell = {
-		projectBasePath: '/workspace',
-		isMobile: false,
-		openSnippets() {},
-		onNewChatDialogSeed(callback: () => void) {
-			seedListener = callback;
-			return () => {};
-		},
-	} as never;
+	const appShell = createAppShellStore();
+	appShell.projectBasePath = '/workspace';
 	setAppShell(appShell);
 	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
@@ -322,9 +318,11 @@
 </script>
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
-<NewChatForm {onStartChat} />
+{#key appShell.newChatDialogRequestId}
+	<NewChatForm {seed} {onStartChat} />
+{/key}
 
-<button type="button" data-testid="reseed-new-chat" onclick={() => seedListener()}>Reseed</button>
+<button type="button" data-testid="reseed-new-chat" onclick={() => appShell.openNewChatDialog()}>Reopen</button>
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 {#each notifications.items as notification (notification.id)}

@@ -388,6 +388,7 @@
 	"chat_new_chat_accept_edits": "Accept Edits",
 	"chat_new_chat_add_to_favorites": "Pin project path",
 	"chat_new_chat_bypass_permissions": "Bypass Permissions",
+	"chat_new_chat_errors_execution_modes_unavailable": "The selected permission or thinking mode is unavailable. Choose a supported mode or another agent.",
 	"chat_new_chat_change_mode": "Click to change mode",
 	"chat_new_chat_create_worktree_failed": "Failed to create worktree.",
 	"chat_new_chat_default_mode": "Default Mode",

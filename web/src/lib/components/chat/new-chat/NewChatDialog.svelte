@@ -15,7 +15,6 @@
 	const sessions = getChatSessions();
 
 	const open = $derived(appShell.newChatDialogOpen);
-	const prefill = $derived(appShell.newChatDialogSeed?.prefill ?? '');
 
 	function handleOpenChange(next: boolean) {
 		if (!next) appShell.closeNewChatDialog();
@@ -59,10 +58,12 @@
 			e.preventDefault();
 		}}
 	>
-		<NewChatForm
-			{prefill}
-			onStartChat={handleStartChat}
-			onCancel={() => appShell.closeNewChatDialog()}
-		/>
+		{#key appShell.newChatDialogRequestId}
+			<NewChatForm
+				seed={appShell.newChatDialogSeed}
+				onStartChat={handleStartChat}
+				onCancel={() => appShell.closeNewChatDialog()}
+			/>
+		{/key}
 	</Dialog.Content>
 </Dialog.Root>

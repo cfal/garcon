@@ -218,6 +218,26 @@ function previewResponse(
 }
 
 describe('NewChatForm', () => {
+	it('explains why a copied direct agent cannot start when direct chats are disabled', async () => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { allowDirectChats: false, onStartChat, seed: {
+			prefill: 'Synthetic scheduled prompt',
+			startup: { executorId: 'local', agentId: 'direct-openai-compatible', projectPath: '/workspace/project',
+				model: 'chat-model', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+				permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+				preambleChoice: { mode: 'defaults' } },
+		} });
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		expect(await screen.findByText('The selected agent is not available for new chats.')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Start session' })).toHaveProperty('disabled', true);
+		await fireEvent.keyDown(screen.getByPlaceholderText('How can I help you today?'), { key: 'Enter', ctrlKey: true });
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
 	it('connects the formatted New Chat input to the shared Markdown editor', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
@@ -505,7 +525,7 @@ describe('NewChatForm', () => {
 		}), PROSPECTIVE_CHAT_ID);
 	});
 
-	it('reveals the form after reseeding while the current path is invalid', async () => {
+	it('reveals the replacement form after reopening while the current path is invalid', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
@@ -1195,7 +1215,7 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
-	it('mints the prospective ID lazily and clears it on reseed', async () => {
+	it('mints the prospective ID lazily and clears it on a new open request', async () => {
 		stubMatchMedia(false);
 		vi.mocked(clientChatId.createClientChatId)
 			.mockReset()
@@ -1224,13 +1244,14 @@ describe('NewChatForm', () => {
 
 		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
 		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
-		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
+		const replacementInput = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(replacementInput, { target: { value: 'after reseed' } });
 		await waitFor(() => {
 			expect(
 				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
 			).toBe(false);
 		});
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await fireEvent.keyDown(replacementInput, { key: 'Enter' });
 
 		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(2);
 		expect(onStartChat).toHaveBeenCalledWith(
@@ -1239,7 +1260,7 @@ describe('NewChatForm', () => {
 		);
 	});
 
-	it('cancels an in-flight expansion on reseed', async () => {
+	it('cancels an in-flight expansion on a new open request', async () => {
 		stubMatchMedia(false);
 		vi.mocked(clientChatId.createClientChatId)
 			.mockReset()
@@ -1254,7 +1275,8 @@ describe('NewChatForm', () => {
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 
 		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
-		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
+		const replacementInput = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(replacementInput, { target: { value: 'after reseed' } });
 		pending.resolve({
 			success: true,
 			source: 'snippet',
@@ -1268,13 +1290,13 @@ describe('NewChatForm', () => {
 
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(messageInput.value).toBe('after reseed');
+		expect(replacementInput.value).toBe('after reseed');
 		await waitFor(() => {
 			expect(
 				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
 			).toBe(false);
 		});
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await fireEvent.keyDown(replacementInput, { key: 'Enter' });
 
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			expect.objectContaining({

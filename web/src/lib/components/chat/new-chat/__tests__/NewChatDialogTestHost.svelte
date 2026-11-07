@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import NewChatDialog from '../NewChatDialog.svelte';
@@ -28,14 +31,16 @@
 	interface Props {
 		snippetTemplate?: string | null;
 		onCreateDraft?: (draft: unknown) => void;
+		shell?: AppShellStore;
+		initialSeed?: NewChatDialogSeed;
 	}
 
-	let { snippetTemplate = null, onCreateDraft = () => {} }: Props = $props();
+	let { snippetTemplate = null, onCreateDraft = () => {}, shell, initialSeed }: Props = $props();
 
-	const appShell = createAppShellStore();
+	const appShell = untrack(() => shell ?? createAppShellStore());
 	setCanonicalWorkspaceLayout();
 	appShell.projectBasePath = '/workspace';
-	appShell.openNewChatDialog();
+	appShell.openNewChatDialog(untrack(() => initialSeed));
 
 	setAppShell(appShell);
 	setNewChatPromptDrafts(new NewChatPromptDraftStore());

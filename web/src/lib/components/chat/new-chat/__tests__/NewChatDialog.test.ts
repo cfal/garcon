@@ -8,6 +8,9 @@ import * as snippetsApi from '$lib/api/snippets';
 import * as navigation from '$lib/chat/actions/chat-navigation.js';
 import * as clientChatId from '$shared/client-chat-id';
 import NewChatDialogTestHost from './NewChatDialogTestHost.svelte';
+import { createAppShellStore } from '$lib/stores/app-shell.svelte';
+import { parseChatId } from '$shared/chat-id';
+import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 
 vi.mock('$lib/api/chats', () => ({
@@ -111,6 +114,14 @@ function makeSnapshot(): RemoteSettingsSnapshot {
 }
 
 describe('NewChatDialog', () => {
+	const scheduledSeed: NewChatDialogSeed = {
+		prefill: 'Review 1000000000000001', prospectiveChatId: parseChatId('1000000000000001'),
+		startup: { executorId: 'local', agentId: 'claude', projectPath: '/workspace/scheduled',
+			model: 'opus', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['scheduled'],
+			agentSettingsById: { claude: { ownerId: 'claude', schemaVersion: 1, values: {} } },
+			preambleChoice: { mode: 'explicit', orderedPreambleIds: [] } },
+	};
 	beforeEach(() => {
 		vi.stubGlobal(
 			'matchMedia',
@@ -134,6 +145,38 @@ describe('NewChatDialog', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
+	});
+
+	it('starts with the copied settings and prospective ID only after an explicit edited submission', async () => {
+		const onCreateDraft = vi.fn();
+		render(NewChatDialogTestHost, { initialSeed: scheduledSeed, onCreateDraft });
+		const textarea = document.querySelector('textarea')!;
+		await waitFor(() => expect(textarea.value).toBe(scheduledSeed.prefill));
+		expect(onCreateDraft).not.toHaveBeenCalled();
+		expect(await screen.findByRole('textbox', { name: 'Project Path' })).toHaveProperty('value', '/workspace/scheduled');
+		await fireEvent.input(textarea, { target: { value: 'Edited 1000000000000001' } });
+		const send = screen.getByRole('button', { name: 'Start session' });
+		await waitFor(() => expect(send).toHaveProperty('disabled', false));
+		await fireEvent.click(send);
+		expect(onCreateDraft).toHaveBeenCalledWith(expect.objectContaining({
+			id: scheduledSeed.prospectiveChatId, projectPath: '/workspace/scheduled',
+			startup: expect.objectContaining({ executorId: 'local', agentId: 'claude', model: 'opus',
+				firstMessage: 'Edited 1000000000000001', permissionMode: 'acceptEdits', thinkingMode: 'high',
+				tags: ['scheduled'], orderedPreambleIds: [], initialImages: [] }),
+		}));
+		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
+	});
+
+	it('replaces an already-open seed and clears its configuration on a plain request', async () => {
+		const shell = createAppShellStore();
+		render(NewChatDialogTestHost, { shell, initialSeed: scheduledSeed });
+		await waitFor(() => expect(document.querySelector('textarea')?.value).toBe(scheduledSeed.prefill));
+		shell.openNewChatDialog({ ...scheduledSeed, prefill: 'Replacement', startup: { ...scheduledSeed.startup!, projectPath: '/workspace/replacement' } });
+		await waitFor(() => expect(document.querySelector('textarea')?.value).toBe('Replacement'));
+		expect(await screen.findByRole('textbox', { name: 'Project Path' })).toHaveProperty('value', '/workspace/replacement');
+		shell.openNewChatDialog();
+		await waitFor(() => expect(screen.getByRole('textbox', { name: 'Project Path' })).toHaveProperty('value', '/workspace'));
+		expect(document.querySelector('textarea')?.value).not.toBe('Replacement');
 	});
 
 	it('uses one prospective ID for expansion, draft creation, and navigation', async () => {

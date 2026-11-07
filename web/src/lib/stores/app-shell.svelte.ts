@@ -2,6 +2,7 @@
 
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
+import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 
 // App tabs are stored in this browser; every other tab is server-owned.
 const APP_SETTINGS_TABS = ['appearance', 'behavior', 'shortcuts'] as const;
@@ -29,10 +30,6 @@ function normalizeSettingsTab(value: string): SettingsTab {
 		: 'appearance';
 }
 
-export interface NewChatDialogSeed {
-	prefill?: string;
-}
-
 /** Captured target for the per-chat preamble selection editor. */
 export interface ChatPreambleSelectionTarget {
 	readonly chatId: string;
@@ -57,6 +54,7 @@ export class AppShellStore {
 
 	/** Controls new-chat dialog visibility. */
 	newChatDialogOpen = $state(false);
+	newChatDialogRequestId = $state(0);
 	/** One-shot seed data (e.g. prefill text) for the dialog form. */
 	newChatDialogSeed = $state<NewChatDialogSeed | null>(null);
 
@@ -230,6 +228,7 @@ export class AppShellStore {
 	/** Opens the new-chat dialog, optionally seeding it with prefill data. */
 	openNewChatDialog(seed?: NewChatDialogSeed): void {
 		this.newChatDialogSeed = seed ?? null;
+		this.newChatDialogRequestId += 1;
 		this.newChatDialogOpen = true;
 		this.#newChatDialogSeed.emit();
 	}
