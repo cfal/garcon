@@ -371,7 +371,7 @@ export class ConversationSessionController {
 		loadPanelSnapshot: PanelTranscriptSnapshotLoader,
 	): Promise<void> {
 		try {
-			if (transcript.display.phase === 'failed') {
+			if (transcript.display.phase === 'failed' || transcript.display.error !== null) {
 				const result = await transcript.controller.retry();
 				if (result === 'superseded' || transcript.activeChatId !== chatId) return;
 			}

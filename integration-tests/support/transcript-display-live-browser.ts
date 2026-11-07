@@ -102,6 +102,12 @@ export async function verifyFailedDisplayControlsAndLiveWire(fixture: ChromiumFi
     projectPath: integration.dirs.project, command: 'Synthetic display failure permission', permissionMode: 'bypassPermissions' }));
   await integration.client.waitForTransientPermission(chatId, () => true);
   const failure = await interceptUnavailableWindow(page, chatId, 'failed');
+  const retryPath = '**/api/v1/chats/transcript-display/retry';
+  const allowRetry = async (route: Route) => {
+    if (route.request().postDataJSON().chatId === chatId) await failure.release();
+    await route.continue();
+  };
+  await page.route(retryPath, allowRetry);
   const wire = await observeDisplayWire(page);
   try {
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
@@ -115,15 +121,20 @@ export async function verifyFailedDisplayControlsAndLiveWire(fixture: ChromiumFi
     await browserExpect(page.getByRole('button', { name: /Submit answer/ })).toHaveCount(0);
     await wire.settle();
     expect(wire.bodies()).toEqual([]);
-  } finally { await failure.release(); }
-  const retried = page.waitForResponse(response => response.url().endsWith('/transcript-display/retry')
-    && response.request().postDataJSON().chatId === chatId);
-  await page.locator(DISPLAY_FEED).getByRole('button', { name: 'Retry', exact: true }).click();
-  expect((await retried).ok()).toBe(true);
-  await page.getByText('Synthetic permission completed', { exact: true }).waitFor();
-  await waitForDisplayIdle(page);
-  await wire.settle();
-  expect(wire.requests.filter(path => path.endsWith('/transcript-display/retry'))).toHaveLength(1);
+    const [retried] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith('/transcript-display/retry')
+        && response.request().postDataJSON().chatId === chatId),
+      page.locator(DISPLAY_FEED).getByRole('button', { name: 'Retry', exact: true }).click(),
+    ]);
+    expect(retried.ok()).toBe(true);
+    await page.getByText('Synthetic permission completed', { exact: true }).waitFor();
+    await waitForDisplayIdle(page);
+    await wire.settle();
+    expect(wire.requests.filter(path => path.endsWith('/transcript-display/retry'))).toHaveLength(1);
+  } finally {
+    await page.unroute(retryPath, allowRetry);
+    await failure.release();
+  }
   const httpStart = wire.http.length, wsStart = wire.ws.length;
   const pairs = 60;
   environment.model.scriptTurn(Array.from({ length: pairs }, (_, index) =>
