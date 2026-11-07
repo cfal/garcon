@@ -205,6 +205,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	imageViewerOpenPlacement: FileOpenPlacementPreference;
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	forkOpenPlacement: ForkOpenPlacementPreference;
+	swapDraggedOpenChats: boolean;
 	hiddenToolTypes: HideableToolType[];
 	globalShortcuts: GlobalShortcutOverrides;
 	browserNotifications: boolean;
@@ -218,6 +219,7 @@ type BooleanLocalSettingKey =
 	| 'terminalAppearance'
 	| 'overlayBackdropEffects'
 	| 'highlightActiveWindow'
+	| 'swapDraggedOpenChats'
 	| 'autoExpandTools'
 	| 'combineToolUseMessages'
 	| 'alwaysExpandCliMessages'
@@ -289,6 +291,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	imageViewerOpenPlacement: 'same-window',
 	markdownViewerOpenPlacement: 'same-window',
 	forkOpenPlacement: 'split-auto',
+	swapDraggedOpenChats: true,
 	hiddenToolTypes: [],
 	globalShortcuts: {},
 	browserNotifications: false,
@@ -571,6 +574,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		forkOpenPlacement: isForkOpenPlacement(parsed.forkOpenPlacement)
 			? parsed.forkOpenPlacement
 			: DEFAULTS.forkOpenPlacement,
+		swapDraggedOpenChats: parseBoolean(parsed.swapDraggedOpenChats, DEFAULTS.swapDraggedOpenChats),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
 		browserNotifications: parseBoolean(parsed.browserNotifications, DEFAULTS.browserNotifications),
@@ -680,6 +684,7 @@ export class LocalSettingsStore {
 		DEFAULTS.markdownViewerOpenPlacement,
 	);
 	forkOpenPlacement = $state<ForkOpenPlacementPreference>(DEFAULTS.forkOpenPlacement);
+	swapDraggedOpenChats = $state(DEFAULTS.swapDraggedOpenChats);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	browserNotifications = $state(DEFAULTS.browserNotifications);
@@ -847,6 +852,7 @@ export class LocalSettingsStore {
 			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			forkOpenPlacement: this.forkOpenPlacement,
+			swapDraggedOpenChats: this.swapDraggedOpenChats,
 			hiddenToolTypes: this.hiddenToolTypes,
 			globalShortcuts: { ...this.globalShortcuts },
 			browserNotifications: this.browserNotifications,
@@ -925,6 +931,7 @@ export class LocalSettingsStore {
 		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.forkOpenPlacement = snap.forkOpenPlacement;
+		this.swapDraggedOpenChats = snap.swapDraggedOpenChats;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 		this.globalShortcuts = { ...snap.globalShortcuts };
 		this.browserNotifications = snap.browserNotifications;

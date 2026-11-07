@@ -1,4 +1,7 @@
 import { tick } from 'svelte';
+import { render } from '@testing-library/svelte';
+import WorkspaceFocusObserver from './WorkspaceFocusObserver.svelte';
+import type { ChatSurfaceTransfer } from '../chat-surface-transfer';
 import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte';
 import { ticketTestHarness } from '$lib/components/tickets/__tests__/ticket-test-harness';
@@ -14,6 +17,7 @@ import {
 	fileSurfaceId,
 	portableSingletonDescriptor,
 	terminalSurfaceId,
+	type WorkspaceLayoutMutation,
 	type WorkspaceWindowId,
 } from '../surface-types';
 import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
@@ -725,6 +729,243 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
 		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toBeNull();
 	});
+
+	it('swaps both Chat bindings in one publication without transiently selecting the displaced chat', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const destination = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		await coordinator.focusSurface(chatViewSurfaceId('window-main'));
+		const onChange = vi.fn();
+		const observer = render(WorkspaceFocusObserver, { workspace: coordinator, onChange });
+		await tick();
+		const publications = [0, 1].map(() => ({ publish: vi.fn(), rollback: vi.fn() }));
+		let transferIndex = 0;
+		const prepareChatSurfaceTransfer = vi.fn((_transfer: ChatSurfaceTransfer) => {
+			for (const publication of publications) {
+				expect(publication.publish).not.toHaveBeenCalled();
+			}
+			return publications[transferIndex++];
+		});
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		const before = layout.snapshot;
+		const revision = layout.revision;
+		await coordinator.swapChatIntoWindow('chat-a', destination, 'chat-b');
+		await tick();
+		expect(onChange.mock.calls.flat()).not.toContain('chat-b');
+		expect(coordinator.focusedChatId).toBe('chat-a');
+		expect(coordinator.currentWindowId).toBe(destination);
+		expect(coordinator.composerAnchorSurfaceId).toBe(chatViewSurfaceId(destination));
+		expect(layout.revision).toBe(revision + 1);
+		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-b' });
+		expect(prepareChatSurfaceTransfer.mock.calls).toEqual([
+			[
+				{
+					sourceSurfaceId: chatViewSurfaceId('window-main'),
+					destinationSurfaceId: chatViewSurfaceId(destination),
+					chatId: 'chat-a',
+				},
+			],
+			[
+				{
+					sourceSurfaceId: chatViewSurfaceId(destination),
+					destinationSurfaceId: chatViewSurfaceId('window-main'),
+					chatId: 'chat-b',
+				},
+			],
+		]);
+		for (const publication of publications) {
+			expect(publication.publish).toHaveBeenCalledOnce();
+			expect(publication.rollback).not.toHaveBeenCalled();
+		}
+		observer.unmount();
+	});
+
+	it('preserves a hidden source Chat slot when swapping into a visible Chat', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const destination = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		await coordinator.focusSurface('singleton:git');
+		const before = windowTabs(layout.snapshot, 'window-main');
+		await coordinator.swapChatIntoWindow('chat-a', destination, 'chat-b');
+		expect(windowTabs(layout.snapshot, 'window-main')).toEqual(before);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-b' });
+		expect(coordinator.currentWindowId).toBe(destination);
+	});
+
+	it('swaps into the fullscreen Chat without exiting fullscreen or changing window tabs', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.showChatInWindow('chat-b', 'window-files');
+		await coordinator.enterWindowFullscreen('window-files');
+		const before = layout.snapshot;
+
+		await coordinator.swapChatIntoWindow('chat-a', 'window-files', 'chat-b');
+
+		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-files');
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-b' });
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({ chatId: 'chat-a' });
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(coordinator.focusedChatId).toBe('chat-a');
+		expect(coordinator.composerAnchorSurfaceId).toBe(chatViewSurfaceId('window-files'));
+	});
+
+	it('falls back to ordinary placement if the dragged Chat is no longer open', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.showChatInWindow('chat-b', 'window-files');
+		const prepareChatSurfaceTransfer = vi.fn();
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		const swapping = coordinator.swapChatIntoWindow('chat-a', 'window-files', 'chat-b');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-c' },
+			]),
+		);
+
+		await swapping;
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-c' });
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({ chatId: 'chat-a' });
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(prepareChatSurfaceTransfer).not.toHaveBeenCalled();
+	});
+
+	it.each(['hidden', 'empty', 'changed', 'missing', 'same', 'mobile'] as const)(
+		'falls back to showing the existing Chat for an ineligible %s swap target',
+		async (scenario) => {
+			const { coordinator, layout } = createHarness();
+			await coordinator.showChatInCurrentWindow('chat-a');
+			await coordinator.showChatInWindow('chat-b', 'window-files');
+			if (scenario === 'hidden') await coordinator.focusSurface('singleton:files');
+			if (scenario === 'empty' || scenario === 'changed') {
+				layout.publish(
+					layout.revision,
+					reduceWorkspaceLayout(layout.snapshot, [
+						{
+							type: 'set-window-chat',
+							windowId: 'window-files',
+							chatId: scenario === 'empty' ? null : 'chat-c',
+						},
+					]),
+				);
+			}
+			if (scenario === 'mobile') await coordinator.enterMobilePresentation();
+			const before = layout.snapshot.surfaces;
+			const prepareChatSurfaceTransfer = vi.fn();
+			coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+			let target: WorkspaceWindowId = 'window-files';
+			if (scenario === 'missing') target = 'window-missing';
+			else if (scenario === 'same') target = 'window-main';
+			await coordinator.swapChatIntoWindow('chat-a', target, 'chat-b');
+			expect(layout.snapshot.surfaces).toEqual(before);
+			expect(coordinator.focusedChatId).toBe('chat-a');
+			expect(prepareChatSurfaceTransfer).not.toHaveBeenCalled();
+		},
+	);
+
+	it('rolls back both transfers without changing focus when a swap cannot publish', async () => {
+		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 3 });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.showChatInWindow('chat-b', 'window-files');
+		coordinator.noteSurfaceFocus(chatViewSurfaceId('window-main'));
+		const before = layout.snapshot;
+		const revision = layout.revision;
+		const focusOwner = coordinator.focusOwner;
+		const composerAnchor = coordinator.composerAnchorSurfaceId;
+		const publications = [0, 1].map(() => ({ publish: vi.fn(), rollback: vi.fn() }));
+		const prepareChatSurfaceTransfer = vi
+			.fn()
+			.mockReturnValueOnce(publications[0])
+			.mockReturnValueOnce(publications[1]);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		await expect(
+			coordinator.swapChatIntoWindow('chat-a', 'window-files', 'chat-b'),
+		).rejects.toThrow();
+		expect(layout.snapshot).toBe(before);
+		expect(layout.revision).toBe(revision);
+		expect(coordinator.focusOwner).toEqual(focusOwner);
+		expect(coordinator.composerAnchorSurfaceId).toBe(composerAnchor);
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(prepareChatSurfaceTransfer).toHaveBeenCalledTimes(2);
+		for (const publication of publications) {
+			expect(publication.publish).toHaveBeenCalledOnce();
+			expect(publication.rollback).toHaveBeenCalledOnce();
+		}
+	});
+
+	it.each(['moved-source', 'changed-target', 'hidden-target'] as const)(
+		'replans a queued swap against the latest layout: %s',
+		async (scenario) => {
+			const { coordinator, layout } = createHarness();
+			await coordinator.showChatInCurrentWindow('chat-a');
+			const destination = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+			const swapping = coordinator.swapChatIntoWindow('chat-a', destination, 'chat-b');
+			let mutation: WorkspaceLayoutMutation;
+			let expectedWindowId: WorkspaceWindowId = 'window-main';
+			let expectedDestinationChatId = 'chat-b';
+			switch (scenario) {
+				case 'moved-source':
+					mutation = {
+						type: 'move-chat-to-window',
+						sourceWindowId: 'window-main',
+						destinationWindowId: 'window-files',
+					};
+					expectedWindowId = destination;
+					expectedDestinationChatId = 'chat-a';
+					break;
+				case 'changed-target':
+					mutation = { type: 'set-window-chat', windowId: destination, chatId: 'chat-c' };
+					expectedDestinationChatId = 'chat-c';
+					break;
+				case 'hidden-target':
+					mutation = { type: 'set-fullscreen-window', windowId: 'window-main' };
+					break;
+			}
+			layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [mutation]));
+			await swapping;
+			expect(coordinator.focusedChatId).toBe('chat-a');
+			expect(coordinator.currentWindowId).toBe(expectedWindowId);
+			expect(layout.surface(chatViewSurfaceId(destination))).toMatchObject({
+				chatId: expectedDestinationChatId,
+			});
+			if (scenario === 'moved-source') {
+				expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({
+					chatId: 'chat-b',
+				});
+			}
+		},
+	);
+
+	it.each(['source', 'destination'] as const)(
+		'does not swap a %s reserved by a pending close',
+		async (reserved) => {
+			const confirmation = deferred<boolean>();
+			const { coordinator, layout } = createHarness({
+				confirmDestructive: () => confirmation.promise,
+			});
+			await coordinator.showChatInCurrentWindow('chat-a');
+			const destination = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+			const reservedWindow = reserved === 'source' ? 'window-main' : destination;
+			await coordinator.placeFileSession('reserved-file', {
+				type: 'window',
+				windowId: reservedWindow,
+			});
+			await coordinator.focusSurface(chatViewSurfaceId(reservedWindow));
+			const prepareChatSurfaceTransfer = vi.fn();
+			coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+			const swapping = coordinator.swapChatIntoWindow('chat-a', destination, 'chat-b');
+			const closing = coordinator.closeWindow(reservedWindow);
+			await expect(swapping).rejects.toThrow('Failed to open view');
+			expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+			expect(layout.surface(chatViewSurfaceId(destination))).toMatchObject({ chatId: 'chat-b' });
+			expect(prepareChatSurfaceTransfer).not.toHaveBeenCalled();
+			confirmation.resolve(false);
+			await expect(closing).resolves.toBe(false);
+		},
+	);
 
 	it('replaces Chat in an exact occupied window without changing another presentation', async () => {
 		const { coordinator, layout } = createHarness();

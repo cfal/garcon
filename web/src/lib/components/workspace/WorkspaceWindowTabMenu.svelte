@@ -131,6 +131,14 @@
 	function closeOtherWindows(): void {
 		void workspace.closeOtherWindows(windowId).catch(notifyFailure);
 	}
+
+	function handleDropdownCloseAutoFocus(event: Event): void {
+		const trigger = document.querySelector(
+			`[data-workspace-window-menu-trigger="${CSS.escape(windowId)}"]`,
+		);
+		// Removed windows can still expose their old focus owner during Svelte teardown.
+		if (!trigger || workspace.currentWindowId !== windowId) event.preventDefault();
+	}
 </script>
 
 {#snippet menuItems()}
@@ -262,6 +270,7 @@
 		class={contentClass}
 		data-workspace-window-menu={windowId}
 		data-workspace-window-tab-menu="dropdown"
+		onCloseAutoFocus={handleDropdownCloseAutoFocus}
 	>
 		{@render menuItems()}
 	</DropdownMenuContent>

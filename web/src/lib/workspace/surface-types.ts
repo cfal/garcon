@@ -154,6 +154,11 @@ export type WorkspaceLayoutMutation =
 	| { type: 'set-window-chat'; windowId: WorkspaceWindowId; chatId: string | null }
 	| { type: 'replace-surface'; previousId: string; surface: SurfaceDescriptor }
 	| { type: 'swap-terminal-placements'; firstSurfaceId: string; secondSurfaceId: string }
+	| {
+			type: 'swap-window-chats';
+			firstWindowId: WorkspaceWindowId;
+			secondWindowId: WorkspaceWindowId;
+	  }
 	| { type: 'activate-window-tab'; windowId: WorkspaceWindowId; surfaceId: string }
 	| {
 			type: 'move-tab';

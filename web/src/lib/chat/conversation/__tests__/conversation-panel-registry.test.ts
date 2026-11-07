@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import type { ChatLoadMessagesOptions } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type {
+	ActiveTranscriptState,
+	ChatLoadMessagesOptions,
+} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
@@ -874,6 +877,369 @@ describe('ConversationPanelRegistry', () => {
 		expect(registry.panel('chat-view:window-left')?.prepareForHide()).toEqual(target);
 		cache.flush();
 	});
+
+	it.each([
+		{ retain: false, reverse: false },
+		{ retain: false, reverse: true },
+		{ retain: true, reverse: false },
+		{ retain: true, reverse: true },
+	])(
+		'exchanges both Chat reading targets and active intervals: %j',
+		async ({ retain, reverse }) => {
+			const { cache, registry } = fixture({ retainInactiveWindows: () => retain });
+			const ids = ['chat-view:window-left', 'chat-view:window-right'] as const;
+			cache.replace('chat-1', 'view-1', [message(1)], 1, null);
+			cache.replace('chat-2', 'view-2', [message(1)], 1, null);
+			registry.reconcile(ids.map((id, index) => presentation(id, `chat-${index + 1}`)));
+			const originals = ids.map((id, index) => {
+				const panel = registry.panel(id)!;
+				const target = {
+					kind: 'row' as const,
+					transcriptViewId: `view-${index + 1}`,
+					ordinal: 1,
+					viewportOffset: -17 - index * 10,
+				};
+				panel.attachPresentation(port(target));
+				if (retain) {
+					registry.applyCommittedBatch({
+						chatId: panel.chatId,
+						transcriptViewId: target.transcriptViewId,
+						messages: Array.from({ length: 4_099 }, (_, offset) => message(offset + 2)),
+						firstOrdinal: 2,
+						lastOrdinal: 4_100,
+						resendCandidates: [],
+						noticeRevision: 0,
+					});
+					panel.transcript.revealAllLoadedMessages();
+				}
+				return { panel, target };
+			});
+			const publications = ids.map((id, index) =>
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: id,
+					destinationSurfaceId: ids[1 - index],
+					chatId: originals[index].panel.chatId,
+				}),
+			);
+			for (const publication of publications) publication.publish();
+			const visible = ids.map((id, index) => presentation(id, originals[1 - index].panel.chatId));
+			if (reverse) visible.reverse();
+			registry.prepareForReconcile(visible);
+			registry.reconcile(visible);
+			for (const [index, id] of ids.entries()) {
+				const incoming = originals[1 - index];
+				const panel = registry.panel(id)!;
+				const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+				panel.attachPresentation(port({ kind: 'end' }));
+				await vi.waitFor(() =>
+					expect(jump).toHaveBeenCalledWith(
+						{
+							chatId: incoming.panel.chatId,
+							transcriptViewId: incoming.target.transcriptViewId,
+							rowId: `${incoming.target.transcriptViewId}:1`,
+						},
+						{ viewportOffset: incoming.target.viewportOffset },
+					),
+				);
+				if (retain) {
+					expect(panel.transcript).toBe(incoming.panel.transcript);
+					expect(panel.transcript.entries).toHaveLength(4_100);
+				}
+			}
+			registry.destroy();
+			cache.flush();
+		},
+	);
+
+	it('preserves pending reading targets across repeated swaps from a hidden source', async () => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		const left = 'chat-view:window-left';
+		const right = 'chat-view:window-right';
+		registry.reconcile([presentation(left, 'chat-1'), presentation(right, 'chat-2')]);
+		const first = registry.panel(left)!;
+		const second = registry.panel(right)!;
+		first.attachPresentation(
+			port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -11 }),
+		);
+		second.attachPresentation(
+			port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -22 }),
+		);
+		const hidden = [presentation(right, 'chat-2')];
+		registry.prepareForReconcile(hidden);
+		registry.reconcile(hidden);
+		for (const { incoming, outgoing, transcript, viewportOffset } of [
+			{
+				incoming: 'chat-1',
+				outgoing: 'chat-2',
+				transcript: first.transcript,
+				viewportOffset: -11,
+			},
+			{
+				incoming: 'chat-2',
+				outgoing: 'chat-1',
+				transcript: second.transcript,
+				viewportOffset: -22,
+			},
+		]) {
+			const publications = [
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: left,
+					destinationSurfaceId: right,
+					chatId: incoming,
+				}),
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: right,
+					destinationSurfaceId: left,
+					chatId: outgoing,
+				}),
+			];
+			for (const publication of publications) publication.publish();
+			const visible = [presentation(right, incoming)];
+			registry.prepareForReconcile(visible);
+			registry.reconcile(visible);
+			const panel = registry.panel(right)!;
+			expect(panel.transcript).toBe(transcript);
+			const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+			panel.attachPresentation(
+				port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset }),
+			);
+			await vi.waitFor(() =>
+				expect(jump).toHaveBeenCalledWith(
+					{ chatId: incoming, transcriptViewId: 'view-1', rowId: 'view-1:1' },
+					{ viewportOffset },
+				),
+			);
+		}
+		registry.reconcile([presentation(left, 'chat-1'), presentation(right, 'chat-2')]);
+		expect(registry.panel(left)?.transcript).toBe(first.transcript);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each([false, true])(
+		'keeps swapped drafts deferred until admission (retention: %s)',
+		async (retain) => {
+			const loadTranscriptSnapshot = vi.fn(
+				async (transcript: ActiveTranscriptState, chatId: string) => {
+					transcript.transcriptCache.replace(chatId, `view-${chatId}`, [message(1)], 1, null);
+					transcript.installCachedSnapshot(chatId);
+				},
+			);
+			const { cache, registry } = fixture({
+				retainInactiveWindows: () => retain,
+				loadTranscriptSnapshot,
+			});
+			const ids = ['chat-view:window-left', 'chat-view:window-right'] as const;
+			registry.reconcile(ids.map((id, index) => presentation(id, `chat-${index + 1}`, 'deferred')));
+			const publications = ids.map((id, index) =>
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: id,
+					destinationSurfaceId: ids[1 - index],
+					chatId: `chat-${index + 1}`,
+				}),
+			);
+			for (const publication of publications) publication.publish();
+			const swapped = ids.map((id, index) => presentation(id, `chat-${2 - index}`, 'deferred'));
+			registry.prepareForReconcile(swapped);
+			registry.reconcile(swapped);
+			for (const item of swapped) {
+				expect(registry.panel(item.surfaceId)?.chatId).toBe(item.chatId);
+				await expect(registry.loadChatSnapshot(item.chatId)).resolves.toBe(false);
+			}
+			expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+
+			registry.reconcile(swapped.map((item) => ({ ...item, snapshotAdmission: 'admitted' })));
+
+			await vi.waitFor(() => {
+				expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(2);
+				for (const item of swapped) {
+					expect(registry.panel(item.surfaceId)?.transcript.transcriptViewId).toBe(
+						`view-${item.chatId}`,
+					);
+					expect(registry.panel(item.surfaceId)?.transcript.entries).toHaveLength(1);
+				}
+			});
+			registry.destroy();
+			cache.flush();
+		},
+	);
+
+	it.each([false, true])(
+		'rejects obsolete refreshes before retrying on swapped transcripts (retention: %s)',
+		async (retain) => {
+			const originalRelease = deferred<void>();
+			const retryRelease = deferred<void>();
+			const attempts = new Map<string, number>();
+			const outcomes: {
+				chatId: string;
+				result: ReturnType<ActiveTranscriptState['setFromPage']>;
+			}[] = [];
+			const loadTranscriptSnapshot = vi.fn(
+				async (transcript: ActiveTranscriptState, chatId: string) => {
+					const attempt = attempts.get(chatId) ?? 0;
+					attempts.set(chatId, attempt + 1);
+					const epoch = transcript.beginSnapshotLoad();
+					await (attempt === 0 ? originalRelease.promise : retryRelease.promise);
+					const lastOrdinal = attempt === 0 ? 1 : 151;
+					const result = transcript.setFromPage(
+						chatId,
+						{
+							transcriptViewId: `view-${chatId}`,
+							messages: Array.from({ length: lastOrdinal }, (_, index) => message(index + 1)),
+							lastOrdinal,
+							pageOldestOrdinal: 1,
+							pageNewestOrdinal: lastOrdinal,
+							nextBeforeOrdinal: null,
+							hasMore: false,
+							resendCandidates: [],
+						},
+						epoch,
+					);
+					outcomes.push({ chatId, result });
+				},
+			);
+			const { cache, registry } = fixture({
+				retainInactiveWindows: () => retain,
+				loadTranscriptSnapshot,
+			});
+			const ids = ['chat-view:window-left', 'chat-view:window-right'] as const;
+			for (const chatId of ['chat-1', 'chat-2']) {
+				cache.replace(chatId, `view-${chatId}`, [message(1)], 1, null);
+			}
+			registry.reconcile(ids.map((id, index) => presentation(id, `chat-${index + 1}`)));
+			const originals = ids.map((id) => registry.panel(id)!);
+			for (const panel of originals) {
+				registry.applyCommittedBatch({
+					chatId: panel.chatId,
+					transcriptViewId: `view-${panel.chatId}`,
+					messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
+					firstOrdinal: 2,
+					lastOrdinal: 150,
+					resendCandidates: [],
+					noticeRevision: 0,
+				});
+				panel.transcript.revealAllLoadedMessages();
+				expect(panel.transcript.entries).toHaveLength(150);
+				expect(cache.get(panel.chatId)?.messages).toHaveLength(100);
+			}
+			const refreshing = Promise.all(
+				originals.map((panel) => registry.loadChatSnapshot(panel.chatId, { minimumLimit: 200 })),
+			);
+			await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(2));
+			const publications = ids.map((id, index) =>
+				registry.prepareChatSurfaceTransfer({
+					sourceSurfaceId: id,
+					destinationSurfaceId: ids[1 - index],
+					chatId: `chat-${index + 1}`,
+				}),
+			);
+			for (const publication of publications) publication.publish();
+			const swapped = ids.map((id, index) => presentation(id, `chat-${2 - index}`));
+			registry.prepareForReconcile(swapped);
+			registry.reconcile(swapped);
+
+			originalRelease.resolve();
+			await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(4));
+			expect(outcomes).toEqual(
+				expect.arrayContaining([
+					{ chatId: 'chat-1', result: 'stale' },
+					{ chatId: 'chat-2', result: 'stale' },
+				]),
+			);
+			expect(outcomes).toHaveLength(2);
+			if (retain) {
+				for (const [index, item] of swapped.entries()) {
+					const transcript = registry.panel(item.surfaceId)!.transcript;
+					expect(transcript).toBe(originals[1 - index].transcript);
+					expect(transcript.entries).toHaveLength(150);
+					expect(transcript.entries[0].ordinal).toBe(1);
+				}
+			}
+
+			retryRelease.resolve();
+			await expect(refreshing).resolves.toEqual([true, true]);
+			for (const item of swapped) {
+				await vi.waitFor(() => {
+					const panel = registry.panel(item.surfaceId)!;
+					expect(panel.chatId).toBe(item.chatId);
+					expect(panel.transcript.transcriptViewId).toBe(`view-${item.chatId}`);
+					expect(panel.transcript.lastOrdinal).toBe(151);
+				});
+			}
+			for (const [index, item] of swapped.entries()) {
+				expect(registry.panel(item.surfaceId)).not.toBe(originals[index]);
+				registry.applyCommittedBatch({
+					chatId: item.chatId,
+					transcriptViewId: `view-${item.chatId}`,
+					messages: [message(152)],
+					firstOrdinal: 152,
+					lastOrdinal: 152,
+					resendCandidates: [],
+					noticeRevision: 0,
+				});
+				expect(registry.panel(item.surfaceId)?.transcript.lastOrdinal).toBe(152);
+				expect(registry.panel(swapped[1 - index].surfaceId)?.transcript.lastOrdinal).toBe(
+					index === 0 ? 151 : 152,
+				);
+			}
+			registry.destroy();
+			cache.flush();
+		},
+	);
+
+	it.each([
+		{ rollback: 'replacement', chatId: 'chat-1', viewportOffset: -11 },
+		{ rollback: 'superseded', chatId: 'chat-2', viewportOffset: -22 },
+	])(
+		'preserves the correct pending transfer when the $rollback publication rolls back',
+		async ({ rollback, chatId, viewportOffset }) => {
+			const { cache, registry } = fixture();
+			seed(cache, 'chat-1');
+			seed(cache, 'chat-2');
+			registry.reconcile([
+				presentation('chat-view:window-left', 'chat-1'),
+				presentation('chat-view:window-right', 'chat-2'),
+			]);
+			registry
+				.panel('chat-view:window-left')!
+				.attachPresentation(
+					port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -11 }),
+				);
+			registry
+				.panel('chat-view:window-right')!
+				.attachPresentation(
+					port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -22 }),
+				);
+			const original = registry.prepareChatSurfaceTransfer({
+				sourceSurfaceId: 'chat-view:window-left',
+				destinationSurfaceId: 'chat-view:window-hidden',
+				chatId: 'chat-1',
+			});
+			original.publish();
+			const replacement = registry.prepareChatSurfaceTransfer({
+				sourceSurfaceId: 'chat-view:window-right',
+				destinationSurfaceId: 'chat-view:window-hidden',
+				chatId: 'chat-2',
+			});
+			replacement.publish();
+			if (rollback === 'replacement') replacement.rollback();
+			else original.rollback();
+			registry.reconcile([presentation('chat-view:window-hidden', chatId)]);
+			const panel = registry.panel('chat-view:window-hidden')!;
+			const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+			panel.attachPresentation(port({ kind: 'end' }));
+			await vi.waitFor(() =>
+				expect(jump).toHaveBeenCalledWith(
+					{ chatId, transcriptViewId: 'view-1', rowId: 'view-1:1' },
+					{ viewportOffset },
+				),
+			);
+			registry.destroy();
+			cache.flush();
+		},
+	);
 
 	it('transfers a captured row target when a Chat move rekeys its surface', async () => {
 		const { cache, registry } = fixture();

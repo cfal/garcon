@@ -374,7 +374,11 @@
 	);
 	const composerPanel = $derived(conversationPanels.composerPanel);
 	const composerBound = $derived(
-		Boolean(composerPlacement && composerPanel?.surfaceId === composerPlacement.surface.id),
+		Boolean(
+			composerPlacement &&
+			composerPanel?.surfaceId === composerPlacement.surface.id &&
+			composerPanel?.chatId === composerPlacement.surface.chatId,
+		),
 	);
 	const liveLayerRectStyle = $derived(
 		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',

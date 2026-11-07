@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore } from '../workspace-layout.svelte';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import { windowNodeById } from '../window-tree';
@@ -80,11 +80,74 @@ describe('WorkspaceTransitionArbiter', () => {
 			],
 			{
 				beforePublish: () => order.push('domain'),
+				afterPublish: () => {
+					expect(layout.revision).toBe(1);
+					order.push('focus');
+				},
 			},
 		);
 
-		expect(order).toEqual(['domain', 'layout']);
+		expect(order).toEqual(['domain', 'layout', 'focus']);
 	});
+
+	it('adopts successful publication before queued observers run, including no-op plans', async () => {
+		const layout = createWorkspaceLayoutStore();
+		const arbiter = new WorkspaceTransitionArbiter(layout, layout);
+		let adopted = false;
+		let observed = false;
+		await arbiter.commit([], {
+			beforePublish: () =>
+				queueMicrotask(() => {
+					observed = adopted;
+				}),
+			afterPublish: () => {
+				adopted = true;
+			},
+		});
+		expect(observed).toBe(true);
+	});
+
+	it('does not adopt a failed publication', async () => {
+		const layout = createWorkspaceLayoutStore();
+		const afterPublish = vi.fn();
+		const publishFailed = vi.fn();
+		const mutations = [
+			{ type: 'set-window-chat' as const, windowId: 'window-main' as const, chatId: 'chat-a' },
+		];
+		const failing = new WorkspaceTransitionArbiter(layout, { publish: () => false });
+		await expect(failing.commit(mutations, { afterPublish, publishFailed })).resolves.toBe(false);
+		expect(afterPublish).not.toHaveBeenCalled();
+		expect(publishFailed).toHaveBeenCalledOnce();
+	});
+
+	it.each([false, true])(
+		'does not roll back a committed success-hook failure (no-op: %s)',
+		async (noOp) => {
+			const layout = createWorkspaceLayoutStore();
+			const before = layout.snapshot;
+			const afterPublish = vi.fn(() => {
+				throw new Error('success observer failed');
+			});
+			const publishFailed = vi.fn();
+			const mutations = noOp
+				? []
+				: [
+						{
+							type: 'set-window-chat' as const,
+							windowId: 'window-main' as const,
+							chatId: 'chat-a',
+						},
+					];
+			const arbiter = new WorkspaceTransitionArbiter(layout, layout);
+			await expect(arbiter.commit(mutations, { afterPublish, publishFailed })).rejects.toThrow(
+				'success observer failed',
+			);
+			expect(afterPublish).toHaveBeenCalledWith(layout.snapshot);
+			if (noOp) expect(layout.snapshot).toBe(before);
+			else expect(layout.surface('chat-view:window-main')).toMatchObject({ chatId: 'chat-a' });
+			expect(publishFailed).not.toHaveBeenCalled();
+		},
+	);
 
 	it('replans a guaranteed removal after a compare-and-publish miss', async () => {
 		const layout = createWorkspaceLayoutStore();

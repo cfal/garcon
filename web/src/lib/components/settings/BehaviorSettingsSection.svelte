@@ -321,6 +321,9 @@
 					ls.markdownViewerOpenPlacement,
 				)}
 			</div>
+			{@render settingRow(m.settings_swap_dragged_open_chats(), ls.swapDraggedOpenChats, () =>
+				ls.toggle('swapDraggedOpenChats'),
+			)}
 			<div class="flex flex-wrap items-center justify-between gap-2 border-t border-border py-2">
 				<div class="min-w-0">
 					<label class="text-sm font-medium text-foreground" for="local-forkOpenPlacement">

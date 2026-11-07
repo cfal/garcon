@@ -18,6 +18,41 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([undefined, null, 'false', 0, {}])(
+		'defaults chat swapping on for a missing or malformed preference: %s',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ swapDraggedOpenChats: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.swapDraggedOpenChats).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('persists, synchronizes and resets the chat-swap opt-out', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('swapDraggedOpenChats');
+		const restored = createLocalSettingsStore();
+		expect(restored.swapDraggedOpenChats).toBe(false);
+		expect(restored.snapshot().swapDraggedOpenChats).toBe(false);
+		store.set('swapDraggedOpenChats', true);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+			}),
+		);
+		expect(restored.swapDraggedOpenChats).toBe(true);
+		store.toggle('swapDraggedOpenChats');
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
+		expect(store.swapDraggedOpenChats).toBe(true);
+		store.destroy();
+		restored.destroy();
+	});
+
 	it.each([null, '', '{}', 'null', '[]', '42', '{invalid'])(
 		'offers setup without usable saved preferences: %s',
 		(raw) => {

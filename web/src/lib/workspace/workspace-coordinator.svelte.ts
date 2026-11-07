@@ -246,12 +246,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	get focusedChatId(): string | null {
-		const snapshot = this.layout.snapshot;
-		const activeSurfaceId = this.isMobile
-			? snapshot.mobileActiveSurfaceId
-			: windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.activeId;
-		const surface = activeSurfaceId ? snapshot.surfaces[activeSurfaceId] : null;
-		return surface?.type === 'chat' ? surface.chatId : null;
+		return this.#presentation.focusedChatId;
 	}
 
 	get currentChatSurfaceId(): `chat-view:${WorkspaceWindowId}` {
@@ -422,6 +417,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async showChatInWindow(chatId: string, windowId: WorkspaceWindowId): Promise<ChatViewSurfaceId> {
 		return this.#chatPlacement.showInWindow(chatId, windowId);
+	}
+
+	swapChatIntoWindow(chatId: string, windowId: WorkspaceWindowId, expectedChatId: string) {
+		return this.#chatPlacement.swapIntoWindow(chatId, windowId, expectedChatId);
 	}
 
 	async openChatInNewWindow(
