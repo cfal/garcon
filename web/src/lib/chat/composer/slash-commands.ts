@@ -14,6 +14,11 @@ import { normalizeTags } from '$shared/tags';
 // misses them. Each command is handled by its owning submit or runtime path.
 export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
+		name: 'fast',
+		source: 'command',
+		description: 'Show or change this chat’s speed: /fast [on|off|status]',
+	},
+	{
 		name: 'clear',
 		source: 'command',
 		description: 'Clear displayed chat history without resetting agent context',
@@ -136,6 +141,20 @@ export interface CompactCommand {
 	instructions: string;
 }
 
+export type FastCommand =
+	| { kind: 'not-command' }
+	| { kind: 'invalid' }
+	| { kind: 'valid'; action: 'on' | 'off' | 'status' };
+
+export function parseFastCommand(input: string): FastCommand {
+	const match = /^\s*\/fast(?=\s|$)(?:\s+([\s\S]*))?$/i.exec(input);
+	if (!match) return { kind: 'not-command' };
+	const action = (match[1] ?? '').trim().toLowerCase() || 'status';
+	return action === 'on' || action === 'off' || action === 'status'
+		? { kind: 'valid', action }
+		: { kind: 'invalid' };
+}
+
 export type SteerCommandParseResult =
 	{ kind: 'not-command' } | { kind: 'invalid' } | { kind: 'valid'; prompt: string };
 
@@ -250,6 +269,7 @@ export function parseScheduleInCommand(input: string, policy: 'conversation' | '
 export function isControllerSlashCommand(input: string, policy: 'conversation' | 'literal' = 'conversation'): boolean {
 	if (policy === 'literal') return isLiteralAppCommand(input);
 	return isClearCommand(input) || parseRenameCommand(input) !== null ||
+		parseFastCommand(input).kind !== 'not-command' ||
 		parseMoveChatBoundaryCommand(input).kind !== 'not-command' ||
 		parseTagCommand(input).kind !== 'not-command' ||
 		parseScheduleInCommand(input).kind !== 'not-command';

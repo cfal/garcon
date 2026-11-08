@@ -10,6 +10,7 @@
     "./agent-execution": "./agent-execution.ts",
     "./agent-integration": "./agent-integration.ts",
     "./agent-settings": "./agent-settings.ts",
+    "./agent-speed": "./agent-speed.ts",
     "./agent-turn-receipt": "./agent-turn-receipt.ts",
     "./agents": "./agents.ts",
     "./attachments": "./attachments.ts",

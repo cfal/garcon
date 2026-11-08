@@ -1,4 +1,4 @@
-import { compactChat } from '$lib/api/chats.js';
+import { compactChat, updateExecutionSettings } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
@@ -6,6 +6,9 @@ import type { ScheduledPromptExecutionSelection } from '$shared/scheduled-prompt
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
 import { effectiveExecutorId } from '$shared/executors';
+import { agentSpeed, findAgentSpeedSetting } from '$shared/agent-speed';
+import type { AgentSettingDescriptor } from '$shared/agent-integration';
+import type { ConversationSettingsController } from './conversation-settings-controller.svelte.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import {
 	steerSubmissionRejection,
@@ -17,6 +20,7 @@ import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import { parseHandoffCommand } from '$lib/chat/composer/handoff-command.js';
 import {
 	parseCompactCommand,
+	parseFastCommand,
 	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
@@ -31,6 +35,7 @@ import type {
 	ScheduleInCommandParseResult,
 	MoveChatBoundaryCommandParseResult,
 	TagCommandParseResult,
+	FastCommand,
 } from '$lib/chat/composer/slash-commands.js';
 import { formatScheduledInstant } from '$lib/scheduling/local-schedule.js';
 import {
@@ -115,6 +120,7 @@ interface SlashCommandLifecycle {
 }
 
 interface SlashCommandModelCatalog {
+	getAgent(agentId: SessionAgentId): { settings: readonly AgentSettingDescriptor[] } | null;
 	selectionFor(
 		agentId: SessionAgentId,
 		model: string,
@@ -131,6 +137,7 @@ interface SlashCommandModelCatalog {
 }
 
 export interface ConversationSlashCommandDeps {
+	settings: Pick<ConversationSettingsController, 'changeAgentSetting' | 'settlePending'>;
 	sessions: SlashCommandSessions;
 	chatState: SlashCommandChatState;
 	composerState: SlashCommandComposerState;
@@ -178,7 +185,15 @@ export class ConversationSlashCommandService {
 	}): SlashCommandSubmissionResolution {
 		const { chatId, chat, text, images, ownsComposer } = input;
 		const policy = input.executionPolicy ?? 'conversation';
-		if (policy === 'literal' && !isLiteralAppCommand(text)) return { kind: 'continue', content: text };
+		if (policy === 'literal' && !isLiteralAppCommand(text))
+			return { kind: 'continue', content: text };
+		const fast = parseFastCommand(text);
+		if (fast.kind !== 'not-command') {
+			return {
+				kind: 'handled',
+				outcome: this.submitFastCommand(chatId, chat, fast, images, ownsComposer),
+			};
+		}
 		const rename = parseRenameCommand(text);
 		if (rename) {
 			return {
@@ -330,6 +345,80 @@ export class ConversationSlashCommandService {
 			return 'rejected';
 		} finally {
 			this.#scheduleInFlight.delete(chatId);
+		}
+	}
+
+	async submitFastCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		command: FastCommand,
+		images: File[],
+		ownsComposer: boolean,
+	): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		const notice = (type: LocalNoticeType, content: string) =>
+			deps.chatState.appendLocalNoticeForChat(chatId, type, content);
+		if (command.kind !== 'valid') {
+			notice('error', m.chat_notice_fast_usage());
+			return 'rejected';
+		}
+		const catalog = deps.modelCatalogForExecutor(effectiveExecutorId(chat.executorId));
+		const descriptor = findAgentSpeedSetting(catalog.getAgent(chat.agentId)?.settings ?? []);
+		if (!descriptor) {
+			notice('error', m.chat_notice_fast_unsupported());
+			return 'rejected';
+		}
+		if (images.length > 0) {
+			notice('error', m.chat_notice_fast_attachments());
+			return 'rejected';
+		}
+		const previousText = deps.composerState.inputText;
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
+		try {
+			await deps.settings.settlePending(chatId);
+			const isSameOwner = () => {
+				const current = deps.sessions.byId[chatId];
+				return (
+					current?.agentId === chat.agentId &&
+					current?.agentOwnershipEpoch === chat.agentOwnershipEpoch &&
+					effectiveExecutorId(current?.executorId) === effectiveExecutorId(chat.executorId)
+				);
+			};
+			if (!isSameOwner()) throw new Error(m.chat_notice_fast_chat_changed());
+			let settings = deps.sessions.byId[chatId].agentSettings;
+			if (command.action === 'status') {
+				if (chat.status !== 'draft') {
+					const response = await updateExecutionSettings({ chatId });
+					settings = response.agentSettings;
+					if (settings.ownerId !== chat.agentId) throw new Error(m.chat_notice_fast_chat_changed());
+				}
+			} else {
+				const accepted = await deps.settings.changeAgentSetting(
+					chatId,
+					descriptor,
+					command.action === 'on' ? 'fast' : 'standard',
+				);
+				if (!accepted) throw new Error(m.chat_notice_fast_unconfirmed());
+			}
+			if (!isSameOwner()) throw new Error(m.chat_notice_fast_chat_changed());
+			// A newer optimistic edit must not be reported as this command's confirmed value.
+			const speed = command.action === 'status'
+				? agentSpeed(settings)
+				: command.action === 'on' ? 'fast' : 'standard';
+			notice('info', speed === 'fast' ? m.chat_notice_fast_on() : m.chat_notice_fast_off());
+			return 'accepted';
+		} catch (error) {
+			notice('error', m.chat_notice_fast_failed({ detail: errorDetail(error) }));
+			this.#restoreComposerIfUntouched({
+				chatId,
+				ownsComposer,
+				text: previousText,
+				images: [],
+				clearedContentRevision,
+			});
+			return 'rejected';
 		}
 	}
 

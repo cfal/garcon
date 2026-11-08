@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { findAgentSpeedSetting } from '$shared/agent-speed';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -967,6 +968,9 @@
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
 			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
+			supportsFast={Boolean(
+				findAgentSpeedSetting(modelCatalog.getAgentSettingsDescriptors(capabilityAgentId)),
+			)}
 			canScheduleIn={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}

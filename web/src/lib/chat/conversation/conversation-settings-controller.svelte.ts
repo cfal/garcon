@@ -92,7 +92,7 @@ export class ConversationSettingsController {
 		return accepted;
 	}
 
-	#send(chatId: string, request: () => Promise<void>): void {
+	#send(chatId: string, request: () => Promise<void>): Promise<boolean> {
 		const previous = this.#pendingRequests.get(chatId);
 		const run = async () => {
 			try {
@@ -107,6 +107,7 @@ export class ConversationSettingsController {
 		void pending.then(() => {
 			if (this.#pendingRequests.get(chatId) === pending) this.#pendingRequests.delete(chatId);
 		});
+		return pending;
 	}
 
 	#changeSetting(
@@ -115,10 +116,10 @@ export class ConversationSettingsController {
 		patch: SettingsPatch,
 		request: (epoch: string | undefined) => Promise<SettingsPatch>,
 		failureMessage: (detail: string) => string,
-	): void {
+	): Promise<boolean> {
 		const { sessions, chatState } = this.options;
 		const chat = sessions.byId[chatId];
-		if (!chat) return;
+		if (!chat) return Promise.resolve(false);
 		const key = `${chatId}:${setting}`;
 		const epoch = chat.agentOwnershipEpoch ?? undefined;
 		const previous = this.#pendingMutations.get(key);
@@ -139,7 +140,7 @@ export class ConversationSettingsController {
 			!!sessions.byId[chatId] &&
 			sessions.byId[chatId].agentOwnershipEpoch === epoch;
 		this.#applyPatch(chatId, patch);
-		this.#send(chatId, async () => {
+		return this.#send(chatId, async () => {
 			try {
 				// Superseded successes still advance the rollback baseline for the next request.
 				mutation.confirmed = await request(epoch);
@@ -338,20 +339,30 @@ export class ConversationSettingsController {
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
-		const { sessions, agentState } = this.options;
-		const chatId = sessions.selectedChatId;
+		const chatId = this.options.sessions.selectedChatId;
 		if (!chatId) return;
-		const previous = agentState.agentSettings;
+		void this.changeAgentSetting(chatId, descriptor, value);
+	}
+
+	async changeAgentSetting(
+		chatId: string,
+		descriptor: AgentSettingDescriptor,
+		value: JsonValue,
+	): Promise<boolean> {
+		const { sessions, agentState } = this.options;
+		const chat = sessions.byId[chatId];
+		if (!chat) return false;
+		const previous = chat.agentSettings;
 		const next = withAgentSetting(previous, descriptor, value);
-		if (next === previous) return;
+		if (next === previous) return false;
 		if (sessions.isDraft(chatId)) {
-			agentState.setAgentSettings(next);
+			if (sessions.selectedChatId === chatId) agentState.setAgentSettings(next);
 			sessions.patchDraftStartup(chatId, { agentSettings: next });
 			sessions.patchChat(chatId, { agentSettings: next });
-			return;
+			return true;
 		}
 		const agentSettingsPatch: JsonObject = { [descriptor.key]: value };
-		this.#changeSetting(
+		return this.#changeSetting(
 			chatId,
 			'agentSettings',
 			{ agentSettings: next },

@@ -29,6 +29,21 @@ function deferred<T>() {
 }
 
 describe('SlashCommandMenu', () => {
+	it('offers Fast only when the selected agent advertises speed settings', async () => {
+		const props = {
+			...baseProps,
+			isVisible: true,
+			query: 'fast',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		};
+		const view = render(SlashCommandMenuTestHost, props);
+		expect(screen.queryByText('/fast')).toBeNull();
+		await view.rerender({ ...props, supportsFast: true });
+		expect(screen.getByText('/fast')).toBeTruthy();
+		await view.rerender({ ...props, supportsFast: false });
+		expect(screen.queryByText('/fast')).toBeNull();
+	});
 	it('grows described command rows with Interface text', async () => {
 		const view = render(SlashCommandMenuTestHost, {
 			...baseProps,

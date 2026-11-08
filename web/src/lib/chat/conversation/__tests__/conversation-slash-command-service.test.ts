@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
+import {
+	compactChat,
+	forkChat,
+	forkRunChat,
+	selfHandoffRunChat,
+	updateExecutionSettings,
+} from '$lib/api/chats.js';
+import { AGENT_SPEED_SETTING } from '$shared/agent-speed';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
@@ -15,6 +22,7 @@ import {
 } from '$lib/chat/conversation/conversation-slash-command-service.js';
 
 vi.mock('$lib/api/chats.js', () => ({
+	updateExecutionSettings: vi.fn(),
 	compactChat: vi.fn(),
 	createQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
@@ -198,6 +206,7 @@ function createDeps(chat = createChat()) {
 		setSelectedChatId: vi.fn(),
 	};
 	const modelCatalog = {
+		getAgent: vi.fn(() => ({ settings: [AGENT_SPEED_SETTING] })),
 		selectionFor: vi.fn<SlashCommandModelCatalog['selectionFor']>((_agentId, model) => ({
 			model,
 			apiProviderId: null,
@@ -209,6 +218,23 @@ function createDeps(chat = createChat()) {
 		supportsSteering: vi.fn(() => false),
 	};
 	const deps = {
+		settings: {
+			settlePending: vi.fn().mockResolvedValue(true),
+			changeAgentSetting: vi.fn(
+				async (chatId: string, descriptor: { key: string }, value: unknown) => {
+					const current = sessions.byId[chatId];
+					if (value !== 'standard' && value !== 'fast') return false;
+					sessions.byId[chatId] = {
+						...current,
+						agentSettings: {
+							...current.agentSettings,
+							values: { ...current.agentSettings.values, [descriptor.key]: value },
+						},
+					};
+					return true;
+				},
+			),
+		},
 		sessions,
 		chatState: {
 			activeChatId: chat.id,
@@ -250,6 +276,213 @@ function createDeps(chat = createChat()) {
 describe('ConversationSlashCommandService', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it.each(['on', 'off'] as const)(
+		'changes /fast %s only for the named chat without starting a turn',
+		async (action) => {
+			const chat = createChat({
+				agentId: 'codex',
+				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+			});
+			const { deps } = createDeps(chat);
+			const service = new ConversationSlashCommandService(deps);
+			const result = service.dispatchSubmission({
+				chatId: chat.id,
+				chat,
+				text: `/fast ${action}`,
+				images: [],
+				ownsComposer: true,
+			});
+			expect(result.kind).toBe('handled');
+			if (result.kind !== 'handled') throw new Error('Expected local command');
+			expect(await result.outcome).toBe('accepted');
+			expect(deps.settings.changeAgentSetting).toHaveBeenCalledWith(
+				chat.id,
+				AGENT_SPEED_SETTING,
+				action === 'on' ? 'fast' : 'standard',
+			);
+			expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+				chat.id,
+				'info',
+				expect.stringContaining(`Fast mode is ${action}`),
+			);
+			expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
+			expect(mockCompactChat).not.toHaveBeenCalled();
+		},
+	);
+
+	it('reports the confirmed command value instead of a newer optimistic edit', async () => {
+		const chat = createChat();
+		const { deps } = createDeps(chat);
+		deps.settings.changeAgentSetting.mockImplementationOnce(async () => {
+			deps.sessions.byId[chat.id] = {
+				...chat, agentSettings: { ...chat.agentSettings, values: { speed: 'standard' } },
+			};
+			return true;
+		});
+		expect(await new ConversationSlashCommandService(deps).submitFastCommand(
+			chat.id, chat, { kind: 'valid', action: 'on' }, [], true,
+		)).toBe('accepted');
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			chat.id, 'info', expect.stringContaining('Fast mode is on'),
+		);
+	});
+
+	it('reads status from the server without changing the saved setting', async () => {
+		const chat = createChat({
+			agentId: 'codex',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+		});
+		const { deps } = createDeps(chat);
+		vi.mocked(updateExecutionSettings).mockResolvedValueOnce({
+			success: true,
+			chatId: chat.id,
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'fast' } },
+		});
+		expect(
+			await new ConversationSlashCommandService(deps).submitFastCommand(
+				chat.id,
+				chat,
+				{ kind: 'valid', action: 'status' },
+				[],
+				true,
+			),
+		).toBe('accepted');
+		expect(updateExecutionSettings).toHaveBeenCalledWith({ chatId: chat.id });
+		expect(deps.settings.changeAgentSetting).not.toHaveBeenCalled();
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			chat.id,
+			'info',
+			expect.stringContaining('Fast mode is on'),
+		);
+	});
+
+	it('shows Standard for an unchanged draft and does not make a server request', async () => {
+		const chat = createChat({ status: 'draft' });
+		const { deps } = createDeps(chat);
+		expect(
+			await new ConversationSlashCommandService(deps).submitFastCommand(
+				chat.id,
+				chat,
+				{ kind: 'valid', action: 'status' },
+				[],
+				true,
+			),
+		).toBe('accepted');
+		expect(updateExecutionSettings).not.toHaveBeenCalled();
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			chat.id,
+			'info',
+			expect.stringContaining('Fast mode is off'),
+		);
+	});
+
+	it('preserves the draft and reports an unconfirmed mutation', async () => {
+		const chat = createChat();
+		const { deps, composerState } = createDeps(chat);
+		composerState.inputText = '/fast on';
+		deps.settings.changeAgentSetting.mockResolvedValueOnce(false);
+		expect(
+			await new ConversationSlashCommandService(deps).submitFastCommand(
+				chat.id,
+				chat,
+				{ kind: 'valid', action: 'on' },
+				[],
+				true,
+			),
+		).toBe('rejected');
+		expect(composerState.inputText).toBe('/fast on');
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			chat.id,
+			'error',
+			expect.stringContaining('not confirmed'),
+		);
+	});
+
+	it('does not report stale status when the server is unavailable', async () => {
+		const chat = createChat();
+		const { deps } = createDeps(chat);
+		vi.mocked(updateExecutionSettings).mockRejectedValueOnce(new Error('Disconnected'));
+		expect(
+			await new ConversationSlashCommandService(deps).submitFastCommand(
+				chat.id,
+				chat,
+				{ kind: 'valid', action: 'status' },
+				[],
+				true,
+			),
+		).toBe('rejected');
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			chat.id,
+			'error',
+			expect.stringContaining('Disconnected'),
+		);
+	});
+
+	it('rejects unsupported agents and attachments without sending a settings request', async () => {
+		const chat = createChat();
+		const { deps } = createDeps(chat);
+		const service = new ConversationSlashCommandService(deps);
+		expect(
+			await service.submitFastCommand(
+				chat.id,
+				chat,
+				{ kind: 'valid', action: 'on' },
+				[new File(['x'], 'x.txt')],
+				true,
+			),
+		).toBe('rejected');
+		deps.modelCatalog.getAgent.mockReturnValueOnce({ settings: [] });
+		expect(
+			await service.submitFastCommand(chat.id, chat, { kind: 'valid', action: 'on' }, [], true),
+		).toBe('rejected');
+		expect(deps.settings.changeAgentSetting).not.toHaveBeenCalled();
+	});
+
+	it('does not retarget a command when the selected chat changes while settings settle', async () => {
+		const chat = createChat();
+		const { deps } = createDeps(chat);
+		const pending = deferred<boolean>();
+		deps.settings.settlePending.mockReturnValueOnce(pending.promise);
+		const result = new ConversationSlashCommandService(deps).submitFastCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'on' },
+			[],
+			true,
+		);
+		deps.sessions.selectedChatId = 'chat-2';
+		pending.resolve(true);
+		expect(await result).toBe('accepted');
+		expect(deps.settings.changeAgentSetting).toHaveBeenCalledWith(
+			chat.id,
+			AGENT_SPEED_SETTING,
+			'fast',
+		);
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			chat.id,
+			'info',
+			expect.any(String),
+		);
+	});
+
+	it('rejects a command when agent ownership changes while settings settle', async () => {
+		const chat = createChat();
+		const { deps } = createDeps(chat);
+		const pending = deferred<boolean>();
+		deps.settings.settlePending.mockReturnValueOnce(pending.promise);
+		const result = new ConversationSlashCommandService(deps).submitFastCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'on' },
+			[],
+			true,
+		);
+		deps.sessions.byId[chat.id] = { ...chat, agentOwnershipEpoch: 'new-epoch' };
+		pending.resolve(true);
+		expect(await result).toBe('rejected');
+		expect(deps.settings.changeAgentSetting).not.toHaveBeenCalled();
 	});
 
 	it('routes supported steering before queue policy despite a stale processing projection', () => {

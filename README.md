@@ -166,6 +166,12 @@ cd garcon-skills
 
 The installer links the skills for Claude, Codex, Pi, and other compatible agents. Messages, delegated work, results, and lineage remain visible in Garcon.
 
+## Fast Mode
+
+Codex chats default to Standard. Use `/fast on` to select Fast for one chat,
+`/fast off` to return to Standard, and `/fast` or `/fast status` to check its
+saved setting. Fast uses more allowance. See [per-chat Fast mode](docs/fast-mode.md).
+
 ## Tickets
 
 Open **Tickets** from a workspace window's add menu. Create work without starting a chat, switch between list and board, and filter by project, status, priority, label, assignee, or readiness. The detail pane shares properties, comments, relationships, and activity across both layouts. On narrow screens, Back returns to the collection. Status menus provide a keyboard equivalent to board dragging; closing asks for Done or Canceled. Moving a card changes only its status, not its assignee.
