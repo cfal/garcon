@@ -58,6 +58,7 @@ import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 import { isClearCommand, isControllerSlashCommand } from '$lib/chat/composer/slash-commands.js';
+import { findAgentSpeedSetting } from '$shared/agent-speed';
 import type {
 	SessionControllerDeps,
 	SessionTranscriptLoadTarget,
@@ -108,6 +109,11 @@ export class ConversationSessionController {
 		this.#slashCommands = new ConversationSlashCommandService(
 			{
 				...deps,
+				settings: {
+					changeAgentSetting: (chatId, descriptor, value) =>
+						this.#settings.changeAgentSetting(chatId, descriptor, value),
+					settlePending: (chatId) => this.#settings.settlePending(chatId),
+				},
 				refetchTranscript: (chatId) => this.#loadChat(chatId),
 				confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
 			},
@@ -576,7 +582,7 @@ export class ConversationSessionController {
 		};
 		if (!literal) text = text.trim();
 		if (
-			(isDraft || !isControllerSlashCommand(text, agent.executionPolicy)) &&
+			(isDraft || !isControllerSlashCommand(text, agent.executionPolicy, findAgentSpeedSetting(agent.settings ?? []) !== undefined)) &&
 			(!deps.canSubmitToExecutor(executorId) ||
 				!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection))
 		) {
@@ -730,7 +736,7 @@ export class ConversationSessionController {
 		const text = agent.executionPolicy === 'literal' ? deps.composerState.inputText : deps.composerState.inputText.trim();
 		const hasAttachments = deps.composerState.images.length > 0;
 		if (!text.trim() && !hasAttachments) return 'no-op';
-		if (selected.status === 'running' && isControllerSlashCommand(text, agent.executionPolicy))
+		if (selected.status === 'running' && isControllerSlashCommand(text, agent.executionPolicy, findAgentSpeedSetting(agent.settings ?? []) !== undefined))
 			return this.submitForChat(chatId);
 		if (
 			!deps.canSubmitToExecutor(deps.agentState.executorId) ||

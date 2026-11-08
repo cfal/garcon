@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { findAgentSpeedSetting } from '$shared/agent-speed';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -702,7 +703,11 @@
 	const controllerCommand = $derived.by(() => {
 		if (sessions.selectedChat?.status !== 'running') return false;
 		if (isClearCommand(composerState.inputText)) return true;
-		return executionAgent !== null && isControllerSlashCommand(composerState.inputText, executionAgent.executionPolicy);
+		return executionAgent !== null && isControllerSlashCommand(
+			composerState.inputText,
+			executionAgent.executionPolicy,
+			findAgentSpeedSetting(executionAgent.settings ?? []) !== undefined,
+		);
 	});
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -967,6 +972,9 @@
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
 			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
+			supportsFast={Boolean(
+				findAgentSpeedSetting(modelCatalog.getAgentSettingsDescriptors(capabilityAgentId)),
+			)}
 			canScheduleIn={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}

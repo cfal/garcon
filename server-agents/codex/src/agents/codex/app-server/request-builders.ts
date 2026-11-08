@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
+import type { AgentSpeed } from '@garcon/common/agent-speed';
+import { codexServiceTier, normalizeCodexServiceTier } from '../service-tier.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import {
   GPT_6_2_SOL_MODEL,
@@ -63,6 +65,7 @@ interface CodexSandboxSettings {
 
 export interface CodexThreadSettingsTarget {
   readonly model: string;
+  readonly serviceTier: string;
   // Represents provider-owned Default as null because Codex reports the effective concrete effort.
   readonly effort: string | null;
   readonly approvalPolicy: CodexApprovalPolicy;
@@ -73,6 +76,7 @@ export interface CodexThreadSettingsTarget {
 
 export interface CodexConfirmedThreadSettings {
   readonly model: string;
+  readonly serviceTier: string;
   readonly effort: string | null;
   readonly approvalPolicy: unknown;
   readonly approvalsReviewer: string;
@@ -96,10 +100,12 @@ export function codexThreadSettingsTarget(configuration: {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
+  readonly speed?: AgentSpeed;
 }): CodexThreadSettingsTarget {
   const { sandbox, approvalPolicy } = codexSandboxSettings(configuration.permissionMode);
   return {
     model: configuration.model,
+    serviceTier: codexServiceTier(configuration.speed),
     effort: mapThinkingModeToCodexEffort(configuration.thinkingMode, configuration.model) ?? null,
     approvalPolicy,
     approvalsReviewer: 'user',
@@ -123,6 +129,7 @@ export function buildThreadSettingsUpdateParams(
   return {
     threadId,
     model: target.model,
+    serviceTier: target.serviceTier,
     approvalPolicy: target.approvalPolicy,
     approvalsReviewer: target.approvalsReviewer,
     sandboxPolicy: target.sandboxPolicy,
@@ -136,6 +143,7 @@ export function threadSettingsMatch(
 ): boolean {
   // Accepts any confirmed effort when Codex owns the Default omitted from the update.
   return settings.model === target.model
+    && settings.serviceTier === target.serviceTier
     && (target.effort === null || settings.effort === target.effort)
     && settings.approvalPolicy === target.approvalPolicy
     && settings.approvalsReviewer === target.approvalsReviewer
@@ -149,6 +157,7 @@ export function threadSettingsTargetFromSnapshot(
   const permissionMode = permissionModeFromSettings(settings, currentPermissionMode);
   return {
     model: settings.model,
+    serviceTier: normalizeCodexServiceTier(settings.serviceTier),
     effort: settings.effort,
     approvalPolicy: settings.approvalPolicy,
     approvalsReviewer: settings.approvalsReviewer,
@@ -232,10 +241,13 @@ export function buildCodexEnv(
 
 function appendCommonThreadParams(
   params: Record<string, unknown>,
-  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>,
+  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig' | 'speed'>,
 ): Record<string, unknown> {
   const { sandbox, approvalPolicy } = codexSandboxSettings(request.permissionMode);
   params.model = request.model;
+  // Explicit Standard overrides executor config and previously persisted Fast settings.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L271-L280
+  params.serviceTier = codexServiceTier(request.speed);
   params.cwd = request.projectPath;
   params.sandbox = sandbox;
   params.approvalPolicy = approvalPolicy;
@@ -254,7 +266,7 @@ export function buildThreadStartParams(request: CodexStartRequest): Record<strin
 export function buildThreadResumeParams(request: {
   agentSessionId: string;
   nativePath?: string | null;
-} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
+} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig' | 'speed'>): Record<string, unknown> {
   const params = appendCommonThreadParams({
     threadId: request.agentSessionId,
     excludeTurns: true,
@@ -295,6 +307,7 @@ export function buildTurnStartParams(request: {
   projectPath: string;
   permissionMode: PermissionMode;
   thinkingMode?: ThinkingMode;
+  speed?: AgentSpeed;
   clientMessageId?: string;
   skills?: CodexSkillRef[];
 }): Record<string, unknown> {
@@ -306,6 +319,7 @@ export function buildTurnStartParams(request: {
     approvalPolicy,
     approvalsReviewer: 'user',
     model: request.model,
+    serviceTier: codexServiceTier(request.speed),
   };
   if (request.clientMessageId) params.clientUserMessageId = request.clientMessageId;
   const effort = mapThinkingModeToCodexEffort(request.thinkingMode, request.model);

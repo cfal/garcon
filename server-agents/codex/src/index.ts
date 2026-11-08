@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
+import { AGENT_SPEED_SETTING } from '@garcon/common/agent-speed';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
@@ -143,8 +144,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.settings = createVersionedSettings({
       ownerId: 'codex',
       schemaVersion: 1,
-      defaults: {},
-      descriptors: [],
+      defaults: { speed: 'standard' },
+      descriptors: [AGENT_SPEED_SETTING],
     });
     const execution = new CodexExecution(
       host,

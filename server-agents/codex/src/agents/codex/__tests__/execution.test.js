@@ -419,6 +419,7 @@ describe('CodexExecution', () => {
     runtime.sourceEndpointId.mockReturnValue(null);
     await execution.applySessionConfiguration('thread-1', next, previous);
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      speed: 'standard',
       model: 'gpt-5.4-mini',
       permissionMode: 'manualBypass',
       thinkingMode: 'high',
@@ -527,6 +528,7 @@ describe('CodexExecution', () => {
     }, previous);
 
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      speed: 'standard',
       model: 'gpt-6-sol',
       permissionMode: 'default',
       thinkingMode: 'none',
@@ -558,6 +560,7 @@ describe('CodexExecution', () => {
       model,
     }, previous);
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      speed: 'standard',
       model,
       permissionMode: 'default',
       thinkingMode: 'none',
@@ -614,6 +617,7 @@ describe('CodexExecution', () => {
       endpoint: endpointId ? { ...previous.endpoint, endpointId } : null,
     }, previous);
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      speed: 'standard',
       model: previous.model, permissionMode: previous.permissionMode, thinkingMode: previous.thinkingMode,
     });
   });

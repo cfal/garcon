@@ -2,6 +2,7 @@
 	import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 	import type { JsonValue } from '$shared/json';
 	import { settingValue } from '$shared/agent-settings';
+	import { AGENT_SPEED_SETTING, agentSpeed } from '$shared/agent-speed';
 	import {
 		agentSettingLabel,
 		agentSettingOptionDescription,
@@ -76,7 +77,12 @@
 							data-slot="agent-setting-menu-trigger"
 							aria-label={`${agentSettingLabel(descriptor)}: ${activeOptionLabel(descriptor)}`}
 							title={`${agentSettingLabel(descriptor)}: ${activeOptionLabel(descriptor)}`}
-							class="inline-flex size-9 items-center justify-center rounded-lg border border-composer-agent-setting-border bg-composer-agent-setting text-composer-agent-setting-foreground outline-none transition-colors hover:bg-composer-agent-setting/80 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+							class={[
+								'inline-flex size-9 items-center justify-center rounded-lg border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+								descriptor.key === AGENT_SPEED_SETTING.key && agentSpeed(envelope) === 'standard'
+									? 'border-border bg-muted text-muted-foreground hover:bg-muted/80'
+									: 'border-composer-agent-setting-border bg-composer-agent-setting text-composer-agent-setting-foreground hover:bg-composer-agent-setting/80',
+							]}
 						>
 							{#if descriptor.labelKey === 'thinking'}
 								<AgentThinkingIcon />
