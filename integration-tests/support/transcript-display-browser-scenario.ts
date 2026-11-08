@@ -33,6 +33,7 @@ export async function verifyDisplayReconnectGap(fixture: ChromiumFixture, engine
   });
   await wire.settle();
   expect(wire.connections).toBeGreaterThan(1);
+  expect(wire.http.slice(firstReply).some(reply => reply.operation === 'window')).toBe(true);
   expect(wire.bodies().filter(row => row.message.type === 'bash-tool-use' || row.message.type === 'tool-result')).toEqual([]);
   expect(wire.requests).not.toContain('/api/v1/chats/messages');
   expect(wire.ws.every(event => !['chat-messages', 'chat-subscribed'].includes(event.type))).toBe(true);

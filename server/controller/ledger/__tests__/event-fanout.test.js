@@ -11,6 +11,48 @@ import { TranscriptLedgerStore } from '../store.ts';
 const at = '2026-08-12T00:00:00.000Z';
 
 describe('transcript event fanout', () => {
+  it.each(['replacement', 'direct-switch'])('flushes old-view facts before %s without carrying maxima into the new view', async boundary => {
+    const sent = [];
+    let chain = Promise.resolve();
+    const fanout = createTranscriptEventFanout({ serverInstanceId: 'server', chatExists: () => true,
+      schedule: (_chat, task) => { chain = chain.then(task); }, broadcast: message => sent.push(message),
+      updateMetadata: () => {}, replaceMetadata: async () => {}, planRevision: () => 0, auxiliaryRevision: () => 0 });
+    const publish = (viewId, messages) => fanout({ type: 'rows', chatId: 'chat', viewId,
+      rows: messages.map((message, index) => ({ kind: 'provider-row', ordinal: index + 1, at, message, providerMeta: null })) });
+    try {
+      publish('view-1', [new EnterPlanModeToolUseMessage(at, 'plan'), new AssistantMessage(at, 'Synthetic answer'), new BashToolUseMessage(at, 'command', 'true')]);
+      await chain;
+      expect(sent).toEqual([]);
+      if (boundary === 'replacement') fanout({ type: 'view-replaced', chatId: 'chat', previousViewId: 'view-1', view: { viewId: 'view-2' } });
+      publish('view-2', [new AssistantMessage(at, 'Synthetic replacement')]);
+      await chain;
+      fanout.flushAll();
+      expect(sent.map(message => [message.type, message.transcriptViewId])).toEqual([
+        ['chat-transcript-head-updated', 'view-1'],
+        ...(boundary === 'replacement' ? [['chat-transcript-replaced', 'view-2']] : []),
+        ['chat-transcript-head-updated', 'view-2'],
+      ]);
+      expect(sent[0]).toMatchObject({ sourceHead: 3, livePlanEnterOrdinal: 1, preview: { text: 'Synthetic answer' }, announcementOrdinals: { bash: 3 } });
+      expect(sent.at(-1)).toMatchObject({ sourceHead: 1, livePlanEnterOrdinal: null,
+        preview: { ordinal: 1, text: 'Synthetic replacement' },
+        responseClassOrdinals: { tool: 0, assistant: 1 }, announcementOrdinals: { bash: 0, assistant: 1 } });
+    } finally { fanout.forget('chat'); }
+  });
+
+  it('retains the last public preview when a coalesced frame contains only tool activity', () => {
+    const sent = [];
+    const fanout = createTranscriptEventFanout({ serverInstanceId: 'server', chatExists: () => true,
+      schedule: (_chat, task) => task(), broadcast: message => sent.push(message),
+      updateMetadata: () => {}, replaceMetadata: async () => {}, planRevision: () => 0, auxiliaryRevision: () => 0 });
+    try {
+      for (const [index, message] of [new AssistantMessage(at, 'Synthetic answer'), new BashToolUseMessage(at, 'command', 'true')].entries()) {
+        fanout({ type: 'rows', chatId: 'chat', viewId: 'view', rows: [{ kind: 'provider-row', ordinal: index + 1, at, message, providerMeta: null }] });
+      }
+      fanout.flushAll();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ sourceHead: 2, preview: { ordinal: 1, text: 'Synthetic answer' }, announcementOrdinals: { bash: 2 } });
+    } finally { fanout.forget('chat'); }
+  });
   it('does not publish imported plan entries from initialization, adoption seeding or Reload as live commits', async () => {
     const root = await mkdtemp(path.join(homedir(), 'tmp', 'plan-import-fanout-'));
     const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(path.join(root, 'ledger')));

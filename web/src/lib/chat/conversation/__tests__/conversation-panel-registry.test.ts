@@ -44,6 +44,20 @@ function port(target: ReturnType<ConversationPanelPresentationPort['captureResto
 const pendingInput = { chatId: 'chat-1', clientMessageId: 'input-1', content: 'Synthetic input', createdAt: DISPLAY_TIME, delivery: 'pending' as const };
 
 describe('display surface registry', () => {
+	it('cancels activation queued behind an open when the registry is destroyed', async () => {
+		const { registry, api, onOpen } = fixture();
+		const held = Promise.withResolvers<DisplayOpenResponse>();
+		api.open.mockReturnValueOnce(held.promise);
+		registry.reconcile([presentation(left)]);
+		const activation = registry.loadChatSnapshot('chat-1', { purpose: 'activation' });
+		await vi.waitFor(() => expect(api.open).toHaveBeenCalledOnce());
+		registry.destroy();
+		held.resolve(displayOpen('chat-1', 'view-1', 1));
+		expect(await activation).toBe(false);
+		expect(api.open).toHaveBeenCalledOnce();
+		expect(onOpen).not.toHaveBeenCalled();
+	});
+
 	it.each(['success', 'failure'] as const)('ignores late activation %s after rapid chat switching', async outcome => {
 		let selected = 'chat-1';
 		const { registry, api } = fixture({ getSelectedChatId: () => selected });

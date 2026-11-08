@@ -11,6 +11,7 @@ import { TranscriptLedgerStore } from '../../ledger/store.js';
 import { TranscriptLedgerService } from '../../ledger/service.js';
 import { TranscriptDisplayService } from '../service.js';
 import { DisplayWorkerClient } from '../worker-client.js';
+import { DisplayStore } from '../store.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
 import * as fs from 'node:fs/promises';
 
@@ -64,6 +65,58 @@ async function ready(input: DisplayWindowRequest): Promise<AvailableDisplayWindo
   }
   throw new Error('Display preparation did not complete');
 }
+
+test('background commits do not adopt or prepare an unopened chat', async () => {
+  await display.initialize();
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request');
+  const adoption = spyOn(display.options.adoption, 'ensure');
+  const notified = Promise.withResolvers<void>();
+  const unsubscribe = ledger.subscribe(event => {
+    if (event.type === 'rows' && event.rows.at(-1)?.ordinal === ledger.highWatermark(event.chatId).ordinal) notified.resolve();
+  });
+  try {
+    const view = seed('chat', 2);
+    await notified.promise;
+    expect(adoption).not.toHaveBeenCalled();
+    expect(worker).not.toHaveBeenCalled();
+    expect(await readdir(path.join(root, 'transcript-display'))).toEqual([]);
+    await display.open('chat');
+    expect(adoption).toHaveBeenCalledTimes(1);
+    expect((await ready(request('chat', view.viewId))).items[1]).toMatchObject({ count: 2 });
+  } finally { unsubscribe(); adoption.mockRestore(); worker.mockRestore(); }
+});
+
+test('shutdown aborts source consumption and drains a held builder frame without restarting work', async () => {
+  const view = seed('chat', 600), head = ledger.highWatermark('chat');
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const source = spyOn(ledger, 'withStoredRowFrames');
+  const retire = spyOn(DisplayWorkerClient.prototype, 'close');
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame') { entered.resolve(); await release.promise; }
+    return original.call(this, task, ...args);
+  });
+  let closing: Promise<void> | undefined;
+  try {
+    await display.open('chat');
+    await entered.promise;
+    const signal = source.mock.calls[0][4];
+    expect(signal?.aborted).toBe(false);
+    closing = display.close();
+    expect(signal?.aborted).toBe(true);
+    await expect(display.open('chat')).rejects.toMatchObject({ code: 'SERVER_SHUTTING_DOWN' });
+    await Bun.sleep(0);
+    expect(retire).not.toHaveBeenCalled();
+    release.resolve(); await closing;
+    expect(retire).toHaveBeenCalledTimes(2);
+    expect(source).toHaveBeenCalledTimes(1);
+    expect(worker.mock.calls.filter(([task]) => task.kind === 'frame')).toHaveLength(1);
+    expect(ledger.highWatermark('chat')).toEqual(head);
+    worker.mockRestore(); source.mockRestore(); retire.mockRestore();
+    display = service('server-b');
+    expect((await ready(request('chat', view.viewId))).certificate.watermark).toBe(head.ordinal);
+  } finally { release.resolve(); await closing; worker.mockRestore(); source.mockRestore(); retire.mockRestore(); }
+});
 
 test('real workers prepare bounded windows, hydrate selected details and reuse a persisted prefix', async () => {
   const view = seed('chat', 600), input = request('chat', view.viewId);
@@ -572,10 +625,13 @@ test('builder transport failure preserves certified prefix reads during recovery
   const first = await ready(input);
   const original = DisplayWorkerClient.prototype.request;
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  let recovering = false;
+  let failed = false;
   const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
-    if (task.kind === 'frame' && !recovering) throw Object.assign(new Error('Synthetic transport failure'), { code: 'DISPLAY_UNAVAILABLE' });
-    if (task.kind === 'inspect' && recovering) { entered.resolve(); await release.promise; }
+    if (task.kind === 'frame' && !failed) {
+      failed = true;
+      throw Object.assign(new Error('Synthetic transport failure'), { code: 'DISPLAY_UNAVAILABLE' });
+    }
+    if (task.kind === 'inspect' && failed) { entered.resolve(); await release.promise; }
     return original.call(this, task, ...args);
   });
   let retry: Promise<void> | undefined;
@@ -595,7 +651,6 @@ test('builder transport failure preserves certified prefix reads during recovery
     };
     await assertPrepared();
     expect(await display.window({ ...input, requiredThrough: first.sourceHead + 1 })).toMatchObject({ kind: 'failed', errorCode: 'DISPLAY_UNAVAILABLE' });
-    recovering = true;
     retry = display.retry('chat');
     await entered.promise;
     await assertPrepared();
@@ -631,7 +686,7 @@ test('retries reuse one failed retirement instead of retaining a chain of replac
   } finally { blocked = false; worker.mockRestore(); }
 });
 
-test.each(['missing', 'replaced'])('warm transport recovery fences an old reader of a %s sidecar', async condition => {
+test.each(['missing', 'replaced', 'corrupt', 'regressed-in-place'])('warm transport recovery fences an old reader of a %s sidecar', async condition => {
   const view = seed('chat', 2), input = request('chat', view.viewId);
   const first = await ready(input), filename = await sidecar();
   const original = DisplayWorkerClient.prototype.request;
@@ -641,9 +696,27 @@ test.each(['missing', 'replaced'])('warm transport recovery fences an old reader
     if (task.kind === 'frame' && !failed) {
       failed = true;
       await original.call(this, { kind: 'close', path: filename });
-      if (condition === 'replaced') await fs.copyFile(filename, filename + '.replacement');
-      for (const suffix of ['', '-wal', '-shm']) await rm(filename + suffix, { force: true });
-      if (condition === 'replaced') await fs.rename(filename + '.replacement', filename);
+      if (condition === 'corrupt' || condition === 'regressed-in-place') {
+        const before = await fs.stat(filename);
+        const derived = new DisplayStore(filename);
+        try {
+          if (condition === 'corrupt') derived.run('PRAGMA user_version = 999');
+          else derived.db.transaction(() => {
+            // A valid empty prefix isolates frontier regression from identity and manifest corruption.
+            for (const { name } of derived.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")) {
+              derived.run(`DELETE FROM "${name}"`);
+            }
+            derived.initialize('chat', view.viewId, 'server-a');
+            derived.run("INSERT INTO auxiliary_control VALUES(1, 0, 0, 0, 0, 'idle', 0, 0)");
+          })();
+        } finally { derived.close(); }
+        const after = await fs.stat(filename);
+        expect([after.dev, after.ino]).toEqual([before.dev, before.ino]);
+      } else {
+        if (condition === 'replaced') await fs.copyFile(filename, filename + '.replacement');
+        for (const suffix of ['', '-wal', '-shm']) await rm(filename + suffix, { force: true });
+        if (condition === 'replaced') await fs.rename(filename + '.replacement', filename);
+      }
       throw Object.assign(new Error('Synthetic lost builder'), { code: 'DISPLAY_UNAVAILABLE' });
     }
     const result = await original.call(this, task, ...args);
@@ -829,7 +902,7 @@ test('deletion fences pending preparation and does not recreate sidecars', async
     for (let i = 0; i < 200 && display.metrics.retirements > 0; i++) await Bun.sleep(5);
     expect(display.metrics.retirements).toBe(0);
     expect(await readdir(path.join(root, 'transcript-display'))).toEqual([]);
-    await expect(display.window(request('chat', view.viewId))).rejects.toThrow();
+    await expect(display.window(request('chat', view.viewId))).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' });
   } finally { release.resolve(); worker.mockRestore(); }
 });
 

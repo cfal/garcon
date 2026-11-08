@@ -46,6 +46,8 @@ test('[TLV5-L08.01-CONTRACT-01] rejects foreign profile, view, watermark and cut
   expect(() => parseDisplayWindowRequest({ ...request, profile: { ...profile, hiddenToolGroups: ['bash', 'bash'] } })).toThrow(TypeError);
   expect(() => parseDisplayWindowRequest({ ...request, cuts: Array(33).fill({ id: 'cut', afterOrdinal: 1, anchorRule: 'raw-position' }) })).toThrow(TypeError);
   expect(() => parseDisplayWindowRequest({ ...request, anchor: { kind: 'before', cursor: { certificate, boundaryOrdinal: 0 } } })).toThrow(TypeError);
+  expect(() => parseDisplayWindowRequest({ ...request, anchor: { kind: 'before', cursor: { certificate, boundaryOrdinal: 12 } } })).toThrow(TypeError);
+  expect(() => parseDisplayWindowRequest({ ...request, atWatermark: 9, anchor: { kind: 'before', cursor: { certificate, boundaryOrdinal: 10 } } })).toThrow(TypeError);
   expect(parseDisplayWindowRequest({ ...request, anchor: { kind: 'after', cursor: { certificate, boundaryOrdinal: 0 } } }).anchor.cursor.boundaryOrdinal).toBe(0);
 });
 

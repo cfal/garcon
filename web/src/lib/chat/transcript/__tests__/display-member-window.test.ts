@@ -50,6 +50,40 @@ function fixture(initialGroups: DisplayDescriptor[], limits = { count: 2000, byt
 	return { controller, api, bodies, replace(next: DisplayDescriptor[]) { groups = next; } };
 }
 
+it.each(['member-watermark', 'body-view', 'body-process'] as const)('rejects a foreign %s response while its surface request is still current', async mismatch => {
+	const whole = group(1, 1000), f = fixture([whole]);
+	await f.controller.refresh();
+	await f.controller.expand(whole);
+	const previous = f.controller.snapshot, certificate = previous.window!.certificate;
+	const sibling = {}, retainedBody = f.bodies.get(certificate, 1);
+	f.bodies.retain(sibling, certificate, [1]);
+	try {
+		if (mismatch === 'member-watermark') {
+			const members = f.api.members.getMockImplementation()!;
+			f.api.members.mockImplementationOnce(async (...args) => {
+				const response = await members(...args);
+				return { ...response, certificate: { ...response.certificate, watermark: certificate.watermark - 1 } };
+			});
+		} else {
+			const bodies = f.api.bodies.getMockImplementation()!;
+			f.api.bodies.mockImplementationOnce(async (...args) => {
+				const response = await bodies(...args);
+				return { ...response, certificate: { ...response.certificate,
+					...(mismatch === 'body-view' ? { transcriptViewId: 'foreign-view' } : { serverInstanceId: 'foreign-server' }) } };
+			});
+		}
+		expect(await f.controller.extendMembers(whole, { kind: 'after', ordinal: 50 })).toBe('failed');
+		expect(f.controller.snapshot.window).toBe(previous.window);
+		expect(f.controller.snapshot.expansions).toEqual(previous.expansions);
+		expect(f.bodies.count).toBe(50);
+		expect(f.bodies.get(certificate, 51)).toBeUndefined();
+		expect(f.bodies.get(certificate, 1)).toBe(retainedBody);
+		expect(f.bodies.usage(sibling).count).toBe(1);
+		expect(await f.controller.extendMembers(whole, { kind: 'after', ordinal: 50 })).toBe('loaded');
+		expect(f.controller.snapshot.expansions[0].page.ordinals).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+	} finally { f.bodies.release(sibling); }
+});
+
 it('updates an appended group summary and continuation without admitting the new members', async () => {
 	vi.useFakeTimers();
 	const initial = group(1, 40000);

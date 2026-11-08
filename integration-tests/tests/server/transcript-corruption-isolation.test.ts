@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { userContents } from '../../support/chat-assertions.js';
 import { UnavailableChatHistoryError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
+import { displayRequest } from '../../support/transcript-display.js';
 
 describe('transcript corruption isolation', () => {
   test('[TLV5-L11.01-SERVER-01] fences only the chat whose SQLite ledger is corrupt', async () => {
@@ -59,6 +61,13 @@ describe('transcript corruption isolation', () => {
           retryable: false,
         },
       });
+
+      const corruptDisplay = await rejectionOf(fixture.client.openDisplay({ chatId: corruptChatId, outstandingClientMessageIds: [], reason: 'activate' }));
+      expect(corruptDisplay).toMatchObject({ status: 422, body: { errorCode: 'TRANSCRIPT_UNAVAILABLE', retryable: false } });
+      const healthyOpen = await fixture.client.openDisplay({ chatId: healthyChatId, outstandingClientMessageIds: [], reason: 'activate' });
+      const healthyWindow = await fixture.client.waitForDisplayWindow(displayRequest(healthyOpen));
+      expect(healthyWindow.certificate.transcriptViewId).toBe(healthyOpen.transcriptViewId);
+      expect(healthyWindow.items.length).toBeGreaterThan(0);
 
       expect(userContents((await fixture.client.getMessages(healthyChatId)).messages)).toEqual([
         'healthy-ledger-chat',

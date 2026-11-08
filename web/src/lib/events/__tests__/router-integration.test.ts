@@ -417,6 +417,21 @@ describe('event router integration', () => {
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 	});
 
+	it.each([
+		['chat-a', 'visible', true], ['chat-a', 'hidden', false], ['chat-b', 'visible', false],
+	] as const)('updates %s activity while document is %s, read receipt=%s', (chatId, visibility, receipt) => {
+		const stores = createStores();
+		const activity = '2026-05-14T00:00:02.000Z';
+		const visible = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(visibility);
+		try {
+			vi.mocked(stores.chatState.isRenderedChat).mockReturnValue(true);
+			renderRouterWithRawMessages([{ ...head(chatId), presentedActivityAt: activity }], stores);
+			expect(stores.sessions.patchPreview).toHaveBeenCalledWith(chatId, 'hi', activity);
+			if (receipt) expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith(chatId, activity);
+			else expect(stores.readState.enqueueReadReceipt).not.toHaveBeenCalled();
+		} finally { visible.mockRestore(); }
+	});
+
 	it('advances thinking activity and visible read receipts without replacing the preview', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages([{ ...head('chat-a', 3, null), responseClassOrdinals: { ...emptyResponseClassOrdinals(), thinking: 3 } }], stores);

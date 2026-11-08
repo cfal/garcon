@@ -292,7 +292,7 @@ it('navigates without waiting for a same-chat sibling projection', async () => {
 	}
 });
 
-it('does not cancel an HTTP row navigation when the socket disconnects', async () => {
+it('does not cancel an HTTP row navigation when lifecycle snapshot refreshes are cancelled', async () => {
 	const f = await fixture(); f.attach();
 	const targetPage = held<AvailableDisplayWindow>();
 	f.api.window.mockReturnValueOnce(targetPage.promise);

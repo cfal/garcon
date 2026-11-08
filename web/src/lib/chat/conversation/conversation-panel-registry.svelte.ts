@@ -358,7 +358,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			this.#projectSnapshot(chatId, pending);
 			const purposeCovered = options.purpose === undefined || pending.purpose === options.purpose;
 			if (purposeCovered) return pending.promise;
+			const generation = this.#refreshGeneration;
 			return pending.metadata.then(() => {
+				if (generation !== this.#refreshGeneration) return false;
 				if (this.#snapshotLoads.get(chatId) === pending) {
 					pending.abort.abort();
 					this.#snapshotLoads.delete(chatId);

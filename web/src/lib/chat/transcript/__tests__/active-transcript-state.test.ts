@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
-import { ChatDisplayStateUpdatedMessage, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
+import { ChatDisplayStateUpdatedMessage, emptyAnnouncementOrdinals, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
 import { displayCutsKey, displayProfileKey, type GroupDescriptor } from '$shared/transcript-display-contract';
 import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
@@ -92,6 +92,30 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(transcript.responseClassOrdinals).toEqual(emptyResponseClassOrdinals());
 		transcript.observeHead('view-2', 4, { ...emptyResponseClassOrdinals(), tool: 4 });
 		expect(transcript.responseClassOrdinals.tool).toBe(4);
+	});
+
+	it('merges announcement facts per category across reordered heads and compatible opens', async () => {
+		const { transcript, open } = setup();
+		await installDisplayOpen(transcript, 'chat-1');
+		transcript.observeHead('view-1', 10, emptyResponseClassOrdinals(), { ...emptyAnnouncementOrdinals(), assistant: 10, bash: 8 });
+		transcript.observeHead('view-1', 9, emptyResponseClassOrdinals(), { ...emptyAnnouncementOrdinals(), assistant: 7, thinking: 9 });
+		transcript.observeHead('view-1', 9, emptyResponseClassOrdinals(), { ...emptyAnnouncementOrdinals(), assistant: 7, thinking: 9 });
+		transcript.observeHead('foreign-view', 100, emptyResponseClassOrdinals(), { ...emptyAnnouncementOrdinals(), bash: 100 });
+		transcript.installOpen(open);
+		expect(transcript.announcementOrdinals).toEqual({ ...emptyAnnouncementOrdinals(), assistant: 10, bash: 8, thinking: 9 });
+		expect(transcript.loadedThroughOrdinal).toBe(3);
+	});
+
+	it.each(['clear', 'view', 'process'] as const)('resets announcement facts on %s without suppressing lower new ordinals', async replacement => {
+		const { transcript } = setup();
+		await installDisplayOpen(transcript, 'chat-1');
+		transcript.observeHead('view-1', 100, emptyResponseClassOrdinals(), { ...emptyAnnouncementOrdinals(), assistant: 100, bash: 99 });
+		if (replacement === 'clear') transcript.clearMessages();
+		const view = replacement === 'view' ? 'view-2' : 'view-1';
+		transcript.installOpen(displayOpen('chat-1', view, 1, replacement === 'process' ? 'instance-2' : 'instance-1'));
+		expect(transcript.announcementOrdinals).toEqual(emptyAnnouncementOrdinals());
+		transcript.observeHead(view, 2, emptyResponseClassOrdinals(), { ...emptyAnnouncementOrdinals(), assistant: 2 });
+		expect(transcript.announcementOrdinals).toEqual({ ...emptyAnnouncementOrdinals(), assistant: 2 });
 	});
 
 	it('keeps the old certified window while preparation lags', async () => {

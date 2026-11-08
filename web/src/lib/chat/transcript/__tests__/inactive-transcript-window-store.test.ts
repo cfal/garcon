@@ -20,6 +20,27 @@ async function park(store: InactiveTranscriptWindowStore, surfaceId: string, cha
 }
 
 describe('InactiveTranscriptWindowStore', () => {
+	it('keeps four parked windows by default and preserves evicted semantic targets', async () => {
+		const store = new InactiveTranscriptWindowStore();
+		for (let i = 0; i < 5; i++) await park(store, `surface-${i}`, `chat-${i}`);
+		expect(store.size).toBe(4);
+		expect(store.take('surface-0', 'chat-0')).toBeNull();
+		expect(store.restoreTarget('surface-0', 'chat-0')).toEqual({ kind: 'end' });
+	});
+
+	it('enforces the aggregate byte budget even when each window and the body count fit', async () => {
+		const first = await transcript('chat-1', 'x'.repeat(3000));
+		const bytes = first.bodyStore.usage(first.controller).bytes;
+		const store = new InactiveTranscriptWindowStore({ windows: 4, messages: 100, bytes: Math.floor(bytes * 1.75) });
+		await park(store, 'left', 'chat-1', first);
+		expect(store.size).toBe(1);
+		await park(store, 'right', 'chat-2', await transcript('chat-2', 'x'.repeat(3000)));
+		expect(store.size).toBe(1);
+		expect(store.take('left', 'chat-1')).toBeNull();
+		expect(first.bodyStore.count).toBe(0);
+		expect(store.take('right', 'chat-2')).not.toBeNull();
+	});
+
 	it('evicts whole least-recently-parked windows and releases their body leases', async () => {
 		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 100_000 });
 		const first = await transcript('chat-1');

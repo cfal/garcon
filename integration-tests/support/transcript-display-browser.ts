@@ -1,11 +1,19 @@
 import { expect } from 'bun:test';
-import type { Page, WebSocketRoute } from 'playwright';
+import type { Page, Response, WebSocketRoute } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { parseBodyDependencyResponse, parseDisplayWindowRequest } from '../../common/transcript-display-contract.js';
 import { parsePrimaryWsServerMessage } from '../../common/ws-protocol.js';
 import { Deferred, withTimeout } from './deferred.js';
 
 export const DISPLAY_FEED = '[data-chat-scroll-viewport]';
+
+export async function readDisplayWireResponse(response: Pick<Response, 'url' | 'body'>) {
+  let bytes: Buffer;
+  try { bytes = await response.body(); }
+  catch { return null; } // Aborted responses have no body on the receiving socket.
+  const operation = new URL(response.url()).pathname.split('/').at(-1)!;
+  return { operation, bytes: bytes.length, body: JSON.parse(bytes.toString()) as unknown };
+}
 
 export async function observeDisplayWire(page: Page) {
   const http: { operation: string; bytes: number; body: unknown }[] = [];
@@ -38,10 +46,9 @@ export async function observeDisplayWire(page: Page) {
   page.on('response', response => {
     const pathname = new URL(response.url()).pathname;
     if (!pathname.includes('/transcript-display/') || response.status() !== 200) return;
-    const read = (async () => {
-      const bytes = await response.body();
-      http.push({ operation: pathname.split('/').at(-1)!, bytes: bytes.length, body: JSON.parse(bytes.toString()) });
-    })().catch(() => { /* Aborted responses have no body on the receiving socket. */ });
+    const read = readDisplayWireResponse(response).then(reply => {
+      if (reply) http.push(reply);
+    }).catch(() => { protocolErrors.push(`Malformed successful display response: ${pathname}`); });
     pending.add(read);
     void read.finally(() => pending.delete(read));
   });

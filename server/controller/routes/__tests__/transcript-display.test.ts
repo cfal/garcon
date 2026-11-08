@@ -8,6 +8,7 @@ import { parseResendSnapshot, parseSubagentSummaryPage } from '../../../../commo
 import { TranscriptLedgerStore } from '../../ledger/store.js';
 import { TranscriptLedgerService } from '../../ledger/service.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
+import { LedgerFencedError, StaleTranscriptViewError } from '../../ledger/errors.js';
 import { TranscriptDisplayService, type DisplayStatus } from '../../transcript-display/service.js';
 import { DisplayWorkerClient } from '../../transcript-display/worker-client.js';
 import { ChatTransientFeedStore } from '../../chats/chat-transient-feed.js';
@@ -184,6 +185,63 @@ test('same-tool-ID plan occurrences remain independent and dismissal is idempote
   expect((await post('plan-dismiss', { ...request, ordinal: 1 })).body.pendingExitCount).toBe(1);
   expect((await post('plan-detail', { ...request, ordinal: 1 })).response.status).toBe(409);
   expect((await post('plan-dismiss', { ...request, serverInstanceId: 'old-server', ordinal: 2 })).response.status).toBe(409);
+});
+
+test('plan pagination crosses the server page boundary without losing occurrences', async () => {
+  const opened = parseDisplayOpenResponse((await post('open', opening())).body);
+  const producer = ledger.openProducer(chatId, 'generic');
+  try {
+    producer.sink.publish({ type: 'rows', rows: Array.from({ length: 51 }, (_, i) => ({
+      message: new ExitPlanModeToolUseMessage(at, 'reused-tool', `Synthetic plan ${i + 1}`),
+    })) });
+    await Promise.resolve();
+    const request = { serverInstanceId: 'server', chatId, transcriptViewId: opened.transcriptViewId };
+    const first = parsePlanPresentationSnapshot((await post('plan', request)).body);
+    expect(first.exits.map(exit => exit.ordinal)).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+    expect(first.pendingExitCount).toBe(51);
+    expect(first.nextAfterOrdinal).toBe(50);
+    const second = parsePlanPresentationSnapshot((await post('plan', { ...request, afterOrdinal: first.nextAfterOrdinal })).body);
+    expect(second.exits.map(exit => exit.ordinal)).toEqual([51]);
+    expect(second.pendingExitCount).toBe(51);
+    expect(second.nextAfterOrdinal).toBeNull();
+  } finally { producer.close(); }
+});
+
+test.each([
+  [new LedgerFencedError(chatId), 422, 'TRANSCRIPT_UNAVAILABLE', false],
+  [Object.assign(new Error('Synthetic invalid request'), { code: 'DISPLAY_INVALID_REQUEST' }), 400, 'DISPLAY_INVALID_REQUEST', true],
+  [Object.assign(new Error('Synthetic busy reader'), { code: 'DISPLAY_BUSY' }), 503, 'DISPLAY_BUSY', true],
+] as const)('translates display open failure %s without false-empty success', async (error, status, errorCode, retryable) => {
+  const failed = spyOn(display, 'open').mockRejectedValueOnce(error);
+  try {
+    const result = await post('open', opening());
+    expect(result.response.status).toBe(status);
+    expect(result.response.headers.get('Cache-Control')).toBe('no-store');
+    expect(result.body).toMatchObject({ errorCode, retryable });
+    expect(result.body).not.toHaveProperty('sourceHead');
+    expect(checks).toBe(0);
+  } finally { failed.mockRestore(); }
+});
+
+test('retry requires the current view and preserves a replacement detected during recovery', async () => {
+  const opened = parseDisplayOpenResponse((await post('open', opening())).body);
+  const retry = spyOn(display, 'retry');
+  try {
+    expect((await post('retry', opening())).response.status).toBe(400);
+    const stale = await post('retry', { ...opening(), expectedTranscriptViewId: 'old-view' });
+    expect(stale.response.status).toBe(409);
+    expect(stale.body).toMatchObject({ errorCode: 'STALE_TRANSCRIPT_VIEW', retryable: true });
+    expect(retry).not.toHaveBeenCalled();
+    const request = { ...opening(), expectedTranscriptViewId: opened.transcriptViewId };
+    retry.mockRejectedValueOnce(new StaleTranscriptViewError(chatId, opened.transcriptViewId, 'replacement'));
+    const replaced = await post('retry', request);
+    expect(replaced.response.status).toBe(409);
+    expect(replaced.body).toMatchObject({ errorCode: 'STALE_TRANSCRIPT_VIEW', retryable: true });
+    const recovered = await post('retry', request);
+    expect(recovered.response.status).toBe(200);
+    expect(recovered.body).toEqual({ success: true });
+    expect(retry).toHaveBeenCalledTimes(2);
+  } finally { retry.mockRestore(); }
 });
 
 test('rejects malformed requests and replaced views without false-empty success', async () => {

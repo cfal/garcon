@@ -6,6 +6,42 @@ import { appendSubagentFact, prepareSubagentFrame, pruneSubagentFrame } from '..
 import { querySubagents } from '../auxiliary-query.js';
 
 const at = '2026-01-01T00:00:00.000Z';
+test('pages a complete published generation while its replacement is built in bounded frames', () => {
+  const store = new DisplayStore(':memory:');
+  try {
+    store.initialize('chat', 'view', 'server');
+    for (let ordinal = 1; ordinal <= 65; ordinal++) {
+      appendSubagentFact(store, ordinal, new CodexSubagentToolUseMessage(at, `spawn-${ordinal}`, 'spawn_agent', { taskName: `worker-${ordinal}` }));
+    }
+    while (prepareSubagentFrame(store, 65) < 65) {}
+    const read = (watermark: number, afterOrder?: number) => querySubagents(store,
+      { chatId: 'chat', transcriptViewId: 'view', limit: 50, ...(afterOrder === undefined ? {} : { afterOrder }) },
+      { serverInstanceId: 'server', chatId: 'chat', transcriptViewId: 'view', watermark, sourceHead: 66 });
+    const first = read(65), second = read(65, first.nextAfterOrder!);
+    expect(first.entries.map(entry => [entry.name, entry.anchorOrdinal])).toEqual(
+      Array.from({ length: 50 }, (_, i) => [`worker-${i + 1}`, i + 1]));
+    expect(first.nextAfterOrder).toBe(50);
+    expect(second.entries.map(entry => [entry.name, entry.anchorOrdinal])).toEqual(
+      Array.from({ length: 15 }, (_, i) => [`worker-${i + 51}`, i + 51]));
+    expect(second.nextAfterOrder).toBeNull();
+    appendSubagentFact(store, 66, new CodexSubagentToolUseMessage(at, 'spawn-66', 'spawn_agent', { taskName: 'worker-66' }));
+    let intermediateFrames = 0;
+    while (prepareSubagentFrame(store, 66) < 66) {
+      intermediateFrames++;
+      expect(read(65)).toEqual(first);
+      expect(read(65, first.nextAfterOrder!)).toEqual(second);
+      expect(() => read(66)).toThrow('Subagent generation changed');
+    }
+    expect(intermediateFrames).toBeGreaterThan(1);
+    expect(() => read(65)).toThrow(expect.objectContaining({ code: 'DISPLAY_STALE_WATERMARK' }));
+    const replacement = read(66), tail = read(66, replacement.nextAfterOrder!);
+    expect(replacement.entries).toEqual(first.entries);
+    expect(tail.entries.map(entry => [entry.name, entry.anchorOrdinal])).toEqual(
+      Array.from({ length: 16 }, (_, i) => [`worker-${i + 51}`, i + 51]));
+    expect(tail.nextAfterOrder).toBeNull();
+  } finally { store.close(); }
+});
+
 test('disk-backed auxiliary prepasses and merges preserve the reference full-prefix reducer', () => {
   const messages: ChatMessage[] = [
     new UserMessage(at, 'Synthetic user text'),

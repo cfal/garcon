@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'bun:test';
-import { AssistantMessage, UserMessage, ThinkingMessage, ErrorMessage, TranscriptNoticeMessage, BashToolUseMessage, ToolResultMessage, WaitToolUseMessage, CommandResultMessage, EnterPlanModeToolUseMessage } from '../chat-types.js';
-import { ChatInputCommittedMessage, ChatTranscriptHeadUpdatedMessage, ChatDisplayStateUpdatedMessage, transcriptActivity } from '../transcript-display-events.js';
+import { AssistantMessage, UserMessage, ThinkingMessage, ErrorMessage, TranscriptNoticeMessage, BashToolUseMessage, ToolResultMessage, WaitToolUseMessage, CommandResultMessage, EnterPlanModeToolUseMessage, parseChatMessage } from '../chat-types.js';
+import { ChatInputCommittedMessage, ChatTranscriptHeadUpdatedMessage, ChatDisplayStateUpdatedMessage, emptyAnnouncementOrdinals, transcriptActivity } from '../transcript-display-events.js';
 import { parseServerWsMessage } from '../ws-events.js';
 import { parseClientWsMessage } from '../ws-requests.js';
 
 describe('compact transcript events', () => {
+  it('keeps unknown, external and MCP tool labels out of compact announcement facts', () => {
+    const rows = ['unknown-tool-use', 'external-tool-use', 'mcp-tool-use'].map((type, index) => ({ ordinal: index + 1,
+      message: parseChatMessage({ type, timestamp: '', toolId: `private-${index}`, rawName: 'Synthetic private label' }) }));
+    const facts = transcriptActivity(rows);
+    expect(facts.announcementOrdinals).toEqual(emptyAnnouncementOrdinals());
+    expect(facts.responseClassOrdinals.tool).toBe(3);
+  });
+  it('requires an explicit nonnegative auxiliary revision on display readiness', () => {
+    const readiness = new ChatDisplayStateUpdatedMessage('server', 'chat', 'view', 1, 'revision', 4, 'available', null);
+    for (const auxiliaryRevision of [undefined, -1, '0', Number.MAX_SAFE_INTEGER + 1]) {
+      expect(parseServerWsMessage({ ...readiness, auxiliaryRevision })).toBeNull();
+    }
+    expect(parseServerWsMessage({ ...readiness, auxiliaryRevision: 0 })).toEqual(readiness);
+  });
 	it('separates live plan entry and announceable categories from coarse response facts', () => {
 		const messages = [new BashToolUseMessage('', 'tool-1', 'true'), new ThinkingMessage('', 'Synthetic thinking'),
 			new WaitToolUseMessage('', 'tool-2', 'execution'), new CommandResultMessage('', 'command',

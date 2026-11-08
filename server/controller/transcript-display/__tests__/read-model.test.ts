@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { AssistantMessage, AskUserQuestionToolUseMessage, BashToolUseMessage, EditToolUseMessage, GlobToolUseMessage, PermissionRequestMessage, ReadToolUseMessage, ToolResultMessage, UserMessage, WriteToolUseMessage } from '../../../../common/chat-types.js';
 import type { ChatMessage } from '../../../../common/chat-types.js';
 import type { DisplayProfile, DisplayWindowRequest, GroupDescriptor, MemberWindowRequest } from '../../../../common/transcript-display-contract.js';
@@ -173,6 +176,67 @@ describe('persistent transcript display read model', () => {
     expect(latest.details.map(detail => [detail.pairedResult, detail.questionWrapper])).toEqual([
       [null, null], [11, 2], [12, 7], [13, 8],
     ]);
+  });
+
+  test('persists more than 5000 unmatched reused-ID occurrences and resumes exact FIFO after reopening', async () => {
+    await mkdir(path.join(homedir(), 'tmp'), { recursive: true });
+    const root = await mkdtemp(path.join(homedir(), 'tmp', 'display-pending-'));
+    let index = new DisplayStore(path.join(root, 'display.sqlite'));
+    try {
+      index.initialize('chat', 'view', 'server');
+      const question = () => new AskUserQuestionToolUseMessage(at, 'reused', 'Synthetic question', []);
+      const prefix = stored([
+        new ToolResultMessage(at, 'reused', 'Synthetic orphan'),
+        new PermissionRequestMessage(at, 'first-question', question()),
+        ...Array.from({ length: 5001 }, () => new BashToolUseMessage(at, 'reused', 'true')),
+        question(), question(), new PermissionRequestMessage(at, 'second-question', question()),
+        new UserMessage(at, 'Synthetic boundary'),
+      ]);
+      const ended = { kind: 'run-ended' as const, at, outcome: 'finished' as const, origin: 'provider' as const };
+      prefix.push({ view_id: 'view', ordinal: prefix.length + 1, kind: ended.kind, at, client_message_id: null,
+        payload_json: encodeLedgerDraft(ended).payloadJson });
+      const append = (rows: StoredLedgerRow[], goal: number) => {
+        for (let offset = 0, frame = 0; offset < rows.length; frame++) {
+          const size = [73, 241, 19][frame % 3];
+          appendDisplayFrame(index, rows.slice(offset, offset + size), goal, 'server');
+          offset += size;
+        }
+      };
+      append(prefix, prefix.length);
+      expect(index.get('SELECT count(*) AS count FROM pending_use')).toEqual({ count: 5003 });
+      expect(query(index).items.filter(item => item.kind === 'tool-group').map(item => item.count)).toEqual([5001]);
+      index.close();
+      index = new DisplayStore(path.join(root, 'display.sqlite'));
+      index.initialize('chat', 'view', 'server');
+      expect(index.get('SELECT count(*) AS count FROM pending_use')).toEqual({ count: 5003 });
+      const suffix = stored(Array.from({ length: 5003 }, (_, i) => new ToolResultMessage(at, 'reused', `Synthetic result ${i}`)), prefix.length + 1);
+      const watermark = prefix.length + suffix.length;
+      append(suffix, watermark);
+      expect(index.all('SELECT use_ordinal, result_ordinal, wrapper_ordinal FROM tool_pair ORDER BY use_ordinal')).toEqual(
+        Array.from({ length: 5003 }, (_, i) => ({ use_ordinal: i + 3, result_ordinal: prefix.length + i + 1,
+          wrapper_ordinal: i === 5001 ? 2 : i === 5002 ? 5006 : null })));
+      expect(index.all('SELECT * FROM pending_use')).toEqual([]);
+      expect(index.all('SELECT * FROM pending_wrapper')).toEqual([]);
+      const seeds = [3, 2503, 5003, 5004, 5005];
+      const request = { certificate: displayCertificate('server', { chatId: 'chat', transcriptViewId: 'view', profile, cuts: [] }, prefix.length),
+        profile, cuts: [], seedOrdinals: seeds, residentOrdinals: [], limitBodies: 20, estimatedByteBudget: 10000 };
+      expect(planBodyRead(index, request).details.map(detail => detail.pairedResult)).toEqual(seeds.map(() => null));
+      expect(planBodyRead(index, { ...request, certificate: { ...request.certificate, watermark } }).details.map(detail => detail.pairedResult))
+        .toEqual(seeds.map(ordinal => prefix.length + ordinal - 2));
+    } finally { index.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  test('a malformed later row rolls back every derived write in its frame', () => {
+    const store = create(), before = store.manifest();
+    const rows = stored([new BashToolUseMessage(at, 'pending', 'true'), new AssistantMessage(at, 'Synthetic answer')]);
+    rows[1] = { ...rows[1], payload_json: '{}' };
+    expect(() => appendDisplayFrame(store, rows, 2, 'server')).toThrow();
+    expect(store.manifest()).toEqual(before);
+    for (const table of ['feature', 'posting', 'class_tail', 'pending_use', 'bash_input', 'bash_event', 'public_tail']) {
+      expect(store.all(`SELECT * FROM ${table}`)).toEqual([]);
+    }
+    appendDisplayFrame(store, stored([new AssistantMessage(at, 'Synthetic recovery')]), 1, 'server');
+    expect(query(store).items).toEqual([expect.objectContaining({ kind: 'row', ordinal: 1 })]);
   });
 
   test.each(['before', 'after'] as const)('rejects %s cursors inside a collapsed group', kind => {

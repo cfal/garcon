@@ -60,6 +60,22 @@ import {
   type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
 import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
+import { readDisplayWireResponse } from '../../support/transcript-display-browser.js';
+
+describe('display wire response accounting', () => {
+  const url = () => 'http://localhost/api/v1/chats/transcript-display/window';
+  test('tolerates an aborted body but rejects successfully received malformed JSON', async () => {
+    expect(await readDisplayWireResponse({ url, body: async () => { throw new Error('Synthetic abort'); } })).toBeNull();
+    const malformed = await rejectionOf(readDisplayWireResponse({ url, body: async () => Buffer.from('{broken') }));
+    expect(malformed).toBeInstanceOf(SyntaxError);
+  });
+  test('measures received bytes rather than reserialized JSON', async () => {
+    const raw = '{ "kind": "available" }\n';
+    expect(await readDisplayWireResponse({ url, body: async () => Buffer.from(raw) })).toEqual({
+      operation: 'window', bytes: Buffer.byteLength(raw), body: { kind: 'available' },
+    });
+  });
+});
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
