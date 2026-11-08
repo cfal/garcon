@@ -292,6 +292,21 @@ describe('Lightpanda Git comparison', () => {
       );
 
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+      // Lightpanda reload omits pagehide, leaving the debounced layout write outstanding.
+      await fixture.page.waitForFunction((windowId) => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        if (!raw) return false;
+        type SavedNode = {
+          id: string;
+          active?: { type: string; kind?: string };
+          children?: SavedNode[];
+        };
+        const { root } = JSON.parse(raw) as { root: SavedNode };
+        const matches = (node: SavedNode): boolean => node.id === windowId
+          ? node.active?.type === 'singleton' && node.active.kind === 'git-compare'
+          : node.children?.some(matches) ?? false;
+        return matches(root);
+      }, { timeout: 20_000 }, compareWindowId);
       await fixture.page.reload({ waitUntil: [] });
       await fixture.waitForSpaWebSocket({
         afterConnectionCount: beforeReloadConnections,
