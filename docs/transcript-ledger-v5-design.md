@@ -1926,6 +1926,7 @@ model context, carryover, or export.
   Detached geometry remains stable while bounded resident details revalidate
   at a newer certificate. Historical controls never confer permission authority.
   Compact source-head events carry bounded activity/preview, response-class
+  ordinals, visibility-qualified announcement categories, explicit live plan-entry
   ordinals, and plan/auxiliary revisions; exact submission acknowledgements are
   separate. Reconnect opens active surfaces independently, resolves at most 32
   outstanding submission IDs, and fetches only their bounded working windows.
