@@ -108,7 +108,7 @@ describe('certified display windows across Chat swaps', () => {
 		if (reverse) swapped.reverse();
 		registry.prepareForReconcile(swapped);
 		registry.reconcile(swapped);
-		for (const [index, surfaceId] of surfaces.entries()) {
+		const restorations = surfaces.map((surfaceId, index) => {
 			const incoming = originals[1 - index];
 			const panel = registry.panel(surfaceId)!;
 			if (retain) {
@@ -117,6 +117,9 @@ describe('certified display windows across Chat swaps', () => {
 			}
 			const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
 			panel.attachPresentation(port({ kind: 'end' }));
+			return { incoming, panel, jump };
+		});
+		for (const { incoming, panel, jump } of restorations) {
 			await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
 				{
 					chatId: incoming.panel.chatId,
@@ -197,7 +200,7 @@ describe('certified display windows across Chat swaps', () => {
 		const swapped = publishSwap(registry);
 		registry.prepareForReconcile(swapped);
 		registry.reconcile(swapped);
-		for (const [, options] of api.open.mock.calls) expect(options?.signal?.aborted).toBe(false);
+		for (const [, signal] of api.open.mock.calls) expect(signal?.aborted).toBe(false);
 		for (const chatId of chats) {
 			replaceChat(chatId, 151);
 			held.get(chatId)!.resolve(displayOpen(chatId, `view-${chatId}`, 151));
@@ -226,12 +229,12 @@ describe('certified display windows across Chat swaps', () => {
 		const pending = new Map<string, typeof holds[number]>(chats.map((chatId, index) => [chatId, holds[index]]));
 		const signals = new Map<string, AbortSignal | undefined>();
 		const windowImpl = api.window.getMockImplementation()!;
-		api.window.mockImplementation(async (request, options) => {
+		api.window.mockImplementation(async (request, signal) => {
 			const hold = pending.get(request.chatId);
 			pending.delete(request.chatId);
-			const result = await windowImpl(request, options);
+			const result = await windowImpl(request, signal);
 			if (hold) {
-				signals.set(request.chatId, options?.signal);
+				signals.set(request.chatId, signal);
 				hold.ready.resolve();
 				await hold.release.promise;
 			}

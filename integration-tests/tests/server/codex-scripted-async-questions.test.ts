@@ -3,7 +3,6 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { asyncQuestionReplyText, type AsyncQuestionReply } from '../../../common/async-user-questions.js';
 import { FILE_CONTEXT_SEPARATOR } from '../../../common/file-mention-context.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { codexFinalAnswerMessage } from '../../support/fake-codex-model.js';
@@ -29,13 +28,14 @@ test('async questions continue immediately and accept correlated ordinary input 
       const chatId = fixture.newChatId();
       const turn = await client.startChat(liveCodexStartRequest({ chatId, projectPath: fixture.executionDirs.project, command: 'Ask for environment and deadline.' }));
       await continued.requested;
-      await client.waitForEvent((event): event is ChatMessagesMessage => event.type === 'chat-messages'
-        && event.chatId === chatId && event.messages.some(entry => entry.message.type === 'assistant-message' && !!entry.message.questions), 'async question publication');
+      const history = await client.waitForMessages(chatId,
+        page => page.messages.some(entry => entry.message.type === 'assistant-message' && !!entry.message.questions),
+        { description: 'async question publication' });
       const snapshot = await client.getChatSnapshot(chatId, 0);
       expect(snapshot.transientFeed.rows).toEqual([]);
-      const history = await client.getMessages(chatId);
       const row = history.messages.find(entry => entry.message.type === 'assistant-message' && entry.message.questions);
       if (row?.message.type !== 'assistant-message' || !row.message.questions) throw new Error('Expected structured questions');
+      await client.waitForHead(chatId, row.ordinal);
       expect(history.messages.filter(entry => entry.message.type === 'assistant-message' && entry.message.questions)).toHaveLength(1);
       const prompts = row.message.questions.questions;
       const questionText = row.message.content;
