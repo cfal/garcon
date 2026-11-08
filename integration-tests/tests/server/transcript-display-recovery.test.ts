@@ -78,6 +78,16 @@ test('source rollback and regrowth before lazy display admission cannot reuse th
     const bodies = await displayBodies(fixture.client, request, current);
     expect(bodies.bodies.every(row => row.message.type === 'assistant-message')).toBe(true);
     expect(bodies.details.every(detail => detail.pairedResult === null)).toBe(true);
+    const overwritten = promptOrdinal + 1;
+    expect(await fixture.client.resolveDisplay({ ...request, atWatermark: current.certificate.watermark,
+      anchor: { kind: 'around', ordinal: overwritten } })).toEqual({ kind: 'visible-row', ordinal: overwritten, landedOrdinal: overwritten });
+    const prefix = await fixture.client.waitForDisplayWindow({ ...request, atWatermark: current.certificate.watermark,
+      anchor: { kind: 'around', ordinal: overwritten } });
+    expect(prefix.items.every(item => item.kind === 'row')).toBe(true);
+    const replacement = await displayBodies(fixture.client, request, prefix, [overwritten]);
+    expect(replacement.bodies).toHaveLength(1);
+    expect(replacement.bodies[0]).toMatchObject({ ordinal: overwritten, message: { type: 'assistant-message', content: 'Synthetic history row 0' } });
+    expect(replacement.details[0]).toMatchObject({ ordinal: overwritten, pairedResult: null });
   });
 }, 90_000);
 
@@ -89,6 +99,10 @@ test('deletion during cold display preparation retires work without recreating i
     expect(open.display.phase).toBe('preparing');
     await fixture.client.deleteChat(chatId);
     expect(await rejectionOf(fixture.client.displayWindow(displayRequest(open)))).toMatchObject({ status: 404 });
+    const directory = join(fixture.dirs.workspace, 'transcript-display');
+    const deadline = Date.now() + 10_000;
+    while ((await readdir(directory)).includes(chatId) && Date.now() < deadline) await Bun.sleep(20);
+    expect((await readdir(directory)).includes(chatId)).toBe(false);
     await fixture.restartGarcon();
     expect((await readdir(join(fixture.dirs.workspace, 'transcript-display'))).includes(chatId)).toBe(false);
     expect((await readdir(join(fixture.dirs.workspace, 'transcript-ledgers'))).includes(chatId)).toBe(false);

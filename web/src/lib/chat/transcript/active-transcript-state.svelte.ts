@@ -5,6 +5,7 @@ import type { TranscriptMessage } from '$shared/chat-view';
 import type { DisplayCut, DisplayProfile, GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 import { transcriptDisplayApi, type TranscriptDisplayApi } from '$lib/api/transcript-display.js';
+import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
 import { DisplayBodyStore } from './display-body-store.js';
 import { DisplayWindowController, emptyDisplayWindow } from './display-window-controller.js';
 import { displayRenderModel } from './display-render-model.js';
@@ -12,18 +13,18 @@ import { ConversationFeedMutationState } from './ConversationFeedMutationState.s
 import { ConversationTranscriptOverlayStore, type ConversationTranscriptOverlayView, type ConversationTranscriptOverlayMutation } from './conversation-transcript-overlay-store.svelte.js';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
-import type { ActiveTranscriptPort, ChatCursor, ChatLoadMessagesOptions } from './active-transcript-port.js';
+import type { ActiveTranscriptPort, ChatCursor } from './active-transcript-port.js';
 import { idlePageState, type TranscriptPageApplicationGate, type TranscriptPageLoadOptions, type TranscriptPageLoadResult, type TranscriptPageState, type TranscriptWindowTarget, type TranscriptWindowLoadResult } from './transcript-page-progress.js';
 import type { TranscriptRowTarget, TranscriptRowWindowResult } from './transcript-row-navigation.js';
 import type { ChatDisplayRow } from './transcript-row-projection.js';
 import { selectForkAtMessage } from '$lib/chat/actions/fork-at-message-action.js';
-import { emptyResponseClassOrdinals, RESPONSE_CLASSES, type ResponseClassOrdinals, type ChatDisplayStateUpdatedMessage } from '$shared/transcript-display-events';
+import { emptyAnnouncementOrdinals, ANNOUNCEMENT_CLASSES, type AnnouncementOrdinals, emptyResponseClassOrdinals, RESPONSE_CLASSES, type ResponseClassOrdinals, type ChatDisplayStateUpdatedMessage } from '$shared/transcript-display-events';
 
 export type { ActiveTranscriptPort, ChatCursor, ChatLoadMessagesOptions } from './active-transcript-port.js';
 export type { ChatDisplayRow, ChatTranscriptRow } from './transcript-row-projection.js';
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
-export class ActiveTranscriptState implements ActiveTranscriptPort {
+export class ActiveTranscriptState implements Omit<ActiveTranscriptPort, 'loadMessages'> {
 	activeChatId = $state<string | null>(null);
 	transcriptViewId = $state('');
 	serverInstanceId = $state('');
@@ -34,19 +35,18 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	display = $state.raw(emptyDisplayWindow());
 	openSnapshot = $state.raw<DisplayOpenResponse | null>(null);
 	responseClassOrdinals = $state.raw<ResponseClassOrdinals>(emptyResponseClassOrdinals());
+	announcementOrdinals = $state.raw<AnnouncementOrdinals>(emptyAnnouncementOrdinals());
 	pageStates = $state<Record<'earlier' | 'later', TranscriptPageState>>({ earlier: idlePageState(), later: idlePageState() });
 	#opening = $state(false);
-	#openError = $state<string | null>(null);
+	#openFailure = $state.raw<{ message: string; errorCode: string | null; retryable: boolean } | null>(null);
 	#profile: Omit<DisplayProfile, 'bashRevision'> = { combine: true, showThinking: true, hiddenToolGroups: [] };
 	#permissionCuts: readonly DisplayCut[] = [];
-	#openEpoch = 0;
 	#pageEpoch = 0;
-	#openAbort: AbortController | null = null;
 	#navigating = false;
 	#navigationEpoch = 0;
 	#representedNotices = $state.raw<ReadonlySet<string>>(new Set());
 	readonly #stopNoticeTracking: () => void;
-	#committedInputs = $state.raw<ReadonlyMap<string, { input: OptimisticUserInput; view: string; ordinal: number; afterOrdinal: number }>>(new Map());
+	#committedInputs = $state.raw<ReadonlyMap<string, { input: OptimisticUserInput; view: string; ordinal: number; afterOrdinal: number; order: number }>>(new Map());
 	#localOverlays = new ConversationTranscriptOverlayStore();
 	#emptyOverlay = this.#localOverlays.forChat('');
 	#mutations = new ConversationFeedMutationState();
@@ -107,7 +107,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	get canLoadEarlier(): boolean { return this.hasEarlierMessages; }
 	get isLoadingMessages(): boolean { return this.#opening || ['requesting', 'preparing', 'lagging', 'busy'].includes(this.display.phase); }
 	get canLoadMembers(): boolean { return this.controller.canLoadMembers; }
-	get loadError(): string | null { return this.#openError ?? this.display.error; }
+	get loadError(): string | null { return this.#openFailure?.message ?? this.display.error; }
+	get loadErrorCode(): string | null { return this.#openFailure?.errorCode ?? null; }
+	get canRetryLoad(): boolean { return this.#openFailure?.retryable ?? true; }
 	get loadStatus(): ChatLoadStatus {
 		if (this.loadError || this.display.phase === 'failed') return 'error';
 		if (this.display.window) return this.displayMessageCount ? 'loaded' : 'empty';
@@ -140,13 +142,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return id ? [id] : [];
 		}));
 		const inputs = new Map(this.optimisticUserInputs.map(input => [input.clientMessageId, input]));
-		for (const [id, committed] of this.#committedInputs) if (committed.view === this.transcriptViewId) inputs.set(id, committed.input);
-		return [...inputs.values()].filter(input => !represented.has(input.clientMessageId));
+		const order = new Map(this.overlay.optimisticSubmissionOrder);
+		for (const [id, committed] of this.#committedInputs) if (committed.view === this.transcriptViewId) {
+			inputs.set(id, committed.input);
+			order.set(id, committed.order);
+		}
+		return [...inputs.values()].filter(input => !represented.has(input.clientMessageId))
+			.sort((left, right) => order.get(left.clientMessageId)! - order.get(right.clientMessageId)!);
 	}
 	acknowledgeInput(view: string, input: OptimisticUserInput, ordinal: number, afterOrdinal: number): void {
 		if (this.display.window?.certificate.transcriptViewId !== view
 			|| !this.display.window.items.some(item => item.kind === 'row' && item.ordinal === ordinal)) {
-			this.#committedInputs = new Map(this.#committedInputs).set(input.clientMessageId, { input: { ...input, delivery: 'delivered' }, view, ordinal, afterOrdinal });
+			const order = this.overlay.optimisticSubmissionOrder.get(input.clientMessageId) ?? this.#committedInputs.get(input.clientMessageId)?.order ?? 0;
+			this.#committedInputs = new Map(this.#committedInputs).set(input.clientMessageId, { input: { ...input, delivery: 'delivered' }, view, ordinal, afterOrdinal, order });
 		}
 		if (!this.#navigating) this.#configureCuts();
 	}
@@ -191,10 +199,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	installOpen(snapshot: DisplayOpenResponse): void {
 		if (snapshot.chat.id !== this.activeChatId) return;
 		const replaced = this.transcriptViewId !== '' && this.transcriptViewId !== snapshot.transcriptViewId;
-		if (!this.#navigating || replaced || this.serverInstanceId !== snapshot.serverInstanceId) this.invalidatePendingHistoryLoad();
+		const processChanged = this.serverInstanceId !== snapshot.serverInstanceId;
+		if (replaced || this.serverInstanceId !== snapshot.serverInstanceId
+			|| this.openSnapshot?.display.policyRevision !== snapshot.display.policyRevision) this.invalidatePendingHistoryLoad();
 		if (replaced) {
 			this.windowRevision += 1;
+		}
+		if (replaced || processChanged) {
 			this.responseClassOrdinals = emptyResponseClassOrdinals();
+			this.announcementOrdinals = emptyAnnouncementOrdinals();
 		}
 		this.#committedInputs = new Map([...this.#committedInputs].filter(([, input]) => input.view === snapshot.transcriptViewId));
 		this.openSnapshot = snapshot;
@@ -202,6 +215,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptViewId = snapshot.transcriptViewId;
 		this.lastOrdinal = replaced ? snapshot.sourceHead : Math.max(this.lastOrdinal, snapshot.sourceHead);
 		this.controller.installOpen(snapshot, { ...this.#profile, bashRevision: snapshot.display.bashRevision });
+		if (replaced || processChanged) this.#representedNotices = new Set();
 		if (!this.#sharedOverlay) for (const submission of snapshot.submissions) {
 			const input = this.optimisticUserInputs.find(input => input.clientMessageId === submission.clientMessageId);
 			if (!input || submission.ordinal === null) continue;
@@ -210,7 +224,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 		if (!this.#navigating) this.#configureCuts();
 		this.#opening = false;
-		this.#openError = null;
+		this.#openFailure = null;
 	}
 
 	displayReady(message: ChatDisplayStateUpdatedMessage): void {
@@ -218,41 +232,24 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.readinessRevision += 1;
 		this.controller.ready(message.bashRevision, message.phase);
 	}
-	beginOpen(): void { this.#opening = true; this.#openError = null; }
-	cancelOpen(): void { this.#openEpoch += 1; this.#openAbort?.abort(); this.#openAbort = null; this.#opening = false; }
+	beginOpen(): void { this.#opening = true; this.#openFailure = null; }
+	cancelOpen(): void { this.#opening = false; }
 	failOpen(error: unknown): void {
 		this.#opening = false;
-		this.#openError = error instanceof Error ? error.message : 'Unable to open transcript';
+		this.#openFailure = { message: error instanceof Error ? error.message : 'Unable to open transcript',
+			errorCode: error instanceof ApiError ? error.errorCode ?? null : null,
+			retryable: !(error instanceof ApiError) || error.retryable || isIntermediaryResponse(error) };
 	}
 
-	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
-		if (this.activeChatId !== chatId) this.activateChat(chatId);
-		const epoch = ++this.#openEpoch;
-		this.#openAbort?.abort();
-		const abort = new AbortController();
-		this.#openAbort = abort;
-		this.#opening = true;
-		this.#openError = null;
-		try {
-			const snapshot = await transcriptDisplayApi.open({ chatId, reason: options.purpose === 'activation' ? 'activate' : 'reconnect',
-				outstandingClientMessageIds: this.optimisticUserInputs.map(input => input.clientMessageId).slice(0, 32) }, abort.signal);
-			if (epoch !== this.#openEpoch || this.activeChatId !== chatId) return [];
-			this.installOpen(snapshot);
-			await this.controller.refresh();
-			return this.chatMessages;
-		} catch (error) {
-			if (epoch !== this.#openEpoch || abort.signal.aborted) return [];
-			this.#openError = error instanceof Error ? error.message : 'Unable to open transcript';
-			throw error;
-		} finally { if (epoch === this.#openEpoch) { this.#opening = false; this.#openAbort = null; } }
-	}
-
-	observeHead(view: string, ordinal: number, responseOrdinals: ResponseClassOrdinals = emptyResponseClassOrdinals()): void {
+	observeHead(view: string, ordinal: number, responseOrdinals: ResponseClassOrdinals = emptyResponseClassOrdinals(), announcements: AnnouncementOrdinals = emptyAnnouncementOrdinals()): void {
 		if (view !== this.transcriptViewId) return;
 		const responseTypes = RESPONSE_CLASSES.filter(key => responseOrdinals[key] > this.responseClassOrdinals[key]);
 		const next = { ...this.responseClassOrdinals };
 		for (const key of RESPONSE_CLASSES) next[key] = Math.max(next[key], responseOrdinals[key]);
 		this.responseClassOrdinals = next;
+		const nextAnnouncements = { ...this.announcementOrdinals };
+		for (const key of ANNOUNCEMENT_CLASSES) nextAnnouncements[key] = Math.max(nextAnnouncements[key], announcements[key]);
+		this.announcementOrdinals = nextAnnouncements;
 		if (ordinal > this.lastOrdinal) this.#mutations.record('live-append', [...responseTypes]);
 		this.lastOrdinal = Math.max(this.lastOrdinal, ordinal);
 		this.controller.observeHead(view, ordinal);
@@ -328,7 +325,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	invalidatePendingWindowNavigation(): void { this.#navigationEpoch += 1; if (this.#navigating) this.controller.cancel(); this.#navigating = false; }
 	invalidatePendingLoads(): void { this.invalidatePendingWindowNavigation(); this.cancelOpen(); this.invalidatePendingHistoryLoad(); }
 	suspendForParking(): boolean { this.invalidatePendingLoads(); this.controller.park(); return this.display.window !== null; }
-	clearMessages(): void { this.invalidatePendingLoads(); this.controller.reset(); this.#committedInputs = new Map(); this.transcriptViewId = ''; this.lastOrdinal = 0; this.openSnapshot = null; this.responseClassOrdinals = emptyResponseClassOrdinals(); this.windowRevision += 1; }
+	clearMessages(): void { this.invalidatePendingLoads(); this.#openFailure = null; this.controller.reset(); this.#representedNotices = new Set(); this.#committedInputs = new Map(); this.transcriptViewId = ''; this.lastOrdinal = 0; this.openSnapshot = null; this.responseClassOrdinals = emptyResponseClassOrdinals(); this.announcementOrdinals = emptyAnnouncementOrdinals(); this.windowRevision += 1; }
 	resetForNewChat(): void { this.clearMessages(); this.isUserScrolledUp = false; }
 	activateChat(chatId: string | null): void { this.resetForNewChat(); this.activeChatId = chatId; }
 	dispose(): void { this.#stopNoticeTracking(); this.invalidatePendingLoads(); this.controller.dispose(); }

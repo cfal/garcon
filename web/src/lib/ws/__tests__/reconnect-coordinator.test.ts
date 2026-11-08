@@ -33,7 +33,7 @@ function fixture(controlIds: string[] = [], visible = ['chat-1']) {
 	const panels = {
 		visibleChatIds: () => visible,
 		cancelRefreshes: vi.fn(), resetServerInstance: vi.fn(),
-		loadChatSnapshot: vi.fn<ReconnectPanelRegistryPort['loadChatSnapshot']>(async () => true),
+		refreshChatSnapshot: vi.fn<ReconnectPanelRegistryPort['refreshChatSnapshot']>(async () => true),
 	} satisfies ReconnectPanelRegistryPort;
 	const sessions = { selectedChatId: 'chat-1' as string | null, quietRefreshChats: vi.fn(async () => {}) };
 	const getExecutionControl = vi.fn(async (_chatId: string) => ({ control: control() }));
@@ -50,15 +50,15 @@ describe('ChatReconnectCoordinator', () => {
 		expect(f.ws.sendRequest).toHaveBeenCalledExactlyOnceWith({ type: 'reconnect-state-query', controlChatIds: ['chat-1'] });
 		expect(f.setControl).toHaveBeenCalledWith('chat-1', control());
 		expect(f.confirmInstance).toHaveBeenCalledWith('instance-1');
-		expect(f.panels.loadChatSnapshot.mock.calls).toEqual([['chat-1'], ['chat-2']]);
+		expect(f.panels.refreshChatSnapshot.mock.calls).toEqual([['chat-1'], ['chat-2']]);
 		await f.coordinator.handleConnectionState(true);
 		expect(f.ws.sendRequest).toHaveBeenCalledOnce();
 		await f.coordinator.handleConnectionState(false);
 		expect(f.disconnect).toHaveBeenCalledOnce();
-		expect(f.panels.cancelRefreshes).toHaveBeenCalledOnce();
+		expect(f.panels.cancelRefreshes).not.toHaveBeenCalled();
 		await f.coordinator.handleConnectionState(true);
 		expect(f.ws.sendRequest).toHaveBeenCalledTimes(2);
-		expect(f.panels.loadChatSnapshot).toHaveBeenCalledTimes(4);
+		expect(f.panels.refreshChatSnapshot).toHaveBeenCalledTimes(4);
 	});
 
 	it('refreshes cached background controls without opening background transcripts', async () => {
@@ -69,7 +69,7 @@ describe('ChatReconnectCoordinator', () => {
 		]));
 		await f.coordinator.handleConnectionState(true);
 		expect(f.ws.sendRequest).toHaveBeenCalledWith({ type: 'reconnect-state-query', controlChatIds: ['chat-1', 'background'] });
-		expect(f.panels.loadChatSnapshot).toHaveBeenCalledExactlyOnceWith('chat-1');
+		expect(f.panels.refreshChatSnapshot).toHaveBeenCalledExactlyOnceWith('chat-1');
 		expect(f.getExecutionControl).not.toHaveBeenCalled();
 	});
 
@@ -80,7 +80,7 @@ describe('ChatReconnectCoordinator', () => {
 		await f.coordinator.handleConnectionState(true);
 		expect(f.getExecutionControl).toHaveBeenCalledExactlyOnceWith('background');
 		expect(f.sessions.quietRefreshChats).toHaveBeenCalledOnce();
-		expect(f.panels.loadChatSnapshot).not.toHaveBeenCalled();
+		expect(f.panels.refreshChatSnapshot).not.toHaveBeenCalled();
 	});
 
 	it.each(['snapshot', 'unavailable'] as const)('honors explicit control outcomes when processing is %s', async processingOutcome => {
@@ -106,7 +106,7 @@ describe('ChatReconnectCoordinator', () => {
 		await f.coordinator.handleConnectionState(true);
 		expect(f.confirmInstance).not.toHaveBeenCalled();
 		expect(f.getExecutionControl.mock.calls).toEqual([['chat-1'], ['background']]);
-		expect(f.panels.loadChatSnapshot).toHaveBeenCalledOnce();
+		expect(f.panels.refreshChatSnapshot).toHaveBeenCalledOnce();
 	});
 
 	it('does not make display recovery await slow fallback controls', async () => {
@@ -115,7 +115,7 @@ describe('ChatReconnectCoordinator', () => {
 		f.ws.sendRequest.mockResolvedValue(response([]));
 		f.getExecutionControl.mockReturnValue(held.promise);
 		const connected = f.coordinator.handleConnectionState(true);
-		await vi.waitFor(() => expect(f.panels.loadChatSnapshot).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(f.panels.refreshChatSnapshot).toHaveBeenCalledOnce());
 		expect(f.setControl).not.toHaveBeenCalled();
 		held.resolve({ control: control() });
 		await connected;
@@ -126,9 +126,9 @@ describe('ChatReconnectCoordinator', () => {
 		const f = fixture([], ['chat-1', 'chat-2']);
 		vi.spyOn(console, 'warn').mockImplementation(() => {});
 		f.sessions.quietRefreshChats.mockRejectedValue(new Error('list unavailable'));
-		f.panels.loadChatSnapshot.mockRejectedValueOnce(new Error('source unavailable'));
+		f.panels.refreshChatSnapshot.mockRejectedValueOnce(new Error('source unavailable'));
 		await expect(f.coordinator.handleConnectionState(true)).resolves.toBeUndefined();
-		expect(f.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-2');
+		expect(f.panels.refreshChatSnapshot).toHaveBeenCalledWith('chat-2');
 		expect(f.setControl).toHaveBeenCalledWith('chat-1', control());
 	});
 
@@ -138,7 +138,7 @@ describe('ChatReconnectCoordinator', () => {
 		f.sessions.quietRefreshChats.mockReturnValue(held.promise);
 		const connected = f.coordinator.handleConnectionState(true);
 		try {
-			await vi.waitFor(() => expect(f.panels.loadChatSnapshot).toHaveBeenCalledTimes(2));
+			await vi.waitFor(() => expect(f.panels.refreshChatSnapshot).toHaveBeenCalledTimes(2));
 			expect(f.confirmInstance).toHaveBeenCalledWith('instance-1');
 		} finally {
 			held.resolve();
@@ -169,7 +169,7 @@ describe('ChatReconnectCoordinator', () => {
 		else f.coordinator.dispose();
 		held.resolve(response()); await connected;
 		expect(f.confirmInstance).not.toHaveBeenCalled();
-		expect(f.panels.loadChatSnapshot).not.toHaveBeenCalled();
+		expect(f.panels.refreshChatSnapshot).not.toHaveBeenCalled();
 		expect(f.getExecutionControl).not.toHaveBeenCalled();
 	});
 
@@ -189,13 +189,13 @@ describe('ChatReconnectCoordinator', () => {
 	it('[TLV5-DISPLAY.07-WEB-UNIT-02] recovers other visible chats independently of a held surface application', async () => {
 		const f = fixture([], ['chat-1', 'chat-2']);
 		const held = Promise.withResolvers<boolean>();
-		f.panels.loadChatSnapshot.mockReturnValueOnce(held.promise);
+		f.panels.refreshChatSnapshot.mockReturnValueOnce(held.promise);
 		const old = f.coordinator.handleConnectionState(true);
-		await vi.waitFor(() => expect(f.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-2'));
+		await vi.waitFor(() => expect(f.panels.refreshChatSnapshot).toHaveBeenCalledWith('chat-2'));
 		await f.coordinator.handleConnectionState(false);
 		held.resolve(false); await old;
-		expect(f.panels.loadChatSnapshot).toHaveBeenCalledTimes(2);
-		expect(f.panels.cancelRefreshes).toHaveBeenCalledOnce();
+		expect(f.panels.refreshChatSnapshot).toHaveBeenCalledTimes(2);
+		expect(f.panels.cancelRefreshes).not.toHaveBeenCalled();
 	});
 
 	it('confirms identified pongs, rejects malformed pongs, and cleans up its consumer', async () => {

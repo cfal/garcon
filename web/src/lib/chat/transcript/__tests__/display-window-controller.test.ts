@@ -313,6 +313,55 @@ it('preserves a cold readiness wake after cancelling its navigation request', as
 	expect(read).toHaveBeenCalledTimes(3);
 });
 
+it.each(['head', 'readiness'] as const)('preserves a warm %s obligation when navigation is cancelled', async wakeup => {
+	vi.useFakeTimers();
+	const { controller, api } = setup();
+	await controller.refresh();
+	const held = Promise.withResolvers<AvailableDisplayWindow>();
+	api.window = vi.fn<TranscriptDisplayApi['window']>().mockReturnValueOnce(held.promise).mockResolvedValue({ ...window(),
+		certificate: { ...certificate, watermark: 50000 }, sourceHead: 50000, structuralPreparedThrough: 50000, bashPreparedThrough: 50000 });
+	const abort = new AbortController(), pending = controller.navigate(20000, abort.signal);
+	controller.observeHead('view', 50000);
+	if (wakeup === 'readiness') controller.ready();
+	abort.abort();
+	held.resolve(window());
+	expect(await pending).toBeNull();
+	await vi.advanceTimersByTimeAsync(250);
+	expect(controller.snapshot.window?.certificate.watermark).toBe(50000);
+	expect(vi.mocked(api.window).mock.calls.at(-1)?.[0].anchor).toEqual({ kind: 'newest' });
+});
+
+it('preserves an extended member range on compatible append without hydrating the append stream', async () => {
+	vi.useFakeTimers();
+	const { controller, api, requested } = setup();
+	await controller.refresh();
+	await controller.expand(group);
+	await controller.extendMembers(group, { kind: 'after', ordinal: 51 });
+	const prior = controller.snapshot.expansions[0].page.ordinals;
+	expect(prior).toHaveLength(100);
+	const appended = { ...group, lastMember: 50000, count: 49999,
+		base: { ...group.base, lastMember: 50000, beforeBreaker: 50001, openAtWatermark: true },
+		fragment: { ...group.fragment, through: 50000 }, totals: { ...group.totals, commands: 49999 } };
+	const readMembers = api.members;
+	const members = vi.fn<TranscriptDisplayApi['members']>(async request => {
+		const page = await readMembers(request);
+		return { ...page, later: { afterOrdinal: page.ordinals.at(-1)!, remaining: appended.lastMember - page.ordinals.at(-1)! } };
+	});
+	api.members = members;
+	api.window = async () => ({ ...window(), certificate: { ...certificate, watermark: 50000 },
+		items: [window().items[0], appended], sourceHead: 50000, structuralPreparedThrough: 50000, bashPreparedThrough: 50000 });
+	requested.length = 0;
+	controller.observeHead('view', 50000);
+	await controller.refresh();
+	expect(controller.snapshot.window?.items[1]).toEqual(appended);
+	expect(controller.snapshot.expansions[0].page.ordinals).toEqual(prior);
+	expect(controller.snapshot.expansions[0].page.later).toEqual({ afterOrdinal: 101, remaining: 49899 });
+	expect(members).toHaveBeenCalled();
+	expect(members.mock.calls.every(([request]) => request.limit <= 50)).toBe(true);
+	expect(requested.length).toBeGreaterThan(0);
+	expect(requested.every(ordinal => ordinal === 1 || prior.includes(ordinal))).toBe(true);
+});
+
 it.each(['preparing', 'busy'] as const)('keeps a slow retry after cancelling cold %s without readiness', async kind => {
 	vi.useFakeTimers();
 	const read = vi.fn<TranscriptDisplayApi['window']>().mockResolvedValueOnce({

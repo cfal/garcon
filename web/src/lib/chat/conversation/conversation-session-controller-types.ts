@@ -49,7 +49,7 @@ type SessionTranscriptState = Pick<
 
 export type SessionTranscriptLoadTarget = Pick<
 	ActiveTranscriptPort,
-	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
+	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat'
 > & {
 	readonly openSnapshot: DisplayOpenResponse | null;
 };

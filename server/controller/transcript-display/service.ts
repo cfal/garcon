@@ -26,7 +26,7 @@ interface DisplayJob {
   tailOrdinal: number | null; ready: boolean; failure: string | null; activeAt: number;
   bash: Map<string, { frontier: number; failure: string | null; pruning: boolean }>;
   auxiliaryFrontier: number; auxiliaryRequested: boolean; auxiliaryFailure: string | null;
-  phase: 'structure' | 'bash' | 'auxiliary'; initialize: Promise<void>;
+  phase: 'structure' | 'bash' | 'auxiliary'; initialize: Promise<void>; fileIdentity: string | null;
 }
 interface Retirement { kind: 'maintenance' | 'eviction'; work: () => Promise<void>; promise: Promise<void>; failed: boolean }
 export interface DisplayStatus {
@@ -55,6 +55,7 @@ export class TranscriptDisplayService {
   readonly #builder = new DisplayWorkerClient('builder');
   readonly #reader = new DisplayWorkerClient('reader');
   readonly #jobs = new Map<string, DisplayJob>();
+  readonly #retries = new Map<string, { viewId: string; promise: Promise<void> }>();
   readonly #retirements = new Map<string, Retirement>();
   readonly #files = new Map<string, { bytes: number; usedAt: number }>();
   readonly #abort = new AbortController();
@@ -170,7 +171,7 @@ export class TranscriptDisplayService {
     if (cursor) this.#validateCertificate(job, { certificate: cursor, profile: request.profile, cuts: request.cuts });
     const W = request.atWatermark ?? cursor?.watermark ?? Math.min(head, frontier);
     if (W > head) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Transcript source changed. Refresh the window.', 409, true);
-    if (!job.ready || frontier < Math.max(W, request.requiredThrough ?? 0) || this.#preparationFailure(job, request.profile)) {
+    if (!job.ready || frontier < Math.max(W, request.requiredThrough ?? 0) || this.#preparationFailure(job, request.profile, W)) {
       return this.#unavailable(job, request, head, frontier);
     }
     const response = await this.#read(job, { kind: 'window', path: job.path, request, watermark: W, sourceHead: head,
@@ -191,7 +192,7 @@ export class TranscriptDisplayService {
     const head = this.#head(job).ordinal, frontier = this.#frontier(job, request.profile.hiddenToolGroups.includes('bash'));
     const watermark = request.atWatermark ?? Math.min(head, frontier);
     if (watermark > head) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Transcript source changed.', 409, true);
-    this.#assertPreparationHealthy(job, request.profile);
+    this.#assertPreparationHealthy(job, request.profile, watermark);
     if (!job.ready || watermark > frontier) return { kind: 'preparing' as const, ordinal, landedOrdinal: null };
     const result = await this.#read(job, { kind: 'resolve', path: job.path, request, watermark, sourceHead: head, ordinal, filteredBash: this.#patterns.length > 0 }, signal);
     this.#current(job); return result;
@@ -208,17 +209,26 @@ export class TranscriptDisplayService {
   }
 
   async retry(chatId: string): Promise<void> {
-    let job = this.#jobs.get(chatId);
+    const job = this.#jobs.get(chatId);
     if (!job) return;
     this.#current(job);
+    const pending = this.#retries.get(chatId);
+    if (pending?.viewId === job.viewId) return pending.promise;
+    const operation = { viewId: job.viewId, promise: this.#retry(job).finally(() => {
+      if (this.#retries.get(chatId) === operation) this.#retries.delete(chatId);
+    }) };
+    this.#retries.set(chatId, operation);
+    return operation.promise;
+  }
+
+  async #retry(initial: DisplayJob): Promise<void> {
+    const chatId = initial.chatId;
     clearTimeout(this.#retryTimers.get(chatId)); this.#retryTimers.delete(chatId);
     const revision = this.#revision;
-    job.failure = null; job.auxiliaryFailure = null;
-    job.ready = false;
-    await job.initialize; this.#current(job);
-    job = this.#reinitialize(job);
-    await job.initialize;
-    this.#current(job);
+    initial.auxiliaryFailure = null;
+    const initialization = initial.initialize;
+    let job = await this.#initializedSuccessor(initial);
+    if (job === initial && job.initialize === initialization) job = await this.#initializedSuccessor(this.#reinitialize(job));
     if (job.ready && job.bash.get(revision)?.failure) {
       await this.#builder.request({ kind: 'filter-failed', path: job.path, revision, retry: true });
       this.#current(job);
@@ -228,6 +238,20 @@ export class TranscriptDisplayService {
     this.#pump();
   }
 
+  async #initializedSuccessor(job: DisplayJob): Promise<DisplayJob> {
+    for (;;) {
+      const initialization = job.initialize;
+      await initialization;
+      this.#head(job);
+      const current = this.#jobs.get(job.chatId);
+      // Recovery may replace a sidecar without replacing the authoritative view.
+      if (!current || current.viewId !== job.viewId) this.#current(job);
+      if (current && current !== job) { job = current; continue; }
+      this.#current(job);
+      if (job.initialize === initialization) return job;
+    }
+  }
+
   async auxiliary(kind: 'user-rows' | 'subagents', request: DisplayAuxiliaryRequest, signal?: AbortSignal) {
     const job = this.#admit(request.chatId, request.transcriptViewId, true), sourceHead = this.#head(job).ordinal;
     if (kind === 'subagents') { job.auxiliaryRequested = true; this.#pump(); }
@@ -235,7 +259,8 @@ export class TranscriptDisplayService {
     const watermark = request.atWatermark ?? Math.min(frontier, sourceHead);
     if (watermark > sourceHead) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Refresh transcript summaries.', 409, true);
     const identity = { serverInstanceId: this.serverInstanceId, chatId: job.chatId, transcriptViewId: job.viewId, watermark, sourceHead };
-    const failure = job.failure ?? (kind === 'subagents' ? job.auxiliaryFailure : null);
+    const failure = (job.ready && frontier >= watermark && job.failure && transientDisplayFailure(job.failure) ? null : job.failure)
+      ?? (kind === 'subagents' ? job.auxiliaryFailure : null);
     if (!job.ready || frontier < watermark || (frontier === 0 && sourceHead > 0) || failure) return { ...identity, watermark: Math.min(frontier, sourceHead),
       kind: failure ? 'failed' : 'preparing', errorCode: failure } satisfies AuxiliaryPreparing;
     const result = await this.#read(job, { kind, path: job.path, request, identity }, signal);
@@ -243,6 +268,7 @@ export class TranscriptDisplayService {
   }
 
   forget(chatId: string): void {
+    this.#retries.delete(chatId);
     this.plans.clear(chatId);
     this.#evict(chatId);
   }
@@ -258,6 +284,12 @@ export class TranscriptDisplayService {
 
   #reinitialize(job: DisplayJob): DisplayJob {
     this.#current(job);
+    clearTimeout(this.#retryTimers.get(job.chatId)); this.#retryTimers.delete(job.chatId);
+    if (job.failure && transientDisplayFailure(job.failure) || !job.ready && this.#retirements.has(job.chatId)) {
+      // Transport recovery preserves validated readers and retries the existing retirement fence.
+      job.initialize = this.#initializeJob(job);
+      return job;
+    }
     this.#retireJob(job.chatId);
     const replacement = this.#admit(job.chatId, job.viewId, false);
     replacement.activeAt = job.activeAt;
@@ -326,6 +358,7 @@ export class TranscriptDisplayService {
 
   async close(): Promise<void> {
     this.#abort.abort(); this.#unsubscribe();
+    this.#retries.clear();
     for (const timer of this.#statusTimers.values()) clearTimeout(timer);
     this.#statusTimers.clear();
     for (const timer of this.#retryTimers.values()) clearTimeout(timer);
@@ -346,7 +379,7 @@ export class TranscriptDisplayService {
       job = { chatId, viewId, path: path.join(this.#root, chatId, displayFilename(viewId)),
         frontier: 0, goal: head.ordinal, tailOrdinal: null, ready: false, failure: null, activeAt: 0,
         bash: new Map(), auxiliaryFrontier: 0, auxiliaryRequested: false, auxiliaryFailure: null,
-        phase: 'structure', initialize: Promise.resolve() };
+        phase: 'structure', initialize: Promise.resolve(), fileIdentity: null };
       this.#jobs.set(chatId, job);
       job.initialize = this.#initializeJob(job);
     }
@@ -369,9 +402,17 @@ export class TranscriptDisplayService {
       let info;
       try { info = await inspect(); } catch (error) {
         if (errorCode(error) !== 'DISPLAY_STORE_INVALID') throw error;
+        if (job.ready) { this.#rebuild(job); return; }
         await this.#discardFile(job); info = await inspect();
       }
       this.#current(job);
+      const file = await lstat(job.path);
+      this.#current(job);
+      const fileIdentity = `${file.dev}:${file.ino}`;
+      // Cached readers belong to the inspected file, not merely its pathname.
+      if (job.ready && (fileIdentity !== job.fileIdentity || info.manifest.prepared_through < job.frontier)) {
+        this.#rebuild(job); return;
+      }
       const head = this.#head(job), recovered = this.options.ledger.recoveredHead(job.chatId), manifest = info.manifest;
       const validRecovery = manifest.written_by_server_instance === this.serverInstanceId
         || (recovered?.viewId === job.viewId && manifest.prepared_through <= recovered.ordinal)
@@ -383,13 +424,17 @@ export class TranscriptDisplayService {
         || info.auxiliaryFrontier > manifest.prepared_through || info.auxiliaryBuilding > manifest.prepared_through
         || info.auxiliaryCursor > info.auxiliaryBuilding || info.auxiliaryGeneration > info.auxiliaryFrontier
         || info.auxiliaryRelevantThrough > manifest.prepared_through) {
+        if (job.ready) { this.#rebuild(job); return; }
         await this.#discardFile(job); info = await inspect(); this.#current(job);
       }
+      const admittedFile = await lstat(job.path);
+      this.#current(job);
+      job.fileIdentity = `${admittedFile.dev}:${admittedFile.ino}`;
       job.frontier = info.manifest.prepared_through; job.tailOrdinal = info.tailOrdinal; job.auxiliaryFrontier = info.auxiliaryFrontier;
       job.bash.clear();
       for (const revision of info.revisions) job.bash.set(revision.revision, { frontier: revision.status === 'pruning' ? 0 : revision.prepared_through,
         failure: revision.failure_code, pruning: revision.status === 'pruning' });
-      job.ready = true; this.#notify(job); this.#pump();
+      job.failure = null; job.ready = true; this.#notify(job); this.#pump();
       await this.#recordFileSize(job);
     } catch (error) {
       if (this.#jobs.get(job.chatId) !== job || this.#abort.signal.aborted) return;
@@ -516,7 +561,8 @@ export class TranscriptDisplayService {
     return hidesBash || this.#patterns.length === 0 ? job.frontier : Math.min(job.frontier, job.bash.get(this.#revision)?.frontier ?? 0);
   }
   #fail(job: DisplayJob, error: unknown): void {
-    job.failure = errorCode(error); job.ready = false;
+    job.failure = errorCode(error);
+    if (!transientDisplayFailure(job.failure)) job.ready = false;
     this.#notify(job);
     if (!transientDisplayFailure(job.failure) || this.#retryTimers.has(job.chatId)) return;
     this.#retryTimers.set(job.chatId, setTimeout(() => {
@@ -598,13 +644,14 @@ export class TranscriptDisplayService {
     const job = this.#admit(request.certificate.chatId, request.certificate.transcriptViewId, true);
     this.#validateCertificate(job, request); return job;
   }
-  #assertPreparationHealthy(job: DisplayJob, profile: DisplayWindowRequest['profile']): void {
-    const failure = this.#preparationFailure(job, profile);
+  #assertPreparationHealthy(job: DisplayJob, profile: DisplayWindowRequest['profile'], through: number): void {
+    const failure = this.#preparationFailure(job, profile, through);
     if (failure) throw new DomainError(isErrorCode(failure) ? failure : 'DISPLAY_INDEX_FAILED',
       `Transcript display preparation failed (${failure}). Retry the display.`, 503, transientDisplayFailure(failure));
   }
-  #preparationFailure(job: DisplayJob, profile: DisplayWindowRequest['profile']): string | null {
-    if (job.failure !== null) return job.failure;
+  #preparationFailure(job: DisplayJob, profile: DisplayWindowRequest['profile'], through = Infinity): string | null {
+    if (job.failure !== null && (!transientDisplayFailure(job.failure) || !job.ready
+      || through > this.#frontier(job, profile.hiddenToolGroups.includes('bash')))) return job.failure;
     if (profile.hiddenToolGroups.includes('bash')) return null;
     return job.bash.get(this.#revision)?.failure ?? null;
   }
@@ -616,7 +663,7 @@ export class TranscriptDisplayService {
       || cert.bashRevision !== request.profile.bashRevision || cert.watermark > this.#head(job).ordinal) {
       throw new DomainError('DISPLAY_STALE_CERTIFICATE', 'Refresh this transcript window.', 409, true);
     }
-    this.#assertPreparationHealthy(job, request.profile);
+    this.#assertPreparationHealthy(job, request.profile, cert.watermark);
     if (!job.ready || cert.watermark > this.#frontier(job, request.profile.hiddenToolGroups.includes('bash'))) throw new DomainError('DISPLAY_PREPARING', 'Transcript display is preparing.', 503, true);
   }
   #validateRevision(policy: number, bash: string): void {

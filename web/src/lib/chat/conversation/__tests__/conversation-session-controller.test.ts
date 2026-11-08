@@ -63,10 +63,11 @@ import {
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types.js';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
+import type { PanelTranscriptSnapshotLoader } from '../conversation-session-controller-types.js';
 import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
-import { displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+import { displayOpen, displayRow, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
@@ -1652,20 +1653,13 @@ describe('ConversationSessionController', () => {
 		deps.sessions.selectedChatId = 'chat-2';
 		const panelTranscript = new ActiveTranscriptState();
 		panelTranscript.activateChat('chat-1');
-		const panelLoad = vi.spyOn(panelTranscript, 'loadMessages').mockResolvedValue([]);
-		const loadPanelSnapshot = vi.fn(async (options: ChatLoadMessagesOptions) => {
-			await panelTranscript.loadMessages('chat-1', options);
-			return true;
-		});
+		const loadPanelSnapshot = vi.fn<PanelTranscriptSnapshotLoader>().mockResolvedValue(true);
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue([]);
 		const controller = new ConversationSessionController(deps);
 
 		await controller.loadPanelChat('chat-1', panelTranscript, loadPanelSnapshot);
 
 		expect(loadPanelSnapshot).toHaveBeenCalledWith({
-			purpose: 'activation',
-		});
-		expect(panelLoad).toHaveBeenCalledWith('chat-1', {
 			purpose: 'activation',
 		});
 		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
@@ -2430,6 +2424,34 @@ describe('ConversationSessionController', () => {
 		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('456', '123');
 	});
 
+	it('recovers a stale panel fork through shared admission, including its sibling surface', async () => {
+		const { deps } = createDeps(createRunningChat({ id: '123' }));
+		deps.sessions.selectedChatId = 'other-chat';
+		const api = mockDisplayApi([displayRow(4)], displayOpen('123', 'old-view', 4));
+		const onOpen = vi.fn();
+		const registry = new ConversationPanelRegistry({ bodies: new DisplayBodyStore(), overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: vi.fn() },
+			getSelectedChatId: () => deps.sessions.selectedChatId, getComposerAnchorSurfaceId: () => null, onOpen });
+		try {
+			registry.reconcile([
+				{ surfaceId: 'chat-view:window-left', windowId: 'window-left', chatId: '123', presentation: 'window-left', snapshotAdmission: 'admitted' },
+				{ surfaceId: 'chat-view:window-right', windowId: 'window-right', chatId: '123', presentation: 'window-right', snapshotAdmission: 'admitted' },
+			]);
+			await registry.loadChatSnapshot('123');
+			const transcript = registry.panel('chat-view:window-left')!.transcript;
+			vi.spyOn(transcript, 'forkSelection').mockReturnValue({ ordinal: 4, transcriptViewId: 'old-view', clientMessageId: null });
+			api.replace([displayRow(4)], displayOpen('123', 'replacement-view', 4));
+			mockForkChat.mockRejectedValue(new ApiError(409, 'Replaced view', 'STALE_TRANSCRIPT_VIEW'));
+			const loader = vi.fn((options: ChatLoadMessagesOptions) => registry.loadChatSnapshot('123', options));
+			await new ConversationSessionController(deps).forkChat('123', 4, transcript, loader);
+			expect(loader).toHaveBeenCalledExactlyOnceWith({ purpose: 'activation' });
+			expect(onOpen).toHaveBeenCalledTimes(2);
+			expect(registry.knownHead('123')?.transcriptViewId).toBe('replacement-view');
+			expect(registry.panel('chat-view:window-right')!.transcript.transcriptViewId).toBe('replacement-view');
+			expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		} finally { registry.destroy(); }
+	});
+
 	it('submits in-chat fork actions from the clicked panel transcript', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
@@ -2452,7 +2474,7 @@ describe('ConversationSessionController', () => {
 		});
 		const controller = new ConversationSessionController(deps);
 
-		await controller.forkChat('123', 4, panelTranscript);
+		await controller.forkChat('123', 4, panelTranscript, vi.fn<PanelTranscriptSnapshotLoader>().mockResolvedValue(true));
 		expect(selection).toHaveBeenCalledWith(4);
 
 		expect(mockForkChat).toHaveBeenCalledWith({

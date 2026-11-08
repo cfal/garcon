@@ -3,7 +3,6 @@ import {
 	buildRouterStores,
 	type ConversationRouterStoreDeps,
 } from '../conversation-router-adapter.svelte.ts';
-import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { AgentState } from '../agent-state.svelte';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
@@ -11,6 +10,7 @@ import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.j
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
+import { emptyAnnouncementOrdinals } from '$shared/transcript-display-events';
 import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '../conversation-panel-registry.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
@@ -18,8 +18,9 @@ import { displayOpen, mockDisplayApi } from '$lib/chat/transcript/__tests__/disp
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 
 let api: ReturnType<typeof mockDisplayApi>;
-const owned: ConversationRouterStoreDeps[] = [];
-afterEach(() => { for (const deps of owned.splice(0)) deps.panels.destroy(); vi.restoreAllMocks(); });
+type TestDeps = ConversationRouterStoreDeps & { chatState: CurrentConversationPanelTranscript };
+const owned: TestDeps[] = [];
+afterEach(() => { for (const deps of owned.splice(0)) { deps.chatState.destroy(); deps.panels.destroy(); } vi.restoreAllMocks(); });
 
 vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
@@ -53,7 +54,7 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	};
 }
 
-function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStoreDeps {
+function depsFor(selectedChat: ChatSessionRecord | null): TestDeps {
 	const lifecycle = new ConversationLifecycleState();
 	const lifecycleByChatId = new Map<string, ConversationLifecycleState>();
 	if (selectedChat) {
@@ -68,9 +69,6 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		lifecycleByChatId.set(chatId, created);
 		return created;
 	};
-	const chatState = Object.assign(new ActiveTranscriptState(), {
-		discardChat: vi.fn(),
-	});
 	const panels = new ConversationPanelRegistry({
 		bodies: new DisplayBodyStore(),
 		overlays: new ConversationTranscriptOverlayStore(),
@@ -81,7 +79,9 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		getComposerAnchorSurfaceId: () => null,
 		getSelectedChatId: () => selectedChat?.id ?? null,
 	});
-	const deps: ConversationRouterStoreDeps = {
+	const chatState = Object.assign(new CurrentConversationPanelTranscript({ panels,
+		getSelectedChatId: () => selectedChat?.id ?? null }), { discardChat: vi.fn() });
+	const deps: TestDeps = {
 		sessions: {
 			byId: selectedChat ? { [selectedChat.id]: selectedChat } : {},
 			selectedChat,
@@ -166,7 +166,7 @@ describe('buildRouterStores', () => {
 
 	it('records compact background heads without hydrating unrendered history', () => {
 		const deps = depsFor(chatRecord()), stores = buildRouterStores(deps);
-		stores.chatState.observeHead('chat-2', 'generation-2', 2, { assistant: 2, 'command-output': 0, 'command-result': 0, thinking: 0, error: 0, permission: 0, tool: 0 });
+		stores.chatState.observeHead('chat-2', 'generation-2', 2, { assistant: 2, 'command-output': 0, 'command-result': 0, thinking: 0, error: 0, permission: 0, tool: 0 }, emptyAnnouncementOrdinals());
 		expect(stores.chatState.getChatCursor('chat-2')).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 2 });
 		expect(api.window).not.toHaveBeenCalled();
 		expect(deps.panels.bodyStore.count).toBe(0);

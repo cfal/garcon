@@ -157,7 +157,7 @@ export function displayProfileKey(profile: DisplayProfile): string {
   return JSON.stringify([profile.combine, profile.showThinking, [...profile.hiddenToolGroups].sort(), profile.bashRevision]);
 }
 export function displayCutsKey(cuts: readonly DisplayCut[]): string {
-  return JSON.stringify([...cuts].sort((a, b) => a.afterOrdinal - b.afterOrdinal || a.id.localeCompare(b.id))
+  return JSON.stringify([...cuts].sort((a, b) => a.afterOrdinal - b.afterOrdinal || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map(cut => [cut.id, cut.afterOrdinal, cut.anchorRule]));
 }
 

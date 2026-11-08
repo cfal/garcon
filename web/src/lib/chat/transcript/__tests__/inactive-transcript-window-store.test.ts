@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { InactiveTranscriptWindowStore } from '../inactive-transcript-window-store.js';
-import { displayOpen, displayRow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
+import { installDisplayOpen, displayOpen, displayRow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
 
 const transcripts: ActiveTranscriptState[] = [];
 afterEach(() => { for (const transcript of transcripts.splice(0)) transcript.dispose(); vi.restoreAllMocks(); });
@@ -11,7 +11,7 @@ async function transcript(chatId: string, content = 'message'): Promise<ActiveTr
 	const api = mockDisplayApi(rows, displayOpen(chatId, 'view-1', 2));
 	const window = new ActiveTranscriptState();
 	transcripts.push(window);
-	await window.loadMessages(chatId);
+	await installDisplayOpen(window, chatId);
 	api.open.mockRestore(); api.window.mockRestore(); api.bodies.mockRestore(); api.resolve.mockRestore(); api.retry.mockRestore();
 	return window;
 }

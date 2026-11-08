@@ -35,7 +35,7 @@ import {
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { applyTranscriptHeadActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
-import type { ResponseClassOrdinals } from '$shared/transcript-display-events';
+import type { AnnouncementOrdinals, ResponseClassOrdinals } from '$shared/transcript-display-events';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 import { PlanPresentationController } from '$lib/chat/conversation/plan-presentation-controller.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
@@ -96,7 +96,7 @@ export type EventRouterChatStateStore = Pick<
 	markRenderedChatStale: (chatId: string) => void;
 	removeChatTranscript: (chatId: string) => void;
 	markChatTranscriptStale: (chatId: string) => void;
-	observeHead: (chatId: string, view: string, ordinal: number, responseTypes: ResponseClassOrdinals) => void;
+	observeHead: (chatId: string, view: string, ordinal: number, responseTypes: ResponseClassOrdinals, announcements: AnnouncementOrdinals) => void;
 	acknowledgeInput: (chatId: string, view: string, id: string, ordinal: number) => void;
 	displayReady: (message: ChatDisplayStateUpdatedMessage) => void;
 	observeOpenSnapshots: (listener: (snapshot: DisplayOpenResponse) => void) => () => void;
@@ -246,9 +246,8 @@ function buildDispatch(
 			if (!(msg instanceof ChatTranscriptHeadUpdatedMessage)) return;
 			const prior = stores.chatState.getChatCursor(msg.chatId);
 			if (prior && prior.transcriptViewId !== msg.transcriptViewId) handleViewTransition(msg.chatId, msg.transcriptViewId);
-			stores.chatState.observeHead(msg.chatId, msg.transcriptViewId, msg.sourceHead, msg.responseClassOrdinals);
-			if (msg.planRevision > 0) plans.refresh(msg, msg.planRevision,
-				prior?.transcriptViewId === msg.transcriptViewId ? prior.lastOrdinal : null);
+			stores.chatState.observeHead(msg.chatId, msg.transcriptViewId, msg.sourceHead, msg.responseClassOrdinals, msg.announcementOrdinals);
+			if (msg.planRevision > 0) plans.refresh(msg, msg.planRevision, msg.livePlanEnterOrdinal);
 		},
 		'chat-input-committed': (msg) => {
 			if (msg instanceof ChatInputCommittedMessage) stores.chatState.acknowledgeInput(msg.chatId, msg.transcriptViewId, msg.clientMessageId, msg.ordinal);

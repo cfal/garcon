@@ -8,7 +8,7 @@ import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { NATIVE_SCROLL_SETTLE_DELAY_MS } from '../conversation-native-scroll-settlement.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
-import { displayCertificate, displayDetail, displayOpen, displayRow, displayWindow, mockDisplayApi } from './display-fixtures.js';
+import { installDisplayOpen, displayCertificate, displayDetail, displayOpen, displayRow, displayWindow, mockDisplayApi } from './display-fixtures.js';
 import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { displayProfileKey } from '$shared/transcript-display-contract';
 import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
@@ -288,7 +288,7 @@ describe('ConversationScrollController', () => {
 		}));
 		try {
 			chat.activateChat('chat-1');
-			await chat.loadMessages('chat-1');
+			await installDisplayOpen(chat, 'chat-1');
 			await chat.controller.expand(target.group);
 			if (scenario === 'preparing' || scenario === 'stale-lagging') chat.configureDisplay({ combine: true, showThinking: false, hiddenToolGroups: [] });
 			const kind = scenario === 'stale-lagging' ? 'lagging' : scenario;

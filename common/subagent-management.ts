@@ -38,6 +38,11 @@ export interface SubagentManagementModel {
 	subagents: SubagentManagementEntry[];
 }
 
+export function projectSubagentsForRoot(entries: readonly SubagentManagementEntry[], rootStatus: 'idle' | 'running'): SubagentManagementEntry[] {
+	return entries.map(entry => rootStatus === 'idle' && (entry.status === 'running' || entry.status === 'waiting' || entry.status === 'observing')
+		? { ...entry, status: 'closed', statusLabel: 'Stopped' } : entry);
+}
+
 export interface BuildSubagentManagementOptions {
 	rootTitle?: string;
 	rootModel?: string | null;
@@ -186,19 +191,11 @@ export function buildSubagentManagementModel(
 		}
 	}
 
-	if (rootStatus === 'idle') {
-		// An idle Garcon session has shut down its dedicated Codex client and workers.
-		for (const entry of orderedSubagents) {
-			if (entry.status === 'running' || entry.status === 'waiting' || entry.status === 'observing') {
-				entry.status = 'closed';
-				entry.statusLabel = 'Stopped';
-			}
-		}
-	}
+	const subagents = projectSubagentsForRoot(orderedSubagents, rootStatus);
 
 	return {
-		entries: [rootEntry, ...orderedSubagents],
-		subagents: orderedSubagents,
+		entries: [rootEntry, ...subagents],
+		subagents,
 	};
 }
 

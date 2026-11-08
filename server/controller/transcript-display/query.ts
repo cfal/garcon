@@ -224,12 +224,14 @@ export class DisplayQuery {
     const feature = this.feature(ordinal);
     if (!feature?.message_type) return { kind: 'non-rendered', ordinal, landedOrdinal: null };
     if (this.eligible(ordinal)) return { kind: feature.role === 'member' && this.profile.combine ? 'group-member' : 'visible-row', ordinal, landedOrdinal: ordinal };
+    let filtered = feature.role !== 'hidden';
     if (feature.message_type === 'tool-result') {
       const pair = this.store.get<{ use_ordinal: number; wrapper_ordinal: number | null }>('SELECT use_ordinal, wrapper_ordinal FROM tool_pair WHERE result_ordinal = ? AND evidence_ordinal <= ?', ordinal, this.watermark);
       if (pair && this.eligible(pair.use_ordinal)) return { kind: 'attached-detail', ordinal, landedOrdinal: pair.use_ordinal };
       if (pair?.wrapper_ordinal && this.eligible(pair.wrapper_ordinal)) return { kind: 'attached-detail', ordinal, landedOrdinal: pair.wrapper_ordinal };
+      if (pair) filtered ||= this.feature(pair.use_ordinal)?.class_id != null;
     }
-    return { kind: feature.role === 'hidden' ? 'non-rendered' : 'filtered', ordinal,
+    return { kind: filtered ? 'filtered' : 'non-rendered', ordinal,
       landedOrdinal: this.seek(this.classes, 0, ordinal, true) ?? this.seek(this.classes, ordinal, this.watermark) };
   }
 

@@ -35,6 +35,7 @@
 		earlierPageState: TranscriptPageState;
 		laterPageState: TranscriptPageState;
 		loadError?: string | null;
+		loadErrorCode?: string | null;
 		onRetry?: () => void;
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
@@ -59,6 +60,7 @@
 		earlierPageState,
 		laterPageState,
 		loadError = null,
+		loadErrorCode = null,
 		onRetry,
 		onLoadEarlier,
 		onLoadLater,
@@ -100,7 +102,7 @@
 	>
 		<div class="flex items-center justify-center space-x-2">
 			<TriangleAlert class="h-3 w-3 text-destructive" />
-			<span>{m.chat_feed_failed_to_refresh()}</span>
+			<span>{loadErrorCode === 'TRANSCRIPT_UNAVAILABLE' ? m.chat_history_unavailable() : m.chat_feed_failed_to_refresh()}</span>
 			{#if onRetry}
 				<Button variant="ghost" size="sm" class="h-6 px-2 text-xs" onclick={onRetry}>
 					<RefreshCw class="mr-1 h-3 w-3" />

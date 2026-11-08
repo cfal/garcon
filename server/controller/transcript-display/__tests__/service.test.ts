@@ -567,6 +567,193 @@ test('ordinary refresh serves a prepared prefix while a finite required goal wai
   } finally { release.resolve(); worker.mockRestore(); }
 });
 
+test('builder transport failure preserves certified prefix reads during recovery', async () => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  const first = await ready(input);
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let recovering = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame' && !recovering) throw Object.assign(new Error('Synthetic transport failure'), { code: 'DISPLAY_UNAVAILABLE' });
+    if (task.kind === 'inspect' && recovering) { entered.resolve(); await release.promise; }
+    return original.call(this, task, ...args);
+  });
+  let retry: Promise<void> | undefined;
+  try {
+    ledger.openProducer('chat', 'synthetic').sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Later answer') }] });
+    for (let i = 0; i < 100 && (await display.open('chat')).display.phase !== 'failed'; i++) await Bun.sleep(5);
+    expect((await display.open('chat')).display.errorCode).toBe('DISPLAY_UNAVAILABLE');
+    const assertPrepared = async () => {
+      expect(await display.window({ ...input, atWatermark: first.certificate.watermark })).toMatchObject({ kind: 'available', certificate: first.certificate });
+      expect(await display.resolve({ ...input, atWatermark: first.certificate.watermark }, 1)).toMatchObject({ kind: 'visible-row' });
+      const group = first.items.find(item => item.kind === 'tool-group');
+      if (!group || group.kind !== 'tool-group') throw new Error('Missing group');
+      expect(await display.members({ certificate: first.certificate, profile: input.profile, cuts: [], base: group.base,
+        fragment: group.fragment, anchor: { kind: 'first' }, limit: 50 })).toMatchObject({ ordinals: [2, 4] });
+      expect(JSON.parse(await display.bodies({ certificate: first.certificate, profile: input.profile, cuts: [],
+        seedOrdinals: [1], residentOrdinals: [], limitBodies: 10, estimatedByteBudget: 10000 })).bodies).toHaveLength(1);
+    };
+    await assertPrepared();
+    expect(await display.window({ ...input, requiredThrough: first.sourceHead + 1 })).toMatchObject({ kind: 'failed', errorCode: 'DISPLAY_UNAVAILABLE' });
+    recovering = true;
+    retry = display.retry('chat');
+    await entered.promise;
+    await assertPrepared();
+    release.resolve(); await retry;
+    expect((await ready(input)).sourceHead).toBe(first.sourceHead + 1);
+  } finally { release.resolve(); await retry?.catch(() => undefined); worker.mockRestore(); }
+});
+
+test('retries reuse one failed retirement instead of retaining a chain of replacement jobs', async () => {
+  const view = seed('chat', 1), input = request('chat', view.viewId);
+  await ready(input);
+  const original = DisplayWorkerClient.prototype.request;
+  let blocked = true, closes = 0;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(function(task, ...args) {
+    if (task.kind === 'close') {
+      closes++;
+      if (blocked) return Promise.reject(Object.assign(new Error('Synthetic retirement failure'), { code: 'DISPLAY_UNAVAILABLE' }));
+    }
+    return original.call(this, task, ...args);
+  });
+  try {
+    display.forget('chat');
+    await display.open('chat');
+    for (let i = 0; i < 100 && (await display.open('chat')).display.phase !== 'failed'; i++) await Bun.sleep(5);
+    for (let i = 0; i < 12; i++) await display.retry('chat');
+    expect(display.metrics.retirements).toBe(1);
+    const beforeRecovery = closes;
+    blocked = false;
+    await display.retry('chat');
+    await ready(input);
+    expect(closes - beforeRecovery).toBe(2);
+    expect(display.metrics.retirements).toBe(0);
+  } finally { blocked = false; worker.mockRestore(); }
+});
+
+test.each(['missing', 'replaced'])('warm transport recovery fences an old reader of a %s sidecar', async condition => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  const first = await ready(input), filename = await sidecar();
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let held = false, failed = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame' && !failed) {
+      failed = true;
+      await original.call(this, { kind: 'close', path: filename });
+      if (condition === 'replaced') await fs.copyFile(filename, filename + '.replacement');
+      for (const suffix of ['', '-wal', '-shm']) await rm(filename + suffix, { force: true });
+      if (condition === 'replaced') await fs.rename(filename + '.replacement', filename);
+      throw Object.assign(new Error('Synthetic lost builder'), { code: 'DISPLAY_UNAVAILABLE' });
+    }
+    const result = await original.call(this, task, ...args);
+    if (task.kind === 'window' && !held) { held = true; entered.resolve(); await release.promise; }
+    return result;
+  });
+  const pending = display.window(input);
+  try {
+    await entered.promise;
+    ledger.openProducer('chat', 'synthetic').sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Later answer') }] });
+    for (let i = 0; i < 100 && (await display.open('chat')).display.phase !== 'failed'; i++) await Bun.sleep(5);
+    expect((await display.open('chat')).display.errorCode).toBe('DISPLAY_UNAVAILABLE');
+    await display.retry('chat');
+    release.resolve();
+    await expect(pending).rejects.toMatchObject({ code: 'DISPLAY_SUPERSEDED' });
+    const fresh = await ready(input);
+    expect(fresh.certificate.watermark).toBe(first.sourceHead + 1);
+    expect(fresh.items.slice(0, -1)).toEqual(first.items);
+  } finally { release.resolve(); await pending.catch(() => undefined); worker.mockRestore(); }
+});
+
+test('manual retries coalesce and disarm a retry timer armed by the initialization they awaited', async () => {
+  const view = seed('chat', 1), input = request('chat', view.viewId);
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), fail = Promise.withResolvers<void>();
+  const recovering = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let inspections = 0;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'inspect') {
+      inspections++;
+      if (inspections === 1) {
+        entered.resolve(); await fail.promise;
+        throw Object.assign(new Error('Synthetic lost builder'), { code: 'DISPLAY_UNAVAILABLE' });
+      }
+      recovering.resolve(); await release.promise;
+    }
+    return original.call(this, task, ...args);
+  });
+  let retries: Promise<void[]> | undefined;
+  try {
+    await display.open('chat');
+    await entered.promise;
+    retries = Promise.all([display.retry('chat'), display.retry('chat')]);
+    fail.resolve(); await recovering.promise;
+    await Bun.sleep(1100);
+    expect(inspections).toBe(2);
+    release.resolve(); await retries;
+    expect((await ready(input)).items[1]).toMatchObject({ count: 1 });
+  } finally { fail.resolve(); release.resolve(); await retries?.catch(() => undefined); worker.mockRestore(); }
+});
+
+test.each((['healthy', 'transport'] as const).flatMap(kind =>
+  (['simultaneous', 'staggered'] as const).map(timing => [kind, timing] as const)))
+('coalesces the whole %s retry operation for %s callers', async (kind, timing) => {
+  const view = seed('chat', 1), input = request('chat', view.viewId);
+  await ready(input);
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let inspections = 0, closes = 0, failed = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame' && kind === 'transport' && !failed) {
+      failed = true;
+      throw Object.assign(new Error('Synthetic lost builder'), { code: 'DISPLAY_UNAVAILABLE' });
+    }
+    if (task.kind === 'inspect') { inspections++; entered.resolve(); await release.promise; }
+    if (task.kind === 'close') closes++;
+    return original.call(this, task, ...args);
+  });
+  let first: Promise<unknown> | undefined, second: Promise<unknown> | undefined;
+  try {
+    if (kind === 'transport') {
+      ledger.openProducer('chat', 'synthetic').sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Later answer') }] });
+      for (let i = 0; i < 100 && (await display.open('chat')).display.phase !== 'failed'; i++) await Bun.sleep(5);
+      expect((await display.open('chat')).display.errorCode).toBe('DISPLAY_UNAVAILABLE');
+    }
+    first = display.retry('chat').catch(error => error);
+    if (timing === 'simultaneous') second = display.retry('chat').catch(error => error);
+    await entered.promise;
+    second ??= display.retry('chat').catch(error => error);
+    release.resolve();
+    expect(await first).toBeUndefined();
+    expect(await second).toBeUndefined();
+    expect(inspections).toBe(1);
+    expect(closes).toBe(kind === 'healthy' ? 2 : 0);
+    await ready(input);
+  } finally { release.resolve(); await first; await second; worker.mockRestore(); }
+});
+
+test('manual retry never follows a successor in a replacement transcript view', async () => {
+  const view = seed('chat', 1);
+  await ready(request('chat', view.viewId));
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let held = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'inspect' && !held) { held = true; entered.resolve(); await release.promise; }
+    return original.call(this, task, ...args);
+  });
+  const retry = display.retry('chat').catch(error => error);
+  try {
+    await entered.promise;
+    const next = await ledger.stageView('chat', [], 1, transcriptViewId('replacement'));
+    ledger.replaceCurrentView('chat', view.viewId, next.viewId);
+    await display.open('chat');
+    release.resolve();
+    expect(await retry).toMatchObject({ name: 'StaleTranscriptViewError', requestedViewId: view.viewId, currentViewId: next.viewId });
+    expect((await ready(request('chat', next.viewId))).certificate.transcriptViewId).toBe(next.viewId);
+  } finally { release.resolve(); await retry; worker.mockRestore(); }
+});
+
 test('auxiliary preparation gets a turn during sustained appends without Bash patterns', async () => {
   const view = seed('chat', 600);
   const original = DisplayWorkerClient.prototype.request;
@@ -627,11 +814,23 @@ test.each([3, 30])('[TLV5-DISPLAY.09-CORE-UNIT-01] rollback and %i regrown rows 
 
 test('deletion fences pending preparation and does not recreate sidecars', async () => {
   const view = seed('chat', 600);
-  await display.open('chat');
-  display.forget('chat'); registry.delete('chat'); ledger.deleteChat('chat');
-  await display.close();
-  expect(await readdir(path.join(root, 'transcript-display'))).toEqual([]);
-  await expect(display.window(request('chat', view.viewId))).rejects.toThrow();
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), settled = Promise.withResolvers<void>();
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind !== 'frame') return original.call(this, task, ...args);
+    entered.resolve(); await release.promise;
+    try { return await original.call(this, task, ...args); } finally { settled.resolve(); }
+  });
+  try {
+    await display.open('chat');
+    await entered.promise;
+    display.forget('chat'); registry.delete('chat'); ledger.deleteChat('chat');
+    release.resolve(); await settled.promise;
+    for (let i = 0; i < 200 && display.metrics.retirements > 0; i++) await Bun.sleep(5);
+    expect(display.metrics.retirements).toBe(0);
+    expect(await readdir(path.join(root, 'transcript-display'))).toEqual([]);
+    await expect(display.window(request('chat', view.viewId))).rejects.toThrow();
+  } finally { release.resolve(); worker.mockRestore(); }
 });
 
 test('forged profile qualifiers are rejected by service admission', async () => {

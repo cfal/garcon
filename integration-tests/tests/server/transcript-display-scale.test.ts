@@ -2,15 +2,15 @@ import { expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import type { AvailableDisplayWindow } from '../../../common/transcript-display-contract.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { appendDisplayRun, createDisplayChat } from '../../support/transcript-display-fixture.js';
-import { displayBodies, displayRequest } from '../../support/transcript-display.js';
+import { appendDisplayRun, createDisplayChat, DISPLAY_PROMPT } from '../../support/transcript-display-fixture.js';
+import { displayBodies, displayRequest, measuredDisplaySnapshot } from '../../support/transcript-display.js';
 
 test.skipIf(process.env.GARCON_TEST_DISPLAY_SCALE !== '1')('200,000 collapsed pairs preserve bounded route and member work', async () => {
   await withIntegrationFixture('display-scale', async fixture => {
     const chatId = await createDisplayChat(fixture);
-    let targetOrdinal = 0;
+    let targetOrdinal = 0, promptOrdinal = 0;
     await fixture.restartGarcon({ beforeStart: async () => {
-      targetOrdinal = (await appendDisplayRun(fixture.dirs.workspace, chatId, 200_000)).targetOrdinal;
+      ({ targetOrdinal, promptOrdinal } = await appendDisplayRun(fixture.dirs.workspace, chatId, 200_000));
     } });
     const started = performance.now();
     const rss = async () => {
@@ -39,7 +39,11 @@ test.skipIf(process.env.GARCON_TEST_DISPLAY_SCALE !== '1')('200,000 collapsed pa
     if (!group) throw new Error('Missing collapsed group.');
     expect(group.count).toBe(200_000);
     expect(window.items.length).toBeLessThan(6);
-    const bodies = await displayBodies(fixture.client, request, window);
+    const measured = await measuredDisplaySnapshot(fixture.client, request, window), { bodies } = measured;
+    expect(measured.window).toEqual(window);
+    expect(bodies.bodies.find(row => row.ordinal === promptOrdinal)?.message).toMatchObject({ type: 'user-message', content: DISPLAY_PROMPT });
+    expect(bodies.deferredOrdinals).not.toContain(promptOrdinal);
+    expect(bodies.nonRenderedOrdinals).not.toContain(promptOrdinal);
     expect(bodies.bodies.every(row => row.message.type !== 'bash-tool-use' && row.message.type !== 'tool-result')).toBe(true);
     const samples: number[] = [];
     for (let index = 0; index < 20; index++) {
@@ -53,7 +57,7 @@ test.skipIf(process.env.GARCON_TEST_DISPLAY_SCALE !== '1')('200,000 collapsed pa
     samples.sort((left, right) => left - right);
     const selected = await displayBodies(fixture.client, request, window, [targetOrdinal]);
     expect(selected.bodies.map(row => row.ordinal)).toEqual([targetOrdinal, targetOrdinal + 1]);
-    const responseBytes = Buffer.byteLength(JSON.stringify({ window, bodies }));
+    const responseBytes = measured.bytes;
     expect(responseBytes).toBeLessThan(5000);
     expect(samples[18]).toBeLessThan(50);
     console.log(JSON.stringify({ displayPairs: 200_000, preparationMs, memberP95Ms: samples[18], responseBytes,

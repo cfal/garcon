@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'bun:test';
-import { AssistantMessage, UserMessage, ThinkingMessage, ErrorMessage, TranscriptNoticeMessage, BashToolUseMessage, ToolResultMessage } from '../chat-types.js';
+import { AssistantMessage, UserMessage, ThinkingMessage, ErrorMessage, TranscriptNoticeMessage, BashToolUseMessage, ToolResultMessage, WaitToolUseMessage, CommandResultMessage, EnterPlanModeToolUseMessage } from '../chat-types.js';
 import { ChatInputCommittedMessage, ChatTranscriptHeadUpdatedMessage, ChatDisplayStateUpdatedMessage, transcriptActivity } from '../transcript-display-events.js';
 import { parseServerWsMessage } from '../ws-events.js';
 import { parseClientWsMessage } from '../ws-requests.js';
 
 describe('compact transcript events', () => {
+	it('separates live plan entry and announceable categories from coarse response facts', () => {
+		const messages = [new BashToolUseMessage('', 'tool-1', 'true'), new ThinkingMessage('', 'Synthetic thinking'),
+			new WaitToolUseMessage('', 'tool-2', 'execution'), new CommandResultMessage('', 'command',
+				{ outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' } }),
+			new EnterPlanModeToolUseMessage('', 'tool-3')];
+		const facts = transcriptActivity(messages.map((message, index) => ({ ordinal: index + 1, message })));
+		expect(facts.announcementOrdinals).toMatchObject({ bash: 1, thinking: 2, exec: 0, 'command-result': 0, tool: 0 });
+		expect(facts.livePlanEnterOrdinal).toBe(5);
+		expect(transcriptActivity([]).livePlanEnterOrdinal).toBeNull();
+	});
   it.each([
     ['first\nsecond\nthird', 'first'],
     ['single line', 'single line'],
@@ -31,7 +41,7 @@ describe('compact transcript events', () => {
     const facts = transcriptActivity([{ ordinal: 1, message: new UserMessage(at, 'prompt') },
       { ordinal: 3, message: new AssistantMessage(at, ' answer\nrest') }]);
     const head = new ChatTranscriptHeadUpdatedMessage('server', 'chat', 'view', 4, facts.presentedActivityAt,
-      facts.preview, facts.responseClassOrdinals, 0, 4);
+      facts.preview, facts.responseClassOrdinals, 0, 4, facts.announcementOrdinals, facts.livePlanEnterOrdinal);
     for (const message of [head, new ChatInputCommittedMessage('server', 'chat', 'view', 'input', 1),
       new ChatDisplayStateUpdatedMessage('server', 'chat', 'view', 1, 'revision', 4, 'available', null)]) {
       expect(parseServerWsMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
@@ -40,6 +50,13 @@ describe('compact transcript events', () => {
     expect(parseServerWsMessage({ ...head, responseClassOrdinals: { ...head.responseClassOrdinals, tool: 5 } })).toBeNull();
     expect(parseServerWsMessage({ ...head, preview: { ...head.preview, text: 'x'.repeat(201) } })).toBeNull();
     expect(parseServerWsMessage({ ...head, sourceHead: Number.MAX_SAFE_INTEGER + 1 })).toBeNull();
+    expect(parseServerWsMessage({ ...head, announcementOrdinals: undefined })).toBeNull();
+    expect(parseServerWsMessage({ ...head, announcementOrdinals: { ...head.announcementOrdinals, bash: 5 } })).toBeNull();
+    expect(parseServerWsMessage({ ...head, announcementOrdinals: { ...head.announcementOrdinals, thinking: -1 } })).toBeNull();
+    for (const livePlanEnterOrdinal of [undefined, 0, 5, '1']) {
+      expect(parseServerWsMessage({ ...head, livePlanEnterOrdinal })).toBeNull();
+    }
+    expect(parseServerWsMessage({ ...head, livePlanEnterOrdinal: 4 })?.livePlanEnterOrdinal).toBe(4);
   });
   it('separates presented activity from response and preview selection', () => {
     const facts = transcriptActivity([{ ordinal: 8, message: new ThinkingMessage('2026-01-02T00:00:00.000Z', 'reasoning') },

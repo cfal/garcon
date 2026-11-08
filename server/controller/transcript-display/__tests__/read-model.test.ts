@@ -307,6 +307,18 @@ describe('persistent transcript display read model', () => {
       .toEqual({ kind: 'visible-row', ordinal: 3, landedOrdinal: 3 });
   });
 
+  test.each(['category', 'pattern'] as const)('resolves attached results with %s-hidden owners as filtered context', filter => {
+    const store = create();
+    const rows = stored([new UserMessage(at, 'Generic context'), new BashToolUseMessage(at, 'tool', 'true'),
+      new ToolResultMessage(at, 'tool', 'Generic result')]);
+    appendDisplayFrame(store, rows, rows.length, 'server');
+    if (filter === 'pattern') while (prepareBashFrame(store, 'patterns', [{ mode: 'glob', pattern: '*' }], 3) < 3) {}
+    const query = new DisplayQuery(store, { ...profile, hiddenToolGroups: filter === 'category' ? ['bash'] : [] }, 3, [], filter === 'pattern');
+    expect(query.resolve(3, 3)).toEqual({ kind: 'filtered', ordinal: 3, landedOrdinal: 1 });
+    expect(new DisplayQuery(store, profile, 3, [], false).resolve(3, 3))
+      .toEqual({ kind: 'attached-detail', ordinal: 3, landedOrdinal: 2 });
+  });
+
   test('hiding all Bash rows certifies exhaustion without waiting for Bash classification', () => {
     const store = create();
     const rows = stored([new BashToolUseMessage(at, 'tool', 'true'), new ToolResultMessage(at, 'tool', 'Generic result')]);

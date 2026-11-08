@@ -125,7 +125,7 @@ for (const phase of ['validation', 'page'] as const) {
   test(`reload during search ${phase} never reuses the old ordinal`, async () => {
     await withChromiumFixture(
       `search-result-reload-${phase}`,
-      async ({ page, context, integration, browserErrors }) => {
+      async ({ page, context, integration, browserErrors, failedResponses }) => {
         const { target, marker, chatId } = await createSearchNavigationTarget(integration);
         const captured = new Deferred<Route>();
         await context.route(
@@ -150,12 +150,14 @@ for (const phase of ['validation', 'page'] as const) {
           20_000,
           () => 'Missing held search request',
         );
-        try {
-          const replacement = await integration.client.reloadChat(chatId);
-          expect(replacement.transcriptViewId).not.toBe(target.transcriptViewId);
-        } finally {
-          await route.continue();
-        }
+        const replacement = await integration.client.reloadChat(chatId);
+        expect(replacement.transcriptViewId).not.toBe(target.transcriptViewId);
+        expect(browserErrors).toEqual([]);
+        const rejected = await route.fetch();
+        expect(rejected.status()).toBe(409);
+        expect(await rejected.json()).toMatchObject({ errorCode: phase === 'validation' ? 'SEARCH_RESULT_STALE' : 'STALE_TRANSCRIPT_VIEW' });
+        const failedBefore = failedResponses.length;
+        await route.fulfill({ response: rejected });
         await page
           .getByText('Transcript was reloaded; search results refreshed.', {
             exact: true,
@@ -166,8 +168,12 @@ for (const phase of ['validation', 'page'] as const) {
             .locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`)
             .count(),
         ).toBe(0);
-        expect(browserErrors.splice(0).filter((error) => error !==
-          'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)')).toEqual([]);
+        const rejections = failedResponses.slice(failedBefore);
+        expect(rejections.length).toBeLessThanOrEqual(1);
+        for (const rejection of rejections) expect(rejection).toBe(`409 POST ${route.request().url()}`);
+        expect(browserErrors.length).toBeLessThanOrEqual(1);
+        for (const error of browserErrors) expect(error).toBe('console.error: Failed to load resource: the server responded with a status of 409 (Conflict)');
+        browserErrors.splice(0);
       },
     );
   });

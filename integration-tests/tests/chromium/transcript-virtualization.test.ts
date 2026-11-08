@@ -2048,13 +2048,14 @@ async function selectAndVerifyDelayedNavigatorTarget(page: Page, marker: string)
   await waitForRowCentered(page, rowId);
 }
 
-async function interruptNavigatorJump(page: Page, marker: string): Promise<void> {
+async function interruptNavigatorJump(page: Page, marker: string, source: 'wheel' | 'touch'): Promise<void> {
   await openCurrentWorkspaceTabActionsMenu(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
   await installDelayedTargetGrowth(page, rowId);
   let trapInstalled = false;
+  let drag: TranscriptTouchDrag | null = null;
   try {
     await installTranscriptScrollTopWriteTrap(page);
     trapInstalled = true;
@@ -2085,11 +2086,19 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
     const writesBeforeIntent = (await transcriptScrollTopWrites(page)).length;
     const box = await page.locator(FEED_SELECTOR).boundingBox();
     if (!box) throw new Error('Transcript viewport has no interaction bounds.');
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.wheel(0, -600);
+    if (source === 'touch') {
+      drag = await beginTranscriptTouchDrag(page);
+      await moveTranscriptTouch(page, drag, 30);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await finishTranscriptTouchDrag(drag);
+      drag = null;
+    } else {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, -600);
+    }
     const writes = await withDiagnosticTimeout(
       'the cancelled navigator jump to stop writing',
-      page.evaluate(async () => {
+      page.evaluate(async (nativeOwned) => {
         const browserGlobal = globalThis as typeof globalThis & {
           __chatDelayedTargetGrowthFrame?: number;
           __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
@@ -2104,24 +2113,30 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
         if (!anchor) throw new Error('No reading row after navigation cancellation.');
         const anchorOffset = anchor.getBoundingClientRect().top - top;
         const offsets: (number | null)[] = [];
+        let duringNativeScroll = 0;
         for (let frame = 0; frame < 45; frame += 1) {
+          if (nativeOwned && frame < 12) feed.dispatchEvent(new Event('scroll', { bubbles: true }));
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          if (frame === 11) duringNativeScroll = (browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0) - afterCancellation;
           offsets.push(anchor.isConnected ? anchor.getBoundingClientRect().top - feed.getBoundingClientRect().top : null);
         }
         return {
           afterCancellation,
+          duringNativeScroll,
           final: browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0,
           anchorOffset, offsets,
           growthFrames: browserGlobal.__chatDelayedTargetGrowthFrame ?? 0,
         };
-      }),
+      }, source === 'touch'),
     );
     expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
+    if (source === 'touch') expect(writes.duringNativeScroll, JSON.stringify(writes, null, 2)).toBe(0);
     expect(writes.growthFrames).toBeGreaterThanOrEqual(5);
     expect(Math.max(...writes.offsets.map(offset => offset === null ? Infinity : Math.abs(offset - writes.anchorOffset))),
       JSON.stringify(writes, null, 2)).toBeLessThanOrEqual(1);
     await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
   } finally {
+    if (drag) await finishTranscriptTouchDrag(drag);
     await page.evaluate(() => {
       const browserGlobal = globalThis as typeof globalThis & {
         __stopDelayedTargetGrowth?: () => void;
@@ -3441,11 +3456,13 @@ async function verifyEdgeNavigation(fixture: ChromiumFixture, chatId: string): P
 async function verifyTargetCancellation(fixture: ChromiumFixture, chatId: string): Promise<void> {
   const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
-  await withDiagnosticTimeout(
-    'the growing navigator target cancellation',
-    interruptNavigatorJump(fixture.page, 'chromium-virtual-turn-40'),
-    30_000,
-  );
+  for (const source of ['wheel', 'touch'] as const) {
+    await withDiagnosticTimeout(
+      `the growing navigator target cancellation by ${source}`,
+      interruptNavigatorJump(fixture.page, 'chromium-virtual-turn-40', source),
+      30_000,
+    );
+  }
   fixture.assertNoBrowserErrors();
 }
 

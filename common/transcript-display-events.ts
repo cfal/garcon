@@ -2,10 +2,17 @@ import { isToolUseMessage, type ChatMessage } from './chat-types.js';
 import type { TranscriptMessage } from './chat-view.js';
 import { displayInteger, displayRecord, displayString } from './transcript-display-contract.js';
 import { parseDisplayPreparationStatus, type DisplayPreparationStatus } from './transcript-display-open.js';
+import { HIDEABLE_TOOL_GROUPS, TOOL_STRUCTURE, toolHideGroup, intrinsicDisplayRole, type HiddenToolGroup } from './transcript-display-policy.js';
 
 export const RESPONSE_CLASSES = ['assistant', 'command-output', 'command-result', 'thinking', 'error', 'permission', 'tool'] as const;
 export type ResponseClass = typeof RESPONSE_CLASSES[number];
 export type ResponseClassOrdinals = Readonly<Record<ResponseClass, number>>;
+export const ANNOUNCEMENT_CLASSES = [...RESPONSE_CLASSES, ...HIDEABLE_TOOL_GROUPS.map(group => group.id)] as const;
+export type AnnouncementClass = ResponseClass | HiddenToolGroup;
+export type AnnouncementOrdinals = Readonly<Record<AnnouncementClass, number>>;
+export function emptyAnnouncementOrdinals(): Record<AnnouncementClass, number> {
+  return { ...emptyResponseClassOrdinals(), bash: 0, exec: 0, 'file-reads': 0, 'file-changes': 0, web: 0, tasks: 0, provider: 0 };
+}
 export interface TranscriptPreview { readonly ordinal: number; readonly text: string; readonly timestamp: string }
 
 export function emptyResponseClassOrdinals(): Record<ResponseClass, number> {
@@ -26,9 +33,12 @@ export function responseClass(message: ChatMessage): ResponseClass | null {
 
 export function transcriptActivity(entries: readonly TranscriptMessage[]): {
   presentedActivityAt: string | null; preview: TranscriptPreview | null; responseClassOrdinals: ResponseClassOrdinals;
+  announcementOrdinals: AnnouncementOrdinals; livePlanEnterOrdinal: number | null;
 } {
   let presentedActivityAt: string | null = null, preview: TranscriptPreview | null = null;
   const ordinals = emptyResponseClassOrdinals();
+  const announcements = emptyAnnouncementOrdinals();
+  let livePlanEnterOrdinal: number | null = null;
   for (const { ordinal, message } of entries) {
     if (message.timestamp && (!presentedActivityAt || message.timestamp > presentedActivityAt)) presentedActivityAt = message.timestamp;
     if (message.type === 'assistant-message' || message.type === 'user-message' || message.type === 'command-output') {
@@ -38,8 +48,15 @@ export function transcriptActivity(entries: readonly TranscriptMessage[]): {
     }
     const kind = responseClass(message);
     if (kind) ordinals[kind] = Math.max(ordinals[kind], ordinal);
+    if (message.type === 'enter-plan-mode-tool-use') livePlanEnterOrdinal = Math.max(livePlanEnterOrdinal ?? 0, ordinal);
+    if (isToolUseMessage(message)) {
+      if (TOOL_STRUCTURE[message.type].input.mode === 'hidden'
+        || ['unknown-tool-use', 'external-tool-use', 'mcp-tool-use'].includes(message.type)) continue;
+      const category = toolHideGroup(message.type) ?? 'tool';
+      announcements[category] = Math.max(announcements[category], ordinal);
+    } else if (kind && intrinsicDisplayRole(message) !== 'hidden') announcements[kind] = Math.max(announcements[kind], ordinal);
   }
-  return { presentedActivityAt, preview, responseClassOrdinals: ordinals };
+  return { presentedActivityAt, preview, responseClassOrdinals: ordinals, announcementOrdinals: announcements, livePlanEnterOrdinal };
 }
 
 export class ChatTranscriptHeadUpdatedMessage {
@@ -49,6 +66,8 @@ export class ChatTranscriptHeadUpdatedMessage {
     public readonly sourceHead: number, public readonly presentedActivityAt: string | null,
     public readonly preview: TranscriptPreview | null, public readonly responseClassOrdinals: ResponseClassOrdinals,
     public readonly planRevision: number, public readonly auxiliaryRevision: number,
+    public readonly announcementOrdinals: AnnouncementOrdinals = emptyAnnouncementOrdinals(),
+    public readonly livePlanEnterOrdinal: number | null = null,
   ) {}
 }
 
@@ -82,12 +101,15 @@ export function parseTranscriptDisplayEvent(value: unknown): TranscriptDisplayEv
       case 'chat-transcript-head-updated': {
         const head = displayInteger(raw.sourceHead), source = displayRecord(raw.responseClassOrdinals), ordinals = emptyResponseClassOrdinals();
         for (const key of RESPONSE_CLASSES) ordinals[key] = displayInteger(source[key], 0, head);
+        const announcements = emptyAnnouncementOrdinals(), announceSource = displayRecord(raw.announcementOrdinals);
+        for (const key of ANNOUNCEMENT_CLASSES) announcements[key] = displayInteger(announceSource[key], 0, head);
+        const liveEnter = raw.livePlanEnterOrdinal === null ? null : displayInteger(raw.livePlanEnterOrdinal, 1, head);
         const activity = raw.presentedActivityAt === null ? null : displayString(raw.presentedActivityAt, 64);
         const p = raw.preview === null ? null : displayRecord(raw.preview);
         if (p && (typeof p.text !== 'string' || p.text.length > 200)) return null;
         const preview = p ? { ordinal: displayInteger(p.ordinal, 1, head), text: p.text as string, timestamp: displayString(p.timestamp, 64) } : null;
         return new ChatTranscriptHeadUpdatedMessage(server, chat, view, head, activity, preview, ordinals,
-          displayInteger(raw.planRevision), displayInteger(raw.auxiliaryRevision));
+          displayInteger(raw.planRevision), displayInteger(raw.auxiliaryRevision), announcements, liveEnter);
       }
       default: return null;
     }

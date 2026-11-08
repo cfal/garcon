@@ -5,6 +5,13 @@ import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, parseBod
 import { parseSubagentSummaryPage } from '../transcript-display-auxiliary.ts';
 
 const profile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'revision' };
+
+test('canonicalizes same-anchor cuts by code units, independent of locale', () => {
+  const cuts = ['a', 'Z', 'A', 'z', '_'].map(id => ({ id, afterOrdinal: 3, anchorRule: 'raw-position' }));
+  const ordered = [...cuts].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  expect(displayCutsKey(cuts)).toBe(displayCutsKey(ordered));
+  expect(JSON.parse(displayCutsKey(cuts)).map(cut => cut[0])).toEqual(['A', 'Z', '_', 'a', 'z']);
+});
 const certificate = { serverInstanceId: 'server', chatId: 'chat', transcriptViewId: 'view', policyRevision: 1,
   profileKey: displayProfileKey(profile), bashRevision: 'revision', watermark: 10, cutsKey: displayCutsKey([]) };
 const request = { chatId: 'chat', transcriptViewId: 'view', policyRevision: 1, profile, cuts: [], limit: 50, anchor: { kind: 'newest' } };

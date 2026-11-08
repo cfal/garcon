@@ -15,7 +15,7 @@
 		StaleConversationSurfaceError,
 		type ConversationPanelActions,
 	} from './conversation-panel-actions.js';
-	import { displayPromptRecall } from '$lib/chat/transcript/display-prompt-recall.js';
+	import { displayPromptRecall, displayPromptRecallIdentity } from '$lib/chat/transcript/display-prompt-recall.js';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -46,7 +46,7 @@
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
-	import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
+	import { projectSubagentsForRoot, type SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 	import { SubagentSummaryController } from '$lib/chat/transcript/subagent-summary-controller.svelte.js';
 	import { ResendCandidatesController } from '$lib/chat/transcript/resend-candidates-controller.svelte.js';
 	import type { ResendSnapshot } from '$shared/transcript-display-auxiliary';
@@ -204,7 +204,7 @@
 		};
 	});
 	const subagentModel = $derived.by<SubagentManagementModel>(() => {
-		const subagents = [...(subagentPages.page?.entries ?? [])];
+		const subagents = projectSubagentsForRoot(subagentPages.page?.entries ?? [], selectedIsProcessing ? 'running' : 'idle');
 		return { subagents, entries: [{ id: 'root', kind: 'root', name: sessions.selectedChat?.title || 'Root',
 			model: sessions.selectedChat?.model ?? agentState.model, status: selectedIsProcessing ? 'running' : 'idle',
 			statusLabel: selectedIsProcessing ? m.chat_subagent_running() : m.chat_subagent_idle() }, ...subagents] };
@@ -417,7 +417,8 @@
 		},
 		fork(surfaceId, chatId, upToOrdinal) {
 			const panel = assertRenderedPanel(surfaceId, chatId);
-			void controller.forkChat(chatId, upToOrdinal, panel.transcript);
+			void controller.forkChat(chatId, upToOrdinal, panel.transcript,
+				options => conversationPanels.loadChatSnapshot(chatId, options));
 		},
 		clearBefore(surfaceId, chatId, ordinal) {
 			const panel = assertRenderedPanel(surfaceId, chatId);
@@ -930,7 +931,7 @@
 				controller.handleAgentSettingChange(descriptor, value)}
 			resendCandidates={currentResend ? chatState.resendCandidates : []}
 			recallIdentity={sessions.selectedChatId && chatState.activeChatId === sessions.selectedChatId
-				? `${sessions.selectedChatId}:${chatState.transcriptViewId}`
+				? displayPromptRecallIdentity(chatState.openSnapshot)
 				: null}
 			recallSource={promptRecallSource()}
 			onRecallError={(message) => chatState.appendLocalNotice('error', message)}

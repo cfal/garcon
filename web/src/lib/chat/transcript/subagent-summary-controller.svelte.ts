@@ -49,7 +49,7 @@ export class SubagentSummaryController implements DisplaySummaryPaging {
 		if (!this.page || this.loading) return;
 		const cursor = this.page.nextAfterOrder;
 		if (cursor === null) return;
-		this.#navigation = { cursor, previous: [...this.#previous.slice(-99), this.#cursor] };
+		this.#navigation = { cursor, previous: [...this.#previous.slice(-99), this.#cursor ?? 0] };
 		await this.#load();
 	}
 	async previous(): Promise<void> {

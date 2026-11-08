@@ -4,9 +4,16 @@ import type { TranscriptMessage } from '$shared/chat-view';
 import { displayCutsKey, displayProfileKey, type AvailableDisplayWindow, type DisplayCertificate, type DisplayDescriptor, type DisplayProfile, type RowDetails } from '$shared/transcript-display-contract';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
+import type { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 
 export const DISPLAY_TIME = '2026-01-01T00:00:00.000Z';
 export const displayProfile: DisplayProfile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'patterns' };
+
+export async function installDisplayOpen(transcript: ActiveTranscriptState, chatId: string): Promise<void> {
+	if (transcript.activeChatId !== chatId) transcript.activateChat(chatId);
+	transcript.installOpen(await transcriptDisplayApi.open({ chatId, reason: 'reconnect', outstandingClientMessageIds: [] }));
+	await transcript.controller.refresh();
+}
 
 export function displayOpen(chatId = 'chat-1', view = 'view-1', head = 0, instance = 'instance-1'): DisplayOpenResponse {
 	return {

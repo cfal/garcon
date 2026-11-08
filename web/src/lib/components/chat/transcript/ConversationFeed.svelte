@@ -28,6 +28,7 @@
 	import { HIDEABLE_TOOL_GROUPS } from '$shared/transcript-display-policy';
 	import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
 	import { DisplayCoverage } from '$lib/chat/transcript/display-coverage.js';
+	import { expansionFor } from '$lib/chat/transcript/display-window-controller.js';
 	import { nextConversationCoverage } from './conversation-feed-coverage.js';
 	import { groupContainingRow } from './conversation-feed-virtual-items.js';
 	import {
@@ -229,13 +230,14 @@
 	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
 		announcement = { sequence: announcement.sequence + 1, text };
 	});
+	const displayProfile = $derived({
+		combine: localSettings.combineToolUseMessages,
+		showThinking: localSettings.showThinking,
+		hiddenToolGroups: HIDEABLE_TOOL_GROUPS.filter(group =>
+			group.toolTypes.some(type => localSettings.hiddenToolTypes.includes(type))).map(group => group.id),
+	});
 	$effect(() => {
-		const profile = {
-			combine: localSettings.combineToolUseMessages,
-			showThinking: localSettings.showThinking,
-			hiddenToolGroups: HIDEABLE_TOOL_GROUPS.filter(group =>
-				group.toolTypes.some(type => localSettings.hiddenToolTypes.includes(type))).map(group => group.id),
-		};
+		const profile = displayProfile;
 		const cuts = activePendingPermissionRequests.flatMap(request =>
 			request.transcript?.transcriptViewId === chatState.transcriptViewId
 				? [{ id: `permission:${request.permissionOccurrenceId}`, afterOrdinal: request.transcript.afterOrdinal, anchorRule: 'eligible-row' as const }]
@@ -268,7 +270,10 @@
 			watermark: chatState.loadedThroughOrdinal,
 			initialHead: chatState.openSnapshot?.sourceHead ?? 0,
 			sourceHead: chatState.lastOrdinal,
-			responseClassOrdinals: chatState.responseClassOrdinals,
+			announcementOrdinals: chatState.announcementOrdinals,
+			profile: displayProfile,
+			collapsedGroups: chatState.display.window?.items.filter((item): item is GroupDescriptor =>
+				item.kind === 'tool-group' && !expansionFor(item, chatState.display.expansions)) ?? [],
 			visible: isVisible && announcementsEnabled,
 			pinnedToBottom,
 			detachedStatus: m.chat_feed_new_response_available(),
@@ -473,7 +478,7 @@
 </script>
 
 {#snippet feedContent()}
-	{#if chatState.isLoadingMessages && chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
+	{#if (chatState.isLoadingMessages || !chatState.display.window && chatState.loadStatus !== 'error') && chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<Loader2 class="h-4 w-4 animate-spin" />
@@ -484,19 +489,19 @@
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
 				<TriangleAlert class="h-4 w-4 text-destructive" />
-				<p class="text-sm">{m.chat_feed_failed_to_load()}</p>
+				<p class="text-sm">{chatState.loadErrorCode === 'TRANSCRIPT_UNAVAILABLE' ? m.chat_history_unavailable() : m.chat_feed_failed_to_load()}</p>
 			</div>
 			{#if chatState.loadError}
 				<p class="text-xs mt-1 text-muted-foreground/70">{chatState.loadError}</p>
 			{/if}
-			{#if onRetry}
+			{#if onRetry && chatState.canRetryLoad}
 				<Button variant="outline" size="sm" class="mt-3" onclick={onRetry}>
 					<RefreshCw class="h-3 w-3 mr-1" />
 					{m.chat_feed_retry()}
 				</Button>
 			{/if}
 		</div>
-	{:else if chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
+	{:else if chatState.display.window && chatState.displayMessageCount === 0 && activePendingPermissionRequests.length === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<p class="text-sm">{m.chat_messages_no_messages()}</p>
 			<p class="text-xs mt-1">{m.chat_messages_send_first_message()}</p>
@@ -536,7 +541,8 @@
 						earlierPageState={chatState.pageStates.earlier}
 						laterPageState={chatState.pageStates.later}
 						loadError={chatState.loadError}
-						{onRetry}
+						loadErrorCode={chatState.loadErrorCode}
+						onRetry={chatState.canRetryLoad ? onRetry : undefined}
 						{onLoadEarlier}
 						{onLoadLater}
 						{onPermissionDecision}

@@ -21,6 +21,7 @@ export interface ConversationTranscriptOverlayView {
 	readonly noticeRevision: number;
 	readonly optimisticInputs: readonly OptimisticUserInput[];
 	readonly optimisticAfterOrdinals: ReadonlyMap<string, number>;
+	readonly optimisticSubmissionOrder: ReadonlyMap<string, number>;
 	readonly resendCandidates: readonly ResendCandidate[];
 	readonly includedResendCandidates: readonly ResendCandidate[];
 	readonly excludedResendOrdinals: readonly number[];
@@ -35,6 +36,8 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	#noticeRevision = $state(0);
 	#optimisticInputs = $state<OptimisticUserInput[]>([]);
 	#optimisticAfterOrdinals = $state.raw<ReadonlyMap<string, number>>(new Map());
+	#optimisticSubmissionOrder = $state.raw<ReadonlyMap<string, number>>(new Map());
+	#nextSubmissionOrder = 0;
 	#resendCandidates = $state<ResendCandidate[]>([]);
 	#excludedResendOrdinals = $state<number[]>([]);
 
@@ -53,6 +56,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	get optimisticAfterOrdinals(): ReadonlyMap<string, number> {
 		return this.#optimisticAfterOrdinals;
 	}
+	get optimisticSubmissionOrder(): ReadonlyMap<string, number> { return this.#optimisticSubmissionOrder; }
 
 	get resendCandidates(): readonly ResendCandidate[] {
 		return this.#resendCandidates;
@@ -76,8 +80,12 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		const previous = this.#notices.at(-1);
 		if (
 			source === 'server' &&
+			previous?.source === 'server' &&
 			previous?.noticeType === noticeType &&
-			previous.content === content
+			previous.content === content &&
+			previous.transcriptBarrier?.serverInstanceId === transcriptBarrier?.serverInstanceId &&
+			previous.transcriptBarrier?.transcriptViewId === transcriptBarrier?.transcriptViewId &&
+			previous.transcriptBarrier?.ordinal === transcriptBarrier?.ordinal
 		) {
 			return feedMutation(false);
 		}
@@ -129,6 +137,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	): ConversationTranscriptOverlayMutation {
 		if (!this.#optimisticAfterOrdinals.has(input.clientMessageId)) {
 			this.clearNoticesThrough();
+			this.#optimisticSubmissionOrder = new Map(this.#optimisticSubmissionOrder).set(input.clientMessageId, ++this.#nextSubmissionOrder);
 			this.#optimisticAfterOrdinals = new Map(this.#optimisticAfterOrdinals).set(
 				input.clientMessageId,
 				afterOrdinal,
@@ -163,6 +172,9 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		const ordinals = new Map(this.#optimisticAfterOrdinals);
 		ordinals.delete(clientMessageId);
 		this.#optimisticAfterOrdinals = ordinals;
+		const order = new Map(this.#optimisticSubmissionOrder);
+		order.delete(clientMessageId);
+		this.#optimisticSubmissionOrder = order;
 		this.#optimisticInputs = next;
 		return feedMutation(true);
 	}
@@ -219,6 +231,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		// captured before the reset cannot clear notices appended after it.
 		this.#optimisticInputs = [];
 		this.#optimisticAfterOrdinals = new Map();
+		this.#optimisticSubmissionOrder = new Map();
 		this.#resendCandidates = [];
 		this.#excludedResendOrdinals = [];
 		return feedMutation(feedStructureChanged);

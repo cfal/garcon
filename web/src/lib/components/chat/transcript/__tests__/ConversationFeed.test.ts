@@ -8,6 +8,7 @@ import { ConversationFeedVirtualController } from '../ConversationFeedVirtualCon
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { BashToolUseMessage } from '$shared/chat-types';
+import { ApiError } from '$lib/api/client.js';
 
 async function ready() {
 	await waitFor(() => expect(screen.getByTestId('feed-fixture-ready').getAttribute('data-ready')).toBe('true'));
@@ -133,6 +134,46 @@ describe('ConversationFeed', () => {
 		await fireEvent.focusIn(viewport);
 
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
+	it('never presents uncertified or cancelled history as empty', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'tool-run', onReady: mounted.resolve });
+		const transcript = await mounted.promise;
+		transcript.clearMessages();
+		transcript.beginOpen();
+		transcript.cancelOpen();
+		await tick();
+		expect(screen.queryByText('No messages')).toBeNull();
+		expect(screen.queryByText(/Send.*first message/)).toBeNull();
+		expect(screen.getByText('Loading messages...')).toBeTruthy();
+	});
+
+	it.each([false, true])('preserves nonretryable archived history presentation, permission=%s', async permission => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		render(ConversationFeedTestHost, { transcriptScenario: 'tool-run', onReady: mounted.resolve, onRetry: vi.fn(),
+			pendingPermissionRequests: permission ? [{ chatId: 'chat-1', permissionOccurrenceId: 'pending-permission',
+				requestedTool: new BashToolUseMessage('', 'tool-1', 'true'),
+				control: { serverInstanceId: 'instance-1', chatId: 'chat-1', runId: 'run-1', permissionOccurrenceId: 'pending-permission' } }] : [],
+		});
+		const transcript = await mounted.promise;
+		transcript.clearMessages();
+		transcript.failOpen(new ApiError(410, 'Synthetic archived source', 'TRANSCRIPT_UNAVAILABLE', undefined, false));
+		await screen.findByText('Archived history for this chat is unavailable.');
+		expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+		if (permission) expect(screen.getByText('Permission required')).toBeTruthy();
+	});
+
+	it('offers Retry for an unstructured intermediary failure', async () => {
+		const mounted = Promise.withResolvers<ActiveTranscriptState>();
+		const retry = vi.fn();
+		render(ConversationFeedTestHost, { transcriptScenario: 'tool-run', onReady: mounted.resolve, onRetry: retry });
+		const transcript = await mounted.promise;
+		transcript.clearMessages();
+		transcript.failOpen(new ApiError(502, 'Bad Gateway'));
+		await screen.findByText('Bad Gateway');
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(retry).toHaveBeenCalledOnce();
 	});
 
 	it('shows initial failure and retry alongside an actionable permission', async () => {

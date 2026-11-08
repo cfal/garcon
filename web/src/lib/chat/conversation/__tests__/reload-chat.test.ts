@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reloadChatFromNative, type ChatReloadOptions, type ChatReloadPort } from '../reload-chat.js';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { displayOpen, displayRow, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+import { displayOpen, displayRow, installDisplayOpen, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import type { WsRequestProgress } from '$lib/ws/connection.svelte.js';
 import { WsRequestError } from '$lib/ws/ws-request-error.js';
 
@@ -33,7 +33,7 @@ afterEach(() => { chat.dispose(); vi.restoreAllMocks(); });
 describe('reloadChatFromNative', () => {
 	it('leaves replacement projection to the registry rather than reopening a single transcript', async () => {
 		const ws = wsWithResponse(replacement);
-		await chat.loadMessages('chat-1');
+		await installDisplayOpen(chat, 'chat-1');
 		api.open.mockClear();
 		const clear = vi.spyOn(chat, 'clearMessages');
 		await expect(reloadChatFromNative(ws, 'chat-1', options())).resolves.toBe('reloaded');

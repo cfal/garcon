@@ -57,7 +57,7 @@ test('a reload between lookup and page load opens the chat without reusing the o
   const messageUrls: string[] = [];
   const interceptedUrls: string[] = [];
   let requests = 0;
-  await withChromiumFixture('ticket-source-reload-race', async ({ page, context, integration, browserErrors }, markPhase) => {
+  await withChromiumFixture('ticket-source-reload-race', async ({ page, context, integration, browserErrors, failedResponses }, markPhase) => {
     const { chatId, ticketId, target } = await createTicketSource(integration, 110);
     const requestStarted = new Deferred<Route>();
     page.on('request', (request) => {
@@ -79,21 +79,27 @@ test('a reload between lookup and page load opens the chat without reusing the o
     await page.getByRole('button', { name: 'Open source', exact: true }).click();
     const route = await withTimeout(requestStarted.promise, 20_000,
       () => 'The exact source page request was not intercepted.');
-    try {
-      markPhase('reloading while the source page request is held');
-      const reloaded = await integration.client.reloadChat(chatId);
-      expect(reloaded.transcriptViewId).not.toBe(target.transcriptViewId);
-    } finally {
-      markPhase('releasing the old-view source page request');
-      await route.continue();
-    }
+    markPhase('reloading while the source page request is held');
+    const reloaded = await integration.client.reloadChat(chatId);
+    expect(reloaded.transcriptViewId).not.toBe(target.transcriptViewId);
+    expect(browserErrors).toEqual([]);
+    const rejected = await route.fetch();
+    expect(rejected.status()).toBe(409);
+    expect(await rejected.json()).toMatchObject({ errorCode: 'STALE_TRANSCRIPT_VIEW' });
+    const failedBefore = failedResponses.length;
+    markPhase('releasing the old-view source page request');
+    await route.fulfill({ response: rejected });
     markPhase('waiting for the transcript reload notification');
     await page.getByText('Transcript was reloaded; exact row unavailable.', { exact: true }).waitFor();
     await page.locator('[data-chat-scroll-viewport]').waitFor();
     expect(requests).toBe(1);
     expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
-    expect(browserErrors.splice(0).filter((error) => error !==
-      'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)')).toEqual([]);
+    const rejections = failedResponses.slice(failedBefore);
+    expect(rejections.length).toBeLessThanOrEqual(1);
+    for (const rejection of rejections) expect(rejection).toBe(`409 POST ${route.request().url()}`);
+    expect(browserErrors.length).toBeLessThanOrEqual(1);
+    for (const error of browserErrors) expect(error).toBe('console.error: Failed to load resource: the server responded with a status of 409 (Conflict)');
+    browserErrors.splice(0);
   }, async ({ page }) => ({
     requests,
     messageUrls,

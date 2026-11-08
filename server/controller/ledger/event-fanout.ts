@@ -1,5 +1,5 @@
 import { ChatInputCommittedMessage, ChatTranscriptHeadUpdatedMessage, ChatTranscriptReplacedMessage } from '../../../common/ws-events.js';
-import { RESPONSE_CLASSES, transcriptActivity } from '../../../common/transcript-display-events.js';
+import { RESPONSE_CLASSES, ANNOUNCEMENT_CLASSES, transcriptActivity } from '../../../common/transcript-display-events.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { TranscriptCommitEvent } from './service.js';
 import { isConversationalLedgerRow } from './contracts.js';
@@ -53,13 +53,16 @@ export function createTranscriptEventFanout(deps: TranscriptEventFanoutDeps): Tr
     const previous = prior?.transcriptViewId === event.viewId ? prior : null;
     const response = { ...facts.responseClassOrdinals };
     for (const key of RESPONSE_CLASSES) response[key] = Math.max(response[key], previous?.responseClassOrdinals[key] ?? 0);
+    const announcements = { ...facts.announcementOrdinals };
+    for (const key of ANNOUNCEMENT_CLASSES) announcements[key] = Math.max(announcements[key], previous?.announcementOrdinals[key] ?? 0);
+    const liveEnter = Math.max(facts.livePlanEnterOrdinal ?? 0, previous?.livePlanEnterOrdinal ?? 0) || null;
     let activity = previous?.presentedActivityAt || null;
     if (facts.presentedActivityAt && (!activity || facts.presentedActivityAt > activity)) {
       activity = facts.presentedActivityAt;
     }
     pending.set(event.chatId, new ChatTranscriptHeadUpdatedMessage(deps.serverInstanceId, event.chatId, event.viewId,
       rows.at(-1)!.ordinal, activity, facts.preview ?? previous?.preview ?? null, response,
-      deps.planRevision(event.chatId, event.viewId), deps.auxiliaryRevision(event.chatId, event.viewId)));
+      deps.planRevision(event.chatId, event.viewId), deps.auxiliaryRevision(event.chatId, event.viewId), announcements, liveEnter));
     for (const row of rows) {
       if (row.kind === 'user-input' && row.detail.clientMessageId) deps.broadcast(new ChatInputCommittedMessage(
         deps.serverInstanceId, event.chatId, event.viewId, row.detail.clientMessageId, row.ordinal));

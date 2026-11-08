@@ -32,6 +32,7 @@
 		earlierPageState: TranscriptPageState;
 		laterPageState: TranscriptPageState;
 		loadError?: string | null;
+		loadErrorCode?: string | null;
 		onRetry?: () => void;
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
@@ -58,6 +59,7 @@
 		earlierPageState,
 		laterPageState,
 		loadError = null,
+		loadErrorCode = null,
 		onRetry,
 		onLoadEarlier,
 		onLoadLater,
@@ -110,6 +112,7 @@
 			{earlierPageState}
 			{laterPageState}
 			{loadError}
+			{loadErrorCode}
 			{onRetry}
 			{onLoadEarlier}
 			{onLoadLater}

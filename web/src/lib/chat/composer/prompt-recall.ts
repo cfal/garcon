@@ -7,6 +7,7 @@ export interface PromptRecallSource {
 export class PromptRecallController {
 	#identity: string | null = null;
 	#prompts: readonly RecallPrompt[] = [];
+	#listSource: PromptRecallSource | null = null;
 	#index = -1;
 	#text = '';
 	#abort: AbortController | null = null;
@@ -18,6 +19,7 @@ export class PromptRecallController {
 		this.#abort = null;
 		this.#identity = null;
 		this.#prompts = [];
+		this.#listSource = null;
 		this.#index = -1;
 		this.#text = '';
 	}
@@ -33,7 +35,8 @@ export class PromptRecallController {
 		this.#identity = identity;
 		try {
 			if (!this.#prompts.length) {
-				const prompts = await source.list(abort.signal);
+				this.#listSource ??= source;
+				const prompts = await this.#listSource.list(abort.signal);
 				if (abort.signal.aborted || epoch !== this.#epoch) return null;
 				this.#prompts = prompts.slice(0, 100);
 			}

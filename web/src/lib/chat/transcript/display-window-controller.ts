@@ -134,7 +134,7 @@ export class DisplayWindowController {
 	installOpen(open: DisplayWindowOpen, profile: DisplayProfile): void {
 		const identity = this.#identity;
 		if (!identity || identity.chatId !== open.chat.id || identity.transcriptViewId !== open.transcriptViewId
-			|| identity.serverInstanceId !== open.serverInstanceId) this.reset();
+			|| identity.serverInstanceId !== open.serverInstanceId || identity.policyRevision !== open.display.policyRevision) this.reset();
 		this.bodies.resetInstance(open.serverInstanceId);
 		this.#identity = { serverInstanceId: open.serverInstanceId, chatId: open.chat.id,
 			transcriptViewId: open.transcriptViewId, policyRevision: open.display.policyRevision };
@@ -622,14 +622,33 @@ export class DisplayWindowController {
 				const ordinal = Math.max(group.firstMember, Math.min(group.lastMember, intent.anchorOrdinal));
 				const previous = intent.page;
 				// Compatible appends preserve trimmed pages instead of refetching their evicted overscan.
-				const retainMembers = previous.ordinals.length > 0 && previous.ordinals.length <= 50
+				const retainMembers = previous.ordinals.length > 0
 					&& sameDisplayCertificate({ ...previous.certificate, watermark: window.certificate.watermark }, window.certificate)
 					&& group.fragment.after === previous.fragment.after && group.fragment.through >= previous.fragment.through;
-				const page = await this.api.members({ certificate: window.certificate, profile, cuts: this.#cuts,
+				const limit = retainMembers ? Math.min(50, previous.ordinals.length) : 50;
+				let page = await this.api.members({ certificate: window.certificate, profile, cuts: this.#cuts,
 					base: group.base, fragment: group.fragment,
-					anchor: { kind: 'around', ordinal: retainMembers ? previous.ordinals[Math.floor(previous.ordinals.length / 2)] : ordinal },
-					limit: retainMembers ? previous.ordinals.length : 50 }, signal);
+					anchor: { kind: 'around', ordinal: retainMembers ? previous.ordinals[Math.floor(limit / 2)] : ordinal }, limit }, signal);
 				this.#assertCertificate(page.certificate, window.certificate);
+				while (retainMembers && page.ordinals.length < previous.ordinals.length && page.later
+					&& page.later.afterOrdinal < previous.ordinals.at(-1)!) {
+					signal.throwIfAborted();
+					const next = await this.api.members({ certificate: window.certificate, profile, cuts: this.#cuts,
+						base: group.base, fragment: group.fragment, anchor: { kind: 'after', ordinal: page.later.afterOrdinal },
+						limit: Math.min(50, previous.ordinals.length - page.ordinals.length) }, signal);
+					this.#assertCertificate(next.certificate, window.certificate);
+					if (!next.ordinals.length || next.ordinals[0] <= page.ordinals.at(-1)!) throw new Error('Non-advancing member page');
+					page = { ...page, ordinals: [...page.ordinals, ...next.ordinals], later: next.later };
+				}
+				if (retainMembers) {
+					const retained = page.ordinals.filter(member => member >= previous.ordinals[0] && member <= previous.ordinals.at(-1)!);
+					if (retained.length) {
+						const before = page.ordinals.indexOf(retained[0]), after = page.ordinals.length - before - retained.length;
+						page = { ...page, ordinals: retained,
+							earlier: before ? { beforeOrdinal: retained[0], remaining: (page.earlier?.remaining ?? 0) + before } : page.earlier,
+							later: after ? { afterOrdinal: retained.at(-1)!, remaining: (page.later?.remaining ?? 0) + after } : page.later };
+					}
+				}
 				const first = Math.max(previous.base.firstMember, previous.fragment.after + 1);
 				const last = Math.min(previous.base.lastMember, previous.fragment.through);
 				let anchorOrdinal: number | undefined;
@@ -845,7 +864,8 @@ export class DisplayWindowController {
 	cancel(): void {
 		this.#replacementPending ||= this.#snapshot.window === null && this.#refreshPending;
 		this.#cancelRequests();
-		if (this.#replacementPending && this.#identity && this.#profile && this.#needsReplace()) {
+		if (this.#identity && this.#profile && (this.#replacementPending && this.#needsReplace()
+			|| this.#refreshPending && this.#snapshot.phase !== 'failed' && (this.#needsHeadRefresh() || this.#needsDetailRefresh()))) {
 			this.#scheduleRefresh(['preparing', 'lagging', 'busy'].includes(this.#snapshot.phase) ? 1500 : 0);
 		} else this.#clearRefresh();
 	}

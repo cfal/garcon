@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { displayOpen, displayRow, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
+import { installDisplayOpen, displayOpen, displayRow, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 
 const transcripts: ActiveTranscriptState[] = [];
@@ -16,7 +16,7 @@ async function setup() {
 	const api = mockDisplayApi(rows, displayOpen('chat-1', 'view-1', 100));
 	const transcript = new ActiveTranscriptState();
 	transcripts.push(transcript);
-	await transcript.loadMessages('chat-1');
+	await installDisplayOpen(transcript, 'chat-1');
 	const projection = new ConversationFeedProjectionState();
 	const reconcile = () => projection.reconcile({
 		surfaceIdentity: 'surface-1',

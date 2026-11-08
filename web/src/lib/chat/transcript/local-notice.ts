@@ -1,4 +1,5 @@
 import type { ChatOperationalNoticeType } from '$shared/ws-events';
+import { hash } from 'fast-sha256';
 
 export type LocalNoticeType = ChatOperationalNoticeType | 'progress';
 
@@ -14,5 +15,6 @@ export interface LocalNoticeRow {
 
 export async function diagnosticDigest(content: string): Promise<string> {
 	const bytes = new TextEncoder().encode(JSON.stringify(content));
-	return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+	const digest = globalThis.crypto?.subtle ? new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)) : hash(bytes);
+	return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 }

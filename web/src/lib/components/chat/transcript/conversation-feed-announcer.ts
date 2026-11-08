@@ -1,9 +1,11 @@
 import { isToolUseMessage } from '$shared/chat-types';
-import { RESPONSE_CLASSES, emptyResponseClassOrdinals, type ResponseClassOrdinals } from '$shared/transcript-display-events';
+import { ANNOUNCEMENT_CLASSES, emptyAnnouncementOrdinals, type AnnouncementOrdinals } from '$shared/transcript-display-events';
+import type { DisplayProfile, GroupDescriptor } from '$shared/transcript-display-contract';
 import type { ChatDisplayRow } from '$lib/chat/transcript/transcript-row-projection.js';
 import { cliPresentationLabel } from '$lib/chat/transcript/cli-presentation-style.js';
 import { commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 import { TOOL_DISPLAY_REGISTRY, getToolDisplayLabel } from '$lib/chat/tools/tool-display-registry.js';
+import { summarizeToolCounts } from '$lib/chat/tools/tool-use-summary.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export const CHAT_FEED_ANNOUNCEMENT_BATCH_MS = 350;
@@ -16,7 +18,9 @@ interface ConversationFeedAnnouncerInput {
 	watermark: number;
 	initialHead: number;
 	sourceHead: number;
-	responseClassOrdinals: ResponseClassOrdinals;
+	announcementOrdinals: AnnouncementOrdinals;
+	profile: Pick<DisplayProfile, 'showThinking' | 'hiddenToolGroups'>;
+	collapsedGroups: readonly GroupDescriptor[];
 	visible: boolean;
 	pinnedToBottom: boolean;
 	detachedStatus: string;
@@ -97,7 +101,7 @@ function announcementLineage(row: ChatDisplayRow): string | null {
 export class ConversationFeedAnnouncerState {
 	#surface = '';
 	#watermark = 0;
-	#responses: ResponseClassOrdinals = emptyResponseClassOrdinals();
+	#responses: AnnouncementOrdinals = emptyAnnouncementOrdinals();
 	#lineages = new Set<string>();
 	#detached = false;
 
@@ -109,9 +113,11 @@ export class ConversationFeedAnnouncerState {
 		const first = input.surfaceIdentity !== this.#surface;
 		if (first) this.reset();
 		const after = Math.max(this.#watermark, input.initialHead);
-		const freshResponse = RESPONSE_CLASSES.some(key => input.responseClassOrdinals[key] > Math.max(this.#responses[key], input.initialHead));
+		const freshResponse = ANNOUNCEMENT_CLASSES.some(key => (key !== 'thinking' || input.profile.showThinking)
+			&& !input.profile.hiddenToolGroups.some(hidden => hidden === key)
+			&& input.announcementOrdinals[key] > Math.max(this.#responses[key], input.initialHead));
 		const previousLineages = new Set(this.#lineages);
-		const chunks: string[] = [];
+		const candidates: { ordinal: number; text: string }[] = [];
 		for (const row of input.rows.slice(-512)) {
 			const lineage = announcementLineage(row);
 			const seen = lineage !== null && (previousLineages.has(lineage) || this.#lineages.has(lineage));
@@ -120,8 +126,14 @@ export class ConversationFeedAnnouncerState {
 			if (lineage !== null && (fresh || row.kind === 'message' && row.ordinal !== undefined && row.ordinal <= after)) this.#remember(lineage);
 			if (seen || !fresh) continue;
 			const text = announcementForAppendedRow(row);
-			if (text) chunks.push(text);
+			if (text) candidates.push({ ordinal: row.kind === 'message' ? row.ordinal ?? Infinity : Infinity, text });
 		}
+		for (const group of input.collapsedGroups) {
+			if (group.lastMember > after && group.lastMember <= input.watermark) {
+				candidates.push({ ordinal: group.firstMember, text: summarizeToolCounts(group.count, group.totals, group.categoryOrder).label });
+			}
+		}
+		const chunks = candidates.sort((left, right) => left.ordinal - right.ordinal).map(candidate => candidate.text);
 		let freshPermission = false;
 		for (const id of input.floatingPermissionOccurrences) {
 			const lineage = `permission:${id}`;
@@ -136,7 +148,7 @@ export class ConversationFeedAnnouncerState {
 		this.#watermark = Math.max(this.#watermark, input.watermark, input.initialHead,
 			!input.visible || !input.pinnedToBottom ? input.sourceHead : 0);
 		const responses = { ...this.#responses };
-		for (const key of RESPONSE_CLASSES) responses[key] = Math.max(responses[key], input.responseClassOrdinals[key]);
+		for (const key of ANNOUNCEMENT_CLASSES) responses[key] = Math.max(responses[key], input.announcementOrdinals[key]);
 		this.#responses = responses;
 		if (first || !input.visible) { this.#detached = false; return { kind: 'clear' }; }
 		if (!input.pinnedToBottom) {
@@ -150,7 +162,7 @@ export class ConversationFeedAnnouncerState {
 		return wasDetached ? { kind: 'clear' } : null;
 	}
 	reset(): void {
-		this.#surface = ''; this.#watermark = 0; this.#responses = emptyResponseClassOrdinals();
+		this.#surface = ''; this.#watermark = 0; this.#responses = emptyAnnouncementOrdinals();
 		this.#lineages.clear(); this.#detached = false;
 	}
 	#remember(id: string): void {

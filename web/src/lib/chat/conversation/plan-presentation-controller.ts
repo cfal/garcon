@@ -18,7 +18,7 @@ interface PlanRefresh {
 	request: PlanPresentationRequest;
 	identity: string;
 	revision: number;
-	enter: number | null;
+	enter: number;
 	abort: AbortController;
 	snapshot: PlanPresentationSnapshot | null;
 	index: number;
@@ -33,14 +33,23 @@ export class PlanPresentationController {
 	#chats = new Map<string, PlanRefresh>();
 	constructor(private readonly port: PlanPresentationPort, private readonly api: Pick<TranscriptDisplayApi, 'plan' | 'planDetail'> = transcriptDisplayApi) {}
 
-	refresh(request: PlanPresentationRequest, revision: number, knownThrough: number | null = null): void {
+	refresh(request: PlanPresentationRequest, revision: number, liveEnterOrdinal: number | null = null): void {
 		if (!this.port.isCurrent(request)) return;
 		const previous = this.#chats.get(request.chatId);
 		const sameIdentity = previous?.identity === this.#identity(request);
-		if (sameIdentity && previous.revision >= revision) return;
+		if (sameIdentity && previous.revision > revision) return;
+		if (sameIdentity && previous.revision === revision) { this.#enterLivePlan(previous, liveEnterOrdinal); return; }
 		if (sameIdentity) request = { ...request, afterOrdinal: previous.request.afterOrdinal };
-		const refresh = this.#begin(request, revision, knownThrough);
+		const refresh = this.#begin(request, revision);
+		this.#enterLivePlan(refresh, liveEnterOrdinal);
 		void this.#read(request, refresh);
+	}
+	#enterLivePlan(refresh: PlanRefresh, ordinal: number | null): void {
+		if (ordinal === null || ordinal <= refresh.enter) return;
+		refresh.enter = ordinal;
+		const chatId = refresh.request.chatId, previous = this.port.getPermissionMode(chatId);
+		if (previous && previous !== 'plan') this.port.conversationUi.beginPlanModeForChat(chatId, previous);
+		this.port.setPermissionMode(chatId, 'plan');
 	}
 	install(snapshot: PlanPresentationSnapshot): void {
 		if (!this.port.isCurrent(snapshot)) return;
@@ -66,11 +75,11 @@ export class PlanPresentationController {
 	}
 	destroy(): void { for (const chatId of this.#chats.keys()) this.remove(chatId); }
 	#identity(request: PlanPresentationRequest): string { return JSON.stringify([request.serverInstanceId, request.transcriptViewId]); }
-	#begin(request: PlanPresentationRequest, revision: number, knownThrough: number | null = null): PlanRefresh {
+	#begin(request: PlanPresentationRequest, revision: number): PlanRefresh {
 		const previous = this.#chats.get(request.chatId), identity = this.#identity(request);
 		previous?.abort.abort();
 		const sameIdentity = previous?.identity === identity;
-		const refresh: PlanRefresh = { request, identity, revision, enter: sameIdentity ? previous.enter : knownThrough,
+		const refresh: PlanRefresh = { request, identity, revision, enter: sameIdentity ? previous.enter : 0,
 			abort: new AbortController(), snapshot: sameIdentity ? previous.snapshot : null,
 			index: sameIdentity ? previous.index : 0, before: sameIdentity ? previous.before : [],
 			loading: true, error: null, selectionEpoch: 0, pending: null, metadataPending: false };
@@ -101,13 +110,6 @@ export class PlanPresentationController {
 		} else if (selected !== undefined) {
 			refresh.index = Math.max(0, snapshot.exits.findIndex(exit => exit.ordinal === selected));
 		}
-		const enter = snapshot.latestEnterOrdinal ?? 0;
-		if (refresh.enter !== null && enter > refresh.enter) {
-			const previous = this.port.getPermissionMode(snapshot.chatId);
-			if (previous && previous !== 'plan') this.port.conversationUi.beginPlanModeForChat(snapshot.chatId, previous);
-			this.port.setPermissionMode(snapshot.chatId, 'plan');
-		}
-		refresh.enter = Math.max(refresh.enter ?? 0, enter);
 		refresh.snapshot = snapshot;
 		refresh.revision = snapshot.revision;
 		await this.#select(snapshot.chatId, refresh);

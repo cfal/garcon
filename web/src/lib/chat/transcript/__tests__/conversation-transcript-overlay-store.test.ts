@@ -18,6 +18,20 @@ function optimistic(clientMessageId: string) {
 
 
 describe('ConversationTranscriptOverlayStore', () => {
+	it('retains equal diagnostics at distinct barriers as distinct occurrences', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const barrier = { serverInstanceId: 'instance-1', transcriptViewId: 'view-1', ordinal: 3 };
+		overlays.appendServerNotice('chat-1', 'error', 'Synthetic failure', barrier);
+		const first = overlays.forChat('chat-1').notices[0];
+		expect(overlays.appendServerNotice('chat-1', 'error', 'Synthetic failure', { ...barrier }).feedStructureChanged).toBe(false);
+		overlays.appendServerNotice('chat-1', 'error', 'Synthetic failure', { ...barrier, ordinal: 6 });
+		const notices = overlays.forChat('chat-1').notices;
+		expect(notices).toHaveLength(2);
+		expect(notices[0].transcriptBarrier?.ordinal).toBe(3);
+		expect(notices[1].id).not.toBe(first.id);
+		expect(notices[1].transcriptBarrier?.ordinal).toBe(6);
+	});
+
 	it('[TLV5-A07-WEB-UNIT-01] a fresh client restores resend candidates excluded only in the old client', () => {
 		const prior = new ConversationTranscriptOverlayStore();
 		prior.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);

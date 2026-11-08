@@ -375,7 +375,7 @@ export class ConversationSessionController {
 				const result = await transcript.controller.retry();
 				if (result === 'superseded' || transcript.activeChatId !== chatId) return;
 			}
-			await this.#loadChat(chatId, { restoreBottom: false }, transcript, loadPanelSnapshot);
+			await this.#loadChat(chatId, { restoreBottom: false }, { transcript, loadSnapshot: loadPanelSnapshot });
 		} catch {
 			// Leaves the panel's load error visible for another explicit retry.
 		}
@@ -384,17 +384,17 @@ export class ConversationSessionController {
 	async #loadChat(
 		chatId: string,
 		options: { restoreBottom?: boolean } = {},
-		transcript: SessionTranscriptLoadTarget = this.deps.chatState,
-		loadPanelSnapshot?: PanelTranscriptSnapshotLoader,
+		panel?: { transcript: SessionTranscriptLoadTarget; loadSnapshot: PanelTranscriptSnapshotLoader },
 	): Promise<void> {
 		const { deps } = this;
+		const transcript = panel?.transcript ?? deps.chatState;
 		if (transcript.activeChatId !== chatId) transcript.activateChat(chatId);
 		const loadOptions: ChatLoadMessagesOptions = { purpose: 'activation' };
-		if (loadPanelSnapshot) {
-			const loaded = await loadPanelSnapshot(loadOptions);
+		if (panel) {
+			const loaded = await panel.loadSnapshot(loadOptions);
 			if (!loaded) return;
 		} else {
-			await transcript.loadMessages(chatId, loadOptions);
+			await deps.chatState.loadMessages(chatId, loadOptions);
 		}
 		if (deps.sessions.selectedChatId !== chatId) return;
 
@@ -743,16 +743,20 @@ export class ConversationSessionController {
 		return this.#handoffForkConfirmation;
 	}
 
+	forkChat(sourceChatId: string, upToOrdinal?: number): Promise<void>;
+	forkChat(sourceChatId: string, upToOrdinal: number | undefined,
+		transcript: SessionTranscriptLoadTarget & ConversationForkSource['transcript'], loadPanelSnapshot: PanelTranscriptSnapshotLoader): Promise<void>;
 	forkChat(
 		sourceChatId: string,
 		upToOrdinal?: number,
 		transcript?: SessionTranscriptLoadTarget & ConversationForkSource['transcript'],
+		loadPanelSnapshot?: PanelTranscriptSnapshotLoader,
 	): Promise<void> {
-		const source = transcript
+		const source = transcript && loadPanelSnapshot
 			? ({
 					transcript,
 					refetchTranscript: () =>
-						this.#loadChat(sourceChatId, { restoreBottom: false }, transcript),
+						this.#loadChat(sourceChatId, { restoreBottom: false }, { transcript, loadSnapshot: loadPanelSnapshot }),
 				} satisfies ConversationForkSource)
 			: undefined;
 		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal, source);

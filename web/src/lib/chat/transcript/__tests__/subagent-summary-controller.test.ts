@@ -41,7 +41,24 @@ it('retains a finite previous page and cursor when navigation fails', async () =
 	expect(controller.page?.entries[0].anchorOrdinal).toBe(10);
 	expect(controller.hasPrevious).toBe(true);
 	await controller.previous();
+	expect(read.mock.calls.at(-1)?.[0]).toMatchObject({ afterOrder: 0, atWatermark: 20 });
 	expect(controller.page?.entries[0].anchorOrdinal).toBe(20);
+});
+
+it('does not return to live generation when Previous reaches the first page', async () => {
+	const { controller, read } = setup();
+	await vi.advanceTimersByTimeAsync(250);
+	read.mockResolvedValueOnce(page(10));
+	await controller.next();
+	controller.configure(target, 30);
+	read.mockImplementationOnce(async request => request.atWatermark === 20 ? page(20, 20) : { ...page(30), watermark: 30, sourceHead: 30 });
+	await controller.previous();
+	expect(controller.page?.watermark).toBe(20);
+	expect(controller.hasPrevious).toBe(false);
+	expect(controller.stale).toBe(true);
+	controller.ready();
+	await vi.advanceTimersByTimeAsync(2000);
+	expect(read).toHaveBeenCalledTimes(3);
 });
 
 it('retries preparation without claiming an authoritative empty page', async () => {

@@ -358,7 +358,7 @@ it('extends both member boundaries and reloads trimmed members without duplicate
 	]);
 });
 
-it.each([false, true])('remaps extended members around the current reading anchor, split=%s', async split => {
+it.each([false, true])('retains compatible extended members and recenters a split around the reading anchor, split=%s', async split => {
 	const whole = group(1, 200), f = fixture([whole]);
 	await f.controller.refresh();
 	await f.controller.expand(whole);
@@ -366,11 +366,12 @@ it.each([false, true])('remaps extended members around the current reading ancho
 	f.controller.setReadingAnchor(80, false);
 	if (split) f.replace([{ ...group(1, 50), base: whole.base }, { ...group(51, 200), base: whole.base }]);
 	await f.controller.refresh();
-	expect(f.api.members.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 80 });
+	expect(f.api.members.mock.calls.at(-1)![0].anchor).toEqual(split ? { kind: 'around', ordinal: 80 } : { kind: 'after', ordinal: 50 });
 	expect(f.controller.snapshot.expansions).toHaveLength(1);
 	expect(f.controller.snapshot.expansions[0].page.ordinals).toContain(80);
-	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(50);
-	expect(f.bodies.count).toBe(50);
+	expect(f.controller.snapshot.expansions[0].page.ordinals).toHaveLength(split ? 50 : 100);
+	if (!split) expect(f.controller.snapshot.expansions[0].page.ordinals).toEqual(Array.from({ length: 100 }, (_, index) => index + 1));
+	expect(f.bodies.count).toBe(split ? 50 : 100);
 });
 
 it.each(['collapse', 'replace-view', 'dispose'] as const)('ignores held member replies after %s without retaining bodies', async action => {

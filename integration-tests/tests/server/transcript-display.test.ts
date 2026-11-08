@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { appendDisplayRun, createDisplayChat, DISPLAY_TIMESTAMP } from '../../support/transcript-display-fixture.js';
-import { displayBodies, displayRequest } from '../../support/transcript-display.js';
+import { appendDisplayRun, createDisplayChat, DISPLAY_PROMPT, DISPLAY_TIMESTAMP } from '../../support/transcript-display-fixture.js';
+import { displayBodies, displayRequest, measuredDisplaySnapshot } from '../../support/transcript-display.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 import type { DisplayWindowRequest } from '../../../common/transcript-display-contract.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
@@ -27,9 +27,13 @@ test('[TLV5-DISPLAY.01-SERVER-01] real routes keep collapsed reads bounded and a
       expect(group?.count).toBe(seed.pairs);
       expect(window.items.some(item => item.kind === 'row' && item.ordinal === seed.promptOrdinal)).toBe(true);
       expect(window.items.length).toBeLessThanOrEqual(5);
-      const bodies = await displayBodies(fixture.client, request, window);
+      const measured = await measuredDisplaySnapshot(fixture.client, request, window), { bodies } = measured;
+      expect(measured.window).toEqual(window);
+      expect(bodies.bodies.find(row => row.ordinal === seed.promptOrdinal)?.message).toMatchObject({ type: 'user-message', content: DISPLAY_PROMPT });
+      expect(bodies.deferredOrdinals).not.toContain(seed.promptOrdinal);
+      expect(bodies.nonRenderedOrdinals).not.toContain(seed.promptOrdinal);
       expect(bodies.bodies.every(row => row.message.type !== 'bash-tool-use' && row.message.type !== 'tool-result')).toBe(true);
-      bytes.push(Buffer.byteLength(JSON.stringify({ window, bodies })));
+      bytes.push(measured.bytes);
       const resolved = await fixture.client.resolveDisplay({ ...request, anchor: { kind: 'around', ordinal: seed.targetOrdinal } });
       expect(resolved.kind).toBe('group-member');
       if (!group) throw new Error('Missing collapsed run.');

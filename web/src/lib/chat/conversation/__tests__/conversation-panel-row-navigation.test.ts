@@ -342,10 +342,11 @@ it('waits through a purpose-qualified successor open before loading its target',
 	const background = f.registry.loadChatSnapshot(chatId);
 	const activation = f.registry.loadChatSnapshot(chatId, { purpose: 'activation' });
 	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
-	first.release(snapshotPage()); await background;
+	first.release(snapshotPage());
 	await vi.waitFor(() => expect(f.api.open).toHaveBeenCalledTimes(2));
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
 	successor.release(snapshotPage()); await activation;
+	expect(await background).toBe(true);
 	expect(await work).toBe('completed');
 });
 

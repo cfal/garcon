@@ -34,7 +34,7 @@ export interface ConversationRouterStoreDeps {
 		| 'isChatProcessing'
 		| 'quietRefreshChats'
 	>;
-	chatState: ActiveTranscriptPort & { discardChat(chatId: string): void };
+	chatState: Pick<ActiveTranscriptPort, 'appendLocalNotice'> & { discardChat(chatId: string): void };
 	agentState: AgentState;
 	lifecycle: Pick<
 		ConversationLifecycleState,
@@ -76,7 +76,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		},
 		chatState: {
 			getChatCursor: (chatId) => deps.panels.knownHead(chatId),
-			observeHead: (chatId, view, ordinal, types) => deps.panels.observeHead(chatId, view, ordinal, types),
+			observeHead: (chatId, view, ordinal, types, announcements) => deps.panels.observeHead(chatId, view, ordinal, types, announcements),
 			acknowledgeInput: (chatId, view, id, ordinal) => deps.panels.acknowledgeInput(chatId, view, id, ordinal),
 			displayReady: message => {
 				for (const panel of deps.panels.panelsForChat(message.chatId)) {

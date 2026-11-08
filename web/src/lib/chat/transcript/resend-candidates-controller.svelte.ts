@@ -27,6 +27,7 @@ export class ResendCandidatesController {
 	}
 
 	activate(target: ResendSnapshotRequest | null, head: number): void {
+		if (sameTarget(target, this.#target)) { this.observeHead(head); return; }
 		this.reset();
 		this.#target = target;
 		this.#head = head;

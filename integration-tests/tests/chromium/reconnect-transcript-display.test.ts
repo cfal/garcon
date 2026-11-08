@@ -114,3 +114,46 @@ test('[TLV5-DISPLAY.07-CHROMIUM-03] rejects held recovery from a view replaced b
     await wire.settle();
   });
 }, 120_000);
+
+test('restores a mounted detached semantic anchor after the controller process restarts', async () => {
+  await withChromiumFixture('display-restart-detached-anchor', async ({ page, integration, withExpectedConsoleErrors }) => {
+    const chatId = await createDisplayChat(integration);
+    await integration.restartGarcon({ beforeStart: () => appendDisplayHistory(integration.dirs.workspace, chatId, 500) });
+    const wire = await observeDisplayWire(page);
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    await waitForDisplayIdle(page);
+    await page.locator(DISPLAY_FEED).evaluate(feed => {
+      feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -500 }));
+      feed.scrollTop = (feed.scrollHeight - feed.clientHeight) / 2;
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await waitForDisplayIdle(page);
+    const anchor = await page.locator(DISPLAY_FEED).evaluate(feed => {
+      const top = feed.getBoundingClientRect().top;
+      const row = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(row => row.getBoundingClientRect().top >= top);
+      if (!row) throw new Error('No detached reading row');
+      return { id: row.getAttribute('data-chat-row-id')!, offset: row.getBoundingClientRect().top - top };
+    });
+    const oldInstance = (await integration.client.openDisplay({ chatId, reason: 'reconnect', outstandingClientMessageIds: [] })).serverInstanceId;
+    await withExpectedConsoleErrors([
+      /^Failed to load resource: net::ERR_CONNECTION_REFUSED$/,
+      /^WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
+      /^WebSocket error: \{readyState: [03], visibilityState: visible, online: true\}$/,
+    ], async () => {
+      await integration.crashAndRestartGarcon({ reusePort: true });
+      const open = await integration.client.openDisplay({ chatId, reason: 'reconnect', outstandingClientMessageIds: [] });
+      expect(open.serverInstanceId).not.toBe(oldInstance);
+      await browserExpect.poll(() => wire.http.some(reply => reply.operation === 'open'
+        && (reply.body as { serverInstanceId?: string }).serverInstanceId === open.serverInstanceId), { timeout: 20_000 }).toBe(true);
+      await browserExpect(page.locator(`[data-chat-row-id="${anchor.id}"]`)).toBeVisible();
+      await waitForDisplayIdle(page);
+    });
+    await browserExpect(page.locator(DISPLAY_FEED)).toHaveAttribute('data-chat-pinned-to-bottom', 'false');
+    const offset = await page.locator(`[data-chat-row-id="${anchor.id}"]`).evaluate(row =>
+      row.getBoundingClientRect().top - row.closest('[data-chat-scroll-viewport]')!.getBoundingClientRect().top);
+    expect(Math.abs(offset - anchor.offset)).toBeLessThanOrEqual(1);
+    await wire.settle();
+    expect(wire.requests).not.toContain('/api/v1/chats/messages');
+  });
+}, 120_000);

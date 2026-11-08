@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UserMessage } from '$shared/chat-types';
+import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import type { DisplayOpenResponse } from '$shared/transcript-display-open';
-import { displayProfileKey } from '$shared/transcript-display-contract';
+import { displayProfileKey, type GroupDescriptor } from '$shared/transcript-display-contract';
+import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte';
-import { displayOpen, displayRow, DISPLAY_TIME, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures';
+import { displayCertificate, displayOpen, displayRow, displayWindow, DISPLAY_TIME, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte';
 import { ConversationPanelRegistry, type ConversationPanelDescriptor, type ConversationPanelPresentationPort } from '../conversation-panel-registry.svelte';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript';
@@ -43,6 +44,120 @@ function port(target: ReturnType<ConversationPanelPresentationPort['captureResto
 const pendingInput = { chatId: 'chat-1', clientMessageId: 'input-1', content: 'Synthetic input', createdAt: DISPLAY_TIME, delivery: 'pending' as const };
 
 describe('display surface registry', () => {
+	it.each(['success', 'failure'] as const)('ignores late activation %s after rapid chat switching', async outcome => {
+		let selected = 'chat-1';
+		const { registry, api } = fixture({ getSelectedChatId: () => selected });
+		const held = Promise.withResolvers<DisplayOpenResponse>();
+		api.open.mockImplementationOnce(() => held.promise);
+		registry.reconcile([presentation(left)]);
+		const loading = registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(api.open).toHaveBeenCalledOnce());
+		const old = registry.panel(left)!.transcript;
+		selected = 'chat-2';
+		api.replace([displayRow(1)], displayOpen('chat-2', 'view-2', 1));
+		registry.reconcile([presentation(left, 'chat-2')]);
+		await registry.loadChatSnapshot('chat-2');
+		if (outcome === 'success') held.resolve(displayOpen('chat-1', 'view-1', 1));
+		else held.reject(new Error('Synthetic stale open failure'));
+		expect(await loading).toBe(false);
+		expect(old.openSnapshot).toBeNull();
+		expect(registry.panel(left)!.transcript.transcriptViewId).toBe('view-2');
+		expect(registry.panel(left)!.transcript.loadError).toBeNull();
+	});
+
+	it.each(['http', 'pong'] as const)('restores a mounted detached target after a same-view %s process replacement', async origin => {
+		const { registry, api } = fixture();
+		const rows = Array.from({ length: 200 }, (_, index) => displayRow(index + 1));
+		api.replace(rows);
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const panel = registry.panel(left)!;
+		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 89, viewportOffset: -12 };
+		panel.attachPresentation(port(target));
+		panel.scroll.setPinnedToBottom(false);
+		panel.transcript.controller.setReadingAnchor(89, false);
+		const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		api.window.mockClear();
+		api.replace(rows, displayOpen('chat-1', 'view-1', 200, 'instance-2'));
+		if (origin === 'pong') registry.resetServerInstance('instance-2');
+		else await registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:89' }, { viewportOffset: -12 }));
+		expect(api.window).toHaveBeenCalled();
+		expect(api.window.mock.calls.every(([request]) => request.anchor.kind === 'around' && request.anchor.ordinal === 89)).toBe(true);
+		expect(panel.scroll.isPinnedToBottom).toBe(false);
+	});
+
+	it('keeps a parked semantic target but releases its bodies across a process replacement', async () => {
+		const { registry, api, bodies } = fixture();
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const original = registry.panel(left)!.transcript;
+		registry.panel(left)!.attachPresentation(port({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 }));
+		api.replace([displayRow(1)], displayOpen('chat-2', 'view-2', 1));
+		registry.reconcile([presentation(left, 'chat-2')]);
+		await registry.loadChatSnapshot('chat-2');
+		api.replace([displayRow(1)], displayOpen('chat-2', 'view-2', 1, 'instance-2'));
+		registry.resetServerInstance('instance-2');
+		expect(bodies.usage(original.controller).count).toBe(0);
+		await registry.loadChatSnapshot('chat-2');
+		api.replace([displayRow(1)], displayOpen('chat-1', 'view-1', 1, 'instance-2'));
+		registry.reconcile([presentation(left)]);
+		const restored = registry.panel(left)!;
+		const jump = vi.spyOn(restored.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		restored.attachPresentation(port({ kind: 'end' }));
+		await registry.loadChatSnapshot('chat-1');
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledWith(
+			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' }, { viewportOffset: -12 }));
+		expect(restored.transcript).not.toBe(original);
+	});
+
+	it('does not cancel a held member expansion when a same-chat sibling opens', async () => {
+		const { registry, api } = fixture();
+		const open = displayOpen('chat-1', 'view-1', 2);
+		api.replace([1, 2].map(ordinal => displayRow(ordinal, new BashToolUseMessage(DISPLAY_TIME, `tool-${ordinal}`, 'true'))), open);
+		const group: GroupDescriptor = { kind: 'tool-group', firstMember: 1, lastMember: 2, count: 2,
+			base: { afterBreaker: 0, beforeBreaker: 3, firstMember: 1, lastMember: 2, openAtWatermark: true },
+			fragment: { after: 0, through: 2 }, totals: { commands: 2, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] };
+		api.window.mockImplementation(async request => displayWindow([group], displayCertificate(open, request.profile)));
+		const gate = Promise.withResolvers<void>();
+		const members = vi.spyOn(transcriptDisplayApi, 'members').mockImplementation(async request => {
+			await gate.promise;
+			return { certificate: request.certificate, base: request.base, fragment: request.fragment,
+				ordinals: [1, 2], earlier: null, later: null };
+		});
+		registry.reconcile([presentation(left)]);
+		await registry.loadChatSnapshot('chat-1');
+		const transcript = registry.panel(left)!.transcript;
+		const expanding = transcript.expandGroup(group);
+		try {
+			await vi.waitFor(() => expect(members).toHaveBeenCalledOnce());
+			registry.reconcile([presentation(left), presentation(right)]);
+			await registry.loadChatSnapshot('chat-1');
+			expect(members.mock.calls[0][1]?.aborted).toBe(false);
+			gate.resolve();
+			expect(await expanding).toBe('loaded');
+			expect(transcript.display.expansions[0]?.page.ordinals).toEqual([1, 2]);
+		} finally { gate.resolve(); await expanding; }
+	});
+
+	it.each([false, true])('retains two-input submission order on a lagging sibling, later ack first=%s', async laterFirst => {
+		const { registry, api } = fixture();
+		registry.reconcile([presentation(left), presentation(right)]);
+		await registry.loadChatSnapshot('chat-1');
+		const fast = registry.panel(left)!.transcript, slow = registry.panel(right)!.transcript;
+		const a = { ...pendingInput, clientMessageId: 'z-first' }, b = { ...pendingInput, clientMessageId: 'a-second' };
+		registry.upsertOptimisticInput('chat-1', a);
+		registry.upsertOptimisticInput('chat-1', b);
+		if (laterFirst) registry.acknowledgeInput('chat-1', 'view-1', b.clientMessageId, 3);
+		registry.acknowledgeInput('chat-1', 'view-1', a.clientMessageId, 2);
+		api.replace([displayRow(1), displayRow(2, new UserMessage(DISPLAY_TIME, a.content, undefined, { clientMessageId: a.clientMessageId }))]);
+		await fast.controller.refresh();
+		await vi.waitFor(() => expect(fast.visibleOptimisticInputs.map(input => input.clientMessageId)).toEqual([b.clientMessageId]));
+		expect(slow.visibleOptimisticInputs.map(input => input.clientMessageId)).toEqual([a.clientMessageId, b.clientMessageId]);
+		expect(slow.overlayRows.map(row => row.id)).toEqual([`optimistic:${a.clientMessageId}`, `optimistic:${b.clientMessageId}`]);
+	});
+
 	it.each([false, true])('retires old-view overlays when an open first reveals replacement, restarted=%s', async restarted => {
 		const { registry, api, overlays } = fixture();
 		registry.reconcile([presentation(left)]);

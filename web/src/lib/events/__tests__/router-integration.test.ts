@@ -7,7 +7,7 @@ import RouterIntegrationHost from './RouterIntegrationHost.svelte';
 import type { EventRouterStores } from '../router.svelte';
 import { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import { ChatTranscriptHeadUpdatedMessage, ChatInputCommittedMessage, ChatDisplayStateUpdatedMessage, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
+import { ChatTranscriptHeadUpdatedMessage, ChatInputCommittedMessage, ChatDisplayStateUpdatedMessage, emptyAnnouncementOrdinals, emptyResponseClassOrdinals } from '$shared/transcript-display-events';
 import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -251,6 +251,10 @@ describe('event router integration', () => {
 
 	it('enters live plan mode from a background head without opening its transcript', async () => {
 		const stores = createStores();
+		vi.mocked(stores.chatState.getChatCursor).mockReturnValue(null);
+		vi.mocked(stores.chatState.observeHead).mockImplementation((_chat, view, ordinal) => {
+			vi.mocked(stores.chatState.getChatCursor).mockReturnValue({ transcriptViewId: view, lastOrdinal: ordinal });
+		});
 		stores.conversationUi.confirmExecutionControlSocketInstance('server-instance-1');
 		const plan = vi.spyOn(transcriptDisplayApi, 'plan').mockResolvedValue({
 			serverInstanceId: 'server-instance-1', chatId: 'chat-b', transcriptViewId: 'generation-current',
@@ -258,7 +262,7 @@ describe('event router integration', () => {
 		});
 		try {
 			renderRouterWithRawMessages([{ ...new ChatTranscriptHeadUpdatedMessage('server-instance-1', 'chat-b',
-				'generation-current', 2, null, null, emptyResponseClassOrdinals(), 1, 0) }], stores);
+				'generation-current', 2, null, null, emptyResponseClassOrdinals(), 1, 0, emptyAnnouncementOrdinals(), 2) }], stores);
 			await vi.waitFor(() => expect(stores.agentSettings.setPermissionMode).toHaveBeenCalledWith('chat-b', 'plan'));
 			expect(stores.chatState.loadRenderedChat).not.toHaveBeenCalled();
 			expect(stores.chatState.reloadChatTranscript).not.toHaveBeenCalled();
@@ -409,7 +413,7 @@ describe('event router integration', () => {
 	it('applies selected compact heads and patches the sidebar preview', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages([head()], stores);
-		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 2, { ...emptyResponseClassOrdinals(), assistant: 2 });
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 2, { ...emptyResponseClassOrdinals(), assistant: 2 }, emptyAnnouncementOrdinals());
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 	});
 
@@ -419,7 +423,7 @@ describe('event router integration', () => {
 		expect(stores.sessions.patchPreview).not.toHaveBeenCalled();
 		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-a', TS);
 		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', TS);
-		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 3, { ...emptyResponseClassOrdinals(), thinking: 3 });
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-a', 'generation-current', 3, { ...emptyResponseClassOrdinals(), thinking: 3 }, emptyAnnouncementOrdinals());
 	});
 
 	it('recovers background transient controls without admitting a display index', async () => {
@@ -449,7 +453,7 @@ describe('event router integration', () => {
 	it.each(['chat-a', 'chat-b'])('accepts coalesced head jumps for %s without raw replay', chatId => {
 		const stores = createStores();
 		renderRouterWithRawMessages([head(chatId, 400, 'current preview')], stores);
-		expect(stores.chatState.observeHead).toHaveBeenCalledWith(chatId, 'generation-current', 400, { ...emptyResponseClassOrdinals(), assistant: 400 });
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith(chatId, 'generation-current', 400, { ...emptyResponseClassOrdinals(), assistant: 400 }, emptyAnnouncementOrdinals());
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith(chatId, 'current preview', TS);
 		expect(stores.chatState.reloadChatTranscript).not.toHaveBeenCalled();
 		expect(stores.chatState.loadRenderedChat).not.toHaveBeenCalled();
@@ -513,7 +517,7 @@ describe('event router integration', () => {
 		const stores = createStores();
 		vi.mocked(stores.chatState.isRenderedChat).mockReturnValue(true);
 		renderRouterWithRawMessages([head('chat-b')], stores);
-		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-b', 'generation-current', 2, expect.any(Object));
+		expect(stores.chatState.observeHead).toHaveBeenCalledWith('chat-b', 'generation-current', 2, expect.any(Object), emptyAnnouncementOrdinals());
 		expect(stores.navigation.navigateToChat).not.toHaveBeenCalled();
 	});
 

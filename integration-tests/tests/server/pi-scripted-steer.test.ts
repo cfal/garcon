@@ -85,7 +85,11 @@ describe('scripted Pi steering', () => {
         steerRequest.clientMessageId,
         { afterIndex: pendingCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
-      expect(committedSteer.ordinal).toBeGreaterThan(0);
+      const committedPage = await fixture.client.getMessages(chatId, {
+        transcriptViewId: committedSteer.transcriptViewId, beforeOrdinal: committedSteer.ordinal + 1, limit: 1,
+      });
+      expect(committedPage.messages).toMatchObject([{ ordinal: committedSteer.ordinal,
+        message: { type: 'user-message', content: steerPrompt, metadata: { clientMessageId: steerRequest.clientMessageId } } }]);
 
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {

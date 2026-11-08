@@ -3,15 +3,23 @@ import type { PromptRecallSource } from '$lib/chat/composer/prompt-recall.js';
 import { transcriptDisplayApi, type TranscriptDisplayApi } from '$lib/api/transcript-display.js';
 import { DISPLAY_BYTE_BUDGET, displayCutsKey, displayProfileKey, sameDisplayCertificate } from '$shared/transcript-display-contract';
 
+export function displayPromptRecallIdentity(open: DisplayOpenResponse | null): string | null {
+	return open ? JSON.stringify([open.serverInstanceId, open.chat.id, open.transcriptViewId]) : null;
+}
+
 export function displayPromptRecall(open: DisplayOpenResponse, getBashRevision: () => string,
 	api: Pick<TranscriptDisplayApi, 'userRows' | 'window' | 'bodies'> = transcriptDisplayApi): PromptRecallSource {
 	const target = { chatId: open.chat.id, transcriptViewId: open.transcriptViewId };
+	let goal: number | null = null;
 	return {
 		async list(signal) {
-			const page = await api.userRows({ ...target, mode: 'recall', limit: 100 }, signal);
+			const page = await api.userRows({ ...target, mode: 'recall', limit: 100, ...(goal === null ? {} : { atWatermark: goal }) }, signal);
+			signal.throwIfAborted();
 			if (page.serverInstanceId !== open.serverInstanceId || page.chatId !== target.chatId || page.transcriptViewId !== target.transcriptViewId) throw new Error('Transcript changed');
+			goal ??= page.sourceHead;
 			if (page.kind === 'failed') throw new Error(page.errorCode ?? 'Prompt history unavailable');
-			if (page.kind !== 'available') return [];
+			if (page.kind !== 'available' || page.watermark < goal) return [];
+			if (page.watermark !== goal) throw new Error('Transcript changed');
 			return page.rows.map(row => ({ ordinal: row.ordinal, watermark: page.watermark }));
 		},
 		async load({ ordinal, watermark }, signal) {

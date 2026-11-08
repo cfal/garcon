@@ -21,7 +21,7 @@ export interface ReconnectPanelRegistryPort {
 	visibleChatIds(): readonly string[];
 	cancelRefreshes(): void;
 	resetServerInstance(serverInstanceId: string): void;
-	loadChatSnapshot(chatId: string): Promise<boolean>;
+	refreshChatSnapshot(chatId: string): Promise<boolean>;
 }
 
 export type ReconnectConversationUiState = Pick<
@@ -56,7 +56,7 @@ export class ChatReconnectCoordinator {
 				const message = parseServerWsMessage(data);
 				if (!(message instanceof WsPongMessage)) return false;
 				this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId);
-			this.options.panels.resetServerInstance(message.serverInstanceId);
+				this.options.panels.resetServerInstance(message.serverInstanceId);
 				return false;
 			});
 			return () => { unsubscribe(); this.dispose(); };
@@ -73,7 +73,6 @@ export class ChatReconnectCoordinator {
 		if (!connected) {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
-			this.options.panels.cancelRefreshes();
 			this.options.conversationUi.markExecutionControlSocketDisconnected();
 			return;
 		}
@@ -95,7 +94,7 @@ export class ChatReconnectCoordinator {
 		const listRefresh = this.#refreshChatsQuietly();
 		const refreshes = this.options.panels.visibleChatIds().map(async chatId => {
 			if (epoch !== this.#reconnectEpoch) return;
-			try { await this.options.panels.loadChatSnapshot(chatId); } catch { /* A surface retains its explicit retry state. */ }
+			try { await this.options.panels.refreshChatSnapshot(chatId); } catch { /* A surface retains its explicit retry state. */ }
 		});
 		await Promise.all([...refreshes, controlRefresh, listRefresh]);
 	}

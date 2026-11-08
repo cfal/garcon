@@ -15,6 +15,7 @@ import {
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
+import { AssistantMessage } from '../../../common/chat-types.js';
 import { ChatTranscriptHeadUpdatedMessage, emptyResponseClassOrdinals } from '../../../common/transcript-display-events.js';
 import { reusableListenPort } from '../../support/execution-backend.js';
 import { redactSensitiveEnvironmentText } from '../../support/garcon-process.js';
@@ -1299,6 +1300,26 @@ describe('integration support contracts', () => {
     } finally {
       await client?.disconnect().catch(() => undefined);
       server.stop(true);
+    }
+  });
+
+  test.each([false, true])('canonical repeated-content waits remain fenced without compact head delivery, replaced=%s', async replaced => {
+    let socket: ControlledWebSocket | null = null;
+    const client = await GarconTestClient.connect('http://garcon.test', { createWebSocket: () => socket = new ControlledWebSocket() });
+    const page = (ordinal: number, view = 'view') => ({ chatId: 'chat', transcriptViewId: view, lastOrdinal: ordinal,
+      messages: [{ ordinal, message: new AssistantMessage('2026-01-01T00:00:00.000Z', 'Repeated synthetic notice') }],
+      pageOldestOrdinal: ordinal, pageNewestOrdinal: ordinal, nextBeforeOrdinal: null, resendCandidates: [], hasMore: false, limit: 200 });
+    const reads = spyOn(client, 'getMessages').mockResolvedValueOnce(page(5)).mockResolvedValue(page(6, replaced ? 'replacement' : 'view'));
+    try {
+      expect(client.observedHead('chat')).toBe(0);
+      const waiting = client.waitForMessages('chat', result => result.messages.some(row => row.message.type === 'assistant-message' && row.message.content === 'Repeated synthetic notice'),
+        { transcriptViewId: 'view', afterOrdinal: 5 });
+      if (replaced) expect(await throwingRejectionOf(waiting)).toThrow('Transcript view changed');
+      else expect((await waiting).messages.map(row => row.ordinal)).toEqual([6]);
+      expect(reads).toHaveBeenCalledTimes(2);
+    } finally {
+      reads.mockRestore();
+      const close = client.close(); socket!.finishClose(); await close;
     }
   });
 

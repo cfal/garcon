@@ -41,12 +41,12 @@ function fixture() {
 }
 
 describe('plan presentation ownership', () => {
-	it.each([null, 0, 1])('uses the known head %s to distinguish a first live plan entry from history', async knownThrough => {
+	it.each([null, 1])('uses explicit live entry %s for a background chat with no known cursor', async liveEnter => {
 		const test = fixture();
 		test.setRendered(false);
-		test.controller.refresh(identity, 1, knownThrough);
+		test.controller.refresh(identity, 1, liveEnter);
 		await vi.waitFor(() => expect(test.presentation.loading).toBe(false));
-		expect(test.port.setPermissionMode.mock.calls).toEqual(knownThrough === 0 ? [['chat-1', 'plan']] : []);
+		expect(test.port.setPermissionMode.mock.calls).toEqual(liveEnter === 1 ? [['chat-1', 'plan']] : []);
 		expect(test.api.planDetail).not.toHaveBeenCalled();
 	});
 	it('preserves selection and enter-mode handling on same-revision installs', async () => {
@@ -68,7 +68,21 @@ describe('plan presentation ownership', () => {
 		expect(test.port.setPermissionMode).not.toHaveBeenCalled();
 		test.controller.install({ ...snapshot(), revision: 2, latestEnterOrdinal: 25 });
 		await vi.waitFor(() => expect(test.presentation.loading).toBe(false));
+		expect(test.port.setPermissionMode).not.toHaveBeenCalled();
+		test.controller.refresh(identity, 2, 25);
+		test.controller.refresh(identity, 2, 25);
+		test.controller.install({ ...snapshot(), revision: 2, latestEnterOrdinal: 25 });
 		expect(test.port.setPermissionMode).toHaveBeenCalledExactlyOnceWith('chat-1', 'plan');
+	});
+
+	it('does not apply a delayed live entry older than the installed plan revision', async () => {
+		const test = fixture();
+		test.controller.install({ ...snapshot(), revision: 2, latestEnterOrdinal: 25 });
+		await vi.waitFor(() => expect(test.presentation.loading).toBe(false));
+		test.controller.refresh(identity, 1, 1);
+		expect(test.port.setPermissionMode).not.toHaveBeenCalled();
+		expect(test.port.conversationUi.beginPlanModeForChat).not.toHaveBeenCalled();
+		expect(test.api.plan).not.toHaveBeenCalled();
 	});
 
 	it('retries failed newer metadata instead of accepting its old installed snapshot', async () => {

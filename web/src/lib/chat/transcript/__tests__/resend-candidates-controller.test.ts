@@ -59,9 +59,23 @@ it('refreshes on reactivation, reconnect, and processing-to-idle even at an unch
 	expect(read).toHaveBeenCalledTimes(2);
 	expect(overlays.forChat(target.chatId).excludedResendOrdinals).toEqual([1]);
 	controller.activate(target, 2);
-	expect(controller.current).toBeNull();
+	expect(controller.current).toEqual(snapshot());
 	await vi.advanceTimersByTimeAsync(250);
-	expect(read).toHaveBeenCalledTimes(3);
+	expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('keeps an in-flight read when an identical sibling open is admitted', async () => {
+	const { controller, read } = setup();
+	const held = Promise.withResolvers<ResendSnapshot>();
+	read.mockReturnValueOnce(held.promise);
+	const pending = controller.refresh();
+	controller.activate({ ...target }, 2);
+	expect(read.mock.calls[0][1].aborted).toBe(false);
+	held.resolve(snapshot());
+	await pending;
+	expect(controller.current).toEqual(snapshot());
+	await vi.advanceTimersByTimeAsync(1000);
+	expect(read).toHaveBeenCalledTimes(1);
 });
 
 it('rejects an obsolete response and reads once more for coalesced newer heads', async () => {

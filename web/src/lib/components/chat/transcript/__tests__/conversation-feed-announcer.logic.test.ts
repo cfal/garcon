@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, CliRowMessage, CommandOutputMessage, CommandResultMessage,
-	ExternalToolUseMessage, McpToolUseMessage, PermissionRequestMessage, ToolResultMessage, UnknownToolUseMessage, UserMessage, WaitToolUseMessage,
+	ExternalToolUseMessage, McpToolUseMessage, PermissionRequestMessage, ToolResultMessage, UnknownToolUseMessage, UserMessage, WaitToolUseMessage, ThinkingMessage,
 	type ChatMessage } from '$shared/chat-types';
-import { emptyResponseClassOrdinals, type ResponseClassOrdinals } from '$shared/transcript-display-events';
+import { emptyAnnouncementOrdinals, transcriptActivity, type AnnouncementOrdinals } from '$shared/transcript-display-events';
+import type { GroupDescriptor } from '$shared/transcript-display-contract';
 import type { ChatDisplayRow } from '$lib/chat/transcript/transcript-row-projection.js';
 import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS, ConversationFeedAnnouncementBatcher, ConversationFeedAnnouncerState,
 	announcementForAppendedRow, plainAnnouncementText } from '../conversation-feed-announcer.js';
@@ -10,10 +11,11 @@ import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS, ConversationFeedAnnouncementBatcher, C
 const row = (ordinal: number, message: ChatMessage): ChatDisplayRow => ({ kind: 'message', id: `view:${ordinal}`, ordinal, message });
 const assistant = (ordinal: number, text: string) => row(ordinal, new AssistantMessage('', text));
 const permission = (ordinal: number, id = 'permission-1') => row(ordinal, new PermissionRequestMessage('', id, new BashToolUseMessage('', 'tool-1', 'true')));
-const responses = (values: Partial<ResponseClassOrdinals> = {}): ResponseClassOrdinals => ({ ...emptyResponseClassOrdinals(), ...values });
+const responses = (values: Partial<AnnouncementOrdinals> = {}): AnnouncementOrdinals => ({ ...emptyAnnouncementOrdinals(), ...values });
 function input(overrides: Partial<Parameters<ConversationFeedAnnouncerState['reconcile']>[0]> = {}) {
 	return { surfaceIdentity: 'chat:view', rows: [assistant(1, 'Existing')], watermark: 1, initialHead: 1, sourceHead: 1,
-		responseClassOrdinals: responses({ assistant: 1 }), visible: true, pinnedToBottom: true,
+		announcementOrdinals: responses({ assistant: 1 }), profile: { showThinking: true, hiddenToolGroups: [] },
+		collapsedGroups: [], visible: true, pinnedToBottom: true,
 		detachedStatus: 'New response available', floatingPermissionOccurrences: [], ...overrides };
 }
 function initialized() {
@@ -23,6 +25,49 @@ function initialized() {
 }
 
 describe('certified feed announcements', () => {
+	it('keeps detached hidden-only activity silent without fetching bodies', () => {
+		const messages = [new WaitToolUseMessage('', 'tool', 'execution'), new ThinkingMessage('', 'Hidden thinking'),
+			new UnknownToolUseMessage('', 'tool', 'private_name', {}), new BashToolUseMessage('', 'tool', 'true'),
+			new CommandResultMessage('', 'command', { outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' } })];
+		for (const message of messages) {
+			const announcer = initialized();
+			const facts = transcriptActivity([{ ordinal: 2, message }]);
+			expect(announcer.reconcile(input({ pinnedToBottom: false, sourceHead: 2,
+				announcementOrdinals: facts.announcementOrdinals,
+				profile: { showThinking: false, hiddenToolGroups: ['bash'] } }))).toBeNull();
+		}
+	});
+
+	it('announces certified collapsed summary growth once, never historical expansion', () => {
+		const announcer = initialized();
+		const group: GroupDescriptor = { kind: 'tool-group', firstMember: 2, lastMember: 3, count: 2,
+			base: { afterBreaker: 1, beforeBreaker: 4, firstMember: 2, lastMember: 3, openAtWatermark: true },
+			fragment: { after: 1, through: 3 }, totals: { commands: 2, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] };
+		const next = input({ rows: [], sourceHead: 3, watermark: 3, collapsedGroups: [group] });
+		expect(announcer.reconcile(next)).toMatch(/2 commands/);
+		expect(announcer.reconcile(next)).toBeNull();
+		expect(announcer.reconcile({ ...next, collapsedGroups: [], rows: [row(2, new BashToolUseMessage('', 'tool', 'true'))] })).toBeNull();
+	});
+	it('announces collapsed groups between surrounding canonical rows, before trailing notices', () => {
+		const announcer = initialized();
+		const group: GroupDescriptor = { kind: 'tool-group', firstMember: 3, lastMember: 4, count: 2,
+			base: { afterBreaker: 2, beforeBreaker: 5, firstMember: 3, lastMember: 4, openAtWatermark: false },
+			fragment: { after: 2, through: 4 }, totals: { commands: 2, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] };
+		const notice: ChatDisplayRow = { kind: 'local-notice', id: 'notice', noticeType: 'info', content: 'Local notice', timestamp: '' };
+		expect(announcer.reconcileUpdate(input({ rows: [assistant(2, 'Before'), assistant(5, 'After'), notice],
+			watermark: 5, sourceHead: 5, collapsedGroups: [group] }))).toEqual({ kind: 'announce',
+			chunks: ['Before', expect.stringMatching(/2 commands/), 'After', 'Local notice'] });
+	});
+	it.each([false, true])('speaks only visible generic summary counts for private tools, mixed=%s', mixed => {
+		const announcer = initialized();
+		const group: GroupDescriptor = { kind: 'tool-group', firstMember: 2, lastMember: 3, count: 2,
+			base: { afterBreaker: 1, beforeBreaker: 4, firstMember: 2, lastMember: 3, openAtWatermark: true },
+			fragment: { after: 1, through: 3 }, totals: { commands: mixed ? 1 : 0, fileReads: 0, fileEdits: 0, other: mixed ? 1 : 2 },
+			categoryOrder: mixed ? ['commands', 'other'] : ['other'] };
+		const speech = announcer.reconcile(input({ rows: [], watermark: 3, sourceHead: 3, collapsedGroups: [group] }));
+		expect(speech).toBe(mixed ? 'Execute a command, an action' : '2 actions');
+		expect(speech).not.toMatch(/private_name|private_tool|server/);
+	});
 	it.each([false, true])('does not consume future permission lineage before it can be announced, floating=%s', floating => {
 		const announcer = initialized();
 		const future = input({ rows: [permission(2)], sourceHead: 2 });
@@ -34,7 +79,7 @@ describe('certified feed announcements', () => {
 	it('announces newly accepted rows, not descriptor refreshes or historical member hydration', () => {
 		const announcer = initialized();
 		const next = input({ rows: [assistant(1, 'Existing'), assistant(2, '**New** response')], watermark: 2, sourceHead: 2,
-			responseClassOrdinals: responses({ assistant: 2 }) });
+			announcementOrdinals: responses({ assistant: 2 }) });
 		expect(announcer.reconcile(next)).toBe('New response');
 		expect(announcer.reconcile(next)).toBeNull();
 		expect(announcer.reconcile({ ...next, rows: [row(1, new BashToolUseMessage('', 'tool-1', 'true')), ...next.rows] })).toBeNull();
@@ -42,38 +87,38 @@ describe('certified feed announcements', () => {
 
 	it('waits for hydration after a live head notification', () => {
 		const announcer = initialized();
-		const head = input({ sourceHead: 2, responseClassOrdinals: responses({ assistant: 2 }) });
+		const head = input({ sourceHead: 2, announcementOrdinals: responses({ assistant: 2 }) });
 		expect(announcer.reconcile(head)).toBeNull();
 		expect(announcer.reconcile({ ...head, watermark: 2, rows: [assistant(2, 'Prepared response')] })).toBe('Prepared response');
 	});
 
 	it('does not announce filtered or collapsed member bodies merely because the head advances', () => {
 		const announcer = initialized();
-		const head = input({ sourceHead: 1000, watermark: 1000, responseClassOrdinals: responses({ tool: 999 }) });
+		const head = input({ sourceHead: 1000, watermark: 1000, announcementOrdinals: responses({ tool: 999 }) });
 		expect(announcer.reconcile(head)).toBeNull();
 		expect(announcer.reconcile({ ...head, rows: [row(500, new BashToolUseMessage('', 'tool-1', 'true'))] })).toBeNull();
 	});
 
 	it('reports detached progress once without speaking subsequent catch-up bodies', () => {
 		const announcer = initialized();
-		const detached = input({ pinnedToBottom: false, sourceHead: 2, responseClassOrdinals: responses({ assistant: 2 }) });
+		const detached = input({ pinnedToBottom: false, sourceHead: 2, announcementOrdinals: responses({ assistant: 2 }) });
 		expect(announcer.reconcile(detached)).toBe('New response available');
-		expect(announcer.reconcile({ ...detached, sourceHead: 3, responseClassOrdinals: responses({ assistant: 3 }) })).toBeNull();
+		expect(announcer.reconcile({ ...detached, sourceHead: 3, announcementOrdinals: responses({ assistant: 3 }) })).toBeNull();
 		expect(announcer.reconcile({ ...detached, pinnedToBottom: true, sourceHead: 3, watermark: 3, rows: [assistant(3, 'Already notified')] })).toBe('');
 	});
 
 	it('consumes head progress while hidden even when the index has not hydrated it', () => {
 		const announcer = initialized();
-		const hidden = input({ visible: false, sourceHead: 5, responseClassOrdinals: responses({ assistant: 5 }) });
+		const hidden = input({ visible: false, sourceHead: 5, announcementOrdinals: responses({ assistant: 5 }) });
 		expect(announcer.reconcile(hidden)).toBe('');
 		expect(announcer.reconcile({ ...hidden, visible: true })).toBeNull();
 		expect(announcer.reconcile({ ...hidden, visible: true, watermark: 5, rows: [assistant(5, 'Hidden response')] })).toBeNull();
-		expect(announcer.reconcile(input({ sourceHead: 6, watermark: 6, rows: [assistant(6, 'Visible response')], responseClassOrdinals: responses({ assistant: 6 }) }))).toBe('Visible response');
+		expect(announcer.reconcile(input({ sourceHead: 6, watermark: 6, rows: [assistant(6, 'Visible response')], announcementOrdinals: responses({ assistant: 6 }) }))).toBe('Visible response');
 	});
 
 	it('suppresses cold activation and reconnect history through the admitted open head', () => {
 		const announcer = initialized();
-		const opening = input({ initialHead: 100, sourceHead: 100, responseClassOrdinals: responses({ assistant: 99 }) });
+		const opening = input({ initialHead: 100, sourceHead: 100, announcementOrdinals: responses({ assistant: 99 }) });
 		expect(announcer.reconcile(opening)).toBeNull();
 		expect(announcer.reconcile({ ...opening, watermark: 100, rows: [assistant(99, 'Historical')] })).toBeNull();
 	});

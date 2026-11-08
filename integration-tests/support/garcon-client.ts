@@ -1040,11 +1040,14 @@ export class GarconTestClient {
   async waitForMessages(
     chatId: string,
     predicate: (page: ChatMessagesPage) => boolean,
-    options: { timeoutMs?: number; limit?: number; description?: string; afterOrdinal?: number } = {},
+    options: { timeoutMs?: number; limit?: number; description?: string; afterOrdinal?: number; transcriptViewId?: string } = {},
   ): Promise<ChatMessagesPage> {
     const deadline = Date.now() + (options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+    let view = options.transcriptViewId;
     for (;;) {
       const response = await this.getMessages(chatId, { limit: options.limit ?? 200 });
+      view ??= response.transcriptViewId;
+      if (response.transcriptViewId !== view) throw new Error(`Transcript view changed while reading ${chatId}`);
       const page = { ...response, messages: response.messages.filter((entry) => entry.ordinal > (options.afterOrdinal ?? 0)) };
       if (predicate(page)) return page;
       if (Date.now() >= deadline) throw new Error(`Timed out reading ${chatId}: ${options.description ?? 'transcript predicate'}`);

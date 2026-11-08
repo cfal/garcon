@@ -6,11 +6,22 @@ import {
 	codexSubagentSourceFingerprint,
 	type ChatMessage,
 } from '$shared/chat-types';
-import { buildSubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
+import { buildSubagentManagementModel, projectSubagentsForRoot, type SubagentManagementEntry } from '$lib/chat/transcript/subagent-management.js';
 
 const TS = '2024-01-01T00:00:00Z';
 
 describe('buildSubagentManagementModel', () => {
+	it('projects root processing changes over the same immutable summary entries', () => {
+		const entries: SubagentManagementEntry[] = ['running', 'waiting', 'observing', 'completed', 'error'].map((status, index) => ({
+			id: `synthetic-${index}`, name: `Worker ${index}`, kind: 'subagent', status: status as SubagentManagementEntry['status'], statusLabel: status,
+		}));
+		const original = structuredClone(entries);
+		expect(projectSubagentsForRoot(entries, 'running')).toEqual(entries);
+		expect(projectSubagentsForRoot(entries, 'idle').map(entry => entry.status)).toEqual(['closed', 'closed', 'closed', 'completed', 'error']);
+		expect(projectSubagentsForRoot(entries, 'idle').slice(0, 3).map(entry => entry.statusLabel)).toEqual(['Stopped', 'Stopped', 'Stopped']);
+		expect(entries).toEqual(original);
+		expect(projectSubagentsForRoot(entries, 'running')).toEqual(original);
+	});
 	it('returns only the root entry when no subagents are present', () => {
 		const model = buildSubagentManagementModel([], {
 			rootTitle: 'Main chat',

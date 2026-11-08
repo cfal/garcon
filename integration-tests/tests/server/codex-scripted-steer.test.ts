@@ -181,7 +181,7 @@ describe('scripted Codex strict steering', () => {
           permissionMode: 'bypassPermissions',
         }));
 
-        await fixture.client.waitForMessages(chatId,
+        const firstDisclosurePage = await fixture.client.waitForMessages(chatId,
         (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
@@ -194,14 +194,17 @@ describe('scripted Codex strict steering', () => {
         expect(firstSteeredRequest.userTexts.join('\n')).toContain(
           `<garcon-chat-id>${chatId}</garcon-chat-id>`,
         );
-        const secondCursor = fixture.client.markEvents();
+        const firstDisclosure = firstDisclosurePage.messages.find(entry => entry.message.type === 'transcript-notice'
+          && entry.message.detail?.type === 'chat-id-disclosure');
+        if (!firstDisclosure) throw new Error('Missing first canonical chat ID disclosure');
         firstSteeredHeld.release();
         await fixture.client.waitForMessages(chatId,
         (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
             )),
-        { afterOrdinal: fixture.client.observedHead(chatId, secondCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `second Codex chat ID disclosure for ${chatId}` },
+        { afterOrdinal: firstDisclosure.ordinal, transcriptViewId: firstDisclosurePage.transcriptViewId,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `second Codex chat ID disclosure for ${chatId}` },
       );
         await writeFile(secondReleasePath, 'release', 'utf8');
 

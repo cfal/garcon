@@ -9,7 +9,7 @@ import { DisplayBodyStore } from '../display-body-store.js';
 import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 import { diagnosticDigest } from '../local-notice.js';
 import * as apiClient from '$lib/api/client.js';
-import { displayCertificate, displayOpen, displayRow, displayWindow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
+import { installDisplayOpen, displayCertificate, displayOpen, displayRow, displayWindow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
 
 const transcripts: ActiveTranscriptState[] = [];
 afterEach(() => { for (const transcript of transcripts.splice(0)) transcript.dispose(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -27,10 +27,9 @@ function setup(count = 3) {
 const input = (id: string, content = id) => ({ chatId: 'chat-1', clientMessageId: id, content, createdAt: DISPLAY_TIME, delivery: 'pending' as const });
 
 describe('ActiveTranscriptState display authority', () => {
-	it('[TLV5-L09.03-WEB-UNIT-01] opens a certified display window and activates only the initial open', async () => {
+	it('[TLV5-L09.03-WEB-UNIT-01] projects a bounded certified window after admission', async () => {
 		const { transcript, api } = setup(1000);
-		await transcript.loadMessages('chat-1', { purpose: 'activation' });
-		expect(api.open).toHaveBeenCalledWith({ chatId: 'chat-1', reason: 'activate', outstandingClientMessageIds: [] }, expect.any(AbortSignal));
+		await installDisplayOpen(transcript, 'chat-1');
 		expect(api.window).toHaveBeenCalledTimes(1);
 		expect(transcript.entries).toHaveLength(50);
 		expect(transcript.entries[0].ordinal).toBe(951);
@@ -43,17 +42,18 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(api.open).toHaveBeenCalledOnce();
 	});
 
-	it('[TLV5-L09.03-WEB-BACKGROUND-01][TLV5-L09.03-WEB-PREVIEW-01] non-activating rendered loads never request native activation', async () => {
+	it('[TLV5-L09.03-WEB-BACKGROUND-01][TLV5-L09.03-WEB-PREVIEW-01] paging and refresh do not reopen or activate history', async () => {
 		const { transcript, api } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
+		api.open.mockClear();
 		await transcript.loadEarlierPage('chat-1');
 		await transcript.controller.refresh();
-		expect(api.open).toHaveBeenCalledExactlyOnceWith({ chatId: 'chat-1', reason: 'reconnect', outstandingClientMessageIds: [] }, expect.any(AbortSignal));
+		expect(api.open).not.toHaveBeenCalled();
 	});
 
 	it('does not confuse a source head with presentation or body receipt', async () => {
 		const { transcript, api } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.observeHead('view-1', 40000, { ...emptyResponseClassOrdinals(), tool: 40000 });
 		expect(transcript.lastOrdinal).toBe(40000);
 		expect(transcript.loadedThroughOrdinal).toBe(3);
@@ -69,7 +69,7 @@ describe('ActiveTranscriptState display authority', () => {
 	it('uses the same display API for non-combined mode and hidden-empty views', async () => {
 		const { transcript, api } = setup(0);
 		transcript.configureDisplay({ combine: false, showThinking: false, hiddenToolGroups: ['bash'] });
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		expect(api.window.mock.calls[0][0].profile).toMatchObject({ combine: false, hiddenToolGroups: ['bash'] });
 		expect(transcript.loadStatus).toBe('empty');
 		expect(transcript.hasEarlierMessages).toBe(false);
@@ -79,14 +79,14 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('orders announced rows canonically rather than by detail hydration order', async () => {
 		const { transcript } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.display = { ...transcript.display, details: new Map([...transcript.display.details].reverse()) };
 		expect(transcript.visibleRows.flatMap(row => row.kind === 'message' ? [row.ordinal] : [])).toEqual([1, 2, 3]);
 	});
 
 	it('resets response watermarks when an open first reveals a replacement view', async () => {
 		const { transcript } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.observeHead('view-1', 1000, { ...emptyResponseClassOrdinals(), tool: 1000 });
 		transcript.installOpen(displayOpen('chat-1', 'view-2', 3));
 		expect(transcript.responseClassOrdinals).toEqual(emptyResponseClassOrdinals());
@@ -96,7 +96,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('keeps the old certified window while preparation lags', async () => {
 		const { transcript, api } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const prior = transcript.display.window;
 		api.window.mockImplementationOnce(async request => ({ kind: 'lagging', serverInstanceId: 'instance-1', chatId: 'chat-1',
 			transcriptViewId: 'view-1', policyRevision: 1, profileKey: displayProfileKey(request.profile), bashRevision: 'patterns',
@@ -111,7 +111,7 @@ describe('ActiveTranscriptState display authority', () => {
 	it.each(['earlier', 'later'] as const)('[TLV5-PAGE.06-WEB-UNIT-01] preserves a failed %s page until its directional retry succeeds', async direction => {
 		vi.useFakeTimers();
 		const { transcript, api } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		if (direction === 'later') await transcript.navigateToWindow('chat-1', 'initial');
 		const load = () => direction === 'earlier' ? transcript.loadEarlierPage('chat-1') : transcript.loadLaterPage('chat-1');
 		const before = api.window.mock.calls.length;
@@ -136,7 +136,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it.each(['earlier', 'later'] as const)('classifies a %s profile-refresh redirect synchronously and respects its gate', async direction => {
 		const { transcript } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.configureDisplay({ combine: false, showThinking: false, hiddenToolGroups: [] });
 		const revision = transcript.feedMutationClock.dataRevision;
 		const held = Promise.withResolvers<'apply'>(), entered = Promise.withResolvers<void>();
@@ -158,7 +158,7 @@ describe('ActiveTranscriptState display authority', () => {
 		api.window.mockResolvedValue(displayWindow([group], displayCertificate(open)));
 		const members = vi.spyOn(transcriptDisplayApi, 'members').mockImplementation(async request => ({ certificate: request.certificate,
 			base: request.base, fragment: request.fragment, ordinals: [101], earlier: { beforeOrdinal: 101, remaining: 100 }, later: null }));
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		members.mockRejectedValueOnce(new Error('Member read failed'));
 		const memberTarget = { group, anchor: { kind: 'after' as const, ordinal: 100 } };
 		expect(await transcript.loadLaterPage('chat-1', { memberTarget })).toBe('failed');
@@ -174,7 +174,7 @@ describe('ActiveTranscriptState display authority', () => {
 		(['readiness', 'fallback', 'cancel'] as const).map(wake => ({ target, wake }))))('keeps $target navigation pending until $wake', async ({ target, wake }) => {
 		vi.useFakeTimers();
 		const { transcript, api } = setup(200);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.controller.setReadingAnchor(100, false);
 		api.window.mockImplementationOnce(async request => ({ kind: 'lagging', serverInstanceId: 'instance-1', chatId: 'chat-1',
 			transcriptViewId: 'view-1', policyRevision: 1, profileKey: displayProfileKey(request.profile),
@@ -194,7 +194,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it.each(['initial', 'latest'] as const)('supersedes held paging when navigating to %s', async target => {
 		const { transcript, api } = setup(200);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const read = api.window.getMockImplementation()!;
 		const held = Promise.withResolvers<void>();
 		api.window.mockImplementationOnce(async (...args) => { await held.promise; return read(...args); });
@@ -212,7 +212,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('supersedes a held initial navigation with latest without retaining its anchor', async () => {
 		const { transcript, api } = setup(200);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const read = api.window.getMockImplementation()!;
 		const held = Promise.withResolvers<void>();
 		api.window.mockImplementationOnce(async (...args) => { await held.promise; return read(...args); });
@@ -228,7 +228,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('fences a held old page status across view replacement and new paging', async () => {
 		const { transcript, api, rows } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const read = api.window.getMockImplementation()!;
 		const old = Promise.withResolvers<void>(), next = Promise.withResolvers<void>();
 		api.window.mockImplementationOnce(async (...args) => { await old.promise; return read(...args); });
@@ -250,7 +250,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('[TLV5-UX.03-WEB-UNIT-01] keeps both edges when paging a detached certified interval', async () => {
 		const { transcript } = setup(150);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.isUserScrolledUp = true;
 		expect(await transcript.loadEarlierPage('chat-1')).toBe('loaded');
 		expect(transcript.entries).toHaveLength(100);
@@ -263,7 +263,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('[TLV5-UX.01-WEB-UNIT-01] maintains ascending unique certified rows through bidirectional paging', async () => {
 		const { transcript } = setup(300);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		await transcript.navigateToRow({ chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 150 }, new AbortController().signal, () => true);
 		for (let index = 0; index < 2; index++) {
 			expect(await transcript.loadEarlierPage('chat-1')).toBe('loaded');
@@ -277,13 +277,13 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('[TLV5-UX.17-WEB-UNIT-04] cold return releases expanded history and loads a bounded certified tail', async () => {
 		const { transcript } = setup(200);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		await transcript.loadEarlierPage('chat-1');
 		expect(transcript.entries).toHaveLength(100);
 		transcript.activateChat('chat-2');
 		expect(transcript.bodyStore.count).toBe(0);
 		transcript.activateChat('chat-1');
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		expect(transcript.entries.map(entry => entry.ordinal)).toEqual(Array.from({ length: 50 }, (_, index) => index + 151));
 		expect(transcript.hasEarlierMessages).toBe(true);
 	});
@@ -291,7 +291,7 @@ describe('ActiveTranscriptState display authority', () => {
 	it.each(['descending', 'duplicate', 'overlap', 'foreign-view', 'future-ordinal'] as const)(
 		'[TLV5-PAGE.03-WEB-UNIT-01] rejects a %s display page before mutating the surface', async defect => {
 		const { transcript, api } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const prior = transcript.display.window!;
 		const row = prior.items[0];
 		const earlier = { ...prior, items: [{ ...row, ordinal: 49 }, { ...row, ordinal: 50 }],
@@ -311,7 +311,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it.each(['earlier', 'later'] as const)('stages a %s page until native-scroll settlement', async direction => {
 		const { transcript, api } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		if (direction === 'later') await transcript.navigateToWindow('chat-1', 'initial');
 		api.bodies.mockClear();
 		const gate = Promise.withResolvers<'apply'>();
@@ -326,7 +326,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('drops an obsolete page after chat identity changes', async () => {
 		const { transcript, api } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const held = Promise.withResolvers<Awaited<ReturnType<typeof api.window>>>();
 		api.window.mockImplementationOnce(() => held.promise);
 		const loading = transcript.loadEarlierPage('chat-1');
@@ -339,31 +339,16 @@ describe('ActiveTranscriptState display authority', () => {
 		expect(transcript.bodyStore.count).toBe(0);
 	});
 
-	it.each(['success', 'failure'] as const)('ignores late activation %s after rapid chat switching', async outcome => {
-		const { transcript, api, open } = setup();
-		const held = Promise.withResolvers<typeof open>();
-		api.open.mockImplementationOnce(() => held.promise);
-		const loading = transcript.loadMessages('chat-1');
-		transcript.activateChat('chat-2');
-		if (outcome === 'success') held.resolve(open);
-		else held.reject(new Error('Synthetic stale open failure'));
-		expect(await loading).toEqual([]);
-		expect(transcript.openSnapshot).toBeNull();
-		expect(transcript.isLoadingMessages).toBe(false);
-		expect(transcript.loadError).toBeNull();
-		expect(api.window).not.toHaveBeenCalled();
-	});
-
 	it('rejects stale-view navigation without loading another window', async () => {
 		const { transcript, api } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		expect(await transcript.navigateToRow({ chatId: 'chat-1', transcriptViewId: 'old', ordinal: 1 }, new AbortController().signal, () => true)).toBe('view-changed');
 		expect(api.resolve).not.toHaveBeenCalled();
 	});
 
 	it('resolves a canonical target instead of requesting a raw prefix', async () => {
 		const { transcript, api } = setup(1000);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 	expect(await transcript.navigateToRow({ chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 500 }, new AbortController().signal, () => true)).toEqual({ kind: 'loaded', landedOrdinal: 500, revealDetail: false, targetMatched: true });
 		expect(api.resolve.mock.calls[0][0].ordinal).toBe(500);
 		expect(transcript.entries.some(row => row.ordinal === 500)).toBe(true);
@@ -373,7 +358,7 @@ describe('ActiveTranscriptState display authority', () => {
 
 	it('defers permission cut changes until navigation has resolved', async () => {
 		const { transcript, api } = setup(1000);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const held = Promise.withResolvers<Awaited<ReturnType<typeof api.resolve>>>();
 		api.resolve.mockReturnValueOnce(held.promise);
 		const navigating = transcript.navigateToRow({ chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 500 }, new AbortController().signal, () => true);
@@ -389,21 +374,21 @@ describe('ActiveTranscriptState display authority', () => {
 	it('[TLV5-L02.03-WEB-UNIT-01] keeps repeated equal bodies as distinct canonical occurrences', async () => {
 		const { transcript, api, open } = setup();
 		api.replace([displayRow(1, new AssistantMessage(DISPLAY_TIME, 'same')), displayRow(2, new AssistantMessage(DISPLAY_TIME, 'same'))], { ...open, sourceHead: 2 });
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		expect(transcript.renderModel.items.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
 	});
 
 	it('captures fork identity from the selected source-owned body', async () => {
 		const { transcript, api, open } = setup(1);
 		api.replace([displayRow(1, new UserMessage(DISPLAY_TIME, 'prompt', undefined, { clientMessageId: 'input-1' }))], open);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		expect(transcript.forkSelection(1)).toEqual({ ordinal: 1, transcriptViewId: 'view-1', clientMessageId: 'input-1' });
 		expect(transcript.forkSelection(999)).toBeNull();
 	});
 
 	it('releases all body leases on teardown', async () => {
 		const { transcript } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.dispose();
 		expect(transcript.bodyStore.count).toBe(0);
 		expect(transcript.display.window).toBeNull();
@@ -413,7 +398,7 @@ describe('ActiveTranscriptState display authority', () => {
 describe('surface-local overlays', () => {
 	it('marks optimistic rows awaiting delivery only until the input is delivered', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		overlays.upsertOptimisticInput('chat-1', input('pending'), 3);
 		expect(transcript.overlayRows).toContainEqual(expect.objectContaining({ id: 'optimistic:pending', awaitingDelivery: true }));
 		overlays.markOptimisticInputDelivered('chat-1', 'pending');
@@ -421,7 +406,7 @@ describe('surface-local overlays', () => {
 	});
 	it('keeps the latest Bash revision across notice and optimistic cut changes', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		transcript.displayReady(new ChatDisplayStateUpdatedMessage('instance-1', 'chat-1', 'view-1', 1, 'new-patterns', 3, 'available', null));
 		overlays.appendLocalNotice('chat-1', 'info', 'Synthetic notice');
 		transcript.applySharedOverlayMutation({ feedStructureChanged: true });
@@ -433,7 +418,7 @@ describe('surface-local overlays', () => {
 	});
 	it('keeps a committed input through preparation and removes it only with its canonical replacement', async () => {
 		const { transcript, api, overlays, open, rows } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const optimistic = input('input-1');
 		overlays.upsertOptimisticInput('chat-1', optimistic, 3);
 		transcript.acknowledgeInput('view-1', optimistic, 4, 3);
@@ -451,7 +436,7 @@ describe('surface-local overlays', () => {
 	it('finishes navigation before removing the cut for an input represented by that navigation', async () => {
 		vi.useFakeTimers();
 		const { transcript, api, overlays, open, rows } = setup(100);
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		await transcript.navigateToRow({ chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 10 }, new AbortController().signal, () => true);
 		const optimistic = input('input-1');
 		overlays.upsertOptimisticInput('chat-1', optimistic, 100);
@@ -472,7 +457,7 @@ describe('surface-local overlays', () => {
 
 	it('retains submission order and declared ordinal cuts despite timestamp skew', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		overlays.upsertOptimisticInput('chat-1', { ...input('first'), createdAt: '2030-01-01T00:00:00.000Z' }, 3);
 		overlays.upsertOptimisticInput('chat-1', { ...input('second'), createdAt: '2020-01-01T00:00:00.000Z' }, 4);
 		transcript.applySharedOverlayMutation({ feedStructureChanged: true });
@@ -482,7 +467,7 @@ describe('surface-local overlays', () => {
 
 	it('keeps shared anchor advancement when a later acknowledgement arrives first', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		overlays.upsertOptimisticInput('chat-1', input('first'), 3);
 		overlays.upsertOptimisticInput('chat-1', input('second'), 3);
 		transcript.acknowledgeInput('view-1', input('second'), 5, 3);
@@ -494,7 +479,7 @@ describe('surface-local overlays', () => {
 
 	it('retains all controls and reports cut-budget overflow instead of dropping inputs', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		for (let index = 0; index < 33; index++) overlays.upsertOptimisticInput('chat-1', input(`input-${index}`), 3);
 		transcript.applySharedOverlayMutation({ feedStructureChanged: true });
 		expect(transcript.controller.cuts).toHaveLength(33);
@@ -504,7 +489,7 @@ describe('surface-local overlays', () => {
 
 	it('deduplicates only one exact diagnostic after its terminal watermark is certified', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		const digest = await diagnosticDigest('Synthetic failure');
 		overlays.appendServerNotice('chat-1', 'error', 'Synthetic failure', { serverInstanceId: 'instance-1', transcriptViewId: 'view-1', ordinal: 5 });
 		await vi.waitFor(() => expect(overlays.forChat('chat-1').notices[0].contentDigest).toBe(digest));
@@ -520,7 +505,7 @@ describe('surface-local overlays', () => {
 
 	it('does not use old-instance or old-view tail evidence to hide the only error', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		overlays.appendServerNotice('chat-1', 'error', 'Synthetic failure', { serverInstanceId: 'old-instance', transcriptViewId: 'view-1', ordinal: 1 });
 		await vi.waitFor(() => expect(overlays.forChat('chat-1').notices[0].contentDigest).toBeDefined());
 		const digest = await diagnosticDigest('Synthetic failure');
@@ -528,9 +513,32 @@ describe('surface-local overlays', () => {
 		expect(transcript.localNotices).toHaveLength(1);
 	});
 
+	it.each(['clear', 'process', 'view'] as const)('retires remembered diagnostic proofs on %s replacement', async replacement => {
+		const { transcript, overlays } = setup();
+		await installDisplayOpen(transcript, 'chat-1');
+		overlays.appendServerNotice('chat-1', 'error', 'Synthetic failure', { serverInstanceId: 'instance-1', transcriptViewId: 'view-1', ordinal: 3 });
+		await vi.waitFor(() => expect(overlays.forChat('chat-1').notices[0].contentDigest).toBeDefined());
+		transcript.display = { ...transcript.display, window: { ...transcript.display.window!, publicTail: {
+			ordinal: 3, contentDigest: await diagnosticDigest('Synthetic failure'), combinedDigest: null } } };
+		flushSync();
+		expect(transcript.localNotices).toHaveLength(0);
+		if (replacement === 'clear') transcript.clearMessages();
+		else transcript.installOpen(displayOpen('chat-1', replacement === 'view' ? 'view-2' : 'view-1', 1, replacement === 'process' ? 'instance-2' : 'instance-1'));
+		flushSync();
+		expect(transcript.localNotices).toHaveLength(1);
+	});
+
+	it('computes diagnostic evidence on insecure HTTP without SubtleCrypto', async () => {
+		const expected = 'd84b487a7fd094ecd1972f0aff7d6e237756268e5e8051036f8b23928b75d3cc';
+		const crypto = globalThis.crypto;
+		vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+		try { expect(await diagnosticDigest('Synthetic failure')).toBe(expected); }
+		finally { vi.unstubAllGlobals(); }
+	});
+
 	it('keeps local notices display-only and never puts them in source cursor or body storage', async () => {
 		const { transcript, overlays } = setup();
-		await transcript.loadMessages('chat-1');
+		await installDisplayOpen(transcript, 'chat-1');
 		overlays.appendLocalNotice('chat-1', 'info', 'Local notice');
 		expect(transcript.localNotices).toHaveLength(1);
 		expect(transcript.getCursor().lastOrdinal).toBe(3);
