@@ -351,6 +351,7 @@ test('cold combined history refreshes commits received after its snapshot was ca
       await browserExpect(feed.getByText(`echo:${marker}`, { exact: true })).toBeVisible();
       await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
       expect(combined.slice(beforeRelease)).toContainEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
+      expect(combined.slice(beforeRelease).some(request => request.purpose === 'activation')).toBe(false);
     } finally {
       provider.releaseEcho();
       held.resolve();

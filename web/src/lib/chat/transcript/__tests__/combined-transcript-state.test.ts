@@ -1727,8 +1727,12 @@ describe('combined transcript intervals', () => {
 		vi.mocked(getCombinedChatMessages).mockImplementation(async request => history([...retained, assistant(81)])(request));
 		if (origin === 'same-view recovery') vi.mocked(getCombinedChatMessages).mockImplementationOnce(async request => read(request));
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => { replacementStarted.resolve(); return replacement.promise; });
-		if (origin === 'cold') mount('left', 'right');
-		const recovery = selected.loadMessages(chatId);
+		if (origin === 'cold') {
+			cache.replace(chatId, viewId, [], 0, null);
+			mount('left', 'right');
+			cache.remove(chatId);
+		}
+		const recovery = selected.loadMessages(chatId, { purpose: 'activation' });
 		let reload: ReturnType<typeof selected.loadMessages> | undefined;
 		try {
 			await replacementStarted.promise;
@@ -1752,6 +1756,77 @@ describe('combined transcript intervals', () => {
 			replacement.resolve(read({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await recovery;
 			await reload;
+		}
+	});
+
+	it.each([false, true])('keeps refresh responsibility when the loader is hidden (remaining peer: %s)', async remainingPeer => {
+		const { cache, registry, mount } = panelFixture({ retainInactive: true });
+		const entries = Array.from({ length: 81 }, (_, index) => assistant(index + 1));
+		const snapshot = Promise.withResolvers<TranscriptAnchorPage>();
+		const refresh = Promise.withResolvers<TranscriptAnchorPage>();
+		const started = Promise.withResolvers<void>();
+		installHistory(entries);
+		vi.mocked(getCombinedChatMessages)
+			.mockImplementationOnce(() => snapshot.promise)
+			.mockImplementationOnce(() => { started.resolve(); return refresh.promise; });
+		mount('left', ...(remainingPeer ? ['right'] : []));
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => chatId });
+		const load = selected.loadMessages(chatId);
+		const settled = load.then(() => { cache.markValidated(chatId); return 'loaded'; }, () => 'failed');
+		try {
+			expect(selected.applyMessages(chatId, viewId, [assistant(81)], 81, 81)).toBe('gap-detected');
+			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			await started.promise;
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 80, stale: true });
+			mount(...(remainingPeer ? ['right'] : []));
+			refresh.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			expect(await settled).toBe(remainingPeer ? 'loaded' : 'failed');
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: remainingPeer ? 81 : 80, stale: !remainingPeer });
+			mount('left');
+			if (!remainingPeer) await registry.loadChatSnapshot(chatId);
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 81, stale: false });
+			expect(registry.panel('chat-view:window-left')!.transcript.entries).toEqual(entries);
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(3);
+			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0]).toEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
+		} finally {
+			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			refresh.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			await settled;
+		}
+	});
+
+	it('keeps an accepted commit and newer resend candidates during the required refresh', async () => {
+		const { cache, overlays, registry, mount } = panelFixture();
+		const entries = Array.from({ length: 82 }, (_, index) => input(index + 1));
+		const snapshot = Promise.withResolvers<TranscriptAnchorPage>();
+		const refresh = Promise.withResolvers<TranscriptAnchorPage>();
+		const started = Promise.withResolvers<void>();
+		const candidates = (ordinal: number) => [{ ordinal, content: `Synthetic input ${ordinal}`, attachmentNames: [] }];
+		const captured = { ...history(entries.slice(0, 81))({ chatId, direction: 'backward', anchorsRemaining: 100 }), resendCandidates: candidates(81) };
+		vi.mocked(getCombinedChatMessages)
+			.mockImplementationOnce(() => snapshot.promise)
+			.mockImplementationOnce(() => { started.resolve(); return refresh.promise; });
+		mount('left', 'right');
+		const load = registry.loadChatSnapshot(chatId);
+		try {
+			expect(registry.applyCommittedBatch({ chatId, transcriptViewId: viewId, firstOrdinal: 81, lastOrdinal: 81,
+				messages: [input(81)], resendCandidates: candidates(81), noticeRevision: 0,
+			})).toMatchObject({ kind: 'chat-recovery-required' });
+			snapshot.resolve(captured);
+			await started.promise;
+			expect(registry.applyCommittedBatch({ chatId, transcriptViewId: viewId, firstOrdinal: 82, lastOrdinal: 82,
+				messages: [input(82)], resendCandidates: candidates(82), noticeRevision: 0,
+			})).toMatchObject({ kind: 'applied' });
+			refresh.resolve(captured);
+			await load;
+			for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.entries).toEqual(entries);
+			expect(cache.get(chatId)?.messages).toEqual(entries);
+			expect(overlays.forChat(chatId).resendCandidates).toEqual(candidates(82));
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(2);
+		} finally {
+			snapshot.resolve(captured);
+			refresh.resolve(captured);
+			await load;
 		}
 	});
 

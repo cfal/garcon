@@ -366,14 +366,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		options: ChatLoadMessagesOptions,
 		isCurrent: () => boolean,
 		retryAfterLoaderRemoval = true,
+		recoveringContinuity = false,
 	): Promise<boolean> {
+		const incomplete = (): false => {
+			if (recoveringContinuity && isCurrent()) throw new Error('Transcript snapshot recovery did not establish continuity');
+			return false;
+		};
 		const loader = [...this.#panels.values()].find(
 			(panel) => panel.chatId === chatId && panel.snapshotAdmission === 'admitted',
 		);
-		if (!loader) return false;
+		if (!loader) return incomplete();
 		const handoffs = new Map(this.panelsForChat(chatId).map(panel => [panel, panel.transcript.snapshotHandoffGuard()]));
 		let readOptions = options;
-		let recoveringContinuity = false;
 		for (;;) {
 			if (this.options.loadTranscriptSnapshot) {
 				await this.options.loadTranscriptSnapshot(loader.transcript, chatId, readOptions);
@@ -393,16 +397,13 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			const loaderWasRemoved = this.#panels.get(loader.surfaceId) !== loader;
 			if (loaderWasRemoved) {
 				return retryAfterLoaderRemoval
-					? this.#performChatSnapshotLoad(chatId, readOptions, isCurrent, false)
-					: false;
+					? this.#performChatSnapshotLoad(chatId, readOptions, isCurrent, false, recoveringContinuity)
+					: incomplete();
 			}
 			if (!refreshRequired) break;
 		}
 		const cursor = this.options.cache.readAppliedCursor(chatId);
-		if (!cursor || cursor.stale) {
-			if (recoveringContinuity) throw new Error('Transcript snapshot recovery did not establish continuity');
-			return false;
-		}
+		if (!cursor || cursor.stale) return incomplete();
 		const currentPanels = this.panelsForChat(chatId);
 		if (currentPanels.length === 0) return false;
 		for (const panel of currentPanels) {
