@@ -116,14 +116,45 @@ describe('combined history response', () => {
     { startOrdinal: 6 }, { endOrdinal: 4 }, { anchorsRemaining: 1 },
     { pageStatus: 'exhausted' }, { pageStatus: 'unknown' },
     { startOrdinal: 1, pageStatus: 'complete' },
-    { startOrdinal: 5, messages: [], pageStatus: 'partial' },
-    { startOrdinal: 5, messages: [], pageStatus: 'complete' },
     { messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'Outside span') }] },
     { messages: [{ ordinal: 5, message: new AssistantMessage(TS, 'Outside span') }] },
     { messages: [...page.messages].reverse() },
     { startOrdinal: 2, endOrdinal: 203, watermarkOrdinal: 202, lastOrdinal: 202 },
   ])('rejects invalid response relation %#', change => {
     expect(() => parseTranscriptAnchorResponse(request, { ...page, ...change })).toThrow();
+  });
+
+  it.each(['backward', 'forward'])('rejects impossible terminal statuses with otherwise valid budgets (%s)', direction => {
+    const input = { ...request, direction, transcriptViewId: page.transcriptViewId,
+      cursorOrdinal: direction === 'backward' ? 5 : 0, watermarkOrdinal: 4 };
+    const partial = { ...page, direction, pageStatus: 'partial',
+      startOrdinal: direction === 'backward' ? 2 : 1,
+      endOrdinal: direction === 'backward' ? 5 : 4,
+      messages: [], anchorsRemaining: 1 };
+    expect(parseTranscriptAnchorResponse(input, partial)).toEqual(partial);
+    expect(() => parseTranscriptAnchorResponse(input, { ...partial, pageStatus: 'complete' }))
+      .toThrow('completion');
+    expect(() => parseTranscriptAnchorResponse(input, { ...partial, pageStatus: 'exhausted' }))
+      .toThrow('exhaustion');
+    const edge = direction === 'backward' ? 5 : 1;
+    expect(() => parseTranscriptAnchorResponse(input, { ...partial, startOrdinal: edge, endOrdinal: edge }))
+      .toThrow('partial must make progress');
+    expect(() => parseTranscriptAnchorResponse(input, { ...partial, lastOrdinal: 3 }))
+      .toThrow('watermark');
+  });
+
+  it('validates forward partial continuation, contiguity and resend eligibility independently', () => {
+    const input = { ...request, direction: 'forward', transcriptViewId: page.transcriptViewId,
+      cursorOrdinal: 0, watermarkOrdinal: 4 };
+    const partial = { ...page, direction: 'forward', pageStatus: 'partial',
+      startOrdinal: 1, endOrdinal: 3, messages: [], anchorsRemaining: 1 };
+    expect(parseTranscriptAnchorResponse(input, partial)).toEqual(partial);
+    expect(transcriptAnchorContinuation(partial)).toEqual({ ...input, cursorOrdinal: 2 });
+    expect(() => parseTranscriptAnchorResponse(input, { ...partial, startOrdinal: 2 }))
+      .toThrow('cursor contiguity');
+    expect(() => parseTranscriptAnchorResponse(input, { ...partial,
+      resendCandidates: [{ ordinal: 1, content: 'Synthetic input', attachmentNames: [] }] }))
+      .toThrow('resend candidates on continuation');
   });
 
   it('rejects stale view, changed continuation watermark, and continuation resend candidates', () => {
