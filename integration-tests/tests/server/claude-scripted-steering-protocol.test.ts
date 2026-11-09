@@ -45,12 +45,16 @@ describe('pinned Claude steering protocol', () => {
     30_000,
   );
 
-  test('correlates background notification continuations through provider idle', async () => {
+  test.each(['short', 'long'])('correlates %s background commands through provider idle', async (length) => {
     const harness = await createHarness();
     const inputId = '00000000-0000-4000-8000-000000000001';
+    const padding = length === 'long'
+      ? `: '${'x'.repeat(700)}synthetic-command-middle${'x'.repeat(700)}'; ` : '';
+    const command = 'while [ ! -f background-release ]; do sleep 0.05; done; '
+      + padding + 'printf synthetic-background-output';
     harness.model.scriptTurn([
       claudeToolUse('toolu_background_origin', 'Bash', {
-        command: 'while [ ! -f background-release ]; do sleep 0.05; done; printf synthetic-background-output',
+        command,
         run_in_background: true,
       }),
     ]);
@@ -78,9 +82,21 @@ describe('pinned Claude steering protocol', () => {
     expect(harness.messages.indexOf(finalIdle))
       .toBeGreaterThan(harness.messages.indexOf(results[1]!));
     expect(harness.model.requests()).toHaveLength(3);
+    expect(harness.messages.filter((message) => message.type === 'assistant')
+      .map((message) => asRecord(message.message).content))
+      .toContainEqual(expect.arrayContaining([expect.objectContaining({
+        type: 'tool_use', id: 'toolu_background_origin', name: 'Bash',
+        input: expect.objectContaining({ command }),
+      })]));
     expect(claudeModelInputText(harness.model.requests()[1]!)).not.toContain('<task-notification>');
     expect(claudeModelInputText(harness.model.requests()[2]!).split('<task-notification>'))
       .toHaveLength(2);
+    if (length === 'long') {
+      const notificationInput = harness.model.requests()[2]!.lastUserText;
+      expect(notificationInput).toContain('while [ ! -f background-release ]');
+      expect(notificationInput).toContain('printf synthetic-background-output');
+      expect(notificationInput).not.toContain('synthetic-command-middle');
+    }
     const isTaskCompletion = (message: Record<string, unknown>) => message.type === 'system'
       && message.subtype === 'task_notification' && message.status === 'completed'
       && message.tool_use_id === 'toolu_background_origin';
@@ -99,6 +115,11 @@ describe('pinned Claude steering protocol', () => {
       && asRecord(entry.origin).kind === 'task-notification');
     expect(notification?.origin).toEqual(results[1]?.origin);
     expect(asRecord(notification?.message).content).toContain('<task-notification>');
+    const reloaded = convertClaudeEntries(entries);
+    expect(reloaded.filter((message) => message.type === 'bash-tool-use'))
+      .toContainEqual(expect.objectContaining({ toolId: 'toolu_background_origin', command }));
+    expect(reloaded.filter((message) => message.type === 'user-message').map((message) => message.content))
+      .toEqual(['Synthetic background input']);
     harness.model.assertSettled();
   }, 30_000);
 
