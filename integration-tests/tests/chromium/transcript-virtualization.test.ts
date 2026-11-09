@@ -5741,8 +5741,10 @@ describe('Chromium combined tool-use presentation', () => {
         await withDiagnosticTimeout('the held combined continuation', continuation.promise, 20_000);
         const summary = fixture.page.locator('[data-chat-tool-group]');
         await browserExpect(summary).toHaveAttribute('data-chat-tool-group-count', '200');
+        await browserExpect(summary).toBeVisible();
         await summary.focus();
         const oldAnchorId = await summary.getAttribute('data-chat-anchor-id');
+        await browserExpect(summary).toBeFocused();
         release.resolve();
         await browserExpect(summary).toHaveAttribute('data-chat-tool-group-count', '300');
         expect(await summary.getAttribute('data-chat-anchor-id')).not.toBe(oldAnchorId);
