@@ -3,6 +3,7 @@ import type { Page } from "puppeteer-core";
 import { withE2eFixture, type E2eFixture } from "../../support/e2e-fixture.js";
 import type { ConfiguredDirectTestAgent } from "../../support/garcon-client.js";
 import { SpaDriver } from "../../support/spa-driver.js";
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 const FEED_SELECTOR = "[data-chat-scroll-viewport]";
 const SIZER_SELECTOR = "[data-chat-virtual-sizer]";
@@ -206,6 +207,7 @@ async function virtualTranscriptSnapshot(page: Page): Promise<VirtualTranscriptS
 describe("Lightpanda transcript scrolling", () => {
   test("[TLV5-PAGE.07-LIGHTPANDA-01] pages earlier history while keeping the virtual DOM bounded", async () => {
     await withE2eFixture("transcript-scrolling", async (fixture) => {
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { combineToolUseMessages: false });
       const app = new SpaDriver(fixture.page, fixture.integration);
       const turns = Array.from(
         { length: 101 },
@@ -274,6 +276,7 @@ describe("Lightpanda transcript scrolling", () => {
 
   test("loads complete repeated-handoff history across archived and native pages", async () => {
     await withE2eFixture("repeated-agent-handoff-history", async (fixture) => {
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { combineToolUseMessages: false });
       const app = new SpaDriver(fixture.page, fixture.integration);
       const chatId = fixture.integration.newChatId();
       const agentA = fixture.integration.directAgents.openAi;

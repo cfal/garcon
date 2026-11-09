@@ -3149,6 +3149,7 @@ async function prepareTranscript(
   fixture: ChromiumFixture,
   chatId: string,
   minimumModelCount = 50,
+  combined = false,
 ): Promise<{
   chatId: string;
   initialModelCount: number;
@@ -3156,6 +3157,7 @@ async function prepareTranscript(
   return withDiagnosticTimeout(
     'the transcript fixture to be prepared',
     (async () => {
+      await initializeCombineToolUses(fixture, combined);
       const response = await fixture.page.goto(
         `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
         { waitUntil: 'domcontentloaded' },
@@ -5490,19 +5492,18 @@ describe('Chromium combined tool-use presentation', () => {
       await appendLedgerRows(fixture, chatId, initial.transcriptViewId, [...context, ...toolRows]);
 
 
-      const earlierRequestLimits: number[] = [];
+      const earlierRequestBudgets: number[] = [];
       const recordEarlierRequest = (request: Request) => {
         const url = new URL(request.url());
-        if (
-          url.pathname.endsWith('/chats/messages') &&
-          url.searchParams.get('chatId') === chatId &&
-          url.searchParams.has('beforeOrdinal')
-        ) {
-          earlierRequestLimits.push(Number(url.searchParams.get('limit')));
+        if (url.pathname === '/api/v1/chats/combined-messages') {
+          const body = request.postDataJSON();
+          if (body.chatId === chatId && body.cursorOrdinal !== undefined) {
+            earlierRequestBudgets.push(body.anchorsRemaining);
+          }
         }
       };
       fixture.page.on('request', recordEarlierRequest);
-      await prepareTranscript(fixture, chatId, 1);
+      await prepareTranscript(fixture, chatId, 1, true);
       const waitForContext = async () => {
         await fixture.page.waitForFunction(
           ({ selector, toolRowCount }) => {
@@ -5522,12 +5523,12 @@ describe('Chromium combined tool-use presentation', () => {
         expect(layout.sizerHeight).toBeGreaterThan(layout.feedHeight);
       };
       await waitForContext();
-      expect(earlierRequestLimits).toContain(200);
-      expect(earlierRequestLimits.every((limit) => limit <= 200)).toBe(true);
-      if (toolCount > 1_000) expect(earlierRequestLimits.length).toBeGreaterThan(10);
+      expect(earlierRequestBudgets.length).toBeGreaterThan(0);
+      expect(earlierRequestBudgets.every((budget) => budget <= 100)).toBe(true);
+      if (toolCount > 1_000) expect(earlierRequestBudgets.length).toBeGreaterThan(10);
 
       await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
-      earlierRequestLimits.length = 0;
+      earlierRequestBudgets.length = 0;
       try {
         for (let switchIndex = 0; switchIndex < 2; switchIndex += 1) {
           await selectSidebarChat(fixture.page, chatId, 'compressed-history-0');
@@ -5536,7 +5537,7 @@ describe('Chromium combined tool-use presentation', () => {
             await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
           }
         }
-        expect(earlierRequestLimits).toEqual([]);
+        expect(earlierRequestBudgets).toEqual([]);
       } finally {
         fixture.page.off('request', recordEarlierRequest);
       }

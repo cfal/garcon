@@ -4,6 +4,7 @@ import type { BrowserContext, Page } from 'playwright';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { LedgerRowDraft } from '../../../server/controller/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import {
   type ChromiumFixture,
   withChromiumFixture,
@@ -64,6 +65,7 @@ type ReplayGateScope = typeof globalThis & {
 };
 
 async function installReplayGate(context: BrowserContext): Promise<void> {
+  await context.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
   await context.addInitScript(() => {
     const scope = globalThis as ReplayGateScope;
     const gate: ReplayGate = {
@@ -574,7 +576,7 @@ describe('Chromium reconnect transcript replay', () => {
       const transcriptReads: string[] = [];
       fixture.page.on('request', (request) => {
         const url = new URL(request.url());
-        if (url.pathname === '/api/v1/chats/messages') transcriptReads.push(url.toString());
+        if (/\/chats\/(?:combined-)?messages$/.test(url.pathname)) transcriptReads.push(url.toString());
       });
       const connectionCount = await replayGateOpenCount(fixture.page);
       await armReplayGate(fixture.page, { chatId, mode: 'hold-continuation' });
@@ -670,7 +672,7 @@ describe('Chromium reconnect transcript replay', () => {
       const transcriptReads: string[] = [];
       fixture.page.on('request', (request) => {
         const url = new URL(request.url());
-        if (url.pathname === '/api/v1/chats/messages') transcriptReads.push(url.toString());
+        if (/\/chats\/(?:combined-)?messages$/.test(url.pathname)) transcriptReads.push(url.toString());
       });
       const connectionCount = await replayGateOpenCount(fixture.page);
       await armReplayGate(fixture.page, { chatId, mode: 'hold-continuation' });

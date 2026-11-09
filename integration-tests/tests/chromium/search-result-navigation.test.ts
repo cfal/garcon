@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { join } from 'node:path';
 import { ThinkingMessage } from '../../../common/chat-types.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
@@ -86,6 +87,7 @@ for (const width of [1440, 390]) {
       `search-result-exact-${width}`,
       async ({ page, integration, assertNoBrowserErrors }) => {
         const { target, marker, chatId } = await createSearchNavigationTarget(integration);
+        await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
         await page.setViewportSize({ width, height: 900 });
         await page.goto(integration.garcon.baseUrl);
         if (width > 700) await collapseCanonicalFilesWindow(page);

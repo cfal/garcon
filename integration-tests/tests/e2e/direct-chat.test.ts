@@ -34,10 +34,12 @@ async function holdFirstChatStart(page: Page): Promise<void> {
 
       const url = new URL(inputUrl, globalThis.location.href);
       const gate = scope.__garconDraftStartRequestGate;
-      if (gate && url.pathname === '/api/v1/chats/messages') {
+      if (gate && /\/chats\/(?:combined-)?messages$/.test(url.pathname)) {
+        const body = url.pathname.endsWith('/combined-messages') && typeof init?.body === 'string'
+          ? JSON.parse(init.body) as { chatId: string; purpose?: string } : null;
         gate.messageRequests.push({
-          chatId: url.searchParams.get('chatId'),
-          purpose: url.searchParams.get('purpose'),
+          chatId: body?.chatId ?? url.searchParams.get('chatId'),
+          purpose: body?.purpose ?? url.searchParams.get('purpose'),
         });
       }
       if (gate && url.pathname === '/api/v1/chats/start') {
