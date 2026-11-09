@@ -7,6 +7,113 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { reloadUntilNativeContains, waitForVisibleResponse } from '../../support/live-agent.js';
 import { piNativeSession, scriptedPiStartRequest, startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 
+test('keeps streamed write arguments authoritative across delta boundaries and native reload', async () => {
+  const environment = startScriptedPiTestEnvironment({ extensionSource: `
+export default function (pi) {
+  pi.on('session_start', () => pi.setActiveTools(['write']));
+}
+` });
+  const content = 'line: "\\value"\n'.repeat(512);
+  const input = { path: 'streamed.txt', content };
+  const serialized = JSON.stringify(input);
+  const rawArguments = Array.from({ length: Math.ceil(serialized.length / 17) }, (_, index) =>
+    serialized.slice(index * 17, (index + 1) * 17));
+  try {
+    environment.model.scriptTurn([chatCompletionsToolUse('streamed-write', 'write', {}, { rawArguments })]);
+    environment.model.scriptTurn([chatCompletionsText('streamed write finished')]);
+    await withIntegrationFixture('pi-scripted-streamed-write', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: 'write streamed content',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: 'streamed write finished', afterIndex: cursor });
+      expect(await Bun.file(join(fixture.dirs.project, input.path)).text()).toBe(content);
+      const { messages } = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(messages, 'write-tool-use')).toEqual([
+        expect.objectContaining({ toolId: 'streamed-write', filePath: input.path, content }),
+      ]);
+      expect(messagesOfType(messages, 'tool-result')).toEqual([
+        expect.objectContaining({ toolId: 'streamed-write', isError: false }),
+      ]);
+      expect(messagesOfType(messages, 'unknown-tool-use')).toEqual([]);
+      await reloadUntilNativeContains(fixture, chatId, 'streamed write finished');
+      const reloaded = (await fixture.client.getMessages(chatId)).messages;
+      expect(messagesOfType(reloaded, 'write-tool-use')).toEqual(messagesOfType(messages, 'write-tool-use'));
+      const native = await piNativeSession(fixture, chatId);
+      const entries = (await Bun.file(native.path).text()).trim().split('\n').map((line) => JSON.parse(line));
+      const call = entries.flatMap((entry) => entry.message?.content ?? [])
+        .find((part) => part.type === 'toolCall' && part.id === 'streamed-write');
+      expect(call).toEqual({ type: 'toolCall', id: 'streamed-write', name: 'write', arguments: input });
+      environment.model.assertSettled();
+    }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace });
+  } finally {
+    environment.dispose();
+  }
+}, 120_000);
+
+test('normalizes plain-schema MCP calls while Pi coerces arguments and reports validation errors', async () => {
+  const environment = startScriptedPiTestEnvironment({ extensionSource: `
+export default function (pi) {
+  pi.registerTool({
+    name: 'mcp__synthetic__coerce', label: 'Coerce', description: 'Synthetic schema validation tool',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string' }, count: { type: 'integer' }, values: { type: 'array', items: { type: 'number' } } },
+      required: ['text', 'count', 'values'], additionalProperties: false,
+    },
+    async execute(_id, args) {
+      return { content: [{ type: 'text', text: JSON.stringify(args) }] };
+    },
+  });
+  pi.on('session_start', () => pi.setActiveTools(['mcp__synthetic__coerce']));
+}
+` });
+  const input = { text: null, count: '3.5', values: '2' };
+  try {
+    environment.model.scriptTurn([
+      chatCompletionsToolUse('coerced', 'mcp__synthetic__coerce', input),
+      chatCompletionsToolUse('rejected', 'mcp__synthetic__coerce', { text: 'valid', count: 'invalid', values: [] }),
+    ]);
+    environment.model.scriptTurn((request) => {
+      const success = request.toolResults.find((result) => result.toolCallId === 'coerced');
+      expect(JSON.parse(success!.content)).toEqual({ text: 'null', count: 3, values: [2] });
+      const failure = request.toolResults.find((result) => result.toolCallId === 'rejected');
+      expect(failure?.content).toContain('count: expected integer, got string');
+      return [chatCompletionsText('schema validation finished')];
+    });
+    await withIntegrationFixture('pi-scripted-schema-validation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: 'validate tool arguments',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: 'schema validation finished', afterIndex: cursor });
+      const { messages } = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(messages, 'mcp-tool-use')).toEqual([
+        expect.objectContaining({ toolId: 'coerced', server: 'synthetic', tool: 'coerce', input }),
+        expect.objectContaining({
+          toolId: 'rejected', server: 'synthetic', tool: 'coerce',
+          input: { text: 'valid', count: 'invalid', values: [] },
+        }),
+      ]);
+      expect(messagesOfType(messages, 'tool-result')).toEqual([
+        expect.objectContaining({ toolId: 'coerced', isError: false }),
+        expect.objectContaining({ toolId: 'rejected', isError: true }),
+      ]);
+      expect(messagesOfType(messages, 'unknown-tool-use')).toEqual([]);
+      await reloadUntilNativeContains(fixture, chatId, 'schema validation finished');
+      const reloaded = (await fixture.client.getMessages(chatId)).messages;
+      for (const type of ['mcp-tool-use', 'tool-result'] as const) {
+        expect(messagesOfType(reloaded, type)).toEqual(messagesOfType(messages, type));
+      }
+      environment.model.assertSettled();
+    }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace });
+  } finally {
+    environment.dispose();
+  }
+}, 120_000);
+
 test('keeps malformed Pi built-in calls canonical without executing their valid argument prefix', async () => {
   const environment = startScriptedPiTestEnvironment({ extensionSource: `
 export default function (pi) {

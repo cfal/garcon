@@ -10,7 +10,8 @@ it('discovers configured legacy, native, and virtual extension models through th
     const agentDir = await preparePiModelDiscoveryFixture(home);
     const modulePath = new URL('../pi-models.ts', import.meta.url).href;
     // A separate process excludes SDK module mocks and ambient provider credentials.
-    const child = Bun.spawn([process.execPath, '-e', `
+    // Disables auto-install so jiti must use Pi's pinned extension aliases.
+    const child = Bun.spawn([process.execPath, '--no-install', '-e', `
       const { getPiAvailableModels } = await import(${JSON.stringify(modulePath)});
       console.log(JSON.stringify(await getPiAvailableModels()));
     `], {
@@ -44,6 +45,7 @@ it('discovers the renamed Azure provider without duplicating classifier variants
         HOME: home, PATH: process.env.PATH,
         PI_CODING_AGENT_DIR: join(home, '.pi', 'agent'), PI_OFFLINE: '1', PI_TELEMETRY: '0',
         AZURE_OPENAI_API_KEY: 'synthetic-key', OPENAI_API_KEY: 'synthetic-key',
+        GEMINI_API_KEY: 'synthetic-key',
       },
       stdout: 'pipe', stderr: 'pipe',
     });
@@ -56,6 +58,11 @@ it('discovers the renamed Azure provider without duplicating classifier variants
     expect(values).toContain('azure/deepseek-v4-pro');
     expect(values.some((value) => value.startsWith('azure-openai-responses/'))).toBe(false);
     expect(values).toContain('openai/gpt-5.5');
+    expect(values).toContain('openai/gpt-6.1-terra');
+    expect(values).toContain('google/gemini-robotics-er-2-preview');
+    expect(values).not.toContain('openai/gpt-realtime-2.1');
+    expect(values).not.toContain('google/gemini-3.1-flash-live-preview');
+    expect(values).not.toContain('google/gemini-3.1-flash-lite-image');
     expect(values.filter((value) => value === 'openai/gpt-6-luna')).toHaveLength(1);
   } finally {
     await rm(home, { recursive: true, force: true });
