@@ -10,7 +10,7 @@ export const COMBINED_RESPONSE = 'Synthetic combined history response';
 
 export async function seedCombinedAnchorHistory(
   fixture: IntegrationFixture,
-  options: { tallResponse?: boolean; thinking?: boolean } = {},
+  options: { tallResponse?: boolean; thinking?: boolean; toolPayloadSize?: number; trailingAnchors?: number } = {},
 ) {
   const chatId = fixture.newChatId();
   const started = await fixture.client.startDirectChat({
@@ -24,13 +24,17 @@ export async function seedCombinedAnchorHistory(
     { kind: 'provider-row', at, message: new UserMessage(at, COMBINED_PROMPT) },
     ...Array.from({ length: 650 }, (_, index): LedgerRowDraft => index % 10 === 0
       ? { kind: 'run-ended', at, outcome: 'finished', origin: 'core' }
-      : { kind: 'provider-row', at, message: new BashToolUseMessage(at, `synthetic-tool-${index}`, `printf synthetic-${index}`),
+      : { kind: 'provider-row', at, message: new BashToolUseMessage(at, `synthetic-tool-${index}`,
+        `printf synthetic-${index}${'x'.repeat(options.toolPayloadSize ?? 0)}`),
         providerMeta: { syntheticPrivateValue: 'not-public' } }),
     ...(options.thinking ? [{ kind: 'provider-row', at, message: new ThinkingMessage(at,
       Array.from({ length: 60 }, (_, index) => `Synthetic reasoning paragraph ${index}.`).join('\n\n')) } satisfies LedgerRowDraft] : []),
     { kind: 'provider-row', at, message: new AssistantMessage(at, options.tallResponse
       ? Array.from({ length: 60 }, (_, index) => `${COMBINED_RESPONSE} ${index}.`).join('\n\n')
       : COMBINED_RESPONSE) },
+    ...Array.from({ length: options.trailingAnchors ?? 0 }, (_, index): LedgerRowDraft => ({
+      kind: 'provider-row', at, message: new AssistantMessage(at, `Synthetic later anchor ${index}`),
+    })),
   ];
   let schemaVersion = 0;
   await fixture.restartGarcon({ beforeStart: async () => {

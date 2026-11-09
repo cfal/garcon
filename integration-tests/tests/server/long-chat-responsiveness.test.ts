@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFile, readFile } from 'node:fs/promises';
 import type { ChatDetailsResponse } from '../../../common/chat-details.js';
 import type { ChatHandoffArtifactResponse } from '../../../common/chat-handoff-artifact-contracts.js';
+import { isCompleteTranscriptAnchorResponse, parseTranscriptAnchorResponse, type TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -18,7 +19,7 @@ const BODY = 'Synthetic long-chat content with generic identifiers and no real d
 const PING_INTERVAL_MS = 25;
 const MAX_PING_ROUND_TRIP_MS = 500;
 
-test('a long chat reloads, forks, and renders a handoff artifact while the server stays responsive', async () => {
+test('a long chat reloads, reads combined history, forks, and renders while the server stays responsive', async () => {
   await withIntegrationFixture('long-chat-responsiveness', async (fixture) => {
     const chatId = fixture.newChatId();
     const started = await fixture.client.startDirectChat({
@@ -32,6 +33,12 @@ test('a long chat reloads, forks, and renders a handoff artifact while the serve
 
     const probe = startPingProbe(fixture);
     const reloaded = await fixture.client.reloadChat(chatId);
+    const request: TranscriptAnchorRequest = { chatId, direction: 'backward', anchorsRemaining: 200 };
+    const combined = parseTranscriptAnchorResponse(request,
+      await fixture.client.post<unknown>('/api/v1/chats/combined-messages', request));
+    if (!isCompleteTranscriptAnchorResponse(combined)) throw new Error('Synthetic history unavailable');
+    expect(combined.pageStatus).toBe('complete');
+    expect(combined.endOrdinal - combined.startOrdinal).toBeGreaterThanOrEqual(200);
     const fork = await fixture.client.forkChat({ sourceChatId: chatId, chatId: fixture.newChatId() });
     const artifact = await fixture.client.get<ChatHandoffArtifactResponse>(
       `/api/v1/chats/handoff-artifact?${new URLSearchParams({ chatId, contextWindowTokens: '131072' })}`,
