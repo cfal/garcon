@@ -208,7 +208,11 @@ function historicalReviewDecision(decision: { allow: boolean; alwaysAllow?: bool
 }
 
 function commandApprovalKind(pending: CodexPendingApproval): 'command' | 'writeStdin' {
-  return pending.params.kind === 'writeStdin' ? 'writeStdin' : 'command';
+  const kind = pending.params.kind;
+  if (kind === undefined || kind === 'command') return 'command';
+  if (kind === 'writeStdin') return kind;
+  // Human-only checkpoints require a capability Garcon does not advertise.
+  throw new TypeError('Unsupported Codex command approval kind');
 }
 
 function grantedPermissionProfile(raw: unknown): Record<string, unknown> {
