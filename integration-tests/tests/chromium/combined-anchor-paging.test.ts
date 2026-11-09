@@ -1,13 +1,20 @@
 import { expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
-import type { TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
+import { parseTranscriptAnchorResponse, type TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
 import { COMBINED_PROMPT, COMBINED_RESPONSE, seedCombinedAnchorHistory } from '../../support/combined-anchor-history.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+
+const expectedDisconnectErrors = [
+  /^console\.error: WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
+  /^console\.error: WebSocket error: \{readyState: 3, visibilityState: visible, online: true\}$/,
+  /^console\.error: Failed to load resource: net::ERR_CONNECTION_REFUSED$/,
+];
 
 for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'compact', width: 390, height: 700 }]) {
   test(`combined history paints before continuation and retains grouped context (${viewport.name})`, async () => {
@@ -47,6 +54,21 @@ for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'com
         const input = page.getByPlaceholder('Reply...', { exact: true });
         await input.fill('Synthetic retained draft');
         const before = await composer.boundingBox();
+        phase('saving a deferred preference while continuation transport is held');
+        const heldReads = requests.length;
+        await page.evaluate(() => {
+          const key = 'pref_local_settings';
+          const newValue = JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), combineToolUseMessages: false });
+          localStorage.setItem(key, newValue);
+          window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
+        });
+        const refresh = page.getByRole('dialog', { name: 'Refresh required', exact: true });
+        await browserExpect(refresh).toBeVisible();
+        await refresh.getByRole('button', { name: 'Later', exact: true }).click();
+        await browserExpect(feed.locator('[data-chat-tool-group]')).toHaveCount(1);
+        expect(requests.length).toBe(heldReads);
+        await input.focus();
+        await browserExpect(input).toBeFocused();
         release();
         phase('completion without first-paint or composer disruption');
         await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
@@ -58,21 +80,11 @@ for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'com
         expect(Math.abs((await composer.boundingBox())!.y - before!.y)).toBeLessThan(2);
         expect(requests.filter(request => request.chatId === chatId).length).toBeGreaterThan(2);
 
-        phase('width-only resize and deferred preference change');
+        phase('width-only resize');
         const reads = requests.length;
         await page.setViewportSize({ width: viewport.width - 30, height: viewport.height });
         await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
-        await page.evaluate(() => {
-          const key = 'pref_local_settings';
-          const newValue = JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), combineToolUseMessages: false });
-          localStorage.setItem(key, newValue);
-          window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
-        });
-        const refresh = page.getByRole('dialog', { name: 'Refresh required', exact: true });
-        await browserExpect(refresh).toBeVisible();
-        await refresh.getByRole('button', { name: 'Later', exact: true }).click();
         await browserExpect(feed.locator('[data-chat-tool-group]')).toHaveCount(1);
-        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
         expect(requests.length).toBe(reads);
 
         phase('rapid switches preserve the composer and combined window');
@@ -81,6 +93,7 @@ for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'com
           if (!(await summary.isVisible())) await page.getByRole('button', { name: 'Menu', exact: true }).click();
           await summary.locator('xpath=ancestor::button[1]').click();
           await page.waitForURL(url => url.pathname === `/chat/${id}`);
+          if (id === otherChatId) await browserExpect.poll(() => requests.some(request => request.chatId === otherChatId)).toBe(true);
         }
         await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
         expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, composerNode)).toBe(true);
@@ -281,12 +294,121 @@ test('reconnect replay and held combined coverage preserve both the historical p
       await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(1);
       await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
       await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
-      const expectedDisconnectErrors = [
-        /^console\.error: WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
-        /^console\.error: WebSocket error: \{readyState: 3, visibilityState: visible, online: true\}$/,
-        /^console\.error: Failed to load resource: net::ERR_CONNECTION_REFUSED$/,
-      ];
       expect(browserErrors.splice(0).filter(error => !expectedDisconnectErrors.some(pattern => pattern.test(error)))).toEqual([]);
     } finally { release(); }
+  });
+}, 180_000);
+
+test('cold combined history refreshes commits received after its snapshot was captured', async () => {
+  await withChromiumFixture('combined-anchor-cold-commit', async ({ integration, page, context }, phase) => {
+    const chatId = integration.newChatId();
+    const initial = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic cold history seed', projectPath: integration.dirs.project,
+      agent: integration.directAgents.openAi,
+    });
+    await integration.client.waitForTurnTerminal(chatId, initial.turnId);
+    const head = (await integration.client.getMessages(chatId)).lastOrdinal;
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const held = Promise.withResolvers<void>();
+    let holding = true;
+    let captured = 0;
+    const combined: TranscriptAnchorRequest[] = [];
+    await page.route(/\/api\/v1\/chats\/(?:combined-)?messages(?:\?|$)/, async route => {
+      const url = new URL(route.request().url());
+      const request = route.request().method() === 'POST'
+        ? route.request().postDataJSON() as TranscriptAnchorRequest : null;
+      if ((request?.chatId ?? url.searchParams.get('chatId')) !== chatId) return route.continue();
+      if (request) combined.push(request);
+      if (!holding) return route.continue();
+      const response = await route.fetch();
+      expect((await response.json()).lastOrdinal).toBe(head);
+      if (request) captured += 1;
+      await held.promise;
+      await route.fulfill({ response });
+    });
+    const marker = 'Synthetic commit during cold history';
+    const provider = integration.fakeProviders.openAi.holdNext({ lastUserText: marker });
+    try {
+      phase('capturing the first history response before a live turn');
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await browserExpect.poll(() => captured).toBeGreaterThan(0);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      const live = await integration.client.runDirectChat({ chatId, content: marker, agent: integration.directAgents.openAi });
+      await provider.received;
+      const stop = page.getByRole('button', { name: 'Stop', exact: true });
+      await browserExpect(stop).toBeVisible();
+      provider.releaseEcho();
+      await integration.client.waitForTurnTerminal(chatId, live.turnId);
+      // Terminal handling flushes the browser's message accumulator before clearing processing.
+      await browserExpect(stop).toHaveCount(0);
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(0);
+      const beforeRelease = combined.length;
+      phase('installing the captured response and recovering the missed commits');
+      holding = false;
+      held.resolve();
+      await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(1);
+      await browserExpect(feed.getByText(`echo:${marker}`, { exact: true })).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      expect(combined[beforeRelease]).toEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
+    } finally {
+      provider.releaseEcho();
+      held.resolve();
+    }
+  });
+}, 180_000);
+
+test('reconnect replaces a same-view lost tail and accepts a commit at its reused ordinal', async () => {
+  await withChromiumFixture('combined-anchor-tail-loss', async ({ integration, page, context, browserErrors }, phase) => {
+    const { chatId, transcriptViewId, head } = await seedCombinedAnchorHistory(integration);
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const feed = page.locator('[data-chat-scroll-viewport]');
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+    await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    const composer = page.locator('[data-composer]');
+    const node = await composer.elementHandle();
+    const input = page.getByPlaceholder('Reply...', { exact: true });
+    await input.fill('Synthetic retained recovery draft');
+    const snapshot = page.waitForResponse(response => {
+      if (!response.url().endsWith('/api/v1/chats/combined-messages')) return false;
+      const request = response.request().postDataJSON() as TranscriptAnchorRequest;
+      return request.chatId === chatId && request.cursorOrdinal === undefined;
+    }, { timeout: 60_000 });
+    phase('simulating committed tail loss while the isolated controller is stopped');
+    await integration.crashAndRestartGarcon({ reusePort: true, beforeStart: async () => {
+      const db = new Database(join(integration.dirs.workspace, 'transcript-ledgers', chatId, 'ledger.sqlite'));
+      try {
+        expect(db.query('DELETE FROM transcript_rows WHERE view_id = ? AND ordinal = ?').run(transcriptViewId, head).changes).toBe(1);
+      } finally { db.close(); }
+    } });
+    const response = await snapshot;
+    expect(response.status()).toBe(200);
+    const request = response.request().postDataJSON() as TranscriptAnchorRequest;
+    expect(request.watermarkOrdinal).toBeUndefined();
+    expect(parseTranscriptAnchorResponse(request, await response.json())).toMatchObject({
+      transcriptViewId, lastOrdinal: head - 1, watermarkOrdinal: head - 1,
+    });
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toHaveCount(0);
+    await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    await browserExpect(input).toHaveValue('Synthetic retained recovery draft');
+    expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, node)).toBe(true);
+
+    phase('publishing at the formerly occupied ordinal without dropping the new input');
+    const marker = 'Synthetic input after tail loss';
+    const live = await integration.client.runDirectChat({ chatId, content: marker, agent: integration.directAgents.openAi });
+    await integration.client.waitForTurnTerminal(chatId, live.turnId);
+    const history = await integration.client.getMessages(chatId);
+    expect(history.transcriptViewId).toBe(transcriptViewId);
+    expect(history.messages.find(entry => entry.ordinal === head)?.message).toMatchObject({ type: 'user-message', content: marker });
+    await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toHaveCount(0);
+    await page.reload();
+    await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toHaveCount(0);
+    expect(browserErrors.splice(0).filter(error => !expectedDisconnectErrors.some(pattern => pattern.test(error)))).toEqual([]);
   });
 }, 180_000);

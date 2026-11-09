@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { AssistantMessage, BashToolUseMessage, ErrorMessage, UserMessage } from '../../../../common/chat-types.ts';
 import { parseTranscriptAnchorResponse } from '../../../../common/transcript-anchor-page.ts';
@@ -146,6 +146,20 @@ describe('bounded conversational anchor scan', () => {
     expect(scan('forward', 1)).toMatchObject({ startOrdinal: 1, endOrdinal: 2, pageStatus: 'complete' });
   });
 
+  it('advances through a hidden tail and an oversized private row before exposing the prompt', () => {
+    append([user(), { kind: 'run-ended', at: TS, origin: 'core', outcome: 'failed',
+      error: { code: 'SYNTHETIC_FAILURE', message: 'x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET + 1) } }, hidden()]);
+    const tail = scan('backward', 1);
+    expect(tail).toMatchObject({ startOrdinal: 3, endOrdinal: 4, anchorsRemaining: 1, pageStatus: 'partial' });
+    expect(ledgerRowsToTranscriptMessages(tail.rows)).toEqual([]);
+    const oversized = scan('backward', tail.anchorsRemaining, { cursorOrdinal: tail.startOrdinal });
+    expect(oversized).toMatchObject({ startOrdinal: 2, endOrdinal: 3, anchorsRemaining: 1, pageStatus: 'partial' });
+    expect(ledgerRowsToTranscriptMessages(oversized.rows)).toEqual([]);
+    const prompt = scan('backward', oversized.anchorsRemaining, { cursorOrdinal: oversized.startOrdinal });
+    expect(prompt).toMatchObject({ startOrdinal: 1, endOrdinal: 2, anchorsRemaining: 0, pageStatus: 'exhausted' });
+    expect(ledgerRowsToTranscriptMessages(prompt.rows)).toEqual([{ ordinal: 1, message: user().message }]);
+  });
+
   it('holds the captured watermark under appends and lets a fresh demand see the new head', () => {
     append(Array.from({ length: 201 }, tool));
     const first = scan('forward', 1);
@@ -178,13 +192,53 @@ describe('bounded conversational anchor scan', () => {
     }
   });
 
-  it('uses the existing primary key and never changes the schema', () => {
-    append([user(), tool(), assistant()]);
-    const schema = db.query('SELECT name, sql FROM sqlite_master ORDER BY name').all();
-    const plan = db.query('EXPLAIN QUERY PLAN SELECT * FROM transcript_rows WHERE view_id = ? AND ordinal < ? AND ordinal <= ? ORDER BY ordinal DESC LIMIT ?').all(VIEW, 4, 3, 201);
-    expect(plan.some(row => row.detail.includes('PRIMARY KEY'))).toBe(true);
-    scan('backward', 1);
-    expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
-    expect(db.query('SELECT name, sql FROM sqlite_master ORDER BY name').all()).toEqual(schema);
-  });
+  for (const direction of ['backward', 'forward']) {
+    it.each(['boundary', 'row-cap', 'byte-target', 'decode-error', 'gap'])(
+      `bounds actual iterator work and finalizes its keyset statement (${direction}, %s)`, stop => {
+        const drafts = stop === 'boundary' ? [assistant(), user()]
+          : stop === 'row-cap' ? Array.from({ length: 205 }, tool)
+          : stop === 'byte-target' ? [hidden(), notice('x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET + 1)), user()]
+          : [tool(), tool(), tool()];
+        append(direction === 'forward' ? drafts : drafts.reverse());
+        if (stop === 'decode-error') db.query("UPDATE transcript_rows SET payload_json = 'invalid synthetic JSON' WHERE ordinal = 2").run();
+        if (stop === 'gap') db.query('DELETE FROM transcript_rows WHERE ordinal = 2').run();
+        const schema = db.query('SELECT name, sql FROM sqlite_master ORDER BY name').all();
+        const query = db.query.bind(db);
+        let pulls = 0;
+        let iterateSpy;
+        let finalizeSpy;
+        let allSpy;
+        const querySpy = spyOn(db, 'query').mockImplementation(sql => {
+          const statement = query(sql);
+          const iterate = statement.iterate.bind(statement);
+          iterateSpy = spyOn(statement, 'iterate').mockImplementation(function* (...args) {
+            for (const row of iterate(...args)) { pulls++; yield row; }
+          });
+          allSpy = spyOn(statement, 'all').mockImplementation(() => { throw new Error('Anchor reads must iterate lazily'); });
+          finalizeSpy = spyOn(statement, 'finalize');
+          return statement;
+        });
+        try {
+          if (stop === 'decode-error') expect(() => scan(direction, 1)).toThrow();
+          else if (stop === 'gap') expect(() => scan(direction, 1)).toThrow('noncontiguous raw interval');
+          else expect(scan(direction, 1).rows).toHaveLength(stop === 'row-cap' ? 200 : 1);
+          expect(querySpy).toHaveBeenCalledTimes(1);
+          expect(pulls).toBe(stop === 'row-cap' ? 201 : 2);
+          expect(allSpy).not.toHaveBeenCalled();
+          expect(finalizeSpy).toHaveBeenCalledTimes(1);
+          const args = [VIEW, direction === 'backward' ? head + 1 : 0, head, 201];
+          expect(iterateSpy).toHaveBeenCalledWith(...args);
+          const plan = query(`EXPLAIN QUERY PLAN ${querySpy.mock.calls[0][0]}`).all(...args);
+          expect(plan.some(row => row.detail.includes('PRIMARY KEY'))).toBe(true);
+          expect(query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+          expect(query('SELECT name, sql FROM sqlite_master ORDER BY name').all()).toEqual(schema);
+        } finally {
+          iterateSpy?.mockRestore();
+          allSpy?.mockRestore();
+          finalizeSpy?.mockRestore();
+          querySpy.mockRestore();
+        }
+      },
+    );
+  }
 });

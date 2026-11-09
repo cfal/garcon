@@ -36,7 +36,7 @@ function presentation(
 	};
 }
 
-function deferredPage(lastOrdinal = 2, transcriptViewId = 'view-1') {
+function deferredPage(lastOrdinal = 2, transcriptViewId = 'view-1', limit = 50) {
 	let resolve!: (page: Awaited<ReturnType<typeof getChatMessages>>) => void;
 	vi.mocked(getChatMessages).mockReturnValueOnce(
 		new Promise((done) => {
@@ -54,7 +54,7 @@ function deferredPage(lastOrdinal = 2, transcriptViewId = 'view-1') {
 			pageNewestOrdinal: lastOrdinal,
 			nextBeforeOrdinal: null,
 			hasMore: false,
-			limit: 50,
+			limit,
 			resendCandidates: [],
 		});
 }
@@ -116,6 +116,33 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 			},
 		};
 	}
+
+	it('refreshes a cold raw snapshot after a rejected live commit instead of coalescing it away', async () => {
+		const { cache, registry, selected } = fixture();
+		registry.reconcile([presentation('window-left'), presentation('window-right')]);
+		cache.remove('chat-1');
+		const releaseSnapshot = deferredPage(2, 'view-1', 150);
+		const releaseRefresh = deferredPage(3, 'view-1', 150);
+		const load = selected.loadMessages('chat-1', { minimumLimit: 150, purpose: 'activation' });
+		try {
+			expect(getChatMessages).toHaveBeenNthCalledWith(1, { chatId: 'chat-1', limit: 150, purpose: 'activation' });
+			expect(selected.applyMessages('chat-1', 'view-1', [entry(3)], 3, 3)).toBe('gap-detected');
+			const reload = registry.loadChatSnapshot('chat-1');
+			releaseSnapshot();
+			await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+			expect(getChatMessages).toHaveBeenNthCalledWith(2, { chatId: 'chat-1', limit: 150 });
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: true });
+			releaseRefresh();
+			await load;
+			await reload;
+			for (const panel of registry.panelsForChat('chat-1')) expect(panel.transcript.entries).toEqual([entry(1), entry(2), entry(3)]);
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 3, stale: false });
+		} finally {
+			releaseSnapshot();
+			releaseRefresh();
+			await load;
+		}
+	});
 
 	it.each([0, 1, 2])('recovers Clear without WS delivery across %i panels and an older activation', async (panelCount) => {
 		const { cache, registry, selected } = fixture();

@@ -2674,7 +2674,7 @@ async function verifyTouchDragPrepend(
   }
 }
 
-async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise<void> {
+async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture, combined = false): Promise<void> {
   await fixture.context.addInitScript(() => {
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
@@ -2684,7 +2684,18 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     });
   });
   await fixture.page.setViewportSize({ width: 390, height: 700 });
-  const chatId = await seedTranscript(fixture.integration, 90, 'chromium-touch-momentum');
+  const chatId = await seedTranscript(fixture.integration, combined ? 160 : 90, 'chromium-touch-momentum');
+  const pageSize = combined ? 100 : 50;
+  const routePattern = combined ? '**/api/v1/chats/combined-messages' : '**/api/v1/chats/messages?**';
+  const isEarlierRequest = (request: Request) => {
+    const url = new URL(request.url());
+    if (combined) {
+      if (url.pathname !== '/api/v1/chats/combined-messages') return false;
+      const input = request.postDataJSON();
+      return input.chatId === chatId && input.direction === 'backward' && input.cursorOrdinal !== undefined;
+    }
+    return url.pathname === '/api/v1/chats/messages' && url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal');
+  };
   let releaseEarlierPage!: () => void;
   const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
   let resolveEarlierRequest!: () => void;
@@ -2692,18 +2703,13 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
   let drag: TranscriptTouchDrag | null = null;
 
   try {
-    await prepareTranscript(fixture, chatId);
+    await prepareTranscript(fixture, chatId, pageSize, combined);
     expect(await fixture.page.evaluate(() => navigator.userAgent)).toContain('iPhone');
     const initialEntryCount = await transcriptEntryCount(fixture.page);
-    expect(initialEntryCount).toBe(50);
+    expect(initialEntryCount).toBe(pageSize);
     let heldRequest = false;
-    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-      const url = new URL(route.request().url());
-      if (
-        !heldRequest &&
-        url.searchParams.get('chatId') === chatId &&
-        url.searchParams.has('beforeOrdinal')
-      ) {
+    await fixture.page.route(routePattern, async (route) => {
+      if (!heldRequest && isEarlierRequest(route.request())) {
         heldRequest = true;
         resolveEarlierRequest();
         await earlierPageGate;
@@ -2730,14 +2736,7 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     drag = null;
 
     await startTranscriptMomentum(fixture.page);
-    const response = fixture.page.waitForResponse((candidate) => {
-      const url = new URL(candidate.url());
-      return (
-        url.pathname === '/api/v1/chats/messages' &&
-        url.searchParams.get('chatId') === chatId &&
-        url.searchParams.has('beforeOrdinal')
-      );
-    });
+    const response = fixture.page.waitForResponse(candidate => isEarlierRequest(candidate.request()));
     releaseEarlierPage();
     await (await response).finished();
     await waitForTranscriptMomentumFrames(fixture.page, 12);
@@ -2748,7 +2747,7 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     await stopTranscriptMomentum(fixture.page);
     const anchor = await readingAnchor(fixture.page);
     await startReadingAnchorFrameSampler(fixture.page, anchor);
-    await waitForStableModelCount(fixture.page, initialEntryCount + 50);
+    await waitForStableModelCount(fixture.page, initialEntryCount + pageSize);
     expect(await fixture.page.locator(FEED_SELECTOR).getAttribute('aria-busy')).toBe('false');
     expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
     expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
@@ -2772,12 +2771,21 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
       ),
       JSON.stringify({ anchor, frames }, null, 2),
     ).toBeLessThanOrEqual(1);
+    if (combined) {
+      const next = await revealEarlierTranscript(fixture.page, initialEntryCount + pageSize);
+      await waitForStableModelCount(fixture.page, initialEntryCount + 2 * pageSize);
+      expect(next.frames.length).toBeGreaterThan(2);
+      expect(next.frames.every(frame => frame.connected && frame.rowId === next.anchor.rowId && !frame.pinned)).toBe(true);
+      expect(Math.max(...next.frames.map(frame => frame.offset === null ? Infinity : Math.abs(frame.offset - next.anchor.offset))))
+        .toBeLessThanOrEqual(1);
+      expect(Math.abs((await anchorByKey(fixture.page, next.anchor.key)).offset - next.anchor.offset)).toBeLessThanOrEqual(1);
+    }
     fixture.assertNoBrowserErrors();
   } finally {
     releaseEarlierPage();
     await stopTranscriptMomentum(fixture.page).catch(() => undefined);
     if (drag) await finishTranscriptTouchDrag(drag);
-    await fixture.page.unroute('**/api/v1/chats/messages?**');
+    await fixture.page.unroute(routePattern);
   }
 }
 
@@ -5929,6 +5937,17 @@ describe('Chromium transcript virtualization', () => {
         markPhase('continuing mobile momentum while an earlier page finishes loading');
         await verifyPostTouchMomentumPrepend(fixture);
       },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('preserves combined reading anchors through coasting and successive earlier publications', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'combined-transcript-post-touch-momentum-prepend',
+      async fixture => { await verifyPostTouchMomentumPrepend(fixture, true); },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
       browser,

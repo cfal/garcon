@@ -6,6 +6,7 @@ import {
 	forkChat,
 	forkRunChat,
 	getChatExecutionControl,
+	getChatMessages,
 	getChatSnapshot,
 	handoffChat,
 	interruptAndSendChat,
@@ -39,7 +40,11 @@ import {
 	PermissionRequestMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { CompleteChatHistoryResponse, TranscriptMessage } from '$shared/chat-view';
+import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '../conversation-panel-registry.svelte.js';
+import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 import type {
 	ChatTransientControlAction,
 	ChatTransientFeedMutation,
@@ -74,6 +79,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	forkRunChat: vi.fn(),
 	selfHandoffRunChat: vi.fn(),
 	getChatExecutionControl: vi.fn(),
+	getChatMessages: vi.fn(),
 	getChatSnapshot: vi.fn(),
 	handoffChat: vi.fn(),
 	interruptAndSendChat: vi.fn(),
@@ -1664,6 +1670,61 @@ describe('ConversationSessionController', () => {
 		expect(markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.scrollToBottom).not.toHaveBeenCalled();
+	});
+
+	it('does not validate an incomplete snapshot when its last panel is hidden during refresh', async () => {
+		const { deps } = createDeps();
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.setCurrentChatId('chat-1');
+		const registry = new ConversationPanelRegistry({
+			cache,
+			overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => lifecycle, remove: () => {} },
+			getSelectedChatId: () => 'chat-1',
+			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+		});
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-1' });
+		const controller = new ConversationSessionController({ ...deps, chatState: selected });
+		const page = (lastOrdinal: number): CompleteChatHistoryResponse => ({
+			chatId: 'chat-1', transcriptViewId: 'generation-1', historyState: { kind: 'complete' },
+			messages: Array.from({ length: lastOrdinal }, (_, index) => ({ ordinal: index + 1,
+				message: new AssistantMessage('2026-01-01T00:00:00.000Z', `Synthetic response ${index + 1}`),
+			})),
+			lastOrdinal, pageOldestOrdinal: 1, pageNewestOrdinal: lastOrdinal,
+			nextBeforeOrdinal: null, hasMore: false, limit: 50, resendCandidates: [],
+		});
+		const snapshot = deferred<CompleteChatHistoryResponse>();
+		const refresh = deferred<CompleteChatHistoryResponse>();
+		vi.mocked(getChatMessages).mockReset().mockResolvedValue(page(3))
+			.mockReturnValueOnce(snapshot.promise).mockReturnValueOnce(refresh.promise);
+		const panel = { chatId: 'chat-1', surfaceId: 'chat-view:window-left', presentation: 'window-left',
+			windowId: 'window-left', snapshotAdmission: 'admitted' } satisfies ConversationPanelDescriptor;
+		registry.reconcile([panel]);
+		const markValidated = vi.spyOn(cache, 'markValidated');
+		const load = controller.loadChat('chat-1', { restoreBottom: false });
+		try {
+			expect(selected.applyMessages('chat-1', 'generation-1', page(3).messages.slice(-1), 3, 3)).toBe('gap-detected');
+			snapshot.resolve(page(2));
+			await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+			registry.reconcile([]);
+			refresh.resolve(page(3));
+			await load;
+			expect(markValidated).not.toHaveBeenCalled();
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: true });
+			registry.reconcile([panel]);
+			await registry.loadChatSnapshot('chat-1');
+			expect(getChatMessages).toHaveBeenCalledTimes(3);
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 3, stale: false });
+		} finally {
+			snapshot.resolve(page(2));
+			refresh.resolve(page(3));
+			await load;
+			markValidated.mockRestore();
+			registry.destroy();
+			cache.flush();
+			vi.mocked(getChatMessages).mockReset();
+		}
 	});
 
 	it('restores a selected chat live permission capability with its initial snapshot', async () => {

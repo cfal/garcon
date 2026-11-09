@@ -74,6 +74,7 @@ interface SnapshotLoad {
 	readonly minimumLimit: number;
 	readonly purpose: ChatLoadMessagesOptions['purpose'];
 	readonly promise: Promise<boolean>;
+	refreshRequired: boolean;
 }
 
 interface ActivePanelReconnectReplay {
@@ -341,6 +342,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const operation: SnapshotLoad = {
 			minimumLimit,
 			purpose: options.purpose,
+			refreshRequired: false,
 			promise: this.#performChatSnapshotLoad(chatId, options, () => this.#snapshotLoads.get(chatId) === operation).finally(() => {
 				if (this.#snapshotLoads.get(chatId) === operation) this.#snapshotLoads.delete(chatId);
 			}),
@@ -364,28 +366,44 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		options: ChatLoadMessagesOptions,
 		isCurrent: () => boolean,
 		retryAfterLoaderRemoval = true,
+		recoveringContinuity = false,
 	): Promise<boolean> {
+		const incomplete = (): false => {
+			if (recoveringContinuity && isCurrent()) throw new Error('Transcript snapshot recovery did not establish continuity');
+			return false;
+		};
 		const loader = [...this.#panels.values()].find(
 			(panel) => panel.chatId === chatId && panel.snapshotAdmission === 'admitted',
 		);
-		if (!loader) return false;
+		if (!loader) return incomplete();
 		const handoffs = new Map(this.panelsForChat(chatId).map(panel => [panel, panel.transcript.snapshotHandoffGuard()]));
-		if (this.options.loadTranscriptSnapshot) {
-			await this.options.loadTranscriptSnapshot(loader.transcript, chatId, options);
-		} else {
-			await loader.transcript.loadMessages(chatId, options);
-		}
-		if (!isCurrent()) return false;
-		const loaderWasRemoved = this.#panels.get(loader.surfaceId) !== loader;
-		if (loaderWasRemoved) {
-			return retryAfterLoaderRemoval
-				? this.#performChatSnapshotLoad(chatId, options, isCurrent, false)
-				: false;
+		let readOptions = options;
+		for (;;) {
+			if (this.options.loadTranscriptSnapshot) {
+				await this.options.loadTranscriptSnapshot(loader.transcript, chatId, readOptions);
+			} else {
+				await loader.transcript.loadMessages(chatId, readOptions);
+			}
+			if (!isCurrent()) return false;
+			const pending = this.#snapshotLoads.get(chatId)!;
+			const refreshRequired = pending.refreshRequired;
+			if (refreshRequired) {
+				// A reload after a rejected commit must read newer history, not join the captured snapshot.
+				pending.refreshRequired = false;
+				recoveringContinuity = true;
+				this.markChatStale(chatId);
+				readOptions = { ...options, purpose: undefined };
+			}
+			const loaderWasRemoved = this.#panels.get(loader.surfaceId) !== loader;
+			if (loaderWasRemoved) {
+				return retryAfterLoaderRemoval
+					? this.#performChatSnapshotLoad(chatId, readOptions, isCurrent, false, recoveringContinuity)
+					: incomplete();
+			}
+			if (!refreshRequired) break;
 		}
 		const cursor = this.options.cache.readAppliedCursor(chatId);
-		if (!cursor || cursor.stale) {
-			return false;
-		}
+		if (!cursor || cursor.stale) return incomplete();
 		const currentPanels = this.panelsForChat(chatId);
 		if (currentPanels.length === 0) return false;
 		for (const panel of currentPanels) {
@@ -468,6 +486,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		});
 		if (outcome.status !== 'applied') {
 			this.#inactiveWindows.removeChat(batch.chatId);
+			const pending = this.#snapshotLoads.get(batch.chatId);
+			if (pending) pending.refreshRequired = true;
 			return { kind: 'chat-recovery-required', outcome };
 		}
 		const overlayMutation = this.options.overlays.applyCommittedBatch(batch);
