@@ -52,11 +52,11 @@
 	}
 </script>
 
-<section class="min-w-0 space-y-2 border-l-2 border-border pl-3" aria-label={m.chat_async_question()}>
+<section class="min-w-0 space-y-2 pb-3 last:pb-0" aria-label={m.chat_async_question()}>
 	{#if collapsed || !replyable}
-		<p class="whitespace-pre-wrap break-words text-sm font-medium">{question.prompt}</p>
+		<p class="whitespace-pre-wrap break-words text-sm font-medium text-foreground">{question.prompt}</p>
 		{#if recorded !== undefined}
-			<p class="whitespace-pre-wrap break-words text-sm">{recorded}</p>
+			<p class="whitespace-pre-wrap break-words text-sm text-foreground">{recorded}</p>
 		{:else if !entry?.dismissed}
 			<ul class="list-inside list-disc text-sm text-muted-foreground">
 				{#each question.options as option (option.id)}

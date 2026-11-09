@@ -52,6 +52,23 @@ for (const width of [1440, 390]) {
           await browserExpect(page.getByRole('button', { name: 'Send answer', exact: true }).nth(1)).toBeDisabled();
         }
         await deadline.fill('Friday afternoon');
+        const questions = page.locator('[data-async-questions]');
+        const card = questions.locator('[data-slot="chat-event-card"]');
+        await browserExpect(card).toHaveCount(1);
+        await browserExpect(card.getByText('Question', { exact: true })).toBeVisible();
+        const prompts = card.getByRole('region', { name: 'Question', exact: true });
+        await browserExpect(prompts).toHaveCount(2);
+        expect(await prompts.first().evaluate(element => {
+          const style = getComputedStyle(element);
+          return { beforeDivider: style.paddingBottom, afterDivider: style.marginBottom, divider: style.borderBottomWidth };
+        })).toEqual({ beforeDivider: '12px', afterDivider: '12px', divider: '1px' });
+        expect(await prompts.last().evaluate(element => getComputedStyle(element).paddingBottom)).toBe('0px');
+        const promptColor = await card.getByText('Which environment?', { exact: true }).evaluate(element => getComputedStyle(element).color);
+        await card.getByRole('button', { name: 'Dismiss question', exact: true }).first().click();
+        expect(await card.getByText('Which environment?', { exact: true }).evaluate(element => getComputedStyle(element).color)).toBe(promptColor);
+        await browserExpect(deadline).toHaveValue('Friday afternoon');
+        await card.getByRole('button', { name: 'Reply', exact: true }).click();
+        await browserExpect(page.getByRole('radio', { name: 'Production', exact: true })).toBeChecked();
         const composerTop = (await composer.boundingBox())!.y;
 
         async function selectChat(id: string) {
