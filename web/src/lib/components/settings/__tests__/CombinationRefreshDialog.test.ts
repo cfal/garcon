@@ -77,3 +77,15 @@ it('prompts for other-tab changes and permits Escape without applying them', asy
 	expect(settings.combineToolUseMessages).toBe(false);
 	expect(settings.activeCombineToolUseMessages).toBe(true);
 });
+
+it('defers the refresh prompt until onboarding closes', async () => {
+	settings = createLocalSettingsStore();
+	const { rerender } = render(CombinationRefreshDialog, { deferred: true });
+	settings.toggle('combineToolUseMessages');
+	await Promise.resolve();
+	expect(screen.queryByRole('dialog')).toBeNull();
+	expect(settings.combineToolUseMessages).toBe(false);
+	expect(settings.activeCombineToolUseMessages).toBe(true);
+	await rerender({ deferred: false });
+	await screen.findByRole('dialog', { name: 'Refresh required' });
+});

@@ -978,4 +978,4 @@
 	{/await}
 {/if}
 
-<CombinationRefreshDialog />
+<CombinationRefreshDialog deferred={appShell.showOnboardingWizard} />

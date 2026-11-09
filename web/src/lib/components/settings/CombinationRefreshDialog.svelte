@@ -5,9 +5,10 @@
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
+	let { deferred = false }: { deferred?: boolean } = $props();
 	const localSettings = getLocalSettings();
 	let open = $derived(
-		localSettings.combineToolUseMessages !== localSettings.activeCombineToolUseMessages,
+		!deferred && localSettings.combineToolUseMessages !== localSettings.activeCombineToolUseMessages,
 	);
 </script>
 
