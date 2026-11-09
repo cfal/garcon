@@ -212,9 +212,11 @@ describe('cooperative anchor responses', () => {
   it.each(['append', 'evict', 'replace', 'delete', 'closeChat', 'close', 'abort', 'corrupt', 'query-failure'])(
     'revalidates ownership and data after a held batch: %s', async action => {
       const view = initialize();
-      const replacement = await store.stageView('anchors', {
-        viewId: transcriptViewId('replacement'), contentStartOrdinal: 1, rows: [],
-      });
+      const replacement = action === 'replace'
+        ? await store.stageView('anchors', {
+          viewId: transcriptViewId('replacement'), contentStartOrdinal: 1, rows: [],
+        })
+        : null;
       const held = Promise.withResolvers();
       const pause = spyOn(EventLoopSteps.prototype, 'next').mockImplementationOnce(() => held.promise);
       const abort = new AbortController();
@@ -266,18 +268,18 @@ describe('cooperative anchor responses', () => {
   for (const terminal of ['complete', 'exhausted']) {
     it.each(['delete', 'closeChat', 'close', 'abort'])(
       `revalidates ownership after the final ${terminal} batch: %s`, async action => {
-        const view = store.initializeCurrentView('anchors', { contentStartOrdinal: 1,
-          rows: [provider('first anchor'), ...Array.from({ length: 10 }, () => ({
-            kind: 'run-ended', at, origin: 'core', outcome: 'finished',
-          })), ...(terminal === 'complete' ? [provider('excluded anchor')] : [])] });
+        const drafts = [provider('first anchor'), ...Array.from({ length: 10 }, () => ({
+          kind: 'run-ended', at, origin: 'core', outcome: 'finished',
+        }))];
+        if (terminal === 'complete') drafts.push(provider('excluded anchor'));
+        const view = store.initializeCurrentView('anchors', { contentStartOrdinal: 1, rows: drafts });
         const held = Promise.withResolvers();
         const clock = spyOn(performance, 'now').mockReturnValue(0);
         const pause = spyOn(EventLoopSteps.prototype, 'next').mockImplementationOnce(() => held.promise);
         const existing = spyOn(store, 'existingCurrentView');
         const abort = new AbortController();
         const pending = store.anchorPage('anchors', view.viewId, {
-          direction: 'forward', cursorOrdinal: 0,
-          watermarkOrdinal: terminal === 'complete' ? 12 : 11, anchorsRemaining: 1,
+          direction: 'forward', cursorOrdinal: 0, watermarkOrdinal: drafts.length, anchorsRemaining: 1,
         }, abort.signal);
         try {
           expect(pause).toHaveBeenCalledTimes(1);

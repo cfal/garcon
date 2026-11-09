@@ -48,13 +48,12 @@ test('measured underfill requests another real anchor page, not a raw-row contin
     await page.setViewportSize({ width: 1280, height: 10000 });
     await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
     const held = Promise.withResolvers<void>();
-    const entered = Promise.withResolvers<void>();
     const requests: TranscriptAnchorRequest[] = [];
     await page.route('**/api/v1/chats/combined-messages', async route => {
       const request = route.request().postDataJSON() as TranscriptAnchorRequest;
       if (request.chatId === chatId) {
         requests.push(request);
-        if (requests.length === 2) { entered.resolve(); await held.promise; }
+        if (requests.length === 2) await held.promise;
       }
       await route.continue();
     });
@@ -63,7 +62,6 @@ test('measured underfill requests another real anchor page, not a raw-row contin
       const feed = page.locator('[data-chat-scroll-viewport]');
       await browserExpect(feed.getByText('Synthetic later anchor 149', { exact: true })).toBeVisible();
       await browserExpect.poll(() => requests.length).toBe(2);
-      await entered.promise;
       expect(requests[1]!.anchorsRemaining).toBe(100);
       expect(requests[1]!.watermarkOrdinal).toBeUndefined();
       expect(await feed.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
@@ -145,7 +143,7 @@ for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'com
         await browserExpect(input).toBeFocused();
         expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, composerNode)).toBe(true);
         expect(Math.abs((await composer.boundingBox())!.y - before!.y)).toBeLessThan(2);
-        expect(requests.filter(request => request.chatId === chatId).some(request => request.cursorOrdinal !== undefined)).toBe(true);
+        expect(requests.some(request => request.chatId === chatId && request.cursorOrdinal !== undefined)).toBe(true);
 
         phase('width-only resize');
         const reads = requests.length;

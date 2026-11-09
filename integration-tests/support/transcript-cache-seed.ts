@@ -13,5 +13,5 @@ export async function seedRecentTranscriptCache(context: BrowserContext, chatId:
     localStorage.setItem('chat_snapshot_index_v3', JSON.stringify({ version: 6, entries: [{
       chatId, lastAccessedAt: now, lastValidatedAt: now, schemaVersion: 6, stale: false,
     }] }));
-  }, { chatId, page: JSON.parse(JSON.stringify(page)) as TranscriptPage });
+  }, { chatId, page });
 }

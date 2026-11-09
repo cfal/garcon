@@ -133,7 +133,9 @@ function groupToolRuns(
 			expanded,
 			spacingAfter: expanded ? 'none' : run[run.length - 1].spacingAfter,
 		});
-		if (expanded) for (const item of run) grouped.push(item);
+		if (expanded) {
+			for (const item of run) grouped.push(item);
+		}
 		run = [];
 	};
 	for (const item of items) {

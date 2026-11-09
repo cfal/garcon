@@ -43,6 +43,10 @@ const input = (ordinal: number): TranscriptMessage => ({
 	ordinal,
 	message: new UserMessage(time, `Synthetic input ${ordinal}`),
 });
+function wideAnchorInterval(): TranscriptMessage[] {
+	return [input(1), ...Array.from({ length: 650 }, (_, i) => tool(i + 2)), assistant(652)];
+}
+
 function fixture(combined = true) {
 	const cache = new ChatTranscriptCache({ limit: 100 });
 	caches.add(cache);
@@ -197,15 +201,20 @@ afterEach(() => {
 });
 
 describe('combined transcript intervals', () => {
-	it.each(['snapshot', 'earlier', 'later', 'initial', 'latest'] as const)('installs a whole wide interval through %s', async target => {
+	it.each([
+		['snapshot', null],
+		['earlier', 652],
+		['later', 1],
+		['initial', 300],
+		['latest', 300],
+	] as const)('installs a whole wide interval through %s', async (target, residentOrdinal) => {
 		const { transcript, cache } = fixture();
-		const entries = [input(1), ...Array.from({ length: 650 }, (_, i) => tool(i + 2)), assistant(652)];
+		const entries = wideAnchorInterval();
 		installHistory(entries);
-		if (target !== 'snapshot') {
-			const ordinal = target === 'earlier' ? 652 : target === 'later' ? 1 : 300;
-			transcript.replaceGeneration(chatId, viewId, [entries[ordinal - 1]], {
-				lastOrdinal: 652, pageNewestOrdinal: ordinal, pageOldestOrdinal: ordinal,
-				nextBeforeOrdinal: ordinal === 1 ? null : ordinal, hasMore: ordinal > 1,
+		if (residentOrdinal !== null) {
+			transcript.replaceGeneration(chatId, viewId, [entries[residentOrdinal - 1]], {
+				lastOrdinal: 652, pageNewestOrdinal: residentOrdinal, pageOldestOrdinal: residentOrdinal,
+				nextBeforeOrdinal: residentOrdinal === 1 ? null : residentOrdinal, hasMore: residentOrdinal > 1,
 			});
 		}
 		if (target === 'snapshot') await transcript.loadMessages(chatId);
@@ -221,7 +230,7 @@ describe('combined transcript intervals', () => {
 
 	it('preserves a buffered live suffix while installing a wide fixed-watermark snapshot', async () => {
 		const { transcript } = fixture();
-		const entries = [input(1), ...Array.from({ length: 650 }, (_, i) => tool(i + 2)), assistant(652)];
+		const entries = wideAnchorInterval();
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
 		const load = transcript.loadMessages(chatId);
@@ -234,7 +243,7 @@ describe('combined transcript intervals', () => {
 
 	it('does not publish a wide earlier response rejected by the application gate', async () => {
 		const { transcript } = fixture();
-		const entries = [input(1), ...Array.from({ length: 650 }, (_, i) => tool(i + 2)), assistant(652)];
+		const entries = wideAnchorInterval();
 		transcript.replaceGeneration(chatId, viewId, [assistant(652)], {
 			lastOrdinal: 652, pageOldestOrdinal: 652, nextBeforeOrdinal: 652, hasMore: true,
 		});
@@ -249,7 +258,7 @@ describe('combined transcript intervals', () => {
 
 	it('discards a wide snapshot after chat ownership changes', async () => {
 		const { transcript } = fixture();
-		const entries = [input(1), ...Array.from({ length: 650 }, (_, i) => tool(i + 2)), assistant(652)];
+		const entries = wideAnchorInterval();
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
 		const load = transcript.loadMessages(chatId);
