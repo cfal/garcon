@@ -155,6 +155,10 @@ describe('combined history response', () => {
     expect(() => parseTranscriptAnchorResponse(input, { ...partial,
       resendCandidates: [{ ordinal: 1, content: 'Synthetic input', attachmentNames: [] }] }))
       .toThrow('resend candidates on continuation');
+    expect(() => parseTranscriptAnchorResponse({ ...request, direction: 'forward',
+      transcriptViewId: page.transcriptViewId }, { ...partial,
+      resendCandidates: [{ ordinal: 1, content: 'Synthetic input', attachmentNames: [] }] }))
+      .toThrow('resend candidates on continuation');
   });
 
   it('rejects stale view, changed continuation watermark, and continuation resend candidates', () => {
