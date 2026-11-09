@@ -137,7 +137,8 @@
 		overlays: conversationTranscriptOverlays,
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
-		retainInactiveWindows: () => localSettings.combineToolUseMessages,
+		retainInactiveWindows: () => localSettings.activeCombineToolUseMessages,
+		combineMessages: localSettings.activeCombineToolUseMessages,
 	});
 	setConversationPanels(conversationPanels);
 	const auth = getAuth();
@@ -445,7 +446,6 @@
 	$effect(() => {
 		const visible = chatPresentations;
 		const existingSurfaceIds = existingChatSurfaceIds;
-		void localSettings.combineToolUseMessages;
 		untrack(() => {
 			conversationPanels.reconcile(visible);
 			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);

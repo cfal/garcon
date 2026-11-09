@@ -17,6 +17,60 @@ import { ledgerRowsToMessages } from '../presentation.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptViewReader', () => {
+  it('reads anchor chunks through adoption, the stored view and the public projection', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      appendPrompt(ledger, viewId, 'synthetic-input');
+      const lease = ledger.openProducer('chat-1', 'test');
+      lease.sink.publish({ type: 'session', session: { agentSessionId: 'synthetic-session', nativeSession: null, nativeSeedReceipt: null } });
+      lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(TS, 'Synthetic answer'), providerMeta: { syntheticPrivate: 'withheld' } }] });
+      const result = await reader.anchorPage({ chatId: 'chat-1', direction: 'backward', anchorsRemaining: 1 });
+      expect(result).toMatchObject({ transcriptViewId: viewId, direction: 'backward',
+        watermarkOrdinal: 3, lastOrdinal: 3, startOrdinal: 2, endOrdinal: 4,
+        anchorsRemaining: 0, pageStatus: 'complete' });
+      expect(result.messages.map(entry => entry.ordinal)).toEqual([3]);
+      expect(JSON.stringify(result)).not.toContain('withheld');
+    });
+  });
+
+  it('validates anchor requests and ahead cursors without fencing the ledger', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      appendPrompt(ledger, viewId, 'synthetic-input');
+      const request = { chatId: 'chat-1', direction: 'forward', anchorsRemaining: 1, transcriptViewId: viewId };
+      await expect(reader.anchorPage({ ...request, anchorsRemaining: 201 })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      await expect(reader.anchorPage({ ...request, cursorOrdinal: 2 })).rejects.toMatchObject({ code: 'TRANSCRIPT_CURSOR_AHEAD', status: 409 });
+      await expect(reader.anchorPage({ ...request, cursorOrdinal: 0, watermarkOrdinal: 2 })).rejects.toMatchObject({ code: 'TRANSCRIPT_CURSOR_AHEAD', status: 409 });
+      await expect(reader.anchorPage({ ...request, cursorOrdinal: 2, watermarkOrdinal: 1 })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      appendPrompt(ledger, viewId, 'synthetic-next-input');
+      expect((await reader.anchorPage(request)).lastOrdinal).toBe(2);
+    });
+  });
+
+  it('checks anchor expected view before head or cursor-ahead validation', async () => {
+    await withReader(async ({ ledger, reader }) => {
+      const read = spyOn(ledger, 'highWatermark');
+      try {
+        await expect(reader.anchorPage({ chatId: 'chat-1', direction: 'backward', anchorsRemaining: 1,
+          transcriptViewId: 'replaced-view', cursorOrdinal: 501, watermarkOrdinal: 500 }))
+          .rejects.toBeInstanceOf(StaleTranscriptViewError);
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+      }
+    });
+  });
+
+  it('translates an undecodable anchor scan into fenced degraded history', async () => {
+    await withReader(async ({ ledger, reader, viewId, root }) => {
+      appendPrompt(ledger, viewId, 'synthetic-input');
+      const database = new Database(path.join(root, 'chat-1', 'ledger.sqlite'));
+      database.query("UPDATE transcript_rows SET payload_json = 'invalid synthetic JSON' WHERE ordinal = 1").run();
+      database.close();
+      await expect(reader.anchorPage({ chatId: 'chat-1', direction: 'backward', anchorsRemaining: 1 }))
+        .rejects.toMatchObject({ historyState: { kind: 'degraded', errorCode: 'LEDGER_FENCED', retryable: false } });
+      await expect(reader.page('chat-1', 20)).rejects.toBeInstanceOf(TranscriptHistoryUnavailableError);
+    });
+  });
+
   it('rejects excess captures before reading rows and retains admission until the consumer settles', async () => {
     await withReader(async ({ ledger, reader }) => {
       const held = Promise.withResolvers();

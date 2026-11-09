@@ -158,6 +158,7 @@ class ChatTranscriptPersistenceQueue {
 
 export class ChatTranscriptCache {
 	#entries = new SvelteMap<string, ChatTranscriptSnapshot>();
+	#snapshotReads = new Set<{ chatId: string; current: boolean }>();
 	#lastAccessedAt = new Map<string, string>();
 	#storage: LocalChatTranscriptStorage;
 	#limit: number;
@@ -190,6 +191,15 @@ export class ChatTranscriptCache {
 	get(chatId: string): ChatTranscriptSnapshot | null {
 		const entry = this.#entries.get(chatId);
 		return entry ? snapshotFromEntry(entry) : null;
+	}
+
+	trackSnapshotRead(chatId: string): { isCurrent(): boolean; release(): void } {
+		const read = { chatId, current: true };
+		this.#snapshotReads.add(read);
+		return {
+			isCurrent: () => read.current,
+			release: () => { this.#snapshotReads.delete(read); },
+		};
 	}
 
 	markAccessed(chatId: string): void {
@@ -398,6 +408,9 @@ export class ChatTranscriptCache {
 
 	remove(chatId: string): void {
 		if (!chatId) return;
+		for (const read of this.#snapshotReads) {
+			if (read.chatId === chatId) read.current = false;
+		}
 		this.#entries.delete(chatId);
 		this.#lastAccessedAt.delete(chatId);
 		this.#storage.remove(chatId);

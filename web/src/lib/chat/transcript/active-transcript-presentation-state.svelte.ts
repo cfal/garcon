@@ -72,7 +72,7 @@ export class ActiveTranscriptPresentationState {
 		optimisticAfterOrdinals: this.optimisticAfterOrdinals,
 		notices: this.#displayLocalNotices,
 	}));
-	#visibleRows = $derived(visibleTranscriptRows({
+	#visibleRows = $derived.by(() => this.combinedMode ? this.#displayRows : visibleTranscriptRows({
 		entries: this.entries,
 		transcriptViewId: this.transcriptViewId,
 		optimisticInputs: this.visibleOptimisticInputs,
@@ -83,7 +83,10 @@ export class ActiveTranscriptPresentationState {
 	#displayMessages = $derived(messagesFromDisplayRows(this.#displayRows));
 	#visibleMessages = $derived(messagesFromDisplayRows(this.#visibleRows));
 
-	constructor(sharedOverlay: ConversationTranscriptOverlayView | null) {
+	constructor(
+		sharedOverlay: ConversationTranscriptOverlayView | null,
+		readonly combinedMode = false,
+	) {
 		this.#sharedOverlay = sharedOverlay;
 	}
 
@@ -221,6 +224,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	revealEarlierLoadedRows(): boolean {
+		if (this.combinedMode) return false;
 		const previousCount = this.visibleMessageCount;
 		const nextCount = Math.min(this.displayMessageCount, previousCount + 100);
 		if (nextCount <= previousCount) return false;
@@ -232,6 +236,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	revealAllLoadedMessages(): void {
+		if (this.combinedMode) return;
 		const changed = this.visibleMessageCount < this.displayMessageCount;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 		this.rememberExpandedVisibleWindow();
@@ -239,6 +244,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	protected rememberExpandedVisibleWindow(): void {
+		if (this.combinedMode) return;
 		if (this.entries.length <= INITIAL_VISIBLE_MESSAGES) return;
 		let firstVisibleOrdinal: number | undefined;
 		for (const row of this.#visibleRows) {
@@ -252,6 +258,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	protected growExpandedVisibleWindow(): void {
+		if (this.combinedMode) return;
 		if (this.expandedVisibleStartOrdinal === null) return;
 		const firstVisibleIndex = this.#displayRows.findIndex(
 			(row) => row.kind === 'message' && row.ordinal === this.expandedVisibleStartOrdinal,

@@ -7,7 +7,13 @@ import { CHAT_MESSAGES_MAX_LIMIT } from '../../../common/chat-view.js';
 import type { TicketSource } from '../../../common/tickets.js';
 import type { TicketSourceResolution } from '../../../common/ticket-source-navigation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
-import { DomainError } from '../../common/domain-error.js';
+import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
+import {
+  parseTranscriptAnchorRequest,
+  TranscriptAnchorRequestError,
+  type TranscriptAnchorRequest,
+} from '../../../common/transcript-anchor-page.js';
+import type { TranscriptAnchorRead } from '../chats/chat-message-reader.js';
 import type { TranscriptAdoptionService } from './adoption.js';
 import type { TranscriptViewId } from './contracts.js';
 import {
@@ -54,6 +60,48 @@ export class TranscriptViewReader {
       expectedTranscriptViewId,
       signal,
     ));
+  }
+
+  async anchorPage(
+    request: TranscriptAnchorRequest,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<TranscriptAnchorRead> {
+    try {
+      request = parseTranscriptAnchorRequest(request);
+    } catch (error) {
+      if (error instanceof TranscriptAnchorRequestError) throw new ValidationDomainError(error.message);
+      throw error;
+    }
+    return readWithFenceTranslation(async () => {
+      const view = await this.#adoption.ensure(request.chatId, signal);
+      signal.throwIfAborted();
+      if (request.transcriptViewId !== undefined && view.viewId !== request.transcriptViewId) {
+        throw new StaleTranscriptViewError(request.chatId, request.transcriptViewId, view.viewId);
+      }
+      const head = this.#ledger.highWatermark(request.chatId);
+      if (head.viewId !== view.viewId) {
+        throw new StaleTranscriptViewError(request.chatId, view.viewId, head.viewId);
+      }
+      const watermarkOrdinal = request.watermarkOrdinal ?? head.ordinal;
+      const cursorOrdinal = request.cursorOrdinal ?? (request.direction === 'backward' ? watermarkOrdinal + 1 : 0);
+      if (watermarkOrdinal > head.ordinal || cursorOrdinal > head.ordinal + (request.direction === 'backward' ? 1 : 0)) {
+        throw new DomainError('TRANSCRIPT_CURSOR_AHEAD', 'Transcript cursor is ahead of the current view', 409);
+      }
+      const { rows, ...coverage } = this.#ledger.anchorPage(request.chatId, view.viewId, {
+        direction: request.direction,
+        cursorOrdinal,
+        watermarkOrdinal,
+        anchorsRemaining: request.anchorsRemaining,
+      });
+      return {
+        ...coverage,
+        direction: request.direction,
+        transcriptViewId: view.viewId,
+        watermarkOrdinal,
+        lastOrdinal: head.ordinal,
+        messages: ledgerRowsToTranscriptMessages(rows),
+      };
+    });
   }
 
   async resolveTicketSource(source: TicketSource, signal?: AbortSignal): Promise<TicketSourceResolution> {

@@ -260,6 +260,14 @@
 	});
 
 	$effect(() => {
+		void panel.transcript.pagingRevision;
+		void panel.transcript.feedMutationClock.dataRevision;
+		void panel.transcript.isLoadingMessages;
+		void conversationViewport;
+		untrack(() => panel.scroll.wakeCoverage());
+	});
+
+	$effect(() => {
 		const element = scrollContainer;
 		const viewport = conversationViewport;
 		if (!element || !isVisible) return;
@@ -347,6 +355,7 @@
 				onViewportPortChange={(port) => (conversationViewport = port)}
 				onPresentationPortChange={setFeedPresentation}
 				onInitialEndRestored={() => panel.completeInitialBottomRestore()}
+				onCoverageChange={() => panel.scroll.wakeCoverage()}
 				{isProcessing}
 			/>
 			{#snippet failed(error)}

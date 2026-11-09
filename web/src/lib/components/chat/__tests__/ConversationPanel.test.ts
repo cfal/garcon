@@ -188,6 +188,7 @@ function makePanel() {
 		resumePendingRestore: () => {},
 		navigateToTranscriptRow: async () => 'cancelled',
 		prepareForInteractionLoss,
+		installInitialSnapshot: () => {},
 		prepareForHide: () => {
 			lastRestoreTarget = presentation?.captureRestoreTarget() ?? lastRestoreTarget;
 			return lastRestoreTarget;

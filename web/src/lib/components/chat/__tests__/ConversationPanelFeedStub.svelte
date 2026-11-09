@@ -36,7 +36,6 @@
 	};
 	const viewport: ConversationViewportPort = {
 		isReady: () => true,
-		hasCollapsedToolGroups: () => false,
 		isAtEnd: () => false,
 		ownsScrollPosition: () => false,
 		viewportPosition: () => null,
@@ -46,6 +45,8 @@
 		scrollBy: () => {},
 		waitForLayout: async () => 'settled',
 		measureViewportFill: async () => 'overflow',
+		readViewportFill: () => 'overflow',
+		onNextMeasurement: () => () => {},
 		restoreHiddenReadingPosition: async () => 'restored',
 		cancelPendingLayoutMutation: () => {},
 		cancelForUserIntent: () => 'cancelled',

@@ -17,6 +17,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	readonly transcriptCache;
 	readonly #fallback;
 	readonly #optimisticChatIds = new Map<string, string>();
+	#fallbackLoadEpoch = 0;
 
 	constructor(
 		private readonly options: {
@@ -25,7 +26,11 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		},
 	) {
 		this.transcriptCache = options.panels.transcriptCache;
-		this.#fallback = new ActiveTranscriptState(this.transcriptCache);
+		this.#fallback = new ActiveTranscriptState(this.transcriptCache, null, {
+			onSnapshotResendCandidates: (chatId, candidates, frontier) => {
+				options.panels.publishSnapshotResendCandidates(chatId, candidates, frontier);
+			},
+		});
 	}
 
 	get activeChatId(): string | null {
@@ -166,9 +171,12 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	async loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]> {
 		const panel = this.#panelForChat(chatId);
 		if (!panel) {
+			const epoch = ++this.#fallbackLoadEpoch;
 			const messages = await this.#fallback.loadMessages(chatId, options);
-			for (const mounted of this.options.panels.panelsForChat(chatId)) {
-				if (!mounted.transcript.isLoadingMessages) mounted.transcript.installCachedSnapshot(chatId);
+			if (epoch === this.#fallbackLoadEpoch && this.#fallback.activeChatId === chatId) {
+				for (const mounted of this.options.panels.panelsForChat(chatId)) {
+					mounted.installInitialSnapshot();
+				}
 			}
 			return this.#panelForChat(chatId)?.transcript.chatMessages ?? messages;
 		}
@@ -182,13 +190,8 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	async recoverViewReplacement(chatId: string, previousViewId: string): Promise<void> {
-		const currentViewId = this.transcriptCache.get(chatId)?.transcriptViewId;
-		// A delivered replacement or a later view already owns the presentation.
-		if (currentViewId && currentViewId !== previousViewId) return;
+		if (!this.options.panels.resetForViewReplacement(chatId, previousViewId)) return;
 		this.discardChat(chatId);
-		this.options.panels.handleViewReplacement(chatId);
-		this.transcriptCache.remove(chatId);
-		for (const panel of this.options.panels.panelsForChat(chatId)) panel.transcript.clearMessages();
 		if (!this.hasMountedPresentation(chatId)) {
 			if (this.options.getSelectedChatId() !== chatId) return;
 			this.#fallback.activateChat(chatId);
@@ -242,7 +245,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		for (const [clientMessageId, optimisticChatId] of this.#optimisticChatIds) {
 			if (optimisticChatId === chatId) this.#optimisticChatIds.delete(clientMessageId);
 		}
-		if (this.#fallback.activeChatId === chatId) this.#fallback.activateChat(null);
+		if (this.#fallback.activeChatId === chatId) this.#activateFallback(null);
 	}
 
 	hasMountedPresentation(chatId: string): boolean {
@@ -250,8 +253,13 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	activateChat(chatId: string | null): ChatRestoreResult | null {
-		if (!chatId) return this.#fallback.activateChat(null);
+		if (!chatId) return this.#activateFallback(null);
 		if (this.#current()?.chatId === chatId) return null;
+		return this.#activateFallback(chatId);
+	}
+
+	#activateFallback(chatId: string | null): ChatRestoreResult | null {
+		this.#fallbackLoadEpoch += 1;
 		return this.#fallback.activateChat(chatId);
 	}
 

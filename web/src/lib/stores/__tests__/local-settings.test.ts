@@ -18,6 +18,22 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([false, true])('keeps the active combination mode until a new app store is created (%s)', combined => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: combined }));
+		const store = createLocalSettingsStore();
+		store.toggle('combineToolUseMessages');
+		expect(store.activeCombineToolUseMessages).toBe(combined);
+		expect(store.combineToolUseMessages).toBe(!combined);
+		const refreshed = createLocalSettingsStore();
+		expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
+		expect(store.activeCombineToolUseMessages).toBe(combined);
+		expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+		store.destroy();
+		refreshed.destroy();
+	});
+
 	it.each([undefined, null, 'false', 0, {}])(
 		'defaults chat swapping on for a missing or malformed preference: %s',
 		(value) => {

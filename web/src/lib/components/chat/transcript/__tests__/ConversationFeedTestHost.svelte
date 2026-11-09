@@ -234,7 +234,6 @@
 	localSettings.chatMaxWidth = 'medium';
 	localSettings.showThinking = true;
 	localSettings.hiddenToolTypes = [];
-	localSettings.combineToolUseMessages = false;
 	setLocalSettings(localSettings);
 	setRemoteSettings(untrack(() => remoteSettingsStore));
 	const appShell = createAppShellStore();

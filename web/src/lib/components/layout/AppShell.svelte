@@ -53,6 +53,7 @@
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
+	import CombinationRefreshDialog from '../settings/CombinationRefreshDialog.svelte';
 	import WorkspaceCloseGuard from '$lib/components/workspace/WorkspaceCloseGuard.svelte';
 	import { bindMobileViewport } from './mobile-viewport-binding';
 	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
@@ -976,3 +977,5 @@
 		<OnboardingWizard />
 	{/await}
 {/if}
+
+<CombinationRefreshDialog deferred={appShell.showOnboardingWizard} />

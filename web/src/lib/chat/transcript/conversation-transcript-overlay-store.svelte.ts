@@ -28,6 +28,8 @@ export interface ConversationTranscriptOverlayView {
 
 export interface CommittedOverlayBatch {
 	readonly chatId: string;
+	readonly transcriptViewId: string;
+	readonly lastOrdinal: number;
 	readonly messages: readonly TranscriptMessage[];
 	readonly resendCandidates: readonly ResendCandidate[];
 	readonly noticeRevision: number;
@@ -38,6 +40,7 @@ function feedMutation(feedStructureChanged: boolean): ConversationTranscriptOver
 }
 
 class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverlayView {
+	#resendFrontier: { transcriptViewId: string; lastOrdinal: number } | null = null;
 	#notices = $state<OverlayNotice[]>([]);
 	#noticeRevision = $state(0);
 	#optimisticInputs = $state<OptimisticUserInput[]>([]);
@@ -167,6 +170,19 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return feedMutation(false);
 	}
 
+	publishSnapshotResendCandidates(
+		candidates: readonly ResendCandidate[],
+		frontier: { transcriptViewId: string; lastOrdinal: number },
+	): ConversationTranscriptOverlayMutation {
+		if (this.#resendFrontier?.transcriptViewId === frontier.transcriptViewId
+			&& this.#resendFrontier.lastOrdinal > frontier.lastOrdinal) return feedMutation(false);
+		this.#resendFrontier = {
+			transcriptViewId: frontier.transcriptViewId,
+			lastOrdinal: frontier.lastOrdinal,
+		};
+		return this.replaceResendCandidates(candidates);
+	}
+
 	excludeResendCandidate(ordinal: number): ConversationTranscriptOverlayMutation {
 		if (!this.#resendCandidates.some((candidate) => candidate.ordinal === ordinal)) {
 			return feedMutation(false);
@@ -219,7 +235,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			}
 		}
 
-		this.#installResendCandidates(batch.resendCandidates);
+		this.publishSnapshotResendCandidates(batch.resendCandidates, batch);
 		return feedMutation(feedStructureChanged);
 	}
 
@@ -235,6 +251,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	}
 
 	resetForTranscriptReplacement(): ConversationTranscriptOverlayMutation {
+		this.#resendFrontier = null;
 		const feedStructureChanged = this.#notices.length > 0 || this.#optimisticInputs.length > 0;
 		this.#notices = [];
 		// The revision counter stays monotonic across replacements so a revision
@@ -321,6 +338,14 @@ export class ConversationTranscriptOverlayStore {
 
 	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
 		return this.#entry(batch.chatId).applyCommittedBatch(batch);
+	}
+
+	publishSnapshotResendCandidates(
+		chatId: string,
+		candidates: readonly ResendCandidate[],
+		frontier: { transcriptViewId: string; lastOrdinal: number },
+	): ConversationTranscriptOverlayMutation {
+		return this.#entry(chatId).publishSnapshotResendCandidates(candidates, frontier);
 	}
 
 	resetForTranscriptReplacement(chatId: string): ConversationTranscriptOverlayMutation {

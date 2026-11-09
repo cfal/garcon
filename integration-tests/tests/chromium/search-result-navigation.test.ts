@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { join } from 'node:path';
 import { ThinkingMessage } from '../../../common/chat-types.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
@@ -86,6 +87,7 @@ for (const width of [1440, 390]) {
       `search-result-exact-${width}`,
       async ({ page, integration, assertNoBrowserErrors }) => {
         const { target, marker, chatId } = await createSearchNavigationTarget(integration);
+        await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
         await page.setViewportSize({ width, height: 900 });
         await page.goto(integration.garcon.baseUrl);
         if (width > 700) await collapseCanonicalFilesWindow(page);
@@ -333,6 +335,7 @@ test('search cancels a target page at its deadline without installing a late row
     'search-result-deadline',
     async ({ page, integration, assertNoBrowserErrors }) => {
       const { target, marker } = await createSearchNavigationTarget(integration);
+      await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await openSearch(page, marker);
@@ -362,6 +365,7 @@ test('search cancels a target page at its deadline without installing a late row
         });
         await notification.waitFor();
         expect(await notification.count()).toBe(1);
+        expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
         await releaseRequest(page, route);
         expect(await composer.inputValue()).toBe('Synthetic deadline draft.');
         expect(await composer.evaluate((node) => document.activeElement === node)).toBe(true);

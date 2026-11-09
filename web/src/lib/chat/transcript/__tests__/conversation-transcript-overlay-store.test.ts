@@ -27,6 +27,19 @@ function echoed(clientMessageId: string, ordinal: number): TranscriptMessage {
 }
 
 describe('ConversationTranscriptOverlayStore', () => {
+	it.each(['snapshot', 'commit'] as const)('copies only the freshness identity from a %s publication', source => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const publication = {
+			chatId: 'chat-1', transcriptViewId: 'synthetic-view', lastOrdinal: 100,
+			messages: [echoed('input-100', 100)], resendCandidates: [candidate(100)], noticeRevision: 0,
+		};
+		if (source === 'snapshot') overlays.publishSnapshotResendCandidates('chat-1', publication.resendCandidates, publication);
+		else overlays.applyCommittedBatch(publication);
+		publication.lastOrdinal = 0;
+		overlays.publishSnapshotResendCandidates('chat-1', [candidate(50)], { transcriptViewId: 'synthetic-view', lastOrdinal: 50 });
+		expect(overlays.forChat('chat-1').resendCandidates).toEqual([candidate(100)]);
+	});
+
 	it('reads a missing chat without creating reactive state', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 
@@ -64,6 +77,8 @@ describe('ConversationTranscriptOverlayStore', () => {
 
 		const mutation = overlays.applyCommittedBatch({
 			chatId: 'chat-1',
+			transcriptViewId: 'synthetic-view',
+			lastOrdinal: 3,
 			messages: [echoed('input-1', 3)],
 			resendCandidates: [candidate(3)],
 			noticeRevision: capturedRevision,
@@ -174,6 +189,8 @@ describe('ConversationTranscriptOverlayStore', () => {
 
 		overlays.applyCommittedBatch({
 			chatId: 'chat-1',
+			transcriptViewId: 'synthetic-view',
+			lastOrdinal: 1,
 			messages: [echoed('input-1', 1)],
 			resendCandidates: [],
 			noticeRevision: revision,
@@ -191,6 +208,14 @@ describe('ConversationTranscriptOverlayStore', () => {
 			'intervening notice',
 			'native history changed',
 		]);
+	});
+
+	it('accepts an admitted replacement snapshot without comparing ordinals across views', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.publishSnapshotResendCandidates('chat-1', [], { transcriptViewId: 'old-view', lastOrdinal: 100 });
+		const candidates = [{ ordinal: 1, content: 'Synthetic replacement input', attachmentNames: [] }];
+		overlays.publishSnapshotResendCandidates('chat-1', candidates, { transcriptViewId: 'new-view', lastOrdinal: 1 });
+		expect(overlays.forChat('chat-1').includedResendCandidates).toEqual(candidates);
 	});
 
 	it('prunes only chats outside the active session set', () => {

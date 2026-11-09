@@ -133,6 +133,8 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         }
         if (title === 'Chat display') {
           await wizard.getByRole('switch', { name: 'Combine tool use messages', exact: true }).uncheck();
+          await browserExpect(page.getByRole('dialog', { name: 'Refresh required', exact: true })).toHaveCount(0);
+          await browserExpect(wizard.getByRole('heading', { name: title })).toBeVisible();
         }
         if (title === 'Writing and behavior') {
           await wizard.getByText('Source', { exact: true }).click();
@@ -185,6 +187,9 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await browserExpect.poll(() => page.getByRole('dialog', { name: 'Settings', exact: true }).evaluate(element => element.contains(document.activeElement))).toBe(true);
       await browserExpect(page.getByRole('tab', { name: 'Providers', exact: true })).toHaveAttribute('aria-selected', 'true');
       await page.keyboard.press('Escape');
+      const refresh = page.getByRole('dialog', { name: 'Refresh required', exact: true });
+      await browserExpect(refresh).toBeVisible();
+      await refresh.getByRole('button', { name: 'Later', exact: true }).click();
       await browserExpect(page.getByRole('dialog')).toHaveCount(0);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.reload();
