@@ -749,12 +749,12 @@ describe('Chromium transcript chat rows', () => {
         const activeTranscriptReads: string[] = [];
         const observerTranscriptReads: string[] = [];
         fixture.page.on('request', (request) => {
-          if (new URL(request.url()).pathname === '/api/v1/chats/messages') {
+          if (/\/chats\/(?:combined-)?messages$/.test(new URL(request.url()).pathname)) {
             activeTranscriptReads.push(request.url());
           }
         });
         observerPage.on('request', (request) => {
-          if (new URL(request.url()).pathname === '/api/v1/chats/messages') {
+          if (/\/chats\/(?:combined-)?messages$/.test(new URL(request.url()).pathname)) {
             observerTranscriptReads.push(request.url());
           }
         });

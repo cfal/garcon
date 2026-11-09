@@ -95,6 +95,8 @@ import {
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
+import { readAnchorPage, type AnchorScanInput, type AnchorScanResult } from './anchor-page.js';
+import { readRawPage } from './raw-page.js';
 
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const PREVIEW_EDGE_ROWS = 32;
@@ -418,28 +420,14 @@ export class TranscriptLedgerStore {
     }
     return this.#read(chatId, (entry) => {
       this.#assertCurrent(entry, viewId);
-      const stored = before === undefined
-        ? entry.db.query<StoredLedgerRow, [string, number]>(`
-            SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-            FROM transcript_rows
-            WHERE view_id = ?
-            ORDER BY ordinal DESC
-            LIMIT ?
-          `).all(viewId, boundedLimit)
-        : entry.db.query<StoredLedgerRow, [string, number, number]>(`
-            SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-            FROM transcript_rows
-            WHERE view_id = ? AND ordinal < ?
-            ORDER BY ordinal DESC
-            LIMIT ?
-          `).all(viewId, before, boundedLimit);
-      const rows = stored.map(decodeStoredLedgerRow).reverse();
-      const oldest = rows[0]?.ordinal ?? null;
-      return {
-        viewId,
-        rows,
-        nextBefore: oldest !== null && oldest > 1 ? oldest : null,
-      };
+      return readRawPage(entry.db, viewId, boundedLimit, before);
+    });
+  }
+
+  anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput): AnchorScanResult {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return readAnchorPage(entry.db, viewId, input);
     });
   }
 

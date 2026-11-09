@@ -82,6 +82,7 @@
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onPresentationPortChange?: (port: ConversationFeedPresentationPort | null) => void;
 		onInitialEndRestored?: () => void;
+		onCoverageChange?: () => void;
 	}
 
 	let {
@@ -90,6 +91,7 @@
 		agentId,
 		scrollContainer = $bindable(null),
 		onscroll,
+		onCoverageChange,
 		onUserScrollIntent,
 		onPermissionDecision,
 		onExitPlanMode,
@@ -259,7 +261,7 @@
 		) {
 			return 'visible';
 		}
-		if (localSettings.combineToolUseMessages && chatState.canLoadEarlier) {
+		if (localSettings.activeCombineToolUseMessages && chatState.canLoadEarlier) {
 			return 'when-collapsed';
 		}
 		return 'hidden';
@@ -271,11 +273,11 @@
 		hiddenToolTypes: localSettings.hiddenToolTypes,
 		hiddenBashCommands,
 		showThinking: localSettings.showThinking,
-		combineToolUseMessages: localSettings.combineToolUseMessages,
-		expandedToolMemberIds: localSettings.combineToolUseMessages
+		combineToolUseMessages: localSettings.activeCombineToolUseMessages,
+		expandedToolMemberIds: localSettings.activeCombineToolUseMessages
 			? toolGroups.expandedMemberIds
 			: EMPTY_TOOL_MEMBER_IDS,
-		protectedVirtualKeys: localSettings.combineToolUseMessages
+		protectedVirtualKeys: localSettings.activeCombineToolUseMessages
 			? retention.retainedKeys
 			: EMPTY_PROTECTED_KEYS,
 		isLiveWindow: !chatState.hasLaterMessages,
@@ -344,6 +346,11 @@
 	const virtualSnapshot = $derived(virtualController.snapshot);
 	const renderedIndexes = $derived(virtualController.renderedIndexes(virtualSnapshot));
 	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
+
+	$effect(() => {
+		void projection.geometry.geometryRevision;
+		untrack(() => onCoverageChange?.());
+	});
 
 	$effect.pre(() => {
 		toolGroups.reconcile(

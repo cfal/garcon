@@ -43,7 +43,8 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
-import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
+import type { TranscriptAnchorPageReader, TranscriptPageReader } from '../chats/chat-message-reader.js';
+import { createCombinedMessageRoutes } from './combined-messages.js';
 import type { ShareTranscriptSnapshotPort } from './shares.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
@@ -88,6 +89,7 @@ export default function createAllRoutes(workspaceDir: string, {
   processing,
   metadata,
   chatViews,
+  transcriptAnchors,
   ticketSources,
   shareSnapshots,
   agents,
@@ -130,6 +132,7 @@ export default function createAllRoutes(workspaceDir: string, {
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   chatViews: TranscriptPageReader;
+  transcriptAnchors: TranscriptAnchorPageReader;
   ticketSources: TicketSourceReader;
   shareSnapshots: ShareTranscriptSnapshotPort;
   agents: AgentRegistry;
@@ -182,6 +185,12 @@ export default function createAllRoutes(workspaceDir: string, {
       transientFeeds,
     }),
     createChatRowRoutes(chatRows),
+    createCombinedMessageRoutes({
+      registry,
+      reader: transcriptAnchors,
+      processing,
+      resendCandidates: (chatId) => agents.resendCandidates(chatId),
+    }),
     createChatExportRoutes(transcriptExport),
     createChatClearRoutes(transcriptClear),
     createChatHandoffArtifactRoutes(handoffArtifact),

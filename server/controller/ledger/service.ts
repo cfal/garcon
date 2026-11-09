@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { AnchorScanInput, AnchorScanResult } from './anchor-page.js';
 import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentFinalResponse,
@@ -537,6 +538,10 @@ export class TranscriptLedgerService {
 
   page(chatId: string, viewId: TranscriptViewId, limit: number, before?: number): TranscriptPage {
     return this.#store.page(chatId, viewId, limit, before);
+  }
+
+  anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput): AnchorScanResult {
+    return this.#store.anchorPage(chatId, viewId, input);
   }
 
   ticketOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {

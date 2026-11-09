@@ -15,6 +15,8 @@ import {
 	captureConversationVirtualAnchor,
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationMountedVirtualItems,
+	measureConversationViewportFill,
+	readConversationViewportFill,
 } from '../conversation-feed-virtual-runtime.js';
 import ConversationFeedVirtualControllerTestHost from './ConversationFeedVirtualControllerTestHost.svelte';
 
@@ -80,6 +82,31 @@ function snapshot(keys: readonly string[], sizes: readonly number[]): VirtualLis
 }
 
 describe('ConversationFeed virtual policy', () => {
+	it('uses existing estimates for passive detached fill without requiring offscreen mounts', () => {
+		const measurements = new Map([['visible', 20]]);
+		const input = { keys: ['visible', 'offscreen'], estimates: [200, 200],
+			measuredSize: (key: string) => measurements.get(key), viewportHeight: 100 };
+		expect(readConversationViewportFill(input)).toBe('overflow');
+		measurements.set('offscreen', 20);
+		expect(readConversationViewportFill(input)).toBe('underfilled');
+	});
+
+	it('does not restore or write scroll when measured overflow already classifies', async () => {
+		const viewport = document.createElement('div');
+		Object.defineProperty(viewport, 'clientHeight', { value: 100 });
+		const scrollToIndex = vi.fn();
+		const scrollToEnd = vi.fn();
+		const restoreReadingAnchor = vi.fn(() => true);
+		expect(await measureConversationViewportFill({
+			keys: ['synthetic-row'], measuredSize: () => 200, viewport: () => viewport,
+			isCurrent: () => true, restoreEnd: false,
+			readingAnchor: { key: 'synthetic-row', viewportOffset: 0, fallbackKeys: [] },
+			scrollToIndex, scrollToEnd, restoreReadingAnchor,
+		})).toBe('overflow');
+		expect(scrollToIndex).not.toHaveBeenCalled();
+		expect(scrollToEnd).not.toHaveBeenCalled();
+		expect(restoreReadingAnchor).not.toHaveBeenCalled();
+	});
 	it('captures the first eligible painted row and stable fallback keys', () => {
 		const current = snapshot(['spacer', 'a', 'b', 'c'], [20, 40, 40, 40]);
 		const anchor = captureConversationVirtualAnchor({
@@ -465,6 +492,49 @@ describe('ConversationFeedVirtualController', () => {
 		await exposure.resetMeasurements();
 		await settleController();
 		expect(exposure.controller.snapshot.sizerSize).toBeLessThan(initialSize);
+	});
+
+	it('keeps detached passive reads nonmutating and deduplicates one-shot measurement wakeups', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const viewport = exposure.viewport();
+		if (!viewport) throw new Error('Expected a mounted viewport');
+		ResizeObserverHarness.emit(viewport, 400, 200);
+		await settleController();
+		const position = exposure.controller.viewportPosition();
+		const before = exposure.transactions.length;
+		expect(exposure.controller.readViewportFill()).toBe('overflow');
+		expect(exposure.controller.viewportPosition()).toEqual(position);
+		expect(exposure.transactions).toHaveLength(before);
+		const wake = vi.fn();
+		const cleanupWake = exposure.controller.onNextMeasurement(wake);
+		await settleController();
+		expect(wake).not.toHaveBeenCalled();
+		const item = exposure.viewport()?.querySelector<HTMLElement>('[data-chat-virtual-item]');
+		if (!item) throw new Error('Expected a mounted transcript item');
+		Object.defineProperty(item, 'offsetHeight', { configurable: true, value: 60 });
+		ResizeObserverHarness.emit(item, 400, 60);
+		await settleController();
+		expect(wake).toHaveBeenCalledOnce();
+		await settleController();
+		expect(wake).toHaveBeenCalledOnce();
+		cleanupWake();
+	});
+
+	it.each([true, false])('wakes measurement once when a hidden surface becomes ready (pinned %s)', async initialPinned => {
+		const { exposure } = await renderController({ initialPinned });
+		await exposure.hide();
+		expect(exposure.controller.isReady()).toBe(false);
+		const wake = vi.fn();
+		const cleanupWake = exposure.controller.onNextMeasurement(wake);
+		await settleController();
+		expect(wake).not.toHaveBeenCalled();
+		await exposure.showAtLayout(400, 40);
+		await settleController();
+		expect(exposure.controller.isReady()).toBe(true);
+		expect(wake).toHaveBeenCalledOnce();
+		await settleController();
+		expect(wake).toHaveBeenCalledOnce();
+		cleanupWake();
 	});
 
 	it('invalidates hidden row measurements when the viewport width changes', async () => {

@@ -4,6 +4,11 @@ import type { ConversationViewportPort } from './conversation-viewport-port.js';
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
 	| 'canLoadEarlier'
+	| 'combinedMode'
+	| 'nextBeforeOrdinal'
+	| 'loadedThroughOrdinal'
+	| 'hasPendingAnchorDemand'
+	| 'isPageLoading'
 	| 'displayMessageCount'
 	| 'feedMutationClock'
 	| 'hasEarlierRowsToReveal'

@@ -28,6 +28,7 @@ import type {
 	ConversationPanelRegistry,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ChatMessagesRequest } from '$lib/api/chats.js';
+import type { TranscriptAnchorRequest } from '$shared/transcript-anchor-page';
 import type { ProjectTarget } from '$shared/project-resolution';
 import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
@@ -39,7 +40,7 @@ import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.sve
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
-const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
+const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn(), getCombinedChatMessages: vi.fn() }));
 
 vi.mock('$lib/context', () => ({
 	getAuth: () => ({ token: null }),
@@ -91,6 +92,7 @@ vi.mock('$lib/api/chats.js', async (importOriginal) => {
 	return {
 		...actual,
 		getChatMessages: chatApiMocks.getChatMessages,
+		getCombinedChatMessages: chatApiMocks.getCombinedChatMessages,
 	};
 });
 
@@ -563,6 +565,14 @@ describe('WorkspaceRoot', () => {
 		chatApiMocks.getChatMessages.mockImplementation(async (request: ChatMessagesRequest) =>
 			emptyChatHistory(request),
 		);
+		chatApiMocks.getCombinedChatMessages.mockReset();
+		chatApiMocks.getCombinedChatMessages.mockImplementation(async (request: TranscriptAnchorRequest) => ({
+			chatId: request.chatId, transcriptViewId: `view-${request.chatId}`,
+			historyState: { kind: 'complete' }, direction: request.direction,
+			lastOrdinal: 0, watermarkOrdinal: 0, startOrdinal: 1, endOrdinal: 1,
+			anchorsRemaining: request.anchorsRemaining, pageStatus: 'exhausted',
+			messages: [], resendCandidates: [],
+		}));
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
 
@@ -695,12 +705,14 @@ describe('WorkspaceRoot', () => {
 		sessions.selectedChat = draft;
 		sessions.byId['chat-a'] = draft;
 		chatApiMocks.getChatMessages.mockRejectedValue(new Error('Session not found'));
+		chatApiMocks.getCombinedChatMessages.mockRejectedValue(new Error('Session not found'));
 
 		renderRoot();
 		await tick();
 
 		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
 		expect(chatApiMocks.getChatMessages).not.toHaveBeenCalled();
+		expect(chatApiMocks.getCombinedChatMessages).not.toHaveBeenCalled();
 	});
 
 	it('keeps visible project resolution stable across chat record updates', async () => {

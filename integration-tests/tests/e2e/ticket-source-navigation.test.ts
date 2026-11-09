@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { createTicketSource } from '../../support/ticket-source-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -6,6 +7,7 @@ import { SpaDriver } from '../../support/spa-driver.js';
 test('opens a cold source chat at an older visible outcome using one targeted page', async () => {
   await withE2eFixture('ticket-source-exact', async (fixture) => {
     const { target, ticketId } = await createTicketSource(fixture.integration, 110);
+    await fixture.page.evaluateOnNewDocument(seedLocalSettings, { combineToolUseMessages: false });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.setViewport(1440, 900);
     await app.open();

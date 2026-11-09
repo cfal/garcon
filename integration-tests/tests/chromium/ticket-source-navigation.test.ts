@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import type { Page, Route } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
@@ -27,6 +28,7 @@ for (const width of [1440, 390]) {
   test(`lands on the exact old outcome and preserves the composer draft at ${width}px`, async () => {
     await withChromiumFixture(`ticket-source-exact-${width}`, async ({ page, integration, assertNoBrowserErrors }) => {
       const { chatId, ticketId, target } = await createTicketSource(integration, 110);
+      await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
       await collapseCanonicalFilesWindow(page);
       const composer = page.locator('textarea:visible');
@@ -55,6 +57,7 @@ test('a reload between lookup and page load opens the chat without reusing the o
   let requests = 0;
   await withChromiumFixture('ticket-source-reload-race', async ({ page, context, integration, browserErrors }, markPhase) => {
     const { chatId, ticketId, target } = await createTicketSource(integration, 110);
+    await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
     const requestStarted = new Deferred<Route>();
     page.on('request', (request) => {
       if (new URL(request.url()).pathname === '/api/v1/chats/messages') messageUrls.push(request.url());
