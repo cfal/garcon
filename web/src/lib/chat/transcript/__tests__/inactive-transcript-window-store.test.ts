@@ -31,6 +31,21 @@ function park(
 }
 
 describe('InactiveTranscriptWindowStore', () => {
+	it.each([650, 8001])('admits or rejects a %s-message combined window whole', count => {
+		const store = new InactiveTranscriptWindowStore();
+		const cache = new ChatTranscriptCache({ limit: 50 });
+		const window = new ActiveTranscriptState(cache, null, { combineMessages: true });
+		const messages = Array.from({ length: count }, (_, i) => ({ ordinal: i + 1,
+			message: new AssistantMessage('2026-01-01T00:00:00.000Z', 'synthetic') }));
+		window.replaceGeneration('wide', 'view', messages, {
+			lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		park(store, 'left', 'wide', window);
+		expect(window.entries).toHaveLength(count);
+		if (count > 8000) expect(store.take('left', 'wide')).toBeNull();
+		else expect(store.take('left', 'wide')?.transcript.entries).toEqual(messages);
+	});
+
 	it('evicts whole least-recently-parked windows', () => {
 		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 100_000 });
 		park(store, 'left', 'chat-1');

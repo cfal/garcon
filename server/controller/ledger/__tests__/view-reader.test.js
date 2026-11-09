@@ -1,9 +1,12 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { Database } from 'bun:sqlite';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, UserMessage } from '../../../../common/chat-types.ts';
+import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../../common/chat-types.ts';
+import { parseTranscriptAnchorResponse } from '../../../../common/transcript-anchor-page.ts';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
 import { TranscriptRenderingWorker } from '../../chats/transcript-rendering/client.ts';
 import { transcriptViewId } from '../contracts.ts';
@@ -17,6 +20,91 @@ import { ledgerRowsToMessages } from '../presentation.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptViewReader', () => {
+  it('does not recreate a chat deleted while adoption was awaited', async () => {
+    await withReader(async ({ ledger, root }) => {
+      const reader = new TranscriptViewReader(ledger, { ensure: async () => {
+        const view = ledger.currentView('chat-1');
+        ledger.deleteChat('chat-1');
+        return view;
+      } });
+      const head = spyOn(ledger, 'highWatermark');
+      try {
+        await expect(reader.anchorPage({ chatId: 'chat-1', direction: 'backward', anchorsRemaining: 1 }))
+          .rejects.toThrow('no current view');
+        expect(head).not.toHaveBeenCalled();
+        expect(existsSync(path.join(root, 'chat-1'))).toBe(false);
+      } finally { head.mockRestore(); }
+    });
+  });
+
+  it.each(['append', 'abort', 'shutdown', 'corrupt-lookahead'])('validates a wide read after yielding: %s', async action => {
+    await withReader(async ({ ledger, reader, viewId, root }) => {
+      appendPrompt(ledger, viewId, 'synthetic-input');
+      const producer = ledger.openProducer('chat-1', 'test');
+      producer.sink.publish({ type: 'rows', rows: [
+        ...Array.from({ length: 650 }, (_, i) => ({ message: new BashToolUseMessage(TS, `tool-${i}`, 'true'), providerMeta: { private: 'withheld' } })),
+        { message: new AssistantMessage(TS, 'answer') },
+      ] });
+      const held = Promise.withResolvers();
+      const entered = Promise.withResolvers();
+      const pause = spyOn(EventLoopSteps.prototype, 'next').mockImplementationOnce(() => {
+        entered.resolve();
+        return held.promise;
+      });
+      const abort = new AbortController();
+      const request = { chatId: 'chat-1', direction: 'backward', anchorsRemaining: 1 };
+      const pending = reader.anchorPage(request, abort.signal);
+      try {
+        await entered.promise;
+        if (action === 'append') producer.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(TS, 'live') }] });
+        if (action === 'abort') abort.abort(new Error('synthetic abort'));
+        if (action === 'shutdown') reader.close();
+        if (action === 'corrupt-lookahead') {
+          const db = new Database(path.join(root, 'chat-1', 'ledger.sqlite'));
+          db.query("UPDATE transcript_rows SET payload_json = 'invalid' WHERE ordinal = 1").run();
+          db.close();
+        }
+        held.resolve();
+        if (action === 'abort') await expect(pending).rejects.toBe(abort.signal.reason);
+        else if (action === 'shutdown') await expect(pending).rejects.toMatchObject({ code: 'SERVER_SHUTTING_DOWN', status: 503 });
+        else if (action === 'corrupt-lookahead') await expect(pending).rejects.toMatchObject({ historyState: { errorCode: 'LEDGER_FENCED' } });
+        else {
+          const result = await pending;
+          expect(result).toMatchObject({ watermarkOrdinal: 652, lastOrdinal: 652, startOrdinal: 2, endOrdinal: 653, pageStatus: 'complete' });
+          expect(result.messages).toHaveLength(651);
+          expect(JSON.stringify(result)).not.toContain('withheld');
+          parseTranscriptAnchorResponse(request, { ...result, historyState: { kind: 'complete' }, chatId: 'chat-1', resendCandidates: [] });
+          expect((await reader.anchorPage(request)).lastOrdinal).toBe(653);
+        }
+        if (action === 'abort' || action === 'shutdown') expect(ledger.currentView('chat-1').viewId).toBe(viewId);
+      } finally {
+        held.resolve();
+        await pending.catch(() => {});
+        pause.mockRestore();
+      }
+    });
+  });
+
+  it('rejects a replacement after store completion and before public projection', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      const replacement = transcriptViewId('replacement');
+      await ledger.stageView('chat-1', [], 1, replacement);
+      const original = ledger.anchorPage.bind(ledger);
+      const scan = spyOn(ledger, 'anchorPage').mockImplementation(async (...args) => {
+        const result = await original(...args);
+        ledger.replaceCurrentView('chat-1', viewId, replacement);
+        return result;
+      });
+      try {
+        await expect(reader.anchorPage({ chatId: 'chat-1', direction: 'backward', anchorsRemaining: 1 }))
+          .rejects.toBeInstanceOf(StaleTranscriptViewError);
+        expect(ledger.currentView('chat-1').viewId).toBe(replacement);
+      } finally {
+        scan.mockRestore();
+      }
+    });
+  });
+
   it('reads anchor chunks through adoption, the stored view and the public projection', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       appendPrompt(ledger, viewId, 'synthetic-input');
