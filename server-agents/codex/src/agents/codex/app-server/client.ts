@@ -329,7 +329,7 @@ export class CodexAppServerClient extends EventEmitter {
     if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
     const args = ['app-server', '--listen', 'stdio://'];
     // Provider admission compares saved routes with launch configuration, not thread overrides.
-    // https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/config_manager.rs#L434-L452
+    // https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/config_manager.rs#L434-L452
     appendCodexConfigArgs(args, this.#config);
     // Keeps turn ownership in Garcon while enabling its synchronous question response UI.
     args.push(
