@@ -10,6 +10,21 @@ import {
 } from './transcript-page-demand.js';
 import type { TranscriptWindowTarget } from './transcript-page-progress.js';
 
+export function mergeCachedLatestAnchorWindow(
+	page: TranscriptWindowPage,
+	cached: ChatTranscriptSnapshot | null,
+): TranscriptWindowPage {
+	if (!cached || cached.stale || cached.transcriptViewId !== page.transcriptViewId
+		|| cached.lastOrdinal <= page.pageNewestOrdinal
+		|| (cached.nextBeforeOrdinal ?? 1) > page.pageNewestOrdinal + 1) return page;
+	return {
+		...page,
+		messages: [...page.messages, ...cached.messages.filter(entry => entry.ordinal > page.pageNewestOrdinal)],
+		lastOrdinal: Math.max(page.lastOrdinal, cached.lastOrdinal),
+		pageNewestOrdinal: cached.lastOrdinal,
+	};
+}
+
 export type TranscriptWindowPage = TranscriptPage & {
 	resendCandidates?: ResendCandidate[];
 };

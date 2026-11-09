@@ -1,3 +1,4 @@
+import { ConversationViewportCoverageController, USER_SCROLL_INTENT_WINDOW_MS, type PageApplicationPolicy } from './conversation-viewport-coverage-controller.svelte.js';
 import { tick } from 'svelte';
 import {
 	jumpToLoadedTranscriptRow,
@@ -16,9 +17,6 @@ import type {
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
-import { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
-import { fillConversationViewport } from './conversation-viewport-auto-fill.js';
-import { observeConversationQueueResize } from './conversation-queue-resize.js';
 import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type {
 	ConversationViewportIntentCancellationResult,
@@ -35,14 +33,12 @@ import type {
 	UserMessageNavigatorTarget,
 } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
-const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 const MIN_PAGE_PREFETCH_DISTANCE_PX = 100;
 const EARLIER_PAGE_PREFETCH_VIEWPORTS = 2;
 const LIVE_END_REPIN_THRESHOLD_PX = 50;
 const FEED_START_THRESHOLD_PX = 1;
 
 type PageRequestReason = 'scroll' | 'button';
-type PageApplicationPolicy = 'immediate' | 'after-native-scroll';
 type UserScrollIntentSource = 'native-touch' | 'other';
 type WindowNavigationResult = 'settled' | 'committed-unsettled' | 'invalidated';
 interface UserScrollIntent {
@@ -57,10 +53,7 @@ export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
 	isScrollingToBottom = $state(false);
-	#isAutoFillingViewport = $state(false);
 	#isViewportAtStart = $state(true);
-	#refillViewportAfterCurrentFill = false;
-	#compressedAutoFillBudget = new ConversationCompressedAutoFillBudget();
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
 	#initialBottomPaintChatId = $state<string | null>(null);
@@ -74,7 +67,9 @@ export class ConversationScrollController {
 	#deferredLiveEdgeIntent: DeferredLiveEdgeIntent | null = null;
 	#nativeScrollHandoff: NativeScrollHandoff | null = null;
 	#nativeScrollSettlement: ConversationNativeScrollSettlement;
-	#isPageMutationInProgress = false;
+	#coverage: ConversationViewportCoverageController;
+	#pageMutationOwner: { direction: TranscriptPageDirection; manual: boolean } | null = null;
+	#releaseWindowNavigation: (() => void) | null = null;
 	#activeTargetNavigations = $state(0);
 	#resumeAutoFillAfterTargets = false;
 	#lastObservedFeedChatId: string | null;
@@ -84,7 +79,23 @@ export class ConversationScrollController {
 	constructor(private deps: ConversationScrollControllerDeps) {
 		this.#nativeScrollSettlement = new ConversationNativeScrollSettlement((activity) => {
 			this.deps.getViewport()?.setNativeScrollActivity(activity);
+			if (activity === 'idle') this.wakeCoverage();
 		});
+		this.#coverage = new ConversationViewportCoverageController(deps, {
+			isVisible: () => this.#isViewportVisible,
+			isPinnedToBottom: () => this.isPinnedToBottom,
+			hasTargetNavigation: () => this.#activeTargetNavigations > 0,
+			hasInitialRestore: () => this.#initialBottomRestoreChatId !== null,
+			intentEpoch: () => this.#userScrollIntent.epoch,
+			intentReceivedAt: () => this.#userScrollIntent.receivedAt,
+			hasRecentIntent: () => this.#hasRecentUserScrollIntent(),
+			hasManualPage: () => this.#pageMutationOwner?.manual ?? false,
+			preserveHistoryBrowsing: () => this.#preserveHistoryBrowsing(),
+			scrollToBottom: () => this.scrollToBottom(),
+			canRequestPage: direction => this.#canRequestPage(direction),
+			mutatePage: (direction, mutate, policy) => this.#mutatePage(direction, mutate, policy, 'coverage'),
+			isCurrentViewportOperation: (chatId, epoch) => this.#isCurrentViewportOperation(chatId, epoch),
+		}, this.#nativeScrollSettlement);
 		this.#lastObservedFeedChatId = deps.getChatId();
 		this.#lastObservedTranscriptViewId = deps.chatState.transcriptViewId;
 		this.#lastObservedFeedDataRevision = deps.chatState.feedMutationClock.dataRevision;
@@ -92,6 +103,17 @@ export class ConversationScrollController {
 		this.#previousLogicalOffset = position?.logicalOffset ?? null;
 		const isAtStart = isConversationViewportAtStart(position, FEED_START_THRESHOLD_PX);
 		if (isAtStart !== null) this.#isViewportAtStart = isAtStart;
+	}
+
+	get #isPageMutationInProgress(): boolean {
+		return this.#pageMutationOwner !== null
+			&& (this.#pageMutationOwner.manual || this.deps.chatState.combinedMode);
+	}
+
+	destroy(): void {
+		this.#coverage.destroy();
+		this.cancelNativeScroll();
+		this.#cancelViewportOperations();
 	}
 
 	isNearBottom(): boolean {
@@ -128,9 +150,7 @@ export class ConversationScrollController {
 			this.scrollToBottom();
 			return;
 		}
-		const result = await this.#navigateToWindow(chatId, 'latest', () =>
-			this.setPinnedToBottom(true),
-		);
+		const result = await this.#navigateToWindow(chatId, 'latest', () => this.setPinnedToBottom(true));
 		if (result === 'invalidated') return;
 		this.scrollToBottom();
 	}
@@ -140,7 +160,8 @@ export class ConversationScrollController {
 		this.isScrollingToBottom = true;
 		try {
 			await this.scrollToLatest();
-			await this.fillUnderfilledViewport();
+			if (this.deps.chatState.combinedMode) this.wakeCoverage();
+			else await this.fillUnderfilledViewport();
 		} finally {
 			this.isScrollingToBottom = false;
 		}
@@ -154,11 +175,13 @@ export class ConversationScrollController {
 	}
 
 	setPinnedToBottom(isPinned: boolean): void {
+		const wasPinned = this.isPinnedToBottom;
 		this.isPinnedToBottom = isPinned;
 		this.deps.chatState.isUserScrolledUp = !isPinned;
 		if (!isPinned) {
 			this.#deferredLiveEdgeIntent = null;
 		}
+		if (!wasPinned && isPinned) this.wakeCoverage();
 	}
 
 	reconcilePinnedProjection(): void {
@@ -230,6 +253,7 @@ export class ConversationScrollController {
 			direction,
 			receivedAt: performance.now(),
 		};
+		this.#coverage.armIntentWake();
 		this.#recordNativeScrollHandoff(cancellation, intentEpoch, direction);
 		// Evaluates a clamped edge after the gesture because another wheel or key input
 		// at that edge may not produce the usual scroll event.
@@ -263,6 +287,7 @@ export class ConversationScrollController {
 		if (!this.deps.chatState.displayMessageCount) return;
 		this.#initialBottomPaintChatId = null;
 		this.#initialBottomRestoreChatId = null;
+		this.wakeCoverage();
 		const intentEpoch = this.#userScrollIntent.epoch;
 		// Defers filling until a cancelling gesture has recorded its intent.
 		queueMicrotask(async () => {
@@ -273,7 +298,7 @@ export class ConversationScrollController {
 				this.isPinnedToBottom &&
 				!this.deps.chatState.isUserScrolledUp &&
 				this.#userScrollIntent.epoch === intentEpoch &&
-				this.deps.getViewport()?.hasCollapsedToolGroups()
+				(this.deps.chatState.combinedMode || this.deps.getViewport()?.hasCollapsedToolGroups())
 			) {
 				void this.fillUnderfilledViewport();
 			}
@@ -282,7 +307,7 @@ export class ConversationScrollController {
 
 	reconcileInitialBottomRestore(autoScrollToBottom: boolean): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.getChatId()) return;
-		if (this.#isAutoFillingViewport || this.#activeTargetNavigations > 0) return;
+		if (this.#coverage.isFilling || this.#coverage.isMeasuring || this.#activeTargetNavigations > 0) return;
 		if (
 			!autoScrollToBottom ||
 			this.deps.chatState.loadStatus === 'empty' ||
@@ -296,14 +321,15 @@ export class ConversationScrollController {
 	}
 
 	#clearInitialBottomRestore(): void {
+		const hadRestore = this.#initialBottomRestoreChatId !== null;
 		this.#initialBottomRestoreChatId = null;
 		this.#initialBottomPaintChatId = null;
+		if (hadRestore) this.wakeCoverage();
 	}
 
 	async scrollToTop(): Promise<void> {
 		const chatId = this.deps.getChatId();
 		if (!chatId || this.isScrollingToTop) return;
-
 		this.cancelNativeScroll();
 		this.isScrollingToTop = true;
 		try {
@@ -314,7 +340,8 @@ export class ConversationScrollController {
 			this.noteUserScrollIntent('earlier');
 			this.deps.getViewport()?.scrollToStart();
 			this.#isViewportAtStart = true;
-			await this.fillUnderfilledViewport();
+			if (this.deps.chatState.combinedMode) this.#expireUserScrollIntent();
+			else await this.fillUnderfilledViewport();
 		} finally {
 			this.isScrollingToTop = false;
 		}
@@ -352,7 +379,7 @@ export class ConversationScrollController {
 		);
 		if (position) this.#previousLogicalOffset = position.logicalOffset;
 		const resumedNativeScroll = this.#resumeNativeScrollHandoff(inferredDirection, viewport);
-		if (this.#isPageMutationInProgress) {
+		if (this.#pageMutationOwner?.manual) {
 			this.#applyInferredIntentDirection(inferredDirection, resumedNativeScroll);
 			this.#preserveHistoryBrowsing();
 			return;
@@ -398,6 +425,10 @@ export class ConversationScrollController {
 		reason: PageRequestReason,
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.getChatId();
+		if (chatId && this.deps.chatState.isPageLoading(direction)) {
+			if (reason === 'button' && this.#pageMutationOwner?.direction === direction) this.#pageMutationOwner.manual = true;
+			return direction === 'earlier' ? this.deps.chatState.loadEarlierPage(chatId) : this.deps.chatState.loadLaterPage(chatId);
+		}
 		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
 		const requestIntentEpoch = this.#userScrollIntent.epoch;
 		const requestBoundarySignature =
@@ -415,7 +446,6 @@ export class ConversationScrollController {
 			this.#userScrollIntent.epoch,
 		);
 		this.#preserveHistoryBrowsing();
-		this.#isPageMutationInProgress = true;
 		let result: TranscriptPageLoadResult;
 		let continuedPageIntent: boolean;
 		try {
@@ -426,9 +456,10 @@ export class ConversationScrollController {
 						if (applicationGate && (await applicationGate()) !== 'apply') return 'invalidated';
 						if (this.deps.chatState.revealEarlierLoadedRows()) return 'loaded';
 					}
+					const options = { applicationGate, ...(reason === 'button' && this.deps.chatState.combinedMode ? { preempt: true } : {}) };
 					return direction === 'earlier'
-						? this.deps.chatState.loadEarlierPage(chatId, { applicationGate })
-						: this.deps.chatState.loadLaterPage(chatId, { applicationGate });
+						? this.deps.chatState.loadEarlierPage(chatId, options)
+						: this.deps.chatState.loadLaterPage(chatId, options);
 				},
 				reason === 'scroll' ? 'after-native-scroll' : 'immediate',
 			);
@@ -452,8 +483,8 @@ export class ConversationScrollController {
 					direction === 'later' && continuedPageIntent ? requestIntentEpoch : latestIntentEpoch,
 				),
 			};
-			this.#isPageMutationInProgress = false;
 			if (this.deps.getChatId() === chatId) this.#syncViewportStart();
+			this.wakeCoverage();
 		}
 		if (this.deps.getChatId() !== chatId) return 'invalidated';
 		if (
@@ -475,26 +506,39 @@ export class ConversationScrollController {
 	async loadEarlierPageForNavigator(chatId: string): Promise<TranscriptPageLoadResult> {
 		const viewport = this.deps.getViewport();
 		if (!viewport || this.deps.getChatId() !== chatId) return 'invalidated';
+		if (this.deps.chatState.isPageLoading('earlier')) {
+			if (this.#pageMutationOwner?.direction === 'earlier') this.#pageMutationOwner.manual = true;
+			return this.deps.chatState.loadEarlierPage(chatId);
+		}
 		const operationEpoch = this.#beginViewportOperation();
 		const shouldRemainPinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
-		const result = await this.deps.chatState.loadEarlierPage(chatId);
-		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
-			return result === 'loaded' ? 'invalidated' : result;
+		const intentEpoch = this.#userScrollIntent.epoch;
+		const applicationGate = this.#coverage.applicationGate(chatId, operationEpoch, 'after-native-scroll');
+		const owner = this.deps.chatState.combinedMode ? { direction: 'earlier' as const, manual: true } : null;
+		if (owner) this.#pageMutationOwner = owner;
+		try {
+			const result = owner
+				? await this.deps.chatState.loadEarlierPage(chatId, { applicationGate, preempt: true })
+				: await this.deps.chatState.loadEarlierPage(chatId);
+			if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
+				return result === 'loaded' ? 'invalidated' : result;
+			}
+			const layout = await viewport.waitForLayout({
+				minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
+			});
+			if (layout !== 'settled' || !this.#isCurrentViewportOperation(chatId, operationEpoch)
+				|| this.#userScrollIntent.epoch !== intentEpoch) return 'invalidated';
+			if (shouldRemainPinned) {
+				viewport.scrollToEnd();
+				this.setPinnedToBottom(true);
+			} else {
+				this.#preserveHistoryBrowsing();
+			}
+			return 'loaded';
+		} finally {
+			if (this.#pageMutationOwner === owner) this.#pageMutationOwner = null;
+			this.wakeCoverage();
 		}
-		const layout = await viewport.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		if (layout !== 'settled' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
-			return 'invalidated';
-		}
-		if (shouldRemainPinned) {
-			viewport.scrollToEnd();
-			this.deps.chatState.isUserScrolledUp = false;
-			this.setPinnedToBottom(true);
-		} else {
-			this.#preserveHistoryBrowsing();
-		}
-		return 'loaded';
 	}
 
 	async jumpToMessageRow(
@@ -585,79 +629,20 @@ export class ConversationScrollController {
 		}
 	}
 
-	async fillUnderfilledViewport(): Promise<void> {
-		const chatId = this.deps.getChatId();
-		if (
-			!chatId ||
-			!this.#isViewportVisible ||
-			this.#isAutoFillingViewport ||
-			this.#activeTargetNavigations > 0
-		) {
-			return;
-		}
-		if (!this.deps.chatState.hasLaterMessages) {
-			if (this.deps.chatState.isUserScrolledUp) return;
-		} else {
-			this.#preserveHistoryBrowsing();
-		}
+	fillUnderfilledViewport(): Promise<void> {
+		return this.#coverage.fillUnderfilledViewport();
+	}
 
-		const viewport = this.deps.getViewport();
-		if (!viewport) return;
-		const transcriptViewId = this.deps.chatState.transcriptViewId;
-		const intentEpoch = this.#userScrollIntent.epoch;
-		const ownsFill = () =>
-			this.deps.getChatId() === chatId &&
-			this.deps.chatState.transcriptViewId === transcriptViewId &&
-			this.#isViewportVisible &&
-			this.#userScrollIntent.epoch === intentEpoch &&
-			this.#activeTargetNavigations === 0;
-		this.#isAutoFillingViewport = true;
-		try {
-			await fillConversationViewport({
-				chatId,
-				transcriptViewId,
-				viewport,
-				chatState: this.deps.chatState,
-				budget: this.#compressedAutoFillBudget,
-				isCurrent: ownsFill,
-				canRequestPage: (direction) => this.#canRequestPage(direction),
-				mutatePage: (direction, load) => this.#mutatePage(direction, load),
-				waitForCurrentLayout: () => this.#waitForCurrentLayout('loaded'),
-				isPinnedToBottom: () => this.isPinnedToBottom,
-			});
-		} finally {
-			this.#isAutoFillingViewport = false;
-			if (this.#refillViewportAfterCurrentFill) {
-				this.#refillViewportAfterCurrentFill = false;
-				void this.fillUnderfilledViewport();
-			}
-		}
+	wakeCoverage(): void {
+		this.#coverage.wakeCoverage();
 	}
 
 	observeQueueResize(): (() => void) | undefined {
-		return observeConversationQueueResize(
-			this.deps.getQueueContainer(),
-			() => this.#isViewportVisible && this.#activeTargetNavigations === 0,
-			() => this.deps.getViewport(),
-			() => this.isPinnedToBottom,
-			() => this.scrollToBottom(),
-		);
+		return this.#coverage.observeQueueResize();
 	}
 
 	observeScrollContainerResize(): (() => void) | undefined {
-		const scroller = this.deps.getScrollContainer();
-		if (!scroller || typeof ResizeObserver === 'undefined') return undefined;
-		let previousHeight = scroller.clientHeight;
-		const observer = new ResizeObserver((entries) => {
-			const nextHeight = entries[0]?.contentRect.height ?? scroller.clientHeight;
-			if (nextHeight <= 0 || nextHeight === previousHeight) return;
-			previousHeight = nextHeight;
-			if (this.#isViewportVisible && this.#activeTargetNavigations === 0 && this.isPinnedToBottom) {
-				this.scrollToBottom();
-			}
-		});
-		observer.observe(scroller);
-		return () => observer.disconnect();
+		return this.#coverage.observeScrollContainerResize();
 	}
 
 	setViewportVisible(isVisible: boolean): void {
@@ -688,6 +673,7 @@ export class ConversationScrollController {
 			applicationGate: TranscriptPageApplicationGate | undefined,
 		) => Promise<TranscriptPageLoadResult> | TranscriptPageLoadResult,
 		applicationPolicy: PageApplicationPolicy = 'immediate',
+		intent: 'manual' | 'coverage' = 'manual',
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.getChatId();
 		const viewport = this.deps.getViewport();
@@ -695,57 +681,22 @@ export class ConversationScrollController {
 		const operationEpoch = this.#beginViewportOperation();
 		const userIntentEpoch = this.#userScrollIntent.epoch;
 		const windowRevision = this.deps.chatState.windowRevision;
-		const applicationGate = this.#pageApplicationGate(chatId, operationEpoch, applicationPolicy);
-		const result = await mutate(applicationGate);
-		if (
-			result === 'invalidated' ||
-			this.deps.chatState.windowRevision !== windowRevision ||
-			!this.#isCurrentViewportOperation(chatId, operationEpoch)
-		) {
-			return 'invalidated';
+		const isCurrent = () => this.deps.chatState.windowRevision === windowRevision
+			&& this.#isCurrentViewportOperation(chatId, operationEpoch);
+		const owner = { direction, manual: intent === 'manual' };
+		this.#pageMutationOwner = owner;
+		const applicationGate = this.#coverage.applicationGate(chatId, operationEpoch, applicationPolicy,
+			intent === 'coverage' ? direction : undefined);
+		try {
+			const result = await mutate(applicationGate);
+			if (result === 'invalidated' || !isCurrent()) return 'invalidated';
+			if (result !== 'loaded') return result;
+			const layout = await viewport.waitForLayout({ minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision });
+			if (!isCurrent()) return 'invalidated';
+			return layout === 'settled' || this.#hasContinuedPageIntent(direction, userIntentEpoch) ? result : 'invalidated';
+		} finally {
+			if (this.#pageMutationOwner === owner) this.#pageMutationOwner = null;
 		}
-		if (result !== 'loaded') return result;
-		// Waits until the data revision and anchor correction settle. A continued paging
-		// gesture already owns the viewport, so it may proceed after superseding that correction.
-		const layout = await viewport.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		if (
-			this.deps.chatState.windowRevision !== windowRevision ||
-			!this.#isCurrentViewportOperation(chatId, operationEpoch)
-		) {
-			return 'invalidated';
-		}
-		return layout === 'settled' || this.#hasContinuedPageIntent(direction, userIntentEpoch)
-			? result
-			: 'invalidated';
-	}
-
-	#pageApplicationGate(
-		chatId: string,
-		operationEpoch: number,
-		policy: PageApplicationPolicy,
-	): TranscriptPageApplicationGate | undefined {
-		if (policy === 'immediate') return undefined;
-		let decision: ReturnType<TranscriptPageApplicationGate> | null = null;
-		return () => {
-			decision ??= (async () => {
-				const settlement = await this.#nativeScrollSettlement.waitUntilIdle();
-				return settlement === 'settled' &&
-					this.#isViewportVisible &&
-					this.#isCurrentViewportOperation(chatId, operationEpoch)
-					? 'apply'
-					: 'invalidated';
-			})();
-			return decision;
-		};
-	}
-
-	async #waitForCurrentLayout(result: TranscriptPageLoadResult): Promise<TranscriptPageLoadResult> {
-		const layout = await this.deps.getViewport()?.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		return layout === 'settled' ? result : 'invalidated';
 	}
 
 	#syncViewportStart(position?: ConversationViewportPosition | null): void {
@@ -770,6 +721,7 @@ export class ConversationScrollController {
 		}
 		if (this.#userScrollIntent.direction === direction) {
 			this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: performance.now() };
+			this.#coverage.armIntentWake();
 		}
 	}
 
@@ -798,15 +750,15 @@ export class ConversationScrollController {
 		void this.requestPage(direction, 'scroll');
 	}
 
-	#canRequestPage(direction: TranscriptPageDirection, allowRetry = false): boolean {
-		if (
-			this.#activeTargetNavigations > 0 ||
-			this.#isPageMutationInProgress ||
-			this.deps.chatState.pageStates[direction].status === 'loading' ||
-			(!allowRetry && this.deps.chatState.pageStates[direction].status === 'error')
-		) {
-			return false;
+	#canRequestPage(direction: TranscriptPageDirection, explicitRequest = false): boolean {
+		if (this.#activeTargetNavigations > 0) return false;
+		if (this.#isPageMutationInProgress) {
+			const canPreempt = this.deps.chatState.combinedMode && explicitRequest
+				&& this.#pageMutationOwner?.direction !== direction;
+			if (!canPreempt) return false;
 		}
+		const status = this.deps.chatState.pageStates[direction].status;
+		if (status === 'loading' || (!explicitRequest && status === 'error')) return false;
 		return direction === 'earlier'
 			? this.deps.chatState.canLoadEarlier
 			: this.deps.chatState.hasLaterMessages;
@@ -840,6 +792,7 @@ export class ConversationScrollController {
 			this.deps.getChatId() ?? '',
 			this.deps.chatState.transcriptViewId,
 			this.deps.chatState.windowRevision,
+			this.deps.chatState.nextBeforeOrdinal,
 			this.deps.chatState.feedMutationClock.lastRevisionByKind['history-earlier'],
 		].join(':');
 	}
@@ -854,22 +807,21 @@ export class ConversationScrollController {
 	}
 
 	#cancelViewportOperations(): void {
+		if (this.deps.chatState.combinedMode) this.#pageMutationOwner = null;
 		this.#deferredLiveEdgeIntent = null;
 		this.#nativeScrollHandoff = null;
 		this.deps.chatState.invalidatePendingWindowNavigation();
 		this.#viewportOperationEpoch += 1;
+		this.#releaseWindowNavigation?.();
 	}
 
 	#finishTargetNavigation(shouldResumeAutoFill: boolean): void {
 		this.#resumeAutoFillAfterTargets ||= shouldResumeAutoFill;
 		this.#activeTargetNavigations -= 1;
+		this.wakeCoverage();
 		if (this.#activeTargetNavigations > 0 || !this.#resumeAutoFillAfterTargets) return;
 		this.#resumeAutoFillAfterTargets = false;
-		if (this.#isAutoFillingViewport) {
-			this.#refillViewportAfterCurrentFill = true;
-		} else {
-			void this.fillUnderfilledViewport();
-		}
+		this.#coverage.resumeAfterNavigation();
 	}
 
 	async #navigateToWindow(
@@ -879,17 +831,26 @@ export class ConversationScrollController {
 	): Promise<WindowNavigationResult> {
 		if (this.deps.getChatId() !== chatId) return 'invalidated';
 		const operationEpoch = this.#beginViewportOperation();
-		const result = await this.deps.chatState.navigateToWindow(chatId, target);
-		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
-			return 'invalidated';
+		const release = () => {
+			if (this.#releaseWindowNavigation !== release) return;
+			this.#releaseWindowNavigation = null;
+			this.#finishTargetNavigation(false);
+		};
+		if (this.deps.chatState.combinedMode) {
+			this.#activeTargetNavigations += 1;
+			this.#releaseWindowNavigation = release;
 		}
-		onCommitted();
-		this.#resetPagingContext();
-		const layout = await this.deps.getViewport()?.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		if (!this.#isCurrentViewportOperation(chatId, operationEpoch)) return 'invalidated';
-		return layout === 'settled' ? 'settled' : 'committed-unsettled';
+		try {
+			const result = await this.deps.chatState.navigateToWindow(chatId, target);
+			if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) return 'invalidated';
+			onCommitted();
+			this.#resetPagingContext();
+			const layout = await this.deps.getViewport()?.waitForLayout({ minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision });
+			if (!this.#isCurrentViewportOperation(chatId, operationEpoch)) return 'invalidated';
+			return layout === 'settled' ? 'settled' : 'committed-unsettled';
+		} finally {
+			release();
+		}
 	}
 
 	#resetPagingContext(): void {
@@ -908,6 +869,8 @@ export class ConversationScrollController {
 	}
 	#expireUserScrollIntent(): void {
 		this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
+		this.#coverage.armIntentWake();
+		this.wakeCoverage();
 	}
 	#hasRecentUserScrollIntent(): boolean {
 		return (
@@ -966,13 +929,17 @@ export class ConversationScrollController {
 			return;
 		}
 		const viewport = this.deps.getViewport();
-		if (!viewport?.isReady()) return;
+		if (!viewport?.isReady()) {
+			if (viewport && this.deps.chatState.combinedMode) this.#coverage.armMeasurementWake(viewport);
+			return;
+		}
 		if (this.isPinnedToBottom) {
 			viewport.scrollToEnd();
 			void this.#reverifyEndAfterShow(operationEpoch);
 			return;
 		}
 		await viewport.restoreHiddenReadingPosition();
+		this.wakeCoverage();
 	}
 
 	// Show-time measurements and deferred scale invalidation can land after the end

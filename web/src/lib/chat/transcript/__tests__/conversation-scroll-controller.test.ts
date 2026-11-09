@@ -38,6 +38,11 @@ function scrollState(
 	overrides: Partial<ConversationScrollState> = {},
 ): MutableConversationScrollState {
 	return {
+		combinedMode: false,
+		nextBeforeOrdinal: 100,
+		loadedThroughOrdinal: 200,
+		hasPendingAnchorDemand: vi.fn(() => false),
+		isPageLoading: vi.fn(() => false),
 		canLoadEarlier: false,
 		displayMessageCount: 1,
 		feedMutationClock: mutationClock(),
@@ -119,6 +124,8 @@ function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeVi
 		scrollBy: vi.fn(),
 		waitForLayout: vi.fn(async () => 'settled'),
 		measureViewportFill: vi.fn(async () => 'overflow'),
+		readViewportFill: vi.fn(() => 'overflow'),
+		onNextMeasurement: vi.fn(() => () => {}),
 		restoreHiddenReadingPosition: vi.fn(async () => 'restored'),
 		cancelPendingLayoutMutation: vi.fn(),
 		cancelForUserIntent: vi.fn(() => 'cancelled'),
@@ -145,11 +152,11 @@ class ResizeObserverStub {
 		this.disconnected = true;
 	}
 
-	emit(height: number): void {
+	emit(height: number, width = 0): void {
 		const target = this.observed[0];
 		if (!target) throw new Error('No observed target');
 		this.callback(
-			[{ target, contentRect: { height } as DOMRectReadOnly } as ResizeObserverEntry],
+			[{ target, contentRect: { height, width } as DOMRectReadOnly } as ResizeObserverEntry],
 			this as unknown as ResizeObserver,
 		);
 	}
@@ -1169,47 +1176,44 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 	});
 
-	it('continues through compressed history without visible growth, then bounds automatic requests', async () => {
+	it.each([false, true])('continues beyond 50 demands until measured coverage, without a lifetime cap (combined %s)', async combinedMode => {
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const viewport = fakeViewport({
 			hasCollapsedToolGroups: vi.fn(() => true),
-			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(async () => 'underfilled'),
+			measureViewportFill: vi.fn(async () => loadEarlierPage.mock.calls.length < 75 ? 'underfilled' : 'overflow'),
 		});
 		const fixture = controllerFixture({
 			viewport,
-			state: { canLoadEarlier: true, loadEarlierPage },
+			state: { combinedMode, canLoadEarlier: true, loadEarlierPage },
 		});
 		await fixture.controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(75);
 		await fixture.controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(75);
 		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('loaded');
-		expect(loadEarlierPage).toHaveBeenCalledTimes(51);
-		fixture.sessions.selectedChatId = 'chat-2';
-		fixture.state.isUserScrolledUp = false;
-		await fixture.controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(101);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(76);
 	});
 
-	it('resets the compressed-history budget when the transcript view changes', async () => {
+	it('fills again after a later layout change in the same transcript view', async () => {
+		let targetPages = 60;
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
-		const { controller, state } = controllerFixture({
+		const { controller } = controllerFixture({
 			viewport: fakeViewport({
 				hasCollapsedToolGroups: vi.fn(() => true),
 				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
-					async () => 'underfilled',
+					async () => loadEarlierPage.mock.calls.length < targetPages ? 'underfilled' : 'overflow',
 				),
 			}),
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
-		state.transcriptViewId = 'generation-2';
+		expect(loadEarlierPage).toHaveBeenCalledTimes(60);
+		targetPages = 65;
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(100);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(65);
 	});
 
-	it('does not charge cached-row reveals against the compressed request budget', async () => {
+	it('reveals cached rows before uncapped compressed demands', async () => {
 		const revealEarlierLoadedRows = vi
 			.fn()
 			.mockReturnValueOnce(true)
@@ -1221,17 +1225,43 @@ describe('ConversationScrollController', () => {
 			viewport: fakeViewport({
 				hasCollapsedToolGroups: vi.fn(() => true),
 				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
-					async () => 'underfilled',
+					async () => loadEarlierPage.mock.calls.length < 60 ? 'underfilled' : 'overflow',
 				),
 			}),
 			state: { canLoadEarlier: true, revealEarlierLoadedRows, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
-		expect(revealEarlierLoadedRows).toHaveBeenCalledTimes(54);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(60);
+		expect(revealEarlierLoadedRows).toHaveBeenCalledTimes(63);
 	});
 
-	it('counts a failed compressed request toward the automatic work limit', async () => {
+	it('accepts clamped raw scroll intent during a fill post-load layout wait', async () => {
+		const layout = Promise.withResolvers<'settled'>();
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const viewport = fakeViewport({
+			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(async () => 'underfilled'),
+			waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(async () => 'settled')
+				.mockResolvedValueOnce('settled')
+				.mockImplementationOnce(() => layout.promise),
+		});
+		const { controller } = controllerFixture({
+			viewport,
+			state: { canLoadEarlier: true, loadEarlierPage },
+			scroller: { scrollTop: 0 },
+		});
+		try {
+			const fill = controller.fillUnderfilledViewport();
+			await vi.waitFor(() => expect(viewport.waitForLayout).toHaveBeenCalledTimes(2));
+			controller.noteUserScrollIntent('earlier');
+			await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+			layout.resolve('settled');
+			await fill;
+		} finally {
+			controller.destroy();
+		}
+	});
+
+	it('stops a compressed fill on failure', async () => {
 		const loadEarlierPage = vi.fn()
 			.mockResolvedValueOnce('failed')
 			.mockResolvedValue('loaded');
@@ -1245,8 +1275,6 @@ describe('ConversationScrollController', () => {
 		});
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).toHaveBeenCalledOnce();
-		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
 	});
 
 	it.each([8, 12])('fills through %i compressed pages before measured content overflows', async (pagesToFill) => {
@@ -1536,6 +1564,15 @@ describe('ConversationScrollController', () => {
 		await navigation;
 		ResizeObserverStub.instances[0].emit(160);
 		expect(viewport.scrollBy).toHaveBeenCalledWith(20);
+	});
+
+	it('does not scroll a pinned raw viewport on width-only resize', () => {
+		const { controller, viewport } = controllerFixture({ scroller: { clientHeight: 400, clientWidth: 600 } });
+		const dispose = controller.observeScrollContainerResize();
+		ResizeObserverStub.instances[0]!.emit(400, 300);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+		dispose?.();
+		controller.destroy();
 	});
 
 	it('restores only pinned viewports after a viewport resize', () => {
@@ -2058,6 +2095,157 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 
 		scroller.remove();
+	});
+
+	it('completes a pinned combined activation target even with an overflowing viewport and no collapsed groups', async () => {
+		let pending = true;
+		const loadEarlierPage = vi.fn(async () => { pending = false; return 'loaded' as const; });
+		const { controller, viewport } = controllerFixture({ state: {
+			combinedMode: true, canLoadEarlier: true, hasPendingAnchorDemand: () => pending, loadEarlierPage,
+		} });
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		expect(viewport.hasCollapsedToolGroups).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+
+	it('fetches detached combined underfill passively and never scrolls to end', async () => {
+		let pages = 0;
+		const viewport = fakeViewport({ readViewportFill: vi.fn(() => pages < 2 ? 'underfilled' : 'overflow') });
+		const { controller, state } = controllerFixture({ viewport, state: {
+			combinedMode: true, canLoadEarlier: true,
+			loadEarlierPage: vi.fn(async () => { pages += 1; return 'loaded' as const; }),
+		} });
+		controller.setPinnedToBottom(false);
+		await controller.fillUnderfilledViewport();
+		expect(pages).toBe(2);
+		expect(state.isUserScrolledUp).toBe(true);
+		expect(viewport.measureViewportFill).not.toHaveBeenCalled();
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+
+	it('resumes combined underfill after a measurement-only readiness wake', async () => {
+		let wake = () => {};
+		let ready = false;
+		let loaded = false;
+		const viewport = fakeViewport({
+			waitForLayout: vi.fn(async () => ready ? 'settled' : 'not-ready'),
+			readViewportFill: vi.fn(() => loaded ? 'overflow' : 'underfilled'),
+			onNextMeasurement: callback => { wake = callback; return () => {}; },
+		});
+		const loadEarlierPage = vi.fn(async () => { loaded = true; return 'loaded' as const; });
+		const { controller } = controllerFixture({ viewport, state: { combinedMode: true, canLoadEarlier: true, loadEarlierPage } });
+		controller.setPinnedToBottom(false);
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		ready = true;
+		wake();
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
+
+	it('preserves a reseed wake received while combined transport is held and invalidated without progress', async () => {
+		let release!: (result: 'invalidated') => void;
+		let pending = true;
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>()
+			.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }))
+			.mockImplementation(async () => { pending = false; return 'loaded'; });
+		const { controller } = controllerFixture({ state: { combinedMode: true, canLoadEarlier: true,
+			hasPendingAnchorDemand: () => pending, loadEarlierPage } });
+		const fill = controller.fillUnderfilledViewport();
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		controller.wakeCoverage();
+		release('invalidated');
+		await fill;
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(2));
+		controller.destroy();
+	});
+
+	it('does not hold first paint while a combined coverage fetch is awaiting transport', async () => {
+		let release!: (result: 'invalidated') => void;
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(() => new Promise(resolve => { release = resolve; }));
+		const { controller, viewport } = controllerFixture({ state: { combinedMode: true, canLoadEarlier: true,
+			hasPendingAnchorDemand: () => true, loadEarlierPage } });
+		const fill = controller.fillUnderfilledViewport();
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		controller.prepareInitialBottomRestore('chat-1');
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+		release('invalidated');
+		await fill;
+		controller.destroy();
+	});
+
+	it('rechecks a combined application gate after layout supersession instead of discarding its fetched chunk', async () => {
+		const viewport = fakeViewport({ waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>()
+			.mockResolvedValueOnce('superseded').mockResolvedValue('settled') });
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(async (_chatId, options) => {
+			expect(await options?.applicationGate?.()).toBe('apply');
+			expect(await options?.applicationGate?.()).toBe('apply');
+			return 'loaded';
+		});
+		const { controller } = controllerFixture({ viewport, state: { combinedMode: true, canLoadEarlier: true, loadEarlierPage } });
+		expect(await controller.requestPage('earlier', 'button')).toBe('loaded');
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		expect(viewport.waitForLayout.mock.calls.length).toBeGreaterThanOrEqual(4);
+		controller.destroy();
+	});
+
+	it('wakes detached combined coverage on width-only resize without scrolling', async () => {
+		let underfilled = false;
+		const viewport = fakeViewport({ readViewportFill: () => underfilled ? 'underfilled' : 'overflow' });
+		const loadEarlierPage = vi.fn(async () => { underfilled = false; return 'loaded' as const; });
+		const { controller } = controllerFixture({ viewport,
+			scroller: { clientHeight: 400, clientWidth: 600 },
+			state: { combinedMode: true, canLoadEarlier: true, loadEarlierPage },
+		});
+		controller.setPinnedToBottom(false);
+		const dispose = controller.observeScrollContainerResize();
+		await controller.fillUnderfilledViewport();
+		underfilled = true;
+		ResizeObserverStub.instances[0]!.emit(400, 300);
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+		dispose?.();
+		controller.destroy();
+	});
+
+	it('reconciles initial paint when an already-running combined measurement releases ownership', async () => {
+		let release!: (result: 'settled') => void;
+		const viewport = fakeViewport({ waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>()
+			.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }))
+			.mockResolvedValue('settled') });
+		const { controller } = controllerFixture({ viewport, state: { combinedMode: true } });
+		const fill = controller.fillUnderfilledViewport();
+		controller.prepareInitialBottomRestore('chat-1');
+		const unmount = mountInitialBottomRestoreEffect(controller);
+		await tick();
+		expect(viewport.restoreInitialEnd).not.toHaveBeenCalled();
+		release('settled');
+		await fill;
+		await tick();
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+		unmount();
+		controller.destroy();
+	});
+
+	it('does not automatically retry a combined page error after hiding and showing', async () => {
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const { controller } = controllerFixture({ state: { combinedMode: true, canLoadEarlier: true, loadEarlierPage,
+			hasPendingAnchorDemand: () => true,
+			pageStates: { earlier: { status: 'error', error: 'Synthetic failure' }, later: { status: 'idle', error: null } },
+		} });
+		await controller.fillUnderfilledViewport();
+		controller.setViewportVisible(false);
+		controller.setViewportVisible(true);
+		await tick();
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		controller.destroy();
 	});
 
 	it('leaves focus policy to the workspace shortcut router', () => {

@@ -613,6 +613,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 
 export class LocalSettingsStore {
 	readonly hadSavedSettingsOnLoad: boolean;
+	readonly activeCombineToolUseMessages: boolean;
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	terminalAppearance = $state(DEFAULTS.terminalAppearance);
 	interfaceFont = $state(DEFAULTS.interfaceFont);
@@ -703,6 +704,7 @@ export class LocalSettingsStore {
 		const initial = readPersistedLocalSettings();
 		this.hadSavedSettingsOnLoad = initial !== null;
 		this.#apply(initial ?? DEFAULTS);
+		this.activeCombineToolUseMessages = this.combineToolUseMessages;
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', this.#storageListener);
 		}

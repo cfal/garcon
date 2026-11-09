@@ -32,6 +32,8 @@ export interface ConversationViewportPort {
 	scrollBy(delta: number): void;
 	waitForLayout(options?: { minimumDataRevision?: number }): Promise<ConversationLayoutWaitResult>;
 	measureViewportFill(): Promise<ConversationViewportFillResult>;
+	readViewportFill(): ConversationViewportFillResult;
+	onNextMeasurement(callback: () => void): () => void;
 	restoreHiddenReadingPosition(): Promise<HiddenReadingRestoreResult>;
 	cancelPendingLayoutMutation(): void;
 	cancelForUserIntent(

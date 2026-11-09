@@ -46,6 +46,8 @@
 		scrollBy: () => {},
 		waitForLayout: async () => 'settled',
 		measureViewportFill: async () => 'overflow',
+		readViewportFill: () => 'overflow',
+		onNextMeasurement: () => () => {},
 		restoreHiddenReadingPosition: async () => 'restored',
 		cancelPendingLayoutMutation: () => {},
 		cancelForUserIntent: () => 'cancelled',

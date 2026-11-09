@@ -358,6 +358,7 @@ export async function measureConversationViewportFill(input: {
 	scrollToIndex(index: number): void;
 	scrollToEnd(): void;
 }): Promise<'overflow' | 'underfilled' | 'unsettled'> {
+	let moved = false;
 	for (let attempt = 0; attempt < MAX_EARLY_END_RESTORE_ITERATIONS; attempt += 1) {
 		await nextConversationLayoutFrame();
 		if (!input.isCurrent()) return 'unsettled';
@@ -369,8 +370,8 @@ export async function measureConversationViewportFill(input: {
 			viewportHeight: viewport.clientHeight,
 		});
 		if (classification) {
-			if (input.restoreEnd) input.scrollToEnd();
-			else if (input.readingAnchor && !input.restoreReadingAnchor(input.readingAnchor)) {
+			if (moved && input.restoreEnd) input.scrollToEnd();
+			else if (moved && input.readingAnchor && !input.restoreReadingAnchor(input.readingAnchor)) {
 				return 'unsettled';
 			}
 			return classification;
@@ -379,11 +380,29 @@ export async function measureConversationViewportFill(input: {
 			(key) => input.measuredSize(key) === undefined,
 		);
 		if (nextUnmeasuredIndex < 0) return 'unsettled';
+		moved = true;
 		input.scrollToIndex(nextUnmeasuredIndex);
 	}
-	if (input.restoreEnd && input.isCurrent()) input.scrollToEnd();
-	else if (input.readingAnchor) input.restoreReadingAnchor(input.readingAnchor);
+	if (moved && input.isCurrent()) {
+		if (input.restoreEnd) input.scrollToEnd();
+		else if (input.readingAnchor) input.restoreReadingAnchor(input.readingAnchor);
+	}
 	return 'unsettled';
+}
+
+export function readConversationViewportFill(input: {
+	keys: readonly string[];
+	estimates: readonly number[];
+	measuredSize(key: string): number | undefined;
+	viewportHeight: number;
+}): 'overflow' | 'underfilled' | 'unsettled' {
+	if (input.viewportHeight <= 0) return 'unsettled';
+	let height = 0;
+	for (let index = 0; index < input.keys.length; index += 1) {
+		height += input.measuredSize(input.keys[index]!) ?? input.estimates[index] ?? 0;
+		if (height > input.viewportHeight + CHAT_GEOMETRY_END_THRESHOLD_PX) return 'overflow';
+	}
+	return 'underfilled';
 }
 
 export async function settleConversationTarget(input: {

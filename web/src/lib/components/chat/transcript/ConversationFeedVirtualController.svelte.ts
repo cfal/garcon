@@ -1,3 +1,4 @@
+import { ConversationFeedMeasurement } from './conversation-feed-measurement.js';
 import { untrack } from 'svelte';
 import { observeTypographyChanges } from '$lib/theme/typography.js';
 import type { Attachment } from 'svelte/attachments';
@@ -35,7 +36,6 @@ import {
 	type ConversationVirtualAnchor,
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationMountedVirtualItems,
-	measureConversationViewportFill,
 	nextConversationLayoutFrame,
 	settleConversationEndRestore,
 	settleConversationTarget,
@@ -53,9 +53,7 @@ import type {
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
-const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_READY_ITERATIONS = 180;
-const OFFSET_TOLERANCE_PX = 0.5;
 const FONT_SCOPES = ['interface', 'chat-feed', 'chat-code', 'chat-output', 'code-diff'] as const;
 
 interface ConversationFeedVirtualControllerOptions {
@@ -123,6 +121,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#pendingToolGroupFocus: PendingToolGroupFocus | null = null;
 	#toolGroupFocusFramePending = false;
 	#destroyed = false;
+	#measurement: ConversationFeedMeasurement;
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
 		this.#configuredGeometry = untrack(() => options.geometry);
@@ -144,7 +143,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				this.#lastTransaction = record;
 				this.#completeSettledEarlierPrepend(record);
 				options.onTransaction?.(record);
+				this.#measurement?.notifyTransaction();
 			},
+		});
+		this.#measurement = new ConversationFeedMeasurement(this.#virt, {
+			geometry: () => this.#configuredGeometry,
+			viewport: () => options.viewport,
+			visible: () => options.visible,
+			pinned: () => options.pinned,
+			isReady: () => this.isReady(),
+			layoutToken: () => this.#layoutMutationToken,
+			appliedDataRevision: () => this.#appliedDataRevision,
+			captureReadingAnchor: () => this.#captureVirtualAnchor(true),
+			restoreReadingAnchor: anchor => this.#restoreVirtualAnchor(anchor),
+			scrollToEnd: () => this.#scrollToEndForPinnedFollow(),
 		});
 		this.viewport = this.#virt.viewport;
 		this.sizer = this.#virt.sizer;
@@ -486,53 +498,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#virt.scrollBy(delta);
 	}
 
-	async waitForLayout(
-		options: { minimumDataRevision?: number } = {},
-	): Promise<ConversationLayoutWaitResult> {
-		if (!this.isReady()) return 'not-ready';
-		const token = this.#layoutMutationToken;
-		let previous: { offset: number; revision: number } | null = null;
-		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-			await nextConversationLayoutFrame();
-			if (token !== this.#layoutMutationToken) return 'superseded';
-			const position = this.#virt.viewportPosition;
-			if (!position || !this.options.visible) return 'not-ready';
-			const revision = this.#virt.snapshot.revision;
-			const dataReady =
-				options.minimumDataRevision === undefined ||
-				this.#appliedDataRevision >= options.minimumDataRevision;
-			const stable =
-				previous !== null &&
-				previous.revision === revision &&
-				Math.abs(previous.offset - position.logicalOffset) <= OFFSET_TOLERANCE_PX;
-			if (dataReady && stable) return 'settled';
-			previous = { offset: position.logicalOffset, revision };
-		}
-		return 'not-ready';
+	waitForLayout(options: { minimumDataRevision?: number } = {}): Promise<ConversationLayoutWaitResult> {
+		return this.#measurement.waitForLayout(options);
 	}
 
-	async measureViewportFill(): Promise<ConversationViewportFillResult> {
-		if (!this.isReady()) return 'unsettled';
-		const keys = this.#configuredGeometry.keys;
-		if (keys.length === 0) return 'underfilled';
-		const restoreEnd = this.options.pinned;
-		const readingAnchor = restoreEnd ? null : this.#captureVirtualAnchor(true);
-		const token = this.#layoutMutationToken;
-		return measureConversationViewportFill({
-			keys,
-			measuredSize: (key) => this.#virt.measuredSize(key),
-			viewport: () => this.options.viewport,
-			isCurrent: () => token === this.#layoutMutationToken && this.isReady(),
-			restoreEnd,
-			readingAnchor,
-			restoreReadingAnchor: (anchor) => this.#restoreVirtualAnchor(anchor),
-			scrollToIndex: (index) => {
-				this.#virt.scrollToIndex(index, { align: 'start' });
-			},
-			scrollToEnd: () => {
-				this.#scrollToEndForPinnedFollow();
-			},
-		});
+	measureViewportFill(): Promise<ConversationViewportFillResult> {
+		return this.#measurement.measureViewportFill();
+	}
+
+	readViewportFill(): ConversationViewportFillResult {
+		return this.#measurement.readViewportFill();
+	}
+
+	onNextMeasurement(callback: () => void): () => void {
+		return this.#measurement.onNextMeasurement(callback);
 	}
 
 	async restoreHiddenReadingPosition(): Promise<HiddenReadingRestoreResult> {
@@ -653,6 +632,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#measurement.destroy();
 		this.#clearPendingToolGroupFocus();
 		this.#endRestoreEpoch += 1;
 		this.#cancelTargetScroll();

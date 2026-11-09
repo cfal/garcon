@@ -90,6 +90,8 @@ function fixture() {
 		scrollBy: vi.fn(),
 		waitForLayout: vi.fn(async () => 'settled' as const),
 		measureViewportFill: vi.fn(async () => 'underfilled' as const),
+		readViewportFill: vi.fn(() => 'underfilled' as const),
+		onNextMeasurement: vi.fn(() => () => {}),
 		restoreHiddenReadingPosition: vi.fn(async () => 'restored' as const),
 		cancelPendingLayoutMutation: vi.fn(),
 		cancelForUserIntent: vi.fn(() => 'cancelled' as const),

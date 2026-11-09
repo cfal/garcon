@@ -74,6 +74,7 @@ describe('ConversationFeed', () => {
 	afterAll(() => restoreResizeObserver());
 
 	beforeEach(() => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: false }));
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
 			this: HTMLElement,
 		) {
@@ -123,11 +124,14 @@ describe('ConversationFeed', () => {
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
 	});
 
-	it('combines ordinary tool rows behind an accessible disclosure without changing the off path', async () => {
-		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
-		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
-		expect(container.querySelector('[data-chat-tool-group]')).toBeNull();
+	it('keeps the raw feed unchanged until refresh, then combines rows behind an accessible disclosure', async () => {
+		const raw = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
+		await waitFor(() => expect(raw.container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
+		expect(raw.container.querySelector('[data-chat-tool-group]')).toBeNull();
+		expect(raw.container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3);
+		raw.unmount();
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
 		expect(group.classList.contains('typography-chat-prose')).toBe(true);
 		expect(group.getAttribute('aria-expanded')).toBe('false');
@@ -143,9 +147,9 @@ describe('ConversationFeed', () => {
 		expect(group.getAttribute('aria-expanded')).toBe('false');
 	});
 
-	it('moves focus to a surviving member when combination is disabled in another tab', async () => {
+	it('keeps grouping and focus unchanged when combination is disabled in another tab', async () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
 		group.focus();
 
@@ -158,16 +162,14 @@ describe('ConversationFeed', () => {
 			storageArea: localStorage,
 		}));
 
-		await waitFor(() => expect(container.querySelector('[data-chat-tool-group]')).toBeNull());
-		await waitFor(() => {
-			expect(document.activeElement).not.toBe(document.body);
-			expect((document.activeElement as HTMLElement).dataset.chatRowId).toBe('generation-1:1');
-		});
+		await tick();
+		expect(container.querySelector('[data-chat-tool-group]')).not.toBeNull();
+		expect(document.activeElement).toBe(group);
 	});
 
 	it('moves focus from a member to the summary before explicitly collapsing', async () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
 		await fireEvent.click(group);
 		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
@@ -184,8 +186,8 @@ describe('ConversationFeed', () => {
 	});
 
 	it('keeps a large expanded tool run individually virtualized', async () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'large-tool-run' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
 		const group = await screen.findByRole('button', { name: 'Execute 200 commands' });
 		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
 		expect(Number(container.querySelector('[data-chat-virtual-sizer]')?.getAttribute('data-chat-virtual-model-count'))).toBe(4);
@@ -199,8 +201,8 @@ describe('ConversationFeed', () => {
 	});
 
 	it('restores a collapsed summary but reveals exact durable members for row navigation', async () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Restore group summary' }));
 		await waitFor(() => expect(screen.getByTestId('tool-navigation-result').textContent).toBe('completed'));

@@ -276,6 +276,23 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		}
 	});
 
+	it('does not fan out a superseded fallback before the current fallback completes', async () => {
+		const { registry, selected } = fixture();
+		const resolveOlder = deferredPage(2);
+		const older = selected.loadMessages('chat-1');
+		const resolveNewer = deferredPage(3);
+		const newer = selected.loadMessages('chat-1');
+		registry.reconcile([presentation('window-left')]);
+		const panel = registry.panel('chat-view:window-left')!;
+		const install = vi.spyOn(panel, 'installInitialSnapshot');
+		resolveOlder();
+		await older;
+		expect(install).not.toHaveBeenCalled();
+		resolveNewer();
+		await newer;
+		expect(panel.transcript.lastOrdinal).toBe(3);
+	});
+
 	it.each([1, 2])('retains a newer replacement snapshot in %i mounted panels', async (panelCount) => {
 		const { cache, registry, selected } = fixture();
 		cache.markStale('chat-1');

@@ -2,16 +2,13 @@ import { CHAT_MESSAGES_MAX_LIMIT } from '$shared/chat-view';
 import type { ConversationScrollState } from './conversation-scroll-controller-contract.js';
 import type { ConversationViewportPort } from './conversation-viewport-port.js';
 import type { TranscriptPageDirection, TranscriptPageLoadResult } from './transcript-page-progress.js';
-import type { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
 
 const COMPRESSED_AUTO_FILL_VISIBLE_LIMIT = Math.min(200, CHAT_MESSAGES_MAX_LIMIT);
 
 interface ConversationViewportAutoFillOptions {
 	chatId: string;
-	transcriptViewId: string;
 	viewport: ConversationViewportPort;
 	chatState: ConversationScrollState;
-	budget: ConversationCompressedAutoFillBudget;
 	isCurrent: () => boolean;
 	canRequestPage: (direction: TranscriptPageDirection) => boolean;
 	mutatePage: (
@@ -47,17 +44,14 @@ function loadAutoFillPage(
 export async function fillConversationViewport(options: ConversationViewportAutoFillOptions): Promise<void> {
 	const {
 		chatId,
-		transcriptViewId,
 		viewport,
 		chatState,
-		budget,
 		isCurrent,
 		canRequestPage,
 		mutatePage,
 		waitForCurrentLayout,
 		isPinnedToBottom,
 	} = options;
-	budget.startView(chatId, transcriptViewId);
 	// Measured height, not the number of grouped rows, determines when paging stops.
 	while (isCurrent()) {
 		const layout = await viewport.waitForLayout({
@@ -70,7 +64,7 @@ export async function fillConversationViewport(options: ConversationViewportAuto
 
 		let result: TranscriptPageLoadResult;
 		if (chatState.hasLaterMessages) {
-			if (!canRequestPage('later') || !budget.admitDemand(compressed)) return;
+			if (!canRequestPage('later')) return;
 			result = await mutatePage('later', () =>
 				loadAutoFillPage(chatState, 'later', chatId, compressed),
 			);
@@ -79,7 +73,6 @@ export async function fillConversationViewport(options: ConversationViewportAuto
 			if (chatState.revealEarlierLoadedRows()) {
 				result = await waitForCurrentLayout();
 			} else {
-				if (!budget.admitDemand(compressed)) return;
 				result = await mutatePage('earlier', () =>
 					loadAutoFillPage(chatState, 'earlier', chatId, compressed),
 				);
@@ -87,7 +80,7 @@ export async function fillConversationViewport(options: ConversationViewportAuto
 		} else {
 			return;
 		}
-		if (result !== 'loaded') return;
+		if (result !== 'loaded' || !isCurrent()) return;
 		if (isPinnedToBottom() && !chatState.hasLaterMessages) viewport.scrollToEnd();
 	}
 }
