@@ -774,7 +774,7 @@ export interface CommandExecutionRequestApprovalParams {
   turnId: string;
   itemId: string;
   approvalId?: string | null;
-  kind?: 'command' | 'writeStdin';
+  kind?: 'command' | 'humanCommand' | 'writeStdin';
   startedAtMs?: number;
   reason?: string | null;
   command?: string | null;

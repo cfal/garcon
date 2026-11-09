@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { PERMISSION_MODE_VALUES } from '@garcon/common/chat-modes';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
@@ -377,6 +378,15 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('does not advertise human-only approval support', async () => {
+    const { client, writes } = createRpcClientFixture(() => initializeResponse);
+    await client.connect();
+    const initialize = writes.find((message) => message.method === 'initialize');
+    expect(initialize.params.capabilities.experimentalApi).toBe(true);
+    expect(initialize.params.capabilities.requiredHumanApproval).not.toBe(true);
+    await client.shutdown();
+  });
+
   it('supplies endpoint header secrets only in the spawned environment', async () => {
     const { codexConfig } = buildCodexAppServerEndpointRuntime({
       selection: {
@@ -4652,6 +4662,30 @@ describe('CodexAppServerRuntime', () => {
       ['stdin-request-a', { decision: 'accept' }],
       ['stdin-request-b', { decision: 'cancel' }],
     ]);
+  });
+
+  it.each(PERMISSION_MODE_VALUES)('denies unnegotiated human checkpoints in %s mode', async (permissionMode) => {
+    const nativePath = path.join(tmpDir, 'human-approval-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ permissionMode, operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 'human-request', method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1', itemId: 'synthetic-item',
+        approvalId: 'synthetic-checkpoint', kind: 'humanCommand', command: 'printf synthetic',
+      },
+    });
+    expect(fake.respond.mock.calls).toEqual([['human-request', { decision: 'decline' }]]);
+    expect(permissionEvents(published.events)).toEqual([]);
+    expect(publishedMessages(published.events)).toEqual([]);
   });
 
   it('expires only the matching client request after external resolution', async () => {

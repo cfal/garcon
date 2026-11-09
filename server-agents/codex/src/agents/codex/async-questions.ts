@@ -33,7 +33,7 @@ export function codexAsyncQuestions(id: string, delivery: unknown, value: unknow
   return parseAsyncQuestionSet({ id, questions });
 }
 
-// Matches Codex 0.166.0's context-fragments/src/answered_question.rs.
+// Matches Codex 0.167.0's context-fragments/src/answered_question.rs.
 export function codexQuestionReplyInput(content: string, reply?: AsyncQuestionReply): string {
   if (!reply) return content;
   const readable = asyncQuestionReplyText(reply);
