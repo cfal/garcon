@@ -131,8 +131,9 @@ describe('cooperative conversational anchor scan', () => {
   it.each(['backward', 'forward'])('returns oversized rows and subsequent history in one response (%s)', direction => {
     append([notice('x'.repeat(1024 * 1024 + 1)), ...Array.from({ length: 205 }, tool),
       notice('\u00e9'.repeat(600_000)), user()]);
-    expect(scan(direction, 1)).toMatchObject({ startOrdinal: 1, endOrdinal: 209, pageStatus: 'exhausted' });
-    expect(scan(direction, 1).rows).toHaveLength(208);
+    const result = scan(direction, 1);
+    expect(result).toMatchObject({ startOrdinal: 1, endOrdinal: 209, pageStatus: 'exhausted' });
+    expect(result.rows).toHaveLength(208);
   });
 
   it('excludes a large boundary anchor regardless of its payload size', () => {
@@ -151,10 +152,12 @@ describe('cooperative conversational anchor scan', () => {
 
   it('holds the captured watermark under appends and lets a fresh demand see the new head', () => {
     append(Array.from({ length: 201 }, tool));
-    const first = scan('forward', 1);
+    const watermarkOrdinal = head;
     append([assistant()]);
-    expect(scan('forward', 1, { cursorOrdinal: first.endOrdinal - 1, watermarkOrdinal: 201 }))
-      .toMatchObject({ startOrdinal: 202, endOrdinal: 202, pageStatus: 'exhausted', anchorsRemaining: 1 });
+    const pinned = scan('forward', 1, { cursorOrdinal: 150, watermarkOrdinal });
+    expect(pinned).toMatchObject({ startOrdinal: 151, endOrdinal: 202, pageStatus: 'exhausted', anchorsRemaining: 1 });
+    expect(pinned.rows).toHaveLength(51);
+    expect(pinned.rows.at(-1).ordinal).toBe(watermarkOrdinal);
     expect(scan('forward', 1, { cursorOrdinal: 201 }))
       .toMatchObject({ startOrdinal: 202, endOrdinal: 203, pageStatus: 'exhausted', anchorsRemaining: 0 });
   });
@@ -168,17 +171,15 @@ describe('cooperative conversational anchor scan', () => {
     }));
     for (const direction of ['backward', 'forward']) {
       let cursorOrdinal = direction === 'backward' ? head + 1 : 0;
-      let remaining = 3;
       const ordinals = [];
       for (let count = 0; count < 30; count++) {
-        const result = scan(direction, remaining, { cursorOrdinal, pauseAfter });
+        const result = scan(direction, 3, { cursorOrdinal, pauseAfter });
         expect(await readAnchorPage(VIEW, {
-          direction, cursorOrdinal, watermarkOrdinal: head, anchorsRemaining: remaining,
+          direction, cursorOrdinal, watermarkOrdinal: head, anchorsRemaining: 3,
         }, work => work(db))).toEqual(result);
         ordinals.push(...result.rows.map(row => row.ordinal));
         if (result.pageStatus === 'exhausted') break;
         cursorOrdinal = direction === 'backward' ? result.startOrdinal : result.endOrdinal - 1;
-        remaining = 3;
       }
       expect(ordinals.toSorted((a, b) => a - b)).toEqual(Array.from({ length: head }, (_, index) => index + 1));
     }

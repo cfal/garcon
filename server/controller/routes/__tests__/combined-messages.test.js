@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { AssistantMessage, BashToolUseMessage } from '../../../../common/chat-types.ts';
+import { isErrorCode } from '../../../../common/error-codes.ts';
 import { parseTranscriptAnchorResponse } from '../../../../common/transcript-anchor-page.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
@@ -40,7 +41,12 @@ describe('POST /api/v1/chats/combined-messages', () => {
     expect(parseTranscriptAnchorResponse(input, JSON.parse(body)).messages).toHaveLength(651);
   });
 
-  it.each(['delete', 'abort', 'interrupt', 'shutdown'])('translates %s during a held read without returning a prefix', async action => {
+  it.each([
+    ['delete', 404, 'SESSION_NOT_FOUND'],
+    ['abort', 499, null],
+    ['interrupt', 503, 'TRANSCRIPT_READ_INTERRUPTED'],
+    ['shutdown', 503, 'SERVER_SHUTTING_DOWN'],
+  ])('translates %s during a held read without returning a prefix', async (action, status, errorCode) => {
     const { call, reader, registry } = fixture();
     const entered = Promise.withResolvers();
     const held = Promise.withResolvers();
@@ -54,10 +60,23 @@ describe('POST /api/v1/chats/combined-messages', () => {
       ? new DomainError('SERVER_SHUTTING_DOWN', 'Server is shutting down', 503, true)
       : new LedgerBulkOperationAbandonedError(input.chatId));
     const response = await pending;
-    expect(response.status).toBe(action === 'abort' ? 499 : action === 'delete' ? 404 : 503);
-    if (action !== 'abort') expect((await response.json()).errorCode).toBe(
-      action === 'delete' ? 'SESSION_NOT_FOUND' : action === 'shutdown' ? 'SERVER_SHUTTING_DOWN' : 'TRANSCRIPT_READ_INTERRUPTED',
-    );
+    expect(response.status).toBe(status);
+    if (errorCode !== null) {
+      const body = await response.json();
+      expect(body.errorCode).toBe(errorCode);
+      expect(isErrorCode(body.errorCode)).toBe(true);
+    }
+  });
+
+  it('discards a successful read after cancellation', async () => {
+    const { call, reader, resendCandidates } = fixture();
+    const abort = new AbortController();
+    reader.anchorPage.mockImplementation(async () => {
+      abort.abort();
+      return rawPage;
+    });
+    expect((await call(input, abort.signal)).status).toBe(499);
+    expect(resendCandidates).not.toHaveBeenCalled();
   });
 
   it('returns a typed anchor page without changing raw-page semantics', async () => {

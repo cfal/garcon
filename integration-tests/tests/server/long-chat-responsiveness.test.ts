@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFile, readFile } from 'node:fs/promises';
 import type { ChatDetailsResponse } from '../../../common/chat-details.js';
 import type { ChatHandoffArtifactResponse } from '../../../common/chat-handoff-artifact-contracts.js';
+import type { AddChatRowRequest, AddChatRowResponse } from '../../../common/chat-row-contracts.js';
 import { isCompleteTranscriptAnchorResponse, parseTranscriptAnchorResponse, type TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
 import {
   type IntegrationFixture,
@@ -33,12 +34,27 @@ test('a long chat reloads, reads combined history, forks, and renders while the 
 
     const probe = startPingProbe(fixture);
     const reloaded = await fixture.client.reloadChat(chatId);
+    const notice = await fixture.client.post<AddChatRowResponse>('/api/v1/chats/rows', {
+      clientRequestId: 'synthetic-responsiveness-request',
+      clientMessageId: 'synthetic-responsiveness-row',
+      chatId,
+      transcriptViewId: reloaded.transcriptViewId,
+      presentation: { style: 'notice' },
+      format: 'plain',
+      disclosure: 'expanded',
+      content: 'Synthetic non-anchor row.',
+    } satisfies AddChatRowRequest);
     const request: TranscriptAnchorRequest = { chatId, direction: 'backward', anchorsRemaining: 200 };
     const combined = parseTranscriptAnchorResponse(request,
       await fixture.client.post<unknown>('/api/v1/chats/combined-messages', request));
     if (!isCompleteTranscriptAnchorResponse(combined)) throw new Error('Synthetic history unavailable');
-    expect(combined.pageStatus).toBe('complete');
-    expect(combined.endOrdinal - combined.startOrdinal).toBeGreaterThanOrEqual(200);
+    expect(combined).toMatchObject({
+      pageStatus: 'complete', anchorsRemaining: 0,
+      startOrdinal: notice.ordinal - 200, endOrdinal: notice.ordinal + 1,
+    });
+    expect(combined.messages.map(entry => entry.ordinal)).toEqual(
+      Array.from({ length: 201 }, (_, index) => notice.ordinal - 200 + index),
+    );
     const fork = await fixture.client.forkChat({ sourceChatId: chatId, chatId: fixture.newChatId() });
     const artifact = await fixture.client.get<ChatHandoffArtifactResponse>(
       `/api/v1/chats/handoff-artifact?${new URLSearchParams({ chatId, contextWindowTokens: '131072' })}`,
