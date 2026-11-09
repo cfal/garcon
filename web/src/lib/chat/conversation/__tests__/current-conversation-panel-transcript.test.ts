@@ -117,6 +117,31 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		};
 	}
 
+	it('refreshes a cold raw snapshot after a rejected live commit instead of coalescing it away', async () => {
+		const { cache, registry, selected } = fixture();
+		cache.remove('chat-1');
+		const releaseSnapshot = deferredPage(2);
+		const releaseRefresh = deferredPage(3);
+		registry.reconcile([presentation('window-left'), presentation('window-right')]);
+		const load = selected.loadMessages('chat-1');
+		try {
+			expect(selected.applyMessages('chat-1', 'view-1', [entry(3)], 3, 3)).toBe('gap-detected');
+			const reload = registry.loadChatSnapshot('chat-1');
+			releaseSnapshot();
+			await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: true });
+			releaseRefresh();
+			await load;
+			await reload;
+			for (const panel of registry.panelsForChat('chat-1')) expect(panel.transcript.entries).toEqual([entry(1), entry(2), entry(3)]);
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 3, stale: false });
+		} finally {
+			releaseSnapshot();
+			releaseRefresh();
+			await load;
+		}
+	});
+
 	it.each([0, 1, 2])('recovers Clear without WS delivery across %i panels and an older activation', async (panelCount) => {
 		const { cache, registry, selected } = fixture();
 		registry.reconcile(['window-left', 'window-right'].slice(0, panelCount).map(windowId =>

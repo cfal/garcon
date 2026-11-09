@@ -299,6 +299,65 @@ test('reconnect replay and held combined coverage preserve both the historical p
   });
 }, 180_000);
 
+test('cold combined history refreshes commits received after its snapshot was captured', async () => {
+  await withChromiumFixture('combined-anchor-cold-commit', async ({ integration, page, context }, phase) => {
+    const chatId = integration.newChatId();
+    const initial = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic cold history seed', projectPath: integration.dirs.project,
+      agent: integration.directAgents.openAi,
+    });
+    await integration.client.waitForTurnTerminal(chatId, initial.turnId);
+    const head = (await integration.client.getMessages(chatId)).lastOrdinal;
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const held = Promise.withResolvers<void>();
+    let holding = true;
+    let captured = 0;
+    const combined: TranscriptAnchorRequest[] = [];
+    await page.route(/\/api\/v1\/chats\/(?:combined-)?messages(?:\?|$)/, async route => {
+      const url = new URL(route.request().url());
+      const request = route.request().method() === 'POST'
+        ? route.request().postDataJSON() as TranscriptAnchorRequest : null;
+      if ((request?.chatId ?? url.searchParams.get('chatId')) !== chatId) return route.continue();
+      if (request) combined.push(request);
+      if (!holding) return route.continue();
+      const response = await route.fetch();
+      expect((await response.json()).lastOrdinal).toBe(head);
+      if (request) captured += 1;
+      await held.promise;
+      await route.fulfill({ response });
+    });
+    const marker = 'Synthetic commit during cold history';
+    const provider = integration.fakeProviders.openAi.holdNext({ lastUserText: marker });
+    try {
+      phase('capturing the first history response before a live turn');
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await browserExpect.poll(() => captured).toBeGreaterThan(0);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      const live = await integration.client.runDirectChat({ chatId, content: marker, agent: integration.directAgents.openAi });
+      await provider.received;
+      const stop = page.getByRole('button', { name: 'Stop', exact: true });
+      await browserExpect(stop).toBeVisible();
+      provider.releaseEcho();
+      await integration.client.waitForTurnTerminal(chatId, live.turnId);
+      // Terminal handling flushes the browser's message accumulator before clearing processing.
+      await browserExpect(stop).toHaveCount(0);
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(0);
+      const beforeRelease = combined.length;
+      phase('installing the captured response and recovering the missed commits');
+      holding = false;
+      held.resolve();
+      await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(1);
+      await browserExpect(feed.getByText(`echo:${marker}`, { exact: true })).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      expect(combined.slice(beforeRelease)).toContainEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
+    } finally {
+      provider.releaseEcho();
+      held.resolve();
+    }
+  });
+}, 180_000);
+
 test('reconnect replaces a same-view lost tail and accepts a commit at its reused ordinal', async () => {
   await withChromiumFixture('combined-anchor-tail-loss', async ({ integration, page, context, browserErrors }, phase) => {
     const { chatId, transcriptViewId, head } = await seedCombinedAnchorHistory(integration);
