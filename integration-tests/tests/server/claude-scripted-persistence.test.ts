@@ -253,7 +253,19 @@ describe('scripted Claude persistence', () => {
       };
       await appendFile(
         nativePath,
-        `${JSON.stringify(providerEntry)}\n`,
+        [providerEntry, {
+          sessionId: binding.agentSessionId,
+          version: '2.1.319',
+          type: 'attachment',
+          uuid: '00000000-0000-4000-8000-000000000319',
+          timestamp: '2099-01-01T00:00:01.000Z',
+          attachment: {
+            type: 'queued_command', commandMode: 'prompt',
+            prompt: `${providerText}_QUEUED`,
+            origin: { kind: 'peer', from: 'synthetic-peer' },
+            isMeta: true,
+          },
+        }].map((entry) => `${JSON.stringify(entry)}\n`).join(''),
         'utf8',
       );
 
