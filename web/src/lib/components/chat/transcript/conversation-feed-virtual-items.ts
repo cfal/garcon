@@ -133,7 +133,7 @@ function groupToolRuns(
 			expanded,
 			spacingAfter: expanded ? 'none' : run[run.length - 1].spacingAfter,
 		});
-		if (expanded) grouped.push(...run);
+		if (expanded) for (const item of run) grouped.push(item);
 		run = [];
 	};
 	for (const item of items) {
@@ -235,7 +235,7 @@ export function buildConversationVirtualFeedModel(
 		});
 	}
 	const transcriptStartIndex = items.length;
-	items.push(...presentedBody);
+	for (const item of presentedBody) items.push(item);
 	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {
@@ -335,8 +335,7 @@ export function appendConversationVirtualTranscriptTail(
 	}));
 	if (appendedVirtualItems.some((item) => model.indexByKey.has(item.key))) return null;
 
-	const items = model.items.slice();
-	items.splice(insertIndex, 0, ...appendedVirtualItems);
+	const items = model.items.slice(0, insertIndex).concat(appendedVirtualItems, model.items.slice(insertIndex));
 
 	const indexByKey = new Map(model.indexByKey);
 	const indexByRowId = new Map(model.indexByRowId);

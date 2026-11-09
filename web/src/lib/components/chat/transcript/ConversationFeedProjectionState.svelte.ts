@@ -260,13 +260,13 @@ export class ConversationFeedProjectionState {
 				insertIndex,
 				insertIndex + visibleAppendedItems.length,
 			);
-			keys.splice(insertIndex, 0, ...insertedItems.map((item) => item.key));
-			estimates.splice(insertIndex, 0, ...insertedItems.map(estimateConversationFeedItemSize));
 			geometry = {
 				surfaceIdentity: input.surfaceIdentity,
 				geometryRevision: ++this.#geometryRevision,
-				keys,
-				estimates,
+				keys: keys.slice(0, insertIndex).concat(insertedItems.map((item) => item.key), keys.slice(insertIndex)),
+				estimates: estimates.slice(0, insertIndex).concat(
+					insertedItems.map(estimateConversationFeedItemSize), estimates.slice(insertIndex),
+				),
 				measurementReset: 'none',
 				mutationKinds,
 				endBehavior: conversationFeedEndBehavior(mutationKinds, input.isLiveWindow),

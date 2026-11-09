@@ -57,9 +57,9 @@ export function mergeRowsWithOptimisticInputs(
 		}
 	}
 
-	if (messageIndex < rows.length) merged.push(...rows.slice(messageIndex));
-	if (optimisticIndex < optimisticRows.length) {
-		merged.push(...optimisticRows.slice(optimisticIndex).map(({ row }) => row));
+	for (; messageIndex < rows.length; messageIndex += 1) merged.push(rows[messageIndex]);
+	for (; optimisticIndex < optimisticRows.length; optimisticIndex += 1) {
+		merged.push(optimisticRows[optimisticIndex].row);
 	}
 	return merged;
 }
