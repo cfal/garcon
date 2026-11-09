@@ -1736,6 +1736,7 @@ describe('combined transcript intervals', () => {
 		let reload: ReturnType<typeof selected.loadMessages> | undefined;
 		try {
 			await replacementStarted.promise;
+			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0].purpose).toBe('activation');
 			const result = selected.applyMessages(chatId, viewId, [assistant(81)], 81, 81);
 			if (result !== 'applied') reload = selected.loadMessages(chatId);
 			replacement.resolve(read({ chatId, direction: 'backward', anchorsRemaining: 100 }));
@@ -1759,17 +1760,26 @@ describe('combined transcript intervals', () => {
 		}
 	});
 
-	it.each([false, true])('keeps refresh responsibility when the loader is hidden (remaining peer: %s)', async remainingPeer => {
+	it.each(['no-peer', 'peer', 'second-removal'] as const)('keeps refresh responsibility when the loader is hidden (%s)', async outcome => {
 		const { cache, registry, mount } = panelFixture({ retainInactive: true });
 		const entries = Array.from({ length: 81 }, (_, index) => assistant(index + 1));
 		const snapshot = Promise.withResolvers<TranscriptAnchorPage>();
 		const refresh = Promise.withResolvers<TranscriptAnchorPage>();
+		const handoff = Promise.withResolvers<TranscriptAnchorPage>();
 		const started = Promise.withResolvers<void>();
+		const handoffStarted = Promise.withResolvers<void>();
+		const remainingPeer = outcome !== 'no-peer';
+		const succeeds = outcome === 'peer';
 		installHistory(entries);
 		vi.mocked(getCombinedChatMessages)
 			.mockImplementationOnce(() => snapshot.promise)
 			.mockImplementationOnce(() => { started.resolve(); return refresh.promise; });
-		mount('left', ...(remainingPeer ? ['right'] : []));
+		if (outcome === 'second-removal') vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => {
+			handoffStarted.resolve();
+			return handoff.promise;
+		});
+		const peers = outcome === 'second-removal' ? ['right', 'third'] : remainingPeer ? ['right'] : [];
+		mount('left', ...peers);
 		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => chatId });
 		const load = selected.loadMessages(chatId);
 		const settled = load.then(() => { cache.markValidated(chatId); return 'loaded'; }, () => 'failed');
@@ -1778,19 +1788,26 @@ describe('combined transcript intervals', () => {
 			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await started.promise;
 			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 80, stale: true });
-			mount(...(remainingPeer ? ['right'] : []));
+			mount(...peers);
 			refresh.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
-			expect(await settled).toBe(remainingPeer ? 'loaded' : 'failed');
-			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: remainingPeer ? 81 : 80, stale: !remainingPeer });
+			if (outcome === 'second-removal') {
+				await handoffStarted.promise;
+				mount('third');
+				handoff.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			}
+			expect(await settled).toBe(succeeds ? 'loaded' : 'failed');
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(remainingPeer ? 3 : 2);
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: succeeds ? 81 : 80, stale: !succeeds });
 			mount('left');
-			if (!remainingPeer) await registry.loadChatSnapshot(chatId);
+			if (!succeeds) await registry.loadChatSnapshot(chatId);
 			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 81, stale: false });
 			expect(registry.panel('chat-view:window-left')!.transcript.entries).toEqual(entries);
-			expect(getCombinedChatMessages).toHaveBeenCalledTimes(3);
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(outcome === 'second-removal' ? 4 : 3);
 			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0]).toEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
 		} finally {
 			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			refresh.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			handoff.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await settled;
 		}
 	});

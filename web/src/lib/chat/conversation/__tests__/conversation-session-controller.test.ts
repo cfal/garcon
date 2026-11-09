@@ -1675,10 +1675,12 @@ describe('ConversationSessionController', () => {
 	it('does not validate an incomplete snapshot when its last panel is hidden during refresh', async () => {
 		const { deps } = createDeps();
 		const cache = new ChatTranscriptCache({ limit: 100 });
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.setCurrentChatId('chat-1');
 		const registry = new ConversationPanelRegistry({
 			cache,
 			overlays: new ConversationTranscriptOverlayStore(),
-			lifecycle: { forChat: () => deps.lifecycle, remove: () => {} },
+			lifecycle: { forChat: () => lifecycle, remove: () => {} },
 			getSelectedChatId: () => 'chat-1',
 			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
 		});

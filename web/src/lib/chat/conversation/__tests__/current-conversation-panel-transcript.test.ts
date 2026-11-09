@@ -125,6 +125,7 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		const releaseRefresh = deferredPage(3, 'view-1', 150);
 		const load = selected.loadMessages('chat-1', { minimumLimit: 150, purpose: 'activation' });
 		try {
+			expect(getChatMessages).toHaveBeenNthCalledWith(1, { chatId: 'chat-1', limit: 150, purpose: 'activation' });
 			expect(selected.applyMessages('chat-1', 'view-1', [entry(3)], 3, 3)).toBe('gap-detected');
 			const reload = registry.loadChatSnapshot('chat-1');
 			releaseSnapshot();
