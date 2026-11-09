@@ -14,7 +14,11 @@ export async function preparePiModelDiscoveryFixture(home: string): Promise<stri
     'garcon-native': { type: 'api_key', key: 'synthetic-key' },
   }));
   await writeFile(join(agentDir, 'extensions', 'discovery.js'), `
+import { Type, StringEnum } from '@earendil-works/pi-ai';
+
 export default function (pi) {
+  const schema = Type.Object({ mode: StringEnum(['discovery']) });
+  if (schema.properties.mode.enum[0] !== 'discovery') throw new Error('Pi extension schema compatibility failed');
   pi.registerProvider('garcon-discovery', {
     baseUrl: 'http://127.0.0.1:1/v1', api: 'openai-completions', apiKey: 'synthetic-key',
     models: [{ id: 'physical', name: 'Physical', reasoning: false, input: ['text'],

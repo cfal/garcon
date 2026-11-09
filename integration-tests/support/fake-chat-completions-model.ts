@@ -20,7 +20,7 @@ export type ChatCompletionsBlock =
       readonly id: string;
       readonly name: string;
       readonly input: Record<string, unknown>;
-      readonly rawArguments?: string;
+      readonly rawArguments?: string | readonly string[];
       readonly usage?: ChatCompletionsUsage;
     };
 
@@ -72,7 +72,7 @@ export function chatCompletionsToolUse(
   id: string,
   name: string,
   input: Record<string, unknown>,
-  options: ChatCompletionsBlockOptions & { readonly rawArguments?: string } = {},
+  options: ChatCompletionsBlockOptions & { readonly rawArguments?: string | readonly string[] } = {},
 ): ChatCompletionsBlock {
   return { kind: 'tool_use', id, name, input,
     ...(options.rawArguments === undefined ? {} : { rawArguments: options.rawArguments }),
@@ -191,13 +191,16 @@ function turnChunks(
       },
       finish_reason: null,
     }));
-    chunks.push(chunk(model, request.id, {
-      index: 0,
-      delta: {
-        tool_calls: [{ index: toolIndex, function: { arguments: block.rawArguments ?? JSON.stringify(block.input) } }],
-      },
-      finish_reason: null,
-    }));
+    const rawArguments = block.rawArguments ?? JSON.stringify(block.input);
+    for (const argumentsDelta of typeof rawArguments === 'string' ? [rawArguments] : rawArguments) {
+      chunks.push(chunk(model, request.id, {
+        index: 0,
+        delta: {
+          tool_calls: [{ index: toolIndex, function: { arguments: argumentsDelta } }],
+        },
+        finish_reason: null,
+      }));
+    }
     toolIndex += 1;
   }
   const finishReason = blocks.some((block) => block.kind === 'tool_use') ? 'tool_calls' : 'stop';
