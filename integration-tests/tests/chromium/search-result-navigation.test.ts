@@ -335,6 +335,7 @@ test('search cancels a target page at its deadline without installing a late row
     'search-result-deadline',
     async ({ page, integration, assertNoBrowserErrors }) => {
       const { target, marker } = await createSearchNavigationTarget(integration);
+      await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await openSearch(page, marker);
@@ -364,6 +365,7 @@ test('search cancels a target page at its deadline without installing a late row
         });
         await notification.waitFor();
         expect(await notification.count()).toBe(1);
+        expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
         await releaseRequest(page, route);
         expect(await composer.inputValue()).toBe('Synthetic deadline draft.');
         expect(await composer.evaluate((node) => document.activeElement === node)).toBe(true);
