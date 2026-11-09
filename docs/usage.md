@@ -63,7 +63,7 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   earliest timestamp; Claude Code's own resumes copy the same keys. Entries a
   Garcon fork copied carry `forkedFrom` and are skipped, because their requests
   were billed in the source session (the fork also restamps its last copy).
-- Codex 0.166.0 writes a `token_usage_record` for every billed response,
+- Codex 0.167.0 writes a `token_usage_record` for every billed response,
   including remote compaction, before that response's `token_count`. Once a
   rollout has records, only records are billed, keyed by `response_id`, and
   `token_count` only reports context size. Records with no response id or

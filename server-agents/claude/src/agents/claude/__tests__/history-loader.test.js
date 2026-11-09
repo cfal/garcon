@@ -205,6 +205,74 @@ describe('Claude native user-input conversion', () => {
     });
   });
 
+  it.each([
+    ['peer', { origin: { kind: 'peer' } }, false],
+    ['future provider', { origin: { kind: 'future-provider-kind' } }, false],
+    ['auto continuation', { origin: { kind: 'auto-continuation' } }, false],
+    ['unattributed meta', { isMeta: true }, false],
+    ['human', { origin: { kind: 'human' } }, true],
+    ['unattributed', {}, true],
+  ])('projects queued %s provenance without dropping assistant output', async (_label, provenance, visible) => {
+    const content = 'Synthetic queued prompt';
+    const entries = [{
+      sessionId: 'session-1', type: 'attachment', uuid: 'queued-provenance',
+      timestamp: '2026-11-09T00:00:00.000Z',
+      attachment: { type: 'queued_command', commandMode: 'prompt', prompt: content, ...provenance },
+    }, {
+      sessionId: 'session-1', type: 'assistant', uuid: 'queued-reply',
+      timestamp: '2026-11-09T00:00:01.000Z',
+      message: { role: 'assistant', content: 'Synthetic queued reply' },
+    }];
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      expect((await loadClaudeChatMessages(filePath)).map(({ type, content: text }) => [type, text]))
+        .toEqual([
+          ...(visible ? [['user-message', content]] : []),
+          ['assistant-message', 'Synthetic queued reply'],
+        ]);
+    });
+  });
+
+  it('keeps recognized queued steering despite nested provider metadata', async () => {
+    const entry = {
+      sessionId: 'session-1', type: 'attachment', uuid: 'queued-steering',
+      timestamp: '2026-11-09T00:00:00.000Z',
+      attachment: {
+        type: 'queued_command', commandMode: 'prompt',
+        prompt: [{ type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}Synthetic steering` }],
+        origin: { kind: 'peer' }, isMeta: true,
+      },
+    };
+    await withTempJsonl([JSON.stringify(entry)], async (filePath) => {
+      expect(await loadClaudeChatMessages(filePath))
+        .toMatchObject([{ type: 'user-message', content: 'Synthetic steering' }]);
+    });
+  });
+
+  it('prefers queued attachment provenance to enclosing entry provenance', async () => {
+    const entry = {
+      sessionId: 'session-1', type: 'attachment', uuid: 'queued-nested-provenance',
+      timestamp: '2026-11-09T00:00:00.000Z', origin: { kind: 'human' },
+      attachment: {
+        type: 'queued_command', commandMode: 'prompt', prompt: 'Synthetic peer prompt',
+        origin: { kind: 'peer' },
+      },
+    };
+    await withTempJsonl([JSON.stringify(entry)], async (filePath) => {
+      expect(await loadClaudeChatMessages(filePath)).toEqual([]);
+    });
+  });
+
+  it.each([{ origin: { kind: 'peer' } }, { isMeta: true }])('retains entry-level queued filtering for %j', async (provenance) => {
+    const entry = {
+      sessionId: 'session-1', type: 'attachment', uuid: 'queued-entry-provenance',
+      timestamp: '2026-11-09T00:00:00.000Z', ...provenance,
+      attachment: { type: 'queued_command', commandMode: 'prompt', prompt: 'Synthetic queued prompt' },
+    };
+    await withTempJsonl([JSON.stringify(entry)], async (filePath) => {
+      expect(await loadClaudeChatMessages(filePath)).toEqual([]);
+    });
+  });
+
   it('filters provider-origin messages while preserving human user messages', async () => {
     const entries = [
       {
