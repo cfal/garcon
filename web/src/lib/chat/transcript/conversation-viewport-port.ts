@@ -22,7 +22,6 @@ export interface ConversationViewportPosition {
 
 export interface ConversationViewportPort {
 	isReady(): boolean;
-	hasCollapsedToolGroups(): boolean;
 	isAtEnd(threshold?: number): boolean;
 	ownsScrollPosition(): boolean;
 	viewportPosition(): ConversationViewportPosition | null;

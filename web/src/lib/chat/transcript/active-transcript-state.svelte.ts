@@ -774,11 +774,15 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		const read = this.transcriptCache.trackSnapshotRead(chatId);
 		const isCurrent = () => windowEpoch === this.#windowNavigationEpoch && loadEpoch === this.#loadEpoch
 			&& this.activeChatId === chatId && this.transcriptViewId === transcriptViewId && read.isCurrent();
+		const knownHeads = [{ transcriptViewId, lastOrdinal: this.lastOrdinal }];
+		const cachedCursor = this.transcriptCache.readAppliedCursor(chatId);
+		if (cachedCursor) knownHeads.push(cachedCursor);
 		try {
 			const result = await loadTranscriptAnchorSnapshot({
 				request: { chatId, transcriptViewId, direction: target === 'latest' ? 'backward' : 'forward',
 					anchorsRemaining: TRANSCRIPT_ANCHOR_TARGET },
 				isCurrent,
+				knownHeads,
 			});
 			if (result.kind === 'invalidated') return 'invalidated';
 			if (result.kind === 'view-changed' || result.kind === 'cursor-ahead') {

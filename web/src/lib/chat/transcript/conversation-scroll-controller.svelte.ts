@@ -298,7 +298,7 @@ export class ConversationScrollController {
 				this.isPinnedToBottom &&
 				!this.deps.chatState.isUserScrolledUp &&
 				this.#userScrollIntent.epoch === intentEpoch &&
-				(this.deps.chatState.combinedMode || this.deps.getViewport()?.hasCollapsedToolGroups())
+				this.deps.chatState.combinedMode
 			) {
 				void this.fillUnderfilledViewport();
 			}
@@ -425,7 +425,7 @@ export class ConversationScrollController {
 		reason: PageRequestReason,
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.getChatId();
-		if (chatId && this.deps.chatState.isPageLoading(direction)) {
+		if (this.deps.chatState.combinedMode && chatId && this.deps.chatState.isPageLoading(direction)) {
 			if (reason === 'button' && this.#pageMutationOwner?.direction === direction) this.#pageMutationOwner.manual = true;
 			return direction === 'earlier' ? this.deps.chatState.loadEarlierPage(chatId) : this.deps.chatState.loadLaterPage(chatId);
 		}
@@ -506,7 +506,7 @@ export class ConversationScrollController {
 	async loadEarlierPageForNavigator(chatId: string): Promise<TranscriptPageLoadResult> {
 		const viewport = this.deps.getViewport();
 		if (!viewport || this.deps.getChatId() !== chatId) return 'invalidated';
-		if (this.deps.chatState.isPageLoading('earlier')) {
+		if (this.deps.chatState.combinedMode && this.deps.chatState.isPageLoading('earlier')) {
 			if (this.#pageMutationOwner?.direction === 'earlier') this.#pageMutationOwner.manual = true;
 			return this.deps.chatState.loadEarlierPage(chatId);
 		}

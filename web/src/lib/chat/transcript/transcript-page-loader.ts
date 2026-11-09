@@ -49,7 +49,6 @@ interface TranscriptPageLoaderOptions {
 
 export interface TranscriptPageLoadOptions {
 	applicationGate?: TranscriptPageApplicationGate;
-	visibleLimit?: number;
 	shouldContinue?: () => Promise<boolean>;
 	preempt?: boolean;
 }
@@ -186,6 +185,7 @@ export class TranscriptPageLoader {
 					chatId,
 					transcriptViewId,
 					operationEpoch,
+					lastOrdinal,
 					options,
 				);
 			}
@@ -201,7 +201,10 @@ export class TranscriptPageLoader {
 				options,
 			);
 		} catch (error) {
-			if (this.#isCurrent(chatId, transcriptViewId, operationEpoch)) {
+			const canPublish = this.host.combinedMode
+				? this.#isCurrent(chatId, transcriptViewId, operationEpoch)
+				: await this.#canApply(chatId, transcriptViewId, operationEpoch, options.applicationGate);
+			if (canPublish) {
 				this.host.pageStates[direction] = {
 					status: 'error',
 					error: error instanceof Error ? error.message : 'Page load failed',
@@ -217,8 +220,10 @@ export class TranscriptPageLoader {
 		chatId: string,
 		transcriptViewId: string,
 		operationEpoch: number,
+		lastOrdinal: number,
 		options: TranscriptPageLoadOptions,
 	): Promise<TranscriptPageLoadResult> {
+		const knownHeads = [{ transcriptViewId, lastOrdinal }];
 		const boundary = () =>
 			direction === 'earlier' ? this.host.nextBeforeOrdinal : this.host.loadedThroughOrdinal;
 		const isCurrent = () => this.#isCurrent(chatId, transcriptViewId, operationEpoch);
@@ -238,7 +243,7 @@ export class TranscriptPageLoader {
 		while (isCurrent()) {
 			if (options.shouldContinue && !(await options.shouldContinue())) return 'invalidated';
 			if (!isCurrent() || boundary() !== request.cursorOrdinal) return 'invalidated';
-			const result = await loadTranscriptAnchorChunk(request, isCurrent);
+			const result = await loadTranscriptAnchorChunk(request, isCurrent, { knownHeads });
 			if (result.kind === 'invalidated' || !isCurrent()) return 'invalidated';
 			if (result.kind === 'cursor-ahead' || result.kind === 'view-changed') {
 				await this.host.recoverTranscriptCursorAhead(chatId, transcriptViewId);
@@ -291,7 +296,7 @@ export class TranscriptPageLoader {
 			chatId,
 			transcriptViewId,
 			beforeOrdinal: requestBeforeOrdinal,
-			visibleLimit: options.visibleLimit ?? this.options.pageSize,
+			visibleLimit: this.options.pageSize,
 			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
 			onPageValidated: (request, page) => {
 				if (request.beforeOrdinal === undefined) {
@@ -337,7 +342,7 @@ export class TranscriptPageLoader {
 			transcriptViewId,
 			afterOrdinal: loadedThroughOrdinal,
 			throughOrdinal: lastOrdinal,
-			visibleLimit: options.visibleLimit ?? this.options.pageSize,
+			visibleLimit: this.options.pageSize,
 			isCurrent: () => this.#isCurrent(chatId, transcriptViewId, operationEpoch),
 		});
 		if (demand.kind === 'invalidated') return 'invalidated';

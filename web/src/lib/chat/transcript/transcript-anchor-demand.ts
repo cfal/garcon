@@ -16,6 +16,12 @@ import {
 } from '$shared/transcript-anchor-page';
 import { getCombinedChatMessages } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
+import type { ChatCursor } from './active-transcript-port.js';
+
+interface TranscriptAnchorReadOptions {
+	loadPage?: typeof getCombinedChatMessages;
+	knownHeads?: readonly ChatCursor[];
+}
 
 export type TranscriptAnchorChunkResult =
 	| { kind: 'complete'; page: TranscriptAnchorPage }
@@ -27,11 +33,11 @@ export type TranscriptAnchorChunkResult =
 export async function loadTranscriptAnchorChunk(
 	request: TranscriptAnchorRequest,
 	isCurrent: () => boolean,
-	loadPage = getCombinedChatMessages,
+	options: TranscriptAnchorReadOptions = {},
 ): Promise<TranscriptAnchorChunkResult> {
 	let response: TranscriptAnchorResponse;
 	try {
-		response = await loadPage(request);
+		response = await (options.loadPage ?? getCombinedChatMessages)(request);
 	} catch (error) {
 		if (!isCurrent()) return { kind: 'invalidated' };
 		if (error instanceof ApiError) {
@@ -43,9 +49,13 @@ export async function loadTranscriptAnchorChunk(
 		throw error;
 	}
 	if (!isCurrent()) return { kind: 'invalidated' };
-	return isCompleteTranscriptAnchorResponse(response)
-		? { kind: 'complete', page: response }
-		: { kind: 'unavailable', response };
+	if (!isCompleteTranscriptAnchorResponse(response)) return { kind: 'unavailable', response };
+	// Compares operation-start heads, not commits received while the read was pending.
+	if (options.knownHeads?.some(head => head.transcriptViewId === response.transcriptViewId
+		&& response.lastOrdinal < head.lastOrdinal)) {
+		return { kind: 'cursor-ahead', transcriptViewId: response.transcriptViewId };
+	}
+	return { kind: 'complete', page: response };
 }
 
 export interface TranscriptAnchorSnapshot {
@@ -57,16 +67,15 @@ export type TranscriptAnchorSnapshotResult =
 	| ({ kind: 'complete' } & TranscriptAnchorSnapshot)
 	| Exclude<TranscriptAnchorChunkResult, { kind: 'complete' }>;
 
-export async function loadTranscriptAnchorSnapshot(options: {
+export async function loadTranscriptAnchorSnapshot(options: TranscriptAnchorReadOptions & {
 	request: TranscriptAnchorRequest;
 	isCurrent: () => boolean;
 	isDisjoint?: (page: TranscriptPage) => boolean;
-	loadPage?: typeof getCombinedChatMessages;
 }): Promise<TranscriptAnchorSnapshotResult> {
 	let request = options.request;
 	let accumulated: TranscriptAnchorSnapshot['page'] | undefined;
 	while (options.isCurrent()) {
-		const result = await loadTranscriptAnchorChunk(request, options.isCurrent, options.loadPage);
+		const result = await loadTranscriptAnchorChunk(request, options.isCurrent, options);
 		if (result.kind !== 'complete') return result;
 		const chunk = result.page;
 		if (!accumulated) {

@@ -208,7 +208,8 @@ export class TranscriptSnapshotLoader {
 
 		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
 			const snapshotRead = this.host.transcriptCache.trackSnapshotRead(chatId);
-			const cachedViewAtStart = this.host.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
+			const cachedCursorAtStart = this.host.transcriptCache.readAppliedCursor(chatId);
+			const cachedViewAtStart = cachedCursorAtStart?.transcriptViewId;
 			const epoch = this.host.beginSnapshotLoad();
 			const isCurrent = () => this.options.isCurrentLoad(epoch)
 				&& snapshotRead.isCurrent()
@@ -216,7 +217,10 @@ export class TranscriptSnapshotLoader {
 			try {
 				let demand: TranscriptAnchorSnapshotResult | TranscriptPageDemandResult;
 				if (this.host.combinedMode) {
+					const knownHeads = [{ transcriptViewId: this.host.transcriptViewId, lastOrdinal: this.host.lastOrdinal }];
+					if (cachedCursorAtStart) knownHeads.push(cachedCursorAtStart);
 					demand = await loadTranscriptAnchorSnapshot({
+						knownHeads,
 						request: {
 							chatId,
 							direction: 'backward',

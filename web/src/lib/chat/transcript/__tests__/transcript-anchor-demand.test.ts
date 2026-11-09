@@ -136,10 +136,10 @@ describe('anchor first-install demand', () => {
 		const loadPage = vi.fn(async () => {
 			throw new ApiError(409, 'Synthetic rollback', 'TRANSCRIPT_CURSOR_AHEAD');
 		});
-		expect(await loadTranscriptAnchorChunk(request, () => false, loadPage)).toEqual({
+		expect(await loadTranscriptAnchorChunk(request, () => false, { loadPage })).toEqual({
 			kind: 'invalidated',
 		});
-		expect(await loadTranscriptAnchorChunk(request, () => true, loadPage)).toMatchObject({
+		expect(await loadTranscriptAnchorChunk(request, () => true, { loadPage })).toMatchObject({
 			kind: 'cursor-ahead',
 		});
 	});

@@ -102,7 +102,6 @@ const installHistory = (entries: TranscriptMessage[], maxRows = 200, head?: numb
 function testViewport() {
 	return {
 		isReady: vi.fn(() => true),
-		hasCollapsedToolGroups: () => false,
 		isAtEnd: vi.fn(() => true),
 		ownsScrollPosition: () => false,
 		viewportPosition: () => ({
@@ -140,8 +139,8 @@ function scrolling(transcript: ActiveTranscriptState, scrollContainer: HTMLDivEl
 	return { controller, viewport };
 }
 
-function panelFixture() {
-	const cache = new ChatTranscriptCache({ limit: 100 });
+function panelFixture(maxEntries?: number) {
+	const cache = new ChatTranscriptCache({ limit: 100, maxEntries });
 	const overlays = new ConversationTranscriptOverlayStore();
 	const lifecycle = new ConversationLifecycleState();
 	lifecycle.setCurrentChatId(chatId);
@@ -830,6 +829,67 @@ describe('combined transcript intervals', () => {
 		expect(transcript.pageStates.earlier).toEqual({ status: 'idle', error: null });
 	});
 
+	it.each(['apply', 'invalidated'] as const)('keeps raw page errors behind an %s application gate', async decision => {
+		const { transcript, cache } = fixture(false);
+		transcript.replaceGeneration(chatId, viewId, [assistant(100)], {
+			lastOrdinal: 100, pageOldestOrdinal: 100, nextBeforeOrdinal: 100, hasMore: true,
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.mocked(getChatMessages).mockRejectedValueOnce(new Error('Synthetic raw failure'));
+		const gate = Promise.withResolvers<'apply' | 'invalidated'>();
+		const applicationGate = vi.fn(() => gate.promise);
+		const load = transcript.loadEarlierPage(chatId, { applicationGate });
+		try {
+			await vi.waitFor(() => expect(applicationGate).toHaveBeenCalledOnce());
+			expect(transcript.pageStates.earlier.status).toBe('loading');
+			gate.resolve(decision);
+			expect(await load).toBe('failed');
+			expect(transcript.pageStates.earlier.status).toBe(decision === 'apply' ? 'error' : 'idle');
+		} finally {
+			gate.resolve(decision);
+			await load;
+			cache.flush();
+		}
+	});
+
+	it('waits for layout and restores pinning when a raw navigator joins an earlier load', async () => {
+		const { transcript, cache } = fixture(false);
+		transcript.replaceGeneration(chatId, viewId, [assistant(100)], {
+			lastOrdinal: 100, pageOldestOrdinal: 100, nextBeforeOrdinal: 100, hasMore: true,
+		});
+		const response = Promise.withResolvers<CompleteChatHistoryResponse>();
+		vi.mocked(getChatMessages).mockImplementationOnce(() => response.promise);
+		const { controller, viewport } = scrolling(transcript);
+		const layout = Promise.withResolvers<'settled'>();
+		viewport.waitForLayout.mockReturnValue(layout.promise);
+		const load = transcript.loadEarlierPage(chatId);
+		let finished = false;
+		const navigation = controller.loadEarlierPageForNavigator(chatId).then(result => {
+			finished = true;
+			return result;
+		});
+		response.resolve({
+			chatId, transcriptViewId: viewId, historyState: { kind: 'complete' },
+			messages: Array.from({ length: 50 }, (_, index) => assistant(index + 50)),
+			lastOrdinal: 100, pageOldestOrdinal: 50, pageNewestOrdinal: 99,
+			nextBeforeOrdinal: 50, hasMore: true, limit: 50, resendCandidates: [],
+		});
+		try {
+			await load;
+			await vi.waitFor(() => expect(viewport.waitForLayout).toHaveBeenCalledOnce());
+			expect(finished).toBe(false);
+			layout.resolve('settled');
+			expect(await navigation).toBe('loaded');
+			expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+			expect(controller.isPinnedToBottom).toBe(true);
+		} finally {
+			layout.resolve('settled');
+			await navigation;
+			controller.destroy();
+			cache.flush();
+		}
+	});
+
 	it('seeds two mounted panels from a raw pre-panel fallback and independently fills their real edges', async () => {
 		const { registry, cache, mount } = panelFixture();
 		const entries = [
@@ -1344,6 +1404,165 @@ describe('combined transcript intervals', () => {
 		expect(transcript.lastOrdinal).toBe(80);
 		expect(transcript.entries.at(-1)?.ordinal).toBe(80);
 		expect(cache.readAppliedCursor(chatId)?.lastOrdinal).toBe(80);
+	});
+
+	it.each(['snapshot', 'cached snapshot', 'earlier', 'later', 'initial', 'latest'] as const)(
+		'recovers a successful lower-head %s response before retaining lost rows', async operation => {
+			const { transcript, cache } = fixture();
+			const original = Array.from({ length: 100 }, (_, index) => assistant(index + 1));
+			const retained = original.slice(0, 80);
+			const detached = operation === 'later' || operation === 'latest' || operation === 'cached snapshot';
+			const hasEarlier = operation === 'earlier' || operation === 'initial';
+			const resident = detached ? retained : original.slice(hasEarlier ? 30 : 0);
+			transcript.replaceGeneration(chatId, viewId, resident, {
+				lastOrdinal: operation === 'cached snapshot' ? 80 : 100,
+				pageNewestOrdinal: detached ? 80 : 100,
+				pageOldestOrdinal: resident[0]!.ordinal,
+				nextBeforeOrdinal: hasEarlier ? 31 : null,
+				hasMore: hasEarlier,
+			});
+			cache.replace(chatId, viewId, original, 100, null);
+			installHistory(retained);
+			const recovery = vi.spyOn(transcript, 'recoverTranscriptCursorAhead');
+			switch (operation) {
+				case 'snapshot':
+				case 'cached snapshot':
+					await transcript.loadMessages(chatId);
+					break;
+				case 'earlier':
+					await transcript.loadEarlierPage(chatId);
+					break;
+				case 'later':
+					await transcript.loadLaterPage(chatId);
+					break;
+				default:
+					await transcript.navigateToWindow(chatId, operation);
+			}
+			expect(getCombinedChatMessages).toHaveBeenCalled();
+			expect(recovery).toHaveBeenCalledExactlyOnceWith(chatId, viewId);
+			expect(transcript.entries).toEqual(retained);
+			expect(transcript.lastOrdinal).toBe(80);
+			expect(transcript.loadedThroughOrdinal).toBe(80);
+			expect(transcript.hasLaterMessages).toBe(false);
+			expect(cache.readAppliedCursor(chatId)?.lastOrdinal).toBe(80);
+			cache.flush();
+		},
+	);
+
+	it.each(['snapshot', 'earlier', 'later', 'initial', 'latest'] as const)(
+		'keeps live appends newer than an in-flight %s response without rollback recovery', async operation => {
+			const { transcript, cache } = fixture();
+			const original = Array.from({ length: 100 }, (_, index) => assistant(index + 1));
+			const detached = operation === 'later' || operation === 'latest';
+			const resident = detached ? original.slice(0, 80) : original.slice(30);
+			transcript.replaceGeneration(chatId, viewId, resident, {
+				lastOrdinal: 100,
+				pageNewestOrdinal: detached ? 80 : 100,
+				pageOldestOrdinal: resident[0]!.ordinal,
+				nextBeforeOrdinal: detached ? null : 31,
+				hasMore: !detached,
+			});
+			cache.replace(chatId, viewId, original, 100, null);
+			const read = installHistory(original);
+			const response = Promise.withResolvers<TranscriptAnchorPage>();
+			vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
+			const recovery = vi.spyOn(transcript, 'recoverTranscriptCursorAhead');
+			let load: Promise<unknown>;
+			switch (operation) {
+				case 'snapshot': load = transcript.loadMessages(chatId); break;
+				case 'earlier': load = transcript.loadEarlierPage(chatId); break;
+				case 'later': load = transcript.loadLaterPage(chatId); break;
+				default: load = transcript.navigateToWindow(chatId, operation);
+			}
+			const page = read(vi.mocked(getCombinedChatMessages).mock.calls[0]![0]);
+			transcript.applyMessages(chatId, viewId, [assistant(101)], 101, 101);
+			response.resolve(page);
+			await load;
+			expect(recovery).not.toHaveBeenCalled();
+			expect(transcript.lastOrdinal).toBe(101);
+			expect(cache.readAppliedCursor(chatId)?.lastOrdinal).toBe(101);
+			if (operation !== 'later') expect(transcript.entries.at(-1)?.ordinal).toBe(101);
+			cache.flush();
+		},
+	);
+
+	it('replaces same-view lost tails in every mounted panel and the shared cache', async () => {
+		const { cache, registry, mount } = panelFixture();
+		const original = Array.from({ length: 100 }, (_, index) => assistant(index + 1));
+		const retained = original.slice(0, 80);
+		installHistory(original);
+		mount('left', 'right');
+		try {
+			await registry.loadChatSnapshot(chatId);
+			const left = registry.panel('chat-view:window-left')!.transcript;
+			const right = registry.panel('chat-view:window-right')!.transcript;
+			expect(left.lastOrdinal).toBe(100);
+			expect(right.lastOrdinal).toBe(100);
+			installHistory(retained);
+			await left.loadMessages(chatId);
+			for (const transcript of [left, right]) {
+				expect(transcript.entries).toEqual(retained);
+				expect(transcript.lastOrdinal).toBe(80);
+				expect(transcript.loadedThroughOrdinal).toBe(80);
+				expect(transcript.hasLaterMessages).toBe(false);
+			}
+			expect(cache.get(chatId)?.messages).toEqual(retained);
+			expect(cache.readAppliedCursor(chatId)?.lastOrdinal).toBe(80);
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(3);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
+	it.each([
+		{ persisted: false, sameView: false },
+		{ persisted: true, sameView: false },
+		{ persisted: false, sameView: true },
+		{ persisted: true, sameView: true },
+	])('preserves a distinct peer after eviction (persisted $persisted, same-view retry $sameView)', async ({ persisted, sameView }) => {
+		const { cache, registry, mount } = panelFixture(1);
+		installHistory(Array.from({ length: 101 }, (_, index) => assistant(index + 1)));
+		mount('left', 'matching', 'right');
+		try {
+			await registry.loadChatSnapshot(chatId);
+			if (persisted) cache.flush();
+			const left = registry.panel('chat-view:window-left')!.transcript;
+			const matching = registry.panel('chat-view:window-matching')!.transcript;
+			const right = registry.panel('chat-view:window-right')!.transcript;
+			const response = Promise.withResolvers<TranscriptAnchorPage>();
+			vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
+			const load = left.loadEarlierPage(chatId);
+			const newerView = 'synthetic-newer-view';
+			right.replaceGeneration(chatId, newerView, [assistant(1)], {
+				lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+			});
+			const newerEntries = right.entries;
+			const clearPeer = vi.spyOn(right, 'clearMessages');
+			cache.replace('synthetic-other-chat', 'synthetic-other-view', [assistant(1)], 1, null);
+			expect(cache.get(chatId)).toBeNull();
+			const recoveredView = sameView ? viewId : newerView;
+			const recovered = Array.from({ length: sameView ? 80 : 1 }, (_, index) => assistant(index + 1));
+			let recoveryReads = 0;
+			vi.mocked(getCombinedChatMessages).mockImplementation(async request => {
+				if (++recoveryReads > 2) throw new Error('Repeated synthetic recovery');
+				return history(recovered, 200, recovered.length, recoveredView)(request);
+			});
+			response.reject(new ApiError(409, 'Synthetic stale view', 'STALE_TRANSCRIPT_VIEW'));
+			expect(await load).toBe('invalidated');
+			expect(clearPeer).not.toHaveBeenCalled();
+			expect(right.entries).toBe(newerEntries);
+			expect(left.transcriptViewId).toBe(recoveredView);
+			expect(left.entries).toEqual(recovered);
+			expect(left.lastOrdinal).toBe(recovered.length);
+			expect(left.hasLaterMessages).toBe(false);
+			expect(matching.entries).toEqual(recovered);
+			expect(matching.lastOrdinal).toBe(recovered.length);
+			expect(recoveryReads).toBe(1);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
 	});
 
 	it('prevents reverse-order peer snapshots from regressing the shared receipt cache', async () => {

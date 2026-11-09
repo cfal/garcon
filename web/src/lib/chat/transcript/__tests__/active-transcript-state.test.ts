@@ -545,42 +545,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(total);
 	});
 
-	it('loads a larger logical page when viewport filling requests one', async () => {
-		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
-			lastOrdinal: 300,
-			pageOldestOrdinal: 251,
-			pageNewestOrdinal: 300,
-			nextBeforeOrdinal: 251,
-			hasMore: true,
-		});
-		vi.mocked(getChatMessages).mockImplementationOnce(async (request) => ({
-			chatId: 'chat-1',
-			limit: request.limit ?? 50,
-			...page({
-				messages: assistantEntries(51, 250),
-				lastOrdinal: 300,
-				pageOldestOrdinal: 51,
-				pageNewestOrdinal: 250,
-				nextBeforeOrdinal: 51,
-				hasMore: true,
-			}),
-		}));
-
-		await expect(
-			chat.loadEarlierPage('chat-1', { visibleLimit: 200 }),
-		).resolves.toBe('loaded');
-
-		expect(getChatMessages).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			limit: 200,
-			beforeOrdinal: 251,
-			transcriptViewId: 'generation-1',
-		});
-		expect(chat.entries).toHaveLength(250);
-		expect(chat.entries[0]?.ordinal).toBe(51);
-	});
-
 	it('stages a fetched earlier page until its application gate opens', async () => {
 		const chat = new ActiveTranscriptState();
 		const current = assistantEntries(51, 100);

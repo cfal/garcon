@@ -125,7 +125,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		for (const panel of this.panelsForChat(chatId)) {
 			if (panel.transcript.transcriptViewId !== viewId) continue;
-			if (panel.transcript.installCachedSnapshot(chatId) !== 'applied') {
+			panel.transcript.clearMessages();
+			if (!this.options.cache.get(chatId) || panel.transcript.installCachedSnapshot(chatId) !== 'applied') {
 				await panel.transcript.loadMessages(chatId);
 			}
 		}
@@ -567,6 +568,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	resetForViewReplacement(chatId: string, previousViewId: string): boolean {
 		const current = this.options.cache.readAppliedCursor(chatId)?.transcriptViewId;
 		if (current && current !== previousViewId) return false;
+		if (!current && this.panelsForChat(chatId).some(panel =>
+			panel.transcript.transcriptViewId !== ''
+			&& panel.transcript.transcriptViewId !== previousViewId)) return false;
 		const replay = this.#reconnectReplays.get(chatId);
 		if (replay) this.abortReconnectReplay(replay.token, chatId);
 		this.handleViewReplacement(chatId);

@@ -76,7 +76,6 @@ function fixture() {
 	const panel = registry.panel('chat-view:window-one')!;
 	const viewport = {
 		isReady: () => true,
-		hasCollapsedToolGroups: () => false,
 		isAtEnd: () => false,
 		ownsScrollPosition: () => false,
 		viewportPosition: () => ({

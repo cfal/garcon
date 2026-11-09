@@ -435,10 +435,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		return !this.#destroyed && this.options.visible && this.#virt.viewportPosition !== null;
 	}
 
-	hasCollapsedToolGroups(): boolean {
-		return this.#configuredModel.collapsedGroupByMemberRowId.size > 0;
-	}
-
 	isAtEnd(threshold = CHAT_GEOMETRY_END_THRESHOLD_PX): boolean {
 		const viewport = this.options.viewport;
 		return Boolean(
