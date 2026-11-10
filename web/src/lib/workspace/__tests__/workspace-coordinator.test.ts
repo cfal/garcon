@@ -13,6 +13,7 @@ import { WorkspaceCoordinator, type WorkspaceCoordinatorDeps } from '../workspac
 import { WorkspaceSplitBlockedError } from '../workspace-split-blocked-error';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import {
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	fileSurfaceId,
 	portableSingletonDescriptor,
@@ -3228,10 +3229,10 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
-		for (let index = 4; index < 8; index++) {
+		for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
 			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
 		}
-		expect(windowCountOf(layout.snapshot)).toBe(8);
+		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		await expect(coordinator.openSingletonInNewWindow('commit')).rejects.toBeInstanceOf(
 			WorkspaceSplitBlockedError,
@@ -3245,10 +3246,10 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
-		for (let index = 4; index < 8; index++) {
+		for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
 			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
 		}
-		expect(windowCountOf(layout.snapshot)).toBe(8);
+		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		await expect(
 			coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right'),
@@ -3391,12 +3392,15 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
+		for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
+			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
+		}
 		const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
-		expect(windowCountOf(layout.snapshot)).toBe(4);
+		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		await coordinator.moveTabToNewWindow('singleton:files', 'window-main', 'left');
 
-		expect(windowCountOf(layout.snapshot)).toBe(4);
+		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(
 			sourceWindowId,
 		);

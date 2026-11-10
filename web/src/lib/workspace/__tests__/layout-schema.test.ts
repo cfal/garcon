@@ -47,7 +47,13 @@ function skewedTree(depth: number): PersistedWorkspaceLayoutNode {
 
 function fullTreeWithNodes(nodeCount: number): PersistedWorkspaceLayoutNode {
 	const leafCount = (nodeCount + 1) / 2;
-	let level = Array.from({ length: leafCount }, (_, index) => persistedWindow(index + 1));
+	return balancedTree(Array.from({ length: leafCount }, (_, index) => persistedWindow(index + 1)));
+}
+
+function balancedTree(
+	windows: readonly PersistedWorkspaceLayoutNode[],
+): PersistedWorkspaceLayoutNode {
+	let level = [...windows];
 	let partitionIndex = 0;
 	while (level.length > 1) {
 		const next: PersistedWorkspaceLayoutNode[] = [];
@@ -73,6 +79,41 @@ function fullTreeWithNodes(nodeCount: number): PersistedWorkspaceLayoutNode {
 }
 
 describe('workspace layout V2 schema', () => {
+	it.each([12, 16, WORKSPACE_WINDOW_RESOURCE_CEILING])(
+		'round-trips %d runtime-created windows in a maximally skewed tree',
+		(count) => {
+			expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBeLessThanOrEqual(
+				WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
+			);
+			expect(2 * WORKSPACE_WINDOW_RESOURCE_CEILING - 1).toBeLessThanOrEqual(
+				WORKSPACE_LAYOUT_MAX_PARSE_NODES,
+			);
+			let snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+				{ type: 'close-window', windowId: 'window-files' },
+				{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-1' },
+			]);
+			for (let index = 2; index <= count; index++) {
+				snapshot = reduceWorkspaceLayout(snapshot, [
+					{
+						type: 'open-chat-in-new-window',
+						chatId: `chat-${index}`,
+						targetWindowId: CANONICAL_WINDOW_ID,
+						edge: 'right',
+						newWindowId: `window-${index}`,
+						partitionId: `partition-${index}`,
+					},
+				]);
+			}
+			const persisted = serializeWorkspaceLayout(snapshot);
+			const restored = parsePersistedWorkspaceLayout(JSON.stringify(persisted));
+
+			expect(restored.source).toBe('valid');
+			expect(collectWindowNodes(restored.snapshot.desktopRoot)).toHaveLength(count);
+			expect(serializeWorkspaceLayout(restored.snapshot)).toEqual(persisted);
+			expect(restored.snapshot.surfaces).toEqual(snapshot.surfaces);
+		},
+	);
+
 	it('round-trips mixed window topology, local tab MRU, ratios, terminals, and Chat IDs', () => {
 		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-a' },
@@ -490,16 +531,7 @@ describe('workspace layout V2 schema', () => {
 				mru: [{ type: 'terminal', terminalId: 'terminal-overflow' }],
 			},
 		];
-		const root = windows.slice(1).reduce<PersistedWorkspaceLayoutNode>(
-			(first, second, index) => ({
-				type: 'partition',
-				id: `partition-${index + 1}`,
-				direction: 'horizontal',
-				ratio: 0.5,
-				children: [first, second],
-			}),
-			windows[0]!,
-		);
+		const root = balancedTree(windows);
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({ version: 2, root, unplacedTerminalIds: [] }),
 		);

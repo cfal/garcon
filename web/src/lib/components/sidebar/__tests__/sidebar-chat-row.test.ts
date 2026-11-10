@@ -6,6 +6,7 @@ import SidebarChatItemHost from './SidebarChatItemHost.svelte';
 import SidebarSearchDialogHost from '../search/__tests__/SidebarSearchDialogHost.svelte';
 
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '$lib/workspace/surface-types';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import {
 	deniedWorkspaceSplits,
@@ -630,7 +631,9 @@ describe('shared sidebar chat row', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 		const openItem = screen.getByRole('menuitem', { name: 'Open in new window' });
 		expect(openItem.getAttribute('aria-disabled')).toBe('true');
-		expect(openItem.getAttribute('title')).toBe('Window limit reached (maximum 8)');
+		expect(openItem.getAttribute('title')).toBe(
+			`Window limit reached (maximum ${WORKSPACE_WINDOW_RESOURCE_CEILING})`,
+		);
 		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
 	});
 

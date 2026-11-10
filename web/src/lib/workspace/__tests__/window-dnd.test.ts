@@ -5,6 +5,7 @@ import {
 	WorkspaceWindowDndController,
 } from '../window-dnd.svelte.js';
 import {
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	portableSingletonDescriptor,
 	type WorkspacePartitionId,
 	type WorkspaceWindowId,
@@ -250,11 +251,9 @@ describe('WorkspaceWindowDndController', () => {
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
-				...(
-					['git', 'commit', 'git-history', 'git-compare', 'chat-map', 'pull-requests'] as const
-				).map((kind, index) => ({
-					type: 'register-surface-in-new-window' as const,
-					surface: portableSingletonDescriptor(kind),
+				...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 2 }, (_, index) => ({
+					type: 'open-chat-in-new-window' as const,
+					chatId: `capacity-chat-${index}`,
 					targetWindowId: 'window-main' as const,
 					edge: 'right' as const,
 					newWindowId: `window-${index + 2}` as WorkspaceWindowId,
