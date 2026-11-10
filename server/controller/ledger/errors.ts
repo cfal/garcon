@@ -90,8 +90,7 @@ export class LedgerSchemaError extends LedgerError {
   override readonly name = 'LedgerSchemaError';
 }
 
-// A bulk write spans several transactions; closing or deleting the chat between them
-// abandons the write rather than reopening the ledger it was removed from.
+// Closing or deleting a chat abandons cross-turn work instead of reopening its ledger.
 export class LedgerBulkOperationAbandonedError extends LedgerError {
   override readonly name = 'LedgerBulkOperationAbandonedError';
 

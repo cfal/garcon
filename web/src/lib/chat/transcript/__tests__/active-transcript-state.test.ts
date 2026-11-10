@@ -16,12 +16,24 @@ import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 import type { OptimisticUserInput } from '../optimistic-user-input.js';
+import { mergeRowsWithOptimisticInputs } from '../transcript-row-projection.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
 }));
 
 const TS = '2026-06-01T00:00:00.000Z';
+
+it('merges optimistic input ahead of a durable tail larger than the engine argument limit', () => {
+	const rows = Array.from({ length: 150_000 }, (_, i) => ({
+		kind: 'message' as const, id: `view:${i + 1}`, ordinal: i + 1, message: assistant('synthetic'),
+	}));
+	const optimistic = optimisticInput();
+	const merged = mergeRowsWithOptimisticInputs(rows, [optimistic], new Map());
+	expect(merged).toHaveLength(rows.length + 1);
+	expect(merged[0].id).toBe(`optimistic:${optimistic.clientMessageId}`);
+	expect(merged.slice(1)).toEqual(rows);
+});
 
 function entry(ordinal: number, message: ChatMessage): TranscriptMessage {
 	return { ordinal, message };

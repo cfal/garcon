@@ -110,6 +110,23 @@ describe('combined history response', () => {
     expect(parseTranscriptAnchorResponse(request, user)).toEqual(user);
   });
 
+  it.each(['backward', 'forward'])('accepts wide public and hidden intervals (%s)', direction => {
+    const messages = Array.from({ length: 5000 }, (_, index) => ({
+      ordinal: index + 1, message: new BashToolUseMessage(TS, `tool-${index}`, 'true'),
+    }));
+    const wide = { ...page, direction, startOrdinal: 1, endOrdinal: 5001,
+      watermarkOrdinal: 5000, lastOrdinal: 5000, anchorsRemaining: 1, pageStatus: 'exhausted', messages };
+    expect(parseTranscriptAnchorResponse({ ...request, direction }, wide)).toEqual(wide);
+    expect(parseTranscriptAnchorResponse({ ...request, direction }, { ...wide, messages: [] }).messages).toEqual([]);
+    expect(() => parseTranscriptAnchorResponse({ ...request, direction }, { ...wide, anchorsRemaining: 0 })).toThrow();
+    expect(() => parseTranscriptAnchorResponse({ ...request, direction }, { ...wide, messages: messages.toReversed() })).toThrow();
+  });
+
+  it('accepts the formerly width-rejected sparse boundary interval', () => {
+    const wide = { ...page, startOrdinal: 2, endOrdinal: 203, watermarkOrdinal: 202, lastOrdinal: 202 };
+    expect(parseTranscriptAnchorResponse(request, wide)).toEqual(wide);
+  });
+
   it.each([
     { chatId: 'other' }, { direction: 'forward' }, { transcriptViewId: '' },
     { watermarkOrdinal: 3 }, { lastOrdinal: 3 }, { startOrdinal: 0 },
@@ -119,7 +136,6 @@ describe('combined history response', () => {
     { messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'Outside span') }] },
     { messages: [{ ordinal: 5, message: new AssistantMessage(TS, 'Outside span') }] },
     { messages: [...page.messages].reverse() },
-    { startOrdinal: 2, endOrdinal: 203, watermarkOrdinal: 202, lastOrdinal: 202 },
   ])('rejects invalid response relation %#', change => {
     expect(() => parseTranscriptAnchorResponse(request, { ...page, ...change })).toThrow();
   });

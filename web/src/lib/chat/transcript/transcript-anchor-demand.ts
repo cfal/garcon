@@ -9,7 +9,6 @@ import {
 	isTranscriptAnchor,
 	transcriptAnchorContinuation,
 	transcriptAnchorWindow,
-	TRANSCRIPT_ANCHOR_RAW_LIMIT,
 	type TranscriptAnchorPage,
 	type TranscriptAnchorRequest,
 	type TranscriptAnchorResponse,
@@ -17,6 +16,8 @@ import {
 import { getCombinedChatMessages } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import type { ChatCursor } from './active-transcript-port.js';
+
+const DISJOINT_SNAPSHOT_RAW_SPAN_TARGET = 200;
 
 interface TranscriptAnchorReadOptions {
 	loadPage?: typeof getCombinedChatMessages;
@@ -100,7 +101,7 @@ export async function loadTranscriptAnchorSnapshot(options: TranscriptAnchorRead
 		const continuation = transcriptAnchorContinuation(chunk);
 		const shouldAccumulate = continuation && (
 			accumulated.messages.length === 0 ||
-			(rawCount < TRANSCRIPT_ANCHOR_RAW_LIMIT && options.isDisjoint?.(accumulated))
+			(rawCount < DISJOINT_SNAPSHOT_RAW_SPAN_TARGET && options.isDisjoint?.(accumulated))
 		);
 		if (!shouldAccumulate) return { kind: 'complete', page: accumulated, finalChunk: chunk };
 		request = continuation;

@@ -20,6 +20,7 @@ import {
   InvalidTranscriptReplayRequestError,
   LedgerFencedError,
   StaleTranscriptViewError,
+  TranscriptViewNotInitializedError,
 } from './errors.js';
 import { ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
@@ -73,8 +74,18 @@ export class TranscriptViewReader {
       throw error;
     }
     return readWithFenceTranslation(async () => {
-      const view = await this.#adoption.ensure(request.chatId, signal);
-      signal.throwIfAborted();
+      const readSignal = AbortSignal.any([signal, this.#snapshotShutdown.signal]);
+      readSignal.throwIfAborted();
+      const view = await this.#adoption.ensure(request.chatId, readSignal);
+      const assertCurrent = () => {
+        readSignal.throwIfAborted();
+        const current = this.#ledger.existingCurrentView(request.chatId);
+        if (!current) throw new TranscriptViewNotInitializedError(request.chatId);
+        if (current.viewId !== view.viewId) {
+          throw new StaleTranscriptViewError(request.chatId, view.viewId, current.viewId);
+        }
+      };
+      assertCurrent();
       if (request.transcriptViewId !== undefined && view.viewId !== request.transcriptViewId) {
         throw new StaleTranscriptViewError(request.chatId, request.transcriptViewId, view.viewId);
       }
@@ -87,12 +98,13 @@ export class TranscriptViewReader {
       if (watermarkOrdinal > head.ordinal || cursorOrdinal > head.ordinal + (request.direction === 'backward' ? 1 : 0)) {
         throw new DomainError('TRANSCRIPT_CURSOR_AHEAD', 'Transcript cursor is ahead of the current view', 409);
       }
-      const { rows, ...coverage } = this.#ledger.anchorPage(request.chatId, view.viewId, {
+      const { rows, ...coverage } = await this.#ledger.anchorPage(request.chatId, view.viewId, {
         direction: request.direction,
         cursorOrdinal,
         watermarkOrdinal,
         anchorsRemaining: request.anchorsRemaining,
-      });
+      }, readSignal);
+      assertCurrent();
       return {
         ...coverage,
         direction: request.direction,

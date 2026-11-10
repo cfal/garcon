@@ -250,18 +250,22 @@ export class ConversationFeedProjectionState {
 			if (!appended) return null;
 			model = appended;
 			if (mutationKinds.size === 0) mutationKinds.add('presentation-structure');
-			const keys = previous.geometry.keys.slice();
-			const estimates = previous.geometry.estimates.slice();
 			const insertIndex = previous.model.transcriptEndIndex;
-			if (insertIndex > previous.model.transcriptStartIndex) {
-				estimates[insertIndex - 1] = estimateConversationFeedItemSize(model.items[insertIndex - 1]);
-			}
 			const insertedItems = model.items.slice(
 				insertIndex,
 				insertIndex + visibleAppendedItems.length,
 			);
-			keys.splice(insertIndex, 0, ...insertedItems.map((item) => item.key));
-			estimates.splice(insertIndex, 0, ...insertedItems.map(estimateConversationFeedItemSize));
+			const keys = previous.geometry.keys.slice(0, insertIndex).concat(
+				insertedItems.map((item) => item.key),
+				previous.geometry.keys.slice(insertIndex),
+			);
+			const estimates = previous.geometry.estimates.slice(0, insertIndex).concat(
+				insertedItems.map(estimateConversationFeedItemSize),
+				previous.geometry.estimates.slice(insertIndex),
+			);
+			if (insertIndex > previous.model.transcriptStartIndex) {
+				estimates[insertIndex - 1] = estimateConversationFeedItemSize(model.items[insertIndex - 1]);
+			}
 			geometry = {
 				surfaceIdentity: input.surfaceIdentity,
 				geometryRevision: ++this.#geometryRevision,

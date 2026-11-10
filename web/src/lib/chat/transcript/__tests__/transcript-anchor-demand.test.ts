@@ -46,6 +46,26 @@ function pages(...responses: TranscriptAnchorPage[]) {
 }
 
 describe('anchor first-install demand', () => {
+	it('installs a wide terminal response whole without coalescing another request', async () => {
+		const page = chunk({ startOrdinal: 1, pageStatus: 'exhausted', messages: [
+			...Array.from({ length: 999 }, (_, i) => ({ ordinal: i + 1, message: new BashToolUseMessage(time, `tool-${i}`, 'true') })),
+			{ ordinal: 1000, message: new AssistantMessage(time, 'answer') },
+		] });
+		const loadPage = vi.fn(async () => page);
+		const result = await loadTranscriptAnchorSnapshot({ request, isCurrent: () => true, loadPage, isDisjoint: () => true });
+		expect(result).toMatchObject({ kind: 'complete', page: { messages: page.messages }, finalChunk: { pageStatus: 'exhausted' } });
+		expect(loadPage).toHaveBeenCalledTimes(1);
+	});
+
+	it('counts the entire hidden prefix for disjoint coalescing without stopping hidden-only progress', async () => {
+		const loadPage = vi.fn()
+			.mockResolvedValueOnce(chunk({ startOrdinal: 400, messages: [], anchorsRemaining: 100 }))
+			.mockResolvedValueOnce(chunk({ startOrdinal: 399, endOrdinal: 400,
+				messages: [{ ordinal: 399, message: new AssistantMessage(time, 'answer') }] }));
+		const result = await loadTranscriptAnchorSnapshot({ request, isCurrent: () => true, loadPage, isDisjoint: () => true });
+		expect(result).toMatchObject({ kind: 'complete', page: { nextBeforeOrdinal: 399, lastOrdinal: 1000 } });
+		expect(loadPage).toHaveBeenCalledTimes(2);
+	});
 	it('resolves after first public chunk rather than accumulating the logical demand', async () => {
 		const loadPage = pages(chunk());
 		const result = await loadTranscriptAnchorSnapshot({ request, isCurrent: () => true, loadPage });
@@ -118,7 +138,7 @@ describe('anchor first-install demand', () => {
 		expect(loadPage).toHaveBeenCalledTimes(2);
 	});
 
-	it('stops disjoint accumulation after a full raw chunk and installs all-hidden terminal history', async () => {
+	it('stops disjoint coalescing at its local span target and installs all-hidden terminal history', async () => {
 		const loadPage = pages(chunk());
 		await loadTranscriptAnchorSnapshot({
 			request,
