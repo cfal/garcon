@@ -563,7 +563,7 @@ bounded inactive combined-tool windows, and cold bounded-cache restoration.
 | TLV5-PAGE.05   | Held old work cannot cross reload, chat switch, or navigation.                              | State unit, Chromium                   |
 | TLV5-PAGE.06   | Page errors require explicit retry and cannot tight-loop.                                   | State and controller unit              |
 | TLV5-PAGE.07   | Normal paging is automatic and exposes no ordinary boundary button.                         | Component, browser behavior            |
-| TLV5-PAGE.08   | One request performs one bounded raw query and returns the exact clamped interval ceiling and continuation. | Store static, server and web contract |
+| TLV5-PAGE.08   | One raw-history request performs one bounded raw query and returns the exact clamped interval ceiling and continuation. | Store static, server and web contract |
 | TLV5-PAGE.09   | Client-owned earlier, later, and newest visible demand advances across sparse raw budgets; newest active/background/split loads share the demand helper, and raw continuation survives cache switch and hydration. | Contract, server and web unit |
 | TLV5-PAGE.10   | Malformed or stalled raw continuation is rejected before mutation and cannot loop.          | Contract and web unit                  |
 | TLV5-REPLAY.01 | The first replay page captures a fixed high watermark.                                      | Contract, server black-box             |
@@ -573,6 +573,15 @@ bounded inactive combined-tool windows, and cold bounded-cache restoration.
 | TLV5-REPLAY.05 | Live rows beyond the watermark apply exactly once after fixed replay.                       | State unit, server black-box, Chromium |
 | TLV5-REPLAY.06 | Disconnect abandons partial replay and a later reconnect restarts safely.                   | State unit, Chromium                   |
 | TLV5-REPLAY.07 | View replacement during replay cannot cross views.                                          | Contract, server black-box, Chromium   |
+
+Combined history has separate regression coverage in `anchor-page.test.js`,
+`bulk-operations.test.js`, `view-reader.test.js`, `combined-transcript-state.test.ts`,
+and the server/Chromium `combined-anchor-paging.test.ts` suites. Its producer
+returns a full anchor interval without a raw-row or payload-byte cutoff, using
+cooperative synchronous batches within one HTTP response. Tests require wide
+responses, batch-invariant partitioning, fixed-watermark live appends, failure
+fencing and lifecycle interruption, plus whole browser installation and measured
+refill. The raw one-query obligation above does not constrain this producer.
 
 ### OpenCode V1 Context Exhaustion
 

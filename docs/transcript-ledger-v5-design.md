@@ -58,6 +58,15 @@ Status: revision 41 integrated design. Supersedes
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
+Revision 42 distinguishes raw history from combined anchor paging. Raw history
+keeps its one-query raw-row budget. Combined history completes one anchor demand
+in one HTTP response, including full public non-anchor payloads, with no raw-row
+or payload-byte response cutoff. Its SQLite scan uses bounded synchronous batches
+and named event-loop steps; fixed watermarks and ownership are revalidated across
+yields. The browser targets 100 anchors (API maximum 200) and measured coverage
+owns further demands. This removes avoidable round trips, not a demonstrated
+persistent-underfill defect. Anchor-only/lazy-payload responses remain deferred.
+
 Revision 41 lets remote producer bindings survive an executor disconnect
 and bounds whole-history work. The worker's process-level producer relay
 numbers each binding's events, retains them until the controller acknowledges
@@ -425,7 +434,7 @@ migration quarantine is known prior loss rather than an unknown read failure:
 adoption creates a usable view with an explicit durable warning, while the
 quarantined artifact remains available for support.
 
-HTTP history reads perform one bounded raw-row scan and return an ordinal
+Raw HTTP history reads perform one bounded raw-row scan and return an ordinal
 continuation even when that scan renders no messages; the client requests
 further ranges. This preserves the existing `(transcriptViewId, ordinal)`
 addressing and adds no opaque cursor. Expanded browser history is never
@@ -1160,7 +1169,7 @@ CREATE INDEX transcript_session_rows
   prefix it depends on does not. No other checkpoint is protocol; the
   passive checkpoint on connection close is housekeeping that keeps an
   idle chat's WAL from growing unbounded.
-- HTTP history paging performs exactly one bounded raw-row keyset query on
+- Raw HTTP history paging (`GET /api/v1/chats/messages`) performs exactly one bounded raw-row keyset query on
   the `(view_id, ordinal)` primary key per request; there is no offset,
   presentation-sized scan loop, or sidecar index. The request `limit` is a
   raw-row budget, not a promise to return that many rendered messages. The
@@ -1186,6 +1195,22 @@ CREATE INDEX transcript_session_rows
   keeps all addressing in the existing `(transcriptViewId, ordinal)` space and
   bounds server work independently of transcript length. The backward resend
   scan (7.2) walks the same key order.
+- Combined history (`POST /api/v1/chats/combined-messages`) counts individual
+  user/assistant anchors, with a normal browser target of 100 and maximum request
+  budget of 200. A response includes all public rows through the next excluded
+  anchor or the captured history edge, not server-created groups. Neither raw
+  rows nor payload bytes impose a response cutoff. Synchronous primary-key
+  batches admit at most 200 raw rows, checking `EventLoopSteps.due` after each
+  row; `next()` runs outside the read fence. Internal boundaries never produce
+  HTTP `partial`. The producer returns `complete` at an excluded anchor or
+  `exhausted` at the fixed edge. Generic partial-contract support is retained.
+  Queries keep the original watermark; returned `lastOrdinal` keeps the
+  pre-scan head. Each batch reacquires and checks the current view without
+  recreating deleted storage. Chat/store close, shutdown and abort abandon the
+  read outside the corruption fence. Decode, adjacency and query failures fence
+  only that chat and never return a collected prefix. Projection and JSON
+  serialization remain synchronous; response memory and latency are accepted
+  interval-sized costs. Anchor-only/lazy payloads require workload evidence.
 - Submission idempotency is the `transcript_submission` partial unique
   index plus canonical payload comparison on conflict: an insert that
   conflicts re-reads the existing row; an identical user submission returns
@@ -1238,14 +1263,13 @@ CREATE INDEX transcript_session_rows
   oldest visible ordinal, so an all-hidden page remains resumable. Evicting
   memory never truncates the ledger: older rows remain pageable.
 - An initially underfilled feed with collapsed tool groups starts measured
-  refill after its activation snapshot settles. Each compressed logical page
-  demands at most 200 presented messages, with at most ten automatic demands
-  per panel controller and chat/view; a logical demand may require multiple
-  bounded raw HTTP reads.
-  Cached-row reveals do not consume that allowance. The loop stops when
-  measured content fills the viewport, history ends, ownership changes, or the
-  allowance is exhausted. Manual paging remains available. Non-combined
-  initial restoration and its page size are unchanged.
+  refill after its activation snapshot settles. Each combined logical demand
+  normally requests 100 anchors and completes in one response. There is no
+  automatic-demand counter. Measured coverage, user intent, native scrolling,
+  visibility and operation ownership gate further demands and publication.
+  Recent raw-cache restoration may seed an anchor top-up; that is separate from
+  an HTTP continuation. Non-combined visible demand and raw page sizes are
+  unchanged.
 
 ## 5. Producer Boundary
 
@@ -3151,7 +3175,7 @@ The catalog cites this revision, but its inventory is not repeated here.
   failure remains fatal to a native-fidelity fork. A successfully opened,
   validly empty native session remains a valid zero-row import.
 - **HTTP paging and browser retention**: an expected view is rejected before
-  any high-watermark or page scan; each HTTP request reads at most its raw-row
+  any high-watermark or page scan; each raw HTTP request reads at most its raw-row
   budget and returns the specified raw ceiling and `nextBeforeOrdinal`,
   including a lifecycle-only page with no rendered messages. One case places a
   visible row behind a hidden run substantially longer than the raw budget and
@@ -3170,6 +3194,11 @@ The catalog cites this revision, but its inventory is not repeated here.
   180-second interval, and a static assertion proves the timer,
   `history-pruned`, and immediate-compaction machinery are absent. Compact and
   wide Chromium coverage locks final-row visibility and position.
+  Combined coverage separately requires responses wider than 200 rows and
+  larger than 1 MiB, results independent of internal batching, fixed-watermark
+  appends, and deterministic abort/replacement/eviction/deletion/close races.
+  Tall CSS viewport coverage verifies first-response useful context and real
+  later anchor demands; no test fabricates a raw or byte producer cutoff.
 - **OpenCode V1 compaction**: the owned process does not force autocompaction
   off and preserves operator overrides; the session-latest continuation map
   and plugin remain absent. Scripted fixtures prove threshold and first-turn
@@ -3520,7 +3549,7 @@ Direct plan without requiring another implementation or migration.
     target-chat creation builds the ledger fully and registers
     last, with unregistered-directory startup cleanup and fork-orphan
     provider artifacts as a named accepted loss.
-22. HTTP history paging validates an expected view before reading, performs one
+22. Raw HTTP history paging validates an expected view before reading, performs one
     bounded raw-row keyset query, reports `pageNewestOrdinal` as the clamped raw
     interval ceiling, and returns the oldest raw ordinal as
     `nextBeforeOrdinal` when more dense rows precede it, even when no messages
