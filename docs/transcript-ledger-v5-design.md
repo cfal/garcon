@@ -52,7 +52,7 @@ the retained session row remains in the binding until replacement. Repeated Clea
 consolidates evidence once; native Reload reconstructs ordinary pairs and drops
 the retained field, preventing double-counting.
 
-Status: revision 41 integrated design. Supersedes
+Status: revision 42 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based

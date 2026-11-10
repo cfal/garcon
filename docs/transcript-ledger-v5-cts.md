@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 41 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 42 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -57,8 +57,8 @@ has been unchanged since PR #691.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 41, SHA-256
-  `4a9cd1beb0e3ed680b2ac0e2465279da4751f3c3413935fcbc8925f4d6d599a3`
+- `docs/transcript-ledger-v5-design.md`, revision 42, SHA-256
+  `cd4caef1775168274b8d0fbbbed775fa5490a5afeb78eddc4757b62c6f03b4bc`
 
 Current inventory: 419 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
