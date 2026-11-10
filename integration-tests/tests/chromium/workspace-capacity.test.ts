@@ -11,6 +11,10 @@ import {
   type WorkspaceWindowId,
 } from '../../../web/src/lib/workspace/surface-types.js';
 import { parseTerminalStreamServerMessage } from '../../../common/terminal.js';
+import type {
+  PersistedWorkspaceLayoutNode,
+  PersistedWorkspaceLayoutV2,
+} from '../../../common/workspace-layout.js';
 import { withTimeout } from '../../support/deferred.js';
 
 declare global {
@@ -162,7 +166,7 @@ function capacityLayout(count: number, chatIds: string[]) {
       ]);
     }
   }
-  // The final window is created through the UI, exercising real admission above four.
+  // The final window exercises real split admission rather than restored topology.
   snapshot = reduceWorkspaceLayout(snapshot, [
     { type: 'close-window', windowId: windows.at(-1)!.id },
   ]);
@@ -172,7 +176,7 @@ function capacityLayout(count: number, chatIds: string[]) {
   };
 }
 
-for (const count of [4, 6, 8]) {
+for (const count of [4, 6, 8, 12, 16]) {
   test(`retains and exercises ${count} populated workspace windows`, async () => {
     await withChromiumFixture(
       `workspace-capacity-${count}`,
@@ -210,7 +214,8 @@ for (const count of [4, 6, 8]) {
             if (output.includes('capacity-terminal-ready\r\n')) terminalReady();
           }),
         );
-        await page.setViewportSize({ width: 2560, height: 1440 });
+        const viewport = { width: count <= 12 ? 2560 : 3840, height: 1440 };
+        await page.setViewportSize(viewport);
         markPhase('populating independent conversations');
         const chatIds: string[] = [];
         for (let chatIndex = 0; chatIndex < count - 3; chatIndex++) {
@@ -251,6 +256,42 @@ for (const count of [4, 6, 8]) {
           waitUntil: 'domcontentloaded',
         });
         await page.locator('[data-chat-scroll-viewport]').first().waitFor();
+        await page.waitForFunction(
+          (expected) =>
+            document.querySelectorAll('[data-workspace-window-id]').length === expected,
+          count - 1,
+        );
+        markPhase('restoring the populated layout on the same host');
+        await page.waitForFunction((expected) => {
+          const raw = localStorage.getItem('workspace_layout_v2');
+          if (!raw) return false;
+          const layout: PersistedWorkspaceLayoutV2 = JSON.parse(raw);
+          const countWindows = (node: PersistedWorkspaceLayoutNode): number =>
+            node.type === 'window'
+              ? 1
+              : node.children.reduce((sum, child) => sum + countWindows(child), 0);
+          return countWindows(layout.root) === expected;
+        }, count - 1);
+        const placements = await page.locator('[data-workspace-window-id]').evaluateAll((windows) =>
+          windows.map((element) => ({
+            id: element.getAttribute('data-workspace-window-id'),
+            activeSurface: element.getAttribute('data-workspace-window-active-surface'),
+          })),
+        );
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForFunction((expected) => {
+          const restored = [...document.querySelectorAll('[data-workspace-window-id]')].map(
+            (element) => ({
+              id: element.getAttribute('data-workspace-window-id'),
+              activeSurface: element.getAttribute('data-workspace-window-active-surface'),
+            }),
+          );
+          return JSON.stringify(restored) === JSON.stringify(expected);
+        }, placements);
+        await page.waitForFunction(
+          (expected) => document.querySelectorAll('[data-chat-scroll-viewport]').length === expected,
+          chatIds.length,
+        );
         await page
           .locator(`[data-workspace-window-titlebar="${anchor}"]`)
           .click({ position: { x: 20, y: 3 } });
@@ -276,7 +317,7 @@ for (const count of [4, 6, 8]) {
             const { width, height } = element.getBoundingClientRect();
             return { width, height };
           });
-        expect(hostSize).toEqual({ width: 2240, height: 1440 });
+        expect(hostSize).toEqual({ width: viewport.width - 320, height: viewport.height });
         const dimensions = await page
           .locator('[data-workspace-window-id]')
           .evaluateAll((windows) =>
@@ -373,7 +414,7 @@ for (const count of [4, 6, 8]) {
         expect(await page.locator('textarea[placeholder="Reply..."]').inputValue()).toBe(
           'capacity draft retained',
         );
-        await page.setViewportSize({ width: 2560, height: 1440 });
+        await page.setViewportSize(viewport);
         await page.waitForFunction(() => {
           const raw = localStorage.getItem('workspace_layout_v2');
           return raw !== null && JSON.parse(raw).root.type === 'window';
