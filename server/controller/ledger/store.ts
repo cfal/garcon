@@ -59,6 +59,7 @@ import {
 } from './contracts.js';
 import {
   IncompleteLedgerCheckpointError,
+  LedgerBulkOperationAbandonedError,
   LedgerFencedError,
   LedgerSchemaError,
   StaleTranscriptViewError,
@@ -137,6 +138,7 @@ export class TranscriptLedgerStore {
   readonly #openFailures = new Map<string, Error>();
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
   readonly #staging: StagingViews;
+  #anchorReadEpoch = 0;
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
@@ -424,10 +426,21 @@ export class TranscriptLedgerStore {
     });
   }
 
-  anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput): AnchorScanResult {
-    return this.#read(chatId, (entry) => {
-      this.#assertCurrent(entry, viewId);
-      return readAnchorPage(entry.db, viewId, input);
+  async anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput, signal?: AbortSignal): Promise<AnchorScanResult> {
+    const readEpoch = this.#anchorReadEpoch;
+    const chatGeneration = this.#staging.generation(chatId);
+    return readAnchorPage(viewId, input, work => {
+      signal?.throwIfAborted();
+      if (this.#anchorReadEpoch !== readEpoch || this.#staging.generation(chatId) !== chatGeneration) {
+        throw new LedgerBulkOperationAbandonedError(chatId);
+      }
+      // A normal read can create storage, so deletion must be detected before reacquisition.
+      const current = this.existingCurrentView(chatId);
+      if (!current) throw new TranscriptViewNotInitializedError(chatId);
+      return this.#read(chatId, (entry) => {
+        this.#assertCurrent(entry, viewId);
+        return work(entry.db);
+      });
     });
   }
 
@@ -778,6 +791,7 @@ export class TranscriptLedgerStore {
   }
 
   close(): void {
+    this.#anchorReadEpoch++;
     this.#staging.abandonAll();
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);

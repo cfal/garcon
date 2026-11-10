@@ -35,6 +35,7 @@ import {
 } from '../../support/scripted-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { seedRecentTranscriptCache } from '../../support/transcript-cache-seed.js';
 import { setTypography } from '../../support/typography.js';
 import {
   canonicalFilesWindowId,
@@ -5521,9 +5522,7 @@ describe('Chromium combined tool-use presentation', () => {
         expect(layout.sizerHeight).toBeGreaterThan(layout.feedHeight);
       };
       await waitForContext();
-      expect(earlierRequestBudgets.length).toBeGreaterThan(0);
-      expect(earlierRequestBudgets.every((budget) => budget <= 100)).toBe(true);
-      if (toolCount > 1_000) expect(earlierRequestBudgets.length).toBeGreaterThan(10);
+      expect(earlierRequestBudgets).toEqual([]);
 
       await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
       earlierRequestBudgets.length = 0;
@@ -5732,6 +5731,7 @@ describe('Chromium combined tool-use presentation', () => {
         message: new BashToolUseMessage(timestamp, `focus-tool-${index}`, 'pwd'),
         providerMeta: null,
       })));
+      await seedRecentTranscriptCache(fixture.context, chatId, await fixture.integration.client.getMessages(chatId, { limit: 50 }));
       const continuation = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       let held = false;
@@ -5746,9 +5746,9 @@ describe('Chromium combined tool-use presentation', () => {
       try {
         await initializeCombineToolUses(fixture, true);
         await fixture.page.goto(`${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`);
-        await withDiagnosticTimeout('the held combined continuation', continuation.promise, 20_000);
+        await withDiagnosticTimeout('the held combined cache top-up', continuation.promise, 20_000);
         const summary = fixture.page.locator('[data-chat-tool-group]');
-        await browserExpect(summary).toHaveAttribute('data-chat-tool-group-count', '200');
+        await browserExpect(summary).toHaveAttribute('data-chat-tool-group-count', '50');
         await browserExpect(summary).toBeVisible();
         await summary.focus();
         const oldAnchorId = await summary.getAttribute('data-chat-anchor-id');

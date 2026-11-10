@@ -5,10 +5,74 @@ import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
-import { parseTranscriptAnchorResponse, type TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
+import { parseTranscriptAnchorResponse, isCompleteTranscriptAnchorResponse, type TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
 import { COMBINED_PROMPT, COMBINED_RESPONSE, seedCombinedAnchorHistory } from '../../support/combined-anchor-history.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { seedRecentTranscriptCache } from '../../support/transcript-cache-seed.js';
+
+test('a tall viewport receives prompt, tools, and answer in its first whole anchor response', async () => {
+  await withChromiumFixture('combined-anchor-single-response', async ({ integration, page, context }) => {
+    const { chatId, promptOrdinal, head } = await seedCombinedAnchorHistory(integration);
+    await page.setViewportSize({ width: 1280, height: 1600 });
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const responses: ReturnType<typeof parseTranscriptAnchorResponse>[] = [];
+    await page.route('**/api/v1/chats/combined-messages', async route => {
+      const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+      const response = await route.fetch();
+      if (request.chatId === chatId) responses.push(parseTranscriptAnchorResponse(request, await response.json()));
+      await route.fulfill({ response });
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const feed = page.locator('[data-chat-scroll-viewport]');
+    await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+    await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    expect(responses).toHaveLength(1);
+    const response = responses[0]!;
+    if (!isCompleteTranscriptAnchorResponse(response)) throw new Error('Synthetic history unavailable');
+    expect(response.pageStatus).toBe('exhausted');
+    expect(response.endOrdinal - response.startOrdinal).toBeGreaterThan(200);
+    expect(response.messages.some(entry => entry.ordinal === promptOrdinal)).toBe(true);
+    expect(response.messages.at(-1)!.ordinal).toBe(head);
+    const artifacts = join(import.meta.dir, '../../artifacts/chromium');
+    await mkdir(artifacts, { recursive: true });
+    await page.screenshot({ path: join(artifacts, 'combined-anchor-tall-viewport.png') });
+  });
+}, 150_000);
+
+test('measured underfill requests another real anchor page, not a raw-row continuation', async () => {
+  await withChromiumFixture('combined-anchor-measured-refill', async ({ integration, page, context }) => {
+    const { chatId } = await seedCombinedAnchorHistory(integration, { trailingAnchors: 150 });
+    await page.setViewportSize({ width: 1280, height: 10000 });
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const held = Promise.withResolvers<void>();
+    const requests: TranscriptAnchorRequest[] = [];
+    await page.route('**/api/v1/chats/combined-messages', async route => {
+      const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+      if (request.chatId === chatId) {
+        requests.push(request);
+        if (requests.length === 2) await held.promise;
+      }
+      await route.continue();
+    });
+    try {
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      await browserExpect(feed.getByText('Synthetic later anchor 149', { exact: true })).toBeVisible();
+      await browserExpect.poll(() => requests.length).toBe(2);
+      expect(requests[1]!.anchorsRemaining).toBe(100);
+      expect(requests[1]!.watermarkOrdinal).toBeUndefined();
+      expect(await feed.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+      held.resolve();
+      await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+      await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      expect(requests).toHaveLength(2);
+    } finally { held.resolve(); }
+  });
+}, 150_000);
 
 const expectedDisconnectErrors = [
   /^console\.error: WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
@@ -17,10 +81,11 @@ const expectedDisconnectErrors = [
 ];
 
 for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'compact', width: 390, height: 700 }]) {
-  test(`combined history paints before continuation and retains grouped context (${viewport.name})`, async () => {
+  test(`cached history paints before combined top-up and retains grouped context (${viewport.name})`, async () => {
     await withChromiumFixture(`combined-anchor-${viewport.name}`, async ({ integration, page, context }, phase) => {
       phase('seeding synthetic ledger');
       const { chatId } = await seedCombinedAnchorHistory(integration);
+      await seedRecentTranscriptCache(context, chatId, await integration.client.getMessages(chatId, { limit: 50 }));
       const otherChatId = integration.newChatId();
       const other = await integration.client.startDirectChat({
         chatId: otherChatId, content: 'Synthetic switch target', projectPath: integration.dirs.project,
@@ -78,7 +143,7 @@ for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'com
         await browserExpect(input).toBeFocused();
         expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, composerNode)).toBe(true);
         expect(Math.abs((await composer.boundingBox())!.y - before!.y)).toBeLessThan(2);
-        expect(requests.filter(request => request.chatId === chatId).length).toBeGreaterThan(2);
+        expect(requests.some(request => request.chatId === chatId && request.cursorOrdinal !== undefined)).toBe(true);
 
         phase('width-only resize');
         const reads = requests.length;
@@ -190,11 +255,12 @@ test('pinned combined coverage remains at the end with rows taller than their es
       if (request.cursorOrdinal !== undefined) cursors.push(request.cursorOrdinal);
       await route.continue();
     });
-    phase('loading tall rows through multiple earlier publications');
+    phase('loading a tall response in one complete anchor interval');
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     const feed = page.locator('[data-chat-scroll-viewport]');
-    await browserExpect.poll(() => cursors.length).toBeGreaterThan(2);
+    await browserExpect(feed.getByText(`${COMBINED_RESPONSE} 59.`, { exact: true })).toBeVisible();
     await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    expect(cursors).toEqual([]);
     await browserExpect.poll(() => feed.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
     expect(await feed.locator('[data-chat-message-type="assistant-message"]').last().evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(1000);
     await page.setViewportSize({ width: 390, height: 700 });
@@ -206,6 +272,7 @@ for (const change of ['collapse', 'filter'] as const) {
   test(`detached combined coverage resumes after ${change} creates underfill`, async () => {
     await withChromiumFixture(`combined-anchor-${change}`, async ({ integration, page, context }, phase) => {
       const { chatId } = await seedCombinedAnchorHistory(integration, { thinking: change === 'filter' });
+      await seedRecentTranscriptCache(context, chatId, await integration.client.getMessages(chatId, { limit: 50 }));
       await page.setViewportSize({ width: 1280, height: 600 });
       await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true, showThinking: true });
       const requests: TranscriptAnchorRequest[] = [];
@@ -238,7 +305,8 @@ for (const change of ['collapse', 'filter'] as const) {
         await browserExpect(feed).toHaveAttribute('data-chat-pinned-to-bottom', 'false');
         release();
         await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
-        await browserExpect.poll(() => requests.length).toBe(2);
+        const completedReads = requests.length;
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toHaveCount(0);
         phase('reducing presentation without another scroll or publication');
         if (change === 'collapse') await group.click();
         else await page.evaluate(() => {
@@ -249,7 +317,9 @@ for (const change of ['collapse', 'filter'] as const) {
         });
         await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
         await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
-        expect(requests.length).toBeGreaterThan(3);
+        expect(requests.length).toBe(completedReads + 1);
+        expect(requests.at(-1)!.cursorOrdinal!).toBeLessThanOrEqual(requests[0]!.cursorOrdinal!);
+        expect(requests.at(-1)!.anchorsRemaining).toBe(requests[0]!.anchorsRemaining);
         await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
       } finally { release(); }
     });
@@ -259,6 +329,7 @@ for (const change of ['collapse', 'filter'] as const) {
 test('reconnect replay and held combined coverage preserve both the historical prompt and live suffix', async () => {
   await withChromiumFixture('combined-anchor-reconnect', async ({ integration, page, context, browserErrors }, phase) => {
     const { chatId } = await seedCombinedAnchorHistory(integration);
+    await seedRecentTranscriptCache(context, chatId, await integration.client.getMessages(chatId, { limit: 50 }));
     await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });

@@ -37,6 +37,17 @@ function contents(messages: TranscriptMessage[]): string[] {
 }
 
 describe('ChatTranscriptCache', () => {
+	it('retains a resumable recent tail from a wide interval through hydration', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 50, storage });
+		const entries = Array.from({ length: 650 }, (_, i) => entry(i + 1, 'synthetic'));
+		cache.replaceFromPage('wide', page('view', entries));
+		expect(cache.get('wide')).toMatchObject({ messages: entries.slice(-50), nextBeforeOrdinal: 601 });
+		cache.flush();
+		const restored = new ChatTranscriptCache({ limit: 50, storage }).hydrate('wide');
+		expect(restored).toMatchObject({ messages: entries.slice(-50), nextBeforeOrdinal: 601, lastOrdinal: 650 });
+	});
+
 	beforeEach(() => {
 		localStorage.clear();
 	});

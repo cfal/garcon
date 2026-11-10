@@ -1,9 +1,10 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
-import { AssistantMessage } from '../../../../common/chat-types.ts';
+import { AssistantMessage, BashToolUseMessage } from '../../../../common/chat-types.ts';
+import { isErrorCode } from '../../../../common/error-codes.ts';
 import { parseTranscriptAnchorResponse } from '../../../../common/transcript-anchor-page.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
-import { LedgerFencedError, StaleTranscriptViewError } from '../../ledger/errors.ts';
+import { LedgerBulkOperationAbandonedError, LedgerFencedError, StaleTranscriptViewError } from '../../ledger/errors.ts';
 import { NativeActivityAnchorPageReader } from '../../ledger/native-activity-page-reader.ts';
 import { createCombinedMessageRoutes } from '../combined-messages.ts';
 
@@ -28,6 +29,56 @@ function fixture() {
 }
 
 describe('POST /api/v1/chats/combined-messages', () => {
+  it('serializes a complete interval wider than the former row and payload limits', async () => {
+    const { call, reader } = fixture();
+    const messages = Array.from({ length: 650 }, (_, i) => ({ ordinal: i + 2,
+      message: new BashToolUseMessage('2026-01-01T00:00:00.000Z', `tool-${i}`, 'x'.repeat(2000)) }));
+    messages.push({ ordinal: 652, message: rawPage.messages[0].message });
+    reader.anchorPage.mockResolvedValue({ ...rawPage, watermarkOrdinal: 652, lastOrdinal: 652, endOrdinal: 653, messages });
+    const response = await call();
+    const body = await response.text();
+    expect(body.length).toBeGreaterThan(1024 * 1024);
+    expect(parseTranscriptAnchorResponse(input, JSON.parse(body)).messages).toHaveLength(651);
+  });
+
+  it.each([
+    ['delete', 404, 'SESSION_NOT_FOUND'],
+    ['abort', 499, null],
+    ['interrupt', 503, 'TRANSCRIPT_READ_INTERRUPTED'],
+    ['shutdown', 503, 'SERVER_SHUTTING_DOWN'],
+  ])('translates %s during a held read without returning a prefix', async (action, status, errorCode) => {
+    const { call, reader, registry } = fixture();
+    const entered = Promise.withResolvers();
+    const held = Promise.withResolvers();
+    reader.anchorPage.mockImplementation(() => { entered.resolve(); return held.promise; });
+    const abort = new AbortController();
+    const pending = call(input, abort.signal);
+    await entered.promise;
+    if (action === 'delete' || action === 'abort') registry.getChat.mockReturnValue(null);
+    if (action === 'abort') abort.abort();
+    held.reject(action === 'shutdown'
+      ? new DomainError('SERVER_SHUTTING_DOWN', 'Server is shutting down', 503, true)
+      : new LedgerBulkOperationAbandonedError(input.chatId));
+    const response = await pending;
+    expect(response.status).toBe(status);
+    if (errorCode !== null) {
+      const body = await response.json();
+      expect(body.errorCode).toBe(errorCode);
+      expect(isErrorCode(body.errorCode)).toBe(true);
+    }
+  });
+
+  it('discards a successful read after cancellation', async () => {
+    const { call, reader, resendCandidates } = fixture();
+    const abort = new AbortController();
+    reader.anchorPage.mockImplementation(async () => {
+      abort.abort();
+      return rawPage;
+    });
+    expect((await call(input, abort.signal)).status).toBe(499);
+    expect(resendCandidates).not.toHaveBeenCalled();
+  });
+
   it('returns a typed anchor page without changing raw-page semantics', async () => {
     const { call, reader } = fixture();
     const response = await call();
@@ -124,10 +175,15 @@ describe('POST /api/v1/chats/combined-messages', () => {
 
 describe('anchor activation advisory', () => {
   it('schedules only a successful initial newest activation, not continuations or failed reads', async () => {
-    const pages = { anchorPage: mock(async () => rawPage) };
+    const held = Promise.withResolvers();
+    const pages = { anchorPage: mock(() => held.promise) };
     const nativeActivity = { requestCheck: mock(() => {}) };
     const reader = new NativeActivityAnchorPageReader(pages, nativeActivity);
-    await reader.anchorPage({ ...input, purpose: 'activation' });
+    const pending = reader.anchorPage({ ...input, purpose: 'activation' });
+    await Promise.resolve();
+    expect(nativeActivity.requestCheck).not.toHaveBeenCalled();
+    held.resolve(rawPage);
+    await pending;
     await Promise.resolve();
     expect(nativeActivity.requestCheck).toHaveBeenCalledTimes(1);
     expect(nativeActivity.requestCheck).toHaveBeenCalledWith(input.chatId, 'activation');

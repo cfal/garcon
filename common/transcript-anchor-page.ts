@@ -14,7 +14,6 @@ import { isRecord } from './json.js';
 
 export const TRANSCRIPT_ANCHOR_TARGET = 100;
 export const TRANSCRIPT_ANCHOR_MAX_BUDGET = 200;
-export const TRANSCRIPT_ANCHOR_RAW_LIMIT = 200;
 
 export type TranscriptAnchorDirection = 'backward' | 'forward';
 export type TranscriptAnchorPageStatus = 'partial' | 'complete' | 'exhausted';
@@ -144,7 +143,7 @@ export function parseTranscriptAnchorResponse(
     || page.lastOrdinal === Number.MAX_SAFE_INTEGER) invalid('watermark');
   const cursor = request.cursorOrdinal ?? (direction === 'backward' ? watermarkOrdinal + 1 : 0);
   const width = page.endOrdinal - page.startOrdinal;
-  if (page.startOrdinal < 1 || width < 0 || width > TRANSCRIPT_ANCHOR_RAW_LIMIT
+  if (page.startOrdinal < 1 || width < 0
     || page.endOrdinal > watermarkOrdinal + 1) invalid('raw span');
   if (direction === 'backward' ? page.endOrdinal !== cursor : page.startOrdinal !== cursor + 1) {
     invalid('cursor contiguity');

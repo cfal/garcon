@@ -11,6 +11,7 @@ import type { ChatProcessingActivity } from '../chats/chat-processing-activity.j
 import type { IChatRegistry } from '../chats/store.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
+import { LedgerBulkOperationAbandonedError } from '../ledger/errors.js';
 import { transcriptHistoryError } from './transcript-history-error.js';
 
 export function createCombinedMessageRoutes(deps: {
@@ -35,6 +36,7 @@ export function createCombinedMessageRoutes(deps: {
         if (!deps.registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
         try {
           const page = await deps.reader.anchorPage(input, request.signal);
+          request.signal.throwIfAborted();
           if (!deps.registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
           if (input.transcriptViewId !== undefined && page.transcriptViewId !== input.transcriptViewId) {
             return jsonError('Transcript view changed while paging', 409, 'STALE_TRANSCRIPT_VIEW', false);
@@ -47,6 +49,11 @@ export function createCombinedMessageRoutes(deps: {
               && deps.processing.phase(chatId) === null ? [...deps.resendCandidates(chatId)] : [],
           } satisfies TranscriptAnchorPage);
         } catch (error) {
+          if (request.signal.aborted) return transcriptHistoryError(error, chatId, request.signal);
+          if (!deps.registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+          if (error instanceof LedgerBulkOperationAbandonedError) {
+            return jsonError('Transcript read interrupted; retry.', 503, 'TRANSCRIPT_READ_INTERRUPTED', true);
+          }
           return transcriptHistoryError(error, chatId, request.signal);
         }
       }),

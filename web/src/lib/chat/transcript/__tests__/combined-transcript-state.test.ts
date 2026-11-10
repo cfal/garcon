@@ -43,6 +43,10 @@ const input = (ordinal: number): TranscriptMessage => ({
 	ordinal,
 	message: new UserMessage(time, `Synthetic input ${ordinal}`),
 });
+function wideAnchorInterval(): TranscriptMessage[] {
+	return [input(1), ...Array.from({ length: 650 }, (_, i) => tool(i + 2)), assistant(652)];
+}
+
 function fixture(combined = true) {
 	const cache = new ChatTranscriptCache({ limit: 100 });
 	caches.add(cache);
@@ -56,7 +60,8 @@ function fixture(combined = true) {
 		cache,
 	};
 }
-function history(entries: TranscriptMessage[], maxRows = 200, head = entries.at(-1)?.ordinal ?? 0, view = viewId) {
+// Explicit cutoffs exercise the generic partial-response contract, not the server producer.
+function history(entries: TranscriptMessage[], cutoffRows = Infinity, head = entries.at(-1)?.ordinal ?? 0, view = viewId) {
 	const byOrdinal = new Map(entries.map(entry => [entry.ordinal, entry]));
 	return (request: TranscriptAnchorRequest): TranscriptAnchorPage => {
 		const watermark = request.watermarkOrdinal ?? head;
@@ -72,7 +77,7 @@ function history(entries: TranscriptMessage[], maxRows = 200, head = entries.at(
 		while (position >= 1 && position <= watermark) {
 			const entry = byOrdinal.get(position);
 			const anchor = entry !== undefined && isTranscriptAnchor(entry.message);
-			if ((anchor && remaining === 0) || consumed === maxRows) break;
+			if ((anchor && remaining === 0) || consumed === cutoffRows) break;
 			if (entry) messages.push(entry);
 			if (anchor) remaining -= 1;
 			consumed += 1;
@@ -100,8 +105,8 @@ function history(entries: TranscriptMessage[], maxRows = 200, head = entries.at(
 		return parseTranscriptAnchorResponse(request, page) as TranscriptAnchorPage;
 	};
 }
-const installHistory = (entries: TranscriptMessage[], maxRows = 200, head?: number) => {
-	const read = history(entries, maxRows, head);
+const installHistory = (entries: TranscriptMessage[], cutoffRows = Infinity, head?: number) => {
+	const read = history(entries, cutoffRows, head);
 	vi.mocked(getCombinedChatMessages).mockImplementation(async (request) => read(request));
 	return read;
 };
@@ -196,11 +201,78 @@ afterEach(() => {
 });
 
 describe('combined transcript intervals', () => {
+	it.each([
+		['snapshot', null],
+		['earlier', 652],
+		['later', 1],
+		['initial', 300],
+		['latest', 300],
+	] as const)('installs a whole wide interval through %s', async (target, residentOrdinal) => {
+		const { transcript, cache } = fixture();
+		const entries = wideAnchorInterval();
+		installHistory(entries);
+		if (residentOrdinal !== null) {
+			transcript.replaceGeneration(chatId, viewId, [entries[residentOrdinal - 1]], {
+				lastOrdinal: 652, pageNewestOrdinal: residentOrdinal, pageOldestOrdinal: residentOrdinal,
+				nextBeforeOrdinal: residentOrdinal === 1 ? null : residentOrdinal, hasMore: residentOrdinal > 1,
+			});
+		}
+		if (target === 'snapshot') await transcript.loadMessages(chatId);
+		else if (target === 'earlier') await transcript.loadEarlierPage(chatId);
+		else if (target === 'later') await transcript.loadLaterPage(chatId);
+		else await transcript.navigateToWindow(chatId, target);
+		expect(transcript.entries).toEqual(entries);
+		expect(transcript.hasPendingAnchorDemand('earlier')).toBe(false);
+		expect(transcript.hasPendingAnchorDemand('later')).toBe(false);
+		expect(getCombinedChatMessages).toHaveBeenCalledOnce();
+		expect(cache.get(chatId)!.messages.length).toBeLessThanOrEqual(100);
+	});
+
+	it('preserves a buffered live suffix while installing a wide fixed-watermark snapshot', async () => {
+		const { transcript } = fixture();
+		const entries = wideAnchorInterval();
+		const response = Promise.withResolvers<TranscriptAnchorPage>();
+		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
+		const load = transcript.loadMessages(chatId);
+		transcript.applyMessages(chatId, viewId, [input(653)], 653, 653);
+		response.resolve(history(entries)(vi.mocked(getCombinedChatMessages).mock.calls[0][0]));
+		await load;
+		expect(transcript.entries).toEqual([...entries, input(653)]);
+		expect(transcript.lastOrdinal).toBe(653);
+	});
+
+	it('does not publish a wide earlier response rejected by the application gate', async () => {
+		const { transcript } = fixture();
+		const entries = wideAnchorInterval();
+		transcript.replaceGeneration(chatId, viewId, [assistant(652)], {
+			lastOrdinal: 652, pageOldestOrdinal: 652, nextBeforeOrdinal: 652, hasMore: true,
+		});
+		installHistory(entries);
+		const gate = vi.fn().mockResolvedValue('invalidated');
+		expect(await transcript.loadEarlierPage(chatId, { applicationGate: gate })).toBe('invalidated');
+		expect(transcript.entries).toEqual([assistant(652)]);
+		expect(transcript.nextBeforeOrdinal).toBe(652);
+		await transcript.loadEarlierPage(chatId);
+		expect(transcript.entries).toEqual(entries);
+	});
+
+	it('discards a wide snapshot after chat ownership changes', async () => {
+		const { transcript } = fixture();
+		const entries = wideAnchorInterval();
+		const response = Promise.withResolvers<TranscriptAnchorPage>();
+		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
+		const load = transcript.loadMessages(chatId);
+		transcript.activateChat('other-chat');
+		response.resolve(history(entries)(vi.mocked(getCombinedChatMessages).mock.calls[0][0]));
+		await load;
+		expect(transcript.entries).toEqual([]);
+	});
+
 	it.each(['none', 'unpin', 'replacement', 'intent'] as const)('restores a deferred pinned end only while still owned (%s)', async interruption => {
 		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(1);
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 201 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 201 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const { controller, viewport } = scrolling(transcript);
 		const layout = Promise.withResolvers<'settled'>();
@@ -235,7 +307,7 @@ describe('combined transcript intervals', () => {
 
 	it('does not restore navigator pinning after newer user intent', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -256,7 +328,7 @@ describe('combined transcript intervals', () => {
 		vi.useFakeTimers();
 		await vi.advanceTimersByTimeAsync(1);
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 201 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 201 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const { controller, viewport } = scrolling(transcript);
 		const layout = Promise.withResolvers<'superseded'>();
@@ -283,7 +355,7 @@ describe('combined transcript intervals', () => {
 
 	it('finishes the Start control before obsolete coverage transport settles', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -330,7 +402,7 @@ describe('combined transcript intervals', () => {
 
 	it.each(['transport', 'layout'] as const)('releases superseded coverage ownership before cancelling Latest during %s', async phase => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const coverageResponse = Promise.withResolvers<TranscriptAnchorPage>();
 		const navigationResponse = Promise.withResolvers<TranscriptAnchorPage>();
@@ -345,7 +417,7 @@ describe('combined transcript intervals', () => {
 			const navigation = controller.scrollToLatest();
 			if (phase === 'layout') {
 				viewport.waitForLayout.mockImplementationOnce(() => layout.promise);
-				navigationResponse.resolve(history(Array.from({ length: 602 }, (_, index) => tool(index + 1)))(vi.mocked(getCombinedChatMessages).mock.calls[2]![0]));
+				navigationResponse.resolve(history(Array.from({ length: 602 }, (_, index) => tool(index + 1)), 200)(vi.mocked(getCombinedChatMessages).mock.calls[2]![0]));
 				await vi.waitFor(() => expect(viewport.waitForLayout.mock.results.at(-1)?.value).toBe(layout.promise));
 			}
 			controller.noteUserScrollIntent('earlier', 'other');
@@ -365,7 +437,7 @@ describe('combined transcript intervals', () => {
 
 	it('finishes the Latest control before its combined coverage transport settles', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -384,7 +456,7 @@ describe('combined transcript intervals', () => {
 
 	it.each([true, false])('gives navigator paging ownership over later coverage (coverage first %s)', async coverageFirst => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 600 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 600 }, (_, index) => tool(index + 1)), 200);
 		transcript.replaceGeneration(chatId, viewId, [tool(300)], {
 			lastOrdinal: 600, pageOldestOrdinal: 300, pageNewestOrdinal: 300, nextBeforeOrdinal: 300, hasMore: true,
 		});
@@ -460,7 +532,7 @@ describe('combined transcript intervals', () => {
 
 	it('preserves transport errors when detached coverage becomes overflowing, until explicit retry', async () => {
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -518,7 +590,7 @@ describe('combined transcript intervals', () => {
 	it.each([false, true])('pauses continuation for recent keyboard/wheel intent unless manually joined (%s)', async manual => {
 		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -548,7 +620,7 @@ describe('combined transcript intervals', () => {
 	it.each([false, true])('keeps pinning through non-owned scroll events during fill (combined %s)', async combined => {
 		const { transcript } = fixture(combined);
 		const entries = Array.from({ length: 401 }, (_, index) => tool(index + 1));
-		const read = installHistory(entries);
+		const read = installHistory(entries, 200);
 		if (combined) await transcript.loadMessages(chatId);
 		else transcript.replaceGeneration(chatId, viewId, [assistant(100)], {
 			lastOrdinal: 100, pageOldestOrdinal: 100, nextBeforeOrdinal: 100, hasMore: true,
@@ -581,7 +653,7 @@ describe('combined transcript intervals', () => {
 
 	it('resumes pinned activation after hide/show while obsolete transport is held', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -604,7 +676,7 @@ describe('combined transcript intervals', () => {
 
 	it.each([false, true])('waits for show-time readiness before resuming coverage (pinned %s)', async pinned => {
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const { controller, viewport } = scrolling(transcript);
 		controller.setPinnedToBottom(false);
@@ -633,7 +705,7 @@ describe('combined transcript intervals', () => {
 
 	it('retries superseded detached measurements before fetching a continuation', async () => {
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const { controller, viewport } = scrolling(transcript);
 		controller.setPinnedToBottom(false);
@@ -659,7 +731,7 @@ describe('combined transcript intervals', () => {
 
 	it('rechecks recent intent after a held passive measurement before applying a chunk', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const response = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
@@ -706,7 +778,7 @@ describe('combined transcript intervals', () => {
 
 	it('accepts snapshot handoff after no-op or cancelled navigation, but not during navigation', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const beforeNavigation = transcript.snapshotHandoffGuard();
 		await transcript.navigateToWindow(chatId, 'latest');
@@ -727,7 +799,7 @@ describe('combined transcript intervals', () => {
 	it.each([false, true])('releases cancelled window navigation before held transport settles (combined %s)', async combined => {
 		const { transcript } = fixture(combined);
 		const entries = Array.from({ length: 401 }, (_, index) => tool(index + 1));
-		const read = installHistory(entries);
+		const read = installHistory(entries, 200);
 		transcript.replaceGeneration(chatId, viewId, [assistant(300)], {
 			lastOrdinal: 401, pageNewestOrdinal: 300, pageOldestOrdinal: 300, nextBeforeOrdinal: 300, hasMore: true,
 		});
@@ -752,7 +824,7 @@ describe('combined transcript intervals', () => {
 
 	it.each(['paging', 'latest', 'initial'] as const)('surfaces degraded history from combined %s', async target => {
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		if (target === 'latest') await transcript.navigateToWindow(chatId, 'initial');
 		const historyState = { kind: 'degraded', errorCode: 'LEDGER_FENCED', retryable: false } as const;
@@ -764,7 +836,7 @@ describe('combined transcript intervals', () => {
 
 	it('adopts the newer cache view when a stale peer cannot reset shared authority', async () => {
 		const { registry, cache, mount } = panelFixture();
-		installHistory(Array.from({ length: 300 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 300 }, (_, index) => tool(index + 1)), 200);
 		try {
 			mount('left');
 			await registry.loadChatSnapshot(chatId);
@@ -937,7 +1009,7 @@ describe('combined transcript intervals', () => {
 			current.activateChat(chatId);
 			await current.loadMessages(chatId, { minimumLimit: 100 });
 			expect(getCombinedChatMessages).not.toHaveBeenCalled();
-			installHistory(entries);
+			installHistory(entries, 200);
 			mount('left', 'right');
 			for (const panel of registry.panelsForChat(chatId)) {
 				expect(panel.transcript.hasPendingAnchorDemand('earlier')).toBe(true);
@@ -955,7 +1027,7 @@ describe('combined transcript intervals', () => {
 	it('gives peers mounting between chunks provisional coverage, never a later chunk across a gap', async () => {
 		const { registry, cache, mount } = panelFixture();
 		const entries = Array.from({ length: 601 }, (_, index) => tool(index + 1));
-		const read = installHistory(entries);
+		const read = installHistory(entries, 200);
 		try {
 			mount('left');
 			await registry.loadChatSnapshot(chatId);
@@ -1015,7 +1087,7 @@ describe('combined transcript intervals', () => {
 
 	it('upgrades a manual join of held coverage without unpinning or replacing its gate', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const second = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => second.promise);
@@ -1038,7 +1110,7 @@ describe('combined transcript intervals', () => {
 
 	it('pauses a detached activation after a chunk makes the viewport overflow', async () => {
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const { controller, viewport } = scrolling(transcript);
 		viewport.readViewportFill.mockImplementation(() =>
@@ -1059,7 +1131,7 @@ describe('combined transcript intervals', () => {
 
 	it('waits for a new native gesture to settle before applying a held continuation', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 401 }, (_, index) => tool(index + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const second = Promise.withResolvers<TranscriptAnchorPage>();
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => second.promise);
@@ -1082,7 +1154,7 @@ describe('combined transcript intervals', () => {
 
 	it('lets an explicit opposite-direction page preempt transport without losing the earlier budget', async () => {
 		const { transcript } = fixture();
-		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)));
+		const read = installHistory(Array.from({ length: 601 }, (_, index) => tool(index + 1)), 200);
 		transcript.replaceGeneration(chatId, viewId, [tool(301)], {
 			lastOrdinal: 601,
 			pageOldestOrdinal: 301,
@@ -1111,10 +1183,10 @@ describe('combined transcript intervals', () => {
 	it('recaptures a fresh forward watermark after exhausting W below the observed head', async () => {
 		const { transcript } = fixture();
 		const entries = Array.from({ length: 401 }, (_, index) => tool(index + 1));
-		installHistory(entries);
+		installHistory(entries, 200);
 		await transcript.loadMessages(chatId);
 		await transcript.navigateToWindow(chatId, 'initial');
-		installHistory([...entries, assistant(402)]);
+		installHistory([...entries, assistant(402)], 200);
 		await transcript.loadLaterPage(chatId);
 		expect(transcript.loadedThroughOrdinal).toBe(401);
 		expect(transcript.hasLaterMessages).toBe(true);
@@ -1278,7 +1350,7 @@ describe('combined transcript intervals', () => {
 			...Array.from({ length: 350 }, (_, i) => tool(i + 2)),
 			assistant(352),
 		];
-		const read = installHistory(entries);
+		const read = installHistory(entries, 200);
 		await transcript.loadMessages(chatId);
 		expect(transcript.entries).toHaveLength(200);
 		expect(transcript.isLoadingMessages).toBe(false);
@@ -1302,6 +1374,7 @@ describe('combined transcript intervals', () => {
 		const { transcript } = fixture();
 		const read = installHistory(
 			Array.from({ length: 601 }, (_, i) => (i === 600 ? assistant(i + 1) : tool(i + 1))),
+			200,
 		);
 		await transcript.loadMessages(chatId);
 		vi.mocked(getCombinedChatMessages)
@@ -1325,7 +1398,7 @@ describe('combined transcript intervals', () => {
 	it.each(['held', 'error'] as const)('preserves combined demand through parking and background commits (%s)', async interruption => {
 		const { cache, registry, mount, switchChat } = panelFixture({ retainInactive: true });
 		const entries = [input(1), ...Array.from({ length: 599 }, (_, index) => tool(index + 2)), assistant(601)];
-		const read = installHistory(entries);
+		const read = installHistory(entries, 200);
 		mount('left');
 		await registry.loadChatSnapshot(chatId);
 		const transcript = registry.panel('chat-view:window-left')!.transcript;
@@ -1365,7 +1438,7 @@ describe('combined transcript intervals', () => {
 				captureRestoreTarget: () => ({ kind: 'end' }),
 				closeTransients: vi.fn(),
 			});
-			installHistory([...entries, assistant(602)]);
+			installHistory([...entries, assistant(602)], 200);
 			panel.completeInitialBottomRestore();
 			if (interruption === 'error') {
 				await panel.scroll.fillUnderfilledViewport();
@@ -1385,7 +1458,7 @@ describe('combined transcript intervals', () => {
 
 	it('treats hidden-only loader chunks as raw progress without changing public rows', async () => {
 		const { transcript } = fixture();
-		const read = installHistory([assistant(601)]);
+		const read = installHistory([assistant(601)], 200);
 		await transcript.loadMessages(chatId);
 		const before = transcript.entries;
 		const gate = vi.fn().mockResolvedValueOnce('apply').mockResolvedValueOnce('invalidated');
@@ -1449,7 +1522,7 @@ describe('combined transcript intervals', () => {
 
 	it('gates every chunk freshly and never advances a rejected raw interval', async () => {
 		const { transcript } = fixture();
-		installHistory(Array.from({ length: 601 }, (_, i) => tool(i + 1)));
+		installHistory(Array.from({ length: 601 }, (_, i) => tool(i + 1)), 200);
 		await transcript.loadMessages(chatId);
 		const gate = vi.fn().mockResolvedValueOnce('apply').mockResolvedValueOnce('invalidated');
 		expect(await transcript.loadEarlierPage(chatId, { applicationGate: gate })).toBe('invalidated');
@@ -1462,7 +1535,7 @@ describe('combined transcript intervals', () => {
 	it('historical H changes do not detach live presentation or alter resend overlays', async () => {
 		const { transcript } = fixture();
 		const entries = Array.from({ length: 350 }, (_, i) => tool(i + 1));
-		installHistory(entries);
+		installHistory(entries, 200);
 		await transcript.loadMessages(chatId);
 		transcript.setResendCandidates([
 			{ ordinal: 1, content: 'Synthetic pending input', attachmentNames: [] },
@@ -1524,7 +1597,7 @@ describe('combined transcript intervals', () => {
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		installHistory([input(1), assistant(1000)]);
+		installHistory([input(1), assistant(1000)], 200);
 		await transcript.loadMessages(chatId);
 		expect(transcript.entries.map((entry) => entry.ordinal)).toEqual([1]);
 		expect(transcript.loadedThroughOrdinal).toBe(100);

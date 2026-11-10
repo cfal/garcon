@@ -540,8 +540,8 @@ export class TranscriptLedgerService {
     return this.#store.page(chatId, viewId, limit, before);
   }
 
-  anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput): AnchorScanResult {
-    return this.#store.anchorPage(chatId, viewId, input);
+  anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput, signal?: AbortSignal): Promise<AnchorScanResult> {
+    return this.#store.anchorPage(chatId, viewId, input, signal);
   }
 
   ticketOutcomeOrdinal(chatId: string, viewId: TranscriptViewId, requestOrdinal: number): number | null {

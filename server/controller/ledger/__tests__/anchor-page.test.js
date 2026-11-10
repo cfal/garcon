@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { AssistantMessage, BashToolUseMessage, ErrorMessage, UserMessage } from '../../../../common/chat-types.ts';
 import { parseTranscriptAnchorResponse } from '../../../../common/transcript-anchor-page.ts';
-import { readAnchorPage, TRANSCRIPT_ANCHOR_BYTE_TARGET } from '../anchor-page.ts';
-import { encodeLedgerDraft } from '../codec.ts';
+import { readAnchorBatch, readAnchorPage } from '../anchor-page.ts';
 import { createSchema } from '../connection-setup.ts';
 import { transcriptViewId } from '../contracts.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
@@ -17,7 +16,6 @@ const assistant = () => provider(new AssistantMessage(TS, 'Synthetic response'))
 const tool = () => provider(new BashToolUseMessage(TS, 'synthetic-tool', 'true'));
 const hidden = () => ({ kind: 'run-ended', at: TS, origin: 'core', outcome: 'finished' });
 const notice = message => ({ kind: 'notice', at: TS, message, detail: {} });
-const size = draft => Buffer.byteLength(encodeLedgerDraft(draft).payloadJson, 'utf8');
 let db;
 let head;
 
@@ -37,7 +35,23 @@ function append(drafts) {
 function scan(direction, anchorsRemaining, options = {}) {
   const watermarkOrdinal = options.watermarkOrdinal ?? head;
   const cursorOrdinal = options.cursorOrdinal ?? (direction === 'backward' ? watermarkOrdinal + 1 : 0);
-  const result = readAnchorPage(db, VIEW, { direction, anchorsRemaining, watermarkOrdinal, cursorOrdinal });
+  const input = { direction, anchorsRemaining, watermarkOrdinal, cursorOrdinal };
+  let progress = input;
+  const rows = [];
+  let batch;
+  do {
+    let admitted = 0;
+    batch = readAnchorBatch(db, VIEW, input, progress, () => ++admitted >= (options.pauseAfter ?? 200));
+    rows.push(...batch.rows);
+    progress = batch.progress;
+  } while (batch.stop === 'yield');
+  const result = {
+    rows: direction === 'backward' ? rows.reverse() : rows,
+    startOrdinal: direction === 'backward' ? progress.cursorOrdinal : cursorOrdinal + 1,
+    endOrdinal: direction === 'backward' ? cursorOrdinal : progress.cursorOrdinal + 1,
+    anchorsRemaining: progress.anchorsRemaining,
+    pageStatus: batch.stop,
+  };
   const response = { ...result, historyState: { kind: 'complete' }, chatId: 'synthetic-chat',
     transcriptViewId: VIEW, direction, watermarkOrdinal, lastOrdinal: head,
     messages: ledgerRowsToTranscriptMessages(result.rows), resendCandidates: [] };
@@ -46,7 +60,7 @@ function scan(direction, anchorsRemaining, options = {}) {
   return result;
 }
 
-describe('bounded conversational anchor scan', () => {
+describe('cooperative conversational anchor scan', () => {
   it('keeps adjoining tools with a response backward and a prompt forward', () => {
     append([user(), tool(), notice('Synthetic result'), assistant()]);
     expect(scan('backward', 1)).toMatchObject({ startOrdinal: 2, endOrdinal: 5, anchorsRemaining: 0, pageStatus: 'complete' });
@@ -80,21 +94,15 @@ describe('bounded conversational anchor scan', () => {
 
   it.each(['backward', 'forward'])('advances all-hidden and zero-anchor intervals by raw coverage (%s)', direction => {
     append(Array.from({ length: 405 }, hidden));
-    let cursorOrdinal = direction === 'backward' ? 406 : 0;
-    const consumed = [];
-    for (let chunk = 0; chunk < 3; chunk++) {
-      const result = scan(direction, 3, { cursorOrdinal });
-      expect(result.anchorsRemaining).toBe(3);
-      expect(ledgerRowsToTranscriptMessages(result.rows)).toEqual([]);
-      expect(result.endOrdinal - result.startOrdinal).toBe(chunk < 2 ? 200 : 5);
-      expect(result.pageStatus).toBe(chunk < 2 ? 'partial' : 'exhausted');
-      consumed.push(...result.rows.map(row => row.ordinal));
-      cursorOrdinal = direction === 'backward' ? result.startOrdinal : result.endOrdinal - 1;
-    }
-    expect(new Set(consumed).size).toBe(405);
+    const result = scan(direction, 3);
+    expect(result.anchorsRemaining).toBe(3);
+    expect(ledgerRowsToTranscriptMessages(result.rows)).toEqual([]);
+    expect(result.endOrdinal - result.startOrdinal).toBe(405);
+    expect(result.pageStatus).toBe('exhausted');
+    expect(new Set(result.rows.map(row => row.ordinal)).size).toBe(405);
   });
 
-  it.each(['backward', 'forward'])('checks a 201st boundary anchor before the raw cap (%s)', direction => {
+  it.each(['backward', 'forward'])('checks an excluded anchor across an internal batch boundary (%s)', direction => {
     const run = [assistant(), ...Array.from({ length: 199 }, tool), user()];
     append(direction === 'forward' ? run : run.reverse());
     const result = scan(direction, 1);
@@ -103,15 +111,12 @@ describe('bounded conversational anchor scan', () => {
     expect(result.pageStatus).toBe('complete');
   });
 
-  it.each(['backward', 'forward'])('continues with zero budget when a 201st zero-weight row remains (%s)', direction => {
-    const run = [assistant(), ...Array.from({ length: 201 }, tool), user()];
+  it.each(['backward', 'forward'])('continues with zero budget through several internal batches (%s)', direction => {
+    const run = [assistant(), ...Array.from({ length: 601 }, tool), user()];
     append(direction === 'forward' ? run : run.reverse());
     const first = scan(direction, 1);
-    expect(first).toMatchObject({ anchorsRemaining: 0, pageStatus: 'partial' });
-    const cursorOrdinal = direction === 'backward' ? first.startOrdinal : first.endOrdinal - 1;
-    const second = scan(direction, 0, { cursorOrdinal });
-    expect(second.rows).toHaveLength(2);
-    expect(second).toMatchObject({ anchorsRemaining: 0, pageStatus: 'complete' });
+    expect(first).toMatchObject({ anchorsRemaining: 0, pageStatus: 'complete' });
+    expect(first.rows).toHaveLength(602);
   });
 
   it.each(['backward', 'forward'])('returns an empty completion at an excluded adjoining anchor (%s)', direction => {
@@ -123,54 +128,41 @@ describe('bounded conversational anchor scan', () => {
     expect(result.endOrdinal).toBe(result.startOrdinal);
   });
 
-  it.each([0, 1])('honors exact UTF-8 payload target with %s excess bytes', excess => {
-    const small = notice('\u00e9'.repeat(32));
-    const empty = notice('');
-    const large = notice('x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET - size(small) - size(empty) + excess));
-    append([small, large, user()]);
-    const result = scan('forward', 1);
-    expect(result.rows).toHaveLength(excess === 0 ? 2 : 1);
-    expect(result.pageStatus).toBe('partial');
+  it.each(['backward', 'forward'])('returns oversized rows and subsequent history in one response (%s)', direction => {
+    append([notice('x'.repeat(1024 * 1024 + 1)), ...Array.from({ length: 205 }, tool),
+      notice('\u00e9'.repeat(600_000)), user()]);
+    const result = scan(direction, 1);
+    expect(result).toMatchObject({ startOrdinal: 1, endOrdinal: 209, pageStatus: 'exhausted' });
+    expect(result.rows).toHaveLength(208);
   });
 
-  it('allows an oversized first row but leaves an oversized lookahead unconsumed', () => {
-    const large = notice('x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET + 1));
-    append([notice('small prefix'), large, user()]);
-    expect(scan('forward', 1)).toMatchObject({ startOrdinal: 1, endOrdinal: 2, pageStatus: 'partial' });
-    expect(scan('forward', 1, { cursorOrdinal: 1 })).toMatchObject({ startOrdinal: 2, endOrdinal: 3, pageStatus: 'partial' });
-    expect(scan('forward', 0, { cursorOrdinal: 1 })).toMatchObject({ startOrdinal: 2, endOrdinal: 3, pageStatus: 'complete' });
-  });
-
-  it('excludes a boundary anchor even when consuming it would exceed the byte budget', () => {
-    append([assistant(), provider(new UserMessage(TS, 'x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET + 1)))]);
+  it('excludes a large boundary anchor regardless of its payload size', () => {
+    append([assistant(), provider(new UserMessage(TS, 'x'.repeat(1024 * 1024 + 1)))]);
     expect(scan('forward', 1)).toMatchObject({ startOrdinal: 1, endOrdinal: 2, pageStatus: 'complete' });
   });
 
   it('advances through a hidden tail and an oversized private row before exposing the prompt', () => {
     append([user(), { kind: 'run-ended', at: TS, origin: 'core', outcome: 'failed',
-      error: { code: 'SYNTHETIC_FAILURE', message: 'x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET + 1) } }, hidden()]);
-    const tail = scan('backward', 1);
-    expect(tail).toMatchObject({ startOrdinal: 3, endOrdinal: 4, anchorsRemaining: 1, pageStatus: 'partial' });
-    expect(ledgerRowsToTranscriptMessages(tail.rows)).toEqual([]);
-    const oversized = scan('backward', tail.anchorsRemaining, { cursorOrdinal: tail.startOrdinal });
-    expect(oversized).toMatchObject({ startOrdinal: 2, endOrdinal: 3, anchorsRemaining: 1, pageStatus: 'partial' });
-    expect(ledgerRowsToTranscriptMessages(oversized.rows)).toEqual([]);
-    const prompt = scan('backward', oversized.anchorsRemaining, { cursorOrdinal: oversized.startOrdinal });
-    expect(prompt).toMatchObject({ startOrdinal: 1, endOrdinal: 2, anchorsRemaining: 0, pageStatus: 'exhausted' });
+      error: { code: 'SYNTHETIC_FAILURE', message: 'x'.repeat(1024 * 1024 + 1) } }, hidden()]);
+    const prompt = scan('backward', 1);
+    expect(prompt).toMatchObject({ startOrdinal: 1, endOrdinal: 4, anchorsRemaining: 0, pageStatus: 'exhausted' });
+    expect(prompt.rows).toHaveLength(3);
     expect(ledgerRowsToTranscriptMessages(prompt.rows)).toEqual([{ ordinal: 1, message: user().message }]);
   });
 
   it('holds the captured watermark under appends and lets a fresh demand see the new head', () => {
     append(Array.from({ length: 201 }, tool));
-    const first = scan('forward', 1);
+    const watermarkOrdinal = head;
     append([assistant()]);
-    expect(scan('forward', 1, { cursorOrdinal: first.endOrdinal - 1, watermarkOrdinal: 201 }))
-      .toMatchObject({ startOrdinal: 201, endOrdinal: 202, pageStatus: 'exhausted', anchorsRemaining: 1 });
+    const pinned = scan('forward', 1, { cursorOrdinal: 150, watermarkOrdinal });
+    expect(pinned).toMatchObject({ startOrdinal: 151, endOrdinal: 202, pageStatus: 'exhausted', anchorsRemaining: 1 });
+    expect(pinned.rows).toHaveLength(51);
+    expect(pinned.rows.at(-1).ordinal).toBe(watermarkOrdinal);
     expect(scan('forward', 1, { cursorOrdinal: 201 }))
       .toMatchObject({ startOrdinal: 202, endOrdinal: 203, pageStatus: 'exhausted', anchorsRemaining: 0 });
   });
 
-  it('partitions synthetic mixed history without skipped or duplicated raw ordinals', () => {
+  it.each([1, 2, 7, 200])('partitions history independently of pauses after %s rows', async pauseAfter => {
     append(Array.from({ length: 1207 }, (_, index) => {
       if (index % 113 === 0) return user();
       if (index % 79 === 0) return assistant();
@@ -179,26 +171,33 @@ describe('bounded conversational anchor scan', () => {
     }));
     for (const direction of ['backward', 'forward']) {
       let cursorOrdinal = direction === 'backward' ? head + 1 : 0;
-      let remaining = 3;
       const ordinals = [];
       for (let count = 0; count < 30; count++) {
-        const result = scan(direction, remaining, { cursorOrdinal });
+        const result = scan(direction, 3, { cursorOrdinal, pauseAfter });
+        expect(await readAnchorPage(VIEW, {
+          direction, cursorOrdinal, watermarkOrdinal: head, anchorsRemaining: 3,
+        }, work => work(db))).toEqual(result);
         ordinals.push(...result.rows.map(row => row.ordinal));
         if (result.pageStatus === 'exhausted') break;
         cursorOrdinal = direction === 'backward' ? result.startOrdinal : result.endOrdinal - 1;
-        remaining = result.pageStatus === 'partial' ? result.anchorsRemaining : 3;
       }
       expect(ordinals.toSorted((a, b) => a - b)).toEqual(Array.from({ length: head }, (_, index) => index + 1));
     }
   });
 
   for (const direction of ['backward', 'forward']) {
-    it.each(['boundary', 'row-cap', 'byte-target', 'decode-error', 'gap'])(
-      `bounds actual iterator work and finalizes its keyset statement (${direction}, %s)`, stop => {
-        const drafts = stop === 'boundary' ? [assistant(), user()]
-          : stop === 'row-cap' ? Array.from({ length: 205 }, tool)
-          : stop === 'byte-target' ? [hidden(), notice('x'.repeat(TRANSCRIPT_ANCHOR_BYTE_TARGET + 1)), user()]
-          : [tool(), tool(), tool()];
+    it.each([
+      ['boundary', 1, 2, 'complete'],
+      ['batch-limit', 200, 200, 'yield'],
+      ['oversized-row', 3, 3, 'exhausted'],
+      ['decode-error', 0, 2, null],
+      ['gap', 0, 2, null],
+    ])(
+      `bounds actual iterator work and finalizes its keyset statement (${direction}, %s)`, (stop, rowCount, pullCount, expectedStop) => {
+        let drafts = [tool(), tool(), tool()];
+        if (stop === 'boundary') drafts = [assistant(), user()];
+        if (stop === 'batch-limit') drafts = Array.from({ length: 205 }, tool);
+        if (stop === 'oversized-row') drafts = [hidden(), notice('x'.repeat(1024 * 1024 + 1)), user()];
         append(direction === 'forward' ? drafts : drafts.reverse());
         if (stop === 'decode-error') db.query("UPDATE transcript_rows SET payload_json = 'invalid synthetic JSON' WHERE ordinal = 2").run();
         if (stop === 'gap') db.query('DELETE FROM transcript_rows WHERE ordinal = 2').run();
@@ -219,14 +218,21 @@ describe('bounded conversational anchor scan', () => {
           return statement;
         });
         try {
-          if (stop === 'decode-error') expect(() => scan(direction, 1)).toThrow();
-          else if (stop === 'gap') expect(() => scan(direction, 1)).toThrow('noncontiguous raw interval');
-          else expect(scan(direction, 1).rows).toHaveLength(stop === 'row-cap' ? 200 : 1);
+          const input = { direction, cursorOrdinal: direction === 'backward' ? head + 1 : 0,
+            watermarkOrdinal: head, anchorsRemaining: 1 };
+          const read = () => readAnchorBatch(db, VIEW, input, input, () => false);
+          if (stop === 'decode-error') expect(read).toThrow();
+          else if (stop === 'gap') expect(read).toThrow('noncontiguous raw interval');
+          else {
+            const result = read();
+            expect(result.rows).toHaveLength(rowCount);
+            expect(result.stop).toBe(expectedStop);
+          }
           expect(querySpy).toHaveBeenCalledTimes(1);
-          expect(pulls).toBe(stop === 'row-cap' ? 201 : 2);
+          expect(pulls).toBe(pullCount);
           expect(allSpy).not.toHaveBeenCalled();
           expect(finalizeSpy).toHaveBeenCalledTimes(1);
-          const args = [VIEW, direction === 'backward' ? head + 1 : 0, head, 201];
+          const args = [VIEW, input.cursorOrdinal, head, 200];
           expect(iterateSpy).toHaveBeenCalledWith(...args);
           const plan = query(`EXPLAIN QUERY PLAN ${querySpy.mock.calls[0][0]}`).all(...args);
           expect(plan.some(row => row.detail.includes('PRIMARY KEY'))).toBe(true);
@@ -241,4 +247,21 @@ describe('bounded conversational anchor scan', () => {
       },
     );
   }
+  it.each([1, 250, 405])('rejects a missing row at ordinal %s instead of reporting exhaustion', ordinal => {
+    append(Array.from({ length: 405 }, hidden));
+    db.query('DELETE FROM transcript_rows WHERE ordinal = ?').run(ordinal);
+    for (const direction of ['forward', 'backward']) {
+      expect(() => scan(direction, 1)).toThrow('Transcript anchor scan');
+    }
+  });
+
+  it('uses the existing primary key and never changes the schema', () => {
+    append([user(), tool(), assistant()]);
+    const schema = db.query('SELECT name, sql FROM sqlite_master ORDER BY name').all();
+    const plan = db.query('EXPLAIN QUERY PLAN SELECT * FROM transcript_rows WHERE view_id = ? AND ordinal < ? AND ordinal <= ? ORDER BY ordinal DESC LIMIT ?').all(VIEW, 4, 3, 200);
+    expect(plan.some(row => row.detail.includes('PRIMARY KEY'))).toBe(true);
+    scan('backward', 1);
+    expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(db.query('SELECT name, sql FROM sqlite_master ORDER BY name').all()).toEqual(schema);
+  });
 });
