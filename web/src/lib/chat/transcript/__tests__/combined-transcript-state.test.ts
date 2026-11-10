@@ -1398,7 +1398,7 @@ describe('combined transcript intervals', () => {
 	it.each(['held', 'error'] as const)('preserves combined demand through parking and background commits (%s)', async interruption => {
 		const { cache, registry, mount, switchChat } = panelFixture({ retainInactive: true });
 		const entries = [input(1), ...Array.from({ length: 599 }, (_, index) => tool(index + 2)), assistant(601)];
-		const read = installHistory(entries);
+		const read = installHistory(entries, 200);
 		mount('left');
 		await registry.loadChatSnapshot(chatId);
 		const transcript = registry.panel('chat-view:window-left')!.transcript;
@@ -1438,7 +1438,7 @@ describe('combined transcript intervals', () => {
 				captureRestoreTarget: () => ({ kind: 'end' }),
 				closeTransients: vi.fn(),
 			});
-			installHistory([...entries, assistant(602)]);
+			installHistory([...entries, assistant(602)], 200);
 			panel.completeInitialBottomRestore();
 			if (interruption === 'error') {
 				await panel.scroll.fillUnderfilledViewport();
@@ -1458,7 +1458,7 @@ describe('combined transcript intervals', () => {
 
 	it('treats hidden-only loader chunks as raw progress without changing public rows', async () => {
 		const { transcript } = fixture();
-		const read = installHistory([assistant(601)]);
+		const read = installHistory([assistant(601)], 200);
 		await transcript.loadMessages(chatId);
 		const before = transcript.entries;
 		const gate = vi.fn().mockResolvedValueOnce('apply').mockResolvedValueOnce('invalidated');
