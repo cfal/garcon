@@ -5,7 +5,7 @@ import type {
 	ActiveTranscriptState,
 	ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import { CHAT_TRANSCRIPT_CACHE_LIMIT, ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import {
@@ -15,7 +15,7 @@ import {
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
-import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+import { WORKSPACE_WINDOW_RESOURCE_CEILING, type ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 
 function message(ordinal: number): TranscriptMessage {
 	return {
@@ -116,6 +116,41 @@ function switchPanel(
 describe('ConversationPanelRegistry', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it('applies incremental updates for a workspace at its window limit', async () => {
+		expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBeLessThanOrEqual(CHAT_TRANSCRIPT_CACHE_LIMIT);
+		const { cache, registry } = fixture({
+			loadTranscriptSnapshot: async (transcript, chatId) => {
+				seed(cache, chatId);
+				transcript.installCachedSnapshot(chatId);
+			},
+		});
+		const visible = Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING }, (_, index) =>
+			presentation(`chat-view:window-${index}`, `chat-${index}`),
+		);
+		try {
+			registry.reconcile(visible);
+			await Promise.all(visible.map(({ chatId }) => registry.loadChatSnapshot(chatId)));
+			for (const { chatId, surfaceId } of visible) {
+				expect(
+					registry.applyCommittedBatch({
+						chatId,
+						transcriptViewId: 'view-1',
+						messages: [message(2)],
+						firstOrdinal: 2,
+						lastOrdinal: 2,
+						resendCandidates: [],
+						noticeRevision: 0,
+					}),
+				).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+				expect(registry.panel(surfaceId)?.transcript.entries.map(({ ordinal }) => ordinal))
+					.toEqual([1, 2]);
+			}
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
 	});
 
 	it('restores an expanded transcript immediately after rapid chat switches', () => {
