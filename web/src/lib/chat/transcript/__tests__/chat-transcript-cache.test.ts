@@ -244,8 +244,8 @@ describe('ChatTranscriptCache', () => {
 		expect(cache.listCursors()).toEqual([]);
 	});
 
-	it('prunes memory entries after maxEntries is exceeded', () => {
-		const cache = new ChatTranscriptCache({ limit: 100, maxEntries: 2 });
+	it('prunes hidden entries after their budget is exceeded', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 2 });
 
 		cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
 		cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'two')]));
@@ -259,7 +259,7 @@ describe('ChatTranscriptCache', () => {
 	it('uses explicit access recency when pruning memory entries', () => {
 		vi.useFakeTimers();
 		try {
-			const cache = new ChatTranscriptCache({ limit: 100, maxEntries: 2 });
+			const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 2 });
 			vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
 			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
 			vi.setSystemTime(new Date('2024-01-01T00:00:01.000Z'));
@@ -275,6 +275,95 @@ describe('ChatTranscriptCache', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('evicts hidden chats before visible chats and releases protection with visibility', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 2 });
+		cache.setVisibleChatIds(['visible']);
+		cache.replaceFromPage('visible', page('view', [entry(1, 'visible')]));
+		cache.replaceFromPage('hidden-old', page('view', [entry(1, 'old')]));
+		cache.replaceFromPage('hidden-middle', page('view', [entry(1, 'middle')]));
+		cache.replaceFromPage('hidden-new', page('view', [entry(1, 'new')]));
+		expect(cache.get('visible')).not.toBeNull();
+		expect(cache.get('hidden-old')).toBeNull();
+		expect(cache.get('hidden-middle')).not.toBeNull();
+		expect(cache.get('hidden-new')).not.toBeNull();
+
+		cache.setVisibleChatIds([]);
+		expect(cache.get('visible')).toBeNull();
+		cache.flush();
+	});
+
+	it('bounds hidden entries independently of visible chats and prunes on release', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 1 });
+		cache.setVisibleChatIds(['chat-1', 'chat-2']);
+		cache.replaceFromPage('chat-1', page('view', [entry(1, 'one')]));
+		cache.replaceFromPage('chat-2', page('view', [entry(1, 'two')]));
+		expect(cache.get('chat-1')).not.toBeNull();
+		expect(cache.get('chat-2')).not.toBeNull();
+
+		cache.setVisibleChatIds(['chat-1']);
+		expect(cache.get('chat-1')).not.toBeNull();
+		expect(cache.get('chat-2')).not.toBeNull();
+		cache.setVisibleChatIds([]);
+		expect(cache.get('chat-1')).toBeNull();
+		expect(cache.get('chat-2')).not.toBeNull();
+		cache.flush();
+	});
+
+	it('keeps consecutive hidden pages and appends current before persistence with visible chats pinned', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 1, storage });
+		cache.replaceFromPage('hidden', {
+			...page('view', [entry(2, 'two')]),
+			nextBeforeOrdinal: 2,
+			hasMore: true,
+		});
+		cache.flush();
+		cache.setVisibleChatIds(['visible']);
+		cache.replaceFromPage('visible', page('view', [entry(1, 'visible')]));
+		cache.replaceFromPage('other-hidden', page('view', [entry(1, 'other')]));
+
+		expect(cache.get('hidden')).toBeNull();
+		cache.applyEarlierPage('hidden', 'view', 2, {
+			...page('view', [entry(1, 'one')]),
+			lastOrdinal: 2,
+		});
+		for (const ordinal of [3, 4]) {
+			expect(
+				cache.applyMessages('hidden', 'view', {
+					firstOrdinal: ordinal,
+					lastOrdinal: ordinal,
+					messages: [entry(ordinal, `message-${ordinal}`)],
+				}),
+			).toMatchObject({ status: 'applied', lastOrdinal: ordinal });
+		}
+		cache.flush();
+		expect(storage.restore('hidden')?.entries.map(({ ordinal }) => ordinal)).toEqual([1, 2, 3, 4]);
+		expect(storage.restore('hidden')?.nextBeforeOrdinal).toBeNull();
+		expect(cache.get('hidden')?.lastOrdinal).toBe(4);
+		expect(cache.get('other-hidden')).toBeNull();
+		expect(cache.get('visible')?.lastOrdinal).toBe(1);
+	});
+
+	it('still invalidates and removes protected entries without losing their visibility', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 1 });
+		cache.setVisibleChatIds(['visible']);
+		cache.replaceFromPage('visible', page('old-view', [entry(1, 'old')]));
+		cache.markStale('visible');
+		expect(cache.get('visible')?.stale).toBe(true);
+		cache.remove('visible');
+		expect(cache.get('visible')).toBeNull();
+		cache.replaceFromPage('visible', page('new-view', [entry(1, 'new')]));
+		cache.replaceFromPage('hidden', page('view', [entry(1, 'hidden')]));
+		cache.applyMessages('other-hidden', 'view', {
+			firstOrdinal: 1,
+			lastOrdinal: 1,
+			messages: [entry(1, 'hidden')],
+		});
+		expect(cache.get('visible')?.transcriptViewId).toBe('new-view');
+		expect(cache.get('hidden')).toBeNull();
+		cache.flush();
 	});
 
 	it('reads reactive entries without mutating cache state during derivation', async () => {

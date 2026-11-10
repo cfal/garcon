@@ -1,6 +1,6 @@
 export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
 export const MAX_MOBILE_RETURN_TARGETS = 32;
-// Stays within the shared transcript cache capacity and the restore depth and node budgets.
+// Bounds visible transcript retention and stays within the restore depth and node budgets.
 export const WORKSPACE_WINDOW_RESOURCE_CEILING = 25;
 export const MIN_PARTITION_RATIO = 0.15;
 export const MAX_PARTITION_RATIO = 0.85;

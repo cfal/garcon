@@ -5,7 +5,10 @@ import type {
 	ActiveTranscriptState,
 	ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { CHAT_TRANSCRIPT_CACHE_LIMIT, ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import {
+	CHAT_TRANSCRIPT_CACHE_LIMIT,
+	ChatTranscriptCache,
+} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import {
@@ -15,7 +18,10 @@ import {
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
-import { WORKSPACE_WINDOW_RESOURCE_CEILING, type ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+import {
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
+	type ChatViewSurfaceId,
+} from '$lib/workspace/surface-types.js';
 
 function message(ordinal: number): TranscriptMessage {
 	return {
@@ -39,6 +45,7 @@ function presentation(
 
 function fixture(
 	options: {
+		maxHiddenEntries?: number;
 		loadTranscriptSnapshot?: (
 			transcript: import('$lib/chat/transcript/active-transcript-state.svelte.js').ActiveTranscriptState,
 			chatId: string,
@@ -49,7 +56,11 @@ function fixture(
 			retainInactiveWindows?: () => boolean;
 	} = {},
 ) {
-	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+	const cache = new ChatTranscriptCache({
+		limit: 100,
+		maxHiddenEntries: options.maxHiddenEntries,
+		persistenceDelayMs: 60_000,
+	});
 	const overlays = new ConversationTranscriptOverlayStore();
 	const lifecycles = new Map<string, ConversationLifecycleState>();
 	const lifecycle = {
@@ -118,40 +129,147 @@ describe('ConversationPanelRegistry', () => {
 		localStorage.clear();
 	});
 
-	it('applies incremental updates for a workspace at its window limit', async () => {
-		expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBeLessThanOrEqual(CHAT_TRANSCRIPT_CACHE_LIMIT);
-		const { cache, registry } = fixture({
-			loadTranscriptSnapshot: async (transcript, chatId) => {
-				seed(cache, chatId);
-				transcript.installCachedSnapshot(chatId);
-			},
-		});
-		const visible = Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING }, (_, index) =>
-			presentation(`chat-view:window-${index}`, `chat-${index}`),
-		);
-		try {
-			registry.reconcile(visible);
-			await Promise.all(visible.map(({ chatId }) => registry.loadChatSnapshot(chatId)));
-			for (const { chatId, surfaceId } of visible) {
-				expect(
-					registry.applyCommittedBatch({
-						chatId,
-						transcriptViewId: 'view-1',
-						messages: [message(2)],
-						firstOrdinal: 2,
-						lastOrdinal: 2,
-						resendCandidates: [],
-						noticeRevision: 0,
-					}),
-				).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
-				expect(registry.panel(surfaceId)?.transcript.entries.map(({ ordinal }) => ordinal))
-					.toEqual([1, 2]);
+	it.each([false, true])(
+		'keeps visible chats cached after switching at the window limit (retain inactive: %s)',
+		async (retainInactive) => {
+			const { cache, registry } = fixture({
+				retainInactiveWindows: () => retainInactive,
+				loadTranscriptSnapshot: async (transcript, chatId) => {
+					seed(cache, chatId);
+					transcript.installCachedSnapshot(chatId);
+					cache.flush();
+				},
+			});
+			const visible = Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING }, (_, index) =>
+				presentation(`chat-view:window-${index}`, `chat-${index}`),
+			);
+			try {
+				registry.reconcile(visible);
+				await Promise.all(visible.map(({ chatId }) => registry.loadChatSnapshot(chatId)));
+				const outgoing = visible[visible.length - 1]!;
+				visible[visible.length - 1] = presentation(outgoing.surfaceId, 'chat-new');
+				registry.prepareForReconcile(visible);
+				registry.reconcile(visible);
+				await registry.loadChatSnapshot('chat-new');
+				for (const { chatId, surfaceId } of visible) {
+					expect(
+						registry.applyCommittedBatch({
+							chatId,
+							transcriptViewId: 'view-1',
+							messages: [message(2)],
+							firstOrdinal: 2,
+							lastOrdinal: 2,
+							resendCandidates: [],
+							noticeRevision: 0,
+						}),
+					).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+					expect(
+						registry.panel(surfaceId)?.transcript.entries.map(({ ordinal }) => ordinal),
+					).toEqual([1, 2]);
+				}
+				for (const ordinal of [2, 3]) {
+					expect(
+						registry.applyCommittedBatch({
+							chatId: outgoing.chatId,
+							transcriptViewId: 'view-1',
+							messages: [message(ordinal)],
+							firstOrdinal: ordinal,
+							lastOrdinal: ordinal,
+							resendCandidates: [],
+							noticeRevision: 0,
+						}),
+					).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+				}
+				expect(cache.get(outgoing.chatId)?.lastOrdinal).toBe(3);
+				expect(registry.hasInactiveWindow(outgoing.chatId)).toBe(retainInactive);
+				for (let index = 0; index < CHAT_TRANSCRIPT_CACHE_LIMIT; index += 1) {
+					seed(cache, `background-${index}`);
+					cache.flush();
+				}
+				for (const { chatId } of visible) {
+					expect(cache.get(chatId)?.lastOrdinal).toBe(2);
+				}
+				expect(cache.get(outgoing.chatId)).toBeNull();
+			} finally {
+				registry.destroy();
+				cache.flush();
 			}
-		} finally {
+		},
+	);
+
+	it.each(['close', 'delete', 'destroy'] as const)(
+		'releases visible cache protection on %s without releasing a remaining duplicate',
+		(action) => {
+			const { cache, registry } = fixture({ maxHiddenEntries: 1 });
+			seed(cache);
+			const remaining = presentation('chat-view:window-right', 'chat-1');
+			registry.reconcile([presentation('chat-view:window-left', 'chat-1'), remaining]);
+			registry.reconcile([remaining]);
+			seed(cache, 'background');
+			seed(cache, 'background-next');
+			expect(cache.get('chat-1')).not.toBeNull();
+			expect(cache.get('background')).toBeNull();
+
+			switch (action) {
+				case 'close':
+					registry.reconcile([]);
+					break;
+				case 'delete':
+					registry.removeChat('chat-1');
+					expect(cache.get('chat-1')).toBeNull();
+					seed(cache);
+					break;
+				case 'destroy':
+					registry.destroy();
+					break;
+			}
+			seed(cache, 'background-new');
+			expect(cache.get('chat-1')).toBeNull();
+			expect(cache.get('background-new')).not.toBeNull();
 			registry.destroy();
 			cache.flush();
-		}
-	});
+		},
+	);
+
+	it.each([false, true])(
+		'keeps moved chats cached while creating a new panel (retain inactive: %s)',
+		async (retainInactive) => {
+			const { cache, registry } = fixture({
+				maxHiddenEntries: 2,
+				retainInactiveWindows: () => retainInactive,
+				loadTranscriptSnapshot: async (transcript, chatId) => {
+					seed(cache, chatId);
+					transcript.installCachedSnapshot(chatId);
+				},
+			});
+			seed(cache, 'chat-1');
+			seed(cache, 'chat-2');
+			registry.reconcile([
+				presentation('chat-view:window-left', 'chat-1'),
+				presentation('chat-view:window-right', 'chat-2'),
+			]);
+			seed(cache, 'background-a');
+			seed(cache, 'background-b');
+			registry
+				.prepareChatSurfaceTransfer({
+					chatId: 'chat-1',
+					sourceSurfaceId: 'chat-view:window-left',
+					destinationSurfaceId: 'chat-view:window-right',
+				})
+				.publish();
+			registry.reconcile([
+				presentation('chat-view:window-left', 'chat-new'),
+				presentation('chat-view:window-right', 'chat-1'),
+			]);
+			await registry.loadChatSnapshot('chat-new');
+			expect(cache.get('chat-1')).not.toBeNull();
+			expect(cache.get('chat-2')).toBeNull();
+			expect(cache.get('chat-new')).not.toBeNull();
+			expect(registry.panel('chat-view:window-right')?.transcript.entries).toEqual([message(1)]);
+			registry.destroy();
+			cache.flush();
+		},
+	);
 
 	it('restores an expanded transcript immediately after rapid chat switches', () => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
