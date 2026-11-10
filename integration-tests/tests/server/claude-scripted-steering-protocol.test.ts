@@ -227,6 +227,80 @@ describe('pinned Claude steering protocol', () => {
     }
   }, 30_000);
 
+  test('correlates peer and task continuations without inventing human input identities', async () => {
+    const harness = await createHarness();
+    const inputId = '00000000-0000-4000-8000-000000000001';
+    const prompt = 'Synthetic peer continuation input';
+    const peer = 'Synthetic peer continuation update';
+    const launched = 'Synthetic parent launched';
+    const peerReply = 'Synthetic parent peer reply';
+    const settled = 'Synthetic parent settled';
+    const childGate = Promise.withResolvers<void>();
+    const reportGate = Promise.withResolvers<void>();
+    harness.model.scriptTurn([claudeToolUse('toolu_continuation_fork', 'Agent', {
+      subagent_type: 'fork', description: 'Synthetic continuation fork', prompt: 'Synthetic child directive',
+    })]);
+    for (let index = 0; index < 5; index += 1) {
+      harness.model.scriptTurn(async (request) => {
+        const messages = JSON.stringify(request.body.messages);
+        if (messages.includes('<fork-boilerplate>')) {
+          if (!messages.includes('toolu_continuation_peer')) {
+            await childGate.promise;
+            return [claudeToolUse('toolu_continuation_peer', 'SendMessage', {
+              to: 'main', message: peer, summary: 'Synthetic continuation update',
+            })];
+          }
+          await reportGate.promise;
+          return [claudeText('Synthetic child report')];
+        }
+        return [claudeText(request.lastUserText.includes('<task-notification>')
+          ? settled : request.lastUserText.includes(peer) ? peerReply : launched)];
+      });
+    }
+
+    try {
+      await harness.send(userFrame(harness.sessionId, inputId, prompt));
+      const initial = await harness.waitFor((message) => message.type === 'result'
+        && message.user_message_uuid === inputId, 'initial parent result');
+      childGate.resolve();
+      const peerResult = await harness.waitFor((message) => message.type === 'result'
+        && message.result === peerReply, 'peer continuation result');
+      reportGate.resolve();
+      const taskResult = await harness.waitFor((message) => message.type === 'result'
+        && message.result === settled, 'task continuation result');
+      const taskResultAt = harness.messages.indexOf(taskResult);
+      await harness.waitFor((message, index) => index > taskResultAt
+        && providerState('idle')(message), 'provider idle after both continuations');
+
+      expect(initial.result).toBe(launched);
+      expect(initial.origin).toBeUndefined();
+      expect(peerResult.origin).toMatchObject({ kind: 'peer' });
+      expect(taskResult.origin).toMatchObject({ kind: 'task-notification' });
+      expect(peerResult.user_message_uuid).toBeUndefined();
+      expect(taskResult.user_message_uuid).toBeUndefined();
+      expect(harness.results()).toEqual([initial, peerResult, taskResult]);
+      expect(harness.results().map((result) => result.session_id))
+        .toEqual([harness.sessionId, harness.sessionId, harness.sessionId]);
+      expect(harness.results().every((result) => result.is_error === false)).toBe(true);
+
+      const entries = await harness.waitForNativeEntries((native) =>
+        JSON.stringify(native).includes(settled), 'peer and task native continuations');
+      for (const kind of ['peer', 'task-notification']) {
+        expect(entries.some((entry) => entry.type === 'user' && asRecord(entry.origin).kind === kind))
+          .toBe(true);
+      }
+      const reloaded = convertClaudeEntries(entries);
+      expect(reloaded.flatMap((message) => message.type === 'user-message' ? [message.content] : []))
+        .toEqual([prompt]);
+      expect(reloaded.flatMap((message) => message.type === 'assistant-message' ? [message.content] : []))
+        .toEqual([launched, peerReply, settled]);
+      harness.model.assertSettled();
+    } finally {
+      childGate.resolve();
+      reportGate.resolve();
+    }
+  }, 30_000);
+
   test('queues following guidance before replay and keeps result boundaries', async () => {
     const harness = await createHarness();
     const originalId = crypto.randomUUID();
