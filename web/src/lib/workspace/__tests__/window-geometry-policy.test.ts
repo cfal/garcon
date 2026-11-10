@@ -17,7 +17,7 @@ import {
 	resolveWorkspaceSplitAdmission,
 	workspaceWindowsFitHost,
 } from '../window-geometry-policy';
-import { balanceWindowRow, computeWindowRects } from '../window-tree';
+import { balanceWindowRow, collectWindowNodes, computeWindowRects } from '../window-tree';
 
 function workspaceWindow(id: WorkspaceWindowId, surfaceIds: readonly string[] = [`chat:${id}`]) {
 	return {
@@ -70,7 +70,7 @@ function snapshot(root: DesktopWorkspaceNode): WorkspaceLayoutSnapshot {
 }
 
 describe('workspace split admission', () => {
-	it('uses available space to admit or block splits above eight windows', () => {
+	it('admits or blocks splits in a 16-window grid by available space', () => {
 		let nextId = 0;
 		function grid(depth: number): DesktopWorkspaceNode {
 			const id = ++nextId;
@@ -83,12 +83,12 @@ describe('workspace split admission', () => {
 				grid(depth - 1),
 			);
 		}
-		const root = grid(4);
-		const windows = computeWindowRects(root).windows;
+		const layout = snapshot(grid(4));
+		const windows = collectWindowNodes(layout.desktopRoot);
 		expect(windows).toHaveLength(16);
-		for (const { workspaceWindow } of windows) {
+		for (const window of windows) {
 			for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
-				const request = { snapshot: snapshot(root), targetWindowId: workspaceWindow.id, edge };
+				const request = { snapshot: layout, targetWindowId: window.id, edge };
 				expect(
 					resolveWorkspaceSplitAdmission({ ...request, hostSize: { width: 3200, height: 1920 } }),
 				).toEqual({ allowed: true });

@@ -283,6 +283,15 @@ function createHarness(
 	};
 }
 
+async function populateWindowLimitFixture(coordinator: WorkspaceCoordinator): Promise<void> {
+	await coordinator.openSingletonInNewWindow('git-history');
+	await coordinator.openSingletonInNewWindow('git-compare');
+	await coordinator.openSingletonInNewWindow('files');
+	for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
+		await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
+	}
+}
+
 function createShortcutDispatcher(
 	workspace: WorkspaceCoordinator,
 	transients: TransientLayerRegistry,
@@ -3226,12 +3235,7 @@ describe('WorkspaceCoordinator', () => {
 
 	it('rejects new windows beyond the window limit', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewWindow('git-history');
-		await coordinator.openSingletonInNewWindow('git-compare');
-		await coordinator.openSingletonInNewWindow('files');
-		for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
-			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
-		}
+		await populateWindowLimitFixture(coordinator);
 		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		await expect(coordinator.openSingletonInNewWindow('commit')).rejects.toBeInstanceOf(
@@ -3243,12 +3247,7 @@ describe('WorkspaceCoordinator', () => {
 	it('rejects a directional Chat move beyond the window limit', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.showChatInCurrentWindow('chat-a');
-		await coordinator.openSingletonInNewWindow('git-history');
-		await coordinator.openSingletonInNewWindow('git-compare');
-		await coordinator.openSingletonInNewWindow('files');
-		for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
-			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
-		}
+		await populateWindowLimitFixture(coordinator);
 		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		await expect(
@@ -3389,12 +3388,7 @@ describe('WorkspaceCoordinator', () => {
 
 	it('allows a net-zero edge move at the window limit', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewWindow('git-history');
-		await coordinator.openSingletonInNewWindow('git-compare');
-		await coordinator.openSingletonInNewWindow('files');
-		for (let index = 4; index < WORKSPACE_WINDOW_RESOURCE_CEILING; index++) {
-			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
-		}
+		await populateWindowLimitFixture(coordinator);
 		const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
 		expect(windowCountOf(layout.snapshot)).toBe(WORKSPACE_WINDOW_RESOURCE_CEILING);
 

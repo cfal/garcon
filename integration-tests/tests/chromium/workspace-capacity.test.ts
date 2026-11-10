@@ -11,10 +11,6 @@ import {
   type WorkspaceWindowId,
 } from '../../../web/src/lib/workspace/surface-types.js';
 import { parseTerminalStreamServerMessage } from '../../../common/terminal.js';
-import type {
-  PersistedWorkspaceLayoutNode,
-  PersistedWorkspaceLayoutV2,
-} from '../../../common/workspace-layout.js';
 import { withTimeout } from '../../support/deferred.js';
 
 declare global {
@@ -262,31 +258,27 @@ for (const count of [4, 6, 8, 12, 16]) {
           count - 1,
         );
         markPhase('restoring the populated layout on the same host');
-        await page.waitForFunction((expected) => {
-          const raw = localStorage.getItem('workspace_layout_v2');
-          if (!raw) return false;
-          const layout: PersistedWorkspaceLayoutV2 = JSON.parse(raw);
-          const countWindows = (node: PersistedWorkspaceLayoutNode): number =>
-            node.type === 'window'
-              ? 1
-              : node.children.reduce((sum, child) => sum + countWindows(child), 0);
-          return countWindows(layout.root) === expected;
-        }, count - 1);
-        const placements = await page.locator('[data-workspace-window-id]').evaluateAll((windows) =>
-          windows.map((element) => ({
-            id: element.getAttribute('data-workspace-window-id'),
-            activeSurface: element.getAttribute('data-workspace-window-active-surface'),
-          })),
-        );
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        await page.waitForFunction((expected) => {
-          const restored = [...document.querySelectorAll('[data-workspace-window-id]')].map(
-            (element) => ({
+        const placements = await page
+          .locator('[data-workspace-window-id]')
+          .evaluateAll((windows) =>
+            windows.map((element) => ({
               id: element.getAttribute('data-workspace-window-id'),
               activeSurface: element.getAttribute('data-workspace-window-active-surface'),
-            }),
+            })),
           );
-          return JSON.stringify(restored) === JSON.stringify(expected);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForFunction((expected) => {
+          const windows = document.querySelectorAll('[data-workspace-window-id]');
+          return (
+            windows.length === expected.length &&
+            expected.every(({ id, activeSurface }, index) => {
+              const element = windows[index]!;
+              return (
+                element.getAttribute('data-workspace-window-id') === id &&
+                element.getAttribute('data-workspace-window-active-surface') === activeSurface
+              );
+            })
+          );
         }, placements);
         await page.waitForFunction(
           (expected) => document.querySelectorAll('[data-chat-scroll-viewport]').length === expected,

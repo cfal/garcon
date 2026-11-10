@@ -79,15 +79,16 @@ function balancedTree(
 }
 
 describe('workspace layout V2 schema', () => {
+	it('keeps the window ceiling within the worst-case restore budgets', () => {
+		expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBeLessThanOrEqual(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH);
+		expect(2 * WORKSPACE_WINDOW_RESOURCE_CEILING - 1).toBeLessThanOrEqual(
+			WORKSPACE_LAYOUT_MAX_PARSE_NODES,
+		);
+	});
+
 	it.each([12, 16, WORKSPACE_WINDOW_RESOURCE_CEILING])(
 		'round-trips %d runtime-created windows in a maximally skewed tree',
 		(count) => {
-			expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBeLessThanOrEqual(
-				WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
-			);
-			expect(2 * WORKSPACE_WINDOW_RESOURCE_CEILING - 1).toBeLessThanOrEqual(
-				WORKSPACE_LAYOUT_MAX_PARSE_NODES,
-			);
 			let snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 				{ type: 'close-window', windowId: 'window-files' },
 				{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-1' },

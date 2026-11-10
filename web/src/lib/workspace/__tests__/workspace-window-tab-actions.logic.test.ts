@@ -163,10 +163,7 @@ describe('workspace window tab actions', () => {
 		const snapshot = snapshotWithWindows(
 			[
 				source,
-				workspaceWindow('window-two', ['terminal:two']),
-				workspaceWindow('window-three', ['terminal:three']),
-				workspaceWindow('window-four', ['terminal:four']),
-				...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 4 }, (_, index) =>
+				...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 1 }, (_, index) =>
 					workspaceWindow(`window-extra-${index}`, [`terminal:extra-${index}`]),
 				),
 			],
