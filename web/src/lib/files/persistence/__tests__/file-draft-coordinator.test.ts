@@ -8,7 +8,11 @@ import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-dra
 
 function document() {
 	const value = new FileDocumentState(
-		{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
+		{
+			executorId: 'local',
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'src/file.ts',
+		},
 		'file',
 	);
 	value.baseline = 'initial';
@@ -27,6 +31,84 @@ function harness(durable = true) {
 }
 
 describe('FileDraftCoordinator', () => {
+	it('keeps only the latest pending checkpoint while a write is blocked', async () => {
+		const { repository, coordinator } = harness();
+		const put = repository.putDraft.bind(repository);
+		let release!: () => void;
+		const barrier = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const writes = vi.spyOn(repository, 'putDraft').mockImplementationOnce(async (record) => {
+			await barrier;
+			await put(record);
+		});
+		const value = document();
+		void coordinator.settle(value);
+		await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+		for (let revision = 0; revision < 100; revision += 1) {
+			value.content = `synthetic revision ${revision}`;
+			void coordinator.settle(value);
+		}
+		const flushed = coordinator.flush();
+		release();
+		await flushed;
+		expect(writes).toHaveBeenCalledTimes(2);
+		expect(writes.mock.calls.map(([record]) => record.content)).toEqual([
+			'changed',
+			'synthetic revision 99',
+		]);
+		coordinator.destroy();
+	});
+
+	it('does not coalesce checkpoints across a successful save deletion', async () => {
+		const { repository, coordinator } = harness();
+		const put = repository.putDraft.bind(repository);
+		const remove = repository.deleteDraft.bind(repository);
+		const operations: string[] = [];
+		let release!: () => void;
+		const barrier = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.spyOn(repository, 'putDraft').mockImplementation(async (record) => {
+			operations.push(record.content);
+			if (operations.length === 1) await barrier;
+			await put(record);
+		});
+		vi.spyOn(repository, 'deleteDraft').mockImplementation(async (id) => {
+			operations.push('delete');
+			await remove(id);
+		});
+		const value = document();
+		void coordinator.settle(value);
+		await vi.waitFor(() => expect(operations).toEqual(['changed']));
+		value.content = 'before save';
+		void coordinator.settle(value);
+		value.dirty = false;
+		void coordinator.settle(value);
+		value.content = 'after save';
+		const final = coordinator.settle(value);
+		release();
+		await final;
+		expect(operations).toEqual(['changed', 'before save', 'delete', 'after save']);
+		coordinator.destroy();
+	});
+
+	it('discovers metadata without reading bodies and reports a missing recovery body', async () => {
+		const { repository, coordinator } = harness();
+		coordinator.closeDocument(document());
+		await coordinator.flush();
+		const read = vi.spyOn(repository, 'getDraft');
+		await coordinator.initialize();
+		expect(read).not.toHaveBeenCalled();
+		const [summary] = coordinator.available;
+		expect(summary).not.toHaveProperty('content');
+		await repository.deleteDraft(summary.documentId);
+		expect(await coordinator.read(summary)).toBeNull();
+		expect(coordinator.error).toBeTruthy();
+		expect(coordinator.available).toHaveLength(1);
+		coordinator.destroy();
+	});
+
 	it('does not warn about unavailable storage when a clean document needs no backup', async () => {
 		const { coordinator } = harness(false);
 		const value = document();
@@ -66,7 +148,7 @@ describe('FileDraftCoordinator', () => {
 		await coordinator.settle(reopened);
 		const records = await repository.getDrafts('user', 'deployment');
 		expect(records).toHaveLength(1);
-		expect(records[0].content).toBe('newer edit');
+		expect((await repository.getDraft(records[0].documentId))?.content).toBe('newer edit');
 		coordinator.destroy();
 	});
 
@@ -115,7 +197,8 @@ describe('FileDraftCoordinator', () => {
 		await coordinator.flush();
 		await coordinator.initialize();
 		const draft = coordinator.available[0];
-		expect(draft.content).toBe('changed');
+		expect(draft).not.toHaveProperty('content');
+		expect((await coordinator.read(draft))?.content).toBe('changed');
 		coordinator.discard(draft);
 		expect(coordinator.available).toEqual([]);
 		await coordinator.flush();
@@ -154,7 +237,8 @@ describe('FileDraftCoordinator', () => {
 		expect(repository.putDraft).toHaveBeenCalledOnce();
 		release();
 		await checkpoint;
-		expect((await repository.getDrafts('user', 'deployment'))[0].content).toBe('reopened edit');
+		const [summary] = await repository.getDrafts('user', 'deployment');
+		expect((await repository.getDraft(summary.documentId))?.content).toBe('reopened edit');
 		coordinator.destroy();
 	});
 });

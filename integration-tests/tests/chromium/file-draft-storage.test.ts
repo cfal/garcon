@@ -65,8 +65,29 @@ describe('File draft storage failures', () => {
         const repository = createFileDraftRepository();
         const user = 'synthetic-user';
         const deployment = 'synthetic-deployment';
+        const migratedDraft = {
+          schemaVersion: 1 as const,
+          userNamespace: user,
+          deploymentId: deployment,
+          documentId: fileDraftKey(user, deployment, '/project', 'migrated.txt'),
+          canonicalFileRootPath: '/project',
+          normalizedRelativePath: 'migrated.txt',
+          content: 'synthetic recovery from schema two',
+          savedAt: 1,
+        };
+        const originalGetAll = IDBObjectStore.prototype.getAll;
+        let bodyScans = 0;
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'drafts') bodyScans += 1;
+          return originalGetAll.apply(this, args);
+        };
         const blocker = await new Promise<IDBDatabase>((resolve, reject) => {
-          const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, 1);
+          const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, 2);
+          request.onupgradeneeded = () => {
+            request.result
+              .createObjectStore('drafts', { keyPath: 'documentId' })
+              .put(migratedDraft);
+          };
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });
@@ -78,7 +99,9 @@ describe('File draft storage failures', () => {
         } finally {
           blocker.close();
         }
-        await repository.getDrafts(user, deployment);
+        const migrated = await repository.getDrafts(user, deployment);
+        const migratedBody = await repository.getDraft(migratedDraft.documentId);
+        await repository.clearDrafts(user, deployment);
         const draft = {
           schemaVersion: 1 as const,
           userNamespace: user,
@@ -118,7 +141,7 @@ describe('File draft storage failures', () => {
         } finally {
           IDBObjectStore.prototype.put = originalPut;
         }
-        const afterFailure = await repository.getDrafts(user, deployment);
+        const afterFailure = await repository.getDraft(draft.documentId);
         await repository.clearDrafts(user, deployment);
 
         const conformance: unknown[] = [];
@@ -126,8 +149,11 @@ describe('File draft storage failures', () => {
           await candidate.putDraft(draft);
           await candidate.putDraft({ ...draft, content: 'latest', savedAt: 2 });
           const read = await candidate.getDrafts(user, deployment);
-          read[0]!.content = 'mutated read';
-          const reread = await candidate.getDrafts(user, deployment);
+          read[0]!.contentBytes = 0;
+          const rereadSummary = await candidate.getDrafts(user, deployment);
+          const body = (await candidate.getDraft(draft.documentId))!;
+          body.content = 'mutated read';
+          const reread = await candidate.getDraft(draft.documentId);
           await candidate.deleteDraft(draft.documentId);
           const empty = await candidate.getDrafts(user, deployment);
           for (let i = 0; i <= FILE_DRAFT_LIMIT; i++) {
@@ -174,6 +200,7 @@ describe('File draft storage failures', () => {
           await candidate.clearDrafts(user, deployment);
           conformance.push({
             reread,
+            rereadSummary,
             empty,
             bounded: bounded.map((entry) => entry.normalizedRelativePath),
             recentLine: (await candidate.getRecents(user, deployment))[0]!.line,
@@ -203,16 +230,27 @@ describe('File draft storage failures', () => {
           unhandled,
           blockedMessage,
           conformance,
+          migrated,
+          migratedBody,
+          bodyScans,
         };
       }, source);
       expect(result.failures).toEqual(['AbortError', 'write failed', 'VersionError']);
       expect(result.retained).toEqual([]);
-      expect(result.afterFailure).toMatchObject([{ content: 'local edit' }]);
+      expect(result.afterFailure).toMatchObject({ content: 'local edit' });
+      expect(result.migrated).toHaveLength(1);
+      expect(result.migrated[0]).not.toHaveProperty('content');
+      expect(result.migrated[0]?.contentBytes).toBe(
+        'synthetic recovery from schema two'.length * 2,
+      );
+      expect(result.migratedBody?.content).toBe('synthetic recovery from schema two');
+      expect(result.bodyScans).toBe(0);
       expect(result.unhandled).toEqual([]);
       expect(result.blockedMessage).toContain('blocked by another tab');
       expect(result.conformance[0]).toEqual(result.conformance[1]);
       expect(result.conformance[0]).toMatchObject({
-        reread: [{ content: 'latest' }],
+        reread: { content: 'latest' },
+        rereadSummary: [{ contentBytes: 12 }],
         empty: [],
         cleared: [],
         otherCount: 1,

@@ -72,10 +72,10 @@ test.each([
         if (deleted) await unlink(path);
         if (lateDiscovery) {
           await page.addInitScript(() => {
-            const getAll = IDBObjectStore.prototype.getAll;
+            const getAll = IDBIndex.prototype.getAll;
             let failDiscovery = true;
-            IDBObjectStore.prototype.getAll = function (...args) {
-              if (this.name === 'drafts' && failDiscovery) {
+            IDBIndex.prototype.getAll = function (...args) {
+              if (this.objectStore.name === 'draft-summaries' && failDiscovery) {
                 failDiscovery = false;
                 throw new Error('Storage unavailable');
               }
