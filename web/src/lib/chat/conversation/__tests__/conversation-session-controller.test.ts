@@ -469,7 +469,6 @@ function createDeps(chat = createRunningChat()) {
 			);
 		}),
 		transcriptCache: {
-			markValidated: vi.fn(),
 			readAppliedCursor: vi.fn(() => ({
 				transcriptViewId: 'generation-1',
 				lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
