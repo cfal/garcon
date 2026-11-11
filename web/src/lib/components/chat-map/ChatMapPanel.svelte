@@ -24,6 +24,7 @@
 	let currentTime = $state(new Date());
 	let scrollRegion = $state<HTMLDivElement>();
 	let scrollTop = 0;
+	let scrollLeft = 0;
 	const model = $derived(visible ? buildChatMapModel(chats, controller.query) : null);
 	const titleId = $derived(`chat-map-title-${presentation.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
 
@@ -34,7 +35,10 @@
 	});
 
 	$effect(() => {
-		if (visible && scrollRegion) scrollRegion.scrollTop = scrollTop;
+		if (visible && scrollRegion) {
+			scrollRegion.scrollTop = scrollTop;
+			scrollRegion.scrollLeft = scrollLeft;
+		}
 	});
 
 	$effect(() => {
@@ -137,7 +141,10 @@
 
 		<div
 			bind:this={scrollRegion}
-			onscroll={(event) => (scrollTop = event.currentTarget.scrollTop)}
+			onscroll={(event) => {
+				scrollTop = event.currentTarget.scrollTop;
+				scrollLeft = event.currentTarget.scrollLeft;
+			}}
 			class="min-h-0 flex-1 overflow-auto p-3 sm:p-4"
 			data-chat-map-scroll-region
 		>

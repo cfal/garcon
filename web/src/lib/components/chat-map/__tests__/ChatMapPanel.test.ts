@@ -77,13 +77,14 @@ describe('ChatMapPanel', () => {
 		view.controller.collapseAll(['chat:parent']);
 		view.controller.setQuery('parent');
 		const region = view.container.querySelector('[data-chat-map-scroll-region]')!;
-		await fireEvent.scroll(region, { target: { scrollTop: 120 } });
+		await fireEvent.scroll(region, { target: { scrollTop: 120, scrollLeft: 80 } });
 		await view.rerender({ visible: false });
 		expect(view.container.querySelector('[data-chat-map-panel]')).toBeNull();
 		await view.rerender({ chats: [...chats, chat('another')] });
 		expect(view.controller.collapsedNodeKeys).toEqual(new Set(['chat:parent']));
 		await view.rerender({ visible: true });
 		expect(view.container.querySelector('[data-chat-map-scroll-region]')?.scrollTop).toBe(120);
+		expect(view.container.querySelector('[data-chat-map-scroll-region]')?.scrollLeft).toBe(80);
 		expect(view.controller.query).toBe('parent');
 		expect(screen.getByRole('link', { name: /Chat parent/ })).toBeTruthy();
 	});
