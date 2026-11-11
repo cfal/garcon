@@ -9,10 +9,13 @@ describe('ConversationFeedItemState', () => {
 		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set());
 		const disclosure = items.disclosurePort('row-1');
 
+		expect(items.hasDisclosureOverrides).toBe(false);
 		expect(disclosure.open('thinking', 'thinking', true)).toBe(true);
 		disclosure.setOpen('thinking', 'thinking', false, true);
+		expect(items.hasDisclosureOverrides).toBe(true);
 		expect(disclosure.open('thinking', 'thinking', true)).toBe(false);
 		disclosure.setOpen('thinking', 'thinking', true, true);
+		expect(items.hasDisclosureOverrides).toBe(false);
 		expect(disclosure.open('thinking', 'thinking', false)).toBe(false);
 	});
 
@@ -88,11 +91,13 @@ describe('ConversationFeedItemState', () => {
 		const items = new ConversationFeedItemState();
 		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set([PERMISSION_OCCURRENCE]));
 		items.setDisclosureOpen(disclosureStateKey('row-1', 'compaction', 'summary'), true, false);
+		expect(items.hasDisclosureOverrides).toBe(true);
 		items.setPermissionDraft(PERMISSION_OCCURRENCE, {
 			selectedQuestionOptions: { question: ['answer'] },
 			rawInputOpen: true,
 		});
 		items.reconcile('chat-1:generation-1', new Set(), new Set());
+		expect(items.hasDisclosureOverrides).toBe(false);
 
 		expect(items.disclosureOpen(disclosureStateKey('row-1', 'compaction', 'summary'), false)).toBe(
 			false,

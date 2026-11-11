@@ -124,6 +124,24 @@ describe('ConversationFeed', () => {
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
 	});
 
+	it('retains an individual disclosure through append and resets it on view replacement', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'thinking-disclosure' });
+		const disclosure = await screen.findByRole('button', { name: 'Thinking' });
+		expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+		await fireEvent.click(disclosure);
+		expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+		expect(container.querySelector('[data-chat-tool-group]')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Append answer' }));
+		await screen.findByText('Synthetic appended answer');
+		expect(screen.getByRole('button', { name: 'Thinking' })).toBe(disclosure);
+		expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+		expect(screen.queryByText('Synthetic thinking body')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Replace transcript' }));
+		await screen.findByText('Synthetic thinking body');
+		expect(screen.getByRole('button', { name: 'Thinking' }).getAttribute('aria-expanded')).toBe('true');
+		expect(screen.queryByText('Synthetic appended answer')).toBeNull();
+	});
+
 	it('keeps the raw feed unchanged until refresh, then combines rows behind an accessible disclosure', async () => {
 		const raw = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
 		await waitFor(() => expect(raw.container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));

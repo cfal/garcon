@@ -19,6 +19,7 @@
 		BashToolUseMessage,
 		ExitPlanModeToolUseMessage,
 		ToolResultMessage,
+		ThinkingMessage,
 		UserMessage,
 	} from '$shared/chat-types';
 	import {
@@ -51,6 +52,7 @@
 			| 'row-ids'
 			| 'bash-filter'
 			| 'tool-run'
+			| 'thinking-disclosure'
 			| 'large-tool-run'
 			| 'count-shrink'
 			| 'count-shrink-survivors'
@@ -71,6 +73,11 @@
 	const pendingPermissions: PendingPermissionRequest[] = [];
 
 	const chatState = new ActiveTranscriptState();
+	function replaceThinkingTranscript(viewId: string): void {
+		chatState.replaceGeneration('chat-1', viewId, [
+			{ ordinal: 1, message: new ThinkingMessage('2026-07-01T00:00:00.000Z', 'Synthetic thinking body') },
+		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+	}
 	let viewportPort: ConversationViewportPort | null = null;
 	let navigationResult = $state('idle');
 	async function navigateToTool(ordinal: number, presentation = false): Promise<void> {
@@ -79,7 +86,9 @@
 			id: `generation-1:${ordinal}`,
 		}) ?? 'not-ready';
 	}
-	if (initialTranscriptScenario === 'file-links') {
+	if (initialTranscriptScenario === 'thinking-disclosure') {
+		replaceThinkingTranscript('generation-1');
+	} else if (initialTranscriptScenario === 'file-links') {
 		chatState.replaceGeneration(initialChatContext.chatId, 'generation-1', [
 			{ ordinal: 1, message: new AssistantMessage('2026-07-01T00:00:00.000Z', '[Message file](./message.txt)') },
 		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
@@ -282,6 +291,12 @@
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
 		>Announce</button
 	>
+{/if}
+{#if transcriptScenario === 'thinking-disclosure'}
+	<button onclick={() => chatState.applyMessages('chat-1', 'generation-1', [
+		{ ordinal: 2, message: new AssistantMessage('2026-07-01T00:00:01.000Z', 'Synthetic appended answer') },
+	], 2, 2)}>Append answer</button>
+	<button onclick={() => replaceThinkingTranscript('generation-2')}>Replace transcript</button>
 {/if}
 {#if transcriptScenario === 'tool-run' || transcriptScenario === 'large-tool-run'}
 	<button onclick={() => localSettings.toggle('combineToolUseMessages')}>Toggle combination</button>

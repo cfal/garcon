@@ -68,11 +68,24 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 	};
 }
 
+function expectMatchesFullProjection(
+	actual: ReturnType<ConversationFeedProjectionState['reconcile']>,
+	config: ProjectionInput,
+): void {
+	const full = new ConversationFeedProjectionState().reconcile(config);
+	expect(actual.model).toEqual(full.model);
+	expect(actual.renderModel).toEqual(full.renderModel);
+	expect(actual.geometry.keys).toEqual(full.geometry.keys);
+	expect(actual.geometry.estimates).toEqual(full.geometry.estimates);
+}
+
 describe('ConversationFeedProjectionState', () => {
-	it.each([false, true])('matches full combined projection through generated appends (expanded=%s)', (expanded) => {
+	it.each(['none', 'all', 'mixed'])('matches full combined projection through generated appends (expanded=%s)', (expanded) => {
 		const projections = new ConversationFeedProjectionState();
 		let config = input({ rows: [], combineToolUseMessages: true, earlierBoundary: 'when-collapsed',
-			expandedToolMemberIds: expanded ? new Set(Array.from({ length: 160 }, (_, i) => `generated:${i}`)) : new Set() });
+			expandedToolMemberIds: new Set(Array.from({ length: 160 }, (_, i) => i)
+				.filter(i => expanded === 'all' || (expanded === 'mixed' && i % 3 === 0))
+				.map(i => `generated:${i}`)) });
 		let previous = projections.reconcile(config);
 		let seed = 17;
 		let reusedPrefixes = 0;
@@ -86,13 +99,10 @@ describe('ConversationFeedProjectionState', () => {
 			config = { ...config, rows: [...config.rows, nextRow], mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
 			const savedPrevious = new Map(previous.model.indexByRowId);
 			const next = projections.reconcile(config);
-			const full = new ConversationFeedProjectionState().reconcile(config);
-			expect(next.model).toEqual(full.model);
-			expect(next.renderModel).toEqual(full.renderModel);
-			expect(next.geometry.keys).toEqual(full.geometry.keys);
-			expect(next.geometry.estimates).toEqual(full.geometry.estimates);
+			expectMatchesFullProjection(next, config);
 			expect(previous.model.indexByRowId).toEqual(savedPrevious);
-			if (next.model !== previous.model && next.model.items[0] === previous.model.items[0]) reusedPrefixes++;
+			const prefix = previous.model.items.find(item => item.kind === 'transcript');
+			if (prefix && next.model !== previous.model && next.model.items.includes(prefix)) reusedPrefixes++;
 			previous = next;
 		}
 		expect(reusedPrefixes).toBeGreaterThan(100);
@@ -125,13 +135,58 @@ describe('ConversationFeedProjectionState', () => {
 			config = { ...config, rows: [...config.rows, messageRow(`append:${index}`, message)],
 				mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
 			const next = projections.reconcile(config);
-			const full = new ConversationFeedProjectionState().reconcile(config);
-			expect(next.model).toEqual(full.model);
-			expect(next.renderModel).toEqual(full.renderModel);
-			expect(next.geometry.keys).toEqual(full.geometry.keys);
-			expect(next.geometry.estimates).toEqual(full.geometry.estimates);
-			expect(next.model.items[0]).toBe(previous.model.items[0]);
+			expectMatchesFullProjection(next, config);
+			const prefix = previous.model.items.find(item => item.kind === 'transcript');
+			expect(prefix).toBeDefined();
+			expect(next.model.items.find(item => item.key === prefix!.key)).toBe(prefix);
 			previous = next;
+		}
+	});
+
+	it.each([false, true])('moves a pending permission inline when its anchor arrives (combined=%s)', (combined) => {
+		const projections = new ConversationFeedProjectionState();
+		const pendingPermissions: ProjectionInput['pendingPermissions'] = [{
+			permissionOccurrenceId: 'synthetic-permission',
+			requestedTool: new BashToolUseMessage(TS, 'pending-tool', 'printf synthetic'),
+			transcript: { transcriptViewId: 'generation-1', afterOrdinal: 3 },
+		}];
+		const initialRows = rows().map((row, index) => ({ ...row, ordinal: index + 1 }));
+		let config = input({ rows: initialRows, combineToolUseMessages: combined, pendingPermissions });
+		const previous = projections.reconcile(config);
+		expect(previous.model.items.findIndex(item => item.kind === 'permission'))
+			.toBeGreaterThan(previous.model.indexByRowId.get('generation-1:2')!);
+		config = { ...config, rows: [...initialRows,
+			{ kind: 'message', id: 'generation-1:3', ordinal: 3, message: new ReadToolUseMessage(TS, 'arrived', '/synthetic') },
+			{ kind: 'message', id: 'generation-1:4', ordinal: 4, message: new AssistantMessage(TS, 'after anchor') },
+		], mutationClock: clock(2, { 'live-append': 2 }) };
+		const next = projections.reconcile(config);
+		expectMatchesFullProjection(next, config);
+		expect(next.model.items.findIndex(item => item.kind === 'permission'))
+			.toBe(next.model.indexByRowId.get('generation-1:3')! + 1);
+		expect(next.model.items.findIndex(item => item.kind === 'permission'))
+			.toBeLessThan(next.model.indexByRowId.get('generation-1:4')!);
+	});
+
+	it.each(['expanded', 'protected'])('rebuilds a collapsed tail when an appended member is predeclared %s', (mode) => {
+		const projections = new ConversationFeedProjectionState();
+		let config = input({
+			rows: [{ kind: 'message', id: 'generation-1:1', ordinal: 1, message: new ReadToolUseMessage(TS, 'first', '/synthetic') }],
+			combineToolUseMessages: true, earlierBoundary: 'when-collapsed',
+			expandedToolMemberIds: new Set(mode === 'expanded' ? ['generation-1:2'] : []),
+			protectedVirtualKeys: mode === 'protected' ? [JSON.stringify(['chat-1:generation-1', 'transcript:generation-1:2'])] : [],
+		});
+		const previous = projections.reconcile(config);
+		expect(previous.model.items.find(item => item.kind === 'tool-group')?.expanded).toBe(false);
+		expect(previous.model.items.some(item => item.kind === 'earlier-boundary')).toBe(true);
+		config = { ...config, rows: [...config.rows,
+			{ kind: 'message', id: 'generation-1:2', ordinal: 2, message: new ReadToolUseMessage(TS, 'second', '/synthetic') },
+		], mutationClock: clock(2, { 'live-append': 2 }) };
+		const next = projections.reconcile(config);
+		expectMatchesFullProjection(next, config);
+		expect(next.model.items.find(item => item.kind === 'tool-group')?.expanded).toBe(true);
+		expect(next.model.items.some(item => item.kind === 'earlier-boundary')).toBe(false);
+		for (const row of config.rows) {
+			expect(next.model.items[next.model.indexByRowId.get(row.id)!]).toMatchObject({ kind: 'transcript', item: { id: row.id } });
 		}
 	});
 
@@ -170,9 +225,11 @@ describe('ConversationFeedProjectionState', () => {
 		{ name: 'duplicate output', messages: [markdown, complete, markdown], retainsPrefix: false },
 		{ name: 'duplicate result', messages: [markdown, complete, complete], retainsPrefix: false },
 		{ name: 'publication gap', messages: [stderr, gap, markdown, complete], retainsPrefix: false },
-	])('matches full virtualization for $name while preserving keys and geometry', ({ messages, retainsPrefix }) => {
+		{ name: 'durable row after duplicate diagnostic', messages: [plain, failed, errorNotice, new AssistantMessage(TS, 'after')], retainsPrefix: false },
+	].flatMap(example => [false, true].map(combineToolUseMessages => ({ ...example, combineToolUseMessages }))))(
+		'matches full virtualization for $name (combined=$combineToolUseMessages)', ({ name, messages, retainsPrefix, combineToolUseMessages }) => {
 		const projections = new ConversationFeedProjectionState();
-		let config = input({ rows: [rows()[0]!] });
+		let config = input({ rows: [rows()[0]!], combineToolUseMessages });
 		let previous = projections.reconcile(config);
 		for (const [index, message] of messages.entries()) {
 			const row: ChatDisplayRow = 'kind' in message ? message : {
@@ -180,13 +237,14 @@ describe('ConversationFeedProjectionState', () => {
 			};
 			config = { ...config, rows: [...config.rows, row], mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
 			const next = projections.reconcile(config);
-			const rebuilt = new ConversationFeedProjectionState().reconcile(config);
-			expect(next.model).toEqual(rebuilt.model);
-			expect(next.geometry.keys).toEqual(rebuilt.geometry.keys);
-			expect(next.geometry.estimates).toEqual(rebuilt.geometry.estimates);
+			expectMatchesFullProjection(next, config);
 			if (next.geometry !== previous.geometry) expect(next.geometry.endBehavior).toBe('restore-if-pinned');
 			if (retainsPrefix) expect(next.model.items[1]).toBe(previous.model.items[1]);
 			previous = next;
+		}
+		if (name === 'durable row after duplicate diagnostic') {
+			expect(previous.model.indexByRowId.has('local-error')).toBe(true);
+			expect(previous.renderModel.items.find(item => item.id === 'local-error')).not.toHaveProperty('duplicateOfRowId');
 		}
 	});
 
