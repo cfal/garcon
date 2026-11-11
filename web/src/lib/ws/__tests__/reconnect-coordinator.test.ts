@@ -503,7 +503,7 @@ describe('ChatReconnectCoordinator', () => {
 				messages: [messages[2]!], firstOrdinal: 3, lastOrdinal: 3, resendCandidates: [], noticeRevision: 0,
 			})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
 			replay.resolve(deltaResponse('chat-1', 'generation-selected', [messageJson(2, 'row-2')]));
-			await flushUntil(() => invalidate.mock.calls.length === 2);
+			await flushUntil(() => invalidate.mock.calls.length >= 2);
 			replacementSnapshot.resolve(page(2));
 			await Promise.all([pending, reconnect]);
 			expect(read).toHaveBeenCalledTimes(3);
@@ -512,6 +512,64 @@ describe('ChatReconnectCoordinator', () => {
 		} finally {
 			read.mockRestore();
 			panels.destroy();
+			cache.flush();
+			localStorage.clear();
+		}
+	});
+
+	it.each(['retained', 'unmounted'] as const)('invalidates a snapshot when abandoning replay drops live commits (%s)', async presentation => {
+		localStorage.clear();
+		const { cache, panels, descriptor, messages, page } = snapshotRecoveryFixture(2);
+		cache.replaceFromPage('chat-1', page(1));
+		const replay = deferred<Record<string, unknown>>();
+		const read = vi.spyOn(chatsApi, 'getChatMessages').mockResolvedValueOnce(page(1)).mockResolvedValue(page(2));
+		const deps = createReconnectDeps();
+		deps.ws.sendRequest.mockImplementation(async request => 'chatId' in request
+			? replay.promise : reconnectStateResponse());
+		const coordinator = new ChatReconnectCoordinator({ ...deps, panels });
+		let reconnect: Promise<void> | undefined;
+		try {
+			panels.reconcile([descriptor]);
+			const original = panels.panel(descriptor.surfaceId)!;
+			original.attachPresentation({
+				getScrollContainer: () => null, getViewport: () => null, getQueueContainer: () => undefined,
+				captureRestoreTarget: () => ({ kind: 'end' }), closeTransients: () => {}, prepareForHide: () => {},
+			} satisfies ConversationPanelPresentationPort);
+			await coordinator.handleConnectionState(true);
+			await coordinator.handleConnectionState(false);
+			reconnect = coordinator.handleConnectionState(true);
+			await flushUntil(() => deps.ws.sendRequest.mock.calls.some(([request]) => 'type' in request && request.type === 'chat-subscribe'));
+			await panels.loadChatSnapshot('chat-1');
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ stale: false, lastOrdinal: 1 });
+			expect(panels.applyCommittedBatch({
+				chatId: 'chat-1', transcriptViewId: 'generation-selected', messages: messages.slice(1),
+				firstOrdinal: 2, lastOrdinal: 2, resendCandidates: [], noticeRevision: 0,
+			}).kind).toBe('applied');
+			expect(cache.get('chat-1')?.messages).toEqual(messages.slice(0, 1));
+			panels.prepareForReconcile([]);
+			panels.reconcile([], presentation === 'retained' ? [descriptor] : []);
+			if (presentation === 'retained') {
+				expect(panels.panel(descriptor.surfaceId)).toBe(original);
+				expect(original.isPresentationVisible).toBe(false);
+				replay.reject(new Error('Replay interrupted'));
+			} else {
+				replay.resolve(deltaResponse('chat-1', 'generation-selected', []));
+			}
+			await reconnect;
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ stale: true, lastOrdinal: 1 });
+			expect(panels.panel(descriptor.surfaceId)).toBeNull();
+			expect(read).toHaveBeenCalledOnce();
+			panels.reconcile([descriptor]);
+			await panels.loadChatSnapshot('chat-1');
+			expect(read).toHaveBeenCalledTimes(2);
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ stale: false, lastOrdinal: 2 });
+			expect(panels.panel(descriptor.surfaceId)!.transcript.entries).toEqual(messages);
+		} finally {
+			await coordinator.handleConnectionState(false);
+			panels.destroy();
+			replay.resolve(deltaResponse('chat-1', 'generation-selected', []));
+			await Promise.allSettled([reconnect]);
+			read.mockRestore();
 			cache.flush();
 			localStorage.clear();
 		}

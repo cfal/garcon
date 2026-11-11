@@ -469,7 +469,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number {
 		const previous = this.#reconnectReplays.get(chatId);
-		if (previous) previous.replay.abort(previous.replayToken);
+		if (previous) this.abortReconnectReplay(previous.token, chatId);
 
 		const token = ++this.#reconnectReplayEpoch;
 		const replay = new TranscriptReconnectReplayState((replayChatId, batch) =>
@@ -503,15 +503,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	abortReconnectReplay(token: number, chatId: string): void {
 		const active = this.#reconnectReplays.get(chatId);
 		if (!active || active.token !== token) return;
-		active.replay.abort(active.replayToken);
+		const discardedLiveCommits = active.replay.abort(active.replayToken);
 		this.#reconnectReplays.delete(chatId);
+		if (discardedLiveCommits) {
+			this.invalidateChatSnapshot(chatId);
+			this.markChatStale(chatId);
+		}
 	}
 
 	abortReconnectReplays(): void {
-		for (const active of this.#reconnectReplays.values()) {
-			active.replay.abort(active.replayToken);
+		for (const [chatId, active] of this.#reconnectReplays) {
+			this.abortReconnectReplay(active.token, chatId);
 		}
-		this.#reconnectReplays.clear();
 	}
 
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult {

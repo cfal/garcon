@@ -752,6 +752,30 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it.each(['abort', 'abort-all', 'supersede'] as const)('fences snapshots when %s discards buffered live commits', operation => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		const token = registry.beginReconnectReplay('chat-1', 'view-1');
+		const snapshot = cache.trackSnapshotRead('chat-1');
+		try {
+			registry.applyCommittedBatch({
+				chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(2)],
+				firstOrdinal: 2, lastOrdinal: 2, resendCandidates: [], noticeRevision: 0,
+			});
+			expect(cache.get('chat-1')?.stale).toBe(false);
+			if (operation === 'abort') registry.abortReconnectReplay(token, 'chat-1');
+			else if (operation === 'abort-all') registry.abortReconnectReplays();
+			else registry.beginReconnectReplay('chat-1', 'view-1');
+			expect(snapshot.isCurrent()).toBe(false);
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ stale: true, lastOrdinal: 1 });
+		} finally {
+			snapshot.release();
+			registry.destroy();
+			cache.flush();
+			localStorage.clear();
+		}
+	});
+
 	it('keeps duplicate surfaces independent while sharing lifecycle identity', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
