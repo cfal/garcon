@@ -34,14 +34,18 @@ describe('FileDraftCoordinator', () => {
 	it('keeps only the latest pending checkpoint while a write is blocked', async () => {
 		const { repository, coordinator } = harness();
 		const put = repository.putDraft.bind(repository);
-		let release!: () => void;
-		const barrier = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const writes = vi.spyOn(repository, 'putDraft').mockImplementationOnce(async (record) => {
-			await barrier;
-			await put(record);
-		});
+		const firstWrite = Promise.withResolvers<void>();
+		const finalWrite = Promise.withResolvers<void>();
+		const writes = vi
+			.spyOn(repository, 'putDraft')
+			.mockImplementationOnce(async (record) => {
+				await firstWrite.promise;
+				await put(record);
+			})
+			.mockImplementationOnce(async (record) => {
+				await finalWrite.promise;
+				await put(record);
+			});
 		const value = document();
 		void coordinator.settle(value);
 		await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
@@ -49,16 +53,79 @@ describe('FileDraftCoordinator', () => {
 			value.content = `synthetic revision ${revision}`;
 			void coordinator.settle(value);
 		}
-		const flushed = coordinator.flush();
-		release();
+		const completed = vi.fn();
+		const flushed = coordinator.flush().then(completed);
+		firstWrite.resolve();
+		await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(2));
+		expect(completed).not.toHaveBeenCalled();
+		expect((await repository.getDraft(writes.mock.calls[0][0].documentId))?.content).toBe(
+			'changed',
+		);
+		finalWrite.resolve();
 		await flushed;
 		expect(writes).toHaveBeenCalledTimes(2);
 		expect(writes.mock.calls.map(([record]) => record.content)).toEqual([
 			'changed',
 			'synthetic revision 99',
 		]);
+		expect((await repository.getDraft(writes.mock.calls[0][0].documentId))?.content).toBe(
+			'synthetic revision 99',
+		);
 		coordinator.destroy();
 	});
+
+	it.each([false, true])(
+		'orders explicit discard after queued checkpoints (reopen: %s)',
+		async (reopen) => {
+			const { repository, coordinator } = harness();
+			const value = document();
+			await coordinator.settle(value);
+			await coordinator.initialize();
+			const [summary] = coordinator.available;
+			const put = repository.putDraft.bind(repository);
+			const remove = repository.deleteDraft.bind(repository);
+			const blocked = Promise.withResolvers<void>();
+			const operations: string[] = [];
+			vi.spyOn(repository, 'putDraft').mockImplementation(async (record) => {
+				operations.push(record.content);
+				if (operations.length === 1) await blocked.promise;
+				await put(record);
+			});
+			vi.spyOn(repository, 'deleteDraft').mockImplementation(async (id) => {
+				operations.push('delete');
+				await remove(id);
+			});
+			try {
+				coordinator.closeDocument(value);
+				await vi.waitFor(() => expect(operations).toEqual(['changed']));
+				value.content = 'before discard';
+				coordinator.closeDocument(value);
+				value.dispose();
+				coordinator.discard(summary);
+				if (reopen) {
+					const reopened = document();
+					reopened.content = 'reopened edit';
+					coordinator.closeDocument(reopened);
+					reopened.dispose();
+				}
+				blocked.resolve();
+				await coordinator.flush();
+				expect(operations).toEqual([
+					'changed',
+					'before discard',
+					'delete',
+					...(reopen ? ['reopened edit'] : []),
+				]);
+				expect(coordinator.available).toEqual([]);
+				const retained = await repository.getDraft(summary.documentId);
+				if (reopen) expect(retained?.content).toBe('reopened edit');
+				else expect(retained).toBeNull();
+			} finally {
+				blocked.resolve();
+				coordinator.destroy();
+			}
+		},
+	);
 
 	it('does not coalesce checkpoints across a successful save deletion', async () => {
 		const { repository, coordinator } = harness();
