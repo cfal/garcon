@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { WebSocketRoute } from 'playwright';
+import { expect as browserExpect, type WebSocketRoute } from 'playwright/test';
 import { AssistantMessage, BashToolUseMessage, ToolResultMessage } from '../../../common/chat-types.js';
 import { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { canonicalWorkspaceSnapshot } from '../../../web/src/lib/workspace/canonical-layout.js';
@@ -87,6 +87,15 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
       const history = await integration.client.getMessages(chat.chatId);
       chat.ordinal = history.lastOrdinal;
     }
+    const intervals = [];
+    for (const windowId of ['window-main', 'window-right']) {
+      const sizer = page.locator(`[data-conversation-panel="chat-view:${windowId}"] [data-chat-virtual-sizer]`);
+      const count = Number(await sizer.getAttribute('data-chat-transcript-entry-count'));
+      const firstOrdinal = await sizer.getAttribute('data-chat-transcript-first-ordinal');
+      expect(count).toBeGreaterThan(0);
+      expect(Number(firstOrdinal)).toBeGreaterThan(0);
+      intervals.push({ sizer, count, firstOrdinal: firstOrdinal! });
+    }
     const connected = await socket.promise;
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
@@ -121,6 +130,10 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
         batchTimes.push(performance.now() - batchStartedAt);
       }
       const profile = await cdp.send('Profiler.stop');
+      for (const interval of intervals) {
+        await browserExpect(interval.sizer).toHaveAttribute('data-chat-transcript-entry-count', String(interval.count + target));
+        await browserExpect(interval.sizer).toHaveAttribute('data-chat-transcript-first-ordinal', interval.firstOrdinal);
+      }
       await writeFile(join(OUTPUT, `cpu-${target}.json`), JSON.stringify(profile.profile));
       await cdp.send('HeapProfiler.collectGarbage');
       const metrics = await cdp.send('Performance.getMetrics');
@@ -149,7 +162,7 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
     }
     singleRowTimes.sort((a, b) => a - b);
     const interaction = {
-      singleRowP50Ms: singleRowTimes[10], singleRowP95Ms: singleRowTimes[19],
+      singleRowP50Ms: singleRowTimes[9], singleRowP95Ms: singleRowTimes[18],
       longTasks: await page.evaluate(() => Reflect.get(window, '__syntheticLongTasks')),
     };
     await writeFile(join(OUTPUT, 'interaction.json'), JSON.stringify(interaction, null, 2));

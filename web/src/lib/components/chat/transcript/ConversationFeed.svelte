@@ -480,6 +480,7 @@
 			data-chat-virtual-model-count={projection.model.items.length}
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
 			data-chat-transcript-entry-count={chatState.entries.length}
+			data-chat-transcript-first-ordinal={chatState.entries[0]?.ordinal}
 			{@attach virtualController.sizer}
 		>
 			{#each virtualItems as virtualItem (virtualItem.key)}

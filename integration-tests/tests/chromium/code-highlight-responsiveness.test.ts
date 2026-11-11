@@ -42,23 +42,30 @@ test('typing remains responsive while a large code fence is highlighted', async 
     // Loads the language module before measuring token publication and DOM work.
     publishCode('const warmup = 1;\n');
     await browserExpect(page.locator('.cm-code-keyword')).not.toHaveCount(0);
-    const source = 'const syntheticValue = { key: "value", count: 42 };\n'.repeat(2_000);
+    // Stays below the segment cap so actual completion differs from initial plain text.
+    const source = 'const syntheticValue = { key: "value", count: 42 };\n'.repeat(200);
     const publishAtKeystroke = 5;
     const inputLatenciesMs: number[] = [];
     const code = page.locator('.markdown-code-block code').last();
     const highlightedSpans = code.locator('span');
+    let highlightedDuringTyping = false;
     for (let index = 0; index < 30; index += 1) {
       if (index === publishAtKeystroke) publishCode(source);
       const start = performance.now();
       await page.keyboard.type('x');
       // Includes rendering opportunities and the DOM probe in the interaction measurement.
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      if (index >= publishAtKeystroke) expect(await highlightedSpans.count()).toBeLessThanOrEqual(2_000);
+      if (index >= publishAtKeystroke) {
+        const spans = await highlightedSpans.count();
+        expect(spans).toBeLessThanOrEqual(2_000);
+        if (spans > 0 && await code.textContent() === source) highlightedDuringTyping = true;
+      }
       inputLatenciesMs.push(performance.now() - start);
       await page.waitForTimeout(20);
     }
     await browserExpect(code).toHaveText(source);
-    expect(await highlightedSpans.count()).toBe(0);
+    expect(highlightedDuringTyping).toBe(true);
+    expect(await highlightedSpans.count()).toBeGreaterThan(0);
     await browserExpect(editor).toHaveText('x'.repeat(inputLatenciesMs.length));
     const maxInputLatencyMs = Math.max(...inputLatenciesMs);
     console.info('Large code fence input latency', { maxMs: maxInputLatencyMs });
