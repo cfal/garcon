@@ -666,7 +666,7 @@
 
 	{#if isMobile && mobileChatSurface}
 		<div class="absolute inset-0 overflow-hidden bg-background">
-			{#if mobileChat && mobilePanel}
+			{#if mobileChat && mobilePanel && conversationPanels.retainedWindowId(mobilePanel.surfaceId) === null}
 				{#key mobilePanel}
 					{const panel = mobilePanel}
 					{const chat = mobileChat}
@@ -685,7 +685,7 @@
 						reserveMobileToolbar={true}
 					/>
 				{/key}
-			{:else if mobileChatPresentation === 'loading'}
+			{:else if mobileChatPresentation === 'loading' || mobilePanel}
 				<ChatLoadingState announcementsEnabled={mobileChatIsComposerAnchor} />
 			{:else}
 				<ChatEmptyState />

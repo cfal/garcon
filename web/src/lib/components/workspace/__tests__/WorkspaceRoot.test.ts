@@ -38,6 +38,7 @@ import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import { panelMounts } from './ConversationPanelTestStub.svelte';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn(), getCombinedChatMessages: vi.fn() }));
@@ -579,6 +580,7 @@ describe('WorkspaceRoot', () => {
 
 	afterEach(() => {
 		cleanup();
+		panelMounts.length = 0;
 		(testContext.current?.localSettings as LocalSettingsStore | undefined)?.destroy();
 		(testContext.current?.projectResolution as ProjectResolutionStore | undefined)?.destroy();
 		testContext.current = null;
@@ -1140,7 +1142,7 @@ describe('WorkspaceRoot', () => {
 				edge: 'right', newWindowId: 'window-2', partitionId: 'partition-1' },
 			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId('window-2'), returnStack: [] },
 		]));
-		const { container, rerender } = renderRoot();
+		const { rerender } = renderRoot();
 		const panels = testContext.current?.conversationPanels as ConversationPanelRegistry;
 		const panel = panels.panel(chatViewSurfaceId('window-2'))!;
 		await waitFor(() => expect(panel.transcript.isLoadingMessages).toBe(false));
@@ -1151,24 +1153,11 @@ describe('WorkspaceRoot', () => {
 		await tick();
 		expect(panels.panel(chatViewSurfaceId('window-2'))).toBe(panel);
 		expect(panel.isPresentationVisible).toBe(false);
-		const mobileMounts = new Set<Element>();
-		const observer = new MutationObserver(records => {
-			for (const record of records) {
-				for (const node of record.addedNodes) {
-					if (!(node instanceof Element)) continue;
-					const added = node.matches('[data-testid="conversation-panel"]') ? [node]
-						: [...node.querySelectorAll('[data-testid="conversation-panel"]')];
-					for (const item of added) {
-						if (!item.closest('[data-workspace-window-id]')) mobileMounts.add(item);
-					}
-				}
-			}
-		});
-		observer.observe(container, { childList: true, subtree: true });
+		panelMounts.length = 0;
 		await rerender({ isMobile: true, chatActions });
 		await Promise.resolve();
-		observer.disconnect();
-		expect(mobileMounts.size).toBe(1);
+		expect(panelMounts).toHaveLength(1);
+		expect(panelMounts[0]?.visible).toBe(true);
 		expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1);
 	});
 
