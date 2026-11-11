@@ -1,17 +1,20 @@
 import type { CanvasConnection, CanvasContent, CanvasNode } from '$shared/chat-canvas';
 
 function sameNode(left: CanvasNode, right: CanvasNode): boolean {
+	if (left === right) return true;
+	if (
+		left.id !== right.id ||
+		left.position.x !== right.position.x ||
+		left.position.y !== right.position.y
+	) {
+		return false;
+	}
+	if (left.type === 'box' && right.type === 'box') return left.title === right.title;
 	return (
-		left === right ||
-		(left.id === right.id &&
-			left.position.x === right.position.x &&
-			left.position.y === right.position.y &&
-			(left.type === 'box' && right.type === 'box'
-				? left.title === right.title
-				: left.type === 'chat' &&
-					right.type === 'chat' &&
-					left.chatId === right.chatId &&
-					left.boxId === right.boxId))
+		left.type === 'chat' &&
+		right.type === 'chat' &&
+		left.chatId === right.chatId &&
+		left.boxId === right.boxId
 	);
 }
 
