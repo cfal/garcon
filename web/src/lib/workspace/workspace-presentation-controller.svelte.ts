@@ -632,6 +632,10 @@ export class WorkspacePresentationController {
 				});
 			}
 			return true;
+		} finally {
+			for (const surfaceId of surfaceIds) {
+				if (!this.layout.surface(surfaceId)) this.#frames.release(surfaceId);
+			}
 		}
 	}
 

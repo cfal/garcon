@@ -16,6 +16,7 @@ export interface SurfaceFrameHandle {
 }
 
 interface FrameRegistration {
+	surfaceId: string;
 	handle: SurfaceFrameHandle;
 	token: symbol;
 	generation: number;
@@ -26,6 +27,7 @@ interface FrameWaiter {
 	resolve: (handle: SurfaceFrameHandle) => void;
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
+	onAbort: () => void;
 }
 
 function frameKey(surfaceId: string, host: PresentationHostId): string {
@@ -43,29 +45,27 @@ export class SurfaceAttachmentError extends Error {
 }
 
 export class SurfaceFrameRegistry {
-	#generationBySurface = new Map<string, number>();
-	#abortBySurface = new Map<string, AbortController>();
+	#nextGeneration = 0;
+	#transfers = new Map<string, { generation: number; controller: AbortController }>();
 	#registrations = new Map<string, FrameRegistration>();
 	#waiters = new Map<string, FrameWaiter>();
 
 	beginTransfer(surfaceId: string, host: PresentationHostId): FrameExpectation {
 		this.cancel(surfaceId);
-		const generation = (this.#generationBySurface.get(surfaceId) ?? 0) + 1;
+		const generation = ++this.#nextGeneration;
 		const controller = new AbortController();
-		this.#generationBySurface.set(surfaceId, generation);
-		this.#abortBySurface.set(surfaceId, controller);
+		this.#transfers.set(surfaceId, { generation, controller });
 		return { surfaceId, host, generation, signal: controller.signal };
 	}
 
 	register(surfaceId: string, host: PresentationHostId, handle: SurfaceFrameHandle): () => void {
 		const key = frameKey(surfaceId, host);
 		const token = Symbol(key);
-		const generation = this.#generationBySurface.get(surfaceId) ?? 0;
-		this.#registrations.set(key, { handle, token, generation });
+		const generation = this.#transfers.get(surfaceId)?.generation ?? 0;
+		this.#registrations.set(key, { surfaceId, handle, token, generation });
 		const waiter = this.#waiters.get(key);
 		if (waiter && this.#isCurrent(waiter.expectation)) {
-			clearTimeout(waiter.timer);
-			this.#waiters.delete(key);
+			this.#removeWaiter(key, waiter);
 			waiter.resolve(handle);
 		}
 		return () => {
@@ -81,23 +81,24 @@ export class SurfaceFrameRegistry {
 			return Promise.resolve(registration.handle);
 		}
 		return new Promise((resolve, reject) => {
+			const previous = this.#waiters.get(key);
+			if (previous) {
+				this.#removeWaiter(key, previous);
+				previous.reject(this.#abortError());
+			}
 			const timer = setTimeout(() => {
 				if (this.#waiters.get(key) !== waiter) return;
-				this.#waiters.delete(key);
+				this.#removeWaiter(key, waiter);
 				reject(new SurfaceAttachmentError(expectation.surfaceId, expectation.host));
 			}, FRAME_REGISTRATION_TIMEOUT_MS);
-			const waiter: FrameWaiter = { expectation, resolve, reject, timer };
+			const onAbort = () => {
+				if (this.#waiters.get(key) !== waiter) return;
+				this.#removeWaiter(key, waiter);
+				reject(this.#abortError());
+			};
+			const waiter: FrameWaiter = { expectation, resolve, reject, timer, onAbort };
 			this.#waiters.set(key, waiter);
-			expectation.signal.addEventListener(
-				'abort',
-				() => {
-					if (this.#waiters.get(key) !== waiter) return;
-					clearTimeout(timer);
-					this.#waiters.delete(key);
-					reject(this.#abortError());
-				},
-				{ once: true },
-			);
+			expectation.signal.addEventListener('abort', onAbort, { once: true });
 		});
 	}
 
@@ -109,25 +110,37 @@ export class SurfaceFrameRegistry {
 	}
 
 	cancel(surfaceId: string): void {
-		this.#abortBySurface.get(surfaceId)?.abort();
-		this.#abortBySurface.delete(surfaceId);
+		this.#transfers.get(surfaceId)?.controller.abort();
+		this.#transfers.delete(surfaceId);
 		for (const [key, waiter] of this.#waiters) {
 			if (waiter.expectation.surfaceId !== surfaceId) continue;
-			clearTimeout(waiter.timer);
-			this.#waiters.delete(key);
+			this.#removeWaiter(key, waiter);
 			waiter.reject(this.#abortError());
 		}
 	}
 
+	release(surfaceId: string): void {
+		this.cancel(surfaceId);
+		for (const [key, registration] of this.#registrations) {
+			if (registration.surfaceId === surfaceId) this.#registrations.delete(key);
+		}
+	}
+
 	destroy(): void {
-		for (const surfaceId of this.#abortBySurface.keys()) this.cancel(surfaceId);
+		for (const surfaceId of this.#transfers.keys()) this.cancel(surfaceId);
 		this.#registrations.clear();
+	}
+
+	#removeWaiter(key: string, waiter: FrameWaiter): void {
+		clearTimeout(waiter.timer);
+		waiter.expectation.signal.removeEventListener('abort', waiter.onAbort);
+		this.#waiters.delete(key);
 	}
 
 	#isCurrent(expectation: FrameExpectation): boolean {
 		return (
 			!expectation.signal.aborted &&
-			this.#generationBySurface.get(expectation.surfaceId) === expectation.generation
+			this.#transfers.get(expectation.surfaceId)?.generation === expectation.generation
 		);
 	}
 
