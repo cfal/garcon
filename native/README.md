@@ -37,6 +37,10 @@ bun install --frozen-lockfile
 bun run --cwd native tauri dev
 ```
 
+`bun run --cwd native tauri dev --release` optimizes the Rust host while retaining
+Tauri's development server for the launcher. Packaged builds use embedded assets;
+both modes retain the launcher's origin and route restrictions.
+
 The CLI builds the launcher and generates platform icons from the existing Carbon
 brand asset. No frontend dev server is required. Enter the complete deployment
 URL, such as `https://example.com/tools/garcon/`. Every cold app launch returns to
