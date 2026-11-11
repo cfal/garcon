@@ -2,7 +2,6 @@ import type { RendererThemeId } from '$lib/theme/themes';
 
 export const MERMAID_SOURCE_LIMIT = 50_000;
 export const MERMAID_OUTPUT_LIMIT = 1_000_000;
-export const MERMAID_PENDING_LIMIT = 16;
 export const MERMAID_CACHE_BYTE_LIMIT = 4 * 1024 * 1024;
 const MERMAID_CACHE_ENTRY_LIMIT = 64;
 
@@ -48,8 +47,6 @@ export class MermaidRenderQueue {
 		}
 		let job = this.#jobs.get(key);
 		if (!job) {
-			if (this.#pending.length >= MERMAID_PENDING_LIMIT)
-				return Promise.reject(new Error('Diagram render queue is full'));
 			job = { key, source, theme, controller: new AbortController(), consumers: new Set() };
 			this.#jobs.set(key, job);
 			this.#pending.push(job);

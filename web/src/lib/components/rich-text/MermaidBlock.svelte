@@ -8,6 +8,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	import * as m from '$lib/paraglide/messages.js';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import MermaidViewerDialog from '$lib/components/rich-text/MermaidViewerDialog.svelte';
+	import CodeBlock from './CodeBlock.svelte';
 	import { renderMermaid, resolveMermaidThemeId } from '$lib/components/rich-text/mermaid-loader';
 	import { getThemeRuntime } from '$lib/context';
 
@@ -102,6 +103,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		</div>
 	{:else if renderError}
 		<div class="text-sm text-destructive">{renderError}</div>
+		<CodeBlock lang="mermaid" {text} />
 	{:else if renderedSvg}
 		<div class="mermaid-thumbnail">
 			<!-- Inert artwork prevents diagram links from competing with viewer activation. -->

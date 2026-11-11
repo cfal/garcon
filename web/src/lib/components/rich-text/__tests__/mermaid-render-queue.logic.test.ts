@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
 	MERMAID_OUTPUT_LIMIT,
-	MERMAID_PENDING_LIMIT,
 	MERMAID_SOURCE_LIMIT,
 	MermaidRenderQueue,
 } from '../mermaid-render-queue';
@@ -68,23 +67,24 @@ describe('Mermaid render admission', () => {
 		expect(render).toHaveBeenCalledTimes(2);
 	});
 
-	it('bounds pending requests and immediately reclaims cancelled admission', async () => {
+	it('serializes a large live document and removes its cancelled queued revisions', async () => {
 		const active = deferred();
 		const render = vi
 			.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(async () => '<svg/>')
 			.mockReturnValueOnce(active.promise);
 		const queue = new MermaidRenderQueue(render);
 		const first = queue.render('active', 'standard-light');
-		const controllers = Array.from({ length: MERMAID_PENDING_LIMIT }, () => new AbortController());
+		const controllers = Array.from({ length: 40 }, () => new AbortController());
 		const pending = controllers.map((controller, index) =>
 			queue.render(`pending-${index}`, 'standard-light', controller.signal).catch(() => undefined),
 		);
-		await expect(queue.render('overflow', 'standard-light')).rejects.toThrow('queue is full');
-		for (const controller of controllers) controller.abort();
+		const overflow = queue.render('overflow', 'standard-light');
+		for (const controller of controllers.slice(0, 20)) controller.abort();
 		const latest = queue.render('latest', 'standard-light');
+		expect(render).toHaveBeenCalledOnce();
 		active.resolve('<svg/>');
-		await Promise.all([first, latest, ...pending]);
-		expect(render).toHaveBeenCalledTimes(2);
+		await Promise.all([first, latest, overflow, ...pending]);
+		expect(render).toHaveBeenCalledTimes(23);
 	});
 
 	it('rejects excessive source/output and continues after render failures', async () => {

@@ -275,11 +275,15 @@ describe('MermaidBlock', () => {
 		});
 	});
 
-	it('does not expose a thumbnail or viewer when rendering fails', async () => {
+	it('preserves the complete copyable source without a thumbnail when rendering fails', async () => {
 		mockedRenderMermaid.mockRejectedValue(new Error('Invalid diagram'));
-		render(MermaidBlock, { text: 'invalid' });
+		const source = 'flowchart LR\n' + 'A --> B\n'.repeat(7_000);
+		const { container } = render(MermaidBlock, { text: source });
 		await screen.findByText('Invalid diagram');
-		expect(screen.queryByRole('button')).toBeNull();
+		expect(container.querySelector('code')?.textContent).toBe(source);
+		expect(screen.queryByRole('button', { name: 'Expand diagram' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+		expect(copyToClipboard).toHaveBeenCalledWith(source);
 		expect(screen.queryByRole('dialog')).toBeNull();
 	});
 
