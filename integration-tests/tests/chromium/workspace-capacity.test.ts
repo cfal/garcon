@@ -220,11 +220,12 @@ for (const [count, rows] of [[4, 2], [6, 2], [8, 2], [12, 2], [16, 2], [25, 5]] 
         const viewport = { width: count <= 12 ? 2560 : 3840, height: rows === 5 ? 2160 : 1440 };
         await page.setViewportSize(viewport);
         markPhase('populating independent conversations');
+        const turnsPerChat = 24;
         const chatIds: string[] = [];
         for (let chatIndex = 0; chatIndex < count - 3; chatIndex++) {
           const chatId = integration.newChatId();
           chatIds.push(chatId);
-          for (let turn = 0; turn < 24; turn++) {
+          for (let turn = 0; turn < turnsPerChat; turn++) {
             const content =
               `capacity-${chatIndex}-${turn}\n` +
               Array.from(
@@ -303,7 +304,7 @@ for (const [count, rows] of [[4, 2], [6, 2], [8, 2], [12, 2], [16, 2], [25, 5]] 
         );
         for (const [index, chatId] of chatIds.entries()) {
           await page.locator(`[data-conversation-panel-chat-id="${chatId}"]`)
-            .getByText(`echo:capacity-${index}-23`, { exact: false }).waitFor();
+            .getByText(`echo:capacity-${index}-${turnsPerChat - 1}`, { exact: false }).waitFor();
         }
         await page
           .locator(`[data-workspace-window-titlebar="${anchor}"]`)

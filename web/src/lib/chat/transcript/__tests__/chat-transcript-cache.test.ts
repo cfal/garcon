@@ -339,8 +339,9 @@ describe('ChatTranscriptCache', () => {
 			).toMatchObject({ status: 'applied', lastOrdinal: ordinal });
 		}
 		cache.flush();
-		expect(storage.restore('hidden')?.entries.map(({ ordinal }) => ordinal)).toEqual([1, 2, 3, 4]);
-		expect(storage.restore('hidden')?.nextBeforeOrdinal).toBeNull();
+		const restored = storage.restore('hidden');
+		expect(restored?.entries.map(({ ordinal }) => ordinal)).toEqual([1, 2, 3, 4]);
+		expect(restored?.nextBeforeOrdinal).toBeNull();
 		expect(cache.get('hidden')?.lastOrdinal).toBe(4);
 		expect(cache.get('other-hidden')).toBeNull();
 		expect(cache.get('visible')?.lastOrdinal).toBe(1);

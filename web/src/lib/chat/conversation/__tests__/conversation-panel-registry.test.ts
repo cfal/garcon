@@ -171,6 +171,17 @@ describe('ConversationPanelRegistry', () => {
 			const visible = Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING }, (_, index) =>
 				presentation(`chat-view:window-${index}`, `chat-${index}`),
 			);
+			function applyMessage(chatId: string, ordinal: number) {
+				return registry.applyCommittedBatch({
+					chatId,
+					transcriptViewId: 'view-1',
+					messages: [message(ordinal)],
+					firstOrdinal: ordinal,
+					lastOrdinal: ordinal,
+					resendCandidates: [],
+					noticeRevision: 0,
+				});
+			}
 			try {
 				registry.reconcile(visible);
 				await Promise.all(visible.map(({ chatId }) => registry.loadChatSnapshot(chatId)));
@@ -180,33 +191,16 @@ describe('ConversationPanelRegistry', () => {
 				registry.reconcile(visible);
 				await registry.loadChatSnapshot('chat-new');
 				for (const { chatId, surfaceId } of visible) {
-					expect(
-						registry.applyCommittedBatch({
-							chatId,
-							transcriptViewId: 'view-1',
-							messages: [message(2)],
-							firstOrdinal: 2,
-							lastOrdinal: 2,
-							resendCandidates: [],
-							noticeRevision: 0,
-						}),
-					).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+					expect(applyMessage(chatId, 2)).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
 					expect(
 						registry.panel(surfaceId)?.transcript.entries.map(({ ordinal }) => ordinal),
 					).toEqual([1, 2]);
 				}
 				for (const ordinal of [2, 3]) {
-					expect(
-						registry.applyCommittedBatch({
-							chatId: outgoing.chatId,
-							transcriptViewId: 'view-1',
-							messages: [message(ordinal)],
-							firstOrdinal: ordinal,
-							lastOrdinal: ordinal,
-							resendCandidates: [],
-							noticeRevision: 0,
-						}),
-					).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+					expect(applyMessage(outgoing.chatId, ordinal)).toEqual({
+						kind: 'applied',
+						localRecoverySurfaceIds: [],
+					});
 				}
 				expect(cache.get(outgoing.chatId)?.lastOrdinal).toBe(3);
 				expect(registry.hasInactiveWindow(outgoing.chatId)).toBe(retainInactive);
