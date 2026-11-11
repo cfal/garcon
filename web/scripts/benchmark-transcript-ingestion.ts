@@ -36,7 +36,9 @@ function ingest(retentionLimit: number | null): IngestionSample {
 				message: new AssistantMessage(TIMESTAMP, `message-${ordinal}-${'x'.repeat(48)}`),
 			},
 		];
-		const applied = applyTranscriptAppend(entries, incoming, lastOrdinal);
+		const applied = applyTranscriptAppend(entries, {
+			messages: incoming, firstOrdinal: ordinal, lastOrdinal: ordinal,
+		}, lastOrdinal);
 		if (applied.status !== 'applied') throw new Error(`Unexpected gap at ${ordinal}`);
 		entries =
 			retentionLimit && applied.messages.length > retentionLimit
