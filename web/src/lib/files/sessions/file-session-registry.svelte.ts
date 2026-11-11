@@ -720,6 +720,8 @@ export class FileSessionRegistry {
 
 	#completeDraftRecovery(session: FileViewSession): void {
 		if (
+			this.#destroyed ||
+			this.documents[session.documentId] !== session.document ||
 			session.loadError ||
 			!session.loadedRevision ||
 			session.document.pendingRecoveryContent !== null

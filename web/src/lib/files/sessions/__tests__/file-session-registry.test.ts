@@ -20,6 +20,7 @@ import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-f
 import { ApiError } from '$lib/api/client.js';
 import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import { FileDocumentRuntime } from '$lib/files/editor/file-document-runtime.js';
+import { FileDocumentIoCoordinator } from '$lib/files/persistence/file-document-io-coordinator.js';
 import {
 	createMemoryFileDraftRepository,
 	fileDraftKey,
@@ -466,6 +467,42 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.flushRecovery();
 		expect(await recoveredContent(repository)).toBe('recovered edit');
 		await harness.registry.destroyAll();
+	});
+
+	it('preserves resumed content when the last view closes before initial-load completion', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(storedDraft());
+		const joined = deferred<void>();
+		const finishJoin = deferred<void>();
+		const join = vi
+			.spyOn(FileDocumentIoCoordinator.prototype, 'ensureEditorForView')
+			.mockImplementationOnce(async () => {
+				joined.resolve();
+				await finishJoin.promise;
+			});
+		const load = vi.spyOn(FileDocumentIoCoordinator.prototype, 'loadInitial');
+		const harness = createHarness({ draftRepository: repository });
+		try {
+			const opening = harness.registry.open(request('file.txt'));
+			await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+			harness.registry.resolveDraft('resume');
+			const session = (await opening)!;
+			await joined.promise;
+			expect(session.content).toBe('recovered edit');
+			expect(session.document.pendingRecoveryContent).toBeNull();
+			expect(session.dirty).toBe(true);
+			await harness.registry.destroy(session.id);
+			expect(harness.registry.documents[session.documentId]).toBeUndefined();
+			finishJoin.resolve();
+			await load.mock.results[0]!.value;
+			await harness.registry.flushRecovery();
+			expect(await recoveredContent(repository)).toBe('recovered edit');
+		} finally {
+			finishJoin.resolve();
+			join.mockRestore();
+			load.mockRestore();
+			await harness.registry.destroyAll();
+		}
 	});
 
 	it('checkpoints edits made before authenticated recovery initialization', async () => {
