@@ -12,6 +12,14 @@ function hasClass(segments: CodeHighlightSegment[], className: string): boolean 
 }
 
 describe('highlightCodeFence', () => {
+	it('highlights the dense browser responsiveness fixture within the segment budget', async () => {
+		const source = Array.from({ length: 100 }, () => 'const syntheticValue = { key: "value", count: 42 };').join('\n');
+		const segments = await highlightCodeFence(source, 'typescript');
+		expect(segmentText(segments)).toBe(source);
+		expect(segments.length).toBeLessThan(MAX_HIGHLIGHT_SEGMENTS);
+		expect(segments.filter(segment => segment.className).length).toBeGreaterThanOrEqual(500);
+	});
+
 	it.each(['typescript', 'diff'])('bounds dense %s output without truncating source', async (language) => {
 		const source = (language === 'diff' ? '+new\n-old\n' : 'const value = { key: "value", count: 42 };\n').repeat(2000);
 		const segments = await highlightCodeFence(source, language);

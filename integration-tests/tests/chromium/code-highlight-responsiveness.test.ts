@@ -32,7 +32,7 @@ test('typing remains responsive while a large code fence is highlighted', async 
       connected.send(JSON.stringify(new ChatMessagesMessage(
         chatId,
         history.transcriptViewId,
-        [{ ordinal, message: new AssistantMessage('2026-01-01T00:00:00.000Z', `\`\`\`typescript\n${source}\`\`\``) }],
+        [{ ordinal, message: new AssistantMessage('2026-01-01T00:00:00.000Z', `\`\`\`typescript\n${source}\n\`\`\``) }],
         ordinal,
         ordinal,
         [],
@@ -40,10 +40,10 @@ test('typing remains responsive while a large code fence is highlighted', async 
     };
 
     // Loads the language module before measuring token publication and DOM work.
-    publishCode('const warmup = 1;\n');
+    publishCode('const warmup = 1;');
     await browserExpect(page.locator('.cm-code-keyword')).not.toHaveCount(0);
-    // Stays below the segment cap so actual completion differs from initial plain text.
-    const source = 'const syntheticValue = { key: "value", count: 42 };\n'.repeat(200);
+    // Keeps the dense fixture below the cap; the fence delimiter owns the final newline.
+    const source = Array.from({ length: 100 }, () => 'const syntheticValue = { key: "value", count: 42 };').join('\n');
     const publishAtKeystroke = 5;
     const inputLatenciesMs: number[] = [];
     const code = page.locator('.markdown-code-block code').last();
@@ -58,17 +58,19 @@ test('typing remains responsive while a large code fence is highlighted', async 
       if (index >= publishAtKeystroke) {
         const spans = await highlightedSpans.count();
         expect(spans).toBeLessThanOrEqual(2_000);
-        if (spans > 0 && await code.textContent() === source) highlightedDuringTyping = true;
+        if (spans >= 500 && await code.textContent() === source) highlightedDuringTyping = true;
       }
       inputLatenciesMs.push(performance.now() - start);
       await page.waitForTimeout(20);
     }
     await browserExpect(code).toHaveText(source);
+    expect(await code.textContent()).toBe(source);
     expect(highlightedDuringTyping).toBe(true);
-    expect(await highlightedSpans.count()).toBeGreaterThan(0);
+    const spanCount = await highlightedSpans.count();
+    expect(spanCount).toBeGreaterThanOrEqual(500);
     await browserExpect(editor).toHaveText('x'.repeat(inputLatenciesMs.length));
     const maxInputLatencyMs = Math.max(...inputLatenciesMs);
-    console.info('Large code fence input latency', { maxMs: maxInputLatencyMs });
+    console.info('Large code fence input latency', { maxMs: maxInputLatencyMs, spanCount });
     expect(maxInputLatencyMs).toBeLessThan(500);
     assertNoBrowserErrors();
   }, undefined, { composerInputMode: 'formatted' });
