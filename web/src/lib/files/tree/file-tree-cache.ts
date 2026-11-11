@@ -15,10 +15,10 @@ export function pruneFileTreeCache(
 	for (const [path, entries] of [...cache].reverse()) {
 		if (visibleExpanded.has(path)) continue;
 		let entryBytes = path.length * 2;
-		if (
-			directories < FILE_TREE_COLD_DIRECTORY_LIMIT &&
-			rows + entries.length <= FILE_TREE_COLD_ROW_LIMIT
-		) {
+		const exceedsCountOrRows =
+			directories >= FILE_TREE_COLD_DIRECTORY_LIMIT ||
+			rows + entries.length > FILE_TREE_COLD_ROW_LIMIT;
+		if (!exceedsCountOrRows) {
 			for (const entry of entries) {
 				entryBytes +=
 					80 +
@@ -31,11 +31,7 @@ export function pruneFileTreeCache(
 				if (bytes + entryBytes > FILE_TREE_COLD_BYTE_LIMIT) break;
 			}
 		}
-		if (
-			directories >= FILE_TREE_COLD_DIRECTORY_LIMIT ||
-			rows + entries.length > FILE_TREE_COLD_ROW_LIMIT ||
-			bytes + entryBytes > FILE_TREE_COLD_BYTE_LIMIT
-		) {
+		if (exceedsCountOrRows || bytes + entryBytes > FILE_TREE_COLD_BYTE_LIMIT) {
 			if (retained === cache) retained = new Map(cache);
 			retained.delete(path);
 		} else {
