@@ -112,6 +112,11 @@ export class FileDocumentState {
 		this.#content = content;
 	}
 
+	attachRuntime(runtime: FileDocumentRuntimePort): void {
+		this.editorRuntime = runtime;
+		this.#content = '';
+	}
+
 	onChange(listener: () => void): () => void {
 		this.#changeListeners.add(listener);
 		return () => this.#changeListeners.delete(listener);
@@ -141,6 +146,9 @@ export class FileDocumentState {
 		if (this.imageObjectUrl) URL.revokeObjectURL(this.imageObjectUrl);
 		this.imageObjectUrl = null;
 		this.editorRuntime = null;
+		this.#content = '';
+		this.baseline = '';
+		this.pendingRecoveryContent = null;
 		this.#changeListeners.clear();
 	}
 }
