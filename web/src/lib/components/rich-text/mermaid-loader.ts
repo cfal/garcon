@@ -249,8 +249,36 @@ let operationTail: Promise<void> = Promise.resolve();
 let renderCounter = 0;
 
 const svgCache = new Map<string, string>();
-const inflightRenders = new Map<string, Promise<string>>();
+interface RenderJob {
+	promise: Promise<string>;
+	consumers: number;
+}
+const inflightRenders = new Map<string, RenderJob>();
 const MAX_CACHE_SIZE = 64;
+const MAX_CACHE_BYTES = 4 * 1024 * 1024;
+let cacheBytes = 0;
+
+function cachedSvg(key: string): string | undefined {
+	const svg = svgCache.get(key);
+	if (svg !== undefined) {
+		svgCache.delete(key);
+		svgCache.set(key, svg);
+	}
+	return svg;
+}
+
+function cacheSvg(key: string, svg: string): void {
+	const bytes = (key.length + svg.length) * 2;
+	if (bytes > MAX_CACHE_BYTES) return;
+	while (svgCache.size >= MAX_CACHE_SIZE || cacheBytes + bytes > MAX_CACHE_BYTES) {
+		const oldest = svgCache.entries().next().value;
+		if (!oldest) break;
+		cacheBytes -= (oldest[0].length + oldest[1].length) * 2;
+		svgCache.delete(oldest[0]);
+	}
+	svgCache.set(key, svg);
+	cacheBytes += bytes;
+}
 
 function renderKey(source: string, themeId: MermaidThemeId): string {
 	return `${themeId}\0${source}`;
@@ -274,36 +302,54 @@ export function resolveMermaidThemeId(presentation: ThemeRendererPresentation): 
 	return rendererThemeIdFor(presentation);
 }
 
-export async function renderMermaid(source: string, themeId: MermaidThemeId): Promise<string> {
+export async function renderMermaid(
+	source: string,
+	themeId: MermaidThemeId,
+	signal?: AbortSignal,
+): Promise<string> {
+	signal?.throwIfAborted();
 	const key = renderKey(source, themeId);
-	const cached = svgCache.get(key);
-	if (cached) return cached;
-
-	const inflight = inflightRenders.get(key);
-	if (inflight) return inflight;
-
-	const promise = enqueue(async () => {
-		const queuedCached = svgCache.get(key);
-		if (queuedCached) return queuedCached;
-		const mermaid = await loadMermaid();
-		if (initializedTheme !== themeId) {
-			mermaid.initialize(THEME_CONFIGS[themeId]);
-			initializedTheme = themeId;
-		}
-		const id = `mermaid-${++renderCounter}-${Date.now()}`;
-		const { svg } = await mermaid.render(id, source);
-		if (svgCache.size >= MAX_CACHE_SIZE) {
-			const oldest = svgCache.keys().next().value;
-			if (oldest !== undefined) svgCache.delete(oldest);
-		}
-		svgCache.set(key, svg);
-		return svg;
-	});
-
-	inflightRenders.set(key, promise);
-	try {
-		return await promise;
-	} finally {
-		inflightRenders.delete(key);
+	const cached = cachedSvg(key);
+	if (cached !== undefined) return cached;
+	let job = inflightRenders.get(key);
+	if (!job) {
+		const created: RenderJob = { consumers: 0, promise: Promise.resolve('') };
+		created.promise = enqueue(async () => {
+			if (created.consumers === 0) throw new DOMException('Render abandoned', 'AbortError');
+			const mermaid = await loadMermaid();
+			if (created.consumers === 0) throw new DOMException('Render abandoned', 'AbortError');
+			if (initializedTheme !== themeId) {
+				mermaid.initialize(THEME_CONFIGS[themeId]);
+				initializedTheme = themeId;
+			}
+			const id = `mermaid-${++renderCounter}-${Date.now()}`;
+			const { svg } = await mermaid.render(id, source);
+			cacheSvg(key, svg);
+			return svg;
+		});
+		inflightRenders.set(key, created);
+		const release = () => inflightRenders.delete(key);
+		void created.promise.then(release, release);
+		job = created;
 	}
+	const shared = job;
+	shared.consumers += 1;
+	return new Promise<string>((resolve, reject) => {
+		let active = true;
+		const finish = () => {
+			if (!active) return false;
+			active = false;
+			shared.consumers -= 1;
+			signal?.removeEventListener('abort', abort);
+			return true;
+		};
+		const abort = () => {
+			if (finish()) reject(signal?.reason);
+		};
+		signal?.addEventListener('abort', abort, { once: true });
+		void shared.promise.then(
+			(svg) => { if (finish()) resolve(svg); },
+			(error: unknown) => { if (finish()) reject(error); },
+		);
+	});
 }

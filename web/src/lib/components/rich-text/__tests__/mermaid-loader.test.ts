@@ -91,4 +91,49 @@ describe('mermaid-loader', () => {
 			});
 		}
 	});
+
+	it('skips abandoned queued work without cancelling another consumer', async () => {
+		const { renderMermaid } = await import('../mermaid-loader');
+		let release!: (value: { svg: string }) => void;
+		mermaid.render.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+		const first = renderMermaid('first', 'standard-light');
+		await vi.waitFor(() => expect(mermaid.render).toHaveBeenCalledOnce());
+		const abandoned = new AbortController();
+		const cancelled = renderMermaid('abandoned', 'standard-dark', abandoned.signal);
+		const rejection = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+		abandoned.abort();
+		await rejection;
+		const peer = new AbortController();
+		const cancelledPeer = renderMermaid('shared', 'standard-dark', peer.signal);
+		const peerRejection = expect(cancelledPeer).rejects.toMatchObject({ name: 'AbortError' });
+		const retained = renderMermaid('shared', 'standard-dark');
+		peer.abort();
+		await peerRejection;
+		release({ svg: '<svg />' });
+		await first;
+		await retained;
+		expect(mermaid.render.mock.calls.map((call) => call[1])).toEqual(['first', 'shared']);
+	});
+
+	it('bounds SVG bytes and refreshes entry recency', async () => {
+		const { renderMermaid } = await import('../mermaid-loader');
+		for (let index = 0; index < 64; index++) await renderMermaid(`item-${index}`, 'standard-light');
+		await renderMermaid('item-0', 'standard-light');
+		await renderMermaid('new', 'standard-light');
+		await renderMermaid('item-0', 'standard-light');
+		expect(mermaid.render).toHaveBeenCalledTimes(65);
+		await renderMermaid('item-1', 'standard-light');
+		expect(mermaid.render).toHaveBeenCalledTimes(66);
+		mermaid.render.mockResolvedValue({ svg: 'x'.repeat(3 * 1024 * 1024) });
+		await renderMermaid('oversized', 'standard-light');
+		await renderMermaid('oversized', 'standard-light');
+		expect(mermaid.render).toHaveBeenCalledTimes(68);
+	});
+
+	it('releases failed jobs for retry', async () => {
+		const { renderMermaid } = await import('../mermaid-loader');
+		mermaid.render.mockRejectedValueOnce(new Error('invalid'));
+		await expect(renderMermaid('retry', 'standard-light')).rejects.toThrow('invalid');
+		await expect(renderMermaid('retry', 'standard-light')).resolves.toBe('<svg></svg>');
+	});
 });

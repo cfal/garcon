@@ -78,7 +78,7 @@ describe('MermaidBlock', () => {
 		const source = 'flowchart LR\nA --> B';
 		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledOnce());
-		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light');
+		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light', expect.any(AbortSignal));
 		expect(screen.queryByText('mermaid')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Copy code' })).toBeNull();
 		expect(screen.getAllByRole('button')).toHaveLength(1);
@@ -91,7 +91,7 @@ describe('MermaidBlock', () => {
 
 		rendered.component.setThemeId('colorblind-light');
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
-		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'colorblind-light');
+		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'colorblind-light', expect.any(AbortSignal));
 	});
 
 	it('keeps the inline diagram visible while a theme render is pending', async () => {
