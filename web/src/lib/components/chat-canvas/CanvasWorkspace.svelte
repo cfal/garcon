@@ -99,6 +99,7 @@
 	});
 	$effect(() => {
 		if (!visible) return;
+		currentTime = new Date();
 		const timer = setInterval(() => (currentTime = new Date()), 60_000);
 		return () => clearInterval(timer);
 	});

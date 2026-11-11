@@ -7,6 +7,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte';
 import * as m from '$lib/paraglide/messages.js';
+import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 import CanvasWorkspace from '../CanvasWorkspace.svelte';
 
 const shortcuts = vi.hoisted(() => ({ registerLocalShortcutOwner: vi.fn(() => vi.fn()) }));
@@ -118,6 +119,32 @@ describe('CanvasWorkspace retention', () => {
 	it.each(['list', 'diagram'] as const)(
 		'releases hidden %s renderers and restores the same document',
 		async (mode) => {
+			vi.useFakeTimers({ toFake: ['Date'] });
+			vi.setSystemTime(new Date('2026-09-07T00:01:00Z'));
+			const chat: ChatSessionRecord = {
+				id: '1780000000000001',
+				parentChat: null,
+				projectPath: '/workspace/project',
+				orderGroup: 'normal',
+				title: 'Research chat',
+				agentId: 'claude',
+				model: 'sonnet',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+				createdAt: '2026-09-07T00:00:00Z',
+				lastActivityAt: '2026-09-07T00:00:00Z',
+				lastReadAt: null,
+				isPinned: false,
+				isArchived: false,
+				isProcessing: false,
+				processingPhase: null,
+				canReloadFromNativeHistory: false,
+				isUnread: false,
+				status: 'running',
+				agentOwnershipEpoch: null,
+				tags: [],
+			};
 			const original = canvas();
 			const api = {
 				get: async () => original,
@@ -130,7 +157,7 @@ describe('CanvasWorkspace retention', () => {
 				const view = render(CanvasWorkspace, {
 					session,
 					controller,
-					chats: [],
+					chats: [chat],
 					visible: true,
 					presentation: 'desktop',
 					onopen: vi.fn(),
@@ -139,6 +166,11 @@ describe('CanvasWorkspace retention', () => {
 				const selector = mode === 'list' ? '[data-canvas-list]' : '.svelte-flow__node';
 				const first = view.container.querySelector<HTMLElement>(selector)!;
 				expect(first).not.toBeNull();
+				const timestamp = () =>
+					view.container
+						.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')
+						?.textContent?.trim();
+				expect(timestamp()).toBe(formatRelativeTimestamp(chat.lastActivityAt, new Date())?.label);
 				if (mode === 'list') {
 					first.scrollTop = 120;
 					const writeScroll = vi.spyOn(first, 'scrollTop', 'set');
@@ -152,7 +184,9 @@ describe('CanvasWorkspace retention', () => {
 				expect(view.container.querySelector(selector)).toBeNull();
 				expect(session.document.content).toBe(content);
 				expect(session.document.canUndo).toBe(true);
+				vi.setSystemTime(new Date('2026-09-07T02:00:00Z'));
 				await view.rerender({ visible: true });
+				expect(timestamp()).toBe(formatRelativeTimestamp(chat.lastActivityAt, new Date())?.label);
 				const restored = view.container.querySelector<HTMLElement>(selector)!;
 				expect(restored).not.toBeNull();
 				expect(restored).not.toBe(first);
