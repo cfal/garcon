@@ -178,6 +178,7 @@ export function submissionFingerprint(detail: LedgerUserInputDetail): string {
     content: detail.message.content,
     images: detail.message.images ?? null,
     presentation: detail.message.presentation ?? null,
+    questionReply: detail.message.metadata?.questionReply ?? null,
     attachments: detail.attachments,
     steer: detail.steer,
   });

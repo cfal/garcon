@@ -51,7 +51,7 @@ export function jsonErrorFromUnknown(
       error.retryable,
     );
   }
-  if (error instanceof AgentIntegrationError && error.code === 'INVALID_SETTINGS') {
+  if (error instanceof AgentIntegrationError && (error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_ENDPOINT')) {
     return jsonError(error.message, 422, error.code, false);
   }
   if (isDomainError(error)) {

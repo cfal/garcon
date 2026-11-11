@@ -3,6 +3,8 @@
 // these shapes, and the frontend renders them directly.
 
 import { isRecord } from './json.js';
+import { parseAsyncQuestionSet, type AsyncQuestionSet, type AsyncQuestionReply } from './async-user-questions.js';
+import { normalizeAskUserQuestionDecisionResponse, type AskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 import {
   commandOutcomeText, isCommandOutputData,
   parseCommandOutcome, parseCommandOutputContext,
@@ -10,7 +12,7 @@ import {
 } from './command-output.js';
 import {
   asAllowedPrompts, asAskUserQuestions, asChatImages, asCodexSubagentInputItems,
-  asCursorAskQuestions, asCursorPlanPhases, asCursorPlanTodos,
+  asCursorPlanPhases, asCursorPlanTodos,
   asOptionalBoolean, asOptionalChanges, asOptionalNumber, asOptionalString, asOptionalStringArray,
   asRecord, asStringArray, coerceTodoItems, parseChatMessageMetadata, str,
 } from './chat-message-coercion.js';
@@ -52,6 +54,7 @@ export interface ChatProcessingEntry {
 }
 
 export interface ChatMessageMetadata {
+  questionReply?: AsyncQuestionReply;
   contentMode?: 'literal';
   contentFormat?: 'plain' | 'markdown';
   clientRequestId?: string;
@@ -82,7 +85,7 @@ export class UserMessage {
 
 export class AssistantMessage {
   readonly type = 'assistant-message' as const;
-  constructor(public timestamp: string, public content: string) {}
+  constructor(public timestamp: string, public content: string, public questions?: AsyncQuestionSet) {}
 }
 
 export class CommandOutputMessage {
@@ -423,6 +426,9 @@ export interface AskUserQuestionPrompt {
   options: AskUserQuestionOption[];
   header?: string;
   allowMultiple?: boolean;
+  allowFreeText?: boolean;
+  allowNotes?: boolean;
+  isSecret?: boolean;
 }
 
 export class AskUserQuestionToolUseMessage {
@@ -433,29 +439,6 @@ export class AskUserQuestionToolUseMessage {
     public toolId: string,
     public title: string | undefined,
     public questions: AskUserQuestionPrompt[],
-  ) {}
-}
-
-export interface CursorAskQuestionOption {
-  id: string;
-  label: string;
-}
-
-export interface CursorAskQuestionPrompt {
-  id: string;
-  prompt: string;
-  options: CursorAskQuestionOption[];
-  allowMultiple?: boolean;
-}
-
-export class CursorAskQuestionToolUseMessage {
-  readonly type = 'cursor-ask-question-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-    public title: string | undefined,
-    public questions: CursorAskQuestionPrompt[],
   ) {}
 }
 
@@ -725,6 +708,7 @@ export class PermissionResolvedMessage {
     public timestamp: string,
     public permissionOccurrenceId: string,
     public allowed: boolean,
+    public questionResponse?: AskUserQuestionDecisionResponse,
   ) {}
 }
 
@@ -807,7 +791,6 @@ export type ToolUseChatMessage =
   | EnterPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
   | AskUserQuestionToolUseMessage
-  | CursorAskQuestionToolUseMessage
   | CursorCreatePlanToolUseMessage
   | AmpFinderToolUseMessage
   | AmpOracleToolUseMessage
@@ -1044,12 +1027,6 @@ const TOOL_USE_MESSAGE_PARSERS = {
       asOptionalString(data.title),
       asAskUserQuestions(data.questions)),
 
-  'cursor-ask-question-tool-use': (data) =>
-    new CursorAskQuestionToolUseMessage(
-      str(data.timestamp), str(data.toolId),
-      asOptionalString(data.title),
-      asCursorAskQuestions(data.questions)),
-
   'cursor-create-plan-tool-use': (data) => {
     const plan = asOptionalString(data.plan);
     if (plan === undefined) return null;
@@ -1165,7 +1142,8 @@ const TOOL_USE_MESSAGE_TYPES = new Set<ToolUseMessageType>(
 );
 
 function parseToolUseMessage(data: Record<string, unknown>): ToolUseChatMessage | null {
-  const type = data.type;
+  // Stored Cursor questions predate the shared question contract.
+  const type = data.type === 'cursor-ask-question-tool-use' ? 'ask-user-question-tool-use' : data.type;
   if (typeof type !== 'string' || !TOOL_USE_MESSAGE_TYPES.has(type as ToolUseMessageType)) return null;
   const parser = TOOL_USE_MESSAGE_PARSERS[type as ToolUseMessageType];
   return parser(data);
@@ -1212,7 +1190,7 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
       );
     }
     case 'assistant-message':
-      return new AssistantMessage(str(data.timestamp), str(data.content));
+      return new AssistantMessage(str(data.timestamp), str(data.content), parseAsyncQuestionSet(data.questions));
     case 'command-output': {
       const context = data.context === null ? null : parseCommandOutputContext(data.context);
       if ((data.context !== null && !context) || !isCommandOutputData(data)) return null;
@@ -1264,6 +1242,7 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
         str(data.timestamp),
         permissionOccurrenceId,
         Boolean(data.allowed),
+        normalizeAskUserQuestionDecisionResponse(data.questionResponse) ?? undefined,
       );
     }
     case 'permission-cancelled': {

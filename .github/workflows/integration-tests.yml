@@ -502,11 +502,17 @@ jobs:
       - name: Build SPA
         run: bun run build
 
+      - name: Identify browser cache OS
+        id: browser-cache-os
+        run: |
+          . /etc/os-release
+          printf 'id=%s-%s\n' "$ID" "$VERSION_ID" >> "$GITHUB_OUTPUT"
+
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('integration-tests/bun.lock') }}
+          key: playwright-chromium-${{ steps.browser-cache-os.outputs.id }}-${{ runner.arch }}-${{ hashFiles('integration-tests/bun.lock') }}
 
       - name: Install Chromium
         working-directory: integration-tests
@@ -579,11 +585,17 @@ jobs:
       - name: Build SPA
         run: bun run build
 
+      - name: Identify browser cache OS
+        id: browser-cache-os
+        run: |
+          . /etc/os-release
+          printf 'id=%s-%s\n' "$ID" "$VERSION_ID" >> "$GITHUB_OUTPUT"
+
       - name: Cache WebKit
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-webkit-${{ runner.os }}-${{ hashFiles('integration-tests/bun.lock') }}
+          key: playwright-webkit-${{ steps.browser-cache-os.outputs.id }}-${{ runner.arch }}-${{ hashFiles('integration-tests/bun.lock') }}
 
       - name: Install WebKit
         timeout-minutes: 10

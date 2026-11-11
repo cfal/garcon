@@ -52,6 +52,7 @@ export interface RunningCodexSession {
   codexHome: string | null;
   client: CodexAppServerClient;
   runtimeIdentity: string;
+  modelEndpointId: string | null;
   activeTurnId: string | null;
   status: RunningStatus;
   permissionMode: PermissionMode;

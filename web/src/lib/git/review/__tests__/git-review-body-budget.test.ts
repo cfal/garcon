@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
-import {
-	collectionLimitDecisionFromGitReviewBody,
-	decideGitReviewBodyBudget,
-} from '$lib/git/review/git-review-body-budget.js';
+import { decideGitReviewBodyBudget } from '$lib/git/review/git-review-body-budget.js';
 
 const limits = {
 	maxSummaryFiles: 100,
@@ -87,7 +84,7 @@ describe('Git review body budget', () => {
 		});
 	});
 
-	it('recognizes a collection limit emitted by the server', () => {
+	it('accepts a per-file limit without imposing a collection limit', () => {
 		const limited: GitReviewFileBody = {
 			...body('b.ts', 0, 0),
 			bodyState: 'too-large',
@@ -95,20 +92,25 @@ describe('Git review body budget', () => {
 			isTooLarge: true,
 			patch: null,
 			patchIndex: null,
-			limitReason: 'collection-too-many-bytes',
-			limitMessage: 'Stopped loading after 80 patch bytes.',
+			limitReason: 'file-too-many-bytes',
+			limitMessage: 'File exceeds the patch byte limit.',
 		};
 
 		expect(
-			collectionLimitDecisionFromGitReviewBody(limited, {
-				'a.ts': body('a.ts', 8, 80),
-			}),
+			decideGitReviewBodyBudget(
+				limited,
+				'visible',
+				{
+					'a.ts': body('a.ts', 8, 80),
+				},
+				new Set(['a.ts']),
+				limits,
+			),
 		).toEqual({
-			accept: false,
+			accept: true,
 			evictedPaths: [],
-			loadedRows: 8,
-			loadedBytes: 80,
-			reason: 'collection-too-many-bytes',
+			loadedRows: 0,
+			loadedBytes: 0,
 		});
 	});
 });

@@ -26,6 +26,7 @@ export interface CodexExecutionRequest {
   readonly chatId: string;
   readonly projectPath: string;
   readonly model: string;
+  readonly modelEndpointId: string | null;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
   readonly clientMessageId?: string;

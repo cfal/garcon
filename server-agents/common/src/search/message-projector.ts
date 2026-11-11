@@ -237,7 +237,6 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
     }
     case 'ask-user-question-tool-use':
-    case 'cursor-ask-question-tool-use':
       return joinTool(message.title, boundedUnknownForJoin(message.questions, budget));
     case 'cursor-create-plan-tool-use':
       return joinTool(

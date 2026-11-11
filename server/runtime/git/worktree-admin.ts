@@ -221,7 +221,8 @@ export async function readAdminWorktreeRecords(
   ]);
   if (
     mainHeadStats?.isSymbolicLink() ||
-    worktreeConfigStats !== null ||
+    (worktreeConfigStats !== null &&
+      (!worktreeConfigStats.isFile() || worktreeConfigStats.size !== 0)) ||
     configRequiresGitFallback(repositoryConfig)
   ) {
     return null;

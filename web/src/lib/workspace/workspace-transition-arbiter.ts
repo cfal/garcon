@@ -23,6 +23,7 @@ export class WorkspaceTransitionArbiter {
 		plan: WorkspaceMutationPlan,
 		hooks: {
 			beforePublish?: (next: WorkspaceLayoutSnapshot, base: WorkspaceLayoutSnapshot) => void;
+			afterPublish?: (next: WorkspaceLayoutSnapshot) => void;
 			publishFailed?: () => void;
 		} = {},
 		options: { retryPublishFailure?: boolean } = {},
@@ -34,20 +35,18 @@ export class WorkspaceTransitionArbiter {
 			hooks.publishFailed?.();
 		};
 		return this.#queue.enqueue(() => {
+			let publishedSnapshot: WorkspaceLayoutSnapshot;
 			try {
 				while (true) {
 					const revision = this.layout.revision;
 					const snapshot = this.layout.snapshot;
 					const mutations = typeof plan === 'function' ? plan(snapshot) : plan;
-					if (mutations.length === 0) {
-						hooks.beforePublish?.(snapshot, snapshot);
-						return true;
-					}
-					const next = reduceWorkspaceLayout(snapshot, mutations);
+					const hasMutations = mutations.length > 0;
+					const next = hasMutations ? reduceWorkspaceLayout(snapshot, mutations) : snapshot;
 					hooks.beforePublish?.(next, snapshot);
-					const published = this.commitPort.publish(revision, next);
-					if (published) {
-						return true;
+					if (!hasMutations || this.commitPort.publish(revision, next)) {
+						publishedSnapshot = next;
+						break;
 					}
 					notifyFailure();
 					if (!options.retryPublishFailure) {
@@ -65,6 +64,9 @@ export class WorkspaceTransitionArbiter {
 				}
 				throw error;
 			}
+			// Success observers run outside rollback handling: the layout is already committed.
+			hooks.afterPublish?.(publishedSnapshot);
+			return true;
 		});
 	}
 }

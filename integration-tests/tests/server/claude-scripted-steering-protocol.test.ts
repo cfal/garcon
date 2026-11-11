@@ -19,12 +19,42 @@ afterEach(async () => {
 });
 
 describe('pinned Claude steering protocol', () => {
-  test('correlates background notification continuations through provider idle', async () => {
+  test.each(['bash-stdout', 'local-command-stdout'])(
+    'acknowledges user input containing a literal %s tag',
+    async (tag) => {
+      const harness = await createHarness();
+      const inputId = '00000000-0000-4000-8000-000000000001';
+      const prompt = `Quote this literal snippet: <${tag}>Synthetic output</${tag}>`;
+      const reply = 'The synthetic snippet was received.';
+      harness.model.scriptTurn([claudeText(reply)]);
+
+      await harness.send(userFrame(harness.sessionId, inputId, prompt));
+      await harness.waitFor(commandLifecycle(inputId, 'started'), 'tagged input started');
+      await harness.waitFor(userReplay(inputId), 'tagged input replay');
+      const result = await harness.waitFor((message) => message.type === 'result'
+        && message.user_message_uuid === inputId, 'tagged input result');
+      await harness.waitFor(providerState('idle'), 'tagged input provider idle');
+
+      expect(result.is_error).toBe(false);
+      expect(result.result).toBe(reply);
+      expect(harness.results()).toHaveLength(1);
+      expect(harness.model.requests()).toHaveLength(1);
+      expect(harness.model.requests()[0]?.lastUserText).toContain(prompt);
+      harness.model.assertSettled();
+    },
+    30_000,
+  );
+
+  test.each(['short', 'long'])('correlates %s background commands through provider idle', async (length) => {
     const harness = await createHarness();
     const inputId = '00000000-0000-4000-8000-000000000001';
+    const padding = length === 'long'
+      ? `: '${'x'.repeat(700)}synthetic-command-middle${'x'.repeat(700)}'; ` : '';
+    const command = 'while [ ! -f background-release ]; do sleep 0.05; done; '
+      + padding + 'printf synthetic-background-output';
     harness.model.scriptTurn([
       claudeToolUse('toolu_background_origin', 'Bash', {
-        command: 'while [ ! -f background-release ]; do sleep 0.05; done',
+        command,
         run_in_background: true,
       }),
     ]);
@@ -52,7 +82,30 @@ describe('pinned Claude steering protocol', () => {
     expect(harness.messages.indexOf(finalIdle))
       .toBeGreaterThan(harness.messages.indexOf(results[1]!));
     expect(harness.model.requests()).toHaveLength(3);
-    expect(claudeModelInputText(harness.model.requests()[2]!)).toContain('<task-notification>');
+    expect(harness.messages.filter((message) => message.type === 'assistant')
+      .map((message) => asRecord(message.message).content))
+      .toContainEqual(expect.arrayContaining([expect.objectContaining({
+        type: 'tool_use', id: 'toolu_background_origin', name: 'Bash',
+        input: expect.objectContaining({ command }),
+      })]));
+    expect(claudeModelInputText(harness.model.requests()[1]!)).not.toContain('<task-notification>');
+    expect(claudeModelInputText(harness.model.requests()[2]!).split('<task-notification>'))
+      .toHaveLength(2);
+    if (length === 'long') {
+      const notificationInput = harness.model.requests()[2]!.lastUserText;
+      expect(notificationInput).toContain('while [ ! -f background-release ]');
+      expect(notificationInput).toContain('printf synthetic-background-output');
+      expect(notificationInput).not.toContain('synthetic-command-middle');
+    }
+    const isTaskCompletion = (message: Record<string, unknown>) => message.type === 'system'
+      && message.subtype === 'task_notification' && message.status === 'completed'
+      && message.tool_use_id === 'toolu_background_origin';
+    const taskNotification = await harness.waitFor(isTaskCompletion, 'background task notification');
+    expect(harness.messages.filter(isTaskCompletion)).toHaveLength(1);
+    const outputFile = taskNotification.output_file;
+    if (typeof outputFile !== 'string') throw new Error('Background completion did not name its output file.');
+    expect(await readFile(outputFile, 'utf8'))
+      .toContain('synthetic-background-output');
     const entries = await harness.waitForNativeEntries((nativeEntries) =>
       JSON.stringify(nativeEntries).includes('Synthetic background continued'), 'background native continuation');
     const nativeInput = entries.find((entry) => entry.uuid === inputId);
@@ -62,7 +115,190 @@ describe('pinned Claude steering protocol', () => {
       && asRecord(entry.origin).kind === 'task-notification');
     expect(notification?.origin).toEqual(results[1]?.origin);
     expect(asRecord(notification?.message).content).toContain('<task-notification>');
+    const reloaded = convertClaudeEntries(entries);
+    expect(reloaded.filter((message) => message.type === 'bash-tool-use'))
+      .toContainEqual(expect.objectContaining({ toolId: 'toolu_background_origin', command }));
+    expect(reloaded.filter((message) => message.type === 'user-message').map((message) => message.content))
+      .toEqual(['Synthetic background input']);
     harness.model.assertSettled();
+  }, 30_000);
+
+  test('preserves immediate background output whether its notification folds or continues', async () => {
+    const harness = await createHarness();
+    const inputId = '00000000-0000-4000-8000-000000000001';
+    harness.model.scriptTurn([claudeToolUse('toolu_immediate_background', 'Bash', {
+      command: 'printf synthetic-immediate-output', run_in_background: true,
+    })]);
+    harness.model.scriptTurn((request) => {
+      if (claudeModelInputText(request).includes('<task-notification>')) {
+        return [claudeText('Synthetic immediate background settled')];
+      }
+      harness.model.scriptTurn([claudeText('Synthetic immediate background settled')]);
+      return [claudeText('Synthetic immediate background launched')];
+    });
+    await harness.send(userFrame(harness.sessionId, inputId, 'Synthetic immediate background input'));
+    const settled = await harness.waitFor((message) => message.type === 'result'
+      && message.result === 'Synthetic immediate background settled', 'immediate background settlement');
+    const settledAt = harness.messages.indexOf(settled);
+    await harness.waitFor((message, index) => index > settledAt
+      && providerState('idle')(message), 'immediate background provider idle');
+    expect(settled.is_error).toBe(false);
+    expect(settled.session_id).toBe(harness.sessionId);
+    expect(claudeModelInputText(harness.model.requests().at(-1)!).split('<task-notification>'))
+      .toHaveLength(2);
+    const isTaskCompletion = (message: Record<string, unknown>) => message.type === 'system'
+      && message.subtype === 'task_notification' && message.status === 'completed'
+      && message.tool_use_id === 'toolu_immediate_background';
+    const notification = await harness.waitFor(isTaskCompletion, 'immediate background task notification');
+    expect(harness.messages.filter(isTaskCompletion)).toHaveLength(1);
+    const outputFile = notification.output_file;
+    if (typeof outputFile !== 'string') throw new Error('Background completion did not name its output file.');
+    expect(await readFile(outputFile, 'utf8')).toContain('synthetic-immediate-output');
+    harness.model.assertSettled();
+  }, 30_000);
+
+  test('keeps a peer prompt folded at a tool boundary out of reloaded user input', async () => {
+    const harness = await createHarness();
+    const inputId = '00000000-0000-4000-8000-000000000001';
+    const prompt = 'Synthetic inline peer input';
+    const peer = 'Synthetic inline peer update';
+    const childGate = Promise.withResolvers<void>();
+    const peerDelivered = Promise.withResolvers<void>();
+    const reportGate = Promise.withResolvers<void>();
+    harness.model.scriptTurn([claudeToolUse('toolu_inline_fork', 'Agent', {
+      subagent_type: 'fork', description: 'Synthetic inline fork', prompt: 'Synthetic child directive',
+    })]);
+    for (let index = 0; index < 5; index += 1) {
+      harness.model.scriptTurn(async (request) => {
+        const messages = JSON.stringify(request.body.messages);
+        if (messages.includes('<fork-boilerplate>')) {
+          if (!messages.includes('toolu_inline_peer')) {
+            await childGate.promise;
+            return [claudeToolUse('toolu_inline_peer', 'SendMessage', {
+              to: 'main', message: peer, summary: 'Synthetic inline update',
+            })];
+          }
+          peerDelivered.resolve();
+          await reportGate.promise;
+          return [claudeText('Synthetic child report')];
+        }
+        if (!messages.includes('toolu_inline_gate')) {
+          return [claudeText('Synthetic parent launched'), claudeToolUse('toolu_inline_gate', 'Bash', {
+            command: 'while [ ! -f peer-release ]; do sleep 0.05; done',
+          })];
+        }
+        return [claudeText(request.lastUserText.includes('<task-notification>')
+          ? 'Synthetic parent settled' : 'Synthetic parent peer reply')];
+      });
+    }
+    try {
+      await harness.send(userFrame(harness.sessionId, inputId, prompt));
+      await harness.waitFor((message) => message.type === 'assistant'
+        && JSON.stringify(message).includes('toolu_inline_gate'), 'parent tool boundary');
+      childGate.resolve();
+      await peerDelivered.promise;
+      await writeFile(join(harness.project, 'peer-release'), 'release', 'utf8');
+      await harness.waitFor((message) => message.type === 'result'
+        && message.user_message_uuid === inputId, 'inline peer result');
+      reportGate.resolve();
+      const settled = await harness.waitFor((message) => message.type === 'result'
+        && message.result === 'Synthetic parent settled', 'inline peer continuation');
+      const settledAt = harness.messages.indexOf(settled);
+      await harness.waitFor((message, index) => index > settledAt
+        && providerState('idle')(message), 'inline peer provider idle');
+      const entries = await harness.waitForNativeEntries((native) =>
+        JSON.stringify(native).includes('Synthetic parent settled'), 'inline peer native history');
+      const queued = entries.find((entry) => entry.type === 'attachment'
+        && asRecord(asRecord(entry.attachment).origin).kind === 'peer');
+      expect(asRecord(queued?.attachment)).toMatchObject({
+        type: 'queued_command', commandMode: 'prompt', isMeta: true,
+      });
+      expect(JSON.stringify(asRecord(queued?.attachment).prompt)).toContain(peer);
+      const reloaded = convertClaudeEntries(entries);
+      expect(reloaded.flatMap((message) => message.type === 'user-message' ? [message.content] : []))
+        .toEqual([prompt]);
+      expect(reloaded.flatMap((message) => message.type === 'assistant-message' ? [message.content] : []))
+        .toEqual(['Synthetic parent launched', 'Synthetic parent peer reply', 'Synthetic parent settled']);
+      harness.model.assertSettled();
+    } finally {
+      childGate.resolve();
+      reportGate.resolve();
+      await writeFile(join(harness.project, 'peer-release'), 'release', 'utf8');
+    }
+  }, 30_000);
+
+  test('correlates peer and task continuations without inventing human input identities', async () => {
+    const harness = await createHarness();
+    const inputId = '00000000-0000-4000-8000-000000000001';
+    const prompt = 'Synthetic peer continuation input';
+    const peer = 'Synthetic peer continuation update';
+    const launched = 'Synthetic parent launched';
+    const peerReply = 'Synthetic parent peer reply';
+    const settled = 'Synthetic parent settled';
+    const childGate = Promise.withResolvers<void>();
+    const reportGate = Promise.withResolvers<void>();
+    harness.model.scriptTurn([claudeToolUse('toolu_continuation_fork', 'Agent', {
+      subagent_type: 'fork', description: 'Synthetic continuation fork', prompt: 'Synthetic child directive',
+    })]);
+    for (let index = 0; index < 5; index += 1) {
+      harness.model.scriptTurn(async (request) => {
+        const messages = JSON.stringify(request.body.messages);
+        if (messages.includes('<fork-boilerplate>')) {
+          if (!messages.includes('toolu_continuation_peer')) {
+            await childGate.promise;
+            return [claudeToolUse('toolu_continuation_peer', 'SendMessage', {
+              to: 'main', message: peer, summary: 'Synthetic continuation update',
+            })];
+          }
+          await reportGate.promise;
+          return [claudeText('Synthetic child report')];
+        }
+        return [claudeText(request.lastUserText.includes('<task-notification>')
+          ? settled : request.lastUserText.includes(peer) ? peerReply : launched)];
+      });
+    }
+
+    try {
+      await harness.send(userFrame(harness.sessionId, inputId, prompt));
+      const initial = await harness.waitFor((message) => message.type === 'result'
+        && message.user_message_uuid === inputId, 'initial parent result');
+      childGate.resolve();
+      const peerResult = await harness.waitFor((message) => message.type === 'result'
+        && message.result === peerReply, 'peer continuation result');
+      reportGate.resolve();
+      const taskResult = await harness.waitFor((message) => message.type === 'result'
+        && message.result === settled, 'task continuation result');
+      const taskResultAt = harness.messages.indexOf(taskResult);
+      await harness.waitFor((message, index) => index > taskResultAt
+        && providerState('idle')(message), 'provider idle after both continuations');
+
+      expect(initial.result).toBe(launched);
+      expect(initial.origin).toBeUndefined();
+      expect(peerResult.origin).toMatchObject({ kind: 'peer' });
+      expect(taskResult.origin).toMatchObject({ kind: 'task-notification' });
+      expect(peerResult.user_message_uuid).toBeUndefined();
+      expect(taskResult.user_message_uuid).toBeUndefined();
+      expect(harness.results()).toEqual([initial, peerResult, taskResult]);
+      expect(harness.results().map((result) => result.session_id))
+        .toEqual([harness.sessionId, harness.sessionId, harness.sessionId]);
+      expect(harness.results().every((result) => result.is_error === false)).toBe(true);
+
+      const entries = await harness.waitForNativeEntries((native) =>
+        JSON.stringify(native).includes(settled), 'peer and task native continuations');
+      for (const kind of ['peer', 'task-notification']) {
+        expect(entries.some((entry) => entry.type === 'user' && asRecord(entry.origin).kind === kind))
+          .toBe(true);
+      }
+      const reloaded = convertClaudeEntries(entries);
+      expect(reloaded.flatMap((message) => message.type === 'user-message' ? [message.content] : []))
+        .toEqual([prompt]);
+      expect(reloaded.flatMap((message) => message.type === 'assistant-message' ? [message.content] : []))
+        .toEqual([launched, peerReply, settled]);
+      harness.model.assertSettled();
+    } finally {
+      childGate.resolve();
+      reportGate.resolve();
+    }
   }, 30_000);
 
   test('queues following guidance before replay and keeps result boundaries', async () => {
@@ -283,6 +519,12 @@ describe('pinned Claude steering protocol', () => {
     expect(expandedReview).not.toBe(`/review ${bareMarker}`);
     expect(expandedReview).not.toContain(`/review ${bareMarker}`);
     expect(expandedReview).not.toContain(STEERING_PREFIX);
+    expect(harness.results().map((result) => result.user_message_uuid)).toEqual([
+      originalId, steerId,
+    ]);
+    expect(harness.results().map((result) => result.session_id)).toEqual([
+      harness.sessionId, harness.sessionId,
+    ]);
     harness.model.assertSettled();
   }, 30_000);
 

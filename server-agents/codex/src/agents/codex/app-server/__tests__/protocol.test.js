@@ -82,6 +82,8 @@ describe('Codex app-server protocol', () => {
 
   it.each([
     ['failed', 'flexUnavailable'],
+    ['failed', 'modelNotFound'],
+    ['failed', 'policyCapacityUnavailable'],
     ['interrupted', 'tooManyDenials'],
   ])('decodes %s turns with %s errors', (status, codexErrorInfo) => {
     const response = parseThreadTurnsListResponse({

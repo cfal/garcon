@@ -1,4 +1,5 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { CODEX_USER_INPUT_METHOD } from '../user-input.js';
 import { CodexAppServerRpcError } from './client.js';
 import type { CodexTurnError } from './protocol.js';
 import type {
@@ -17,6 +18,7 @@ export const NOOP_LOGGER: AgentLogger = {
 };
 
 export function denialResponseForRequest(method: string, params?: Record<string, unknown>): unknown {
+  if (method === CODEX_USER_INPUT_METHOD) return { answers: {} };
   if (method === 'item/commandExecution/requestApproval' && params?.kind === 'writeStdin') {
     return { decision: 'cancel' };
   }
@@ -28,6 +30,17 @@ export function denialResponseForRequest(method: string, params?: Record<string,
 
 export function humanizeCodexAppServerError(error: unknown): string {
   const raw = String((error as Error)?.message || error || '');
+  if (error instanceof CodexAppServerRpcError) {
+    const data = error.data;
+    if (data && typeof data === 'object' && 'type' in data) {
+      switch (data.type) {
+        case 'modelProviderMismatch':
+        case 'modelProviderNotConfigured':
+        case 'modelProviderPolicyConflict':
+          return `Codex error: ${raw}`;
+      }
+    }
+  }
   if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
     return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';
   }

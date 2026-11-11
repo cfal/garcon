@@ -23,5 +23,137 @@
     "file": "InterVariable-Italic.woff2",
     "sha256": "e564f652916db6c139570fefb9524a77c4d48f30c92928de9db19b6b5c7a262a",
     "url": "https://raw.githubusercontent.com/rsms/inter/353b61b9f4430d5f420d56605a6e7993e0941470/docs/font-files/InterVariable-Italic.woff2"
+  },
+  {
+    "file": "SourceSans3.woff2",
+    "sha256": "5f16566f7a40d39b339ad26be151fa5a1ab1f0c2574c7a2e619765584a1acbd8",
+    "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/WOFF2/VF/SourceSans3VF-Upright.ttf.woff2",
+    "license": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/LICENSE.md"
+  },
+  {
+    "file": "SourceSans3-Italic.woff2",
+    "sha256": "b4959abc0569392f87c6c6ac612f90e3fe0104d283724189b7d8b6f61af347d3",
+    "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/WOFF2/VF/SourceSans3VF-Italic.ttf.woff2",
+    "license": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/LICENSE.md"
+  },
+  {
+    "file": "SourceSerif4.woff2",
+    "sha256": "940a76eda1388de39d38c8e7a79bf6ea058a387faee0a9f33c8d25c6ba05e1be",
+    "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/WOFF2/VAR/SourceSerif4Variable-Roman.ttf.woff2",
+    "license": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/LICENSE.md"
+  },
+  {
+    "file": "SourceSerif4-Italic.woff2",
+    "sha256": "9d28b5749a1ad096a295cb607c521bd1af4cd9979b6f37332daf70143149fb44",
+    "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/WOFF2/VAR/SourceSerif4Variable-Italic.ttf.woff2",
+    "license": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/LICENSE.md"
+  },
+  {
+    "file": "SourceCodePro.woff2",
+    "sha256": "d95dc751b4d82141259f5c00c9838addaadd3b4eac30dd7db4a0da4921d77792",
+    "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/WOFF2/VF/SourceCodeVF-Upright.ttf.woff2",
+    "license": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/LICENSE.md"
+  },
+  {
+    "file": "SourceCodePro-Italic.woff2",
+    "sha256": "720e47a2e54568db2908bfbb32894c1c298fd948cc8942426987c2d29f7ebd9e",
+    "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/WOFF2/VF/SourceCodeVF-Italic.ttf.woff2",
+    "license": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/LICENSE.md"
+  },
+  {
+    "file": "AtkinsonHyperlegible-Regular.ttf",
+    "sha256": "7fb917c89019896d0b52ee84b7cbb3304c18cb90b19a62f5e32712bd23e97669",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-Regular.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/OFL.txt"
+  },
+  {
+    "file": "AtkinsonHyperlegible-Italic.ttf",
+    "sha256": "021beda4d3c6edfc78872e436d74009f9a1bcb294331908fe5747c61d3dcc514",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-Italic.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/OFL.txt"
+  },
+  {
+    "file": "AtkinsonHyperlegible-Bold.ttf",
+    "sha256": "5a3b0c8cc8ca545155150b4512a1fa248298df121c50d6557e651e61fbdab92f",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-Bold.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/OFL.txt"
+  },
+  {
+    "file": "AtkinsonHyperlegible-BoldItalic.ttf",
+    "sha256": "7a46f1b0ef2f64b61065c1a6b5a11fcb9b019b44062d88ba121a083cc39e86bf",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-BoldItalic.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/atkinsonhyperlegible/OFL.txt"
+  },
+  {
+    "file": "IBMPlexMono-Regular.woff2",
+    "sha256": "ba204497f16b6d334cee9d1e963a831b73e3a56e1d6300a8489d18df7214b350",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-Regular.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-Italic.woff2",
+    "sha256": "2024bf2b08027dcd6d09091385756e327744bbe26b782c411381dffc40ffc622",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-Italic.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-Medium.woff2",
+    "sha256": "33faf307fa6031fb4062276d7320a6d632de890cbb347576fd80cfa01077bc25",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-Medium.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-MediumItalic.woff2",
+    "sha256": "782325462f9a9708e02cb0415445cef7c9b5ee74f8910f33bfd1ab405a3402d2",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-MediumItalic.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-SemiBold.woff2",
+    "sha256": "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-SemiBold.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-SemiBoldItalic.woff2",
+    "sha256": "67ad8975ad3cea95517f9dfe6d67fb3e4d87ca7bc4b51fa80e797e375c0cbe71",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-SemiBoldItalic.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-Bold.woff2",
+    "sha256": "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-Bold.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "IBMPlexMono-BoldItalic.woff2",
+    "sha256": "03e97fe28d44cc2bdf18d77284046bc9019ee626bdab1f06e7ea64837680824b",
+    "url": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/IBMPlexMono-BoldItalic.woff2",
+    "license": "https://raw.githubusercontent.com/IBM/plex/48e8676114c04f29033b4b53da4ec579f8846297/packages/plex-mono/fonts/complete/woff2/license.txt"
+  },
+  {
+    "file": "Arimo.ttf",
+    "sha256": "e43898b143ec826ac8cb4034816458a7047fbe0836558de2a1f8c6223ae3e0ca",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/arimo/Arimo%5Bwght%5D.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/arimo/OFL.txt"
+  },
+  {
+    "file": "Arimo-Italic.ttf",
+    "sha256": "a80fc54fd0233c1dfe298577c4d00f5ae81d5bb83510975e473c47e699b7f4ed",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/arimo/Arimo-Italic%5Bwght%5D.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/arimo/OFL.txt"
+  },
+  {
+    "file": "Roboto.ttf",
+    "sha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/roboto/OFL.txt"
+  },
+  {
+    "file": "Roboto-Italic.ttf",
+    "sha256": "9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182",
+    "url": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/roboto/Roboto-Italic%5Bwdth%2Cwght%5D.ttf",
+    "license": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/roboto/OFL.txt"
   }
 ]

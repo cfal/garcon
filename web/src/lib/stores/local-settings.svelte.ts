@@ -205,6 +205,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	imageViewerOpenPlacement: FileOpenPlacementPreference;
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	forkOpenPlacement: ForkOpenPlacementPreference;
+	swapDraggedOpenChats: boolean;
 	hiddenToolTypes: HideableToolType[];
 	globalShortcuts: GlobalShortcutOverrides;
 	browserNotifications: boolean;
@@ -218,6 +219,7 @@ type BooleanLocalSettingKey =
 	| 'terminalAppearance'
 	| 'overlayBackdropEffects'
 	| 'highlightActiveWindow'
+	| 'swapDraggedOpenChats'
 	| 'autoExpandTools'
 	| 'combineToolUseMessages'
 	| 'alwaysExpandCliMessages'
@@ -271,7 +273,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGrouping: 'project-and-activity',
+	sidebarGrouping: 'none',
 	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'single-line',
@@ -279,7 +281,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	selectedChatBoardId: null,
 	chatBoardItemLayout: null,
 	chatBoardActiveColumnByBoardId: {},
-	sidebarSortMode: 'manual',
+	sidebarSortMode: 'recent',
 	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
 	codeEditorVimMode: false,
@@ -289,6 +291,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	imageViewerOpenPlacement: 'same-window',
 	markdownViewerOpenPlacement: 'same-window',
 	forkOpenPlacement: 'split-auto',
+	swapDraggedOpenChats: true,
 	hiddenToolTypes: [],
 	globalShortcuts: {},
 	browserNotifications: false,
@@ -571,6 +574,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		forkOpenPlacement: isForkOpenPlacement(parsed.forkOpenPlacement)
 			? parsed.forkOpenPlacement
 			: DEFAULTS.forkOpenPlacement,
+		swapDraggedOpenChats: parseBoolean(parsed.swapDraggedOpenChats, DEFAULTS.swapDraggedOpenChats),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
 		browserNotifications: parseBoolean(parsed.browserNotifications, DEFAULTS.browserNotifications),
@@ -584,20 +588,23 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	};
 }
 
-// Reads the persisted local settings snapshot.
-function readPersistedLocalSettings(): LocalSettingsSnapshot {
+function readPersistedLocalSettings(): LocalSettingsSnapshot | null {
 	try {
 		const raw = getLocalStorageItem(LOCAL_STORAGE_KEYS.localSettings);
-		if (raw) {
-			const parsed = JSON.parse(raw);
-			if (parsed && typeof parsed === 'object') {
-				return parseFromRaw(parsed);
-			}
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		if (
+			!parsed ||
+			typeof parsed !== 'object' ||
+			Array.isArray(parsed) ||
+			Object.keys(parsed).length === 0
+		) {
+			return null;
 		}
+		return parseFromRaw(parsed);
 	} catch {
-		// Corrupt storage
+		return null;
 	}
-	return { ...DEFAULTS };
 }
 
 function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
@@ -605,6 +612,8 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 }
 
 export class LocalSettingsStore {
+	readonly hadSavedSettingsOnLoad: boolean;
+	readonly activeCombineToolUseMessages: boolean;
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	terminalAppearance = $state(DEFAULTS.terminalAppearance);
 	interfaceFont = $state(DEFAULTS.interfaceFont);
@@ -676,6 +685,7 @@ export class LocalSettingsStore {
 		DEFAULTS.markdownViewerOpenPlacement,
 	);
 	forkOpenPlacement = $state<ForkOpenPlacementPreference>(DEFAULTS.forkOpenPlacement);
+	swapDraggedOpenChats = $state(DEFAULTS.swapDraggedOpenChats);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	browserNotifications = $state(DEFAULTS.browserNotifications);
@@ -687,12 +697,14 @@ export class LocalSettingsStore {
 	#storageListener = (event: StorageEvent) => {
 		if (event.storageArea !== window.localStorage) return;
 		if (event.key !== null && event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
-		this.#apply(readPersistedLocalSettings());
+		this.#apply(readPersistedLocalSettings() ?? DEFAULTS);
 	};
 
 	constructor() {
 		const initial = readPersistedLocalSettings();
-		this.#apply(initial);
+		this.hadSavedSettingsOnLoad = initial !== null;
+		this.#apply(initial ?? DEFAULTS);
+		this.activeCombineToolUseMessages = this.combineToolUseMessages;
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', this.#storageListener);
 		}
@@ -702,6 +714,10 @@ export class LocalSettingsStore {
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('storage', this.#storageListener);
 		}
+	}
+
+	save(): void {
+		persistLocalSettings(this.snapshot());
 	}
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
@@ -838,6 +854,7 @@ export class LocalSettingsStore {
 			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			forkOpenPlacement: this.forkOpenPlacement,
+			swapDraggedOpenChats: this.swapDraggedOpenChats,
 			hiddenToolTypes: this.hiddenToolTypes,
 			globalShortcuts: { ...this.globalShortcuts },
 			browserNotifications: this.browserNotifications,
@@ -916,6 +933,7 @@ export class LocalSettingsStore {
 		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.forkOpenPlacement = snap.forkOpenPlacement;
+		this.swapDraggedOpenChats = snap.swapDraggedOpenChats;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 		this.globalShortcuts = { ...snap.globalShortcuts };
 		this.browserNotifications = snap.browserNotifications;

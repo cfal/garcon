@@ -7,6 +7,7 @@
 	import { NewChatMarkdownState } from './new-chat-markdown-state.svelte.js';
 	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import { NewChatPromptDraft } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import {
@@ -85,7 +86,6 @@
 		matchesSelectableSnippetExpansion,
 		type SelectableSnippet,
 	} from '$lib/snippets/selectable-snippet.js';
-	import { createClientChatId } from '$shared/client-chat-id';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -94,12 +94,12 @@
 	import { NewChatPromptRefinementController } from './new-chat-prompt-refinement-controller.js';
 
 	interface Props {
-		prefill?: string;
+		seed?: NewChatDialogSeed | null;
 		onStartChat: (config: NewChatConfig, chatId: ChatId) => void;
 		onCancel?: () => void;
 	}
 
-	let { prefill = '', onStartChat, onCancel }: Props = $props();
+	let { seed = null, onStartChat, onCancel }: Props = $props();
 
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
@@ -162,7 +162,6 @@
 
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
-	let prospectiveChatId = $state<ChatId | null>(null);
 	const initialContentReady = $derived(form.settingsLoaded);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
@@ -254,22 +253,12 @@
 		);
 	}
 
-	function reseed(): void {
-		markdown.reset();
-		snippetExpansion.cancel();
-		promptRefinement.abort();
-		prospectiveChatId = null;
-		composerEditor.reset();
-		snippetInteractionGeneration += 1;
-		snippetPalette.reset();
-		form.reseed(prefill);
-		pendingTextareaFocus = true;
-	}
-
 	onMount(() => {
-		reseed();
+		markdown.reset();
+		snippetInteractionGeneration += 1;
+		form.reseed(seed?.prefill ?? '', seed?.prospectiveChatId);
+		if (seed?.startup) form.restoreStartup(seed.startup);
 		form.loadSettingsAndModels();
-		const removeSeedListener = appShell.onNewChatDialogSeed(() => reseed());
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;
 		const handleMediaChange = (e: MediaQueryListEvent) => {
@@ -278,7 +267,6 @@
 		mql.addEventListener('change', handleMediaChange);
 
 		return () => {
-			removeSeedListener();
 			mql.removeEventListener('change', handleMediaChange);
 		};
 	});
@@ -319,7 +307,7 @@
 		if (!pendingTextareaFocus || !initialContentReady || form.showBrowser || !canFocusTextarea())
 			return;
 		if (!textareaRef) return;
-		if (prefill) {
+		if (seed?.prefill) {
 			textareaRef.setSelectionRange(0, 0);
 			textareaRef.scrollTop = 0;
 		}
@@ -438,17 +426,12 @@
 		composerEditor.updateSelection(selection);
 	}
 
-	function ensureProspectiveChatId(): ChatId {
-		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
-		return prospectiveChatId;
-	}
-
 	function expansionContext() {
 		const projectPath = form.nonblankPath;
 		if (projectPath) {
 			return {
 				type: 'new-chat' as const,
-				chatId: ensureProspectiveChatId(),
+				chatId: promptDraft.ensureProspectiveChatId(),
 				projectPath,
 				executorId: form.executorId,
 			};
@@ -573,7 +556,12 @@
 		}
 		const config = form.buildConfig();
 		if (!config) return;
-		onStartChat(config, ensureProspectiveChatId());
+		const chatId = promptDraft.ensureProspectiveChatId();
+		if (sessions.byId[chatId]) {
+			form.error = m.chat_new_chat_errors_chat_id_in_use();
+			return;
+		}
+		onStartChat(config, chatId);
 		promptDraft.discardSubmitted();
 	}
 
@@ -635,7 +623,11 @@
 		);
 	}
 	const displayedFormError = $derived(
-		form.modelSelectionError ?? form.attachmentError ?? form.error,
+		form.modelSelectionError ??
+			form.agentSelectionError ??
+			form.executionModeError ??
+			form.attachmentError ??
+			form.error,
 	);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';

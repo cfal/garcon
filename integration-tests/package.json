@@ -20,24 +20,17 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.310",
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@openai/codex": "0.164.0",
+    "@anthropic-ai/claude-code": "2.1.322",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@openai/codex": "0.167.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/bun": "1.4.3",
     "bun-pty": "0.5.1",
-    "opencode-ai": "1.19.4",
+    "opencode-ai": "1.19.5",
     "playwright": "1.64.1",
     "puppeteer-core": "25.14.0",
     "svelte": "5.57.2",
     "typescript": "^6.0.3",
     "vite": "^8.3.4"
-  },
-  "overrides": {
-    "minimatch": "11.0.3",
-    "undici": "8.12.3"
-  },
-  "patchedDependencies": {
-    "@earendil-works/pi-coding-agent@1.4.0": "../patches/@earendil-works%2Fpi-coding-agent@1.4.0.patch"
   }
 }

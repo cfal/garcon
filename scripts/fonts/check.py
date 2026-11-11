@@ -27,6 +27,21 @@ for face in report:
         assert output == face["source"] == inventory(ASSETS / output["file"])
         assert (ASSETS / output["file"]).read_bytes() == (HERE / "sources" / output["file"]).read_bytes()
         continue
+    if face["strategy"] == "woff2":
+        assert len(face["outputs"]) == 1
+        output = face["outputs"][0]
+        path = ASSETS / output["file"]
+        actual = TTFont(path)
+        assert output == inventory(path)
+        for key in face["source"].keys() - {"file", "bytes", "sha256"}:
+            assert output[key] == face["source"][key], (path, key)
+        source.ensureDecompiled()
+        actual.ensureDecompiled()
+        assert set(source.keys()) - {"DSIG"} == set(actual.keys())
+        # WOFF2 recalculates offsets/checksums and drops the obsolete digital signature.
+        for tag in set(source.keys()) - {"GlyphOrder", "head", "loca", "DSIG"}:
+            assert source.getTableData(tag) == actual.getTableData(tag), (path, tag)
+        continue
     points = []
     for output in face["outputs"]:
         path = ASSETS / output["file"]
@@ -71,4 +86,4 @@ for face in report:
     assert points[0] | points[1] == set(source.getBestCmap())
     assert all(point in points[0] for point in source.getBestCmap() if unicodedata.category(chr(point)).startswith("M"))
     assert not any(0x3400 <= point <= 0x9FFF for point in points[0] | points[1])
-print("Three split faces retain exact source coverage and accurate CSS ranges; both Inter faces are byte-identical to their sources.")
+print("Split faces retain exact source coverage; original faces are byte-identical; WOFF2 conversions preserve font tables and coverage.")

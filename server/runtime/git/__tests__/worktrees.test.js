@@ -80,6 +80,8 @@ describe("worktree listing metadata", () => {
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["config", "core.ignorecase", "true"]);
+      await runGitCommand(projectPath, ["config", "extensions.worktreeConfig", "true"]);
+      await fs.writeFile(path.join(projectPath, ".git", "config.worktree"), "");
       await runGitCommand(projectPath, [
         "worktree",
         "add",

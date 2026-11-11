@@ -239,6 +239,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       ),
     });
     this.forking = createCodexForking({
+      nativeSessions,
       journal: journalForking,
       resolveNativeSession: nativeEvidence.resolveNativeSession,
       resolveProfile: async (request) => {
@@ -385,7 +386,7 @@ async function forkCodexNativeSession(
     nativeSession: nativeSessions.encode({
       path: result.nativePath,
       agentSessionId: result.agentSessionId,
-      modelEndpointId: request.endpoint?.endpointId ?? source.modelEndpointId,
+      modelEndpointId: request.endpoint?.endpointId ?? null,
     }),
     nativeSeedReceipt: retargetNativeSeedReceipt(
       request.source.nativeSeedReceipt,

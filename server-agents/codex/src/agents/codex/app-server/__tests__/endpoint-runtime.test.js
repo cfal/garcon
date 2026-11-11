@@ -5,6 +5,7 @@ import {
   buildCodexHostProviderConfig,
 } from '../endpoint-runtime.ts';
 import { resolveCodexModelCatalogPath } from '../model-catalog.ts';
+import { appendCodexConfigArgs } from '../config-overrides.ts';
 
 function selection(endpoint = {}) {
   return {
@@ -42,19 +43,46 @@ describe('buildCodexAppServerEndpointRuntime', () => {
               requires_openai_auth: false,
               supports_websockets: false,
               env_key: 'GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI',
-              http_headers: {
-                'HTTP-Referer': 'https://github.com/cfal/garcon',
-                'X-OpenRouter-Title': 'Garcon',
+              env_http_headers: {
+                'HTTP-Referer': 'GARCON_CODEX_PROVIDER_HEADER_0_ACME_OPENAI',
+                'X-OpenRouter-Title': 'GARCON_CODEX_PROVIDER_HEADER_1_ACME_OPENAI',
               },
             },
           },
         },
         env: {
           GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI: 'secret',
+          GARCON_CODEX_PROVIDER_HEADER_0_ACME_OPENAI: 'https://github.com/cfal/garcon',
+          GARCON_CODEX_PROVIDER_HEADER_1_ACME_OPENAI: 'Garcon',
         },
         modelCatalogPath: resolveCodexModelCatalogPath(),
       },
     });
+  });
+
+  it('keeps header values out of argv and preserves literal dotted header names', () => {
+    const runtime = buildCodexAppServerEndpointRuntime({
+      ...selection({ headers: { 'X.Gateway.Key': 'synthetic-header-secret', 'X-Gateway-Key': 'other-secret' } }),
+      credential: null,
+    });
+    const args = [];
+    appendCodexConfigArgs(args, runtime.codexConfig.config);
+    expect(Bun.TOML.parse(args.find((arg) => arg.startsWith('model_providers=')))).toEqual({
+      model_providers: {
+        garcon_acme_openai: expect.objectContaining({
+          env_http_headers: {
+            'X.Gateway.Key': 'GARCON_CODEX_PROVIDER_HEADER_0_ACME_OPENAI',
+            'X-Gateway-Key': 'GARCON_CODEX_PROVIDER_HEADER_1_ACME_OPENAI',
+          },
+        }),
+      },
+    });
+    expect(runtime.codexConfig.env).toEqual({
+      GARCON_CODEX_PROVIDER_HEADER_0_ACME_OPENAI: 'synthetic-header-secret',
+      GARCON_CODEX_PROVIDER_HEADER_1_ACME_OPENAI: 'other-secret',
+    });
+    expect(args.join(' ')).not.toContain('synthetic-header-secret');
+    expect(args.join(' ')).not.toContain('other-secret');
   });
 
   it('omits API key env config for blank-key endpoints', () => {
@@ -78,6 +106,22 @@ describe('buildCodexAppServerEndpointRuntime', () => {
         modelCatalogPath: resolveCodexModelCatalogPath(),
       },
     });
+  });
+
+  it('preserves blank header values that Codex omits from env_http_headers', () => {
+    const runtime = buildCodexAppServerEndpointRuntime({
+      ...selection({ headers: { 'X.Empty.Header': '', 'X-Blank': '  ', 'X-Key': 'synthetic-secret' } }),
+      credential: null,
+    });
+    const provider = runtime.codexConfig.config.model_providers.garcon_acme_openai;
+    expect(provider.http_headers).toEqual({ 'X.Empty.Header': '', 'X-Blank': '  ' });
+    expect(provider.env_http_headers).toEqual({ 'X-Key': 'GARCON_CODEX_PROVIDER_HEADER_2_ACME_OPENAI' });
+    expect(runtime.codexConfig.env).toEqual({ GARCON_CODEX_PROVIDER_HEADER_2_ACME_OPENAI: 'synthetic-secret' });
+    const args = [];
+    appendCodexConfigArgs(args, runtime.codexConfig.config);
+    expect(Bun.TOML.parse(args.find((arg) => arg.startsWith('model_providers='))).model_providers.garcon_acme_openai.http_headers)
+      .toEqual({ 'X.Empty.Header': '', 'X-Blank': '  ' });
+    expect(args.join(' ')).not.toContain('synthetic-secret');
   });
 
   it('supplies the bundled catalog only when effective auth disables live discovery', () => {

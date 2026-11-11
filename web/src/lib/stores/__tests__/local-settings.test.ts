@@ -11,10 +11,94 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
 import { CHAT_BOARD_MAX_COUNT, type ChatBoard } from '$shared/chat-boards';
 import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
+import { DEFAULT_SIDEBAR_DISPLAY_OPTIONS } from '$lib/components/sidebar/sidebar-display-options';
 
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it.each([false, true])('keeps the active combination mode until a new app store is created (%s)', combined => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: combined }));
+		const store = createLocalSettingsStore();
+		store.toggle('combineToolUseMessages');
+		expect(store.activeCombineToolUseMessages).toBe(combined);
+		expect(store.combineToolUseMessages).toBe(!combined);
+		const refreshed = createLocalSettingsStore();
+		expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
+		expect(store.activeCombineToolUseMessages).toBe(combined);
+		expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+		store.destroy();
+		refreshed.destroy();
+	});
+
+	it.each([undefined, null, 'false', 0, {}])(
+		'defaults chat swapping on for a missing or malformed preference: %s',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ swapDraggedOpenChats: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.swapDraggedOpenChats).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('persists, synchronizes and resets the chat-swap opt-out', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('swapDraggedOpenChats');
+		const restored = createLocalSettingsStore();
+		expect(restored.swapDraggedOpenChats).toBe(false);
+		expect(restored.snapshot().swapDraggedOpenChats).toBe(false);
+		store.set('swapDraggedOpenChats', true);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+			}),
+		);
+		expect(restored.swapDraggedOpenChats).toBe(true);
+		store.toggle('swapDraggedOpenChats');
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
+		expect(store.swapDraggedOpenChats).toBe(true);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([null, '', '{}', 'null', '[]', '42', '{invalid'])(
+		'offers setup without usable saved preferences: %s',
+		(raw) => {
+			if (raw !== null) localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, raw);
+			const store = createLocalSettingsStore();
+			expect(store.hadSavedSettingsOnLoad).toBe(false);
+			store.destroy();
+		},
+	);
+
+	it('saves default preferences on dismissal without adding an onboarding flag', () => {
+		const store = createLocalSettingsStore();
+		store.save();
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toEqual(store.snapshot());
+		expect(store.hadSavedSettingsOnLoad).toBe(false);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('recognizes existing preferences and captures freshness before early setting writes', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarGrouping', 'project');
+		expect(store.hadSavedSettingsOnLoad).toBe(false);
+		const restored = createLocalSettingsStore();
+		expect(restored.hadSavedSettingsOnLoad).toBe(true);
+		expect(restored.sidebarGrouping).toBe('project');
+		store.destroy();
+		restored.destroy();
 	});
 
 	it('defaults the new category preferences independently of obsolete settings', () => {
@@ -23,6 +107,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ showQuickCommitTray: false }),
 		);
 		const store = createLocalSettingsStore();
+		expect(store.hadSavedSettingsOnLoad).toBe(true);
 		expect(store.composerStatusBarGitProjects).toBe(true);
 		expect(store.composerStatusBarNonGitProjects).toBe(false);
 		store.set('composerStatusBarGitProjects', true);
@@ -161,7 +246,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.combineToolUseMessages).toBe(true);
 		expect(store.allowDirectChats).toBe(false);
-		expect(store.sidebarGrouping).toBe('project-and-activity');
+		expect(store.sidebarGrouping).toBe('none');
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('single-line');
@@ -169,7 +254,9 @@ describe('LocalSettingsStore', () => {
 		expect(store.selectedChatBoardId).toBeNull();
 		expect(store.chatBoardItemLayout).toBeNull();
 		expect(store.chatBoardActiveColumnByBoardId).toEqual({});
-		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.sidebarSortMode).toBe('recent');
+		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.grouping).toBe(store.sidebarGrouping);
+		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.sortMode).toBe(store.sidebarSortMode);
 		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
 		expect(store.composerStatusBarGitProjects).toBe(true);
@@ -263,6 +350,17 @@ describe('LocalSettingsStore', () => {
 			store.destroy();
 		},
 	);
+
+	it('preserves explicitly saved sidebar grouping and manual order', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarGrouping: 'project-and-activity', sidebarSortMode: 'manual' }),
+		);
+		const store = createLocalSettingsStore();
+		expect(store.sidebarGrouping).toBe('project-and-activity');
+		expect(store.sidebarSortMode).toBe('manual');
+		store.destroy();
+	});
 
 	it('persists the Vim toggle', () => {
 		const store = createLocalSettingsStore();
@@ -1069,7 +1167,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('falls back to manual for invalid sidebar sort mode', () => {
+	it('falls back to recent activity for invalid sidebar sort mode', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
 			JSON.stringify({ sidebarSortMode: 'chronological' }),
@@ -1077,7 +1175,7 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.sidebarSortMode).toBe('recent');
 
 		store.destroy();
 	});
@@ -1139,7 +1237,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
 		);
 		const oldToken = createLocalSettingsStore();
-		expect(oldToken.sidebarGrouping).toBe('project-and-activity');
+		expect(oldToken.sidebarGrouping).toBe('none');
 		oldToken.destroy();
 	});
 

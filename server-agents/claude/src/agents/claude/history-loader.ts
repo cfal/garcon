@@ -110,8 +110,12 @@ function queuedCommandPrompts(entry: Record<string, unknown>): readonly string[]
   if (entry.type !== 'attachment') return [];
   const attachment = asRecord(entry.attachment);
   if (attachment.type !== 'queued_command' || attachment.commandMode !== 'prompt') return [];
+  const provenance = { origin: attachment.origin ?? entry.origin };
   return claudeUserTexts(attachment.prompt)
-    .filter((prompt) => prompt.steering || !isProviderOwnedUserMessage(entry, prompt.text))
+    .filter((prompt) => prompt.steering || (
+      attachment.isMeta !== true && entry.isMeta !== true
+      && !isProviderOwnedUserMessage(provenance, prompt.text)
+    ))
     .map((prompt) => stripResolvedFileMentionContext(prompt.text));
 }
 

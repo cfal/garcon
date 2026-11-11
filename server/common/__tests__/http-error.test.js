@@ -27,11 +27,11 @@ describe('jsonError', () => {
 });
 
 describe('jsonErrorFromUnknown', () => {
-  it('reports rejected integration input as non-retryable validation rather than a server error', async () => {
-    const response = jsonErrorFromUnknown(new AgentIntegrationError('INVALID_SETTINGS', 'Invalid submitted source', false));
+  it.each(['INVALID_SETTINGS', 'INVALID_ENDPOINT'])('reports rejected %s input as non-retryable validation rather than a server error', async (code) => {
+    const response = jsonErrorFromUnknown(new AgentIntegrationError(code, 'Invalid submitted source', false));
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ success: false, error: 'Invalid submitted source',
-      errorCode: 'INVALID_SETTINGS', retryable: false });
+      errorCode: code, retryable: false });
   });
   it('does not expose unexpected 500 error details', async () => {
     const response = jsonErrorFromUnknown(new Error('/secret/path failed'));

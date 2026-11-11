@@ -31,7 +31,6 @@ import type {
 import type {
   CompleteChatHistoryResponse,
   TranscriptReadPurpose,
-  UnavailableChatHistoryResponse,
 } from '../../../common/chat-view.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
@@ -48,7 +47,6 @@ import {
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
-import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
@@ -58,7 +56,6 @@ import {
   TitleGenerationError,
 } from '../chats/title-generator.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import { safeFenceDiagnostic, StaleTranscriptViewError } from '../ledger/errors.js';
 import { commandHttpError, parseCommandRequest } from '../lib/command-http-error.js';
 import { composeRoutes } from '../lib/compose-routes.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -79,6 +76,7 @@ import {
 } from './chat-search-routes.js';
 import { executorIdFromUrl } from './executor-target.js';
 import { requireStringField } from './route-helpers.js';
+import { transcriptHistoryError } from './transcript-history-error.js';
 
 const logger = createLogger('routes:chats');
 
@@ -420,52 +418,7 @@ export default function createChatRoutes({
         limit,
       } satisfies CompleteChatHistoryResponse);
     } catch (error: unknown) {
-      if (request.signal.aborted) return new Response(null, { status: 499 });
-      // A fenced ledger is permanent for the process, and its cause can carry a database path or
-      // chat identity. It reports one fixed line with sanitized identifiers and returns before the
-      // generic diagnostic below, which logs the raw message.
-      if (
-        error instanceof TranscriptHistoryUnavailableError
-        && error.historyState.errorCode === 'LEDGER_FENCED'
-      ) {
-        logger.warn('Transcript ledger read is fenced.', safeFenceDiagnostic(error.cause));
-        return Response.json({
-          historyState: error.historyState,
-          chatId,
-          messages: [],
-        } satisfies UnavailableChatHistoryResponse);
-      }
-      logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
-      if (error instanceof StaleTranscriptViewError) {
-        return jsonError(
-          'Transcript view changed while paging',
-          409,
-          'STALE_TRANSCRIPT_VIEW',
-          false,
-        );
-      }
-      if (error instanceof DomainError && error.code === 'CARRYOVER_HISTORY_UNAVAILABLE') {
-        return Response.json({
-          historyState: {
-            kind: 'degraded',
-            errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
-            retryable: false,
-          },
-          chatId,
-          messages: [],
-        } satisfies UnavailableChatHistoryResponse);
-      }
-      // A non-ready transcript read is a typed history state, not exhaustion:
-      // deferred retries once on the execution-to-idle transition and degraded
-      // carries the store's own failure code.
-      if (error instanceof TranscriptHistoryUnavailableError) {
-        return Response.json({
-          historyState: error.historyState,
-          chatId,
-          messages: [],
-        } satisfies UnavailableChatHistoryResponse);
-      }
-      return jsonErrorFromUnknown(error);
+      return transcriptHistoryError(error, chatId, request.signal);
     }
   }
 

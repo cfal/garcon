@@ -11,6 +11,8 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
 	import FontPreloads from '$lib/components/layout/FontPreloads.svelte';
+	import NativeReadySignal from '$lib/components/layout/NativeReadySignal.svelte';
+	import { installNativeConnectionNotification } from '$lib/native/connection-notification.js';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import ReauthenticationOverlay from '$lib/components/auth/ReauthenticationOverlay.svelte';
@@ -45,7 +47,7 @@
 	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 	import { PullRequestReviewsRouter } from '$lib/events/pull-request-reviews-router.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
-	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
+	import { StartupOnboardingState } from '$lib/onboarding/startup-onboarding.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -101,10 +103,7 @@
 	import { searchChatTranscripts } from '$lib/api/chats';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
-		getLocalStorageItem,
 		getSessionStorageItem,
-		LOCAL_STORAGE_KEYS,
-		removeLocalStorageItem,
 		SESSION_STORAGE_KEYS,
 		setSessionStorageItem,
 	} from '$lib/utils/local-persistence';
@@ -388,6 +387,13 @@
 			if (!connected) browserNotificationsRouter.clearPermissions();
 		});
 	});
+	onMount(() =>
+		installNativeConnectionNotification(
+			ws,
+			notifications,
+			new URL(resolve('/'), window.location.origin),
+		),
+	);
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const transcriptSearchStatus = new TranscriptSearchStatusController(ws, (status) =>
@@ -587,24 +593,15 @@
 		}
 	});
 
-	// Opens the onboarding wizard on the first authenticated load right after
-	// a successful registration. Gated on a persisted flag set during the
-	// registration flow so cold loads for existing users or auth-disabled
-	// sessions do not receive a blocking onboarding modal.
-	let onboardingAutoOpened = $state(false);
+	const startupOnboarding = new StartupOnboardingState();
 	$effect(() => {
-		if (onboardingAutoOpened) return;
-		const decision = resolveFirstRegistrationOnboarding({
-			isLoading: auth.isLoading,
+		const decision = startupOnboarding.resolve({
 			isAuthenticated: auth.isAuthenticated,
-			authDisabled: auth.authDisabled,
-			isRegistrationRoute: page.route.id === '/setup',
-			justRegistered: getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1',
+			isPublicRoute,
+			logoutPending: auth.logoutPending,
+			hadSavedSettingsOnLoad: localSettings.hadSavedSettingsOnLoad,
 		});
-		if (decision === 'wait') return;
-		onboardingAutoOpened = true;
 		if (decision === 'open') {
-			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
 			appShell.openOnboardingWizard();
 		}
 	});
@@ -638,6 +635,7 @@
 		</div>
 	</div>
 {:else if !auth.presentationOwner && auth.isUnavailable && (!isPublicRoute || auth.token || (isAuthRoute && auth.availability === 'storage-unavailable'))}
+	<NativeReadySignal />
 	<div data-auth-recovery class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="max-w-md text-center">
 			<div class="flex justify-center mb-4">
@@ -661,8 +659,10 @@
 	</div>
 {:else if isPublicRoute}
 	{@render children()}
+	<NativeReadySignal />
 {:else if auth.presentationOwner}
 	<AppShell />
+	<NativeReadySignal />
 
 	<CommandMenu bind:this={commandMenu} />
 	<KeyboardShortcuts

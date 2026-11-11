@@ -59,6 +59,20 @@ export function fontLabel(surface: TypographySurface, font: FontPreference): str
 			return 'JetBrains Mono';
 		case 'inter':
 			return 'Inter';
+		case 'source-sans-3':
+			return 'Source Sans 3';
+		case 'atkinson-hyperlegible':
+			return 'Atkinson Hyperlegible';
+		case 'source-serif-4':
+			return 'Source Serif 4';
+		case 'ibm-plex-mono':
+			return 'IBM Plex Mono';
+		case 'source-code-pro':
+			return 'Source Code Pro';
+		case 'arimo':
+			return 'Arimo';
+		case 'roboto':
+			return 'Roboto';
 		case 'default':
 			switch (surface) {
 				case 'code-editor':

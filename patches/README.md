@@ -87,14 +87,12 @@ Typography's AST parsing and trailing-pseudo extraction APIs remain compatible;
 `scripts/__tests__/typography-parser.test.js` covers those transformations.
 Remove the override once typography's own dependency range selects a fixed release.
 
-## Pi CLI entry point
+## dompurify and minimatch overrides
 
-`@earendil-works/pi-coding-agent@1.4.0` publishes its `pi` bin as a bundle with compiled
-copies of `undici` 8.10.2 and `minimatch` 10.2.6, which package overrides cannot reach.
-The patch makes the launcher behind that bin start the published unbundled `dist/cli.js`,
-which resolves both from `node_modules`. It targets the launcher because Bun reads bin paths
-from lockfile metadata, so patching `bin` in `package.json` has no effect. Retire the patch and the overrides once a Pi release ships a bundle
-built with `undici` 8.12.2 or newer and `minimatch` 11.0.1 or newer.
-
-Coverage lives in `integration-tests/tests/server/pi-cli-dependencies.test.ts`, which
-asserts what the spawned CLI loads rather than what the lockfile declares.
+`mermaid` pins `dompurify` 3.4.16 and the ESLint toolchain resolves `minimatch` 10.2.x.
+The root overrides select `dompurify` 3.4.17, which fixes
+[a SAFE_FOR_TEMPLATES bypass](https://github.com/advisories/GHSA-cg2g-xh64-v4q7) and two
+further sanitizer advisories, and `minimatch` 11.0.3, which fixes
+[globparts amplification](https://github.com/advisories/GHSA-g3hv-75wg-m249). The `mermaid-loader`
+tests still assert `securityLevel: 'strict'`, and `bun run lint` exercises the ESLint path.
+Remove each override once the dependents' own ranges select a fixed release.

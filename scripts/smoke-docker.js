@@ -95,7 +95,8 @@ async function verifyControllerStartup() {
   await startContainer(controller);
   await waitForCli(controller);
   const version = await cli(controller, ['--version']);
-  assert.match(version.stdout.trim(), /^\d+\.\d+\.\d+/);
+  const expectedVersion = process.env.EXPECTED_VERSION ?? (await Bun.file(path.resolve(import.meta.dir, '../package.json')).json()).version;
+  assert.equal(version.stdout.trim(), expectedVersion);
   const help = await cli(controller, ['--help']);
   assert.match(help.stdout, /Usage:\s+garcon-cli/);
   const uid = await docker(['exec', controller, 'id', '-u']);

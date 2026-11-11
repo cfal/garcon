@@ -40,8 +40,11 @@ test('ArrowUp recalls current-chat prompts without replacing drafts or remountin
     const bounds = (await composer.boundingBox())!;
     const historyRequested = Promise.withResolvers<void>();
     const releaseHistory = Promise.withResolvers<void>();
-    await page.route('**/api/v1/chats/messages?**', async route => {
-      if (new URL(route.request().url()).searchParams.get('chatId') === ids[1]) {
+    const historyRoute = /\/api\/v1\/chats\/(?:combined-)?messages(?:\?|$)/;
+    await page.route(historyRoute, async route => {
+      const request = route.request();
+      const chatId = request.method() === 'POST' ? request.postDataJSON().chatId : new URL(request.url()).searchParams.get('chatId');
+      if (chatId === ids[1]) {
         historyRequested.resolve();
         await releaseHistory.promise;
       }
@@ -75,7 +78,7 @@ test('ArrowUp recalls current-chat prompts without replacing drafts or remountin
       }
     } finally {
       releaseHistory.resolve();
-      await page.unroute('**/api/v1/chats/messages?**');
+      await page.unroute(historyRoute);
     }
     assertNoBrowserErrors();
   });

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onDestroy, untrack } from 'svelte';
+	import { PullRequestDiffController } from '$lib/git/pull-requests/pull-request-diff.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
@@ -13,16 +15,23 @@
 	}
 
 	let { detail }: Props = $props();
+	const diff = new PullRequestDiffController();
+	$effect(() => {
+		const current = detail;
+		untrack(() => diff.open(current));
+	});
+	onDestroy(() => diff.close());
+	const documentId = $derived(diff.documentId ?? detail.documentId);
 
 	let viewedFiles = $state<Set<string>>(new Set());
 	let collapsedFiles = $state<Set<string>>(new Set());
 
 	// Resets per-PR view state whenever the shown pull request changes.
-	let trackedNumber = $state<number | null>(null);
+	let trackedReview = $state<string | null>(null);
 	$effect(() => {
-		const current = detail.number;
-		if (current !== trackedNumber) {
-			trackedNumber = current;
+		const current = detail.reviewId;
+		if (current !== trackedReview) {
+			trackedReview = current;
 			viewedFiles = new Set();
 			collapsedFiles = new Set();
 		}
@@ -44,15 +53,16 @@
 	const diffSource = $derived.by(() => {
 		const baseSource = buildGitVirtualReviewRowSource({
 			summary: {
-				documentId: detail.documentId,
+				documentId,
 				project: '',
 				context: 3,
 				files: detail.files,
 				limits: DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
 			},
-			visibleFilePaths: detail.files.map((file) => file.path),
-			fileBodies: detail.fileBodies,
-			loadingBodies: new Set<string>(),
+			visibleFilePaths: filePaths,
+			fileBodies: diff.fileBodies,
+			syntaxResults: diff.syntax.results,
+			loadingBodies: diff.loadingBodies,
 			focusedFilePath: null,
 			diffMode: 'unified',
 			contextLines: 3,
@@ -62,7 +72,7 @@
 		return buildPullRequestVirtualRowSource({
 			baseSource,
 			files: detail.files,
-			fileBodies: detail.fileBodies,
+			fileBodies: diff.fileBodies,
 			threads: detail.threads,
 			collapsedFilePaths: collapsedFiles,
 		});
@@ -132,7 +142,7 @@
 	</div>
 {:else}
 	<PullRequestVirtualDiffSurface
-		documentId={detail.documentId}
+		{documentId}
 		source={diffSource}
 		{viewedFiles}
 		{collapsedFiles}
@@ -140,5 +150,10 @@
 		{threadCountByFile}
 		onToggleViewed={toggleViewed}
 		onToggleCollapsed={toggleCollapsed}
+		onBodyDemand={(demand) =>
+			diff.handleDemand({
+				...demand,
+				filePaths: demand.filePaths.filter((path) => !collapsedFiles.has(path)),
+			})}
 	/>
 {/if}

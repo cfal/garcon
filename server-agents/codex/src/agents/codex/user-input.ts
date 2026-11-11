@@ -1,0 +1,158 @@
+import { AskUserQuestionToolUseMessage, type AskUserQuestionPrompt } from '@garcon/common/chat-types';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
+import {
+  ASK_USER_QUESTION_MAX_ANSWERS,
+  ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
+  askUserQuestionDecisionValidationError,
+  isAskUserQuestionId,
+  normalizeAskUserQuestionDecisionResponse,
+} from '@garcon/common/ask-user-question-response';
+import { isRecord } from '@garcon/common/json';
+
+export const CODEX_USER_INPUT_METHOD = 'item/tool/requestUserInput';
+
+interface CodexUserInputResponse {
+  answers: Record<string, { answers: string[] }>;
+}
+
+const USER_NOTE_PREFIX = 'user_note: ';
+const OTHER_OPTION_LABEL = 'None of the above';
+
+function parseCodexUserInputQuestions(value: unknown): AskUserQuestionPrompt[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > ASK_USER_QUESTION_MAX_ANSWERS) {
+    throw new TypeError('Invalid Codex questions');
+  }
+  const ids = new Set<string>();
+  return value.map((question): AskUserQuestionPrompt => {
+    if (!isRecord(question)) throw new TypeError('Invalid Codex question');
+    if (!isAskUserQuestionId(question.id) || ids.has(question.id)) {
+      throw new TypeError('Invalid Codex question');
+    }
+    if (typeof question.question !== 'string' || !question.question.trim()) {
+      throw new TypeError('Invalid Codex question');
+    }
+    if (
+      (question.isOther !== undefined && typeof question.isOther !== 'boolean') ||
+      (question.isSecret !== undefined && typeof question.isSecret !== 'boolean')
+    ) {
+      throw new TypeError('Invalid Codex question');
+    }
+    ids.add(question.id);
+    const options = question.options ?? [];
+    if (!Array.isArray(options) || options.length > ASK_USER_QUESTION_MAX_SELECTED_OPTIONS) {
+      throw new TypeError('Invalid Codex question options');
+    }
+    if (options.length === 0 && question.isOther !== true) throw new TypeError('Unanswerable Codex question');
+    return {
+      id: question.id,
+      prompt: question.question,
+      ...(typeof question.header === 'string' ? { header: question.header } : {}),
+      allowFreeText: question.isOther === true,
+      allowNotes: options.length > 0,
+      isSecret: question.isSecret === true,
+      options: options.map((option, index) => {
+        if (!isRecord(option) || typeof option.label !== 'string' || !option.label.trim()) {
+          throw new TypeError('Invalid Codex question option');
+        }
+        return {
+          id: `option-${index}`,
+          label: option.label,
+          ...(typeof option.description === 'string' ? { description: option.description } : {}),
+        };
+      }),
+    };
+  });
+}
+
+export function codexUserInputMessage(
+  timestamp: string,
+  itemId: unknown,
+  questions: unknown,
+): AskUserQuestionToolUseMessage {
+  if (typeof itemId !== 'string' || !itemId.trim()) throw new TypeError('Missing Codex question item ID');
+  return new AskUserQuestionToolUseMessage(timestamp, itemId, undefined, parseCodexUserInputQuestions(questions));
+}
+
+export function codexUserInputResponse(
+  tool: AskUserQuestionToolUseMessage,
+  decision: PermissionDecisionPayload,
+): CodexUserInputResponse {
+  const response = normalizeAskUserQuestionDecisionResponse(decision.response);
+  if (decision.response !== undefined && !response) throw new TypeError('Invalid Codex question response');
+  if (response) {
+    const error = askUserQuestionDecisionValidationError(tool, decision.allow, response);
+    if (error) throw new TypeError(error);
+  }
+  if (!decision.allow) return { answers: {} };
+  if (!response || response.outcome !== 'answered') throw new TypeError('Codex questions require structured answers');
+  const questions = new Map(tool.questions.map((question) => [question.id, question]));
+  const answerEntries = response.answers.map((answer): [string, { answers: string[] }] => {
+    let values: string[];
+    if (answer.selectedOptionIds.length === 0 && answer.text !== undefined) {
+      values = [answer.text];
+    } else {
+      const question = questions.get(answer.questionId)!;
+      values = answer.selectedOptionIds.map((id) => question.options.find((option) => option.id === id)!.label);
+      if (answer.text !== undefined) values.push(`${USER_NOTE_PREFIX}${answer.text}`);
+    }
+    return [answer.questionId, { answers: values }];
+  });
+  return { answers: Object.fromEntries(answerEntries) };
+}
+
+export function codexHistoricalUserInput(
+  timestamp: string,
+  callId: string,
+  input: Record<string, unknown>,
+): AskUserQuestionToolUseMessage {
+  try {
+    // The native handler adds Other after recording the original model arguments.
+    let questions = input.questions;
+    if (Array.isArray(questions)) {
+      questions = questions.map((question) => (isRecord(question) ? { ...question, isOther: true } : question));
+    }
+    return codexUserInputMessage(timestamp, callId, questions);
+  } catch {
+    return new AskUserQuestionToolUseMessage(timestamp, callId, undefined, []);
+  }
+}
+
+function parseHistoricalAnswers(output: unknown): Map<string, string[]> | null {
+  let value = output;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(value) || !isRecord(value.answers)) return null;
+  const answers = new Map<string, string[]>();
+  for (const [id, answer] of Object.entries(value.answers)) {
+    if (!isRecord(answer) || !Array.isArray(answer.answers)
+      || !answer.answers.every((text) => typeof text === 'string')) {
+      return null;
+    }
+    answers.set(id, answer.answers);
+  }
+  return answers;
+}
+
+export function codexHistoricalQuestionResult(
+  output: unknown,
+  questions: readonly AskUserQuestionPrompt[],
+): { answers: Record<string, string[]>; textAnswers: Record<string, string> } | null {
+  const answers = parseHistoricalAnswers(output);
+  if (!answers) return null;
+  const textAnswers = new Map<string, string>();
+  for (const question of questions) {
+    const values = answers.get(question.id);
+    if (values?.length !== 2 || !values[1].startsWith(USER_NOTE_PREFIX)) continue;
+    // The TUI appends a tagged note after its selected label, including Other.
+    const selected = question.options.some((option) => option.label === values[0]);
+    if (!selected && values[0] !== OTHER_OPTION_LABEL) continue;
+    answers.set(question.id, selected ? [values[0]] : []);
+    textAnswers.set(question.id, values[1].slice(USER_NOTE_PREFIX.length));
+  }
+  return { answers: Object.fromEntries(answers), textAnswers: Object.fromEntries(textAnswers) };
+}

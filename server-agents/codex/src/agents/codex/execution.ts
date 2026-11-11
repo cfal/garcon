@@ -15,7 +15,9 @@ import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/reso
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
 import type { CodexAuthStatus } from './codex-auth.js';
+import { codexQuestionReplyInput } from './async-questions.js';
 import {
+  assertCodexSessionEndpoint,
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
   buildCodexHostProviderConfig,
@@ -114,6 +116,10 @@ export class CodexExecution implements AgentRuntimeExecution {
     configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
     previousConfiguration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[2],
   ): Promise<void> {
+    // Unloaded settings remain repairable; execution validates the native endpoint before admission.
+    const sourceEndpointId = this.runtime.sourceEndpointId(agentSessionId);
+    if (sourceEndpointId === undefined) return;
+    assertCodexSessionEndpoint(sourceEndpointId, configuration.endpoint?.endpointId ?? null);
     const previousEffort = mapThinkingModeToCodexEffort(
       previousConfiguration.thinkingMode,
       previousConfiguration.model,
@@ -122,21 +128,12 @@ export class CodexExecution implements AgentRuntimeExecution {
       configuration.thinkingMode,
       configuration.model,
     );
-    if (!this.runtime.hasSource(agentSessionId)) return;
     if (previousEffort !== undefined && nextEffort === undefined) {
       // Defers the whole update because the runtime replaces explicit-effort sources before Default turns.
       if (!this.runtime.isRunning(agentSessionId)) return;
       throw new AgentIntegrationError(
         'INVALID_SETTINGS',
         'Codex cannot clear a concrete reasoning effort during an active turn',
-        false,
-      );
-    }
-    if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
-      if (!this.runtime.isRunning(agentSessionId)) return;
-      throw new AgentIntegrationError(
-        'INVALID_ENDPOINT',
-        'Cannot change the Codex endpoint while a session is running',
         false,
       );
     }
@@ -152,6 +149,10 @@ export class CodexExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
+    assertCodexSessionEndpoint(
+      this.nativeSessions.decode(request.nativeSession).modelEndpointId,
+      request.endpoint?.endpointId ?? null,
+    );
     await action(prepareResumeRequest(
       request,
       await this.#runtimeConfiguration(request),
@@ -191,16 +192,6 @@ export class CodexExecution implements AgentRuntimeExecution {
   }
 }
 
-function sameEndpoint(
-  left: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
-  right: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
-): boolean {
-  if (!left || !right) return left === right;
-  return left.apiProviderId === right.apiProviderId
-    && left.endpointId === right.endpointId
-    && left.protocol === right.protocol;
-}
-
 function executionFields(
   request: AgentRuntimeExecutionContext,
 ) {
@@ -208,6 +199,7 @@ function executionFields(
     chatId: request.chatId,
     projectPath: request.projectPath,
     model: request.model,
+    modelEndpointId: request.endpoint?.endpointId ?? null,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
     executionAdmission: {
@@ -226,7 +218,7 @@ function prepareStartRequest(
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
-    command: carriedContext ? `${carriedContext}${request.prompt}` : request.prompt,
+    command: `${carriedContext ?? ''}${codexQuestionReplyInput(request.prompt, request.submission?.questionReply)}`,
     images: request.attachments,
     ...configuration,
   };
@@ -242,7 +234,7 @@ function prepareResumeRequest(
     ...executionFields(request),
     operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
-    command: request.prompt,
+    command: codexQuestionReplyInput(request.prompt, request.submission?.questionReply),
     images: request.attachments,
     nativePath: nativeSessions.decode(request.nativeSession).path,
     ...configuration,

@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ChatListEntry } from '$shared/chat-list';
+import { renderScheduledPrompt } from '$lib/api/scheduled-prompts';
+import { createExecutorStartupFixture } from '$lib/chat/new-chat/__tests__/executor-startup-fixture';
 import type {
 	ScheduledPrompt,
 	ScheduledPromptRunLogEntry,
@@ -9,6 +12,7 @@ import type {
 } from '$shared/scheduled-prompts';
 
 vi.mock('../ScheduledPromptDialog.svelte', async () => import('./ScheduledPromptDialogTestStub.svelte'));
+vi.mock('$lib/api/scheduled-prompts', () => ({ renderScheduledPrompt: vi.fn() }));
 
 const ScheduledPromptsSectionTestHost = (await import('./ScheduledPromptsSectionTestHost.svelte'))
 	.default;
@@ -82,6 +86,104 @@ function executorPill(title: string): string | null {
 }
 
 describe('ScheduledPromptsSection', () => {
+	it('loads a cold remote catalog before enabling an unguarded existing-chat copy', async () => {
+		const { modelCatalog, remoteCatalog } = createExecutorStartupFixture();
+		const metadata = remoteCatalog.agentMetadata;
+		remoteCatalog.agentMetadata = {};
+		const discovery = Promise.withResolvers<void>();
+		vi.mocked(remoteCatalog.refreshIfStale).mockImplementation(async () => {
+			await discovery.promise;
+			remoteCatalog.agentMetadata = metadata;
+		});
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor, remoteExecutor], modelCatalog,
+			chats: [chat('chat-remote', remoteExecutor.id)],
+			prompts: [prompt('remote-existing', 'Remote existing chat', existingChat('chat-remote'))],
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		expect(screen.getByRole('menuitem', { name: 'Open in new chat' }).getAttribute('aria-disabled')).toBe('true');
+		expect(remoteCatalog.refreshIfStale).toHaveBeenCalledOnce();
+		expect(modelCatalog.refreshIfStale).not.toHaveBeenCalled();
+		discovery.resolve();
+		await vi.waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open in new chat' }).getAttribute('aria-disabled')).not.toBe('true'));
+	});
+
+	it('prepares an editable new-chat seed from the row without changing the schedule', async () => {
+		const onOpenInNewChat = vi.fn();
+		vi.mocked(renderScheduledPrompt).mockImplementation(async request => ({ success: true, chatId: request.chatId, expandedText: `Review ${request.chatId}` }));
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor], chats: [],
+			prompts: [prompt('a', 'Review {{chat_id}}', newChat())], onOpenInNewChat,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new chat' }));
+		await vi.waitFor(() => expect(onOpenInNewChat).toHaveBeenCalledOnce());
+		const seed = onOpenInNewChat.mock.calls[0][0];
+		expect(seed.prefill).toBe(`Review ${seed.prospectiveChatId}`);
+		expect(seed.startup).toMatchObject({ executorId: 'local', projectPath: '/workspace/project', agentId: 'claude', model: 'opus' });
+	});
+
+	it.each(['success', 'failure'] as const)('blocks a new scheduled draft until chat preparation settles with %s', async outcome => {
+		const pending = Promise.withResolvers<void>();
+		const onOpenInNewChat = vi.fn();
+		vi.mocked(renderScheduledPrompt).mockImplementation(async request => {
+			await pending.promise;
+			return { success: true, chatId: request.chatId, expandedText: 'Review task' };
+		});
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor], chats: [],
+			prompts: [prompt('a', 'Review task', newChat())], onOpenInNewChat,
+		});
+		const addPrompt = screen.getByRole('button', { name: 'Add Prompt' }) as HTMLButtonElement;
+		expect(addPrompt.disabled).toBe(false);
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new chat' }));
+		try {
+			addPrompt.click();
+			await tick();
+			expect(screen.queryByText('Scheduled prompt editor')).toBeNull();
+			expect(addPrompt.disabled).toBe(true);
+			expect(onOpenInNewChat).not.toHaveBeenCalled();
+		} finally {
+			if (outcome === 'success') pending.resolve();
+			else pending.reject(new Error('Synthetic render failure'));
+		}
+		await vi.waitFor(() => expect(addPrompt.disabled).toBe(false));
+		if (outcome === 'success') expect(onOpenInNewChat).toHaveBeenCalledOnce();
+		else expect(screen.getByRole('alert').textContent).toBe('Synthetic render failure');
+	});
+
+	it.each(['closed', 'superseded', 'unmounted'] as const)('aborts rendering when the section is %s and ignores a late reply', async reason => {
+		const pending = Promise.withResolvers<void>();
+		const onOpenInNewChat = vi.fn();
+		vi.mocked(renderScheduledPrompt).mockImplementation(async request => {
+			await pending.promise;
+			return { success: true, chatId: request.chatId, expandedText: 'Late rendered task' };
+		});
+		const view = render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor], chats: [],
+			prompts: [prompt('a', 'Review task', newChat())], onOpenInNewChat,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Prompt actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new chat' }));
+		expect(renderScheduledPrompt).toHaveBeenCalledOnce();
+		const signal = vi.mocked(renderScheduledPrompt).mock.calls[0][1]?.signal;
+		expect(signal?.aborted).toBe(false);
+		try {
+			if (reason === 'closed') await view.rerender({ active: false });
+			if (reason === 'superseded') await view.rerender({ newChatRequestId: 1 });
+			if (reason === 'unmounted') view.unmount();
+			await tick();
+			expect(signal?.aborted).toBe(true);
+		} finally {
+			pending.resolve();
+		}
+		await vi.mocked(renderScheduledPrompt).mock.results[0].value;
+		await tick();
+		expect(onOpenInNewChat).not.toHaveBeenCalled();
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
 	it('shows where each prompt runs once a remote executor is configured', () => {
 		render(ScheduledPromptsSectionTestHost, {
 			executors: [localExecutor, remoteExecutor],

@@ -146,6 +146,15 @@ export class WorkspacePresentationController {
 		return this.resolveCurrentWindow(this.layout.snapshot);
 	}
 
+	get focusedChatId(): string | null {
+		const snapshot = this.layout.snapshot;
+		const activeSurfaceId = this.isMobile
+			? snapshot.mobileActiveSurfaceId
+			: windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.activeId;
+		const surface = activeSurfaceId ? snapshot.surfaces[activeSurfaceId] : null;
+		return surface?.type === 'chat' ? surface.chatId : null;
+	}
+
 	get currentChatSurfaceId(): string | null {
 		return this.#chatSurfaceInWindow(this.layout.snapshot, this.currentWindowId);
 	}
@@ -765,6 +774,14 @@ export class WorkspacePresentationController {
 						this.#frames.recordPreparationError(next, error, presentationTo);
 					}
 				},
+				afterPublish: (next) => {
+					const presentationTarget = resolveTarget?.() ?? null;
+					if (presentationTarget && presentationTo) {
+						// Focus must follow the new bindings before reactive selection observes them.
+						presentationGeneration = this.#frames.supersedePendingTransition();
+						this.#adoptPublishedPresentationTarget(next, presentationTarget, presentationTo);
+					}
+				},
 				publishFailed: () => {
 					try {
 						if (presentationFrom) this.#setPresentationMode(presentationFrom);
@@ -782,15 +799,6 @@ export class WorkspacePresentationController {
 		if (!published) throw new WorkspacePublicationInvariantError();
 		if (!presentationTo) {
 			throw new WorkspacePublicationInvariantError('Workspace presentation mode was not prepared');
-		}
-		const presentationTarget = resolveTarget?.() ?? null;
-		if (presentationTarget) {
-			presentationGeneration = this.#frames.supersedePendingTransition();
-			this.#adoptPublishedPresentationTarget(
-				this.layout.snapshot,
-				presentationTarget,
-				presentationTo,
-			);
 		}
 		this.#syncSingletonVisibility(this.layout.snapshot, presentationTo);
 		this.#normalizeFocusOwner(this.layout.snapshot, presentationTo);

@@ -27,6 +27,11 @@ import {
 	type ChatMessagesRequest,
 } from '$shared/chat-view';
 export type { ChatMessagesRequest } from '$shared/chat-view';
+import {
+	parseTranscriptAnchorResponse,
+	type TranscriptAnchorRequest,
+	type TranscriptAnchorResponse,
+} from '$shared/transcript-anchor-page';
 import type {
 	ChatListEntry,
 	ChatListResponse,
@@ -375,6 +380,16 @@ export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
 	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
+}
+
+export async function getCombinedChatMessages(
+	request: TranscriptAnchorRequest,
+	options?: ApiFetchOptions,
+): Promise<TranscriptAnchorResponse> {
+	return parseTranscriptAnchorResponse(
+		request,
+		await apiPost<unknown>('/api/v1/chats/combined-messages', request, options),
+	);
 }
 
 export async function getChatMessages(

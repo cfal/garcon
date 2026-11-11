@@ -14,6 +14,38 @@ const ROW_KIND = Object.freeze({
 	del: 3,
 });
 
+export interface GitPatchIndexData {
+	rowKinds: Uint8Array;
+	textStarts: Uint32Array;
+	textEnds: Uint32Array;
+	beforeLines: Uint32Array;
+	afterLines: Uint32Array;
+	hunkIndices: Uint32Array;
+	diffLineIndices: Uint32Array;
+	hunkHeaders: Uint32Array;
+	hunkOldStarts: Uint32Array;
+	hunkOldLines: Uint32Array;
+	hunkNewStarts: Uint32Array;
+	hunkNewLines: Uint32Array;
+	hunkRowEnds: Uint32Array;
+}
+
+export interface GitSplitPatchIndexData {
+	leftRowIndices: Uint32Array;
+	rightRowIndices: Uint32Array;
+}
+
+export function restoreGitPatchIndex(
+	patch: string,
+	data: GitPatchIndexData,
+	split?: GitSplitPatchIndexData,
+): GitPatchIndex {
+	const index = new GitPatchIndex(patch, data);
+	if (split)
+		splitIndexCache.set(index, new GitSplitPatchIndex(split.leftRowIndices, split.rightRowIndices));
+	return index;
+}
+
 class GrowingUint32 {
 	private values: Uint32Array;
 	length = 0;
@@ -68,68 +100,62 @@ export class GitPatchIndex {
 	readonly rowCount: number;
 	readonly hunkCount: number;
 
+	toData(): GitPatchIndexData {
+		return { ...this.data };
+	}
+
 	constructor(
 		readonly patch: string,
-		private readonly rowKinds: Uint8Array,
-		private readonly textStarts: Uint32Array,
-		private readonly textEnds: Uint32Array,
-		private readonly beforeLines: Uint32Array,
-		private readonly afterLines: Uint32Array,
-		private readonly hunkIndices: Uint32Array,
-		private readonly diffLineIndices: Uint32Array,
-		private readonly hunkHeaders: Uint32Array,
-		private readonly hunkOldStarts: Uint32Array,
-		private readonly hunkOldLines: Uint32Array,
-		private readonly hunkNewStarts: Uint32Array,
-		private readonly hunkNewLines: Uint32Array,
-		private readonly hunkRowEnds: Uint32Array,
+		private readonly data: GitPatchIndexData,
 	) {
-		this.rowCount = rowKinds.length;
-		this.hunkCount = hunkHeaders.length;
+		this.data = { ...data };
+		this.rowCount = data.rowKinds.length;
+		this.hunkCount = data.hunkHeaders.length;
 	}
 
 	rowAt(index: number): GitRenderedDiffRow {
 		if (index < 0 || index >= this.rowCount) throw new RangeError(`Invalid diff row ${index}.`);
-		const kind = decodeRowKind(this.rowKinds[index]);
-		const hunkIndex = this.hunkIndices[index];
+		const data = this.data;
+		const kind = decodeRowKind(data.rowKinds[index]);
+		const hunkIndex = data.hunkIndices[index];
 		const hunkId = `hunk-${hunkIndex}`;
-		const beforeLine = decodeNullable(this.beforeLines[index]);
-		const afterLine = decodeNullable(this.afterLines[index]);
-		const diffLineIndex = decodeNullable(this.diffLineIndices[index]) ?? -1;
+		const beforeLine = decodeNullable(data.beforeLines[index]);
+		const afterLine = decodeNullable(data.afterLines[index]);
+		const diffLineIndex = decodeNullable(data.diffLineIndices[index]) ?? -1;
+		let key: string;
+		if (kind === 'hunk') key = `hunk:${hunkIndex}:${hunkId}`;
+		else if (kind === 'context') key = `line:${diffLineIndex}:context:${beforeLine}:${afterLine}`;
+		else key = `line:${diffLineIndex}:${kind}:${kind === 'del' ? beforeLine : afterLine}`;
 		return {
-			key:
-				kind === 'hunk'
-					? `hunk:${hunkIndex}:${hunkId}`
-					: kind === 'context'
-						? `line:${diffLineIndex}:context:${beforeLine}:${afterLine}`
-						: `line:${diffLineIndex}:${kind}:${kind === 'del' ? beforeLine : afterLine}`,
+			key,
 			kind,
 			hunkIndex,
 			hunkId,
 			beforeLine,
 			afterLine,
-			text: this.patch.slice(this.textStarts[index], this.textEnds[index]),
+			text: this.patch.slice(data.textStarts[index], data.textEnds[index]),
 			diffLineIndex,
 		};
 	}
 
 	rowKindAt(index: number): GitRenderedDiffRowKind {
 		if (index < 0 || index >= this.rowCount) throw new RangeError(`Invalid diff row ${index}.`);
-		return decodeRowKind(this.rowKinds[index]);
+		return decodeRowKind(this.data.rowKinds[index]);
 	}
 
 	hunkAt(index: number): GitRenderedHunk {
 		if (index < 0 || index >= this.hunkCount) throw new RangeError(`Invalid diff hunk ${index}.`);
-		const rowStartIndex = this.hunkHeaders[index];
+		const data = this.data;
+		const rowStartIndex = data.hunkHeaders[index];
 		return {
 			id: `hunk-${index}`,
-			header: this.patch.slice(this.textStarts[rowStartIndex], this.textEnds[rowStartIndex]),
-			oldStart: this.hunkOldStarts[index],
-			oldLines: this.hunkOldLines[index],
-			newStart: this.hunkNewStarts[index],
-			newLines: this.hunkNewLines[index],
+			header: this.patch.slice(data.textStarts[rowStartIndex], data.textEnds[rowStartIndex]),
+			oldStart: data.hunkOldStarts[index],
+			oldLines: data.hunkOldLines[index],
+			newStart: data.hunkNewStarts[index],
+			newLines: data.hunkNewLines[index],
 			rowStartIndex,
-			rowEndIndex: this.hunkRowEnds[index],
+			rowEndIndex: data.hunkRowEnds[index],
 		};
 	}
 }
@@ -141,6 +167,10 @@ export interface GitSplitPatchEntry {
 
 export class GitSplitPatchIndex {
 	readonly rowCount: number;
+
+	toData(): GitSplitPatchIndexData {
+		return { leftRowIndices: this.leftRowIndices, rightRowIndices: this.rightRowIndices };
+	}
 
 	constructor(
 		private readonly leftRowIndices: Uint32Array,
@@ -162,7 +192,7 @@ export function createGitPatchIndex(
 	patch: string,
 	expectedRenderedRowCount?: number,
 ): GitPatchIndex {
-	const initialRows = Math.max(16, expectedRenderedRowCount ?? 0);
+	const initialRows = Math.max(16, Math.min(patch.length, expectedRenderedRowCount ?? 0));
 	const rowKinds = new GrowingUint8(initialRows);
 	const textStarts = new GrowingUint32(initialRows);
 	const textEnds = new GrowingUint32(initialRows);
@@ -183,6 +213,11 @@ export function createGitPatchIndex(
 	let lineStart = 0;
 
 	while (lineStart < patch.length) {
+		if (expectedRenderedRowCount !== undefined && rowKinds.length > expectedRenderedRowCount) {
+			throw new Error(
+				`Diff row count mismatch: server reported ${expectedRenderedRowCount}, client indexed more rows.`,
+			);
+		}
 		const newlineIndex = patch.indexOf('\n', lineStart);
 		const lineEnd = newlineIndex < 0 ? patch.length : newlineIndex;
 		const line = patch.slice(lineStart, lineEnd);
@@ -248,22 +283,21 @@ export function createGitPatchIndex(
 		lineStart = newlineIndex + 1;
 	}
 
-	const index = new GitPatchIndex(
-		patch,
-		rowKinds.finish(),
-		textStarts.finish(),
-		textEnds.finish(),
-		beforeLines.finish(),
-		afterLines.finish(),
-		hunkIndices.finish(),
-		diffLineIndices.finish(),
-		hunkHeaders.finish(),
-		hunkOldStarts.finish(),
-		hunkOldLines.finish(),
-		hunkNewStarts.finish(),
-		hunkNewLines.finish(),
-		hunkRowEnds.finish(),
-	);
+	const index = new GitPatchIndex(patch, {
+		rowKinds: rowKinds.finish(),
+		textStarts: textStarts.finish(),
+		textEnds: textEnds.finish(),
+		beforeLines: beforeLines.finish(),
+		afterLines: afterLines.finish(),
+		hunkIndices: hunkIndices.finish(),
+		diffLineIndices: diffLineIndices.finish(),
+		hunkHeaders: hunkHeaders.finish(),
+		hunkOldStarts: hunkOldStarts.finish(),
+		hunkOldLines: hunkOldLines.finish(),
+		hunkNewStarts: hunkNewStarts.finish(),
+		hunkNewLines: hunkNewLines.finish(),
+		hunkRowEnds: hunkRowEnds.finish(),
+	});
 	if (expectedRenderedRowCount !== undefined && index.rowCount !== expectedRenderedRowCount) {
 		throw new Error(
 			`Diff row count mismatch: server reported ${expectedRenderedRowCount}, client indexed ${index.rowCount}.`,

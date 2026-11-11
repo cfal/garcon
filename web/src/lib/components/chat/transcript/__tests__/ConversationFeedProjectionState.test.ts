@@ -69,6 +69,20 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 }
 
 describe('ConversationFeedProjectionState', () => {
+	it('appends a wide tail without variadic insertion and preserves geometry', () => {
+		const projections = new ConversationFeedProjectionState();
+		const prefix = rows();
+		const first = projections.reconcile(input({ rows: prefix }));
+		const tail: ChatDisplayRow[] = Array.from({ length: 150_000 }, (_, i) => ({
+			kind: 'message', id: `generation-1:${i + 3}`, message: new AssistantMessage(TS, 'synthetic'),
+		}));
+		const result = projections.reconcile(input({ rows: prefix.concat(tail), mutationClock: clock(2, { 'live-append': 2 }) }));
+		expect(result.model.items.length).toBe(first.model.items.length + tail.length);
+		expect(result.geometry.keys).toEqual(result.model.items.map(item => item.key));
+		expect(result.geometry.estimates).toEqual(result.model.items.map(estimateConversationFeedItemSize));
+		expect(result.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);
+	});
+
 	const commandContext = { executorId: 'local', projectPath: '/project' };
 	const plain = new CommandOutputMessage(TS, 'command', 'stdout', 'plain', 'output', commandContext);
 	const markdown = new CommandOutputMessage(TS, 'command', 'stdout', 'markdown', '# heading', commandContext);

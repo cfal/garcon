@@ -10,6 +10,7 @@ import type {
   PreamblesSnapshot,
 } from '../../../common/preambles.js';
 import { type ChromiumFixture, withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 
 interface ViewportScenario {
@@ -505,6 +506,7 @@ describe('Chromium preambles', () => {
 
   test('preserves the active composer during a background application and wraps the notice narrowly', async () => {
     await withChromiumFixture('preambles-background-application', async (fixture, markPhase) => {
+      await fixture.context.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
       await createGlobalPreambles(fixture);
       const controlChatId = fixture.integration.newChatId();
       const controlPrompt = Array.from(

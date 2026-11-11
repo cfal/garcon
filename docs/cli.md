@@ -828,9 +828,10 @@ bun cli/main.ts --runtime controller status 1785337200123456 \
 permission requests, and 10 recent normalized transcript messages by default.
 Plain permission rows include the exact occurrence, run, and server-instance
 fences plus shell-safe allow and deny commands where the request supports a
-boolean decision. Structured rows include a typed answer template instead of an
-allow command. They remain visible with `--messages 0` or an unavailable
-transcript. `--messages` accepts 0 through 200; zero skips transcript loading.
+boolean decision. Structured rows include typed answer templates for option
+selections or free text, as supported by their questions, instead of an allow
+command. They remain visible with `--messages 0` or an unavailable transcript.
+`--messages` accepts 0 through 200; zero skips transcript loading.
 JSON is the stable machine-readable interface; plain text redacts image bodies
 and truncates long messages.
 
@@ -863,6 +864,21 @@ bun cli/main.ts --runtime controller permission-answer 1785337200123456 \
 `--answers` is a JSON array with one row per answered question. Each row has a
 unique `questionId` and a `selectedOptionIds` array containing unique option
 IDs. Use `permission-decision ... deny` to skip or decline the request.
+For a question without options or free text, use `selectedOptionIds: []`.
+Plain `permission-decision ... allow` is not an answer to a question: it returns
+a validation error (exit 2) and leaves the question pending for `permission-answer`.
+
+Questions with `allowFreeText: true` also accept an answer such as
+`{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"Custom answer"}`.
+Text replaces option selections unless the question also has `allowNotes: true`.
+Independently, questions with `allowNotes: true` accept selected options with a
+note, for example
+`{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"],"text":"Only for tests"}`.
+Text and notes must be nonblank and at most 16 KiB UTF-8 per answer. Omit `text`
+for an option answer without notes. Every pending question must have one answer.
+The same payload works through the controller and executor CLI gateway, subject
+to the gateway's total request-size limit. Secret-input masking is presentation
+only: submitted answers remain part of conversation history.
 
 The command never fetches or substitutes the newest request. Its deterministic
 idempotency identity binds the server instance, chat, run, and occurrence while
@@ -982,6 +998,21 @@ Successful output identifies `delivery: new-turn|steer` and the accepted turn
 ID. `--json` emits one versioned envelope with the exact receipt, delivery,
 parent relationship, server instance, and workspace. Garcon bounds run/steer
 race retries and reports ambiguity rather than risking duplicate delivery.
+
+Codex's asynchronous questions are conversational messages, not pending
+permissions. In the browser, each inline question can be answered independently
+while the agent continues working. Answers use the same steer-or-start policy
+as `resume-async --allow-steer`, never a queue or `permission-answer`. The CLI
+can send a contextual textual answer through `resume-async --allow-steer`;
+there is no separate question-selection command.
+
+Submitted answers remain ordinary transcript messages. A recorded answer or
+successful steer does not prove the model read it. Questions remain replyable
+after a turn ends, but controls from a previous agent ownership are read-only.
+Unsent form drafts and local dismissal survive chat switches within the tab,
+not browser reloads. Native Reload preserves structured questions when native
+history provides them; ambiguous legacy records stay text rather than guessed
+interactive forms.
 
 CLI exit codes:
 

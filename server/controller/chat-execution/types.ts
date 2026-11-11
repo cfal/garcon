@@ -59,6 +59,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'model'
   | 'images'
   | 'excludedResendOrdinals'
+  | 'questionReply'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   createdAt?: string; userMessagePresentation?: UserMessagePresentation;
@@ -227,6 +228,7 @@ export type CapturedControlOffer =
 export type ServerControlOffer = CapturedControlOffer | { readonly kind: 'queued' };
 
 export interface AcceptedSteerInput {
+  questionReply?: RunAgentTurnOptions['questionReply'];
   command: AcceptedExecutionCommand;
   content: string;
   providerContent: string;

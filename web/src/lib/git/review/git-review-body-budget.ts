@@ -12,24 +12,6 @@ export interface GitReviewBodyBudgetDecision {
 	reason?: 'collection-too-many-rows' | 'collection-too-many-bytes';
 }
 
-export function collectionLimitDecisionFromGitReviewBody(
-	body: GitReviewFileBody,
-	currentBodies: Readonly<Record<string, GitReviewFileBody>>,
-): GitReviewBodyBudgetDecision | null {
-	if (
-		body.limitReason !== 'collection-too-many-rows' &&
-		body.limitReason !== 'collection-too-many-bytes'
-	) {
-		return null;
-	}
-	return {
-		accept: false,
-		evictedPaths: [],
-		...loadedGitReviewBodyTotals(currentBodies, body.path),
-		reason: body.limitReason,
-	};
-}
-
 export function decideGitReviewBodyBudget(
 	body: GitReviewFileBody,
 	purpose: GitReviewBodyPurpose,

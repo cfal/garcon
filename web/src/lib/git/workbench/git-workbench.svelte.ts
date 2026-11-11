@@ -515,7 +515,7 @@ export class GitWorkbenchStore {
 			const snapshot = await getGitWorkbenchSnapshot(target, requestTab, requestContext, {
 				signal: controller.signal,
 				selectedFile: effective.preferSelectedFile ? previousSelectedFile : null,
-				bodyCandidateCount: 8,
+				bodyCandidateCount: 3,
 			});
 			trace.snapshotMs = elapsedMs(snapshotStartedAt);
 			if (!this.isCurrentSnapshotLoad(target, generation, requestTab, requestContext)) {
@@ -578,10 +578,7 @@ export class GitWorkbenchStore {
 			snapshot.tree.hasCommits,
 			snapshot.tree.statsState,
 		);
-		this.virtualReview.applySummary(snapshot.reviewSummary);
-
 		const paths = new Set(this.treeState.filePaths);
-		this.virtualReview.pruneToFilePaths(paths);
 		this.lineSelection.clearSelection();
 
 		const visible = this.treeState.visibleFilePaths;
@@ -610,8 +607,8 @@ export class GitWorkbenchStore {
 			this.treeState.selectedFile,
 			...snapshot.firstBodyCandidates,
 		]).filter((filePath) => visible.includes(filePath));
-		if (bodyCandidates.length > 0)
-			this.virtualReview.requestInitialBodies(target.projectPath, bodyCandidates);
+		this.virtualReview.applySummary(snapshot.reviewSummary, bodyCandidates);
+		this.virtualReview.pruneToFilePaths(paths);
 	}
 
 	private async refreshFileAfterStage(project: GitProjectTarget, filePath: string): Promise<void> {

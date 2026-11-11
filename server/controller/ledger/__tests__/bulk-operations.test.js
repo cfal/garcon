@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
@@ -7,6 +8,7 @@ import path from 'node:path';
 import { AssistantMessage } from '../../../../common/chat-types.ts';
 import {
   LedgerBulkOperationAbandonedError,
+  LedgerFencedError,
   StaleTranscriptViewError,
   TranscriptLedgerStore,
   transcriptViewId,
@@ -176,5 +178,135 @@ describe('bounded transcript bulk operations', () => {
     expect(turns).toBeGreaterThan(1);
     expect(through.map((row) => row.ordinal)).toEqual(Array.from({ length: 2100 }, (_, index) => index + 1));
     expect(store.currentRows('paged').slice(0, 2100)).toEqual(through);
+  });
+});
+
+describe('cooperative anchor responses', () => {
+  function initialize() {
+    return store.initializeCurrentView('anchors', { contentStartOrdinal: 1,
+      rows: Array.from({ length: 650 }, () => ({ kind: 'run-ended', at, origin: 'core', outcome: 'finished' })) });
+  }
+
+  function read(view, signal) {
+    return store.anchorPage('anchors', view.viewId, {
+      direction: 'forward', cursorOrdinal: 0, watermarkOrdinal: 650, anchorsRemaining: 1,
+    }, signal);
+  }
+
+  it('lets the event loop progress within one complete response', async () => {
+    const view = initialize();
+    let time = performance.now();
+    const clock = spyOn(performance, 'now').mockImplementation(() => ++time);
+    const observer = observeTurns();
+    try {
+      const result = await read(view);
+      expect(result.pageStatus).toBe('exhausted');
+      expect(result.rows.map(row => row.ordinal)).toEqual(Array.from({ length: 650 }, (_, i) => i + 1));
+      expect(observer.stop().turns).toBeGreaterThan(1);
+    } finally {
+      observer.stop();
+      clock.mockRestore();
+    }
+  });
+
+  it.each(['append', 'evict', 'replace', 'delete', 'closeChat', 'close', 'abort', 'corrupt', 'query-failure'])(
+    'revalidates ownership and data after a held batch: %s', async action => {
+      const view = initialize();
+      const replacement = action === 'replace'
+        ? await store.stageView('anchors', {
+          viewId: transcriptViewId('replacement'), contentStartOrdinal: 1, rows: [],
+        })
+        : null;
+      const held = Promise.withResolvers();
+      const pause = spyOn(EventLoopSteps.prototype, 'next').mockImplementationOnce(() => held.promise);
+      const abort = new AbortController();
+      const pending = read(view, abort.signal);
+      try {
+        expect(pause).toHaveBeenCalledTimes(1);
+        if (action === 'append') store.append('anchors', view.viewId, [provider('new anchor')]);
+        if (action === 'evict') store.initializeCurrentView('other', { contentStartOrdinal: 1 });
+        if (action === 'replace') store.replaceCurrentView('anchors', view.viewId, replacement.viewId);
+        if (action === 'delete') store.deleteChat('anchors');
+        if (action === 'closeChat') store.closeChat('anchors');
+        if (action === 'close') store.close();
+        if (action === 'abort') abort.abort(new Error('synthetic cancellation'));
+        if (action === 'corrupt' || action === 'query-failure') {
+          const db = new Database(path.join(root, 'anchors', 'ledger.sqlite'));
+          if (action === 'corrupt') db.query("UPDATE transcript_rows SET payload_json = 'invalid' WHERE ordinal = 350").run();
+          else db.run('DROP TABLE transcript_rows');
+          db.close();
+        }
+        held.resolve();
+        if (action === 'replace') await expect(pending).rejects.toBeInstanceOf(StaleTranscriptViewError);
+        else if (['delete', 'closeChat', 'close'].includes(action)) {
+          await expect(pending).rejects.toBeInstanceOf(LedgerBulkOperationAbandonedError);
+        } else if (action === 'abort') await expect(pending).rejects.toBe(abort.signal.reason);
+        else if (action === 'corrupt' || action === 'query-failure') {
+          await expect(pending).rejects.toBeInstanceOf(LedgerFencedError);
+          expect(() => store.currentView('anchors')).toThrow(LedgerFencedError);
+          expect(store.initializeCurrentView('healthy', { contentStartOrdinal: 1 })).not.toBeNull();
+        } else {
+          const result = await pending;
+          expect(result.rows.map(row => row.ordinal)).toEqual(Array.from({ length: 650 }, (_, i) => i + 1));
+          expect(result).toMatchObject({ startOrdinal: 1, endOrdinal: 651, pageStatus: 'exhausted', anchorsRemaining: 1 });
+        }
+        if (action === 'delete') expect(existsSync(path.join(root, 'anchors'))).toBe(false);
+        if (action === 'abort' || action === 'replace') expect(store.currentView('anchors')).not.toBeNull();
+        if (action === 'append') {
+          expect((await store.anchorPage('anchors', view.viewId, {
+            direction: 'forward', cursorOrdinal: 650, watermarkOrdinal: 651, anchorsRemaining: 1,
+          })).rows.map(row => row.ordinal)).toEqual([651]);
+        }
+      } finally {
+        held.resolve();
+        await pending.catch(() => {});
+        pause.mockRestore();
+      }
+    },
+  );
+
+  for (const terminal of ['complete', 'exhausted']) {
+    it.each(['delete', 'closeChat', 'close', 'abort'])(
+      `revalidates ownership after the final ${terminal} batch: %s`, async action => {
+        const drafts = [provider('first anchor'), ...Array.from({ length: 10 }, () => ({
+          kind: 'run-ended', at, origin: 'core', outcome: 'finished',
+        }))];
+        if (terminal === 'complete') drafts.push(provider('excluded anchor'));
+        const view = store.initializeCurrentView('anchors', { contentStartOrdinal: 1, rows: drafts });
+        const held = Promise.withResolvers();
+        const clock = spyOn(performance, 'now').mockReturnValue(0);
+        const pause = spyOn(EventLoopSteps.prototype, 'next').mockImplementationOnce(() => held.promise);
+        const existing = spyOn(store, 'existingCurrentView');
+        const abort = new AbortController();
+        const pending = store.anchorPage('anchors', view.viewId, {
+          direction: 'forward', cursorOrdinal: 0, watermarkOrdinal: drafts.length, anchorsRemaining: 1,
+        }, abort.signal);
+        try {
+          expect(pause).toHaveBeenCalledTimes(1);
+          expect(existing).toHaveBeenCalledTimes(1);
+          if (action === 'delete') store.deleteChat('anchors');
+          if (action === 'closeChat') store.closeChat('anchors');
+          if (action === 'close') store.close();
+          if (action === 'abort') abort.abort(new Error('synthetic final cancellation'));
+          held.resolve();
+          if (action === 'abort') await expect(pending).rejects.toBe(abort.signal.reason);
+          else await expect(pending).rejects.toBeInstanceOf(LedgerBulkOperationAbandonedError);
+          expect(existing).toHaveBeenCalledTimes(1);
+          if (action === 'delete') expect(existsSync(path.join(root, 'anchors'))).toBe(false);
+          if (action === 'abort') expect(store.currentView('anchors').viewId).toBe(view.viewId);
+        } finally {
+          held.resolve();
+          await pending.catch(() => {});
+          existing.mockRestore();
+          pause.mockRestore();
+          clock.mockRestore();
+        }
+      },
+    );
+  }
+
+  it('does not create storage for a missing chat', async () => {
+    await expect(read({ viewId: transcriptViewId('missing') })).rejects.toThrow('no current view');
+    expect(existsSync(path.join(root, 'anchors'))).toBe(false);
   });
 });

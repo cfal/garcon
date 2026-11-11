@@ -28,9 +28,11 @@ export async function updateClaudeContextWindow(
   // ACKs can succeed without applying settings, including under managed env policy.
   // The pinned CLI suite verifies this private protocol against the actual compaction budget.
   const usage = await request({ subtype: 'get_context_usage' });
+  // Claude may omit an ineffective [1m] suffix from the reported model ID.
+  // https://github.com/anthropics/claude-code/blob/80c6959d28c4c30ecd14fc1cdf172f19d9adad81/CHANGELOG.md#L295
   if (
     !isRecord(usage)
-    || usage.model !== model
+    || (usage.model !== model && usage.model !== model.replace(/\[1m\]$/, ''))
     || usage.autocompactSource !== 'env'
     || usage.rawMaxTokens !== autoCompactWindow
   ) {

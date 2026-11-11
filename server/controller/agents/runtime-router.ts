@@ -322,6 +322,7 @@ export class AgentRuntimeRouter {
       target,
       input,
       clientMessageId: options.clientMessageId,
+      questionReply: options.questionReply,
     }, { dispatchDeadline: deadline ?? undefined });
   }
 
@@ -810,10 +811,17 @@ export class AgentRuntimeRouter {
     const resolvedPrompt = await retryAfterSessionLoss(
       () => this.#resolveFileMentions(prompt, entry.projectPath, entry.executorId, readBefore(opts.dispatchDeadline, signal)), signal,
     );
+    const submittedInput = composition?.input;
+    const questionReply = submittedInput?.detail.message.metadata?.questionReply;
     return {
       dispatch: true,
       prompt: resolvedPrompt,
       outboundPrompt: `${composition?.providerPrefix ?? ''}${resolvedPrompt}`,
+      submission: submittedInput && questionReply ? {
+        clientMessageId: submittedInput.detail.clientMessageId,
+        timestamp: submittedInput.at,
+        questionReply,
+      } : undefined,
       attachments: [...preparedAttachments],
       excludedOrdinals: excluded,
       viewId,

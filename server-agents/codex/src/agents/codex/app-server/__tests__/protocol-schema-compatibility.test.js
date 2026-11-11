@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseChatMessage } from '@garcon/common/chat-types';
 import { resolveCodexCli } from '../cli.ts';
+import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { convertCodexAppServerItem } from '../converter.ts';
 import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from '../protocol.ts';
 
@@ -38,6 +39,7 @@ const itemFields = {
 describe('bundled Codex experimental schema compatibility', () => {
   let directory;
   let definitions;
+  let approvalDefinitions;
 
   beforeAll(async () => {
     directory = await mkdtemp(join(homedir(), '.garcon-codex-schema-'));
@@ -53,6 +55,7 @@ describe('bundled Codex experimental schema compatibility', () => {
       const stderr = await new Response(child.stderr).text();
       expect(await child.exited, stderr).toBe(0);
       definitions = (await Bun.file(join(directory, 'codex_app_server_protocol.v2.schemas.json')).json()).definitions;
+      approvalDefinitions = (await Bun.file(join(directory, 'CommandExecutionRequestApprovalParams.json')).json()).definitions;
     } finally {
       if (child.exitCode === null) child.kill();
       await child.exited;
@@ -100,11 +103,39 @@ describe('bundled Codex experimental schema compatibility', () => {
     }
   });
 
+  it('preserves optional lifecycle times on every published item variant', () => {
+    expect(Object.keys(definitions.ThreadItem.properties).toSorted())
+      .toEqual(['completedAtMs', 'startedAtMs']);
+    for (const type of Object.keys(itemFields)) {
+      for (const times of [
+        {},
+        { startedAtMs: null, completedAtMs: null },
+        { startedAtMs: 1_790_000_000_000, completedAtMs: 1_790_000_001_000 },
+      ]) {
+        const item = { type, id: `synthetic-${type}`, ...itemFields[type], ...times };
+        expect(decodeItem(item)).toEqual(item);
+        expect(convertCodexAppServerItem(item).some((message) => message.type === 'unknown-tool-use')).toBe(false);
+        const timestamp = '2026-10-01T00:00:00.000Z';
+        expect(convertCodexAppServerItem(item, timestamp)).toEqual(convertCodexAppServerItem({
+          type, id: item.id, ...itemFields[type],
+        }, timestamp));
+      }
+    }
+    for (const field of Object.keys(definitions.ThreadItem.properties)) {
+      for (const value of ['synthetic', true, {}, [], NaN, Infinity, 1.5]) {
+        expect(() => decodeItem({
+          type: 'contextCompaction', id: 'synthetic-invalid-time', [field]: value,
+        })).toThrow(field);
+      }
+    }
+  });
+
   it('decodes both generated-image representations without dropping stored file references', () => {
     const schema = definitions.ThreadItem.oneOf.find((variant) => (
       variant.properties.type.enum.includes('imageGeneration')
     ));
     expect(schema.anyOf.map((variant) => variant.required)).toEqual([['fileId'], ['result']]);
+    expect(schema.properties.generationId.type).toEqual(['string', 'null']);
     for (const image of [
       { result: 'synthetic-image' },
       { fileId: 'synthetic-file' },
@@ -114,6 +145,7 @@ describe('bundled Codex experimental schema compatibility', () => {
         type: 'imageGeneration', id: 'synthetic-image', status: 'completed',
         revisedPrompt: null, savedPath: '/synthetic/image.png',
         inputImages: [{ path: '/synthetic/input.png', sha256: 'ab'.repeat(32) }],
+        generationId: 'synthetic-generation',
         ...image,
       };
       const parsed = decodeItem(item);
@@ -135,6 +167,7 @@ describe('bundled Codex experimental schema compatibility', () => {
       {}, { fileId: null }, { fileId: 3 }, { result: 3 },
       { fileId: 'synthetic-file', result: 3 },
       { result: 'synthetic', savedPath: 3 },
+      { result: 'synthetic', generationId: 3 },
       { result: 'synthetic', inputImages: {} },
       { result: 'synthetic', inputImages: [{ path: 3, sha256: 'synthetic' }] },
       { result: 'synthetic', inputImages: [{ path: '/synthetic/input.png', sha256: 3 }] },
@@ -211,6 +244,58 @@ describe('bundled Codex experimental schema compatibility', () => {
       const parsed = decodeItem(item);
       expect(parsed).toEqual(item);
       expect(convertCodexAppServerItem(parsed)[0].type).toBe('tool-result');
+    }
+  });
+
+  it('keeps function audio outputs inline despite the wider raw audio input schema', () => {
+    const rawAudio = definitions.ContentItem.oneOf.find(
+      (variant) => variant.properties.type.enum.includes('input_audio'),
+    );
+    expect(rawAudio.anyOf.map((variant) => variant.required)).toEqual([['audio_url'], ['file_id']]);
+    const userAudio = definitions.UserInput.oneOf.find(
+      (variant) => variant.properties.type.enum.includes('audio'),
+    );
+    expect(userAudio.anyOf.map((variant) => variant.required)).toEqual([['url'], ['fileId']]);
+    const audio = definitions.FunctionCallOutputContentItem.oneOf.find(
+      (variant) => variant.properties.type.enum.includes('input_audio'),
+    );
+    expect(audio.required).toEqual(['audio_url', 'type']);
+    // File-backed raw audio becomes text, not audio, in function outputs.
+    // https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/protocol/src/models.rs#L2292-L2300
+    const output = [{ type: 'input_audio', audio_url: 'https://example.invalid/synthetic.wav' }];
+    const item = { type: 'functionCallOutput', id: 'synthetic-audio', ...itemFields.functionCallOutput, output };
+    const parsed = decodeItem(item);
+    expect(parsed).toEqual(item);
+    const [message] = convertCodexAppServerItem(parsed);
+    expect(message.type).toBe('tool-result');
+    expect(message.content).toEqual({ items: output });
+    expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+    for (const reference of [
+      {}, { audio_url: null }, { audio_url: 3 }, { file_id: 'synthetic-audio-file' },
+      { file_id: 'synthetic-audio-file', audio_url: 3 },
+    ]) {
+      expect(() => decodeItem({
+        type: 'functionCallOutput', id: 'synthetic-audio', ...itemFields.functionCallOutput,
+        output: [{ type: 'input_audio', ...reference }],
+      })).toThrow('Invalid');
+    }
+  });
+
+  it('refuses unnegotiated human-only checkpoints and unknown command approval kinds', () => {
+    const kinds = approvalDefinitions.CommandExecutionApprovalKind.oneOf.flatMap((variant) => variant.enum);
+    expect(kinds).toEqual(['command', 'writeStdin', 'humanCommand']);
+    for (const kind of [...kinds, 'futureKind', null, 3]) {
+      const pending = createPendingApproval('synthetic-chat', {
+        id: 'synthetic-request', method: 'item/commandExecution/requestApproval',
+        params: { threadId: 'synthetic-thread', turnId: 'synthetic-turn', itemId: 'synthetic-item', approvalId: 'synthetic-approval', kind },
+      });
+      if (kind === 'command' || kind === 'writeStdin') {
+        expect(buildApprovalMessage(pending).requestedTool.type)
+          .toBe(kind === 'writeStdin' ? 'write-stdin-tool-use' : 'bash-tool-use');
+      } else {
+        expect(() => buildApprovalMessage(pending)).toThrow('Unsupported Codex command approval kind');
+        expect(() => buildApprovalResponse(pending, { allow: true })).toThrow('Unsupported Codex command approval kind');
+      }
     }
   });
 });

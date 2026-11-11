@@ -72,6 +72,8 @@ export type CodexErrorInfo =
   | 'rateLimitExceeded'
   | 'flexUnavailable'
   | 'serverOverloaded'
+  | 'modelNotFound'
+  | 'policyCapacityUnavailable'
   | 'cyberPolicy'
   | 'misalignmentPolicyViolation'
   | 'tooManyDenials'
@@ -190,10 +192,14 @@ export type CodexFunctionCallOutputContentItem =
 
 export type CodexMessagePhase = 'commentary' | 'partial_answer' | 'final_answer';
 
-export type CodexThreadItem =
+export type CodexThreadItem = {
+  startedAtMs?: number | null;
+  completedAtMs?: number | null;
+} & (
   | { type: 'userMessage'; id: string; content: CodexUserInput[]; clientId?: string | null }
   | { type: 'hookPrompt'; id: string; fragments: unknown[] }
-  | { type: 'agentMessage'; id: string; text: string; phase?: CodexMessagePhase | null; memoryCitation: unknown }
+  | { type: 'agentMessage'; id: string; text: string; phase?: CodexMessagePhase | null; memoryCitation: unknown;
+      delivery?: 'async' | null; questions?: unknown }
   | { type: 'plan'; id: string; text: string }
   | { type: 'reasoning'; id: string; summary: string[]; content: string[] }
   | {
@@ -270,10 +276,11 @@ export type CodexThreadItem =
       revisedPrompt: string | null;
       savedPath?: string | null;
       inputImages?: Array<{ path: string; sha256: string }>;
+      generationId?: string | null;
     } & ({ fileId: string; result?: string } | { result: string; fileId?: never }))
   | { type: 'enteredReviewMode'; id: string; review: string }
   | { type: 'exitedReviewMode'; id: string; review: string }
-  | { type: 'contextCompaction'; id: string };
+  | { type: 'contextCompaction'; id: string });
 
 const CODEX_THREAD_ITEM_TYPES = new Set<CodexThreadItem['type']>([
   'userMessage',
@@ -311,6 +318,8 @@ const CODEX_ERROR_INFO_STRINGS = new Set<Extract<CodexErrorInfo, string>>([
   'rateLimitExceeded',
   'flexUnavailable',
   'serverOverloaded',
+  'modelNotFound',
+  'policyCapacityUnavailable',
   'cyberPolicy',
   'misalignmentPolicyViolation',
   'tooManyDenials',
@@ -452,6 +461,10 @@ function parseCodexThreadItem(value: unknown, label: string): CodexThreadItem {
 }
 
 function validateCodexThreadItem(item: Record<string, unknown>, label: string): void {
+  for (const field of ['startedAtMs', 'completedAtMs']) {
+    const value = nullableProtocolNumber(item[field], `${label} ${field}`);
+    if (value !== null && !Number.isInteger(value)) throw new Error(`Invalid ${label} ${field}`);
+  }
   switch (item.type) {
     case 'userMessage':
       protocolArray(item.content, `${label} content`);
@@ -560,6 +573,7 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
       else protocolString(item.result, `${label} result`);
       if (item.result !== undefined) protocolString(item.result, `${label} result`);
       nullableProtocolString(item.savedPath, `${label} savedPath`);
+      nullableProtocolString(item.generationId, `${label} generationId`);
       if (item.inputImages !== undefined) {
         for (const [index, value] of protocolArray(item.inputImages, `${label} inputImages`).entries()) {
           const input = protocolRecord(value, `${label} inputImages ${index}`);
@@ -760,7 +774,7 @@ export interface CommandExecutionRequestApprovalParams {
   turnId: string;
   itemId: string;
   approvalId?: string | null;
-  kind?: 'command' | 'writeStdin';
+  kind?: 'command' | 'humanCommand' | 'writeStdin';
   startedAtMs?: number;
   reason?: string | null;
   command?: string | null;

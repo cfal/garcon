@@ -214,6 +214,9 @@ describe('GitVirtualDiffSurface', () => {
 
 		await waitFor(() => expect(lastViewportDemand(onBodyDemand)).toBeTruthy());
 		const initialDemand = lastViewportDemand(onBodyDemand);
+		expect(initialDemand.filePaths.length).toBeLessThan(
+			container.querySelectorAll('[data-git-virtual-row]').length,
+		);
 		onBodyDemand.mockClear();
 		viewport.scrollTop = 8_400;
 		await fireEvent.scroll(viewport);
@@ -245,6 +248,7 @@ describe('GitVirtualDiffSurface', () => {
 		const demand = lastViewportDemand(onBodyDemand);
 
 		await rerender({ ...props, active: false });
+		await waitFor(() => expect(lastViewportDemand(onBodyDemand)?.filePaths).toEqual([]));
 		onBodyDemand.mockClear();
 		await rerender({ ...props, active: true });
 

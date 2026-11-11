@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { createSearchNavigationTarget } from '../../support/search-navigation-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -6,6 +7,7 @@ import { SpaDriver } from '../../support/spa-driver.js';
 test('search opens a cold chat at the original old matching row with a targeted page', async () => {
   await withE2eFixture('search-result-cold', async (fixture) => {
     const { target, marker } = await createSearchNavigationTarget(fixture.integration);
+    await fixture.page.evaluateOnNewDocument(seedLocalSettings, { combineToolUseMessages: false });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.setViewport(1440, 900);
     await app.open();

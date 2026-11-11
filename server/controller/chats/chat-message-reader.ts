@@ -1,4 +1,5 @@
 import type { TranscriptPage, TranscriptReadPurpose } from '../../../common/chat-view.js';
+import type { TranscriptAnchorPage, TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
 import type { TicketSource } from '../../../common/tickets.js';
 import type { TicketSourceResolution } from '../../../common/ticket-source-navigation.js';
 
@@ -15,4 +16,10 @@ export interface TranscriptPageReader {
     signal?: AbortSignal,
     purpose?: TranscriptReadPurpose,
   ): Promise<TranscriptPage>;
+}
+
+export type TranscriptAnchorRead = Omit<TranscriptAnchorPage, 'historyState' | 'chatId' | 'resendCandidates'>;
+
+export interface TranscriptAnchorPageReader {
+  anchorPage(request: TranscriptAnchorRequest, signal?: AbortSignal): Promise<TranscriptAnchorRead>;
 }

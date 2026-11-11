@@ -966,7 +966,7 @@ function parsePermissionAnswer(
   });
   if (!response || response.outcome !== 'answered') {
     throw argumentError(
-      '--answers must be a bounded array of unique question IDs and selected option IDs',
+      '--answers must be a bounded array of unique question IDs, selected option IDs, and optional nonblank text of at most 16 KiB UTF-8',
     );
   }
   return {

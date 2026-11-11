@@ -80,6 +80,7 @@ export class SteerInputDelivery {
         transcriptViewId: options.transcriptViewId,
         turnId: target.identity.turnId,
         commandType: 'steer',
+        questionReply: options.questionReply,
         userMessagePresentation,
       });
       if (!inserted) return { turnId: target.identity.turnId, duplicate: true };
@@ -87,6 +88,11 @@ export class SteerInputDelivery {
       await this.#deliverToProvider(chatId, providerContent, options, target);
       return { turnId: target.identity.turnId, duplicate: false };
     } catch (error) {
+      // An admitted answer must not authorize a fresh run with a second message identity.
+      if (inserted && options.questionReply && error instanceof DomainError
+        && (error.code === 'STEER_TURN_CHANGED' || error.code === 'STEER_TURN_UNAVAILABLE')) {
+        throw new SteerDeliveryError(error, 'not-sent');
+      }
       if (error instanceof DomainError) throw error;
       throw new SteerDeliveryError(error, 'not-sent');
     } finally {

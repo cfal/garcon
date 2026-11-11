@@ -55,7 +55,6 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'enter-plan-mode-tool-use': 'EnterPlanMode',
 	'exit-plan-mode-tool-use': 'ExitPlanMode',
 	'ask-user-question-tool-use': 'Question',
-	'cursor-ask-question-tool-use': 'Question',
 	'cursor-create-plan-tool-use': 'Plan',
 	'amp-finder-tool-use': 'Finder',
 	'amp-oracle-tool-use': 'Oracle',
@@ -652,16 +651,6 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	},
 
 	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
-
-	'cursor-ask-question-tool-use': {
-		input: {
-			mode: 'hidden',
-			label: 'Question',
-		},
-		result: {
-			hidden: true,
-		},
-	},
 
 	'ask-user-question-tool-use': {
 		input: {

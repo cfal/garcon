@@ -24,6 +24,85 @@ function codeModeOutput(callId, output = 'aggregate output') {
   };
 }
 
+function functionCall(callId, name = 'request_user_input') {
+  return {
+    type: 'response_item', timestamp: TS,
+    payload: { type: 'function_call', name, call_id: callId, arguments: JSON.stringify({
+      questions: [{ id: 'mode', header: 'Mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
+    }) },
+  };
+}
+
+function functionOutput(callId, output) {
+  return {
+    type: 'response_item', timestamp: TS,
+    payload: { type: 'function_call_output', call_id: callId, output },
+  };
+}
+
+describe('LegacyCodexProjection questions', () => {
+  it('hides asynchronous publication acknowledgements without fabricating an answer', () => {
+    const projection = new LegacyCodexProjection();
+    expect(projection.project(functionCall('async', 'request_user_input_async'), {}).canonical).toEqual([]);
+    expect(projection.project(functionOutput('async', '{"accepted":true}'), {}).canonical).toEqual([]);
+    projection.project(functionCall('failure', 'request_user_input_async'), {});
+    expect(projection.project(functionOutput('failure', 'Invalid question title'), {}).canonical[0].content)
+      .toEqual({ raw: 'Invalid question title' });
+  });
+  it.each([
+    'request_user_input is unavailable in Default mode',
+    'request_user_input was cancelled before receiving a response',
+    'failed to parse function arguments: missing field `header`',
+    'failed to parse function arguments: EOF while parsing a value',
+  ])('marks only the matching question result as failed: %s', (output) => {
+    const projection = new LegacyCodexProjection();
+    projection.project(functionCall('question'), {});
+    projection.project(functionCall('ordinary', 'custom_tool'), {});
+    expect(projection.project(functionOutput('ordinary', output), {}).canonical[0])
+      .toMatchObject({ isError: false, content: { raw: output } });
+    expect(projection.project(functionOutput('question', output), {}).canonical[0])
+      .toMatchObject({ isError: true, content: { raw: output } });
+    expect(projection.project(functionOutput('question', output), {}).canonical[0].isError).toBe(false);
+  });
+
+  it.each([
+    {},
+    { mode: { answers: ['request_user_input was cancelled'] } },
+    { mode: { answers: ['option-0'] } },
+  ])('projects matching native answers without interpreting text as an error: %j', (answers) => {
+    const projection = new LegacyCodexProjection();
+    projection.project(functionCall('question'), {});
+    const result = projection.project(functionOutput('question', JSON.stringify({ answers })), {});
+    expect(result.canonical[0]).toMatchObject({ isError: false, content: {
+      toolUseResult: { answers: Object.fromEntries(Object.entries(answers).map(([id, answer]) => [id, answer.answers])) },
+    } });
+    expect(result.canonical[0].content.raw).toBeUndefined();
+  });
+
+  it.each(['custom_tool', 'request_user_input_async'])('does not treat %s as a synchronous question', (name) => {
+    const projection = new LegacyCodexProjection();
+    const call = projection.project(functionCall('ordinary', name), {});
+    expect(call.canonical[0]?.type).not.toBe('ask-user-question-tool-use');
+    const result = projection.project(functionOutput('ordinary', '{"answers":{}}'), {});
+    expect(result.canonical[0].content).toEqual({ answers: {} });
+  });
+
+  it('forgets a question when another function reuses its call ID', () => {
+    const projection = new LegacyCodexProjection();
+    projection.project(functionCall('reused'), {});
+    projection.project(functionCall('reused', 'custom_tool'), {});
+    const result = projection.project(functionOutput('reused', 'ordinary output'), {});
+    expect(result.canonical[0]).toMatchObject({ isError: false, content: { raw: 'ordinary output' } });
+  });
+
+  it('bounds unfinished question tracking and preserves recent call pairing', () => {
+    const projection = new LegacyCodexProjection();
+    for (let index = 0; index <= 10_000; index += 1) projection.project(functionCall(`question-${index}`), {});
+    expect(projection.project(functionOutput('question-0', 'failure'), {}).canonical[0].isError).toBe(false);
+    expect(projection.project(functionOutput('question-10000', 'failure'), {}).canonical[0].isError).toBe(true);
+  });
+});
+
 describe('LegacyCodexProjection Code Mode commands', () => {
   it('projects Bash commands and remaps the aggregate result to the final command', () => {
     const projection = new LegacyCodexProjection();

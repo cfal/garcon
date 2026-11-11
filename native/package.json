@@ -1,0 +1,23 @@
+{
+  "name": "garcon-native",
+  "private": true,
+  "version": "0.4.1",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "bun scripts/build.js",
+    "test": "bun test tests/*.test.js",
+    "test:host": "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "test:smoke": "bun scripts/smoke.js",
+    "test:ios-launch": "bun scripts/smoke-ios.js",
+    "test:android:prepare": "bun scripts/prepare-android-tests.js",
+    "distribution": "bun scripts/distribution.js"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "happy-dom": "^21.0.4"
+  }
+}

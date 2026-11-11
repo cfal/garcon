@@ -1,22 +1,24 @@
-// Page flow and option selection for the first-run onboarding wizard.
-// Selections write straight to local settings so every page applies live
-// behind the dialog. The wizard is remounted on each open, so page state
-// does not need an explicit reset.
+// Remounting the wizard on each open resets its page flow.
 
-import type {
-	ChatMaxWidth,
-	LocalSettingsStore,
-} from '$lib/stores/local-settings.svelte.js';
-import type { ThemePreference } from '$lib/theme/themes.js';
-import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
+import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
-export const ONBOARDING_PAGE_IDS = ['theme', 'chat-layout', 'chat-display', 'done'] as const;
+export const ONBOARDING_PAGE_IDS = [
+	'welcome',
+	'theme',
+	'chat-layout',
+	'chat-display',
+	'writing',
+	'transcript-search',
+	'done',
+] as const;
 export type OnboardingPageId = (typeof ONBOARDING_PAGE_IDS)[number];
 
 interface OnboardingWizardStateDeps {
 	localSettings: LocalSettingsStore;
 	onClose: () => void;
 	onOpenProviders: () => void;
+	onOpenScheduledPrompts: () => void;
+	onOpenPreambles: () => void;
 }
 
 export class OnboardingWizardState {
@@ -51,32 +53,23 @@ export class OnboardingWizardState {
 		if (this.pageIndex > 0) this.pageIndex -= 1;
 	}
 
-	selectTheme(preference: ThemePreference): void {
-		this.#deps.localSettings.set('themePreference', preference);
-	}
-
-	selectChatItemLayout(layout: ChatItemLayout): void {
-		this.#deps.localSettings.set('sidebarChatItemLayout', layout);
-	}
-
-	selectChatMaxWidth(chatMaxWidth: ChatMaxWidth): void {
-		this.#deps.localSettings.set('chatMaxWidth', chatMaxWidth);
-	}
-
-	toggleShowThinking(): void {
-		this.#deps.localSettings.toggle('showThinking');
-	}
-
-	toggleAutoExpandTools(): void {
-		this.#deps.localSettings.toggle('autoExpandTools');
-	}
-
 	finish(): void {
+		this.#deps.localSettings.save();
 		this.#deps.onClose();
 	}
 
 	finishToProviders(): void {
-		this.#deps.onClose();
+		this.finish();
 		this.#deps.onOpenProviders();
+	}
+
+	finishToScheduledPrompts(): void {
+		this.finish();
+		this.#deps.onOpenScheduledPrompts();
+	}
+
+	finishToPreambles(): void {
+		this.finish();
+		this.#deps.onOpenPreambles();
 	}
 }

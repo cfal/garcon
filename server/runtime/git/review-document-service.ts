@@ -1,5 +1,7 @@
 import { AsyncResource } from 'node:async_hooks';
 import { GitDomainError } from './git-domain-error.js';
+import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
+import { GitServiceError } from '../../../common/git-error.js';
 import {
   isGitReviewCollectionLimitBody,
   limitGitReviewResponseBodies,
@@ -19,11 +21,20 @@ import type {
   GitReviewBodyPurpose,
   GitReviewDocumentFileBodiesOptions,
   GitReviewDocumentFileBodiesResponse,
+  GitReviewDocumentFileBodiesReady,
 } from './types.js';
 import {
   measureGitReviewPhase,
   measureGitReviewPhaseSync,
 } from './review-performance.js';
+
+// Leaves room for executor scope and bounded diagnostics added by the runtime.
+const MAX_ENCODED_RESPONSE_BYTES = GIT_MAX_RESULT_BYTES - 512 * 1024;
+
+function encodedMemberBytes(path: string, value: unknown): number {
+  // Removes the object braces and reserves one separator comma.
+  return Buffer.byteLength(JSON.stringify({ [path]: value })) - 2 + 1;
+}
 
 interface QueuedPrefetch<T> {
   signal?: AbortSignal;
@@ -185,7 +196,6 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
           );
           if (options.metrics) options.metrics.cacheHits = cached.size;
           const missing = requestedFiles.filter((file) => !cached.has(file.path));
-          let errors: Record<string, string> = {};
           if (missing.length > 0) {
             const cachedTotals = loadedGitReviewBodyTotals(cached.values());
             const loaded = await loadReviewDiffBatches(
@@ -196,7 +206,6 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
               options.metrics,
               cachedTotals,
             );
-            errors = loaded.errors;
             for (const body of loaded.bodies) cached.set(body.path, body);
             if (mutable) {
               const after = await measureGitReviewPhase(
@@ -230,20 +239,37 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
               return body ? [body] : [];
             }),
           );
-          const files = Object.fromEntries(responseBodies.map((body) => [body.path, body]));
+          const response: GitReviewDocumentFileBodiesReady = {
+            status: 'ready',
+            documentId: options.documentId,
+            files: Object.create(null),
+            errors: Object.create(null),
+            deferredFiles: [],
+          };
+          // Reserves metadata for every requested path, including bodies omitted by either budget.
+          let encodedBytes = Buffer.byteLength(JSON.stringify({ ...response, deferredFiles: requestedPaths }));
+          for (const body of responseBodies) {
+            if (isGitReviewCollectionLimitBody(body)) continue;
+            const path = body.path;
+            const entryBytes = encodedMemberBytes(path, body)
+              + (body.error ? encodedMemberBytes(path, body.error) : 0);
+            if (encodedBytes + entryBytes > MAX_ENCODED_RESPONSE_BYTES) continue;
+            encodedBytes += entryBytes;
+            response.files[path] = body;
+            if (body.error) response.errors[path] = body.error;
+          }
+          response.deferredFiles = requestedPaths.filter((path) => !Object.hasOwn(response.files, path));
+          if (requestedPaths.length === 1 && response.deferredFiles.length > 0) {
+            throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git file response exceeds the result limit.');
+          }
           if (options.metrics) {
-            options.metrics.fileCount = Object.keys(files).length;
-            options.metrics.rowCount = Object.values(files).reduce(
+            options.metrics.fileCount = Object.keys(response.files).length;
+            options.metrics.rowCount = Object.values(response.files).reduce(
               (total, body) => total + body.renderedRowCount,
               0,
             );
           }
-          return {
-            status: 'ready',
-            documentId: options.documentId,
-            files,
-            errors,
-          };
+          return response;
         } finally {
           lease.release();
         }

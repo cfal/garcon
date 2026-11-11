@@ -4,14 +4,13 @@ import type {
   ChatImage,
   ChatMessageMetadata,
   CodexSubagentInputItem,
-  CursorAskQuestionOption,
-  CursorAskQuestionPrompt,
   CursorPlanPhase,
   CursorPlanTodo,
   CursorPlanTodoStatus,
   TodoItem,
   TodoStatus,
 } from './chat-types.js';
+import { parseAsyncQuestionReply } from './async-user-questions.js';
 
 export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -88,6 +87,7 @@ export function parseChatMessageMetadata(value: unknown): ChatMessageMetadata | 
   if (typeof raw.clientMessageId === 'string') metadata.clientMessageId = raw.clientMessageId;
   if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;
   if (typeof raw.turnId === 'string') metadata.turnId = raw.turnId;
+  if (raw.questionReply !== undefined) metadata.questionReply = parseAsyncQuestionReply(raw.questionReply);
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
@@ -158,34 +158,10 @@ export function asAskUserQuestions(value: unknown): AskUserQuestionPrompt[] {
     };
     if (typeof raw.header === 'string') question.header = raw.header;
     question.allowMultiple = asOptionalBoolean(raw.allowMultiple);
+    question.allowFreeText = asOptionalBoolean(raw.allowFreeText);
+    question.allowNotes = asOptionalBoolean(raw.allowNotes);
+    question.isSecret = asOptionalBoolean(raw.isSecret);
     questions.push(question);
-  }
-  return questions;
-}
-
-function asCursorAskQuestionOptions(value: unknown): CursorAskQuestionOption[] {
-  if (!Array.isArray(value)) return [];
-  const options: CursorAskQuestionOption[] = [];
-  for (const entry of value) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
-    options.push({ id: raw.id, label: raw.label });
-  }
-  return options;
-}
-
-export function asCursorAskQuestions(value: unknown): CursorAskQuestionPrompt[] {
-  if (!Array.isArray(value)) return [];
-  const questions: CursorAskQuestionPrompt[] = [];
-  for (const entry of value) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.prompt !== 'string') continue;
-    questions.push({
-      id: raw.id,
-      prompt: raw.prompt,
-      options: asCursorAskQuestionOptions(raw.options),
-      allowMultiple: asOptionalBoolean(raw.allowMultiple),
-    });
   }
   return questions;
 }

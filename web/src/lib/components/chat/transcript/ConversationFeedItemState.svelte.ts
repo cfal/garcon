@@ -19,6 +19,7 @@ export interface ConversationDisclosureStatePort {
 
 export interface PermissionQuestionDraft {
 	selectedQuestionOptions: Record<string, string[]>;
+	questionTextAnswers?: Record<string, string>;
 	rawInputOpen: boolean;
 }
 

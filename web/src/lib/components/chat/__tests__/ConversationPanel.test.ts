@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import { AsyncQuestionController } from '$lib/chat/conversation/async-question-controller.svelte.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
 import type {
 	ConversationPanelPresentationPort,
@@ -22,6 +23,12 @@ import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/
 import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 
 const executors = new ExecutorsStore();
+const asyncQuestions = new AsyncQuestionController();
+
+vi.mock('$lib/chat/conversation/async-question-context.js', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/chat/conversation/async-question-context.js')>(),
+	getAsyncQuestionController: () => asyncQuestions,
+}));
 
 const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
@@ -181,6 +188,7 @@ function makePanel() {
 		resumePendingRestore: () => {},
 		navigateToTranscriptRow: async () => 'cancelled',
 		prepareForInteractionLoss,
+		installInitialSnapshot: () => {},
 		prepareForHide: () => {
 			lastRestoreTarget = presentation?.captureRestoreTarget() ?? lastRestoreTarget;
 			return lastRestoreTarget;

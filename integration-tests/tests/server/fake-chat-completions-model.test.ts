@@ -86,6 +86,34 @@ describe('FakeChatCompletionsModel usage scripting', () => {
       model.stop();
     }
   });
+
+  test('preserves tool argument delta boundaries and call indices', async () => {
+    const model = FakeChatCompletionsModel.start();
+    const rawArguments = ['{"path":"split', '.txt","content":"line\\', 'nnext"}'];
+    try {
+      model.scriptTurn([
+        chatCompletionsToolUse('split', 'write', {}, { rawArguments }),
+        chatCompletionsToolUse('second', 'read', { path: 'split.txt' }),
+      ]);
+      const response = await fetch(`${model.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'scripted-model', stream: true, messages: [] }),
+      });
+      expect(response.status).toBe(200);
+      const calls = (await response.text()).split('\n')
+        .filter((line) => line.startsWith('data: {'))
+        .flatMap((line) => JSON.parse(line.slice(6)).choices)
+        .flatMap((choice) => choice.delta?.tool_calls ?? []);
+      expect(calls.filter((call) => call.index === 0).map((call) => call.function.arguments))
+        .toEqual(['', ...rawArguments]);
+      expect(calls.filter((call) => call.index === 1).map((call) => call.function.arguments))
+        .toEqual(['', '{"path":"split.txt"}']);
+      model.assertSettled();
+    } finally {
+      model.stop();
+    }
+  });
 });
 
 async function requestUsage(

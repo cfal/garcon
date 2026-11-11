@@ -1,5 +1,4 @@
 import { createHash } from 'crypto';
-import { mapWithConcurrency } from '../../common/concurrency.js';
 import { captureWorkingTreeObservation, isWorkingTreeObservationCurrent } from './working-tree-observation.js';
 import {
   isExpectedMissingGitResult,
@@ -206,7 +205,8 @@ async function summarizeComparisonFiles({
   const summaries: GitCommitFileSummary[] = [];
   const untrackedSummaryBudget: UntrackedSummaryBudget = createUntrackedSummaryBudget();
 
-  await mapWithConcurrency(candidates, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
+  // Sorted admission keeps the shared untracked-byte budget independent of I/O timing.
+  for (const file of candidates) {
     signal?.throwIfAborted();
     const isUntracked = file.status === '?';
     const untrackedLimits = isUntracked
@@ -272,10 +272,10 @@ async function summarizeComparisonFiles({
       ...(limitReason ? { limitReason } : {}),
       ...(limitMessage ? { limitMessage } : {}),
     });
-  });
+  }
 
   return {
-    files: summaries.sort((left, right) => left.path.localeCompare(right.path)),
+    files: summaries,
     totalFilesKnown,
   };
 }
@@ -551,6 +551,7 @@ async function getComparisonSnapshot(
     numstatOutput: summary.numstat,
     signal,
   });
+  signal?.throwIfAborted();
   const files = summarized.files;
   const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>
     registry.register({

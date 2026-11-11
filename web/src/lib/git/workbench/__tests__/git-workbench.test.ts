@@ -153,6 +153,7 @@ function makeReviewBodies(paths: string[]) {
 		documentId: 'doc',
 		files: Object.fromEntries(paths.map((path) => [path, makeReviewBody(path, `body:${path}`)])),
 		errors: {},
+		deferredFiles: [],
 	};
 }
 
@@ -283,6 +284,7 @@ describe('GitWorkbenchStore', () => {
 			documentId: 'doc',
 			files: { 'a.ts': makeReviewBody('a.ts') },
 			errors: {},
+			deferredFiles: [],
 		});
 	});
 
@@ -294,7 +296,8 @@ describe('GitWorkbenchStore', () => {
 		it('keeps the newest of three refreshes busy after obsolete requests complete', async () => {
 			await wb.setTarget(makeTarget());
 			const requests = Array.from({ length: 3 }, () => deferred<GitWorkbenchSnapshotResponse>());
-			for (const request of requests) mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(request.promise);
+			for (const request of requests)
+				mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(request.promise);
 			const refreshes = requests.map(() => wb.refresh({ reason: 'manual' }));
 			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(4);
 			requests[1].resolve(makeWorkbenchSnapshot({ workbenchFingerprint: 'obsolete-2' }));
@@ -371,7 +374,7 @@ describe('GitWorkbenchStore', () => {
 				expect.objectContaining({
 					signal: expect.any(AbortSignal),
 					selectedFile: null,
-					bodyCandidateCount: 8,
+					bodyCandidateCount: 3,
 				}),
 			);
 		});
@@ -676,6 +679,7 @@ describe('GitWorkbenchStore', () => {
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
 				errors: {},
+				deferredFiles: [],
 			});
 			await Promise.resolve();
 
@@ -703,6 +707,7 @@ describe('GitWorkbenchStore', () => {
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
 				errors: {},
+				deferredFiles: [],
 			});
 
 			await vi.waitFor(() => expect(wb.isExternallyStale).toBe(true));
@@ -718,7 +723,10 @@ describe('GitWorkbenchStore', () => {
 
 			await wb.setTarget(makeTarget());
 
-			await wb.runLocalGitMutation({ executorId: 'local', projectPath: '/project' }, async () => true);
+			await wb.runLocalGitMutation(
+				{ executorId: 'local', projectPath: '/project' },
+				async () => true,
+			);
 
 			await vi.waitFor(() => {
 				expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledWith(
@@ -788,7 +796,7 @@ describe('GitWorkbenchStore', () => {
 				5,
 				expect.objectContaining({
 					selectedFile: 'a.ts',
-					bodyCandidateCount: 8,
+					bodyCandidateCount: 3,
 				}),
 			);
 			expect(wb.loadedWorkbenchFingerprint).toBe('v1:new');
@@ -844,6 +852,7 @@ describe('GitWorkbenchStore', () => {
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'loaded') },
 				errors: {},
+				deferredFiles: [],
 			});
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({
@@ -992,6 +1001,7 @@ describe('GitWorkbenchStore', () => {
 					documentId: 'doc',
 					files: { 'a.ts': makeReviewErrorBody() },
 					errors: { 'a.ts': 'Transient diff failure' },
+					deferredFiles: [],
 				})
 				.mockResolvedValueOnce(makeReviewBodies(['a.ts']));
 
@@ -1019,6 +1029,7 @@ describe('GitWorkbenchStore', () => {
 					documentId: 'doc',
 					files: { 'a.ts': makeReviewErrorBody() },
 					errors: { 'a.ts': 'Transient diff failure' },
+					deferredFiles: [],
 				})
 				.mockResolvedValueOnce(makeReviewBodies(['a.ts']));
 
@@ -1100,51 +1111,36 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.review.aggregateLimit).toBeNull();
 		});
 
-		it('honors a collection budget limit emitted by the server', async () => {
+		it('continues server-deferred bodies without imposing a collection limit', async () => {
 			const paths = ['a.ts', 'b.ts', 'c.ts'];
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({
 					root: paths.map((path) => makeTreeFile(path)),
 					summary: makeReviewSummary(paths),
 					selectedFile: paths[0],
-					firstBodyCandidates: [paths[0]],
+					firstBodyCandidates: paths,
 				}),
 			);
 			mockedApi.getGitReviewFileBodies.mockImplementation(
 				async (_project, _documentId, requestedPaths) => {
-					if (requestedPaths[0] !== 'b.ts') return makeReviewBodies(requestedPaths);
+					if (requestedPaths.length === 1) return makeReviewBodies(requestedPaths);
 					return {
-						status: 'ready' as const,
-						documentId: 'doc',
-						files: {
-							'b.ts': {
-								...makeReviewBody('b.ts'),
-								bodyState: 'too-large' as const,
-								category: 'large' as const,
-								isTooLarge: true,
-								renderedRowCount: 0,
-								patchBytes: 0,
-								patch: null,
-								patchIndex: null,
-								limitReason: 'collection-too-many-bytes' as const,
-								limitMessage: 'Server stopped after 42 patch bytes.',
-							},
-						},
-						errors: {},
+						...makeReviewBodies(requestedPaths.slice(0, 1)),
+						deferredFiles: requestedPaths.slice(1),
 					};
 				},
 			);
 
 			await wb.setTarget(makeTarget());
-			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']).toBeTruthy());
-			wb.review.focusFile('/project', 'b.ts');
-
-			await vi.waitFor(() =>
-				expect(wb.review.aggregateLimit?.reason).toBe('collection-too-many-bytes'),
-			);
-			expect(wb.review.aggregateLimit?.message).toBe('Server stopped after 42 patch bytes.');
-			expect(wb.review.fileBodies['b.ts']?.bodyState).toBe('too-large');
-			expect(wb.review.fileBodies['c.ts']).toBeUndefined();
+			await vi.waitFor(() => expect(wb.review.fileBodies['c.ts']?.bodyState).toBe('loaded'));
+			expect(wb.review.fileBodies['a.ts']?.bodyState).toBe('loaded');
+			expect(wb.review.fileBodies['b.ts']?.bodyState).toBe('loaded');
+			expect(wb.review.aggregateLimit).toBeNull();
+			expect(mockedApi.getGitReviewFileBodies.mock.calls.map(([, , files]) => files)).toEqual([
+				['a.ts'],
+				['b.ts', 'c.ts'],
+				['c.ts'],
+			]);
 		});
 
 		it('refreshes an expired workbench document once without retrying indefinitely', async () => {
@@ -1208,6 +1204,7 @@ describe('GitWorkbenchStore', () => {
 					documentId: 'staged-doc',
 					files: { 'a.ts': makeReviewBody('a.ts', 'new') },
 					errors: {},
+					deferredFiles: [],
 				});
 			await wb.setTarget({
 				executorId: 'local',
@@ -1521,7 +1518,10 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 			wb.staging.requestDiscard('a.ts');
 
-			const result = await wb.staging.confirmDiscard({ executorId: 'local', projectPath: '/project' });
+			const result = await wb.staging.confirmDiscard({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitDiscard).toHaveBeenCalledWith(
@@ -1570,7 +1570,10 @@ describe('GitWorkbenchStore', () => {
 				makeWorkbenchSnapshot({ root: [], hasCommits: true }),
 			);
 
-			const result = await wb.initialCommit.create({ executorId: 'local', projectPath: '/project' });
+			const result = await wb.initialCommit.create({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(result).toBe(true);
 			expect(wb.files.hasCommits).toBe(true);
@@ -2290,11 +2293,17 @@ describe('GitWorkbenchStore', () => {
 
 			wb.files.selectedFile = 'a.ts';
 			wb.porcelain.setInspectorView('history');
-			const firstLoad = wb.porcelain.loadCurrentView({ executorId: 'local', projectPath: '/project' });
+			const firstLoad = wb.porcelain.loadCurrentView({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 			const firstOptions = mockedApi.getGitFileHistory.mock.calls[0]?.[3] as RequestInit;
 
 			wb.files.selectedFile = 'b.ts';
-			const secondLoad = wb.porcelain.loadCurrentView({ executorId: 'local', projectPath: '/project' });
+			const secondLoad = wb.porcelain.loadCurrentView({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 			const secondOptions = mockedApi.getGitFileHistory.mock.calls[1]?.[3] as RequestInit;
 
 			expect(firstOptions.signal).toBeInstanceOf(AbortSignal);

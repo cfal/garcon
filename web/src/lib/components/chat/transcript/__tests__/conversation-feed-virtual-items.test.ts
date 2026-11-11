@@ -69,6 +69,15 @@ function build(
 }
 
 describe('conversation virtual feed model', () => {
+	it('builds and expands a tool run larger than the engine argument limit', () => {
+		const items = Array.from({ length: 150_000 }, (_, i) => bashItem(i + 1));
+		const grouped = build(items, { combineToolUseMessages: true });
+		expect(grouped.items[1]).toMatchObject({ kind: 'tool-group', expanded: false });
+		const expanded = build(items, { combineToolUseMessages: true, expandedToolMemberIds: new Set([items[0].id]) });
+		expect(expanded.items).toHaveLength(items.length + 3);
+		expect(expanded.indexByRowId.get(items.at(-1)!.id)).toBe(items.length + 1);
+	});
+
 	it('routes each command output search target to its own visible row', () => {
 		const rows = [1, 2].map(index => ({ ...userItem(index), message: new CommandOutputMessage(
 			'2026-08-03T00:00:00.000Z', 'command-1', 'stdout', 'plain', `part ${index}`,

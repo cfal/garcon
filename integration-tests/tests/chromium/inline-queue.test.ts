@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import { expect as browserExpect } from "playwright/test";
 import type { Locator } from "playwright";
 import { authenticateChromiumContext, withChromiumFixture } from "../../support/chromium-fixture.js";
+import { seedLocalSettings } from "../../support/local-settings-seed.js";
 import { codexAssistantMessage } from "../../support/fake-codex-model.js";
 import { liveCodexStartRequest } from "../../support/live-codex.js";
 import { startScriptedCodexTestEnvironment } from "../../support/scripted-codex.js";
@@ -283,6 +284,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         watchBrowserErrors(touchContext);
         try {
           await authenticateChromiumContext(touchContext, integration);
+          await touchContext.addInitScript(seedLocalSettings, { allowDirectChats: true });
           const touchPage = await touchContext.newPage();
           await touchPage.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
           const touchGrip = touchPage.locator("[data-queue-drag-id]").first();

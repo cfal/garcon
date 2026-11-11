@@ -1,37 +1,44 @@
-<!-- First-run setup wizard: theme, sidebar chat layout, and chat display
-     preferences across paged steps. Selections persist immediately so each
-     choice applies live behind the dialog. -->
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import CheckIcon from '@lucide/svelte/icons/check';
-	import { getAppShell, getLocalSettings } from '$lib/context';
+	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+	import { getAppShell, getLocalSettings, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
 	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
-	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import {
 		OnboardingWizardState,
 		type OnboardingPageId,
 	} from './onboarding-wizard-state.svelte.js';
 	import { ONBOARDING_OPTION_CARD_CLASS } from './onboarding-option-card.js';
-	import OnboardingChatLayoutPreview from './OnboardingChatLayoutPreview.svelte';
+	import OnboardingSidebarPage from './OnboardingSidebarPage.svelte';
+	import OnboardingWritingPage from './OnboardingWritingPage.svelte';
 	import OnboardingThemePage from './OnboardingThemePage.svelte';
+	import OnboardingWelcomePage from './OnboardingWelcomePage.svelte';
+	import OnboardingTranscriptSearchPage from './OnboardingTranscriptSearchPage.svelte';
+	import { OnboardingTranscriptSearchState } from './onboarding-transcript-search-state.svelte.js';
 
 	const appShell = getAppShell();
 	const ls = getLocalSettings();
+	const transcriptSearch = new OnboardingTranscriptSearchState(getRemoteSettings());
 	const wizard = new OnboardingWizardState({
 		localSettings: ls,
 		onClose: () => appShell.closeOnboardingWizard(),
 		onOpenProviders: () => appShell.openSettings('providers'),
+		onOpenScheduledPrompts: () => appShell.openScheduledPrompts(),
+		onOpenPreambles: () => appShell.openPreambles(),
 	});
 
 	function handleOpenChange(open: boolean) {
-		if (!open) appShell.closeOnboardingWizard();
+		if (!open) wizard.finish();
 	}
 
 	let pageTitleElement = $state<HTMLElement | null>(null);
+	let pageBodyElement = $state<HTMLDivElement | null>(null);
+	let dialogElement = $state<HTMLDivElement | null>(null);
 
 	function handleOpenAutoFocus(event: Event): void {
 		event.preventDefault();
@@ -42,43 +49,29 @@
 	// technology announces the new page; focus otherwise stays on Continue.
 	$effect(() => {
 		wizard.pageIndex;
+		if (dialogElement) dialogElement.scrollTop = 0;
+		if (pageBodyElement) pageBodyElement.scrollTop = 0;
 		pageTitleElement?.focus();
 	});
 
-	const pageTitles: Record<OnboardingPageId, () => string> = {
-		theme: m.onboarding_theme_title,
-		'chat-layout': m.onboarding_layout_title,
-		'chat-display': m.onboarding_chat_display_title,
-		done: m.onboarding_done_title,
+	const pageText: Record<OnboardingPageId, { title: () => string; description: () => string }> = {
+		welcome: { title: m.onboarding_welcome_title, description: m.onboarding_welcome_description },
+		theme: { title: m.onboarding_theme_title, description: m.onboarding_theme_description },
+		'chat-layout': {
+			title: m.onboarding_layout_title,
+			description: m.onboarding_layout_description,
+		},
+		'chat-display': {
+			title: m.onboarding_chat_display_title,
+			description: m.onboarding_chat_display_description,
+		},
+		writing: { title: m.onboarding_writing_title, description: m.onboarding_writing_description },
+		'transcript-search': {
+			title: m.onboarding_search_title,
+			description: m.onboarding_search_description,
+		},
+		done: { title: m.onboarding_done_title, description: m.onboarding_done_description },
 	};
-	const pageDescriptions: Record<OnboardingPageId, () => string> = {
-		theme: m.onboarding_theme_description,
-		'chat-layout': m.onboarding_layout_description,
-		'chat-display': m.onboarding_chat_display_description,
-		done: m.onboarding_done_description,
-	};
-
-	const layoutOptions: Array<{
-		value: ChatItemLayout;
-		label: () => string;
-		hint: () => string;
-	}> = [
-		{
-			value: 'single-line',
-			label: m.onboarding_layout_single_line,
-			hint: m.onboarding_layout_single_line_hint,
-		},
-		{
-			value: 'compact',
-			label: m.onboarding_layout_compact,
-			hint: m.onboarding_layout_compact_hint,
-		},
-		{
-			value: 'detailed',
-			label: m.onboarding_layout_detailed,
-			hint: m.onboarding_layout_detailed_hint,
-		},
-	];
 
 	const chatMaxWidthOptions: Array<{
 		value: ChatMaxWidth;
@@ -94,53 +87,38 @@
 
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="max-h-[85vh] overflow-y-auto sm:max-w-xl"
+		bind:ref={dialogElement}
+		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
 	>
-		<Dialog.Header>
-			<p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				{m.onboarding_wizard_title()}
-			</p>
+		<Dialog.Header class="shrink-0 px-6 pt-6 pb-4 text-left">
+			<div class="flex items-center justify-between gap-3 pr-6 text-xs text-muted-foreground">
+				<p class="font-medium">{m.onboarding_wizard_title()}</p>
+				<span aria-live="polite" aria-atomic="true">
+					{m.onboarding_step_label({ current: wizard.pageIndex + 1, total: wizard.pageCount })}
+				</span>
+			</div>
 			<Dialog.Title
 				bind:ref={pageTitleElement}
 				tabindex={-1}
-				class="text-xl font-semibold outline-none">{pageTitles[wizard.pageId]()}</Dialog.Title
+				class="text-xl font-semibold outline-none">{pageText[wizard.pageId].title()}</Dialog.Title
 			>
 			<Dialog.Description id="onboarding-description">
-				{pageDescriptions[wizard.pageId]()}
+				{pageText[wizard.pageId].description()}
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="min-h-40">
-			{#if wizard.pageId === 'theme'}
-				<OnboardingThemePage onSelect={(preference) => wizard.selectTheme(preference)} />
+		<div
+			bind:this={pageBodyElement}
+			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
+		>
+			{#if wizard.pageId === 'welcome'}
+				<OnboardingWelcomePage />
+			{:else if wizard.pageId === 'theme'}
+				<OnboardingThemePage onSelect={(preference) => ls.set('themePreference', preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
-				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-					<legend class="sr-only">{m.onboarding_layout_title()}</legend>
-					{#each layoutOptions as option (option.value)}
-						<label class={ONBOARDING_OPTION_CARD_CLASS}>
-							<input
-								type="radio"
-								class="sr-only"
-								name="onboarding-layout"
-								value={option.value}
-								checked={ls.sidebarChatItemLayout === option.value}
-								onchange={() => wizard.selectChatItemLayout(option.value)}
-							/>
-							<div class="flex w-full flex-1 items-center">
-								<OnboardingChatLayoutPreview
-									layout={option.value}
-									isSelected={ls.sidebarChatItemLayout === option.value}
-								/>
-							</div>
-							<span class="flex flex-col items-center gap-1">
-								<span class="text-sm font-medium text-foreground">{option.label()}</span>
-								<span class="text-xs text-muted-foreground">{option.hint()}</span>
-							</span>
-						</label>
-					{/each}
-				</fieldset>
+				<OnboardingSidebarPage />
 			{:else if wizard.pageId === 'chat-display'}
 				<fieldset>
 					<legend class="mb-2 text-sm font-medium text-foreground">
@@ -155,7 +133,7 @@
 									name="onboarding-chat-max-width"
 									value={option.value}
 									checked={ls.chatMaxWidth === option.value}
-									onchange={() => wizard.selectChatMaxWidth(option.value)}
+									onchange={() => ls.set('chatMaxWidth', option.value)}
 								/>
 								<span
 									class="flex h-8 w-full items-center justify-center rounded-md bg-muted/60 px-1"
@@ -176,8 +154,18 @@
 						</span>
 						<Switch
 							checked={ls.showThinking}
-							onCheckedChange={() => wizard.toggleShowThinking()}
+							onCheckedChange={() => ls.toggle('showThinking')}
 							aria-label={m.settings_chat_show_thinking()}
+						/>
+					</div>
+					<div class="flex items-center justify-between gap-4 py-2">
+						<span class="text-sm font-medium text-foreground">
+							{m.settings_chat_combine_tool_use_messages()}
+						</span>
+						<Switch
+							checked={ls.combineToolUseMessages}
+							onCheckedChange={(checked) => ls.set('combineToolUseMessages', checked)}
+							aria-label={m.settings_chat_combine_tool_use_messages()}
 						/>
 					</div>
 					<div class="flex items-center justify-between gap-4 py-2">
@@ -186,51 +174,84 @@
 						</span>
 						<Switch
 							checked={ls.autoExpandTools}
-							onCheckedChange={() => wizard.toggleAutoExpandTools()}
+							onCheckedChange={() => ls.toggle('autoExpandTools')}
 							aria-label={m.settings_chat_auto_expand_tools()}
 						/>
 					</div>
 				</div>
+			{:else if wizard.pageId === 'writing'}
+				<OnboardingWritingPage />
+			{:else if wizard.pageId === 'transcript-search'}
+				<OnboardingTranscriptSearchPage search={transcriptSearch} />
 			{:else}
-				<div class="flex flex-col items-center gap-3 py-6 text-center">
-					<span
-						class="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary"
+				<div class="divide-y divide-border">
+					<button
+						type="button"
+						class="flex w-full items-center gap-3 rounded-md px-2 py-4 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+						onclick={() => wizard.finishToScheduledPrompts()}
+						aria-labelledby="onboarding-scheduled-title"
+						aria-describedby="onboarding-scheduled-description"
 					>
-						<CheckIcon class="size-6" />
-					</span>
+						<CalendarClockIcon class="size-5 shrink-0 text-muted-foreground" />
+						<span class="min-w-0 flex-1">
+							<span id="onboarding-scheduled-title" class="block text-sm font-medium"
+								>{m.onboarding_scheduled_tasks()}</span
+							>
+							<span
+								id="onboarding-scheduled-description"
+								class="mt-1 block text-sm text-muted-foreground"
+							>
+								{m.onboarding_scheduled_tasks_description()}
+							</span>
+						</span>
+						<ArrowRightIcon class="size-4 shrink-0 text-muted-foreground" />
+					</button>
+					<button
+						type="button"
+						class="flex w-full items-center gap-3 rounded-md px-2 py-4 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+						onclick={() => wizard.finishToPreambles()}
+						aria-labelledby="onboarding-preambles-title"
+						aria-describedby="onboarding-preambles-description"
+					>
+						<FileTextIcon class="size-5 shrink-0 text-muted-foreground" />
+						<span class="min-w-0 flex-1">
+							<span id="onboarding-preambles-title" class="block text-sm font-medium"
+								>{m.preambles_title()}</span
+							>
+							<span
+								id="onboarding-preambles-description"
+								class="mt-1 block text-sm text-muted-foreground"
+							>
+								{m.onboarding_preambles_description()}
+							</span>
+						</span>
+						<ArrowRightIcon class="size-4 shrink-0 text-muted-foreground" />
+					</button>
 				</div>
 			{/if}
 		</div>
 
-		<Dialog.Footer class="flex-row items-center justify-between gap-2 sm:justify-between">
-			<div class="flex items-center gap-2">
-				<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
-					{m.onboarding_back()}
+		<Dialog.Footer
+			class="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border px-4 py-4 sm:px-6"
+		>
+			<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
+				{m.onboarding_back()}
+			</Button>
+			{#if wizard.isDonePage}
+				<Button
+					class="h-auto min-h-9 min-w-0 justify-self-end whitespace-normal py-2"
+					onclick={() => wizard.finishToProviders()}
+				>
+					{m.onboarding_done_providers()}
 				</Button>
-			</div>
-			<div class="flex flex-wrap items-center justify-end gap-3">
-				<div class="flex items-center gap-1.5" aria-hidden="true">
-					{#each { length: wizard.pageCount } as _, index (index)}
-						<span
-							class={cn(
-								'size-1.5 rounded-full transition-colors',
-								index === wizard.pageIndex ? 'bg-primary' : 'bg-muted-foreground/30',
-							)}
-						></span>
-					{/each}
-				</div>
-				<span class="sr-only" aria-live="polite" aria-atomic="true">
-					{m.onboarding_step_label({ current: wizard.pageIndex + 1, total: wizard.pageCount })}
-				</span>
-				{#if wizard.isDonePage}
-					<Button variant="outline" onclick={() => wizard.finishToProviders()}>
-						{m.onboarding_done_providers()}
-					</Button>
-					<Button onclick={() => wizard.finish()}>{m.onboarding_done_start()}</Button>
-				{:else}
-					<Button onclick={() => wizard.advance()}>{m.onboarding_continue()}</Button>
-				{/if}
-			</div>
+			{:else}
+				<Button
+					class="justify-self-end"
+					onclick={() => wizard.advance()}
+					disabled={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving}
+					>{m.onboarding_continue()}</Button
+				>
+			{/if}
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

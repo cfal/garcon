@@ -16,12 +16,24 @@ import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 import type { OptimisticUserInput } from '../optimistic-user-input.js';
+import { mergeRowsWithOptimisticInputs } from '../transcript-row-projection.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
 }));
 
 const TS = '2026-06-01T00:00:00.000Z';
+
+it('merges optimistic input ahead of a durable tail larger than the engine argument limit', () => {
+	const rows = Array.from({ length: 150_000 }, (_, i) => ({
+		kind: 'message' as const, id: `view:${i + 1}`, ordinal: i + 1, message: assistant('synthetic'),
+	}));
+	const optimistic = optimisticInput();
+	const merged = mergeRowsWithOptimisticInputs(rows, [optimistic], new Map());
+	expect(merged).toHaveLength(rows.length + 1);
+	expect(merged[0].id).toBe(`optimistic:${optimistic.clientMessageId}`);
+	expect(merged.slice(1)).toEqual(rows);
+});
 
 function entry(ordinal: number, message: ChatMessage): TranscriptMessage {
 	return { ordinal, message };
@@ -543,42 +555,6 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleMessageCount).toBe(total);
-	});
-
-	it('loads a larger logical page when viewport filling requests one', async () => {
-		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
-			lastOrdinal: 300,
-			pageOldestOrdinal: 251,
-			pageNewestOrdinal: 300,
-			nextBeforeOrdinal: 251,
-			hasMore: true,
-		});
-		vi.mocked(getChatMessages).mockImplementationOnce(async (request) => ({
-			chatId: 'chat-1',
-			limit: request.limit ?? 50,
-			...page({
-				messages: assistantEntries(51, 250),
-				lastOrdinal: 300,
-				pageOldestOrdinal: 51,
-				pageNewestOrdinal: 250,
-				nextBeforeOrdinal: 51,
-				hasMore: true,
-			}),
-		}));
-
-		await expect(
-			chat.loadEarlierPage('chat-1', { visibleLimit: 200 }),
-		).resolves.toBe('loaded');
-
-		expect(getChatMessages).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			limit: 200,
-			beforeOrdinal: 251,
-			transcriptViewId: 'generation-1',
-		});
-		expect(chat.entries).toHaveLength(250);
-		expect(chat.entries[0]?.ordinal).toBe(51);
 	});
 
 	it('stages a fetched earlier page until its application gate opens', async () => {

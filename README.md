@@ -51,6 +51,8 @@ docker pull ghcr.io/cfal/garcon:main
 
 The [Docker guide](docs/docker.md) covers running the published image, building the current checkout, image tags, volumes, agent login, Git, SSH, and toolchains.
 
+Starting with v0.4.0, [GitHub releases](https://github.com/cfal/garcon/releases) include server/CLI archives, source, checksums, provenance, and explicitly labeled native previews. Native previews are not signed production distributions; Android connections remain disabled and iOS is simulator-only. Human publication starts Docker promotion to the exact version tag and, for the current stable release, `latest`. See [release verification and operations](docs/releases.md).
+
 ## Why Garcon
 
 One agent chat is easy. The hard part begins when several agents are running, one needs approval, another has finished, and their changes still need to be understood and shipped.

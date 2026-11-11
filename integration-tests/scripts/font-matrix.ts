@@ -2,15 +2,13 @@
 import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { originalFontCss } from '../support/font-proof-sources.js';
 
 const root = resolve(import.meta.dirname, '../..');
 const output = resolve(process.argv[2] ?? '/projects/font-optimization-evidence/matrix');
 await mkdir(output, { recursive: true });
 const sources: { file: string }[] = await Bun.file(join(root, 'scripts/fonts/sources.json')).json();
-const before = sources.map(({ file }) => {
-  const family = file.startsWith('Inter') ? 'Inter' : file.startsWith('JetBrains') ? 'JetBrains Mono' : 'Departure Mono';
-  return `@font-face {font-family:'${family}';src:url('/source/${file}');font-style:${file.includes('Italic') ? 'italic' : 'normal'};font-weight:${family === 'Inter' ? '100 900' : family === 'JetBrains Mono' ? '100 800' : '400'};font-display:swap;}`;
-}).join('\n');
+const before = originalFontCss(sources, '/source');
 const after = (await readFile(join(root, 'web/src/lib/theme/font-faces.css'), 'utf8')).replaceAll('./assets/', '/output/');
 const weights = [400, 500, 550, 600, 620, 700, 800, 900];
 const sizes = [9, 10, 10.5, 11, 12, 13, 14, 15, 16, 17.5, 18, 20, 24, 32, 36];

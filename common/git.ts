@@ -240,6 +240,7 @@ export interface GitReviewDocumentFileBodiesReady {
   documentId: string;
   files: Record<string, GitReviewFilePatchBody>;
   errors: Record<string, string>;
+  deferredFiles: string[];
 }
 
 export interface GitReviewDocumentFileBodiesStale {

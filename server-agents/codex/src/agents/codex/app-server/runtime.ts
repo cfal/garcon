@@ -280,6 +280,7 @@ export class CodexAppServerRuntime {
         codexHome: initialized.codexHome || null,
         client,
         runtimeIdentity: codexSourceRuntimeIdentity(request),
+        modelEndpointId: request.modelEndpointId,
         providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
         confirmedThreadSettings: this.#initialThreadSettings(request, started),
         operation,
@@ -459,8 +460,8 @@ export class CodexAppServerRuntime {
     return status !== undefined && isActiveSessionStatus(status);
   }
 
-  hasSource(agentSessionId: string): boolean {
-    return this.#sourceForThread(agentSessionId) !== null;
+  sourceEndpointId(agentSessionId: string): string | null | undefined {
+    return this.#sourceForThread(agentSessionId)?.modelEndpointId;
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
@@ -510,7 +511,7 @@ export class CodexAppServerRuntime {
 
   async #resolvePermission(
     pending: CodexTrackedApproval<CodexAppServerClient>,
-    decision: { allow: boolean; alwaysAllow?: boolean },
+    decision: PermissionDecisionPayload,
   ): Promise<void> {
     if (this.#pendingApprovals.get(pending.client)?.get(pending.requestId) !== pending) {
       throw new Error('Codex permission occurrence is no longer pending');
@@ -628,6 +629,7 @@ export class CodexAppServerRuntime {
   #newClient(request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>, bufferNotifications = false): CodexAppServerClient {
     const client = this.#createClient({
       env: buildCodexEnv(request.envOverrides, request.codexConfig),
+      config: request.codexConfig?.config,
       modelCatalogPath: request.codexConfig?.modelCatalogPath,
     });
     if (bufferNotifications) this.#bufferingClients.add(client);
@@ -753,6 +755,7 @@ export class CodexAppServerRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     runtimeIdentity: string;
+    modelEndpointId: string | null;
     providerOwnsReasoningEffort: boolean;
     confirmedThreadSettings: CodexConfirmedThreadSettings;
     operation: CodexOperation;
@@ -767,6 +770,7 @@ export class CodexAppServerRuntime {
       codexHome: args.codexHome,
       client: args.client,
       runtimeIdentity: args.runtimeIdentity,
+      modelEndpointId: args.modelEndpointId,
       activeTurnId: null,
       status: 'running',
       permissionMode: args.confirmedThreadSettings.permissionMode,
@@ -926,6 +930,7 @@ export class CodexAppServerRuntime {
           codexHome: initialized.codexHome || null,
           client,
           runtimeIdentity,
+          modelEndpointId: request.modelEndpointId,
           providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
           confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
           operation,
@@ -1183,7 +1188,9 @@ export class CodexAppServerRuntime {
     client: CodexAppServerClient,
     params: ServerRequestResolvedNotification,
   ): void {
-    const pending = takePendingApproval(this.#pendingApprovals, client, params.requestId);
+    const candidate = this.#pendingApprovals.get(client)?.get(params.requestId);
+    if (candidate?.params.threadId !== params.threadId) return;
+    const pending = takePendingApproval(this.#pendingApprovals, client, params.requestId, candidate);
     if (!pending) return;
     publishPermissionExpired(
       this.#logger,
@@ -1252,6 +1259,7 @@ export class CodexAppServerRuntime {
     if (params.turn.status === 'completed') {
       const message = params.turn.items.findLast((item) =>
         item.type === 'agentMessage'
+        && item.delivery !== 'async'
         && (item.phase === 'final_answer' || item.phase === null || item.phase === undefined));
       if (message?.type === 'agentMessage') {
         this.#finalResponses.set(operation, { type: 'text', text: message.text });
@@ -1448,7 +1456,7 @@ export class CodexAppServerRuntime {
       client.respond(request.id, denialResponseForRequest(request.method, params));
       return;
     }
-    if (session.permissionMode === 'manualBypass') {
+    if (session.permissionMode === 'manualBypass' && message.requestedTool.type !== 'ask-user-question-tool-use') {
       client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
       return;
     }

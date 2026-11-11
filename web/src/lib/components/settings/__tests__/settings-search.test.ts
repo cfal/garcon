@@ -4,6 +4,13 @@ import { TYPOGRAPHY_SURFACES, type TypographySurface } from '$lib/theme/typograp
 import { searchSettings, settingsSearchEntries } from '../settings-search';
 
 describe('settings search', () => {
+	it('finds the chat-swap preference under Behavior', () => {
+		expect(searchSettings(settingsSearchEntries(), 'swap chats')).toContainEqual({
+			tab: 'behavior',
+			label: 'Swap dragged chats when already open',
+			section: 'Behavior',
+		});
+	});
 	it.each([
 		'Auto-hide chat scrollbar',
 		'Composer status bar',

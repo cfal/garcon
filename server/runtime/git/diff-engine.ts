@@ -505,13 +505,18 @@ function parseLsTreeZ(output: string): Map<string, string> {
 async function loadBatchedFingerprintInputs(
   projectPath: string,
   files: TreeNode[],
+  mode: GitReviewMode,
   existingIndexEntries: Map<string, string> | undefined,
   signal?: AbortSignal,
 ): Promise<BatchedFingerprintInputs> {
   const paths = files.map((file) => file.path);
   const indexEntriesByPath = new Map(existingIndexEntries);
   const headEntriesByPath = new Map<string, string>();
+  const deletedPaths = new Set(
+    mode === 'working' ? files.filter((file) => file.workTreeStatus === 'D').map((file) => file.path) : [],
+  );
   for (const chunk of chunkGitPathspecs(paths)) {
+    const headPaths = chunk.filter((file) => deletedPaths.has(file));
     const [indexResult, headResult] = await Promise.allSettled([
       existingIndexEntries
         ? Promise.resolve({ stdout: '' })
@@ -520,7 +525,9 @@ async function loadBatchedFingerprintInputs(
             ['ls-files', '-s', '-z', '--', ...chunk],
             readOnlyGitOptions({ signal }),
           ),
-      runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], readOnlyGitOptions({ signal })),
+      headPaths.length > 0
+        ? runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...headPaths], readOnlyGitOptions({ signal }))
+        : Promise.resolve({ stdout: '' }),
     ]);
     if (!existingIndexEntries && indexResult.status === 'fulfilled') {
       for (const [filePath, entry] of parseLsFilesStageZ(indexResult.value.stdout)) {
@@ -737,6 +744,7 @@ async function buildReviewDocumentSummaryFromTree({
   const fingerprintInputs = await loadBatchedFingerprintInputs(
     projectPath,
     limitedFiles,
+    effectiveMode,
     indexEntriesByPath,
     signal,
   );

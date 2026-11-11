@@ -638,6 +638,23 @@ describe('chat command request parsers', () => {
     ]) expect(normalizeAskUserQuestionDecisionResponse(invalid)).toBeNull();
   });
 
+  it.each([
+    { kind: 'text', selectedOptionIds: [] },
+    { kind: 'notes', selectedOptionIds: ['option-1'] },
+  ])('parses exact $kind in permission requests', ({ selectedOptionIds }) => {
+    const request = {
+      clientRequestId: 'decision-text', chatId: CHAT_ID,
+      permissionOccurrenceId: 'occurrence-1', allow: true, alwaysAllow: false,
+      control: { serverInstanceId: 'server-1', chatId: CHAT_ID, runId: 'run-1', permissionOccurrenceId: 'occurrence-1' },
+      response: { type: 'ask-user-question-response', outcome: 'answered',
+        answers: [{ questionId: 'question-1', selectedOptionIds, text: '  Exact text\nKeep whitespace.  ' }] },
+    };
+    expect(parsePermissionDecisionCommandRequest(request).response).toEqual(request.response);
+    request.response.answers[0].text = '   ';
+    expect(() => parsePermissionDecisionCommandRequest(request)).toThrow(CommandRequestValidationError);
+    expect(() => parsePermissionDecisionCommandRequest(request)).toThrow('response contains an invalid structured answer');
+  });
+
   it('parses queue entry moves with explicit concurrency preconditions', () => {
     expect(parseQueueEntryMoveCommandRequest({
       clientRequestId: ' request-move ',

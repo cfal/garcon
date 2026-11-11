@@ -1,0 +1,485 @@
+import { expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { expect as browserExpect } from 'playwright/test';
+import { AssistantMessage } from '../../../common/chat-types.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
+import { parseTranscriptAnchorResponse, isCompleteTranscriptAnchorResponse, type TranscriptAnchorRequest } from '../../../common/transcript-anchor-page.js';
+import { COMBINED_PROMPT, COMBINED_RESPONSE, seedCombinedAnchorHistory } from '../../support/combined-anchor-history.js';
+import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { seedRecentTranscriptCache } from '../../support/transcript-cache-seed.js';
+
+test('a tall viewport receives prompt, tools, and answer in its first whole anchor response', async () => {
+  await withChromiumFixture('combined-anchor-single-response', async ({ integration, page, context }) => {
+    const { chatId, promptOrdinal, head } = await seedCombinedAnchorHistory(integration);
+    await page.setViewportSize({ width: 1280, height: 1600 });
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const responses: ReturnType<typeof parseTranscriptAnchorResponse>[] = [];
+    await page.route('**/api/v1/chats/combined-messages', async route => {
+      const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+      const response = await route.fetch();
+      if (request.chatId === chatId) responses.push(parseTranscriptAnchorResponse(request, await response.json()));
+      await route.fulfill({ response });
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const feed = page.locator('[data-chat-scroll-viewport]');
+    await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+    await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    expect(responses).toHaveLength(1);
+    const response = responses[0]!;
+    if (!isCompleteTranscriptAnchorResponse(response)) throw new Error('Synthetic history unavailable');
+    expect(response.pageStatus).toBe('exhausted');
+    expect(response.endOrdinal - response.startOrdinal).toBeGreaterThan(200);
+    expect(response.messages.some(entry => entry.ordinal === promptOrdinal)).toBe(true);
+    expect(response.messages.at(-1)!.ordinal).toBe(head);
+    const artifacts = join(import.meta.dir, '../../artifacts/chromium');
+    await mkdir(artifacts, { recursive: true });
+    await page.screenshot({ path: join(artifacts, 'combined-anchor-tall-viewport.png') });
+  });
+}, 150_000);
+
+test('measured underfill requests another real anchor page, not a raw-row continuation', async () => {
+  await withChromiumFixture('combined-anchor-measured-refill', async ({ integration, page, context }) => {
+    const { chatId } = await seedCombinedAnchorHistory(integration, { trailingAnchors: 150 });
+    await page.setViewportSize({ width: 1280, height: 10000 });
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const held = Promise.withResolvers<void>();
+    const requests: TranscriptAnchorRequest[] = [];
+    await page.route('**/api/v1/chats/combined-messages', async route => {
+      const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+      if (request.chatId === chatId) {
+        requests.push(request);
+        if (requests.length === 2) await held.promise;
+      }
+      await route.continue();
+    });
+    try {
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      await browserExpect(feed.getByText('Synthetic later anchor 149', { exact: true })).toBeVisible();
+      await browserExpect.poll(() => requests.length).toBe(2);
+      expect(requests[1]!.anchorsRemaining).toBe(100);
+      expect(requests[1]!.watermarkOrdinal).toBeUndefined();
+      expect(await feed.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+      held.resolve();
+      await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+      await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      expect(requests).toHaveLength(2);
+    } finally { held.resolve(); }
+  });
+}, 150_000);
+
+const expectedDisconnectErrors = [
+  /^console\.error: WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/ws\?v=\d+' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/,
+  /^console\.error: WebSocket error: \{readyState: 3, visibilityState: visible, online: true\}$/,
+  /^console\.error: Failed to load resource: net::ERR_CONNECTION_REFUSED$/,
+];
+
+for (const viewport of [{ name: 'wide', width: 1280, height: 900 }, { name: 'compact', width: 390, height: 700 }]) {
+  test(`cached history paints before combined top-up and retains grouped context (${viewport.name})`, async () => {
+    await withChromiumFixture(`combined-anchor-${viewport.name}`, async ({ integration, page, context }, phase) => {
+      phase('seeding synthetic ledger');
+      const { chatId } = await seedCombinedAnchorHistory(integration);
+      await seedRecentTranscriptCache(context, chatId, await integration.client.getMessages(chatId, { limit: 50 }));
+      const otherChatId = integration.newChatId();
+      const other = await integration.client.startDirectChat({
+        chatId: otherChatId, content: 'Synthetic switch target', projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(otherChatId, other.turnId);
+      await page.setViewportSize(viewport);
+      await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+      const requests: TranscriptAnchorRequest[] = [];
+      let release!: () => void;
+      const held = new Promise<void>(resolve => { release = resolve; });
+      let holding = false;
+      await page.route('**/api/v1/chats/combined-messages', async route => {
+        const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+        requests.push(request);
+        if (request.chatId === chatId && request.cursorOrdinal !== undefined && !holding) {
+          holding = true;
+          await held;
+        }
+        await route.continue();
+      });
+      try {
+        phase('first paint with continuation held');
+        await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+        const feed = page.locator('[data-chat-scroll-viewport]');
+        await browserExpect.poll(() => holding).toBe(true);
+        await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toHaveCount(0);
+        const composer = page.locator('[data-composer]');
+        const composerNode = await composer.elementHandle();
+        const input = page.getByPlaceholder('Reply...', { exact: true });
+        await input.fill('Synthetic retained draft');
+        const before = await composer.boundingBox();
+        phase('saving a deferred preference while continuation transport is held');
+        const heldReads = requests.length;
+        await page.evaluate(() => {
+          const key = 'pref_local_settings';
+          const newValue = JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), combineToolUseMessages: false });
+          localStorage.setItem(key, newValue);
+          window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
+        });
+        const refresh = page.getByRole('dialog', { name: 'Refresh required', exact: true });
+        await browserExpect(refresh).toBeVisible();
+        await refresh.getByRole('button', { name: 'Later', exact: true }).click();
+        await browserExpect(feed.locator('[data-chat-tool-group]')).toHaveCount(1);
+        expect(requests.length).toBe(heldReads);
+        await input.focus();
+        await browserExpect(input).toBeFocused();
+        release();
+        phase('completion without first-paint or composer disruption');
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+        await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+        await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+        await browserExpect(input).toHaveValue('Synthetic retained draft');
+        await browserExpect(input).toBeFocused();
+        expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, composerNode)).toBe(true);
+        expect(Math.abs((await composer.boundingBox())!.y - before!.y)).toBeLessThan(2);
+        expect(requests.some(request => request.chatId === chatId && request.cursorOrdinal !== undefined)).toBe(true);
+
+        phase('width-only resize');
+        const reads = requests.length;
+        await page.setViewportSize({ width: viewport.width - 30, height: viewport.height });
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+        await browserExpect(feed.locator('[data-chat-tool-group]')).toHaveCount(1);
+        expect(requests.length).toBe(reads);
+
+        phase('rapid switches preserve the composer and combined window');
+        for (const [id, marker] of [[otherChatId, 'Synthetic switch target'], [chatId, 'Synthetic combined history seed']]) {
+          const summary = page.locator('[data-slot="sidebar-chat-summary"]').filter({ hasText: marker }).first();
+          if (!(await summary.isVisible())) await page.getByRole('button', { name: 'Menu', exact: true }).click();
+          await summary.locator('xpath=ancestor::button[1]').click();
+          await page.waitForURL(url => url.pathname === `/chat/${id}`);
+          if (id === otherChatId) await browserExpect.poll(() => requests.some(request => request.chatId === otherChatId)).toBe(true);
+        }
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+        expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, composerNode)).toBe(true);
+        await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+        const overlap = await feed.locator('[data-chat-virtual-item]').evaluateAll(elements => {
+          const rectangles = elements.map(element => element.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+          return rectangles.some((rect, index) => index > 0 && rect.top < rectangles[index - 1]!.bottom - 1);
+        });
+        expect(overlap).toBe(false);
+        const artifacts = join(import.meta.dir, '../../artifacts/chromium');
+        await mkdir(artifacts, { recursive: true });
+        await page.screenshot({ path: join(artifacts, `combined-anchor-${viewport.name}.png`) });
+      } finally { release(); }
+    });
+  }, 150_000);
+}
+
+for (const combined of [true, false]) {
+  test(`combination preference waits for an explicit refresh (initially ${combined})`, async () => {
+    await withChromiumFixture(`combined-refresh-${combined}`, async ({ integration, page }, phase) => {
+      const { chatId } = await seedCombinedAnchorHistory(integration);
+      await page.goto(integration.garcon.baseUrl);
+      await page.evaluate(seedLocalSettings, { combineToolUseMessages: combined });
+      const reads: string[] = [];
+      page.on('request', request => {
+        const path = new URL(request.url()).pathname;
+        if (path === '/api/v1/chats/messages' || path === '/api/v1/chats/combined-messages') reads.push(path);
+      });
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+      if (combined) await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      const oldEndpoint = combined ? '/api/v1/chats/combined-messages' : '/api/v1/chats/messages';
+      expect(reads).toContain(oldEndpoint);
+      if (!combined) expect(reads.every(path => path === oldEndpoint)).toBe(true);
+      const loadedReads = [...reads];
+      const composer = page.getByPlaceholder('Reply...', { exact: true });
+      await composer.fill('Synthetic refresh draft');
+      const openSettings = async () => {
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+        const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
+        await settings.getByRole('tab', { name: 'Behavior', exact: true }).click();
+        return settings;
+      };
+      phase('saving a preference without changing the active feed');
+      const settings = await openSettings();
+      const toggle = settings.getByRole('switch', { name: 'Combine tool use messages', exact: true });
+      await toggle.click();
+      const refresh = page.getByRole('dialog', { name: 'Refresh required', exact: true });
+      await browserExpect(refresh).toBeVisible();
+      const artifacts = join(import.meta.dir, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await refresh.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: join(artifacts, `combination-refresh-${combined}-${width}.png`) });
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await refresh.getByRole('button', { name: 'Later', exact: true }).click();
+      await settings.getByRole('button', { name: 'Close', exact: true }).click();
+      await browserExpect(feed.locator('[data-chat-tool-group]')).toHaveCount(combined ? 1 : 0);
+      await browserExpect(composer).toHaveValue('Synthetic refresh draft');
+      expect(reads).toEqual(loadedReads);
+
+      phase('refreshing into the saved mode');
+      await openSettings();
+      await toggle.click();
+      await browserExpect(refresh).toHaveCount(0);
+      await toggle.click();
+      await browserExpect(refresh).toBeVisible();
+      reads.length = 0;
+      await refresh.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+      await browserExpect(feed.locator('[data-chat-tool-group]')).toHaveCount(combined ? 0 : 1);
+      if (!combined) await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+      await browserExpect(refresh).toHaveCount(0);
+      const newEndpoint = combined ? '/api/v1/chats/messages' : '/api/v1/chats/combined-messages';
+      // The pre-panel snapshot fallback remains raw even when combined paging is active.
+      await browserExpect.poll(() => reads).toContain(newEndpoint);
+      if (combined) expect(reads.every(path => path === newEndpoint)).toBe(true);
+    });
+  }, 150_000);
+}
+
+test('pinned combined coverage remains at the end with rows taller than their estimates', async () => {
+  await withChromiumFixture('combined-anchor-tall', async ({ integration, page, context }, phase) => {
+    const { chatId } = await seedCombinedAnchorHistory(integration, { tallResponse: true });
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const cursors: number[] = [];
+    await page.route('**/api/v1/chats/combined-messages', async route => {
+      const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+      if (request.cursorOrdinal !== undefined) cursors.push(request.cursorOrdinal);
+      await route.continue();
+    });
+    phase('loading a tall response in one complete anchor interval');
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const feed = page.locator('[data-chat-scroll-viewport]');
+    await browserExpect(feed.getByText(`${COMBINED_RESPONSE} 59.`, { exact: true })).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    expect(cursors).toEqual([]);
+    await browserExpect.poll(() => feed.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+    expect(await feed.locator('[data-chat-message-type="assistant-message"]').last().evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(1000);
+    await page.setViewportSize({ width: 390, height: 700 });
+    await browserExpect.poll(() => feed.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+  });
+}, 150_000);
+
+for (const change of ['collapse', 'filter'] as const) {
+  test(`detached combined coverage resumes after ${change} creates underfill`, async () => {
+    await withChromiumFixture(`combined-anchor-${change}`, async ({ integration, page, context }, phase) => {
+      const { chatId } = await seedCombinedAnchorHistory(integration, { thinking: change === 'filter' });
+      await seedRecentTranscriptCache(context, chatId, await integration.client.getMessages(chatId, { limit: 50 }));
+      await page.setViewportSize({ width: 1280, height: 600 });
+      await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true, showThinking: true });
+      const requests: TranscriptAnchorRequest[] = [];
+      let release!: () => void;
+      const held = new Promise<void>(resolve => { release = resolve; });
+      let holding = false;
+      await page.route('**/api/v1/chats/combined-messages', async route => {
+        const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+        requests.push(request);
+        if (request.chatId === chatId && request.cursorOrdinal !== undefined && !holding) {
+          holding = true;
+          await held;
+        }
+        await route.continue();
+      });
+      try {
+        await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+        await browserExpect.poll(() => holding).toBe(true);
+        const feed = page.locator('[data-chat-scroll-viewport]');
+        const group = feed.locator('[data-chat-tool-group]');
+        if (change === 'collapse') await group.click();
+        await browserExpect.poll(() => feed.evaluate(element => element.scrollHeight / element.clientHeight)).toBeGreaterThan(3.5);
+        phase('detaching during held continuation');
+        // Detaches below the earlier-page trigger without explicitly requesting history.
+        await feed.evaluate(element => {
+          element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+          element.scrollTop = element.scrollHeight - element.clientHeight - 100;
+          element.dispatchEvent(new Event('scroll', { bubbles: true }));
+        });
+        await browserExpect(feed).toHaveAttribute('data-chat-pinned-to-bottom', 'false');
+        release();
+        await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+        const completedReads = requests.length;
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toHaveCount(0);
+        phase('reducing presentation without another scroll or publication');
+        if (change === 'collapse') await group.click();
+        else await page.evaluate(() => {
+          const key = 'pref_local_settings';
+          const newValue = JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), showThinking: false });
+          localStorage.setItem(key, newValue);
+          window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
+        });
+        await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+        await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+        expect(requests.length).toBe(completedReads + 1);
+        expect(requests.at(-1)!.cursorOrdinal!).toBeLessThanOrEqual(requests[0]!.cursorOrdinal!);
+        expect(requests.at(-1)!.anchorsRemaining).toBe(requests[0]!.anchorsRemaining);
+        await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      } finally { release(); }
+    });
+  }, 150_000);
+}
+
+test('reconnect replay and held combined coverage preserve both the historical prompt and live suffix', async () => {
+  await withChromiumFixture('combined-anchor-reconnect', async ({ integration, page, context, browserErrors }, phase) => {
+    const { chatId } = await seedCombinedAnchorHistory(integration);
+    await seedRecentTranscriptCache(context, chatId, await integration.client.getMessages(chatId, { limit: 50 }));
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let holding = false;
+    await page.route('**/api/v1/chats/combined-messages', async route => {
+      const request = route.request().postDataJSON() as TranscriptAnchorRequest;
+      if (request.chatId === chatId && request.cursorOrdinal !== undefined && !holding) {
+        holding = true;
+        const response = await route.fetch();
+        await held;
+        await route.fulfill({ response });
+      } else await route.continue();
+    });
+    try {
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await browserExpect.poll(() => holding).toBe(true);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+      const marker = 'Synthetic combined reconnect suffix';
+      phase('restarting with a missed commit while history transport is held');
+      await integration.crashAndRestartGarcon({ reusePort: true, beforeStart: async () => {
+        const store = new TranscriptLedgerStore(join(integration.dirs.workspace, 'transcript-ledgers'));
+        try {
+          const view = store.currentView(chatId)!;
+          const at = '2026-01-01T00:00:00.000Z';
+          store.append(chatId, view.viewId, [{ kind: 'provider-row', at, message: new AssistantMessage(at, marker) }]);
+        } finally { store.close(); }
+      } });
+      await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible({ timeout: 30_000 });
+      release();
+      phase('settling history without losing or duplicating replayed rows');
+      await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(1);
+      await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      expect(browserErrors.splice(0).filter(error => !expectedDisconnectErrors.some(pattern => pattern.test(error)))).toEqual([]);
+    } finally { release(); }
+  });
+}, 180_000);
+
+test('cold combined history refreshes commits received after its snapshot was captured', async () => {
+  await withChromiumFixture('combined-anchor-cold-commit', async ({ integration, page, context }, phase) => {
+    const chatId = integration.newChatId();
+    const initial = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic cold history seed', projectPath: integration.dirs.project,
+      agent: integration.directAgents.openAi,
+    });
+    await integration.client.waitForTurnTerminal(chatId, initial.turnId);
+    const head = (await integration.client.getMessages(chatId)).lastOrdinal;
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    const held = Promise.withResolvers<void>();
+    let holding = true;
+    let captured = 0;
+    const combined: TranscriptAnchorRequest[] = [];
+    await page.route(/\/api\/v1\/chats\/(?:combined-)?messages(?:\?|$)/, async route => {
+      const url = new URL(route.request().url());
+      const request = route.request().method() === 'POST'
+        ? route.request().postDataJSON() as TranscriptAnchorRequest : null;
+      if ((request?.chatId ?? url.searchParams.get('chatId')) !== chatId) return route.continue();
+      if (request) combined.push(request);
+      if (!holding) return route.continue();
+      const response = await route.fetch();
+      expect((await response.json()).lastOrdinal).toBe(head);
+      if (request) captured += 1;
+      await held.promise;
+      await route.fulfill({ response });
+    });
+    const marker = 'Synthetic commit during cold history';
+    const provider = integration.fakeProviders.openAi.holdNext({ lastUserText: marker });
+    try {
+      phase('capturing the first history response before a live turn');
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await browserExpect.poll(() => captured).toBeGreaterThan(0);
+      const feed = page.locator('[data-chat-scroll-viewport]');
+      const live = await integration.client.runDirectChat({ chatId, content: marker, agent: integration.directAgents.openAi });
+      await provider.received;
+      const stop = page.getByRole('button', { name: 'Stop', exact: true });
+      await browserExpect(stop).toBeVisible();
+      provider.releaseEcho();
+      await integration.client.waitForTurnTerminal(chatId, live.turnId);
+      // Terminal handling flushes the browser's message accumulator before clearing processing.
+      await browserExpect(stop).toHaveCount(0);
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(0);
+      const beforeRelease = combined.length;
+      phase('installing the captured response and recovering the missed commits');
+      holding = false;
+      held.resolve();
+      await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+      await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(1);
+      await browserExpect(feed.getByText(`echo:${marker}`, { exact: true })).toBeVisible();
+      await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+      expect(combined[beforeRelease]).toEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
+    } finally {
+      provider.releaseEcho();
+      held.resolve();
+    }
+  });
+}, 180_000);
+
+test('reconnect replaces a same-view lost tail and accepts a commit at its reused ordinal', async () => {
+  await withChromiumFixture('combined-anchor-tail-loss', async ({ integration, page, context, browserErrors }, phase) => {
+    const { chatId, transcriptViewId, head } = await seedCombinedAnchorHistory(integration);
+    await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const feed = page.locator('[data-chat-scroll-viewport]');
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toBeVisible();
+    await browserExpect(feed.getByText(COMBINED_PROMPT, { exact: true })).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    const composer = page.locator('[data-composer]');
+    const node = await composer.elementHandle();
+    const input = page.getByPlaceholder('Reply...', { exact: true });
+    await input.fill('Synthetic retained recovery draft');
+    const snapshot = page.waitForResponse(response => {
+      if (!response.url().endsWith('/api/v1/chats/combined-messages')) return false;
+      const request = response.request().postDataJSON() as TranscriptAnchorRequest;
+      return request.chatId === chatId && request.cursorOrdinal === undefined;
+    }, { timeout: 60_000 });
+    phase('simulating committed tail loss while the isolated controller is stopped');
+    await integration.crashAndRestartGarcon({ reusePort: true, beforeStart: async () => {
+      const db = new Database(join(integration.dirs.workspace, 'transcript-ledgers', chatId, 'ledger.sqlite'));
+      try {
+        expect(db.query('DELETE FROM transcript_rows WHERE view_id = ? AND ordinal = ?').run(transcriptViewId, head).changes).toBe(1);
+      } finally { db.close(); }
+    } });
+    const response = await snapshot;
+    expect(response.status()).toBe(200);
+    const request = response.request().postDataJSON() as TranscriptAnchorRequest;
+    expect(request.watermarkOrdinal).toBeUndefined();
+    expect(parseTranscriptAnchorResponse(request, await response.json())).toMatchObject({
+      transcriptViewId, lastOrdinal: head - 1, watermarkOrdinal: head - 1,
+    });
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toHaveCount(0);
+    await browserExpect(feed.locator('[data-chat-tool-group-count="585"]')).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    await browserExpect(input).toHaveValue('Synthetic retained recovery draft');
+    expect(await page.evaluate(element => document.querySelector('[data-composer]') === element, node)).toBe(true);
+
+    phase('publishing at the formerly occupied ordinal without dropping the new input');
+    const marker = 'Synthetic input after tail loss';
+    const live = await integration.client.runDirectChat({ chatId, content: marker, agent: integration.directAgents.openAi });
+    await integration.client.waitForTurnTerminal(chatId, live.turnId);
+    const history = await integration.client.getMessages(chatId);
+    expect(history.transcriptViewId).toBe(transcriptViewId);
+    expect(history.messages.find(entry => entry.ordinal === head)?.message).toMatchObject({ type: 'user-message', content: marker });
+    await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toHaveCount(0);
+    await page.reload();
+    await browserExpect(feed.getByText(marker, { exact: true })).toBeVisible();
+    await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
+    await browserExpect(feed.getByText(COMBINED_RESPONSE, { exact: true })).toHaveCount(0);
+    expect(browserErrors.splice(0).filter(error => !expectedDisconnectErrors.some(pattern => pattern.test(error)))).toEqual([]);
+  });
+}, 180_000);

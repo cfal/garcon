@@ -39,7 +39,7 @@
 		chatContext = null,
 		chatTitles = {},
 	}: Props = $props();
-	setExecutorsTestContext(untrack(() => executors));
+	export const executorsStore = setExecutorsTestContext(untrack(() => executors));
 	setCanonicalWorkspaceLayout();
 	const notifications = setNotifications(createNotificationsStore());
 

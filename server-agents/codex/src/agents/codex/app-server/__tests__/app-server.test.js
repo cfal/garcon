@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { PERMISSION_MODE_VALUES } from '@garcon/common/chat-modes';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
@@ -12,6 +13,7 @@ import {
 } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
+import { buildCodexAppServerEndpointRuntime } from '../endpoint-runtime.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { isRetainedSourceInUse } from '../runtime-support.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
@@ -80,6 +82,7 @@ function makeRequest(overrides = {}) {
     command: 'hello',
     projectPath: '/repo',
     model: 'gpt-5.4-codex',
+    modelEndpointId: null,
     permissionMode: 'default',
     thinkingMode: 'medium',
     ...overrides,
@@ -345,6 +348,8 @@ function createRpcClientFixture(responder, options = {}) {
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
+    env: options.env,
+    config: options.config,
     modelCatalogPath: options.modelCatalogPath,
     resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'bundled' })),
     shutdownGraceMs: options.shutdownGraceMs,
@@ -373,6 +378,71 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('does not advertise human-only approval support', async () => {
+    const { client, writes } = createRpcClientFixture(() => initializeResponse);
+    await client.connect();
+    const initialize = writes.find((message) => message.method === 'initialize');
+    expect(initialize.params.capabilities.experimentalApi).toBe(true);
+    expect(initialize.params.capabilities.requiredHumanApproval).not.toBe(true);
+    await client.shutdown();
+  });
+
+  it('supplies endpoint header secrets only in the spawned environment', async () => {
+    const { codexConfig } = buildCodexAppServerEndpointRuntime({
+      selection: {
+        apiProviderId: 'synthetic', endpointId: 'synthetic', providerLabel: 'Synthetic',
+        protocol: 'openai-compatible', baseUrl: 'https://example.test/v1',
+        capabilities: { responses: true }, headers: { 'X.Gateway.Key': 'synthetic-header-secret' },
+      },
+      credential: 'synthetic-api-secret',
+    });
+    const { client, spawn } = createRpcClientFixture(() => initializeResponse, {
+      config: codexConfig.config, env: codexConfig.env,
+    });
+    await client.connect();
+    const [, args, options] = spawn.mock.calls[0];
+    expect(args.join(' ')).not.toContain('synthetic-header-secret');
+    expect(args.join(' ')).not.toContain('synthetic-api-secret');
+    expect(options.env.GARCON_CODEX_PROVIDER_HEADER_0_SYNTHETIC).toBe('synthetic-header-secret');
+    expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_SYNTHETIC).toBe('synthetic-api-secret');
+    await client.shutdown();
+  });
+
+  it('supplies provider launch overrides before disabling autonomous work', async () => {
+    const { client, spawn } = createRpcClientFixture(() => initializeResponse, {
+      config: {
+        model_provider: 'synthetic-provider',
+        model_providers: {
+          'synthetic-provider': {
+            name: 'Synthetic provider',
+            base_url: 'https://example.test/v1',
+            wire_api: 'responses',
+            env_key: 'SYNTHETIC_PROVIDER_KEY',
+          },
+        },
+        features: { goals: true, wake_on_agent_messages: true },
+      },
+    });
+    await client.connect();
+    const args = spawn.mock.calls[0][1];
+    expect(args).toContain('model_provider="synthetic-provider"');
+    expect(Bun.TOML.parse(args.find((arg) => arg.startsWith('model_providers=')))).toEqual({
+      model_providers: {
+        'synthetic-provider': {
+          name: 'Synthetic provider',
+          base_url: 'https://example.test/v1',
+          wire_api: 'responses',
+          env_key: 'SYNTHETIC_PROVIDER_KEY',
+        },
+      },
+    });
+    expect(args.slice(-6)).toEqual([
+      '--config', 'features.goals=false', '--config', 'features.wake_on_agent_messages=false',
+      '--config', 'features.default_mode_request_user_input=true',
+    ]);
+    await client.shutdown();
+  });
+
   it.each(['closing', 'closed'])('does not reconnect an explicitly %s client', async (phase) => {
     const { client, spawn, finishExit } = createRpcClientFixture(
       () => initializeResponse,
@@ -798,6 +868,8 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       'features.goals=false',
       '--config',
       'features.wake_on_agent_messages=false',
+      '--config',
+      'features.default_mode_request_user_input=true',
       '--config',
       'model_catalog_json="/opt/garcon/codex-models.json"',
     ], expect.any(Object));
@@ -2841,6 +2913,7 @@ describe('CodexAppServerRuntime', () => {
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
+      modelEndpointId: 'endpoint-1',
       operation: published.operation,
     }));
     await expect(provider.abort('thread-1')).resolves.toBe(true);
@@ -2894,6 +2967,8 @@ describe('CodexAppServerRuntime', () => {
       expect.objectContaining({ outcome: 'finished' }),
     ]);
     expect(provider.isRunning('thread-1')).toBe(false);
+    expect(provider.sourceEndpointId('thread-1')).toBe('endpoint-1');
+    expect(provider.sourceEndpointId('missing-thread')).toBeUndefined();
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
@@ -4025,6 +4100,7 @@ describe('CodexAppServerRuntime', () => {
       CODEX_HOME: '/tmp/codex-home',
     });
     expect(clientOptions[0].modelCatalogPath).toBe('/opt/garcon/codex-models.json');
+    expect(clientOptions[0].config).toEqual({ model_provider: 'custom-openai' });
     expect(operationClient.forkThread).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
       config: { model_provider: 'custom-openai' },
@@ -4248,7 +4324,7 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events).map((message) => message.content)).toEqual(['Earlier progress.', text].filter(Boolean));
   });
 
-  it.each(['commentary', 'partial_answer'])('retains the latest final answer before trailing %s', async (phase) => {
+  it.each(['commentary', 'partial_answer', 'async-question'])('retains the latest final answer before trailing %s', async (phase) => {
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
@@ -4257,7 +4333,8 @@ describe('CodexAppServerRuntime', () => {
     const items = [
       { type: 'agentMessage', id: 'earlier-final', text: 'Earlier final.', phase: 'final_answer', memoryCitation: null },
       { type: 'agentMessage', id: 'latest-final', text: 'Latest final.', phase: 'final_answer', memoryCitation: null },
-      { type: 'agentMessage', id: 'trailing', text: 'Trailing nonterminal text.', phase, memoryCitation: null },
+      { type: 'agentMessage', id: 'trailing', text: 'Trailing nonterminal text.', phase: phase === 'async-question' ? 'final_answer' : phase,
+        ...(phase === 'async-question' ? { delivery: 'async', questions: [{ title: 'Which environment?' }] } : {}), memoryCitation: null },
     ];
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
       turn: makeTurn({ id: 'turn-1', status: 'completed', items, itemsView: 'summary' }) } });
@@ -4424,6 +4501,127 @@ describe('CodexAppServerRuntime', () => {
     expect(permissionEvents(published.events)).toHaveLength(1);
   });
 
+  it('keeps synchronous questions interactive, validates answers, and fences reused occurrences', async () => {
+    const nativePath = path.join(tmpDir, 'questions-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation, permissionMode: 'manualBypass' }));
+    const request = {
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'call-question',
+        isBlocking: false,
+        questions: [{
+          id: 'mode',
+          question: 'Which mode?',
+          isOther: true,
+          options: [{ label: 'Fast' }, { label: 'Careful' }],
+        }],
+      },
+    };
+    fake.emit('serverRequest', request);
+    expect(fake.respond).not.toHaveBeenCalled();
+    const first = permissionEvents(published.events)[0];
+    expect(first.lifecycle.requestedTool.type).toBe('ask-user-question-tool-use');
+    await expect(first.decision.respond({ allow: true })).rejects.toThrow('structured answers');
+    fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'unrelated', requestId: 17 } });
+    expect(permissionEvents(published.events)).toHaveLength(1);
+    await first.decision.respond({
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: [], text: 'Custom mode' }],
+      },
+    });
+    expect(fake.respond).toHaveBeenLastCalledWith(17, { answers: { mode: { answers: ['Custom mode'] } } });
+    fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 17 } });
+    expect(permissionEvents(published.events)).toHaveLength(1);
+    fake.emit('serverRequest', request);
+    const second = permissionEvents(published.events)[1];
+    expect(second.lifecycle.permissionOccurrenceId).not.toBe(first.lifecycle.permissionOccurrenceId);
+    await expect(first.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
+    fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 17 } });
+    expect(permissionEvents(published.events).at(-1).lifecycle.kind).toBe('expired');
+    await expect(second.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
+    fake.emit('serverRequest', { ...request, params: { ...request.params, turnId: 'obsolete' } });
+    expect(fake.respond).toHaveBeenLastCalledWith(17, { answers: {} });
+  });
+
+  it.each([{ itemId: undefined }, { questions: [] }])('declines malformed questions without publishing a permission: %j', async (invalid) => {
+    const nativePath = path.join(tmpDir, 'invalid-question-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'call-question',
+        questions: [{ id: 'mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
+        ...invalid,
+      },
+    });
+    expect(fake.respond).toHaveBeenCalledTimes(1);
+    expect(fake.respond).toHaveBeenCalledWith(17, { answers: {} });
+    expect(permissionEvents(published.events)).toEqual([]);
+  });
+
+  it.each(['exit', 'turn/completed'])('retires unanswered questions on %s', async (terminal) => {
+    const nativePath = path.join(tmpDir, `question-${terminal.replace('/', '-')}.jsonl`);
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'call-question',
+        questions: [{ id: 'mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
+      },
+    });
+    const pending = permissionEvents(published.events)[0];
+    if (terminal === 'exit') {
+      fake.emit('exit', 1);
+    } else {
+      fake.emit('notification', {
+        method: terminal,
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1', status: 'completed' }) },
+      });
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(permissionEvents(published.events).at(-1).lifecycle.kind).toBe('cancelled');
+    await expect(pending.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
+  });
+
   it('keeps write-stdin reviews distinct when they share a parent command', async () => {
     const nativePath = path.join(tmpDir, 'stdin-approval-thread.jsonl');
     const fake = new FakeClient({
@@ -4464,6 +4662,30 @@ describe('CodexAppServerRuntime', () => {
       ['stdin-request-a', { decision: 'accept' }],
       ['stdin-request-b', { decision: 'cancel' }],
     ]);
+  });
+
+  it.each(PERMISSION_MODE_VALUES)('denies unnegotiated human checkpoints in %s mode', async (permissionMode) => {
+    const nativePath = path.join(tmpDir, 'human-approval-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ permissionMode, operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 'human-request', method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1', itemId: 'synthetic-item',
+        approvalId: 'synthetic-checkpoint', kind: 'humanCommand', command: 'printf synthetic',
+      },
+    });
+    expect(fake.respond.mock.calls).toEqual([['human-request', { decision: 'decline' }]]);
+    expect(permissionEvents(published.events)).toEqual([]);
+    expect(publishedMessages(published.events)).toEqual([]);
   });
 
   it('expires only the matching client request after external resolution', async () => {
@@ -5815,13 +6037,15 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('updates a retained idle source while preserving provider-default effort', async () => {
-    const { fake, provider, started } = await startSettingsSession({}, { thinkingMode: 'none' });
+    const { fake, provider, started } = await startSettingsSession({}, {
+      thinkingMode: 'none', modelEndpointId: 'endpoint-1',
+    });
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
     });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(provider.hasSource('thread-1')).toBe(true);
+    expect(provider.sourceEndpointId('thread-1')).toBe('endpoint-1');
     fake.updateThreadSettings.mockImplementation(async () => {
       emitThreadSettings(fake, {
         approvalPolicy: 'on-request',

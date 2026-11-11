@@ -55,6 +55,8 @@
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { AsyncQuestionController } from '$lib/chat/conversation/async-question-controller.svelte.js';
+	import { setAsyncQuestionController } from '$lib/chat/conversation/async-question-context.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import {
 		ConversationPanelRegistry,
@@ -119,6 +121,8 @@
 	const subagentToolbar = new SubagentToolbarState();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const conversationUi = new ConversationUiState();
+	const asyncQuestions = new AsyncQuestionController();
+	setAsyncQuestionController(asyncQuestions);
 	setConversationUi(conversationUi);
 	const conversationLifecycles = new ConversationLifecycleRegistry({
 		sessions,
@@ -133,7 +137,8 @@
 		overlays: conversationTranscriptOverlays,
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
-		retainInactiveWindows: () => localSettings.combineToolUseMessages,
+		retainInactiveWindows: () => localSettings.activeCombineToolUseMessages,
+		combineMessages: localSettings.activeCombineToolUseMessages,
 	});
 	setConversationPanels(conversationPanels);
 	const auth = getAuth();
@@ -370,7 +375,11 @@
 	);
 	const composerPanel = $derived(conversationPanels.composerPanel);
 	const composerBound = $derived(
-		Boolean(composerPlacement && composerPanel?.surfaceId === composerPlacement.surface.id),
+		Boolean(
+			composerPlacement &&
+			composerPanel?.surfaceId === composerPlacement.surface.id &&
+			composerPanel?.chatId === composerPlacement.surface.chatId,
+		),
 	);
 	const liveLayerRectStyle = $derived(
 		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',
@@ -425,6 +434,7 @@
 		untrack(() => {
 			conversationLifecycles.prune(activeChatIds);
 			conversationTranscriptOverlays.prune(activeChatIds);
+			asyncQuestions.prune(activeChatIds);
 		});
 	});
 
@@ -436,7 +446,6 @@
 	$effect(() => {
 		const visible = chatPresentations;
 		const existingSurfaceIds = existingChatSurfaceIds;
-		void localSettings.combineToolUseMessages;
 		untrack(() => {
 			conversationPanels.reconcile(visible);
 			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);

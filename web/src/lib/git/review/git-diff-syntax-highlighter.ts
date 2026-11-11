@@ -71,13 +71,13 @@ export function highlightGitDiffSyntheticSide(
 	if (!tree) return { status: 'plain', reason: 'parse-timeout' };
 
 	const projectSpan = startGitReviewPerformanceSpan('syntax-project');
+	const segmentLimit = new Error('Diff syntax segment limit reached.');
 	try {
 		const highlightedLines = new Map<number, readonly CodeHighlightSegment[]>();
 		let currentSegments: CodeHighlightSegment[] = [];
 		let syntheticLineIndex = 0;
 		let segmentCount = 0;
 		let invalidText = false;
-		let segmentLimitExceeded = false;
 
 		const finishLine = (): void => {
 			const sourceLine = side.lines[syntheticLineIndex];
@@ -92,7 +92,7 @@ export function highlightGitDiffSyntheticSide(
 			}
 			segmentCount += currentSegments.length;
 			if (segmentCount > GIT_DIFF_SYNTAX_LIMITS.maxSegmentsPerSide) {
-				segmentLimitExceeded = true;
+				throw segmentLimit;
 			}
 			currentSegments = [];
 			syntheticLineIndex += 1;
@@ -107,7 +107,6 @@ export function highlightGitDiffSyntheticSide(
 		);
 		finishLine();
 
-		if (segmentLimitExceeded) return { status: 'plain', reason: 'segment-limit' };
 		if (invalidText || syntheticLineIndex !== side.lines.length) {
 			return { status: 'plain', reason: 'invalid-segment-text' };
 		}
@@ -121,6 +120,9 @@ export function highlightGitDiffSyntheticSide(
 				segmentCount,
 			},
 		};
+	} catch (error) {
+		if (error === segmentLimit) return { status: 'plain', reason: 'segment-limit' };
+		throw error;
 	} finally {
 		finishGitReviewPerformanceSpan(projectSpan);
 	}

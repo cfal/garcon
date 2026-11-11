@@ -3,6 +3,7 @@ import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { createForkedChat } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
+import { BashToolUseMessage, PermissionRequestMessage } from '../../../../common/chat-types.js';
 
 export function createRouteCommandLedger() {
   return new CommandLedger();
@@ -46,6 +47,20 @@ export function createRouteCommandService({
     seedChat: async () => ({ viewId: 'view-2' }),
     deleteChat: () => undefined,
   };
+  /** @satisfies {Pick<import('../../chats/chat-transient-feed.js').ChatTransientFeedStore, 'validateAction'>} */
+  const defaultTransientFeeds = {
+    validateAction: ({ permissionOccurrenceId, runId }) => ({
+      permissionOccurrenceId,
+      runId,
+      transcript: { transcriptViewId: 'view-1', afterOrdinal: 0 },
+      displayOrder: 0,
+      message: new PermissionRequestMessage(
+        '2026-11-02T00:00:00.000Z',
+        permissionOccurrenceId,
+        new BashToolUseMessage('2026-11-02T00:00:00.000Z', 'tool-test', 'pwd'),
+      ),
+    }),
+  };
   return new ChatCommandService({
     inspectProject: inspectProjectDirectory,
     chats: registry,
@@ -58,7 +73,7 @@ export function createRouteCommandService({
     metadata,
     agents,
     ledger: commandLedger,
-    transientFeeds: transientFeeds ?? { validateAction: () => undefined },
+    transientFeeds: transientFeeds ?? defaultTransientFeeds,
     preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
 	handoffs: handoffs ?? {
 		resolveTarget: async ({ handoff }) => ({

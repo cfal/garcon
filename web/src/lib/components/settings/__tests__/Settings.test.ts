@@ -660,6 +660,12 @@ describe('Settings', () => {
 			).toEqual(['Split (auto)', 'Split right', 'Split below', 'Replace source chat']);
 			await fireEvent.change(forkPlacement, { target: { value: 'replace' } });
 			expect(onLocalSet).toHaveBeenCalledWith('forkOpenPlacement', 'replace');
+			const swapChats = screen.getByRole('switch', {
+				name: 'Swap dragged chats when already open',
+			});
+			expect(swapChats.getAttribute('aria-checked')).toBe('true');
+			await fireEvent.click(swapChats);
+			expect(swapChats.getAttribute('aria-checked')).toBe('false');
 			expect(screen.queryByText('Chat grouping')).toBeNull();
 			expect(screen.queryByText('Combine nested paths')).toBeNull();
 			expect(

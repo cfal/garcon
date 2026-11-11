@@ -17,7 +17,7 @@ import {
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
 import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
-import { isStopSatisfied, type ChatStopOutcome } from '../../../common/chat-types.js';
+import { isStopSatisfied, type ChatStopOutcome, type ToolUseChatMessage } from '../../../common/chat-types.js';
 import { prepareAgentHandoffCommand, assertAgentHandoffIdle } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
@@ -140,6 +140,7 @@ export class SessionCommands {
 
   private async submitRunLocked(input: SubmitRunInput, deadline: number): Promise<AgentTurnCommandResponse> {
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
+    this.support.assertQuestionReply(input, input.command);
     const normalizedInput = {
       chatId: input.chatId,
       transcriptViewId: input.transcriptViewId,
@@ -292,13 +293,28 @@ export class SessionCommands {
       },
     };
 
-    if (input.response?.type === 'ask-user-question-response') {
+    let actionError: TransientControlActionError | undefined;
+    if (input.allow || input.response !== undefined) {
       const existing = await this.deps.ledger.observe(ledgerInput);
       if (existing?.kind === 'duplicate' && !wasNotDelivered(existing.record)) {
         return this.replayPermissionDecision(existing.record);
       }
       if (existing) this.support.throwOnConflict(existing, 'Conflicting permission decision retry');
-      this.validateStructuredPermissionDecision(input);
+      let requestedTool: ToolUseChatMessage | undefined;
+      try {
+        requestedTool = this.deps.transientFeeds.validateAction(input.control).message.requestedTool;
+      } catch (error) {
+        if (!(error instanceof TransientControlActionError)) throw error;
+        if (input.response?.type === 'ask-user-question-response') {
+          throw permissionDecisionError('PERMISSION_NOT_ACTIONABLE');
+        }
+        // Ordinary stale decisions retain their terminal idempotency record.
+        actionError = error;
+      }
+      if (requestedTool && (requestedTool.type === 'ask-user-question-tool-use'
+        || input.response?.type === 'ask-user-question-response')) {
+        this.validateStructuredPermissionDecision(input, requestedTool);
+      }
     }
 
     const ledger = await this.deps.ledger.accept(ledgerInput);
@@ -307,6 +323,8 @@ export class SessionCommands {
       return this.replayPermissionDecision(ledger.record);
     }
     try {
+      if (actionError) throw actionError;
+      // Acceptance can yield while the pending occurrence is retired.
       this.deps.transientFeeds.validateAction(input.control);
       await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
         allow: input.allow,
@@ -327,7 +345,7 @@ export class SessionCommands {
     return commandResultFromRecord(ledger.record);
   }
 
-  private validateStructuredPermissionDecision(input: PermissionDecisionInput): void {
+  private validateStructuredPermissionDecision(input: PermissionDecisionInput, requestedTool: ToolUseChatMessage): void {
     const response = normalizeAskUserQuestionDecisionResponse(input.response);
     if (!response) {
       throw new CommandValidationError(
@@ -336,17 +354,8 @@ export class SessionCommands {
       );
     }
 
-    let pending;
-    try {
-      pending = this.deps.transientFeeds.validateAction(input.control);
-    } catch (error) {
-      if (error instanceof TransientControlActionError) {
-        throw permissionDecisionError('PERMISSION_NOT_ACTIONABLE');
-      }
-      throw error;
-    }
     const validationError = askUserQuestionDecisionValidationError(
-      pending.message.requestedTool,
+      requestedTool,
       input.allow,
       response,
     );

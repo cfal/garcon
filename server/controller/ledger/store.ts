@@ -59,6 +59,7 @@ import {
 } from './contracts.js';
 import {
   IncompleteLedgerCheckpointError,
+  LedgerBulkOperationAbandonedError,
   LedgerFencedError,
   LedgerSchemaError,
   StaleTranscriptViewError,
@@ -95,6 +96,8 @@ import {
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
+import { readAnchorPage, type AnchorScanInput, type AnchorScanResult } from './anchor-page.js';
+import { readRawPage } from './raw-page.js';
 
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const PREVIEW_EDGE_ROWS = 32;
@@ -135,6 +138,7 @@ export class TranscriptLedgerStore {
   readonly #openFailures = new Map<string, Error>();
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
   readonly #staging: StagingViews;
+  #anchorReadEpoch = 0;
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
@@ -418,28 +422,25 @@ export class TranscriptLedgerStore {
     }
     return this.#read(chatId, (entry) => {
       this.#assertCurrent(entry, viewId);
-      const stored = before === undefined
-        ? entry.db.query<StoredLedgerRow, [string, number]>(`
-            SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-            FROM transcript_rows
-            WHERE view_id = ?
-            ORDER BY ordinal DESC
-            LIMIT ?
-          `).all(viewId, boundedLimit)
-        : entry.db.query<StoredLedgerRow, [string, number, number]>(`
-            SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-            FROM transcript_rows
-            WHERE view_id = ? AND ordinal < ?
-            ORDER BY ordinal DESC
-            LIMIT ?
-          `).all(viewId, before, boundedLimit);
-      const rows = stored.map(decodeStoredLedgerRow).reverse();
-      const oldest = rows[0]?.ordinal ?? null;
-      return {
-        viewId,
-        rows,
-        nextBefore: oldest !== null && oldest > 1 ? oldest : null,
-      };
+      return readRawPage(entry.db, viewId, boundedLimit, before);
+    });
+  }
+
+  async anchorPage(chatId: string, viewId: TranscriptViewId, input: AnchorScanInput, signal?: AbortSignal): Promise<AnchorScanResult> {
+    const readEpoch = this.#anchorReadEpoch;
+    const chatGeneration = this.#staging.generation(chatId);
+    return readAnchorPage(viewId, input, work => {
+      signal?.throwIfAborted();
+      if (this.#anchorReadEpoch !== readEpoch || this.#staging.generation(chatId) !== chatGeneration) {
+        throw new LedgerBulkOperationAbandonedError(chatId);
+      }
+      // A normal read can create storage, so deletion must be detected before reacquisition.
+      const current = this.existingCurrentView(chatId);
+      if (!current) throw new TranscriptViewNotInitializedError(chatId);
+      return this.#read(chatId, (entry) => {
+        this.#assertCurrent(entry, viewId);
+        return work(entry.db);
+      });
     });
   }
 
@@ -790,6 +791,7 @@ export class TranscriptLedgerStore {
   }
 
   close(): void {
+    this.#anchorReadEpoch++;
     this.#staging.abandonAll();
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);

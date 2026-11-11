@@ -5,6 +5,7 @@ import { loadCodeMirrorLanguageForFile } from '$lib/highlighting/codemirror-lang
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import {
 	GIT_DIFF_SYNTAX_LIMITS,
+	GIT_DIFF_SYNTAX_VERSION,
 	buildGitDiffSyntheticSides,
 	gitDiffSyntaxCacheKey,
 	gitDiffSyntaxSkipReason,
@@ -81,6 +82,14 @@ function input(
 	return { documentId: 'document:syntax', file: fileValue, body: bodyValue };
 }
 
+function aggregateOversizedPatch(): string {
+	const line = 'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxLineCharacters / 2);
+	const count =
+		Math.floor((GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide + 1) / (line.length + 1)) + 1;
+	const deletions = Array.from({ length: count }, () => `-${line}`).join('\n');
+	return `@@ -1,${count} +1 @@\n${deletions}\n+const next = true;\n`;
+}
+
 function projectSide(
 	side: GitDiffSyntheticSide,
 	path: string,
@@ -146,8 +155,7 @@ describe('Git diff syntax reconstruction', () => {
 	});
 
 	it('discards only the synthetic side that exceeds its character budget', () => {
-		const longDeletion = 'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide + 1);
-		const patch = `@@ -1 +1 @@\n-${longDeletion}\n+const next = true;\n`;
+		const patch = aggregateOversizedPatch();
 		const reconstructed = buildGitDiffSyntheticSides(body('large.ts', patch));
 
 		expect(reconstructed.beforeExceeded).toBe(true);
@@ -188,9 +196,10 @@ describe('Git diff syntax eligibility', () => {
 		const bodyValue = body(fileValue.path, PATCH, { bodyFingerprint: fileValue.bodyFingerprint });
 
 		expect(JSON.parse(gitDiffSyntaxCacheKey('doc', fileValue, bodyValue))).toEqual([
-			1,
+			GIT_DIFF_SYNTAX_VERSION,
 			'doc',
 			fileValue.bodyFingerprint,
+			null,
 			'src/before.js',
 			'src/after.py',
 		]);
@@ -198,6 +207,52 @@ describe('Git diff syntax eligibility', () => {
 });
 
 describe('Git diff syntax highlighting', () => {
+	it('highlights supported text beyond the former 2,000-row cutoff', async () => {
+		const patch = `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, line) => `+const value${line} = true;`).join('\n')}\n`;
+		const result = await highlightGitDiffFile(
+			input(file('large.ts'), body('large.ts', patch)),
+			new AbortController().signal,
+		);
+		expect(result.status).toBe('highlighted');
+		if (result.status !== 'highlighted') return;
+		expect(result.result.after?.lines.size).toBe(3000);
+		expect(
+			result.result.after?.lines
+				.get(2999)
+				?.map((segment) => segment.text)
+				.join(''),
+		).toBe('const value2999 = true;');
+	});
+
+	it('preserves Unicode UTF-16 text and offsets across highlighted segments', async () => {
+		const text = 'const value = "\u4e2d\ud83d\ude80e\u0301";\r';
+		const result = await highlightGitDiffFile(
+			input(file('unicode.ts'), body('unicode.ts', `@@ -0,0 +1 @@\n+${text}\n`)),
+			new AbortController().signal,
+		);
+		expect(result.status).toBe('highlighted');
+		if (result.status !== 'highlighted') return;
+		const segments = result.result.after!.lines.get(0)!;
+		expect(segments.map((segment) => segment.text).join('')).toBe(text);
+		expect(segments.reduce((offset, segment) => offset + segment.text.length, 0)).toBe(text.length);
+	});
+
+	it('keeps pathological long lines plain while preserving the other side', async () => {
+		const patch = `@@ -1 +1 @@\n-${'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxLineCharacters + 1)}\n+const bounded = true;\n`;
+		const result = await highlightGitDiffFile(
+			input(file('long.ts'), body('long.ts', patch)),
+			new AbortController().signal,
+		);
+		expect(result.status).toBe('highlighted');
+		if (result.status !== 'highlighted') return;
+		expect(result.result.before).toBeNull();
+		expect(
+			result.result.after?.lines
+				.get(1)
+				?.map((segment) => segment.text)
+				.join(''),
+		).toBe('const bounded = true;');
+	});
 	it('highlights a multiline side and preserves every source character', async () => {
 		const loaded = await loadCodeMirrorLanguageForFile('src/example.ts');
 		const side = buildGitDiffSyntheticSides(body()).sides.after;
@@ -350,8 +405,7 @@ describe('Git diff syntax highlighting', () => {
 	});
 
 	it('keeps the other side when one synthetic side exceeds the character limit', async () => {
-		const deletion = 'x'.repeat(GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide + 1);
-		const patch = `@@ -1 +1 @@\n-${deletion}\n+const next = true;\n`;
+		const patch = aggregateOversizedPatch();
 		const fileValue = file('large.ts');
 		const bodyValue = body(fileValue.path, patch, { bodyFingerprint: fileValue.bodyFingerprint });
 

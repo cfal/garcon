@@ -60,7 +60,7 @@ function createRuntime(host = createHost()) {
   runtime.compact = mock(async (request) => { capture(request); });
   runtime.abort = mock(async () => false);
   runtime.isRunning = mock(() => false);
-  runtime.hasSource = mock(() => false);
+  runtime.sourceEndpointId = mock(() => undefined);
   runtime.getRunningSessions = mock(() => []);
   runtime.updateSessionSettings = mock(() => undefined);
   runtime.resolvePermission = mock(async () => undefined);
@@ -188,7 +188,10 @@ describe('CodexExecution', () => {
       }),
       envOverrides: { CODEX_HOME: '/tmp/codex-home' },
       codexConfig: expect.objectContaining({
-        env: { GARCON_CODEX_PROVIDER_API_KEY_ENDPOINT_1: 'secret' },
+        env: {
+          GARCON_CODEX_PROVIDER_API_KEY_ENDPOINT_1: 'secret',
+          GARCON_CODEX_PROVIDER_HEADER_0_ENDPOINT_1: 'value',
+        },
       }),
     }));
 
@@ -205,6 +208,45 @@ describe('CodexExecution', () => {
       type: 'session',
       session: expect.objectContaining({ agentSessionId: 'thread-1' }),
     }));
+  });
+
+  it.each(['resume', 'compact'])('rejects endpoint overrides before %s resolves credentials or calls the runtime', async (method) => {
+    const host = createHost();
+    const runtime = createRuntime();
+    const nativeSessions = createPathNativeSessionCodec('codex');
+    const execution = createTestCodexExecution(host, runtime, nativeSessions, createConfig());
+    const endpoint = {
+      apiProviderId: 'provider-1', endpointId: 'endpoint-1', protocol: 'openai-compatible',
+      providerLabel: 'Synthetic provider', baseUrl: 'https://example.test/v1',
+      capabilities: { responses: true }, headers: {}, model: 'gpt-5.4', isLocal: false,
+      credential: { kind: 'api-provider-endpoint', apiProviderId: 'provider-1', endpointId: 'endpoint-1' },
+    };
+    const events = [];
+    for (const [storedEndpointId, requestedEndpoint] of [
+      ['endpoint-1', { ...endpoint, endpointId: 'endpoint-2' }],
+      ['endpoint-1', null],
+      [null, endpoint],
+    ]) {
+      await expect(execution[method]({
+        ...resumeRequest('run-2'),
+        endpoint: requestedEndpoint,
+        nativeSession: nativeSessions.encode({
+          path: '/tmp/thread-1.jsonl', agentSessionId: 'thread-1', modelEndpointId: storedEndpointId,
+        }),
+      }, (event) => events.push(event))).rejects.toMatchObject({ code: 'INVALID_ENDPOINT', retryable: false });
+    }
+    expect(host.apiProviders.resolveCredential).not.toHaveBeenCalled();
+    expect(runtime.runTurn).not.toHaveBeenCalled();
+    expect(runtime.compact).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+
+    await execution[method]({
+      ...resumeRequest('run-2'), endpoint,
+      nativeSession: nativeSessions.encode({
+        path: '/tmp/thread-1.jsonl', agentSessionId: 'thread-1', modelEndpointId: 'endpoint-1',
+      }),
+    }, () => {});
+    expect(runtime[method === 'resume' ? 'runTurn' : 'compact']).toHaveBeenCalledTimes(1);
   });
 
   it('prefixes ordinary input with carried context and records its seed receipt', async () => {
@@ -374,7 +416,7 @@ describe('CodexExecution', () => {
     await execution.applySessionConfiguration('thread-1', next, previous);
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
 
-    runtime.hasSource.mockReturnValue(true);
+    runtime.sourceEndpointId.mockReturnValue(null);
     await execution.applySessionConfiguration('thread-1', next, previous);
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
       model: 'gpt-5.4-mini',
@@ -385,7 +427,7 @@ describe('CodexExecution', () => {
 
   it('rejects clearing an explicit effort during an active turn', async () => {
     const runtime = createRuntime();
-    runtime.hasSource.mockReturnValue(true);
+    runtime.sourceEndpointId.mockReturnValue(null);
     runtime.isRunning.mockReturnValue(true);
     const execution = createTestCodexExecution(
       createHost(),
@@ -410,7 +452,7 @@ describe('CodexExecution', () => {
 
   it('defers returning to provider-default effort until the retained source is replaced', async () => {
     const runtime = createRuntime();
-    runtime.hasSource.mockReturnValue(true);
+    runtime.sourceEndpointId.mockReturnValue(null);
     const execution = createTestCodexExecution(
       createHost(),
       runtime,
@@ -457,14 +499,14 @@ describe('CodexExecution', () => {
       thinkingMode: 'none',
     }, previous);
 
-    expect(runtime.hasSource).toHaveBeenCalledWith('thread-1');
+    expect(runtime.sourceEndpointId).toHaveBeenCalledWith('thread-1');
     expect(runtime.isRunning).not.toHaveBeenCalled();
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 
   it('switches an established GPT-6 Astra Default session to GPT-6 Sol Default', async () => {
     const runtime = createRuntime();
-    runtime.hasSource.mockReturnValue(true);
+    runtime.sourceEndpointId.mockReturnValue(null);
     const execution = createTestCodexExecution(
       createHost(),
       runtime,
@@ -496,7 +538,7 @@ describe('CodexExecution', () => {
     'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol',
   ])('allows switching from Astra Default to %s Default', async (model) => {
     const runtime = createRuntime();
-    runtime.hasSource.mockReturnValue(true);
+    runtime.sourceEndpointId.mockReturnValue(null);
     const execution = createTestCodexExecution(
       createHost(),
       runtime,
@@ -522,10 +564,10 @@ describe('CodexExecution', () => {
     });
   });
 
-  it('rejects live endpoint replacement and concrete reasoning-effort clearing', async () => {
+  it.each([true, false])('rejects endpoint replacement for a loaded session (running=%s)', async (isRunning) => {
     const runtime = createRuntime();
-    runtime.isRunning.mockReturnValue(true);
-    runtime.hasSource.mockReturnValue(true);
+    runtime.isRunning.mockReturnValue(isRunning);
+    runtime.sourceEndpointId.mockReturnValue('endpoint-1');
     const execution = createTestCodexExecution(
       createHost(),
       runtime,
@@ -544,14 +586,55 @@ describe('CodexExecution', () => {
       },
     };
 
-    await expect(execution.applySessionConfiguration('thread-1', {
+    for (const endpoint of [null, { ...previous.endpoint, endpointId: 'endpoint-2' }]) {
+      for (const thinkingMode of ['high', 'none']) {
+        await expect(execution.applySessionConfiguration('thread-1', {
+          ...previous,
+          endpoint,
+          thinkingMode,
+        }, previous)).rejects.toMatchObject({ code: 'INVALID_ENDPOINT' });
+      }
+    }
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'endpoint-1'])('repairs saved settings to the loaded endpoint (%s)', async (endpointId) => {
+    const runtime = createRuntime();
+    runtime.sourceEndpointId.mockReturnValue(endpointId);
+    const execution = createTestCodexExecution(
+      createHost(), runtime, createPathNativeSessionCodec('codex'), createConfig(),
+    );
+    const previous = {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: { apiProviderId: 'provider-2', endpointId: 'endpoint-2', protocol: 'openai-compatible' },
+    };
+    await execution.applySessionConfiguration('thread-1', {
       ...previous,
-      endpoint: { ...previous.endpoint, endpointId: 'endpoint-2' },
-    }, previous)).rejects.toMatchObject({ code: 'INVALID_ENDPOINT' });
-    await expect(execution.applySessionConfiguration('thread-1', {
-      ...previous,
-      thinkingMode: 'none',
-    }, previous)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+      endpoint: endpointId ? { ...previous.endpoint, endpointId } : null,
+    }, previous);
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      model: previous.model, permissionMode: previous.permissionMode, thinkingMode: previous.thinkingMode,
+    });
+  });
+
+  it('allows repairing endpoint settings when the native source is unloaded', async () => {
+    const runtime = createRuntime();
+    const execution = createTestCodexExecution(
+      createHost(), runtime, createPathNativeSessionCodec('codex'), createConfig(),
+    );
+    const previous = {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: {
+        apiProviderId: 'provider-1', endpointId: 'endpoint-1', protocol: 'openai-compatible',
+      },
+    };
+    for (const endpoint of [null, { ...previous.endpoint, endpointId: 'endpoint-2' }]) {
+      await execution.applySessionConfiguration('thread-1', { ...previous, endpoint }, previous);
+      await execution.applySessionConfiguration('thread-1', previous, { ...previous, endpoint });
+    }
+    expect(runtime.sourceEndpointId).toHaveBeenCalledWith('thread-1');
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 });

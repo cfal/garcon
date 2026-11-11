@@ -1,9 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GitReviewFilePatchBody } from '$lib/api/git.js';
 import { createIndexedGitReviewFileBody } from '$lib/git/review/git-review-body-index.js';
+import { gitReviewWorker } from '../git-review-worker-client.js';
+import { createGitPatchIndex, getGitSplitPatchIndex } from '../git-patch-index.js';
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('createIndexedGitReviewFileBody', () => {
-	it('indexes a compact patch body without materializing row arrays', () => {
+	it('hydrates compact Worker indexes without materializing row arrays or lazy getters', async () => {
+		vi.spyOn(gitReviewWorker, 'run').mockImplementation(async (input) => {
+			if (input.kind !== 'index') throw new Error('Expected index');
+			const index = createGitPatchIndex(input.patch, input.renderedRowCount);
+			return structuredClone({
+				kind: 'index',
+				index: index.toData(),
+				split: getGitSplitPatchIndex(index).toData(),
+			});
+		});
 		performance.clearMeasures();
 		const patch = `diff --git a/file.txt b/file.txt
 --- a/file.txt
@@ -26,15 +39,14 @@ describe('createIndexedGitReviewFileBody', () => {
 			patch,
 		};
 
-		const indexed = createIndexedGitReviewFileBody(body);
+		const indexed = await createIndexedGitReviewFileBody(body);
 
+		expect(indexed).toMatchObject(body);
 		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(
 			0,
 		);
 		expect(indexed.patchIndex?.rowCount).toBe(4);
-		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(
-			1,
-		);
+		expect(Object.getOwnPropertyDescriptor(indexed, 'patchIndex')?.get).toBeUndefined();
 		expect(indexed.patchIndex?.rowAt(2)).toMatchObject({
 			key: 'line:1:del:2',
 			beforeLine: 2,
@@ -52,7 +64,8 @@ describe('createIndexedGitReviewFileBody', () => {
 		});
 	});
 
-	it('preserves terminal body metadata without indexing', () => {
+	it('preserves terminal body metadata without indexing', async () => {
+		const run = vi.spyOn(gitReviewWorker, 'run');
 		const body: GitReviewFilePatchBody = {
 			patchDigest: 'a'.repeat(64),
 			path: 'image.png',
@@ -68,9 +81,10 @@ describe('createIndexedGitReviewFileBody', () => {
 			limitMessage: 'Binary diff is not available.',
 		};
 
-		expect(createIndexedGitReviewFileBody(body)).toEqual({
+		expect(await createIndexedGitReviewFileBody(body)).toEqual({
 			...body,
 			patchIndex: null,
 		});
+		expect(run).not.toHaveBeenCalled();
 	});
 });

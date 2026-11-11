@@ -259,6 +259,111 @@ describe('chat status', () => {
     expect(value).not.toContain('allow command:');
   });
 
+  for (const runtime of ['controller', 'executor'] as const) {
+    test.each([
+      { kind: 'options', hasOptions: true, allowFreeText: false, allowNotes: false, templates: ['answer'] },
+      { kind: 'text only', hasOptions: false, allowFreeText: true, allowNotes: false, templates: ['text answer'] },
+      { kind: 'options or text', hasOptions: true, allowFreeText: true, allowNotes: false, templates: ['answer', 'text answer'] },
+      { kind: 'options with notes', hasOptions: true, allowFreeText: false, allowNotes: true, templates: ['answer', 'option with notes'] },
+      { kind: 'options, text and notes', hasOptions: true, allowFreeText: true, allowNotes: true, templates: ['answer', 'text answer', 'option with notes'] },
+      { kind: 'optionless legacy', hasOptions: false, allowFreeText: false, allowNotes: false, templates: ['answer'] },
+    ])(`renders $kind templates for ${runtime}`, ({ hasOptions, allowFreeText, allowNotes, templates }) => {
+      const value = snapshot();
+      value.transientFeed.rows.push({
+        permissionOccurrenceId: 'text-question',
+        runId: 'run-1',
+        transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+        displayOrder: 2,
+        message: new PermissionRequestMessage(
+          TIMESTAMP,
+          'text-question',
+          new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-1', undefined, [{
+            id: 'details',
+            prompt: 'Which details?',
+            allowFreeText,
+            allowNotes,
+            options: hasOptions ? [{ id: 'preset', label: 'Preset' }] : [],
+          }]),
+        ),
+      });
+      const rendered = formatChatStatus(value, { ...command, runtime });
+      const templateLabels = rendered.split('\n')
+        .filter((line) => line.includes('command template:'))
+        .map((line) => line.split(' command template:')[0]);
+      expect(templateLabels).toEqual(templates);
+      expect(rendered.includes('option selections or free text where allowed')).toBe(allowFreeText);
+      if (allowFreeText) {
+        expect(rendered).toContain(
+          `text answer command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
+            + `permission-answer '${CHAT_ID}' 'text-question' --answers `
+            + `'[{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"ANSWER_TEXT"}]' `
+            + `--run 'run-1' --server-instance 'instance-1'`,
+        );
+      }
+      expect(rendered.includes('OPTION_ID')).toBe(hasOptions);
+      if (!allowFreeText && !hasOptions) {
+        expect(rendered).toContain('action: use permission-answer with the exact question IDs above and empty option selections');
+        expect(rendered).toContain(
+          `answer command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
+            + `permission-answer '${CHAT_ID}' 'text-question' --answers `
+            + `'[{"questionId":"QUESTION_ID","selectedOptionIds":[]}]' `
+            + `--run 'run-1' --server-instance 'instance-1'`,
+        );
+        expect(rendered).not.toContain('exact question and option IDs');
+      }
+      expect(rendered.includes('notes: selected options may include text when allowNotes is true')).toBe(allowNotes);
+      if (allowNotes) {
+        expect(rendered).toContain('"selectedOptionIds":["OPTION_ID"],"text":"NOTE_TEXT"');
+      }
+      expect(rendered).not.toContain('allow command:');
+    });
+  }
+
+  for (const runtime of ['controller', 'executor'] as const) {
+    test.each([
+      {
+        kind: 'options',
+        question: { id: 'mode', prompt: 'Which mode?', options: [{ id: 'fast', label: 'Fast' }] },
+        template: 'answer',
+        answer: '[{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"]}]',
+      },
+      {
+        kind: 'free text',
+        question: { id: 'details', prompt: 'Which details?', options: [], allowFreeText: true },
+        template: 'text answer',
+        answer: '[{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"ANSWER_TEXT"}]',
+      },
+    ])(`renders $kind and empty selection templates via ${runtime}`, ({ question, template, answer }) => {
+      const value = snapshot();
+      value.transientFeed.rows.push({
+        permissionOccurrenceId: 'mixed-question',
+        runId: 'run-1',
+        transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+        displayOrder: 2,
+        message: new PermissionRequestMessage(TIMESTAMP, 'mixed-question', new AskUserQuestionToolUseMessage(
+          TIMESTAMP, 'tool-1', 'Choose a mode', [
+            question,
+            { id: 'empty', prompt: 'Continue?', options: [] },
+          ],
+        )),
+      });
+      const rendered = formatChatStatus(value, { ...command, runtime });
+      const templates = rendered.split('\n').filter((line) => line.includes('command template:'));
+      expect(templates).toEqual([
+        `${template} command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
+          + `permission-answer '${CHAT_ID}' 'mixed-question' --answers `
+          + `'${answer}' `
+          + `--run 'run-1' --server-instance 'instance-1'`,
+        `empty selection command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
+          + `permission-answer '${CHAT_ID}' 'mixed-question' --answers `
+          + `'[{"questionId":"QUESTION_ID","selectedOptionIds":[]}]' `
+          + `--run 'run-1' --server-instance 'instance-1'`,
+      ]);
+      expect(rendered).toContain('empty selections: questions without options or free text require selectedOptionIds: []');
+      expect(rendered).not.toContain('allow command:');
+    });
+  }
+
   test('redacts images and data URLs while preserving unrelated data fields', () => {
     const value = formatChatStatus(snapshot({
       transcript: {

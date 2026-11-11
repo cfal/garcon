@@ -75,11 +75,18 @@ describe('Codex runSingleQuery', () => {
     expect(command).toContain('--config');
     expect(command).toContain('model_catalog_json="/opt/garcon/codex-models.json"');
     expect(command).toContain('model_provider="garcon_acme_openai"');
-    expect(command).toContain('model_providers.garcon_acme_openai.base_url="https://api.acme.test/v1"');
-    expect(command).toContain('model_providers.garcon_acme_openai.wire_api="responses"');
-    expect(command).toContain('model_providers.garcon_acme_openai.requires_openai_auth=false');
-    expect(command).toContain('model_providers.garcon_acme_openai.supports_websockets=false');
-    expect(command).toContain('model_providers.garcon_acme_openai.env_key="GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI"');
+    expect(Bun.TOML.parse(command.find((arg) => arg.startsWith('model_providers=')))).toEqual({
+      model_providers: {
+        garcon_acme_openai: {
+          name: 'Acme',
+          base_url: 'https://api.acme.test/v1',
+          wire_api: 'responses',
+          requires_openai_auth: false,
+          supports_websockets: false,
+          env_key: 'GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI',
+        },
+      },
+    });
     expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI).toBe('secret');
   });
 

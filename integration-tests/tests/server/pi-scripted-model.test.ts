@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatSessionCreatedMessage } from '../../../common/ws-events.js';
 import {
@@ -371,6 +372,35 @@ describe('Pi against a scripted model', () => {
       })))).toBeDefined();
       testEnvironment.model.reset();
     }, withScriptedPi());
+  }, 120_000);
+
+  test('discovers and selects a slash-containing provider over an overlapping provider prefix', async () => {
+    const testEnvironment = requireEnvironment();
+    const model = 'garcon-fake/region/fake-model';
+    const reply = marker('SLASH_PROVIDER_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+    await withIntegrationFixture('pi-scripted-slash-provider', async (fixture) => {
+      const catalog = await fixture.client.listAgentCatalog();
+      expect(catalog.agents.find((agent) => agent.id === 'pi')?.models.map((option) => option.value))
+        .toContain(model);
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: 'select slash provider', model,
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+      expect(testEnvironment.model.requests()[0]?.body.model).toBe('fake-model');
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      async prepareWorkspace(directories) {
+        await testEnvironment.prepareWorkspace(directories);
+        const modelsPath = join(directories.home, '.pi', 'agent', 'models.json');
+        const configuration = JSON.parse(await readFile(modelsPath, 'utf8'));
+        configuration.providers['garcon-fake/region'] = configuration.providers['garcon-fake'];
+        await writeFile(modelsPath, JSON.stringify(configuration), { mode: 0o600 });
+      },
+    });
   }, 120_000);
 
   test('generates chat titles through the unchanged single-query path', async () => {
