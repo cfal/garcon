@@ -129,6 +129,34 @@ describe('ConversationPanelRegistry', () => {
 		localStorage.clear();
 	});
 
+	it('bounds retention to 25 visible and 25 hidden chat tails', () => {
+		expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBe(25);
+		expect(CHAT_TRANSCRIPT_CACHE_LIMIT).toBe(25);
+	});
+
+	it('protects the entire incoming set before hydrating panels from storage', () => {
+		const { cache, registry } = fixture({ maxHiddenEntries: 1 });
+		const visible = ['first', 'second', 'third'].map((id) =>
+			presentation(`chat-view:window-${id}`, `chat-${id}`),
+		);
+		try {
+			for (const { chatId } of visible) {
+				seed(cache, chatId);
+				cache.flush();
+			}
+			expect(cache.get(visible[0]!.chatId)).toBeNull();
+			// Hydration runs during reconciliation, before asynchronous snapshot loading.
+			registry.reconcile(visible);
+			for (const { chatId, surfaceId } of visible) {
+				expect(cache.get(chatId)?.messages).toEqual([message(1)]);
+				expect(registry.panel(surfaceId)?.transcript.entries).toEqual([message(1)]);
+			}
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
 	it.each([false, true])(
 		'keeps visible chats cached after switching at the window limit (retain inactive: %s)',
 		async (retainInactive) => {
@@ -185,6 +213,9 @@ describe('ConversationPanelRegistry', () => {
 				for (let index = 0; index < CHAT_TRANSCRIPT_CACHE_LIMIT; index += 1) {
 					seed(cache, `background-${index}`);
 					cache.flush();
+				}
+				for (let index = 0; index < CHAT_TRANSCRIPT_CACHE_LIMIT; index += 1) {
+					expect(cache.get(`background-${index}`)?.lastOrdinal).toBe(1);
 				}
 				for (const { chatId } of visible) {
 					expect(cache.get(chatId)?.lastOrdinal).toBe(2);
