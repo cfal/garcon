@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, GrepToolUseMessage, ReadToolUseMessage, ThinkingMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
-import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage } from '$shared/chat-types';
+import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, type ChatMessage } from '$shared/chat-types';
 import {
 	ActiveTranscriptState,
 	type ChatDisplayRow,
@@ -75,6 +75,7 @@ describe('ConversationFeedProjectionState', () => {
 			expandedToolMemberIds: expanded ? new Set(Array.from({ length: 160 }, (_, i) => `generated:${i}`)) : new Set() });
 		let previous = projections.reconcile(config);
 		let seed = 17;
+		let reusedPrefixes = 0;
 		for (let index = 0; index < 160; index++) {
 			seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
 			const toolId = `tool-${index % 7}`;
@@ -91,6 +92,45 @@ describe('ConversationFeedProjectionState', () => {
 			expect(next.geometry.keys).toEqual(full.geometry.keys);
 			expect(next.geometry.estimates).toEqual(full.geometry.estimates);
 			expect(previous.model.indexByRowId).toEqual(savedPrevious);
+			if (next.model !== previous.model && next.model.items[0] === previous.model.items[0]) reusedPrefixes++;
+			previous = next;
+		}
+		expect(reusedPrefixes).toBeGreaterThan(100);
+	});
+
+	it('reuses a combined prefix through filtered rows, mixed groups, protected keys and command appends', () => {
+		const projections = new ConversationFeedProjectionState();
+		const messageRow = (id: string, message: ChatMessage): ChatDisplayRow => ({ kind: 'message', id, message });
+		let config = input({ combineToolUseMessages: true, showThinking: false,
+			hiddenToolTypes: ['grep-tool-use'], expandedToolMemberIds: new Set(['expanded']),
+			protectedVirtualKeys: [JSON.stringify(['chat-1:generation-1', 'transcript:protected'])],
+			rows: [
+				...rows(),
+				messageRow('expanded', new ReadToolUseMessage(TS, 'expanded', '/synthetic')),
+				messageRow('separator-a', new AssistantMessage(TS, 'synthetic')),
+				messageRow('collapsed', new ReadToolUseMessage(TS, 'collapsed', '/synthetic')),
+				messageRow('separator-b', new AssistantMessage(TS, 'synthetic')),
+				messageRow('protected', new ReadToolUseMessage(TS, 'protected', '/synthetic')),
+			] });
+		let previous = projections.reconcile(config);
+		expect(previous.model.items.filter(item => item.kind === 'tool-group').map(item => item.expanded))
+			.toEqual([true, false, true]);
+		const appended = [
+			new ThinkingMessage(TS, 'hidden'), new GrepToolUseMessage(TS, 'hidden', 'pattern', '/synthetic'),
+			new ReadToolUseMessage(TS, 'extension', '/synthetic'), new AssistantMessage(TS, 'synthetic'),
+			new CommandOutputMessage(TS, 'new-command', 'stdout', 'plain', 'synthetic', { executorId: 'local', projectPath: '/synthetic' }),
+			new TranscriptNoticeMessage(TS, 'Synthetic notice', { type: 'publication-gap' }),
+		];
+		for (const [index, message] of appended.entries()) {
+			config = { ...config, rows: [...config.rows, messageRow(`append:${index}`, message)],
+				mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
+			const next = projections.reconcile(config);
+			const full = new ConversationFeedProjectionState().reconcile(config);
+			expect(next.model).toEqual(full.model);
+			expect(next.renderModel).toEqual(full.renderModel);
+			expect(next.geometry.keys).toEqual(full.geometry.keys);
+			expect(next.geometry.estimates).toEqual(full.geometry.estimates);
+			expect(next.model.items[0]).toBe(previous.model.items[0]);
 			previous = next;
 		}
 	});
