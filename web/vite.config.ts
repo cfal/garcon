@@ -47,6 +47,12 @@ export default defineConfig({
 				codeSplitting: {
 					groups: [
 						{
+							name: 'vite-runtime',
+							test: (id) => id.includes('vite/preload-helper') || id.includes('vite/modulepreload-polyfill'),
+							// Shared import helpers must not pull optional vendor runtimes into bootstrap.
+							priority: 30,
+						},
+						{
 							name: 'vendor-svelte',
 							test: (id) => id.includes('/node_modules/svelte/'),
 							// Reserves the shared runtime before lazy vendors collect their dependencies.
@@ -71,6 +77,7 @@ export default defineConfig({
 						{
 							debugName: 'vendor-by-package',
 							name(id) {
+								if (!id.includes('/node_modules/')) return;
 								if (id.includes('@xterm/')) return 'vendor-xterm';
 								if (id.includes('@tiptap/') || id.includes('prosemirror-'))
 									return 'vendor-markdown-editor';

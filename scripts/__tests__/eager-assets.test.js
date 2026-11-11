@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { assertLazyLanguageAssets, collectEagerAssets } from '../../web/scripts/eager-assets.ts';
+import { assertEagerAssetBudget, assertLazyLanguageAssets, collectEagerAssets } from '../../web/scripts/eager-assets.ts';
 import { codeMirrorLanguageChunk } from '../../web/codemirror-chunks.ts';
 import { CODEMIRROR_PACKAGES } from '../../web/codemirror-packages.ts';
 
@@ -16,9 +16,9 @@ test('classifies every installed language package as a lazy implementation', () 
 test('collects only static imports and their CSS, including cycles and shared output files', () => {
   const manifest = {
     entry: { file: 'entry.js', imports: ['metadata'], dynamicImports: ['markdown'], css: ['entry.css'] },
-    metadata: { file: 'metadata.js', name: 'vendor-cm-lang-metadata', imports: ['entry'] },
+    metadata: { file: 'metadata.js', name: 'application-metadata', imports: ['entry'] },
     shared: { file: 'metadata.js', imports: ['runtime'], css: ['shared.css'] },
-    runtime: { file: 'runtime.js', name: 'vendor-codemirror' },
+    runtime: { file: 'runtime.js', name: 'vite-runtime' },
     markdown: { file: 'markdown.js', name: 'vendor-cm-lang-template', imports: ['html'] },
     html: { file: 'html.js', name: 'vendor-cm-lang-markup', css: ['html.css'] },
   };
@@ -32,12 +32,18 @@ test('collects only static imports and their CSS, including cycles and shared ou
   expect(() => assertLazyLanguageAssets(reports(closure.files))).not.toThrow();
   manifest.metadata.imports.push('markdown');
   const regressed = collectEagerAssets(['entry.js'], [], manifest);
-  expect(() => assertLazyLanguageAssets(reports(regressed.files))).toThrow('Language implementation chunks must remain lazy');
+  expect(() => assertLazyLanguageAssets(reports(regressed.files))).toThrow('Optional renderer chunks must remain lazy');
 });
 
-test('guards every implementation chunk family but permits metadata and editor runtime', () => {
-  for (const name of ['vendor-cm-lang-web', 'vendor-cm-lang-markup', 'vendor-cm-lang-template', 'vendor-cm-lang-programming', 'vendor-cm-legacy-modes']) {
+test('guards optional language metadata, editor runtimes, and feature engines', () => {
+  for (const name of ['vendor-cm-lang-web', 'vendor-cm-lang-markup', 'vendor-cm-lang-template', 'vendor-cm-lang-programming', 'vendor-cm-legacy-modes', 'vendor-cm-lang-metadata', 'vendor-codemirror-core', 'vendor-codemirror', 'vendor-canvas', 'vendor-xterm']) {
     expect(() => assertLazyLanguageAssets([{ file: 'chunk.js', names: [name] }])).toThrow();
   }
-  expect(() => assertLazyLanguageAssets([{ file: 'chunk.js', names: ['vendor-cm-lang-metadata', 'vendor-codemirror'] }])).not.toThrow();
+  expect(() => assertLazyLanguageAssets([{ file: 'chunk.js', names: ['vite-runtime', 'vendor-svelte'] }])).not.toThrow();
+});
+
+test('guards raw eager bytes independently of chunk naming', () => {
+  expect(() => assertEagerAssetBudget(3_400_000, 460_000)).not.toThrow();
+  expect(() => assertEagerAssetBudget(3_400_001, 0)).toThrow('Eager asset budget exceeded');
+  expect(() => assertEagerAssetBudget(0, 460_001)).toThrow('Eager asset budget exceeded');
 });

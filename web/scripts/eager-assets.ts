@@ -36,10 +36,16 @@ export function collectEagerAssets(
 
 export function assertLazyLanguageAssets(assets: readonly { file: string; names: readonly string[] }[]): void {
 	const eagerLanguages = assets.filter(({ names }) => names.some(name =>
-		(name.startsWith('vendor-cm-lang-') && name !== 'vendor-cm-lang-metadata') ||
-		name === 'vendor-cm-legacy-modes',
+		name.startsWith('vendor-cm-lang-') || name.startsWith('vendor-codemirror') ||
+		name === 'vendor-cm-legacy-modes' || name === 'vendor-xterm' || name === 'vendor-canvas',
 	));
 	if (eagerLanguages.length > 0) {
-		throw new Error(`Language implementation chunks must remain lazy: ${eagerLanguages.map(asset => asset.file).join(', ')}`);
+		throw new Error(`Optional renderer chunks must remain lazy: ${eagerLanguages.map(asset => asset.file).join(', ')}`);
+	}
+}
+
+export function assertEagerAssetBudget(javascriptBytes: number, cssBytes: number): void {
+	if (javascriptBytes > 3_400_000 || cssBytes > 460_000) {
+		throw new Error(`Eager asset budget exceeded: ${javascriptBytes} JS bytes, ${cssBytes} CSS bytes`);
 	}
 }

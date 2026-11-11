@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { renderRuntimeShell } from '../../common/runtime-shell.js';
-import { assertLazyLanguageAssets, collectEagerAssets, type ManifestEntry } from './eager-assets.js';
+import { assertEagerAssetBudget, assertLazyLanguageAssets, collectEagerAssets, type ManifestEntry } from './eager-assets.js';
 
 interface AssetReport {
 	file: string;
@@ -85,7 +85,10 @@ const eagerJs = reportAssets(
 	manifest,
 );
 const eagerCss = reportAssets(eagerCssFiles, keysByFile, manifest);
-if (process.argv.includes('--check')) assertLazyLanguageAssets(eagerJs);
+if (process.argv.includes('--check')) {
+	assertLazyLanguageAssets(eagerJs);
+	assertEagerAssetBudget(sumBytes(eagerJs), sumBytes(eagerCss));
+}
 const allJs = reportAssets(
 	collectFiles(buildRoot)
 		.filter((file) => file.endsWith('.js'))
