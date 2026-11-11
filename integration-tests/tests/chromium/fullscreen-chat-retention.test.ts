@@ -5,6 +5,7 @@ import {
   AssistantMessage,
   BashToolUseMessage,
   ToolResultMessage,
+  UserMessage,
   type ChatMessage,
 } from "../../../common/chat-types.js";
 import type {
@@ -592,5 +593,43 @@ test("suspends a nonempty hidden queue and restores its current entries", async 
     } finally {
       held.releaseEcho();
     }
+  });
+}, 180_000);
+
+test("cancels pending message long presses when fullscreen hides their Chat", async () => {
+  await withChromiumFixture("fullscreen-chat-pending-message-menu", async fixture => {
+    const { page } = fixture;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const at = "2026-01-01T00:00:00.000Z";
+    const chatIds = await seedChats(fixture, 2, [
+      new UserMessage(at, "Synthetic long-press input"),
+      new AssistantMessage(at, "Synthetic long-press output"),
+    ]);
+    await openLayout(fixture, chatIds);
+    await page.clock.install();
+    for (const [pointerType, messageType] of [["touch", "assistant"], ["pen", "user"]]) {
+      await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
+      const trigger = page.locator(`${panelSelector(chatIds[1]!)} .${messageType}-message-context-target`).last();
+      await trigger.evaluate((element, type) => {
+        (element as HTMLElement).dataset.retentionMarker = "pending-menu";
+        element.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true, cancelable: true, pointerType: type, clientX: 24, clientY: 36,
+        }));
+      }, pointerType);
+      await page.locator('[data-workspace-window-fullscreen="window-main"]').evaluate(element => (element as HTMLElement).click());
+      await page.clock.runFor(800);
+      expect(await trigger.getAttribute("data-retention-marker")).toBe("pending-menu");
+      expect(await page.getByRole("menu").count()).toBe(0);
+      await trigger.dispatchEvent("contextmenu");
+      expect(await page.getByRole("menu").count()).toBe(0);
+      await page.locator('[data-workspace-window-fullscreen="window-main"]').evaluate(element => (element as HTMLElement).click());
+      await page.clock.resume();
+      await waitForReadyPanels(page, 2);
+      await trigger.dispatchEvent("contextmenu");
+      await page.getByRole("menu").waitFor();
+      await page.keyboard.press("Escape");
+      await page.getByRole("menu").waitFor({ state: "hidden" });
+    }
+    fixture.assertNoBrowserErrors();
   });
 }, 180_000);

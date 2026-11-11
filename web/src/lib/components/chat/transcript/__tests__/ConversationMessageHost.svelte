@@ -21,6 +21,7 @@
 	type OpenAutoInput = FileOpenRequest;
 
 	interface Props {
+		isVisible?: boolean;
 		executors?: readonly ExecutorSnapshot[];
 		executorUpdate?: readonly ExecutorSnapshot[];
 		chatContext?: ConversationMessageChatContext;
@@ -45,6 +46,7 @@
 	}
 
 	let {
+		isVisible = true,
 		executors,
 		executorUpdate,
 		chatContext,
@@ -137,6 +139,7 @@
 </script>
 
 <ConversationMessage
+	{isVisible}
 	{chatContext}
 	{message}
 	{rowId}

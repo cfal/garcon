@@ -24,6 +24,7 @@
 	}
 
 	interface Props {
+		isVisible: boolean;
 		item: ConversationVirtualFeedItem;
 		renderModel: ConversationFeedRenderModel;
 		showThinking: boolean;
@@ -48,6 +49,7 @@
 	}
 
 	let {
+		isVisible,
 		item,
 		renderModel,
 		showThinking,
@@ -138,6 +140,7 @@
 {:else}
 	<div class="flow-root">
 		<ConversationTranscriptItem
+			{isVisible}
 			item={item.item}
 			{renderModel}
 			{showThinking}

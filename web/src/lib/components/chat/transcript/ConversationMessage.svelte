@@ -81,6 +81,7 @@
 		'a, button, input, textarea, select, [role="button"], [contenteditable]:not([contenteditable="false"])';
 
 	interface Props {
+		isVisible?: boolean;
 		message: ChatMessage;
 		/** Marks a submitted message whose request has not come back yet. */
 		awaitingDelivery?: boolean;
@@ -116,6 +117,7 @@
 	}
 
 	let {
+		isVisible = true,
 		message,
 		awaitingDelivery = false,
 		rowId,
@@ -360,6 +362,7 @@
 		const { clientX, clientY } = event;
 		messageLongPressTimer = setTimeout(() => {
 			messageLongPressTimer = null;
+			if (!isVisible) return;
 			openContextMenuAtPoint(trigger, clientX, clientY);
 		}, MESSAGE_CONTEXT_MENU_LONG_PRESS_MS);
 	}
@@ -396,7 +399,7 @@
 	// Opens message context menus faster than Bits UI's default long-press delay.
 	$effect(() => {
 		const trigger = messageMenuTriggerRef;
-		if (!trigger || typeof window === 'undefined') return;
+		if (!isVisible || !trigger || typeof window === 'undefined') return;
 
 		const handlePointerDown = (event: PointerEvent) => startMessageLongPress(trigger, event);
 		trigger.addEventListener('pointerdown', handlePointerDown);
@@ -585,6 +588,7 @@
 			>
 				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 					<ContextMenuTrigger
+						disabled={!isVisible}
 						bind:ref={messageMenuTriggerRef}
 						oncontextmenucapture={captureMessageSelection}
 						class={cn(
@@ -809,6 +813,7 @@
 					{:else if asAssistant || asCommandOutput}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
+								disabled={!isVisible}
 								bind:ref={messageMenuTriggerRef}
 								oncontextmenucapture={captureMessageSelection}
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"

@@ -496,6 +496,7 @@
 				{@const item = itemIndex === undefined ? undefined : projection.model.items[itemIndex]}
 				{#if item}
 					<ConversationFeedVirtualRow
+						{isVisible}
 						{virtualItem}
 						{item}
 						controller={virtualController}
