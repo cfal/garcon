@@ -717,7 +717,8 @@ export class TicketsController implements PortableSingletonController {
 			this.bootstrap.viewerKey !== draft.current.viewerKey
 		)
 			return;
-		this.mutations.confirm({ draft, result, cleared, reused }, this.#knownRevision);
+		if (this.visible)
+			this.mutations.confirm({ draft, result, cleared, reused }, this.#knownRevision);
 		if (cleared) {
 			if (this.closeDraft === draft) {
 				this.closeDraft = null;
