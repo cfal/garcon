@@ -194,6 +194,7 @@
 	setWs({
 		messages: [],
 		trimOffset: 0,
+		trimConsumedMessages: () => {},
 		isConnected: false,
 		registerCursor: (_cursor: DrainCursor) => () => {},
 		addMessageConsumer: () => () => {},

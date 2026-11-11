@@ -20,10 +20,6 @@ import {
 	type ChatProcessingSnapshotResult,
 } from '$shared/ws-events';
 
-// Trims the message log once all registered consumers have drained
-// past this many entries. Keeps memory bounded on long-running sessions.
-const TRIM_THRESHOLD = 500;
-
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 6_000;
 // Resume checks bound the wait on sockets silently lost during mobile suspension.
@@ -313,7 +309,6 @@ export class WsConnection {
 					if (this.#consumeMessage(data, {})) return;
 
 					this.#messageLog.push({ data, timestamp: Date.now() });
-					this.#tryTrim();
 					this.messageVersion++;
 				} catch (error) {
 					console.error('Error parsing WebSocket message:', error);
@@ -414,6 +409,8 @@ export class WsConnection {
 		this.#closeExisting({ rejectPending: false });
 		this.#messageConsumers.clear();
 		this.#connectionListeners.clear();
+		this.#trimOffset += this.#messageLog.length;
+		this.#messageLog.length = 0;
 		if (this.#visibilityHandler) {
 			document.removeEventListener('visibilitychange', this.#visibilityHandler);
 			this.#visibilityHandler = null;
@@ -601,6 +598,7 @@ export class WsConnection {
 		this.#cursors.add(cursor);
 		return () => {
 			this.#cursors.delete(cursor);
+			this.trimConsumedMessages();
 		};
 	}
 
@@ -612,20 +610,16 @@ export class WsConnection {
 		return this.#trimOffset;
 	}
 
-	// Trims the front of the message log when all registered consumers
-	// have drained past TRIM_THRESHOLD entries.
-	#tryTrim(): void {
+	trimConsumedMessages(): void {
 		const cursors = this.#cursors;
-		if (cursors.size === 0) return;
-
 		const offset = this.#trimOffset;
-		let minCursor = Infinity;
+		let minCursor = offset + this.#messageLog.length;
 		for (const c of cursors) {
 			if (c.current < minCursor) minCursor = c.current;
 		}
 
 		const minLocal = minCursor - offset;
-		if (minLocal >= TRIM_THRESHOLD) {
+		if (minLocal > 0) {
 			this.#messageLog.splice(0, minLocal);
 			this.#trimOffset += minLocal;
 		}
