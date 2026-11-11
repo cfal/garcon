@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
@@ -31,6 +31,27 @@ function park(
 }
 
 describe('InactiveTranscriptWindowStore', () => {
+	it('reuses immutable row estimates across repeated parking', () => {
+		const store = new InactiveTranscriptWindowStore();
+		const window = transcript('shared');
+		park(store, 'left', 'shared', window);
+		const stringify = vi.spyOn(JSON, 'stringify');
+		try {
+			park(store, 'right', 'shared', window);
+			expect(stringify.mock.calls).toEqual([[['right', 'shared']]]);
+		} finally { stringify.mockRestore(); }
+	});
+
+	it('rejects oversized rows before allocating their JSON', () => {
+		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 1000 });
+		const window = transcript('oversized', 'x'.repeat(100_000));
+		const stringify = vi.spyOn(JSON, 'stringify');
+		try {
+			park(store, 'left', 'oversized', window);
+			expect(store.size).toBe(0);
+			expect(stringify.mock.calls).toEqual([[['left', 'oversized']]]);
+		} finally { stringify.mockRestore(); }
+	});
 	it.each([650, 8001])('admits or rejects a %s-message combined window whole', count => {
 		const store = new InactiveTranscriptWindowStore();
 		const cache = new ChatTranscriptCache({ limit: 50 });

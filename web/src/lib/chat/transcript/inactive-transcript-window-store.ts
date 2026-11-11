@@ -1,4 +1,5 @@
 import type { TranscriptMessage } from '$shared/chat-view';
+import { serializeTranscriptWithinBudget } from './bounded-transcript-json';
 import type { ConversationPanelRestoreTarget } from './conversation-panel-restore-target.js';
 import {
 	type SharedTranscriptCommit,
@@ -22,26 +23,40 @@ interface StoredWindow extends InactiveTranscriptWindow {
 	estimatedBytes: number;
 }
 
-function estimatedMessageBytes(message: TranscriptMessage): number {
+function estimatedMessageBytes(message: TranscriptMessage, limit: number): number {
 	try {
-		const serialized = JSON.stringify(message);
-		return serialized ? serialized.length * 2 + 128 : Infinity;
+		const serialized = serializeTranscriptWithinBudget(message, {
+			characters: Math.max(0, Math.floor((limit - 128) / 2)),
+			values: 100_000,
+			depth: 64,
+		});
+		return serialized ? serialized.length * 2 + 128 : limit + 1;
 	} catch {
-		return Infinity;
+		return limit + 1;
 	}
-}
-
-function estimatedTranscriptBytes(messages: readonly TranscriptMessage[], limit: number): number {
-	let estimatedBytes = 0;
-	for (const message of messages) {
-		estimatedBytes += estimatedMessageBytes(message);
-		if (estimatedBytes > limit) return estimatedBytes;
-	}
-	return estimatedBytes;
 }
 
 export class InactiveTranscriptWindowStore {
 	#windows = new Map<string, StoredWindow>();
+	#messageBytes = new WeakMap<TranscriptMessage, number>();
+
+	#estimateMessage(message: TranscriptMessage): number {
+		let bytes = this.#messageBytes.get(message);
+		if (bytes === undefined) {
+			bytes = estimatedMessageBytes(message, this.limits.bytes);
+			this.#messageBytes.set(message, bytes);
+		}
+		return bytes;
+	}
+
+	#estimateTranscript(messages: readonly TranscriptMessage[]): number {
+		let bytes = 0;
+		for (const message of messages) {
+			bytes += this.#estimateMessage(message);
+			if (bytes > this.limits.bytes) break;
+		}
+		return bytes;
+	}
 
 	constructor(
 		private readonly limits = {
@@ -67,7 +82,7 @@ export class InactiveTranscriptWindowStore {
 		this.#windows.delete(key);
 		const messageCount = window.transcript.entries.length;
 		if (messageCount === 0 || messageCount > this.limits.messages) return;
-		const estimatedBytes = estimatedTranscriptBytes(window.transcript.entries, this.limits.bytes);
+		const estimatedBytes = this.#estimateTranscript(window.transcript.entries);
 		if (estimatedBytes > this.limits.bytes) return;
 		this.#windows.set(key, { ...window, messageCount, estimatedBytes });
 		this.#prune();
@@ -112,10 +127,10 @@ export class InactiveTranscriptWindowStore {
 			const prefixPreserved = previousEntries.every((entry, index) => entries[index] === entry);
 			if (prefixPreserved) {
 				for (const message of entries.slice(previousEntries.length)) {
-					window.estimatedBytes += estimatedMessageBytes(message);
+					window.estimatedBytes += this.#estimateMessage(message);
 				}
 			} else {
-				window.estimatedBytes = estimatedTranscriptBytes(entries, this.limits.bytes);
+				window.estimatedBytes = this.#estimateTranscript(entries);
 			}
 		}
 		this.#prune();
@@ -142,6 +157,7 @@ export class InactiveTranscriptWindowStore {
 
 	clear(): void {
 		this.#windows.clear();
+		this.#messageBytes = new WeakMap();
 	}
 
 	#prune(): void {
