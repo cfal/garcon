@@ -3509,6 +3509,37 @@ describe('WorkspaceCoordinator', () => {
 		expect(frames.focus(surfaceId, 'window-main')).toBe(false);
 	});
 
+	it('retains frame metadata when a terminal is hidden but remains in the inventory', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const release = vi.spyOn(frames, 'release');
+		const { coordinator, terminals, layout } = createHarness({ surfaceFrames: frames });
+		const id = 'hidden-terminal';
+		const surfaceId = terminalSurfaceId(id);
+		terminals.sessions[id] = { metadata: terminalMetadata(id), attachmentState: 'attached' };
+		try {
+			const opening = coordinator.openTerminalSession(id, 'window-main');
+			await vi.waitFor(() => expect(coordinator.frameVersion(surfaceId)).toBe(1));
+			frames.register(surfaceId, 'window-main', {
+				element: document.createElement('div'),
+				attachRetainedRenderer: () => {
+					throw new Error('Renderer unavailable');
+				},
+				focusPrimary: vi.fn(),
+			});
+			await opening;
+			await coordinator.focusSurface(CANONICAL_CHAT_SURFACE_ID);
+			await coordinator.reconcileTerminals([id], { deriveLauncher: false });
+			expect(layout.surface(surfaceId)).not.toBeNull();
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
+			expect(coordinator.frameVersion(surfaceId)).toBe(1);
+			expect(coordinator.attachmentErrors[surfaceId]).toBe('Renderer unavailable');
+			expect(frames.focus(surfaceId, 'window-main')).toBe(true);
+			expect(release).not.toHaveBeenCalledWith(surfaceId);
+		} finally {
+			frames.destroy();
+		}
+	});
+
 	it('returns to an inactive Chat when mobile terminal reconciliation removes the active tab', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		const terminalId = 'mobile-active';
