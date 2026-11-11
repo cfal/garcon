@@ -2,21 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { FileImageLoadQueue } from '../file-image-load-queue';
 
 describe('FileImageLoadQueue', () => {
-	it('bounds waiting work and releases cancelled requests without starting them', async () => {
+	it('bounds active work without rejecting live requests and removes cancelled requests', async () => {
 		const queue = new FileImageLoadQueue();
 		const active = Promise.withResolvers<void>();
 		const started = vi.fn(() => active.promise);
-		const controllers = Array.from({ length: 68 }, () => new AbortController());
+		const controllers = Array.from({ length: 100 }, () => new AbortController());
 		const results = controllers.map((controller) =>
 			queue.run(started, controller.signal).catch((error: unknown) => error),
 		);
 		expect(started).toHaveBeenCalledTimes(4);
-		await expect(queue.run(started, new AbortController().signal)).rejects.toThrow('queue is full');
 		controllers[4].abort();
 		const replacement = queue.run(started, new AbortController().signal);
 		active.resolve();
 		await Promise.all([...results, replacement]);
-		expect(started).toHaveBeenCalledTimes(68);
+		expect(started).toHaveBeenCalledTimes(100);
 	});
 
 	it('keeps an active slot reserved until cancelled IO actually settles', async () => {

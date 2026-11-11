@@ -106,6 +106,29 @@ test('retains inline images across chat switches and evicts them when the cache 
     expect(Math.abs((await composer.boundingBox())!.y - composerBounds!.y)).toBeLessThan(1);
     await originalComposer?.dispose();
 
+    const thumbnail = page.locator('[data-chat-message-type="assistant-message"] .markdown-image');
+    async function moveAboveScroller(distance: number): Promise<void> {
+      await thumbnail.evaluate((element: HTMLElement, gap) => {
+        element.style.transform = '';
+        let scroller = element.parentElement;
+        while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+          scroller = scroller.parentElement;
+        }
+        if (!scroller) throw new Error('Missing transcript scroll container');
+        const offset = scroller.getBoundingClientRect().top - gap - element.getBoundingClientRect().bottom;
+        element.style.transform = `translateY(${offset}px)`;
+      }, distance);
+    }
+    await moveAboveScroller(200);
+    await page.waitForTimeout(1100);
+    await browserExpect(image).toHaveAttribute('src', originalSource!);
+    await moveAboveScroller(500);
+    await browserExpect(image).toHaveCount(0);
+    await thumbnail.evaluate((element: HTMLElement) => { element.style.transform = ''; });
+    await decoded();
+    await browserExpect(image).toHaveAttribute('src', originalSource!);
+    expect(requests).toHaveLength(3);
+
     await openSettings();
     await sizeSelect.selectOption('8');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();

@@ -1,5 +1,4 @@
 const MAX_IMAGE_LOADS = 4;
-const MAX_PENDING_IMAGE_LOADS = 64;
 
 interface ImageLoad {
 	start: () => Promise<void>;
@@ -14,8 +13,6 @@ export class FileImageLoadQueue {
 
 	run(start: () => Promise<void>, signal: AbortSignal): Promise<void> {
 		if (signal.aborted) return Promise.reject(signal.reason);
-		if (this.#pending.length >= MAX_PENDING_IMAGE_LOADS)
-			return Promise.reject(new Error('Image loading queue is full'));
 		return new Promise<void>((resolve, reject) => {
 			const onAbort = () => {
 				const index = this.#pending.indexOf(job);

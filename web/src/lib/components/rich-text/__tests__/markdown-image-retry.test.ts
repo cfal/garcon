@@ -66,6 +66,80 @@ describe('Markdown image recovery', () => {
 		cache.destroy();
 	});
 
+	it.each(['reentry', 'generation'] as const)(
+		'displays a successful reacquisition after a released failure on %s',
+		async (mode) => {
+			let enter: (visible: boolean) => void = () => {};
+			let observedRoot: Element | Document | null | undefined;
+			vi.stubGlobal(
+				'IntersectionObserver',
+				class implements IntersectionObserver {
+					root = null;
+					rootMargin = '400px';
+					scrollMargin = '0px';
+					thresholds = [0];
+					constructor(
+						private callback: IntersectionObserverCallback,
+						options?: IntersectionObserverInit,
+					) {
+						observedRoot = options?.root;
+					}
+					observe(target: Element) {
+						enter = (isIntersecting) =>
+							this.callback(
+								[
+									{
+										target,
+										isIntersecting,
+										intersectionRatio: Number(isIntersecting),
+										time: 0,
+										boundingClientRect: target.getBoundingClientRect(),
+										intersectionRect: target.getBoundingClientRect(),
+										rootBounds: null,
+									},
+								],
+								this,
+							);
+					}
+					unobserve() {}
+					disconnect() {}
+					takeRecords() {
+						return [];
+					}
+				},
+			);
+			const container = document.createElement('div');
+			container.style.overflowY = 'auto';
+			document.body.append(container);
+			const cache = new FileImageCache({ budgetBytes: 0 });
+			vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
+			const view = render(Host, {
+				props: { cache, source: '![Capture](capture.png)', resolveImageFile },
+				target: container,
+			});
+			try {
+				await tick();
+				expect(observedRoot).toBe(container);
+				enter(true);
+				await screen.findByText('Unable to load image');
+				enter(false);
+				await tick();
+				if (mode === 'generation') {
+					cache.clear();
+					await tick();
+				}
+				enter(true);
+				await screen.findByRole('img', { name: 'Capture' });
+				expect(screen.queryByText('Unable to load image')).toBeNull();
+				expect(filesApi.readContent).toHaveBeenCalledTimes(2);
+			} finally {
+				view.unmount();
+				cache.destroy();
+				container.remove();
+			}
+		},
+	);
+
 	it('retries a missing image in place, with a themed error row and one request per attempt', async () => {
 		vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
 		const { container } = render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });

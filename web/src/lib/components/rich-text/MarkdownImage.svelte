@@ -105,6 +105,7 @@
 			filePath: current.filePath,
 		};
 		let acquired: FileImageLease | undefined = cache.acquire(imageTarget);
+		failed = undefined;
 		held = { attempt: current, lease: acquired };
 		let active = true;
 		let nearby = true;
@@ -112,6 +113,7 @@
 
 		function load(): void {
 			if (!active) return;
+			failed = undefined;
 			acquired ??= cache.acquire(imageTarget);
 			held = { attempt: current, lease: acquired };
 			void acquired.ensureCurrent();
@@ -148,7 +150,7 @@
 					if (nearby) load();
 					else release();
 				},
-				{ rootMargin: '400px' },
+				{ root: imageScrollRoot(target), rootMargin: '400px' },
 			);
 			observer.observe(target);
 		}
@@ -209,6 +211,14 @@
 		if (current !== attempt) return;
 		if (externalSource) failed = current;
 		else lease?.reportDisplayError(url);
+	}
+
+	function imageScrollRoot(target: HTMLElement): HTMLElement | null {
+		for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+			const style = getComputedStyle(parent);
+			if (/(auto|scroll|overlay)/.test(`${style.overflowX} ${style.overflowY}`)) return parent;
+		}
+		return null;
 	}
 
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
