@@ -161,4 +161,32 @@ describe('InactiveTranscriptWindowStore', () => {
 		expect(window.hasLaterMessages).toBe(false);
 		expect(store.size).toBe(0);
 	});
+
+	it('evicts a prefix-preserving append that exceeds bytes without trimming the loaded interval', () => {
+		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 2_000 });
+		const window = transcript('chat-1', 'x'.repeat(100));
+		const prefix = [...window.entries];
+		park(store, 'left', 'chat-1', window);
+		expect(store.size).toBe(1);
+		for (const ordinal of [3, 4]) {
+			const incoming: TranscriptMessage = {
+				ordinal,
+				message: new AssistantMessage('2026-08-30T00:00:00.000Z', 'x'.repeat(100)),
+			};
+			const outcome = window.transcriptCache.applyMessages('chat-1', 'view-1', {
+				firstOrdinal: ordinal, lastOrdinal: ordinal, messages: [incoming],
+			});
+			if (outcome.status !== 'applied') throw new Error('Expected a committed append');
+			store.applySharedCommit({
+				chatId: 'chat-1', transcriptViewId: 'view-1', messages: [incoming],
+				firstOrdinal: ordinal, lastOrdinal: ordinal, resendCandidates: [], noticeRevision: 0,
+				outcome, overlayMutation: { feedStructureChanged: false },
+			}, { feedStructureChanged: false });
+			expect(store.size).toBe(ordinal === 3 ? 1 : 0);
+			expect(window.entries).toHaveLength(ordinal);
+			for (const [index, entry] of prefix.entries()) expect(window.entries[index]).toBe(entry);
+		}
+		expect(store.take('left', 'chat-1')).toBeNull();
+		expect(window.entries.map(entry => entry.ordinal)).toEqual([1, 2, 3, 4]);
+	});
 });
