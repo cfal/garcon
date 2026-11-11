@@ -82,6 +82,7 @@ export class TicketsController implements PortableSingletonController {
 	#epoch = 0;
 	#needsBootstrap = true;
 	#disposed = false;
+	#readOnlyReleased = false;
 	#authenticated = true;
 	#refreshPromise: Promise<void> | null = null;
 	#request: AbortController | null = null;
@@ -173,6 +174,7 @@ export class TicketsController implements PortableSingletonController {
 		this.#request?.abort();
 		this.#cancelPage();
 		if (visible) {
+			this.#readOnlyReleased = false;
 			this.#needsBootstrap = true;
 			this.stale = true;
 			void this.refresh();
@@ -180,6 +182,7 @@ export class TicketsController implements PortableSingletonController {
 	}
 
 	releaseReadOnly(): void {
+		this.#readOnlyReleased = true;
 		this.#epoch++;
 		this.#request?.abort();
 		this.#cancelPage();
@@ -717,7 +720,7 @@ export class TicketsController implements PortableSingletonController {
 			this.bootstrap.viewerKey !== draft.current.viewerKey
 		)
 			return;
-		if (this.visible)
+		if (!this.#readOnlyReleased)
 			this.mutations.confirm({ draft, result, cleared, reused }, this.#knownRevision);
 		if (cleared) {
 			if (this.closeDraft === draft) {
