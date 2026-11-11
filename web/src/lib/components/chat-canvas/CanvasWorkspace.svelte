@@ -44,7 +44,11 @@
 		},
 	});
 	const content = $derived(session.document.content);
-	const chatsById = $derived(Object.fromEntries(chats.map((chat) => [chat.id, chat])));
+	let presentedChats = $state.raw(untrack(() => chats));
+	$effect(() => {
+		if (visible) presentedChats = chats;
+	});
+	const chatsById = $derived(Object.fromEntries(presentedChats.map((chat) => [chat.id, chat])));
 	const boxes = $derived(content.nodes.filter((node) => node.type === 'box'));
 	const editing = $derived(!disabled && (presentation !== 'mobile' || ui.touchEditing));
 	const selectedBox = $derived(

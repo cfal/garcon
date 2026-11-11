@@ -37,11 +37,13 @@
 		controller,
 		sessions,
 		presentation,
+		visible = true,
 		onOpenChat,
 	}: {
 		controller: ChatBoardController;
 		sessions: ChatSessionsPort;
 		presentation: PresentationHostId;
+		visible?: boolean;
 		onOpenChat: (chatId: string) => void;
 	} = $props();
 
@@ -78,7 +80,11 @@
 	let announcement = $state('');
 	let focusedTabId = $state<string | null>(null);
 	let selectedBoard = $derived(controller.selectedBoard);
-	let lanes = $derived(selectedBoard ? projectChatBoard(selectedBoard, sessions.orderedChats) : []);
+	let presentedChats = $state.raw(untrack(() => sessions.orderedChats));
+	$effect(() => {
+		if (visible) presentedChats = sessions.orderedChats;
+	});
+	let lanes = $derived(selectedBoard ? projectChatBoard(selectedBoard, presentedChats) : []);
 	let activeColumnId = $derived(
 		selectedBoard?.columns.some((column) => column.id === controller.activeColumnId)
 			? controller.activeColumnId

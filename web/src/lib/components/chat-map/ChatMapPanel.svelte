@@ -22,7 +22,11 @@
 	let { controller, chats, selectedChatId, visible, presentation }: ChatMapPanelProps = $props();
 
 	let currentTime = $state(new Date());
-	const model = $derived.by(() => buildChatMapModel(chats, controller.query));
+	let presentedChats = $state.raw(untrack(() => chats));
+	$effect(() => {
+		if (visible) presentedChats = chats;
+	});
+	const model = $derived.by(() => buildChatMapModel(presentedChats, controller.query));
 	const titleId = $derived(`chat-map-title-${presentation.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
 
 	$effect(() => {

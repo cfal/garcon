@@ -43,9 +43,23 @@ describe('MinuteClockStore', () => {
 		vi.setSystemTime(new Date('2030-01-01T13:00:00Z'));
 		document.dispatchEvent(new Event('visibilitychange'));
 		expect(clock.currentTime.toISOString()).toBe('2030-01-01T12:00:23.000Z');
+		expect(vi.getTimerCount()).toBe(0);
 		visibility.mockReturnValue('visible');
 		document.dispatchEvent(new Event('visibilitychange'));
 		expect(clock.currentTime.toISOString()).toBe('2030-01-01T13:00:00.000Z');
+		expect(vi.getTimerCount()).toBe(1);
+	});
+
+	it('does not schedule or publish while initially hidden', () => {
+		const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+		clock = new MinuteClockStore();
+		const initial = clock.currentTime;
+		vi.advanceTimersByTime(600_000);
+		expect(clock.currentTime).toBe(initial);
+		expect(vi.getTimerCount()).toBe(0);
+		visibility.mockReturnValue('visible');
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(clock.currentTime).not.toBe(initial);
 		expect(vi.getTimerCount()).toBe(1);
 	});
 

@@ -51,13 +51,25 @@ function renderPanel(
 		controller,
 		chats,
 		selectedChatId: options.selectedChatId ?? null,
-		visible: false,
+		visible: true,
 		presentation: 'window-main',
 	});
 	return { ...rendered, controller };
 }
 
 describe('ChatMapPanel', () => {
+	it('keeps hidden topology dormant and reconciles once when shown', async () => {
+		const initial = [chat('parent'), chat('child', { parentChat: parent('parent') })];
+		const { controller, rerender } = renderPanel(initial);
+		controller.collapseAll(['chat:parent']);
+		await rerender({ visible: false });
+		await rerender({ chats: [chat('replacement')] });
+		expect(controller.collapsedNodeKeys.has('chat:parent')).toBe(true);
+		expect(screen.queryByRole('link', { name: /Chat replacement/ })).toBeNull();
+		await rerender({ visible: true });
+		expect(controller.collapsedNodeKeys.size).toBe(0);
+		expect(screen.getByRole('link', { name: /Chat replacement/ })).toBeTruthy();
+	});
 	it('renders semantic nested lists with ordinary chat links and current state', () => {
 		const { container } = renderPanel(
 			[

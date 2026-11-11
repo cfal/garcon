@@ -233,6 +233,7 @@
 				{controller}
 				{sessions}
 				{presentation}
+				{visible}
 				onOpenChat={(chatId) => {
 					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
 					else void workspace.showChatInWindow(chatId, presentation);
