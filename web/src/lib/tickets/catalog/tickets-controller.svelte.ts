@@ -179,6 +179,17 @@ export class TicketsController implements PortableSingletonController {
 		} else this.drafts.flush();
 	}
 
+	releaseReadOnly(): void {
+		this.#epoch++;
+		this.#request?.abort();
+		this.#cancelPage();
+		this.collection = null;
+		this.#collectionQuery = null;
+		this.detail.releaseReadOnly();
+		this.mutations.reset();
+		this.stale = true;
+	}
+
 	get lanes() {
 		return ticketLanes(this.collection ? (this.#collectionQuery ?? this.query) : this.query);
 	}

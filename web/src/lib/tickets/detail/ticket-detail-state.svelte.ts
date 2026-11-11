@@ -116,6 +116,12 @@ export class TicketDetailState {
 		this.error = null;
 		this.newComments = false;
 	}
+
+	releaseReadOnly(): void {
+		this.#cache.clear();
+		this.current = null;
+		this.history = null;
+	}
 	get cacheSize(): number {
 		return this.#cache.size;
 	}

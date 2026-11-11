@@ -584,6 +584,28 @@ describe('Tickets controller', () => {
 		expect(draft.field('title')).toBe('Retained local edit');
 	});
 
+	it('releases closed read-only projections while preserving dirty editors and recovery', async () => {
+		const { controller } = harness();
+		controller.select('G-1');
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		const draft = controller.drafts.open('fields', controller.detail.current, {
+			title: 'Initial',
+		})!;
+		draft.setField('title', 'Retained edit');
+		expect(controller.detail.cacheSize).toBeGreaterThan(0);
+		controller.setPresentationVisible(false);
+		controller.releaseReadOnly();
+		expect(controller.collection).toBeNull();
+		expect(controller.detail.current).toBeNull();
+		expect(controller.detail.cacheSize).toBe(0);
+		expect(controller.drafts.needsExitGuard).toBe(true);
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		expect(controller.detail.current?.ticket.id).toBe('G-1');
+		expect(draft.field('title')).toBe('Retained edit');
+	});
+
 	it('replaces an old detail error with the current refresh outcome', async () => {
 		const { controller, api } = harness();
 		const unavailable = new ApiError(413, 'Detail unavailable', 'TICKET_RESULT_TOO_LARGE');
