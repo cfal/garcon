@@ -45,7 +45,7 @@ describe('mermaid-loader', () => {
 		const first = renderMermaid('flowchart LR\nA --> B', 'standard-light');
 		await vi.waitFor(() => expect(mermaid.render).toHaveBeenCalledOnce());
 		const second = renderMermaid('gantt\ntitle Example', 'standard-dark');
-		await Promise.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(mermaid.initialize).toHaveBeenCalledOnce();
 		expect(mermaid.render).toHaveBeenCalledOnce();
@@ -140,12 +140,12 @@ describe('mermaid-loader', () => {
 		expect(mermaid.render).toHaveBeenCalledTimes(4);
 	});
 
-	it('returns oversized SVGs without retaining them or evicting useful entries', async () => {
+	it('rejects oversized SVGs without retaining them or evicting useful entries', async () => {
 		const { renderMermaid } = await import('../mermaid-loader');
 		await renderMermaid('retained', 'standard-light');
 		mermaid.render.mockResolvedValue({ svg: 'x'.repeat(3 * 1024 * 1024) });
-		expect(await renderMermaid('oversized', 'standard-light')).toHaveLength(3 * 1024 * 1024);
-		await renderMermaid('oversized', 'standard-light');
+		await expect(renderMermaid('oversized', 'standard-light')).rejects.toThrow('Rendered diagram is too large');
+		await expect(renderMermaid('oversized', 'standard-light')).rejects.toThrow('Rendered diagram is too large');
 		await expect(renderMermaid('retained', 'standard-light')).resolves.toBe('<svg></svg>');
 		expect(mermaid.render).toHaveBeenCalledTimes(3);
 	});
@@ -175,5 +175,31 @@ describe('mermaid-loader', () => {
 		mermaid.render.mockRejectedValueOnce(new Error('invalid'));
 		await expect(renderMermaid('retry', 'standard-light')).rejects.toThrow('invalid');
 		await expect(renderMermaid('retry', 'standard-light')).resolves.toBe('<svg></svg>');
+	});
+
+	it('keeps cancelled running renders serialized across theme changes and discards their output', async () => {
+		const active = Promise.withResolvers<{ svg: string }>();
+		mermaid.render.mockReturnValueOnce(active.promise);
+		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
+		const controller = new AbortController();
+		const source = 'flowchart LR\nA --> B';
+		const first = renderMermaid(source, 'standard-light', controller.signal);
+		const cancelled = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+		await vi.waitFor(() => expect(mermaid.render).toHaveBeenCalledOnce());
+		controller.abort();
+		await cancelled;
+		const dark = renderMermaid(source, 'standard-dark');
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(mermaid.initialize).toHaveBeenCalledOnce();
+		expect(mermaid.render).toHaveBeenCalledOnce();
+		active.resolve({ svg: '<svg>stale</svg>' });
+		await expect(dark).resolves.toBe('<svg></svg>');
+		await expect(renderMermaid(source, 'standard-light')).resolves.toBe('<svg></svg>');
+		expect(mermaid.render).toHaveBeenCalledTimes(3);
+		expect(mermaid.initialize.mock.calls.map(([config]) => config.theme)).toEqual([
+			'default',
+			'dark',
+			'default',
+		]);
 	});
 });

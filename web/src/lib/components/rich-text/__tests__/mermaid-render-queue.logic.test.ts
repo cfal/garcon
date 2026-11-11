@@ -60,6 +60,7 @@ describe('Mermaid render admission', () => {
 		const cancelled = expect(first).rejects.toMatchObject({ name: 'AbortError' });
 		controller.abort();
 		const next = queue.render('same', 'standard-light');
+		expect(render).toHaveBeenCalledOnce();
 		active.resolve('<svg>old</svg>');
 		await cancelled;
 		await expect(next).resolves.toBe('<svg>new</svg>');
@@ -76,15 +77,32 @@ describe('Mermaid render admission', () => {
 		const first = queue.render('active', 'standard-light');
 		const controllers = Array.from({ length: 40 }, () => new AbortController());
 		const pending = controllers.map((controller, index) =>
-			queue.render(`pending-${index}`, 'standard-light', controller.signal).catch(() => undefined),
+			queue.render(`pending-${index}`, 'standard-light', controller.signal),
 		);
+		const outcomes = Promise.allSettled(pending);
 		const overflow = queue.render('overflow', 'standard-light');
 		for (const controller of controllers.slice(0, 20)) controller.abort();
 		const latest = queue.render('latest', 'standard-light');
 		expect(render).toHaveBeenCalledOnce();
 		active.resolve('<svg/>');
-		await Promise.all([first, latest, overflow, ...pending]);
-		expect(render).toHaveBeenCalledTimes(23);
+		await expect(Promise.all([first, latest, overflow])).resolves.toEqual([
+			'<svg/>',
+			'<svg/>',
+			'<svg/>',
+		]);
+		expect(await outcomes).toEqual([
+			...Array.from({ length: 20 }, () => ({
+				status: 'rejected',
+				reason: expect.objectContaining({ name: 'AbortError' }),
+			})),
+			...Array.from({ length: 20 }, () => ({ status: 'fulfilled', value: '<svg/>' })),
+		]);
+		expect(render.mock.calls.map(([source]) => source)).toEqual([
+			'active',
+			...Array.from({ length: 20 }, (_, index) => `pending-${index + 20}`),
+			'overflow',
+			'latest',
+		]);
 	});
 
 	it('rejects excessive source/output and continues after render failures', async () => {
