@@ -7,6 +7,7 @@ import type {
 	GitReviewFileSummary,
 } from '$lib/api/git.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
+import { gitReviewBodyBytes } from '$lib/git/review/git-review-body-budget.js';
 import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import {
 	GitVirtualReviewDocumentController,
@@ -295,6 +296,56 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			deferredFiles: [],
 		};
 	}
+
+	it('rejects oversized cache entries without evicting smaller bodies', async () => {
+		const byteLimit = 900;
+		const patch = `diff --git a/large.ts b/large.ts\n@@ -0,0 +1 @@\n+${'x'.repeat(500)}\n`;
+		const patchIndex = createGitPatchIndex(patch);
+		const large = {
+			...makeBody('large.ts'),
+			patch,
+			patchIndex,
+			patchBytes: patch.length,
+			renderedRowCount: patchIndex.rowCount,
+		};
+		expect(gitReviewBodyBytes(large)).toBeGreaterThan(byteLimit);
+		expect(
+			gitReviewBodyBytes(makeBody('a.ts')) + gitReviewBodyBytes(makeBody('b.ts')),
+		).toBeLessThan(byteLimit);
+		let visiblePaths: string[] = [];
+		const load = vi
+			.spyOn(gitApi, 'getGitReviewFileBodies')
+			.mockImplementation(async (_target, document, files) => ({
+				...ready(files),
+				documentId: document.documentId,
+				files: Object.fromEntries(
+					files.map((path) => [path, path === large.path ? large : makeBody(path)]),
+				),
+			}));
+		const controller = new GitVirtualReviewDocumentController({
+			...documentDeps(() => visiblePaths),
+			targetProjectPath: () => '/project',
+		});
+		try {
+			for (const path of ['a.ts', 'b.ts', large.path, 'a.ts', 'b.ts', large.path]) {
+				visiblePaths = [path];
+				const summary = makeSummary([makeFile(path)], path);
+				summary.limits.maxLoadedPatchBytes = byteLimit;
+				controller.applySummary(summary, [path]);
+				await vi.waitFor(() => expect(controller.fileBodies[path]?.bodyState).toBe('loaded'));
+				expect(controller.aggregateLimit).toBeNull();
+			}
+			expect(load.mock.calls.map(([, , files]) => files)).toEqual([
+				['a.ts'],
+				['b.ts'],
+				[large.path],
+				[large.path],
+			]);
+		} finally {
+			controller.reset();
+			load.mockRestore();
+		}
+	});
 
 	it('loads adjacent visible bodies that fit patch limits despite retained index overhead', async () => {
 		const paths = ['large.ts', 'small.ts'];

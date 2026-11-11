@@ -723,9 +723,11 @@ export class GitVirtualReviewDocumentController {
 		const previous = this.bodyCache.get(key);
 		if (previous) this.bodyCacheBytes -= gitReviewBodyBytes(previous);
 		this.bodyCache.delete(key);
-		this.bodyCache.set(key, body);
-		this.bodyCacheBytes += gitReviewBodyBytes(body);
 		const byteLimit = this.summary?.limits.maxLoadedPatchBytes ?? 10_000_000;
+		const bytes = gitReviewBodyBytes(body);
+		if (bytes > byteLimit) return;
+		this.bodyCache.set(key, body);
+		this.bodyCacheBytes += bytes;
 		while (
 			(this.bodyCache.size > MAX_CACHED_FILE_BODIES || this.bodyCacheBytes > byteLimit) &&
 			this.bodyCache.size > 0

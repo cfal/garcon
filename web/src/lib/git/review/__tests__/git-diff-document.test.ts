@@ -1304,6 +1304,63 @@ describe('GitDiffDocumentController', () => {
 		expect(loadBodies).toHaveBeenCalledTimes(2);
 	});
 
+	it('rejects oversized cache entries without evicting smaller bodies', async () => {
+		const controller = new GitDiffDocumentController();
+		const byteLimit = 900;
+		const patch = `diff --git a/large.ts b/large.ts\n@@ -0,0 +1 @@\n+${'x'.repeat(500)}\n`;
+		const patchIndex = createGitPatchIndex(patch);
+		const large = {
+			...body('large.ts'),
+			patch,
+			patchIndex,
+			patchBytes: patch.length,
+			renderedRowCount: patchIndex.rowCount,
+		};
+		expect(gitReviewBodyBytes(large)).toBeGreaterThan(byteLimit);
+		expect(gitReviewBodyBytes(body('a.ts')) + gitReviewBodyBytes(body('b.ts'))).toBeLessThan(
+			byteLimit,
+		);
+		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (snapshot, files) => ({
+			status: 'ready',
+			documentId: snapshot.documentId,
+			files: Object.fromEntries(
+				files.map(({ path }) => [path, path === large.path ? large : body(path)]),
+			),
+			errors: {},
+			deferredFiles: [],
+		}));
+		try {
+			for (const path of ['a.ts', 'b.ts', large.path, 'a.ts', 'b.ts', large.path]) {
+				controller.open(
+					{
+						project: '/project',
+						documentId: path,
+						files: [file(path)],
+						limits: { ...limits, maxLoadedPatchBytes: byteLimit },
+						firstBodyCandidates: [path],
+					},
+					{
+						contextLines: 5,
+						diffMode: 'unified',
+						loadBodies,
+						onError: vi.fn(),
+						commentSource: testCommentSource(),
+					},
+				);
+				await vi.waitFor(() => expect(controller.fileBodies[path]?.bodyState).toBe('loaded'));
+				expect(controller.aggregateLimit).toBeNull();
+			}
+			expect(loadBodies.mock.calls.map(([, files]) => files.map(({ path }) => path))).toEqual([
+				['a.ts'],
+				['b.ts'],
+				[large.path],
+				[large.path],
+			]);
+		} finally {
+			controller.clear();
+		}
+	});
+
 	it('bounds cached bodies across document changes', async () => {
 		const controller = new GitDiffDocumentController();
 		const boundedLimits = { ...limits, maxLoadedPatchBytes: gitReviewBodyBytes(body('a.ts')) };

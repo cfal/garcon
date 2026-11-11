@@ -661,8 +661,10 @@ export class GitDiffDocumentController {
 		const existing = this.bodyCache.get(key);
 		if (existing) this.bodyCacheBytes -= gitReviewBodyBytes(existing);
 		this.bodyCache.delete(key);
+		const bytes = gitReviewBodyBytes(body);
+		if (bytes > byteLimit) return;
 		this.bodyCache.set(key, body);
-		this.bodyCacheBytes += gitReviewBodyBytes(body);
+		this.bodyCacheBytes += bytes;
 		while (
 			(this.bodyCacheBytes > byteLimit || this.bodyCache.size > MAX_CACHED_FILE_BODIES) &&
 			this.bodyCache.size > 0
