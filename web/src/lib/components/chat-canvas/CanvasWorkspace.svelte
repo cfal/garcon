@@ -44,11 +44,9 @@
 		},
 	});
 	const content = $derived(session.document.content);
-	let presentedChats = $state.raw(untrack(() => chats));
-	$effect(() => {
-		if (visible) presentedChats = chats;
-	});
-	const chatsById = $derived(Object.fromEntries(presentedChats.map((chat) => [chat.id, chat])));
+	const chatsById = $derived(
+		visible ? Object.fromEntries(chats.map((chat) => [chat.id, chat])) : {},
+	);
 	const boxes = $derived(content.nodes.filter((node) => node.type === 'box'));
 	const editing = $derived(!disabled && (presentation !== 'mobile' || ui.touchEditing));
 	const selectedBox = $derived(
@@ -70,6 +68,7 @@
 	let currentTime = $state(new Date());
 	let diagram = $state<CanvasFlow>();
 	let keyboardScope = $state<HTMLElement>();
+	let listScrollTop = $state(0);
 	const shortcuts = getWorkspaceShortcuts();
 	$effect(() => {
 		if (!visible || !keyboardScope) return;
@@ -168,74 +167,77 @@
 			>
 		</div>{/if}
 	<div class="relative min-h-0 flex-1">
-		{#if controller.view === 'diagram'}
-			<SvelteFlowProvider>
-				<CanvasFlow
-					bind:this={diagram}
-					{session}
-					{controller}
-					{editing}
-					{visible}
-					{presentation}
-					selectedIds={ui.selectedIds}
-					onselect={(ids) => ui.select(ids)}
-					onerror={(error) => (ui.error = error)}
-				/>
-			</SvelteFlowProvider>
-			<div class="absolute left-3 top-3 z-10 w-52 max-w-[calc(100%-1.5rem)]">
-				<input
-					type="search"
-					class="canvas-input shadow-sm"
-					placeholder={m.canvas_search()}
-					aria-label={m.canvas_search()}
-					bind:value={ui.query}
-				/>
-				{#if ui.query.trim()}<ul
-						class="mt-1 max-h-60 overflow-y-auto rounded-md border border-border bg-card shadow-md"
-					>
-						{#each matches as node (node.id)}<li>
-								<button
-									class="w-full truncate px-3 py-2 text-left text-sm hover:bg-accent focus-visible:outline focus-visible:outline-ring"
-									onclick={() => select(node.id)}
-									>{node.type === 'box'
-										? node.title
-										: chatsById[node.chatId]?.title || m.canvas_unavailable_chat()}</button
-								>
-							</li>{:else}<li class="p-3 text-sm text-muted-foreground">
-								{m.canvas_search_empty()}
-							</li>{/each}
-					</ul>{/if}
-			</div>
-			<div class="absolute bottom-7 left-3 z-10 flex flex-wrap gap-1">
-				<button class="canvas-button" onclick={() => diagram?.fit()}>{m.canvas_fit()}</button
-				><button
-					class="canvas-button"
-					aria-label={m.canvas_zoom_out()}
-					onclick={() => diagram?.zoomOut()}>−</button
-				><button
-					class="canvas-button"
-					aria-label={m.canvas_zoom_in()}
-					onclick={() => diagram?.zoomIn()}>+</button
-				>{#if presentation === 'mobile'}<button
+		{#if visible}
+			{#if controller.view === 'diagram'}
+				<SvelteFlowProvider>
+					<CanvasFlow
+						bind:this={diagram}
+						{session}
+						{controller}
+						{editing}
+						{visible}
+						{presentation}
+						selectedIds={ui.selectedIds}
+						onselect={(ids) => ui.select(ids)}
+						onerror={(error) => (ui.error = error)}
+					/>
+				</SvelteFlowProvider>
+				<div class="absolute left-3 top-3 z-10 w-52 max-w-[calc(100%-1.5rem)]">
+					<input
+						type="search"
+						class="canvas-input shadow-sm"
+						placeholder={m.canvas_search()}
+						aria-label={m.canvas_search()}
+						bind:value={ui.query}
+					/>
+					{#if ui.query.trim()}<ul
+							class="mt-1 max-h-60 overflow-y-auto rounded-md border border-border bg-card shadow-md"
+						>
+							{#each matches as node (node.id)}<li>
+									<button
+										class="w-full truncate px-3 py-2 text-left text-sm hover:bg-accent focus-visible:outline focus-visible:outline-ring"
+										onclick={() => select(node.id)}
+										>{node.type === 'box'
+											? node.title
+											: chatsById[node.chatId]?.title || m.canvas_unavailable_chat()}</button
+									>
+								</li>{:else}<li class="p-3 text-sm text-muted-foreground">
+									{m.canvas_search_empty()}
+								</li>{/each}
+						</ul>{/if}
+				</div>
+				<div class="absolute bottom-7 left-3 z-10 flex flex-wrap gap-1">
+					<button class="canvas-button" onclick={() => diagram?.fit()}>{m.canvas_fit()}</button
+					><button
 						class="canvas-button"
-						aria-pressed={ui.touchEditing}
-						onclick={() => (ui.touchEditing = !ui.touchEditing)}>{m.canvas_edit()}</button
-					>{/if}
-			</div>
-			{#if content.nodes.length === 0}<div
-					class="pointer-events-none absolute inset-0 flex items-center justify-center p-10 text-center text-sm text-muted-foreground"
-				>
-					{m.canvas_board_empty()}
-				</div>{/if}
-		{:else}
-			<CanvasList
-				{content}
-				chats={chatsById}
-				selectedIds={ui.selectedIds}
-				{currentTime}
-				onselect={(id) => ui.select(new Set([id]))}
-				{onopen}
-			/>
+						aria-label={m.canvas_zoom_out()}
+						onclick={() => diagram?.zoomOut()}>−</button
+					><button
+						class="canvas-button"
+						aria-label={m.canvas_zoom_in()}
+						onclick={() => diagram?.zoomIn()}>+</button
+					>{#if presentation === 'mobile'}<button
+							class="canvas-button"
+							aria-pressed={ui.touchEditing}
+							onclick={() => (ui.touchEditing = !ui.touchEditing)}>{m.canvas_edit()}</button
+						>{/if}
+				</div>
+				{#if content.nodes.length === 0}<div
+						class="pointer-events-none absolute inset-0 flex items-center justify-center p-10 text-center text-sm text-muted-foreground"
+					>
+						{m.canvas_board_empty()}
+					</div>{/if}
+			{:else}
+				<CanvasList
+					bind:scrollTop={listScrollTop}
+					{content}
+					chats={chatsById}
+					selectedIds={ui.selectedIds}
+					{currentTime}
+					onselect={(id) => ui.select(new Set([id]))}
+					{onopen}
+				/>
+			{/if}
 		{/if}
 	</div>
 	{#if ui.selectedIds.size}

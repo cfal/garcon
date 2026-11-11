@@ -278,7 +278,7 @@
 				if (next.size !== selectedIds.size || [...next].some((id) => !selectedIds.has(id)))
 					onselect(next);
 			})}
-		onmoveend={(_event, viewport) => {
+		onmove={(_event, viewport) => {
 			if (viewportApplied) controller.setViewport(session.saved.id, viewport);
 		}}
 	>

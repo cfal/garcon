@@ -11,6 +11,7 @@
 		currentTime,
 		onselect,
 		onopen,
+		scrollTop = $bindable(0),
 	}: {
 		content: CanvasContent;
 		chats: Readonly<Record<string, ChatSessionRecord>>;
@@ -18,7 +19,12 @@
 		currentTime: Date;
 		onselect: (id: string) => void;
 		onopen: (id: string) => void;
+		scrollTop?: number;
 	} = $props();
+	let element = $state<HTMLDivElement>();
+	$effect(() => {
+		if (element) element.scrollTop = scrollTop;
+	});
 	function title(id: string): string {
 		const node = content.nodes.find((entry) => entry.id === id);
 		return node?.type === 'box'
@@ -35,7 +41,12 @@
 	]);
 </script>
 
-<div class="h-full overflow-y-auto p-3" data-canvas-list>
+<div
+	bind:this={element}
+	onscroll={(event) => (scrollTop = event.currentTarget.scrollTop)}
+	class="h-full overflow-y-auto p-3"
+	data-canvas-list
+>
 	{#each groups as group (group.id)}
 		{@const members = boxChats(content, group.id)}
 		{#if group.id || members.length}
