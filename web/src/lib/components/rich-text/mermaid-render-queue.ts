@@ -19,7 +19,7 @@ interface RenderJob {
 	consumers: Set<RenderConsumer>;
 }
 
-type RenderDiagram = (
+export type RenderDiagram = (
 	source: string,
 	theme: RendererThemeId,
 	signal: AbortSignal,

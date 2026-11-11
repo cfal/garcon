@@ -132,13 +132,10 @@ describe('FileDraftCoordinator', () => {
 		const put = repository.putDraft.bind(repository);
 		const remove = repository.deleteDraft.bind(repository);
 		const operations: string[] = [];
-		let release!: () => void;
-		const barrier = new Promise<void>((resolve) => {
-			release = resolve;
-		});
+		const barrier = Promise.withResolvers<void>();
 		vi.spyOn(repository, 'putDraft').mockImplementation(async (record) => {
 			operations.push(record.content);
-			if (operations.length === 1) await barrier;
+			if (operations.length === 1) await barrier.promise;
 			await put(record);
 		});
 		vi.spyOn(repository, 'deleteDraft').mockImplementation(async (id) => {
@@ -154,7 +151,7 @@ describe('FileDraftCoordinator', () => {
 		void coordinator.settle(value);
 		value.content = 'after save';
 		const final = coordinator.settle(value);
-		release();
+		barrier.resolve();
 		await final;
 		expect(operations).toEqual(['changed', 'before save', 'delete', 'after save']);
 		coordinator.destroy();

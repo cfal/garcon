@@ -35,11 +35,8 @@ describe('WorkspacePresentationFrames', () => {
 			files: { get: () => null },
 			terminals: { prepareRendererTransfer: () => {} },
 		});
-		let reject!: (error: Error) => void;
-		const attachment = new Promise<void>((_resolve, rejectPromise) => {
-			reject = rejectPromise;
-		});
-		const attach = vi.fn(() => attachment);
+		const attachment = Promise.withResolvers<void>();
+		const attach = vi.fn(() => attachment.promise);
 		const retry = presentation.retry('file:1', 'window-main');
 		frames.register('file:1', 'window-main', {
 			element: document.createElement('div'),
@@ -48,7 +45,7 @@ describe('WorkspacePresentationFrames', () => {
 		});
 		await vi.waitFor(() => expect(attach).toHaveBeenCalledOnce());
 		presentation.release('file:1');
-		reject(new Error('Late attachment failure'));
+		attachment.reject(new Error('Late attachment failure'));
 		await expect(retry).resolves.toBe(false);
 		expect(presentation.errors).toEqual({});
 		expect(presentation.versions).toEqual({});

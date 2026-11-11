@@ -3,22 +3,13 @@ import {
 	MERMAID_OUTPUT_LIMIT,
 	MERMAID_SOURCE_LIMIT,
 	MermaidRenderQueue,
+	type RenderDiagram,
 } from '../mermaid-render-queue';
-
-function deferred() {
-	let resolve!: (svg: string) => void;
-	const promise = new Promise<string>((complete) => {
-		resolve = complete;
-	});
-	return { promise, resolve };
-}
 
 describe('Mermaid render admission', () => {
 	it('drops cancelled queued revisions without rendering them', async () => {
-		const active = deferred();
-		const render = vi
-			.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(async () => '<svg/>')
-			.mockReturnValueOnce(active.promise);
+		const active = Promise.withResolvers<string>();
+		const render = vi.fn<RenderDiagram>(async () => '<svg/>').mockReturnValueOnce(active.promise);
 		const queue = new MermaidRenderQueue(render);
 		const first = queue.render('first', 'standard-light');
 		const controller = new AbortController();
@@ -32,8 +23,8 @@ describe('Mermaid render admission', () => {
 	});
 
 	it('retains shared work when just one consumer cancels and removes listeners', async () => {
-		const active = deferred();
-		const render = vi.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(() => active.promise);
+		const active = Promise.withResolvers<string>();
+		const render = vi.fn<RenderDiagram>(() => active.promise);
 		const queue = new MermaidRenderQueue(render);
 		const controller = new AbortController();
 		const remove = vi.spyOn(controller.signal, 'removeEventListener');
@@ -50,9 +41,9 @@ describe('Mermaid render admission', () => {
 	});
 
 	it('does not cache orphaned active work or remove its replacement', async () => {
-		const active = deferred();
+		const active = Promise.withResolvers<string>();
 		const render = vi
-			.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(async () => '<svg>new</svg>')
+			.fn<RenderDiagram>(async () => '<svg>new</svg>')
 			.mockReturnValueOnce(active.promise);
 		const queue = new MermaidRenderQueue(render);
 		const controller = new AbortController();
@@ -69,10 +60,8 @@ describe('Mermaid render admission', () => {
 	});
 
 	it('serializes a large live document and removes its cancelled queued revisions', async () => {
-		const active = deferred();
-		const render = vi
-			.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(async () => '<svg/>')
-			.mockReturnValueOnce(active.promise);
+		const active = Promise.withResolvers<string>();
+		const render = vi.fn<RenderDiagram>(async () => '<svg/>').mockReturnValueOnce(active.promise);
 		const queue = new MermaidRenderQueue(render);
 		const first = queue.render('active', 'standard-light');
 		const controllers = Array.from({ length: 40 }, () => new AbortController());
@@ -106,7 +95,7 @@ describe('Mermaid render admission', () => {
 	});
 
 	it('rejects excessive source/output and continues after render failures', async () => {
-		const render = vi.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(async () => '<svg/>');
+		const render = vi.fn<RenderDiagram>(async () => '<svg/>');
 		const queue = new MermaidRenderQueue(render);
 		await expect(
 			queue.render('x'.repeat(MERMAID_SOURCE_LIMIT + 1), 'standard-light'),
@@ -120,9 +109,7 @@ describe('Mermaid render admission', () => {
 	});
 
 	it('evicts cached source/output by aggregate bytes in access order', async () => {
-		const render = vi.fn<ConstructorParameters<typeof MermaidRenderQueue>[0]>(async () =>
-			'x'.repeat(MERMAID_OUTPUT_LIMIT),
-		);
+		const render = vi.fn<RenderDiagram>(async () => 'x'.repeat(MERMAID_OUTPUT_LIMIT));
 		const queue = new MermaidRenderQueue(render);
 		for (let index = 0; index < 4; index += 1)
 			await queue.render(`source-${index}`, 'standard-light');
