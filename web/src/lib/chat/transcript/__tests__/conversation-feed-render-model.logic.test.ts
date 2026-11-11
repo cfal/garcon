@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AssistantMessage,
+	AskUserQuestionToolUseMessage,
+	PermissionRequestMessage,
+	PermissionResolvedMessage,
 	CommandOutputMessage,
 	CommandResultMessage,
 	BashToolUseMessage,
@@ -10,6 +13,7 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
+import { buildConversationFeedRenderModel } from '../conversation-feed-items.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
@@ -19,6 +23,41 @@ function row(ordinal: number, message: ChatMessage): ChatDisplayRow {
 }
 
 describe('ConversationFeedRenderModelController', () => {
+	it('matches full rebuilds across FIFO duplicate tools, late results, and permissions', () => {
+		const question = new AskUserQuestionToolUseMessage(TS, 'shared-question', undefined, []);
+		const source: ChatMessage[] = [
+			new PermissionRequestMessage(TS, 'permission', question), question,
+			new ReadToolUseMessage(TS, 'duplicate', '/a'),
+			new ReadToolUseMessage(TS, 'duplicate', '/b'),
+			new AssistantMessage(TS, 'interleaved'),
+			new ToolResultMessage(TS, 'duplicate', { raw: 'first' }, false),
+			new PermissionResolvedMessage(TS, 'permission', true),
+			new ToolResultMessage(TS, 'shared-question', { raw: 'answer' }, false),
+			new ToolResultMessage(TS, 'duplicate', { raw: 'second' }, false),
+		];
+		const controller = new ConversationFeedRenderModelController();
+		const entries: ChatDisplayRow[] = [];
+		for (const [index, message] of source.entries()) {
+			entries.push(row(index + 1, message));
+			const actual = controller.reconcile('surface', [...entries]);
+			expect(actual).toEqual(buildConversationFeedRenderModel(entries));
+		}
+	});
+
+	it('does not read old tool identifiers again on an ordinary append', () => {
+		let reads = 0;
+		const tool = new ReadToolUseMessage(TS, 'old', '/a');
+		Object.defineProperty(tool, 'toolId', { get: () => { reads++; return 'old'; } });
+		const first = row(1, tool);
+		const controller = new ConversationFeedRenderModelController();
+		const previous = controller.reconcile('surface', [first]);
+		reads = 0;
+		const next = controller.reconcile('surface', [first, row(2, new AssistantMessage(TS, 'next'))]);
+		expect(reads).toBe(0);
+		expect(next.items[0]).toBe(previous.items[0]);
+		expect(previous.items).toHaveLength(1);
+	});
+
 	it('rebuilds prior output when a complete result makes Markdown eligible', () => {
 		const controller = new ConversationFeedRenderModelController();
 		const context = { executorId: 'local', projectPath: '/project' };

@@ -69,6 +69,32 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 }
 
 describe('ConversationFeedProjectionState', () => {
+	it.each([false, true])('matches full combined projection through generated appends (expanded=%s)', (expanded) => {
+		const projections = new ConversationFeedProjectionState();
+		let config = input({ rows: [], combineToolUseMessages: true, earlierBoundary: 'when-collapsed',
+			expandedToolMemberIds: expanded ? new Set(Array.from({ length: 160 }, (_, i) => `generated:${i}`)) : new Set() });
+		let previous = projections.reconcile(config);
+		let seed = 17;
+		for (let index = 0; index < 160; index++) {
+			seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+			const toolId = `tool-${index % 7}`;
+			const message = seed % 4 === 0 ? new ToolResultMessage(TS, toolId, { raw: 'synthetic' }, false)
+				: seed % 4 === 1 ? new AssistantMessage(TS, 'synthetic')
+				: new ReadToolUseMessage(TS, toolId, '/synthetic');
+			const nextRow: ChatDisplayRow = { kind: 'message', id: `generated:${index}`, ordinal: index + 1, message };
+			config = { ...config, rows: [...config.rows, nextRow], mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
+			const savedPrevious = new Map(previous.model.indexByRowId);
+			const next = projections.reconcile(config);
+			const full = new ConversationFeedProjectionState().reconcile(config);
+			expect(next.model).toEqual(full.model);
+			expect(next.renderModel).toEqual(full.renderModel);
+			expect(next.geometry.keys).toEqual(full.geometry.keys);
+			expect(next.geometry.estimates).toEqual(full.geometry.estimates);
+			expect(previous.model.indexByRowId).toEqual(savedPrevious);
+			previous = next;
+		}
+	});
+
 	it('appends a wide tail without variadic insertion and preserves geometry', () => {
 		const projections = new ConversationFeedProjectionState();
 		const prefix = rows();

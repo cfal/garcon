@@ -1,6 +1,7 @@
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
 import {
 	buildConversationFeedRenderModel,
+	ConversationToolPairing,
 	type ConversationFeedRenderItem,
 	type ConversationFeedRenderModel,
 } from './conversation-feed-items.js';
@@ -22,6 +23,8 @@ export class ConversationFeedRenderModelController {
 	#surfaceIdentity: string | null = null;
 	#rows: ChatDisplayRow[] = [];
 	#model: ConversationFeedRenderModel | null = null;
+	#pairing = new ConversationToolPairing();
+	#hasLocalNotices = false;
 
 	reconcile(surfaceIdentity: string, rows: ChatDisplayRow[]): ConversationFeedRenderModel {
 		return this.reconcileDetailed(surfaceIdentity, rows).model;
@@ -37,7 +40,27 @@ export class ConversationFeedRenderModelController {
 			return { model: this.#model, change: { kind: 'unchanged' } };
 		}
 
-		const builtModel = buildConversationFeedRenderModel(rows);
+		if (this.#model && !this.#hasLocalNotices && rows.length > this.#rows.length
+			&& this.#samePrefix(rows, this.#rows.length)) {
+			const appendedRows = rows.slice(this.#rows.length);
+			// Commands can revise earlier output; local notices depend on the final durable row.
+			if (appendedRows.every(row => row.kind === 'message'
+				&& row.message.type !== 'command-output' && row.message.type !== 'command-result'
+				&& row.message.type !== 'transcript-notice')) {
+				const suffix = buildConversationFeedRenderModel(appendedRows, this.#pairing);
+				const appendedItems = suffix.items.map(item => ({ ...item, index: item.index + this.#rows.length }));
+				const terminals = suffix.permissionTerminalByOccurrence.size === 0
+					? this.#model.permissionTerminalByOccurrence
+					: new Map([...this.#model.permissionTerminalByOccurrence, ...suffix.permissionTerminalByOccurrence]);
+				this.#model = { ...suffix, items: [...this.#model.items, ...appendedItems],
+					permissionTerminalByOccurrence: terminals };
+				this.#rows = rows;
+				return { model: this.#model, change: { kind: 'tail-appended', appendedItems } };
+			}
+		}
+		this.#pairing = new ConversationToolPairing();
+		const builtModel = buildConversationFeedRenderModel(rows, this.#pairing);
+		this.#hasLocalNotices = rows.some(row => row.kind === 'local-notice');
 		const appendedItems = this.#appendedTailItems(rows, builtModel.items);
 		let model = builtModel;
 		if (appendedItems && this.#model) {
@@ -55,6 +78,8 @@ export class ConversationFeedRenderModelController {
 		this.#surfaceIdentity = null;
 		this.#rows = [];
 		this.#model = null;
+		this.#pairing = new ConversationToolPairing();
+		this.#hasLocalNotices = false;
 	}
 
 	#resetForSurface(surfaceIdentity: string): void {
@@ -74,7 +99,8 @@ export class ConversationFeedRenderModelController {
 				return false;
 			}
 			if (previous.kind === 'message' && next.kind === 'message') {
-				if (previous.ordinal !== next.ordinal || previous.message !== next.message) return false;
+				if (previous.ordinal !== next.ordinal || previous.message !== next.message
+					|| previous.awaitingDelivery !== next.awaitingDelivery) return false;
 			} else if (previous !== next) {
 				return false;
 			}

@@ -156,14 +156,20 @@ export function messagesFromDisplayRows(rows: readonly ChatDisplayRow[]): ChatMe
 	return rows.flatMap((row) => (row.kind === 'message' ? [row.message] : []));
 }
 
+const durableRowCache = new WeakMap<TranscriptMessage, { viewId: string; row: ChatTranscriptRow }>();
+
 function durableRowsFor(
 	entries: readonly TranscriptMessage[],
 	transcriptViewId: string,
 ): ChatTranscriptRow[] {
-	return entries.map((entry) => ({
-		kind: 'message',
-		id: `${transcriptViewId}:${entry.ordinal}`,
-		ordinal: entry.ordinal,
-		message: entry.message,
-	}));
+	return entries.map((entry) => {
+		const cached = durableRowCache.get(entry);
+		if (cached?.viewId === transcriptViewId) return cached.row;
+		const row: ChatTranscriptRow = {
+			kind: 'message', id: `${transcriptViewId}:${entry.ordinal}`,
+			ordinal: entry.ordinal, message: entry.message,
+		};
+		durableRowCache.set(entry, { viewId: transcriptViewId, row });
+		return row;
+	});
 }

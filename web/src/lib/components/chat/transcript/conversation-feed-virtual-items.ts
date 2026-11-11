@@ -264,6 +264,14 @@ export function buildConversationVirtualFeedModel(
 		spacingAfter: 'none',
 	});
 
+	return indexConversationItems(items, transcriptStartIndex, transcriptEndIndex);
+}
+
+function indexConversationItems(
+	items: ConversationVirtualFeedItem[],
+	transcriptStartIndex: number,
+	transcriptEndIndex: number,
+): ConversationVirtualFeedModel {
 	const indexByKey = new Map<string, number>();
 	const indexByRowId = new Map<string, number>();
 	const targetByDomAnchorId = new Map<string, ConversationVirtualTarget>();
@@ -372,6 +380,46 @@ export function appendConversationVirtualTranscriptTail(
 		memberRowIdByDomAnchorId,
 		representativeRowIdByKey,
 		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
+	};
+}
+
+export function appendCombinedConversationTail(
+	model: ConversationVirtualFeedModel,
+	input: Pick<ConversationVirtualFeedInput,
+		'surfaceIdentity' | 'expandedToolMemberIds' | 'protectedVirtualKeys' | 'earlierBoundary'>,
+	appendedItems: ConversationFeedRenderItem[],
+): { model: ConversationVirtualFeedModel; changedIndex: number } | null {
+	let changedIndex = model.transcriptEndIndex;
+	const tail = model.items[changedIndex - 1];
+	if (tail?.kind === 'tool-group') changedIndex -= 1;
+	else if (tail && groupableToolInput(tail)) {
+		while (changedIndex > model.transcriptStartIndex
+			&& groupableToolInput(model.items[changedIndex - 1])) changedIndex -= 1;
+		if (model.items[changedIndex - 1]?.kind === 'tool-group') changedIndex -= 1;
+	}
+	const previousGroup = model.items[changedIndex];
+	const members = previousGroup?.kind === 'tool-group' ? previousGroup.members : [];
+	const appended: TranscriptVirtualFeedItem[] = appendedItems.map(item => ({
+		kind: 'transcript', key: namespacedKey(input.surfaceIdentity, `transcript:${item.id}`),
+		item, spacingAfter: transcriptSpacing(item),
+	}));
+	const seen = new Set<string>();
+	for (const item of appended) {
+		if (model.indexByRowId.has(item.item.id) || seen.has(item.item.id)) return null;
+		seen.add(item.item.id);
+	}
+	const grouped = groupToolRuns([...members, ...appended],
+		key => namespacedKey(input.surfaceIdentity, key), input.expandedToolMemberIds,
+		new Set(input.protectedVirtualKeys));
+	if (input.earlierBoundary === 'when-collapsed'
+		&& !model.items.slice(0, model.transcriptStartIndex).some(item => item.kind === 'earlier-boundary')
+		&& grouped.some(item => item.kind === 'tool-group' && !item.expanded)) return null;
+	if (previousGroup?.kind === 'tool-group' && grouped[0]?.kind === 'tool-group'
+		&& previousGroup.expanded !== grouped[0].expanded) return null;
+	const items = model.items.slice(0, changedIndex).concat(grouped, model.items.slice(model.transcriptEndIndex));
+	return {
+		model: indexConversationItems(items, model.transcriptStartIndex, changedIndex + grouped.length),
+		changedIndex,
 	};
 }
 

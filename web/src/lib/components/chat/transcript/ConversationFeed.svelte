@@ -353,9 +353,11 @@
 	});
 
 	$effect.pre(() => {
+		const validRowIds = toolGroups.expandedMemberIds.size > 0 || itemState.hasDisclosureOverrides
+			? new Set(chatState.visibleRows.map((row) => row.id)) : new Set<string>();
 		toolGroups.reconcile(
 			surfaceIdentity,
-			new Set(chatState.visibleRows.map((row) => row.id)),
+			validRowIds,
 		);
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
@@ -376,7 +378,7 @@
 			settleRevealWaiters(true);
 			itemState.reconcile(
 				input.surfaceIdentity,
-				new Set(input.rows.map((row) => row.id)),
+				validRowIds,
 				pendingPermissionOccurrences,
 			);
 		});

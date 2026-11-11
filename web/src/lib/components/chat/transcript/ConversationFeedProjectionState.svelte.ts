@@ -22,6 +22,7 @@ import {
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
 	appendConversationVirtualTranscriptTail,
+	appendCombinedConversationTail,
 	type ConversationEarlierBoundaryMode,
 	type ConversationVirtualFeedModel,
 	type ToolGroupVirtualFeedItem,
@@ -227,7 +228,6 @@ export class ConversationFeedProjectionState {
 		mutationKinds: Set<ConversationFeedMutationKind>,
 	): ConversationFeedProjection | null {
 		const previous = this.#lastProjection;
-		if (input.combineToolUseMessages) return null;
 		if (!previous || !sameProjectionConfiguration(this.#lastInput, input)) return null;
 
 		let model: ConversationVirtualFeedModel;
@@ -235,6 +235,7 @@ export class ConversationFeedProjectionState {
 		if (reconciliation.change.kind === 'unchanged') {
 			model = previous.model;
 		} else if (reconciliation.change.kind === 'tail-appended') {
+			if (input.pendingPermissions.length > 0) return null;
 			const visibleAppendedItems = this.#visibleTranscriptItems(
 				reconciliation.change.appendedItems,
 				input,
@@ -242,7 +243,10 @@ export class ConversationFeedProjectionState {
 			if (visibleAppendedItems.length === 0) {
 				return this.#commitProjection(input, reconciliation.model, previous.model, geometry);
 			}
-			const appended = appendConversationVirtualTranscriptTail(
+			const combined = input.combineToolUseMessages
+				? appendCombinedConversationTail(previous.model, input, visibleAppendedItems) : null;
+			if (input.combineToolUseMessages && !combined) return null;
+			const appended = combined?.model ?? appendConversationVirtualTranscriptTail(
 				previous.model,
 				input.surfaceIdentity,
 				visibleAppendedItems,
@@ -250,18 +254,18 @@ export class ConversationFeedProjectionState {
 			if (!appended) return null;
 			model = appended;
 			if (mutationKinds.size === 0) mutationKinds.add('presentation-structure');
-			const insertIndex = previous.model.transcriptEndIndex;
+			const insertIndex = combined?.changedIndex ?? previous.model.transcriptEndIndex;
 			const insertedItems = model.items.slice(
 				insertIndex,
-				insertIndex + visibleAppendedItems.length,
+				model.transcriptEndIndex,
 			);
 			const keys = previous.geometry.keys.slice(0, insertIndex).concat(
 				insertedItems.map((item) => item.key),
-				previous.geometry.keys.slice(insertIndex),
+				previous.geometry.keys.slice(previous.model.transcriptEndIndex),
 			);
 			const estimates = previous.geometry.estimates.slice(0, insertIndex).concat(
 				insertedItems.map(estimateConversationFeedItemSize),
-				previous.geometry.estimates.slice(insertIndex),
+				previous.geometry.estimates.slice(previous.model.transcriptEndIndex),
 			);
 			if (insertIndex > previous.model.transcriptStartIndex) {
 				estimates[insertIndex - 1] = estimateConversationFeedItemSize(model.items[insertIndex - 1]);
