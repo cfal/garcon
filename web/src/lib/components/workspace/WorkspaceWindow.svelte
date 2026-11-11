@@ -94,6 +94,10 @@
 	const activePanel = $derived(
 		activeSurface?.type === 'chat' ? conversationPanels.panel(activeSurface.id) : null,
 	);
+	const retainedInThisWindow = $derived(
+		retainFullscreenChats && activePanel !== null &&
+			conversationPanels.retainedWindowId(activePanel.surfaceId) === workspaceWindow.id,
+	);
 	const composerPanel = $derived(conversationPanels.composerPanel);
 	const activeChatIsComposerAnchor = $derived(
 		activeSurface?.type === 'chat' &&
@@ -340,7 +344,7 @@
 				class:pointer-events-none={!chatIsActive}
 				onfocusin={() => workspace.noteSurfaceFocus(chatSurface.id)}
 			>
-				{#if chatIsActive && activeChat && activePanel && (isVisible || (retainFullscreenChats && conversationPanels.retainedWindowId(activePanel.surfaceId) === workspaceWindow.id))}
+				{#if chatIsActive && activeChat && activePanel && (isVisible || retainedInThisWindow)}
 					{#key activePanel}
 						<!-- Keeps the admitted chat stable while panel registration publication catches up. -->
 						{const panel = activePanel}

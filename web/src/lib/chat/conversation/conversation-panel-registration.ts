@@ -100,9 +100,9 @@ export class PanelRegistration implements ConversationPanelRegistration {
 
 	get canRetainPresentation(): boolean {
 		const cursor = this.transcript.transcriptCache.readAppliedCursor(this.chatId);
-		return !this.#destroyed && this.#presentation !== null && !this.transcript.isLoadingMessages
-			&& cursor !== null && !cursor.stale
-			&& cursor.transcriptViewId === this.transcript.transcriptViewId
+		if (this.#destroyed || this.#presentation === null || this.transcript.isLoadingMessages) return false;
+		if (!cursor || cursor.stale) return false;
+		return cursor.transcriptViewId === this.transcript.transcriptViewId
 			&& cursor.lastOrdinal >= this.transcript.lastOrdinal;
 	}
 

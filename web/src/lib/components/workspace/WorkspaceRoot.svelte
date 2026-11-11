@@ -414,6 +414,9 @@
 	const mobilePanel = $derived(
 		mobileChatSurface ? conversationPanels.panel(mobileChatSurface.id) : null,
 	);
+	const mobilePanelRetainedOnDesktop = $derived(
+		mobilePanel !== null && conversationPanels.retainedWindowId(mobilePanel.surfaceId) !== null,
+	);
 	const mobileChatPresentation = $derived(
 		resolveChatSurfacePresentation(mobileChat, sessions.isLoadingChats),
 	);
@@ -666,7 +669,7 @@
 
 	{#if isMobile && mobileChatSurface}
 		<div class="absolute inset-0 overflow-hidden bg-background">
-			{#if mobileChat && mobilePanel && conversationPanels.retainedWindowId(mobilePanel.surfaceId) === null}
+			{#if mobileChat && mobilePanel && !mobilePanelRetainedOnDesktop}
 				{#key mobilePanel}
 					{const panel = mobilePanel}
 					{const chat = mobileChat}

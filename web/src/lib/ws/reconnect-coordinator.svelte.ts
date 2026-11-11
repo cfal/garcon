@@ -195,11 +195,10 @@ export class ChatReconnectCoordinator {
 			if (!validation.isCurrent()) throw new Error('Transcript continuity changed during replay');
 			const replayResult = panels.finishReconnectReplay(replayToken, chatId);
 			if (replayResult === 'stale') return;
-			if (replayResult !== 'applied') {
-				await this.#loadRenderedSnapshot(chatId, epoch);
-				return;
-			}
-			if (!this.#cacheReachedReplayFrontier(chatId, cursor.transcriptViewId, message.throughOrdinal)) {
+			if (
+				replayResult !== 'applied' ||
+				!this.#cacheReachedReplayFrontier(chatId, cursor.transcriptViewId, message.throughOrdinal)
+			) {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
