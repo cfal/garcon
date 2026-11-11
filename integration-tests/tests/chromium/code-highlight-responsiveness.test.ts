@@ -44,39 +44,25 @@ test('typing remains responsive while a large code fence is highlighted', async 
     await browserExpect(page.locator('.cm-code-keyword')).not.toHaveCount(0);
     const source = 'const syntheticValue = { key: "value", count: 42 };\n'.repeat(2_000);
     const publishAtKeystroke = 5;
-    const keystrokesAfterHighlight = 5;
-    const highlightedSpanThreshold = 10_000;
     const inputLatenciesMs: number[] = [];
     const code = page.locator('.markdown-code-block code').last();
     const highlightedSpans = code.locator('span');
-    let highlightedAtKeystroke: number | null = null;
-    for (let index = 0; index < 200; index += 1) {
+    for (let index = 0; index < 30; index += 1) {
       if (index === publishAtKeystroke) publishCode(source);
       const start = performance.now();
       await page.keyboard.type('x');
-      // Includes the span probe in the timing so highlight DOM publication cannot escape measurement.
-      if (
-        highlightedAtKeystroke === null
-        && index >= publishAtKeystroke
-        && await highlightedSpans.count() > highlightedSpanThreshold
-      ) {
-        highlightedAtKeystroke = index;
-      }
+      // Includes rendering opportunities and the DOM probe in the interaction measurement.
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      if (index >= publishAtKeystroke) expect(await highlightedSpans.count()).toBeLessThanOrEqual(2_000);
       inputLatenciesMs.push(performance.now() - start);
-      if (highlightedAtKeystroke !== null && index >= highlightedAtKeystroke + keystrokesAfterHighlight) break;
       await page.waitForTimeout(20);
     }
-    if (highlightedAtKeystroke === null) {
-      throw new Error('Highlight publication was not observed during typing.');
-    }
-    expect(inputLatenciesMs.length).toBe(highlightedAtKeystroke + keystrokesAfterHighlight + 1);
     await browserExpect(code).toHaveText(source);
-    expect(await highlightedSpans.count()).toBeGreaterThan(highlightedSpanThreshold);
+    expect(await highlightedSpans.count()).toBe(0);
     await browserExpect(editor).toHaveText('x'.repeat(inputLatenciesMs.length));
     const maxInputLatencyMs = Math.max(...inputLatenciesMs);
     console.info('Large code fence input latency', { maxMs: maxInputLatencyMs });
-    // Allows shared-runner variance while rejecting the former multi-second proxy bookkeeping.
-    expect(maxInputLatencyMs).toBeLessThan(3_000);
+    expect(maxInputLatencyMs).toBeLessThan(500);
     assertNoBrowserErrors();
   }, undefined, { composerInputMode: 'formatted' });
 }, 120_000);

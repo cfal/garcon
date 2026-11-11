@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { highlightCodeFence } from '../code-fence-highlighter';
+import { highlightCodeFence, MAX_HIGHLIGHT_SEGMENTS } from '../code-fence-highlighter';
 import type { CodeHighlightSegment } from '../code-highlight-types';
 
 function segmentText(segments: CodeHighlightSegment[]): string {
@@ -12,6 +12,28 @@ function hasClass(segments: CodeHighlightSegment[], className: string): boolean 
 }
 
 describe('highlightCodeFence', () => {
+	it.each(['typescript', 'diff'])('bounds dense %s output without truncating source', async (language) => {
+		const source = (language === 'diff' ? '+new\n-old\n' : 'const value = { key: "value", count: 42 };\n').repeat(2000);
+		const segments = await highlightCodeFence(source, language);
+		expect(segments.length).toBeLessThanOrEqual(MAX_HIGHLIGHT_SEGMENTS);
+		expect(segments).toEqual([{ text: source, className: null }]);
+	});
+
+	it('shares exact immutable results across simultaneous aliases and remounts', async () => {
+		const source = 'const sharedCacheProbe = 42;';
+		const [first, second] = await Promise.all([highlightCodeFence(source, 'js'), highlightCodeFence(source, 'javascript')]);
+		expect(second).toBe(first);
+		expect(await highlightCodeFence(source, 'js')).toBe(first);
+	});
+
+	it('abandons cancelled language loads without poisoning other consumers', async () => {
+		const abort = new AbortController();
+		const source = 'const cancellationProbe = 73;';
+		const cancelled = highlightCodeFence(source, 'typescript', abort.signal);
+		abort.abort();
+		expect(await cancelled).toEqual([{ text: source, className: null }]);
+		expect((await highlightCodeFence(source, 'typescript')).some((segment) => segment.className)).toBe(true);
+	});
 	it('highlights JavaScript keywords and preserves exact text', async () => {
 		const source = 'const value = 1;';
 		const segments = await highlightCodeFence(source, 'js');

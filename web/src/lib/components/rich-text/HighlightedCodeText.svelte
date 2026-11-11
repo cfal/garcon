@@ -36,7 +36,7 @@ The raw source remains visible while the language package loads.
 	$effect(() => {
 		const currentText = text;
 		const currentLanguage = language;
-		let cancelled = false;
+		const abort = new AbortController();
 
 		asyncSegments = null;
 		if (!currentText || !shouldAttemptCodeFenceHighlight(currentLanguage)) return;
@@ -44,15 +44,16 @@ The raw source remains visible while the language package loads.
 		void (async () => {
 			try {
 				const { highlightCodeFence } = await loadHighlighter();
-				const nextSegments = await highlightCodeFence(currentText, currentLanguage);
-				if (!cancelled) asyncSegments = nextSegments;
+				if (abort.signal.aborted) return;
+				const nextSegments = await highlightCodeFence(currentText, currentLanguage, abort.signal);
+				if (!abort.signal.aborted) asyncSegments = nextSegments;
 			} catch {
-				if (!cancelled) asyncSegments = null;
+				if (!abort.signal.aborted) asyncSegments = null;
 			}
 		})();
 
 		return () => {
-			cancelled = true;
+			abort.abort();
 		};
 	});
 </script>
