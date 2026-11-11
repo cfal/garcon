@@ -65,11 +65,10 @@ export async function highlightCodeFence(
 	signal?: AbortSignal,
 ): Promise<CodeHighlightSegment[]> {
 	if (!text) return [];
-	if (shouldSkipHighlighting(text)) return plainCodeSegments(text);
+	if (signal?.aborted || shouldSkipHighlighting(text)) return plainCodeSegments(text);
 
 	const language = normalizeCodeFenceLanguage(rawLanguage);
 	if (!language || language === 'plaintext') return plainCodeSegments(text);
-	if (signal?.aborted) return plainCodeSegments(text);
 	const key = `${language}\0${text}`;
 	const cached = highlightCache.get(key);
 	if (cached) return cached;
