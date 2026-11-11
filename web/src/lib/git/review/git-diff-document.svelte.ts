@@ -658,9 +658,7 @@ export class GitDiffDocumentController {
 
 	private cacheBody(file: GitCommitFileSummary, body: GitReviewFileBody, byteLimit: number): void {
 		const key = this.cacheKey(file);
-		const existing = this.bodyCache.get(key);
-		if (existing) this.bodyCacheBytes -= gitReviewBodyBytes(existing);
-		this.bodyCache.delete(key);
+		this.dropCachedBody(key);
 		const bytes = gitReviewBodyBytes(body);
 		if (bytes > byteLimit) return;
 		this.bodyCache.set(key, body);
@@ -671,10 +669,13 @@ export class GitDiffDocumentController {
 		) {
 			const oldestKey = this.bodyCache.keys().next().value;
 			if (oldestKey === undefined) break;
-			const evicted = this.bodyCache.get(oldestKey);
-			this.bodyCache.delete(oldestKey);
-			this.bodyCacheBytes -= gitReviewBodyBytes(evicted);
+			this.dropCachedBody(oldestKey);
 		}
+	}
+
+	private dropCachedBody(key: string): void {
+		this.bodyCacheBytes -= gitReviewBodyBytes(this.bodyCache.get(key));
+		this.bodyCache.delete(key);
 	}
 
 	private clearBodyCache(): void {

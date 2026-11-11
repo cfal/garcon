@@ -356,8 +356,7 @@ export class GitVirtualReviewDocumentController {
 	invalidateFile(filePath: string): void {
 		for (const key of Array.from(this.bodyCache.keys())) {
 			if (this.bodyCache.get(key)?.path === filePath) {
-				this.bodyCacheBytes -= gitReviewBodyBytes(this.bodyCache.get(key));
-				this.bodyCache.delete(key);
+				this.dropCachedBody(key);
 			}
 		}
 		this.replaceFileBodies(
@@ -378,8 +377,7 @@ export class GitVirtualReviewDocumentController {
 		for (const key of Array.from(this.bodyCache.keys())) {
 			const filePath = this.bodyCache.get(key)?.path;
 			if (!filePath || !paths.has(filePath)) {
-				this.bodyCacheBytes -= gitReviewBodyBytes(this.bodyCache.get(key));
-				this.bodyCache.delete(key);
+				this.dropCachedBody(key);
 			}
 		}
 	}
@@ -720,9 +718,7 @@ export class GitVirtualReviewDocumentController {
 		body: GitReviewFileBody,
 	): void {
 		const key = this.cacheKey(file, guard);
-		const previous = this.bodyCache.get(key);
-		if (previous) this.bodyCacheBytes -= gitReviewBodyBytes(previous);
-		this.bodyCache.delete(key);
+		this.dropCachedBody(key);
 		const byteLimit = this.summary?.limits.maxLoadedPatchBytes ?? 10_000_000;
 		const bytes = gitReviewBodyBytes(body);
 		if (bytes > byteLimit) return;
@@ -734,9 +730,13 @@ export class GitVirtualReviewDocumentController {
 		) {
 			const oldestKey = this.bodyCache.keys().next().value;
 			if (oldestKey === undefined) break;
-			this.bodyCacheBytes -= gitReviewBodyBytes(this.bodyCache.get(oldestKey));
-			this.bodyCache.delete(oldestKey);
+			this.dropCachedBody(oldestKey);
 		}
+	}
+
+	private dropCachedBody(key: string): void {
+		this.bodyCacheBytes -= gitReviewBodyBytes(this.bodyCache.get(key));
+		this.bodyCache.delete(key);
 	}
 
 	private clearBodyInFlightLoads(): void {

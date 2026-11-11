@@ -33,8 +33,14 @@ export function decideGitReviewBodyBudget(
 	const loaded = Object.entries(currentBodies).filter(
 		([path, candidate]) => path !== body.path && candidate.bodyState === 'loaded',
 	);
-	let { loadedRows, loadedBytes } = loadedGitReviewBodyTotals(currentBodies, body.path);
-	let loadedPatchBytes = loaded.reduce((total, [, candidate]) => total + candidate.patchBytes, 0);
+	let loadedRows = 0;
+	let loadedBytes = 0;
+	let loadedPatchBytes = 0;
+	for (const [, candidate] of loaded) {
+		loadedRows += candidate.renderedRowCount;
+		loadedBytes += gitReviewBodyBytes(candidate);
+		loadedPatchBytes += candidate.patchBytes;
+	}
 	const evictedPaths: string[] = [];
 	const bodyBytes = gitReviewBodyBytes(body);
 
@@ -63,29 +69,16 @@ export function decideGitReviewBodyBudget(
 	const bytesExceeded =
 		(purpose === 'visible' ? loadedPatchBytes + body.patchBytes : loadedBytes + bodyBytes) >
 		limits.maxLoadedPatchBytes;
-	return {
+	const decision: GitReviewBodyBudgetDecision = {
 		accept: !rowsExceeded && !bytesExceeded,
 		evictedPaths,
 		loadedRows,
 		loadedBytes,
-		...(rowsExceeded
-			? { reason: 'collection-too-many-rows' as const }
-			: bytesExceeded
-				? { reason: 'collection-too-many-bytes' as const }
-				: {}),
 	};
-}
-
-function loadedGitReviewBodyTotals(
-	currentBodies: Readonly<Record<string, GitReviewFileBody>>,
-	excludedPath: string,
-): Pick<GitReviewBodyBudgetDecision, 'loadedRows' | 'loadedBytes'> {
-	let loadedRows = 0;
-	let loadedBytes = 0;
-	for (const [path, body] of Object.entries(currentBodies)) {
-		if (path === excludedPath || body.bodyState !== 'loaded') continue;
-		loadedRows += body.renderedRowCount;
-		loadedBytes += gitReviewBodyBytes(body);
+	if (rowsExceeded) {
+		decision.reason = 'collection-too-many-rows';
+	} else if (bytesExceeded) {
+		decision.reason = 'collection-too-many-bytes';
 	}
-	return { loadedRows, loadedBytes };
+	return decision;
 }
