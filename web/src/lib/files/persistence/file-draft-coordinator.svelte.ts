@@ -89,8 +89,11 @@ export class FileDraftCoordinator {
 				!this.available.some((entry) => entry.documentId === draft.documentId)
 			)
 				return null;
+			if (!body) {
+				this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath, draft.executorId);
+				throw new Error(m.file_recovery_incomplete());
+			}
 			if (
-				!body ||
 				body.userNamespace !== draft.userNamespace ||
 				body.deploymentId !== draft.deploymentId ||
 				body.canonicalFileRootPath !== draft.canonicalFileRootPath ||

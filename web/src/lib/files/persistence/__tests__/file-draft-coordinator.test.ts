@@ -105,7 +105,7 @@ describe('FileDraftCoordinator', () => {
 		await repository.deleteDraft(summary.documentId);
 		expect(await coordinator.read(summary)).toBeNull();
 		expect(coordinator.error).toBeTruthy();
-		expect(coordinator.available).toHaveLength(1);
+		expect(coordinator.available).toHaveLength(0);
 		coordinator.destroy();
 	});
 

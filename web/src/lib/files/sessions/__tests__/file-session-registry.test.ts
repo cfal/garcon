@@ -430,6 +430,44 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.destroyAll();
 	});
 
+	it('preserves a resumed backup when the last view closes between recovery and replacement', async () => {
+		const repository = createMemoryFileDraftRepository();
+		await repository.putDraft(storedDraft());
+		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
+		const harness = createHarness({ draftRepository: repository });
+		harness.readText.mockRejectedValueOnce(new Error('Read failed'));
+		const first = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(first.loadError).toBe('Read failed'));
+		await harness.registry.retryRecoveryDiscovery();
+		const body = deferred<FileDraft | null>();
+		// Closes after Resume publishes its body but before the awaiting open replaces the document.
+		let pendingAtDisposal: string | null = null;
+		const dispose = first.document.dispose.bind(first.document);
+		vi.spyOn(first.document, 'dispose').mockImplementation(() => {
+			pendingAtDisposal = first.document.pendingRecoveryContent;
+			dispose();
+		});
+		const closing = body.promise
+			.then(() => {})
+			.then(() => {})
+			.then(() => harness.registry.destroy(first.id));
+		const read = vi.spyOn(repository, 'getDraft').mockReturnValueOnce(body.promise);
+		const side = harness.registry.openToSide(first.id, 'window-main');
+		await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+		harness.registry.resolveDraft('resume');
+		await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+		body.resolve(storedDraft());
+		const second = (await side)!;
+		await closing;
+		expect(pendingAtDisposal).toBe('recovered edit');
+		expect(second.document).not.toBe(first.document);
+		await vi.waitFor(() => expect(second.content).toBe('recovered edit'));
+		expect(second.dirty).toBe(true);
+		await harness.registry.flushRecovery();
+		expect(await recoveredContent(repository)).toBe('recovered edit');
+		await harness.registry.destroyAll();
+	});
+
 	it('checkpoints edits made before authenticated recovery initialization', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const harness = createHarness({ draftRepository: repository, userNamespace: null });
@@ -2497,6 +2535,27 @@ describe('best-effort file recovery', () => {
 		expect(harness.registry.recoveredDrafts).toHaveLength(1);
 		expect(harness.registry.recoveryError).toBe('Body read failed');
 		expect(harness.readText).not.toHaveBeenCalled();
+		await harness.registry.destroyAll();
+	});
+
+	it('removes a missing recovery summary without silently resuming disk content', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const draft = storedDraft();
+		await repository.putDraft(draft);
+		const harness = createHarness({ draftRepository: repository });
+		await harness.registry.ready();
+		await repository.deleteDraft(draft.documentId);
+		const opening = harness.registry.open(request('file.txt'));
+		await vi.waitFor(() => expect(harness.registry.draftRequest).not.toBeNull());
+		harness.registry.resolveDraft('resume');
+		await expect(opening).resolves.toBeNull();
+		expect(harness.registry.recoveryError).toBeTruthy();
+		expect(harness.registry.recoveredDrafts).toEqual([]);
+		expect(harness.readText).not.toHaveBeenCalled();
+		const reopened = (await harness.registry.open(request('file.txt')))!;
+		await vi.waitFor(() => expect(reopened.loading).toBe(false));
+		expect(reopened.content).toBe('initial');
+		expect(harness.registry.draftRequest).toBeNull();
 		await harness.registry.destroyAll();
 	});
 

@@ -148,7 +148,7 @@ export class FileDocumentState {
 		this.editorRuntime = null;
 		this.#content = '';
 		this.baseline = '';
-		this.pendingRecoveryContent = null;
+		// An awaiting open may transfer pending recovery to a replacement document after disposal.
 		this.#changeListeners.clear();
 	}
 }
