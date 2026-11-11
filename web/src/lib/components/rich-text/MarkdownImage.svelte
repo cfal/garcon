@@ -70,6 +70,8 @@
 		Boolean(externalSource || (file && executorContextKey && cache.available)),
 	);
 	let held = $state.raw<{ attempt: typeof attempt; lease: FileImageLease }>();
+	let placeholderSize = $state.raw<{ attempt: typeof attempt; width: number; height: number }>();
+	const size = $derived(placeholderSize?.attempt === attempt ? placeholderSize : undefined);
 	let failed = $state.raw<typeof attempt>();
 	const lease = $derived(held?.attempt === attempt ? held.lease : undefined);
 	const source = $derived(externalSource ?? lease?.image?.url);
@@ -96,38 +98,65 @@
 			!current.filePath
 		)
 			return;
-		const acquired = cache.acquire({
+		const imageTarget = {
 			executorId: current.executorId,
 			executorContextKey: current.executorContextKey,
 			projectPath: current.projectPath,
 			filePath: current.filePath,
-		});
+		};
+		let acquired: FileImageLease | undefined = cache.acquire(imageTarget);
 		held = { attempt: current, lease: acquired };
-		let started = false;
+		let active = true;
+		let nearby = true;
 		let observer: IntersectionObserver | undefined;
 
 		function load(): void {
-			if (started) return;
-			started = true;
-			observer?.disconnect();
+			if (!active) return;
+			acquired ??= cache.acquire(imageTarget);
+			held = { attempt: current, lease: acquired };
 			void acquired.ensureCurrent();
 		}
 
+		function release(): void {
+			if (!acquired) return;
+			if (active && target!.contains(document.activeElement)) return;
+			if (acquired.image) {
+				const bounds = target!.getBoundingClientRect();
+				if (bounds.width > 0 && bounds.height > 0)
+					placeholderSize = { attempt: current, width: bounds.width, height: bounds.height };
+			}
+			if (acquired.failed) failed = current;
+			acquired.release();
+			acquired = undefined;
+			held = undefined;
+		}
+
+		const releaseAfterBlur = () =>
+			queueMicrotask(() => {
+				if (active && !nearby) release();
+			});
+		target.addEventListener('focusout', releaseAfterBlur);
+
 		if (current === requestedRetry || typeof IntersectionObserver === 'undefined') {
 			load();
-		} else {
+		}
+		if (typeof IntersectionObserver !== 'undefined') {
 			observer = new IntersectionObserver(
 				(entries) => {
-					if (entries.some((entry) => entry.isIntersecting)) load();
+					if (!active) return;
+					nearby = entries.some((entry) => entry.isIntersecting);
+					if (nearby) load();
+					else release();
 				},
-				{ rootMargin: '50px' },
+				{ rootMargin: '400px' },
 			);
 			observer.observe(target);
 		}
 		return () => {
-			started = true;
+			active = false;
+			target.removeEventListener('focusout', releaseAfterBlur);
 			observer?.disconnect();
-			acquired.release();
+			release();
 		};
 	});
 
@@ -194,6 +223,8 @@
 		alt={text}
 		{title}
 		decoding="async"
+		width={lease?.image?.width}
+		height={lease?.image?.height}
 		referrerpolicy="no-referrer"
 		style:display={externalRetryPending ? 'none' : undefined}
 		onload={() => {
@@ -209,6 +240,8 @@
 		role="status"
 		aria-label={m.image_loading()}
 		aria-busy="true"
+		style:width={size ? `${size.width}px` : undefined}
+		style:aspect-ratio={size ? `${size.width} / ${size.height}` : undefined}
 	>
 		<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
 	</span>

@@ -37,6 +37,35 @@ describe('Markdown image recovery', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('reuses a warm image before the first intersection callback', async () => {
+		const cache = new FileImageCache({ budgetBytes: 1024 * 1024 });
+		const props = { cache, source: '![Capture](capture.png)', resolveImageFile };
+		const first = render(Host, props);
+		const url = (await screen.findByRole('img')).getAttribute('src');
+		first.unmount();
+		vi.stubGlobal(
+			'IntersectionObserver',
+			class implements IntersectionObserver {
+				root = null;
+				rootMargin = '400px';
+				scrollMargin = '0px';
+				thresholds = [0];
+				observe() {}
+				unobserve() {}
+				takeRecords() {
+					return [];
+				}
+				disconnect() {}
+			},
+		);
+		const next = render(Host, props);
+		await tick();
+		expect(screen.getByRole('img').getAttribute('src')).toBe(url);
+		expect(filesApi.readContent).toHaveBeenCalledOnce();
+		next.unmount();
+		cache.destroy();
+	});
+
 	it('retries a missing image in place, with a themed error row and one request per attempt', async () => {
 		vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
 		const { container } = render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
@@ -292,8 +321,8 @@ describe('Markdown image recovery', () => {
 		await fireEvent.click(await screen.findByRole('button', { name: 'Retry image Capture' }));
 		await screen.findByRole('img');
 		expect(filesApi.readContent).toHaveBeenCalledTimes(2);
-		expect(observe).toHaveBeenCalledOnce();
-		expect(disconnect).toHaveBeenCalledTimes(2);
+		expect(observe).toHaveBeenCalledTimes(2);
+		expect(disconnect).toHaveBeenCalledOnce();
 	});
 
 	it.each(['/outside/capture.png', 'notes.txt'])(

@@ -230,7 +230,7 @@ describe('Markdown images', () => {
 	);
 
 	it('starts one authenticated request only when the preview becomes visible', async () => {
-		let enter: () => void = () => {};
+		let enter: (visible?: boolean) => void = () => {};
 		const disconnect = vi.fn();
 		vi.stubGlobal(
 			'IntersectionObserver',
@@ -244,12 +244,12 @@ describe('Markdown images', () => {
 				takeRecords = () => [];
 				constructor(private callback: IntersectionObserverCallback) {}
 				observe(target: Element): void {
-					enter = () =>
+					enter = (visible = true) =>
 						this.callback(
 							[
 								{
 									target,
-									isIntersecting: true,
+									isIntersecting: visible,
 									intersectionRatio: 1,
 									time: 0,
 									boundingClientRect: target.getBoundingClientRect(),
@@ -272,10 +272,27 @@ describe('Markdown images', () => {
 		enter();
 		enter();
 		await waitFor(() => expect(filesApi.readContent).toHaveBeenCalledOnce());
-		expect(disconnect).toHaveBeenCalledOnce();
+		expect(disconnect).not.toHaveBeenCalled();
 		await screen.findByRole('img');
+		const target = view.container.querySelector('.markdown-image')!;
+		vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 240, 120));
+		target.setAttribute('tabindex', '0');
+		(target as HTMLElement).focus();
+		enter(false);
+		await tick();
+		expect(screen.queryByRole('img')).not.toBeNull();
+		(target as HTMLElement).blur();
+		await tick();
+		await tick();
+		expect(screen.queryByRole('img')).toBeNull();
+		expect(screen.getByRole('status').style.width).toBe('240px');
+		expect(screen.getByRole('status').style.aspectRatio).toBe('240 / 120');
+		expect(URL.revokeObjectURL).toHaveBeenCalled();
+		enter();
+		await screen.findByRole('img');
+		expect(filesApi.readContent).toHaveBeenCalledTimes(2);
 		view.unmount();
-		expect(disconnect).toHaveBeenCalledTimes(2);
+		expect(disconnect).toHaveBeenCalledOnce();
 	});
 
 	it.each(['executorId', 'executorContextKey'] as const)(
