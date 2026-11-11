@@ -76,6 +76,9 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
         }
         expect(probe.status).toBe(429);
         expect(probe.headers.get('retry-after')).toBe(String(SHARED_CHAT_RATE_LIMIT_WINDOW_MS / 1_000));
+        // The page and plain-text routes share that budget.
+        expect((await request(`/shared/llm/${share.shareToken}`)).status).toBe(429);
+        expect((await fetch(origin + share.shareUrl, { headers: { Accept: 'text/html' } })).status).toBe(429);
 
         const discovery = await discoverRuntime({ configDir: fixture.dirs.config, runtime: 'controller' });
         expect(new URL(discovery.baseUrl).pathname).toBe(basePath || '/');

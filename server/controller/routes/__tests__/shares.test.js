@@ -319,16 +319,18 @@ describe('shared transcript routes', () => {
     expect(body.error).toBe('Share not found');
   });
 
-  it('rejects malformed percent-encoded share tokens without throwing', async () => {
-    const { routes } = createRoutes();
-    const response = await routes['/shared/llm/:token'].GET(
-      new Request('http://localhost/shared/llm/%'),
-      new URL('http://localhost/shared/llm/%'),
+  it('answers malformed percent-encoded share tokens exactly like unknown ones', async () => {
+    const { routes, shareStore } = createRoutes();
+    const fetchText = (token) => routes['/shared/llm/:token'].GET(
+      new Request(`http://localhost/shared/llm/${token}`),
+      new URL(`http://localhost/shared/llm/${token}`),
     );
-    const body = await response.json();
+    const malformed = await fetchText('%');
+    const unknown = await fetchText('missing-token');
 
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Share token is required');
+    expect(malformed.status).toBe(404);
+    expect(await malformed.text()).toBe(await unknown.text());
+    expect(shareStore.getTextPath.mock.calls.map(([token]) => token)).toEqual(['', 'missing-token']);
   });
 });
 
@@ -489,7 +491,7 @@ describe('public share lookup', () => {
     expect(shareStore.getMessages.mock.calls.map(([token]) => token)).toEqual(['', 'missing-token']);
   });
 
-  it('serves the production limiter with 429 and Retry-After after the configured misses', async () => {
+  it('serves the production limiter with 429 and Retry-After after the configured misses on any public route', async () => {
     const { routes, shareStore } = createRoutes(undefined, null, { sharedChatLimiter: undefined });
     const served = wrapRoutes(routes);
     const client = serverFor('192.0.2.1');
@@ -510,6 +512,14 @@ describe('public share lookup', () => {
       });
     }
     expect(shareStore.getMessages.mock.calls.length).toBe(lookupsBeforeLimit);
+    // The page and plain-text routes draw on the same budget, so switching routes does not reset it.
+    for (const [route, href] of [['/shared/:token', 'http://localhost/shared/share-token'], ['/shared/llm/:token', 'http://localhost/shared/llm/share-token']]) {
+      const limited = await served[route].GET(new Request(href, { headers: { Accept: 'text/html' } }), client);
+      expect(limited.status, route).toBe(429);
+      expect(limited.headers.get('retry-after')).toBe(String(SHARED_CHAT_RATE_LIMIT_WINDOW_MS / 1_000));
+    }
+    expect(shareStore.getHeader).not.toHaveBeenCalled();
+    expect(shareStore.getTextPath).not.toHaveBeenCalled();
     expect((await served['/api/v1/shared'].GET(
       new Request('http://localhost/api/v1/shared?token=share-token'), serverFor('192.0.2.2'),
     )).status).toBe(200);
