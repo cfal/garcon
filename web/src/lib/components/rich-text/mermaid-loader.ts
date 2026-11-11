@@ -314,10 +314,19 @@ export async function renderMermaid(
 	let job = inflightRenders.get(key);
 	if (!job) {
 		const created: RenderJob = { consumers: 0, promise: Promise.resolve('') };
+		const release = () => {
+			if (inflightRenders.get(key) === created) inflightRenders.delete(key);
+		};
+		const requireDemand = () => {
+			if (created.consumers > 0) return;
+			// New demand must not join a rejected job before its promise cleanup runs.
+			release();
+			throw new DOMException('Render abandoned', 'AbortError');
+		};
 		created.promise = enqueue(async () => {
-			if (created.consumers === 0) throw new DOMException('Render abandoned', 'AbortError');
+			requireDemand();
 			const mermaid = await loadMermaid();
-			if (created.consumers === 0) throw new DOMException('Render abandoned', 'AbortError');
+			requireDemand();
 			if (initializedTheme !== themeId) {
 				mermaid.initialize(THEME_CONFIGS[themeId]);
 				initializedTheme = themeId;
@@ -328,7 +337,6 @@ export async function renderMermaid(
 			return svg;
 		});
 		inflightRenders.set(key, created);
-		const release = () => inflightRenders.delete(key);
 		void created.promise.then(release, release);
 		job = created;
 	}

@@ -130,6 +130,26 @@ describe('mermaid-loader', () => {
 		expect(mermaid.render).toHaveBeenCalledTimes(68);
 	});
 
+	it.each([0, 1, 2, 3, 4, 5, 6, 7, 8])('accepts fresh demand %i microtasks after cancellation', async (turns) => {
+		const { renderMermaid } = await import('../mermaid-loader');
+		let release!: (value: { svg: string }) => void;
+		mermaid.render.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+		const abort = new AbortController();
+		const cancelled = renderMermaid('reattached', 'standard-light', abort.signal);
+		const rejection = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+		abort.abort();
+		for (let index = 0; index < turns; index++) await Promise.resolve();
+		const fresh = renderMermaid('reattached', 'standard-light');
+		const completion = expect(fresh).resolves.toBe('<svg></svg>');
+		await rejection;
+		await vi.waitFor(() => expect(mermaid.render).toHaveBeenCalledOnce());
+		const peer = renderMermaid('reattached', 'standard-light');
+		release({ svg: '<svg></svg>' });
+		await completion;
+		await expect(peer).resolves.toBe('<svg></svg>');
+		expect(mermaid.render).toHaveBeenCalledOnce();
+	});
+
 	it('releases failed jobs for retry', async () => {
 		const { renderMermaid } = await import('../mermaid-loader');
 		mermaid.render.mockRejectedValueOnce(new Error('invalid'));
