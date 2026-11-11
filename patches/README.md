@@ -86,3 +86,13 @@ The root override selects `7.1.6`, which fixes
 Typography's AST parsing and trailing-pseudo extraction APIs remain compatible;
 `scripts/__tests__/typography-parser.test.js` covers those transformations.
 Remove the override once typography's own dependency range selects a fixed release.
+
+## dompurify and minimatch overrides
+
+`mermaid` pins `dompurify` 3.4.16 and the ESLint toolchain resolves `minimatch` 10.2.x.
+The root overrides select `dompurify` 3.4.17, which fixes
+[a SAFE_FOR_TEMPLATES bypass](https://github.com/advisories/GHSA-cg2g-xh64-v4q7) and two
+further sanitizer advisories, and `minimatch` 11.0.3, which fixes
+[globparts amplification](https://github.com/advisories/GHSA-g3hv-75wg-m249). The `mermaid-loader`
+tests still assert `securityLevel: 'strict'`, and `bun run lint` exercises the ESLint path.
+Remove each override once the dependents' own ranges select a fixed release.
