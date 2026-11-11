@@ -2,6 +2,13 @@ import { getTree } from '$lib/api/files.js';
 import { effectiveExecutorId } from '$shared/executors';
 import { ApiError } from '$lib/api/client.js';
 import { buildVisibleFileRows, filterFileRows } from './file-tree-rows.js';
+import { pruneFileTreeCache } from './file-tree-cache.js';
+import {
+	fileTreeNavigationError,
+	type FileTreeDirectoryTarget,
+	type FileTreeNavigationError,
+	type FileTreeNavigationState,
+} from './file-tree-navigation.js';
 import { FILE_TREE_PARENT_ROW_KEY } from './file-tree-render-rows.js';
 import {
 	getLocalStorageItem,
@@ -49,47 +56,6 @@ export const DEFAULT_FILE_TREE_COLUMN_VISIBILITY: Readonly<FileTreeColumnVisibil
 	modified: true,
 	permissions: false,
 };
-
-export interface FileTreeNavigationError {
-	message: string;
-	status?: number;
-	errorCode?: string;
-	retryable: boolean;
-}
-
-export type FileTreeDirectoryTargetReason =
-	| 'initial'
-	| 'executor-switch'
-	| 'directory-row'
-	| 'parent-row'
-	| 'breadcrumb'
-	| 'home'
-	| 'chat-project'
-	| 'reveal-file';
-
-export interface FileTreeDirectoryTarget {
-	path: string;
-	label: string;
-	breadcrumbs: FileTreeBreadcrumb[];
-	reason: FileTreeDirectoryTargetReason;
-	focusPathOnSuccess?: string;
-	captureAsChatProject?: boolean;
-}
-
-export type FileTreeNavigationState =
-	| { kind: 'idle' }
-	| {
-			kind: 'loading';
-			target: FileTreeDirectoryTarget;
-			previous: FileTreeResponse | null;
-	  }
-	| { kind: 'ready'; response: FileTreeResponse }
-	| {
-			kind: 'error';
-			target: FileTreeDirectoryTarget;
-			previous: FileTreeResponse | null;
-			error: FileTreeNavigationError;
-	  };
 
 function copyColumnWidths(widths: Readonly<FileTreeColumnWidths>): FileTreeColumnWidths {
 	return { ...widths };
@@ -146,21 +112,6 @@ function isFileTreeViewPreference(value: string | null): value is FileTreeViewPr
 
 function isSortKey(value: string): value is SortKey {
 	return FILE_TREE_COLUMN_KEYS.includes(value as FileTreeColumnKey);
-}
-
-function fileTreeNavigationError(error: unknown): FileTreeNavigationError {
-	if (error instanceof ApiError) {
-		return {
-			message: error.message,
-			status: error.status,
-			errorCode: error.errorCode,
-			retryable: error.retryable || error.status >= 500,
-		};
-	}
-	return {
-		message: error instanceof Error ? error.message : String(error),
-		retryable: true,
-	};
 }
 
 export function resizeVisibleFileTreeColumnBoundary(
@@ -614,7 +565,7 @@ export class FileTreeStore {
 			this.childrenCache = new Map();
 			this.childErrors = new Map();
 			this.expandedDirs = new Set(expandedPaths);
-			for (const path of expandedPaths) void this.fetchChildren(path);
+			this.#reconcileDirectoryDemand();
 		} catch (error) {
 			if (isAbortError(error) || token !== this.#refreshToken) return;
 			this.refreshError = fileTreeNavigationError(error);
@@ -636,9 +587,16 @@ export class FileTreeStore {
 			expanded.delete(path);
 		} else {
 			expanded.add(path);
-			if (!this.childrenCache.has(path)) void this.fetchChildren(path);
 		}
 		this.expandedDirs = expanded;
+		const entries = this.childrenCache.get(path);
+		if (entries) {
+			const cache = new Map(this.childrenCache);
+			cache.delete(path);
+			cache.set(path, entries);
+			this.childrenCache = cache;
+		}
+		this.#reconcileDirectoryDemand();
 	}
 
 	async fetchChildren(path: string): Promise<void> {
@@ -666,6 +624,7 @@ export class FileTreeStore {
 			const cache = new Map(this.childrenCache);
 			cache.set(path, response.entries);
 			this.childrenCache = cache;
+			this.#reconcileDirectoryDemand();
 		} catch (error) {
 			if (isAbortError(error) || this.#childControllers.get(path) !== controller) return;
 			const nextErrors = new Map(this.childErrors);
@@ -821,12 +780,24 @@ export class FileTreeStore {
 			return;
 		}
 		if (this.navigation.kind === 'ready') {
-			for (const path of this.expandedDirs) {
-				if (!this.childrenCache.has(path) && !this.loadingDirs.has(path)) {
-					void this.fetchChildren(path);
-				}
+			this.#reconcileDirectoryDemand();
+		}
+	}
+
+	#reconcileDirectoryDemand(): void {
+		const visibleExpanded = new Set<string>();
+		for (const { entry } of this.#materializedRows) {
+			if (entry.type !== 'directory' || !this.expandedDirs.has(entry.path)) continue;
+			visibleExpanded.add(entry.path);
+			if (
+				!this.childrenCache.has(entry.path) &&
+				!this.loadingDirs.has(entry.path) &&
+				!this.childErrors.has(entry.path)
+			) {
+				void this.fetchChildren(entry.path);
 			}
 		}
+		this.childrenCache = pruneFileTreeCache(this.childrenCache, visibleExpanded);
 	}
 
 	async #performNavigation(

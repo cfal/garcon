@@ -7,6 +7,7 @@ import {
 	resizeVisibleFileTreeColumnBoundary,
 } from '$lib/files/tree/file-tree.svelte.js';
 import { FILE_TREE_PARENT_ROW_KEY } from '$lib/files/tree/file-tree-render-rows.js';
+import { FILE_TREE_COLD_DIRECTORY_LIMIT } from '$lib/files/tree/file-tree-cache.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
@@ -102,6 +103,44 @@ describe('FileTreeStore', () => {
 		vi.resetAllMocks();
 		mockStorage.clear();
 		store = new FileTreeStore();
+	});
+
+	it('reloads evicted expanded descendants when a collapsed branch is reopened', async () => {
+		const parent = entry('src', 'directory');
+		const nested = entry('nested', 'directory', parent.path);
+		const leaf = entry('child.ts', 'file', nested.path);
+		vi.mocked(filesApi.getTree).mockImplementation(async ({ directoryPath } = {}) => {
+			if (directoryPath === '/workspace/project') return response(directoryPath, [parent]);
+			if (directoryPath === parent.path) return response(directoryPath, [nested]);
+			if (directoryPath === nested.path) return response(directoryPath, [leaf]);
+			return response(directoryPath ?? undefined);
+		});
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.toggleDirectory(parent.path);
+		await tick();
+		store.toggleDirectory(nested.path);
+		await tick();
+		store.filterInput = 'child';
+		expect(store.filteredRows.map((row) => row.entry.name)).toContain('child.ts');
+		store.toggleDirectory(parent.path);
+		for (let index = 0; index <= FILE_TREE_COLD_DIRECTORY_LIMIT; index += 1) {
+			await store.fetchChildren(`/workspace/project/cold-${index}`);
+		}
+		expect(store.childrenCache.has(parent.path)).toBe(false);
+		expect(store.childrenCache.has(nested.path)).toBe(false);
+		expect(store.expandedDirs.has(nested.path)).toBe(true);
+		store.toggleDirectory(parent.path);
+		await vi.waitFor(() =>
+			expect(store.filteredRows.map((row) => row.entry.name)).toContain('child.ts'),
+		);
+		expect(
+			vi
+				.mocked(filesApi.getTree)
+				.mock.calls.filter(([params]) => params?.directoryPath === nested.path),
+		).toHaveLength(2);
+		store.reset();
 	});
 
 	it('starts at the chat project and captures the canonical base and anchor', async () => {
