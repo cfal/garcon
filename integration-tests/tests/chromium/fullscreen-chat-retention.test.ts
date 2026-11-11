@@ -196,6 +196,14 @@ function panelSelector(chatId: string): string {
   return `[data-conversation-panel-chat-id="${chatId}"]`;
 }
 
+async function hiddenModelCounts(page: Page): Promise<(string | null)[]> {
+  return page
+    .locator("[data-workspace-window-id].hidden [data-chat-virtual-sizer]")
+    .evaluateAll(elements => elements.map(element =>
+      element.getAttribute("data-chat-virtual-model-count"),
+    ));
+}
+
 async function readingAnchor(
   page: Page,
   chatId: string,
@@ -319,15 +327,7 @@ test.each([false, true])(
               ),
             ).toBe(true);
             if (count === 25 && round === 0) {
-              const counts = await fixture.page
-                .locator(
-                  "[data-workspace-window-id].hidden [data-chat-virtual-sizer]",
-                )
-                .evaluateAll((elements) =>
-                  elements.map((element) =>
-                    element.getAttribute("data-chat-virtual-model-count"),
-                  ),
-                );
+              const counts = await hiddenModelCounts(fixture.page);
               await fixture.page.evaluate(() => {
                 (globalThis as ChatIngestionScope).__fullscreenChatFrontiers =
                   {};
@@ -354,17 +354,7 @@ test.each([false, true])(
                   ),
                 chatIds.slice(1),
               );
-              expect(
-                await fixture.page
-                  .locator(
-                    "[data-workspace-window-id].hidden [data-chat-virtual-sizer]",
-                  )
-                  .evaluateAll((elements) =>
-                    elements.map((element) =>
-                      element.getAttribute("data-chat-virtual-model-count"),
-                    ),
-                  ),
-              ).toEqual(counts);
+              expect(await hiddenModelCounts(fixture.page)).toEqual(counts);
             }
             await toggleFullscreen(fixture.page, false);
             await waitForReadyPanels(fixture.page, count);
@@ -582,11 +572,13 @@ test("suspends a nonempty hidden queue and restores its current entries", async 
       });
       await toggleFullscreen(fixture.page, true);
       const hiddenHeight = await list.locator("ol").getAttribute("style");
-      const hiddenRows = await list.locator("[data-queue-entry-id]").evaluateAll(rows => rows.map(row => row.getAttribute("data-queue-entry-id")));
+      const rowIds = () => list.locator("[data-queue-entry-id]")
+        .evaluateAll(rows => rows.map(row => row.getAttribute("data-queue-entry-id")));
+      const hiddenRows = await rowIds();
       await fixture.integration.client.enqueueNew(queuedChat, "Synthetic hidden queue entry");
       await queue.getByText("13 queued", { exact: true }).waitFor({ state: "attached" });
       expect(await list.locator("ol").getAttribute("style")).toBe(hiddenHeight);
-      expect(await list.locator("[data-queue-entry-id]").evaluateAll(rows => rows.map(row => row.getAttribute("data-queue-entry-id")))).toEqual(hiddenRows);
+      expect(await rowIds()).toEqual(hiddenRows);
       await toggleFullscreen(fixture.page, false);
       await fixture.page.waitForFunction(({ chatId, id, offset }) => {
         const viewport = document.querySelector(`[data-conversation-panel-chat-id="${chatId}"] [data-queue-list]`);

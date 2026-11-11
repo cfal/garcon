@@ -16,7 +16,7 @@ import * as chatsApi from '$lib/api/chats.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -405,6 +405,35 @@ async function reconnectAfterFirstConnection(
 	await coordinator.handleConnectionState(true);
 }
 
+function snapshotRecoveryFixture(messages: TranscriptMessage[]) {
+	const cache = new ChatTranscriptCache({ limit: 100 });
+	const panels = new ConversationPanelRegistry({
+		cache,
+		overlays: new ConversationTranscriptOverlayStore(),
+		lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
+		getSelectedChatId: () => 'chat-1',
+		getComposerAnchorSurfaceId: () => 'chat-view:window-one',
+	});
+	const descriptor = {
+		surfaceId: 'chat-view:window-one', chatId: 'chat-1',
+		presentation: 'window-one', windowId: 'window-one', snapshotAdmission: 'admitted',
+	} satisfies ConversationPanelDescriptor;
+	const page = (count: number): CompleteChatHistoryResponse => ({
+		chatId: descriptor.chatId,
+		transcriptViewId: 'generation-selected',
+		historyState: { kind: 'complete' },
+		messages: messages.slice(0, count),
+		lastOrdinal: count,
+		pageOldestOrdinal: 1,
+		pageNewestOrdinal: count,
+		nextBeforeOrdinal: null,
+		hasMore: false,
+		limit: 50,
+		resendCandidates: [],
+	});
+	return { cache, panels, descriptor, page };
+}
+
 describe('ChatReconnectCoordinator', () => {
 	it.each([
 		{ cached: false, rejects: false }, { cached: true, rejects: false },
@@ -412,23 +441,12 @@ describe('ChatReconnectCoordinator', () => {
 	])('restarts a snapshot fenced by reconnect (cached: $cached, rejects: $rejects)', async ({ cached, rejects }) => {
 		localStorage.clear();
 		const messages = [1, 2].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) }));
-		const page = (count: number): CompleteChatHistoryResponse => ({
-			chatId: 'chat-1', transcriptViewId: 'generation-selected', historyState: { kind: 'complete' },
-			messages: messages.slice(0, count), lastOrdinal: count, pageOldestOrdinal: 1,
-			pageNewestOrdinal: count, nextBeforeOrdinal: null, hasMore: false, limit: 50, resendCandidates: [],
-		});
+		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(messages);
 		const held = deferred<CompleteChatHistoryResponse>();
 		const read = vi.spyOn(chatsApi, 'getChatMessages').mockReturnValueOnce(held.promise).mockResolvedValue(page(2));
-		const cache = new ChatTranscriptCache({ limit: 100 });
 		if (cached) cache.replaceFromPage('chat-1', page(1));
-		const panels = new ConversationPanelRegistry({
-			cache, overlays: new ConversationTranscriptOverlayStore(),
-			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
-			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => 'chat-view:window-one',
-		});
 		try {
-			panels.reconcile([{ surfaceId: 'chat-view:window-one', chatId: 'chat-1',
-				presentation: 'window-one', windowId: 'window-one', snapshotAdmission: 'admitted' }]);
+			panels.reconcile([descriptor]);
 			const pending = panels.loadChatSnapshot('chat-1');
 			const deps = createReconnectDeps();
 			deps.ws.sendRequest.mockImplementation(async request => 'chatId' in request
@@ -458,27 +476,16 @@ describe('ChatReconnectCoordinator', () => {
 	it('refreshes beyond live commits discarded after a snapshot overtakes replay', async () => {
 		localStorage.clear();
 		const messages = [1, 2, 3].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) }));
-		const page = (count: number): CompleteChatHistoryResponse => ({
-			chatId: 'chat-1', transcriptViewId: 'generation-selected', historyState: { kind: 'complete' },
-			messages: messages.slice(0, count), lastOrdinal: count, pageOldestOrdinal: 1,
-			pageNewestOrdinal: count, nextBeforeOrdinal: null, hasMore: false, limit: 50, resendCandidates: [],
-		});
+		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(messages);
 		const oldSnapshot = deferred<CompleteChatHistoryResponse>();
 		const replacementSnapshot = deferred<CompleteChatHistoryResponse>();
 		const replay = deferred<Record<string, unknown>>();
 		const read = vi.spyOn(chatsApi, 'getChatMessages')
 			.mockReturnValueOnce(oldSnapshot.promise).mockReturnValueOnce(replacementSnapshot.promise)
 			.mockResolvedValue(page(3));
-		const cache = new ChatTranscriptCache({ limit: 100 });
 		cache.replaceFromPage('chat-1', page(1));
-		const panels = new ConversationPanelRegistry({
-			cache, overlays: new ConversationTranscriptOverlayStore(),
-			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
-			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => 'chat-view:window-one',
-		});
 		try {
-			panels.reconcile([{ surfaceId: 'chat-view:window-one', chatId: 'chat-1',
-				presentation: 'window-one', windowId: 'window-one', snapshotAdmission: 'admitted' }]);
+			panels.reconcile([descriptor]);
 			const pending = panels.loadChatSnapshot('chat-1');
 			const deps = createReconnectDeps();
 			deps.ws.sendRequest.mockImplementation(async request => 'chatId' in request

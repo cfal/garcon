@@ -125,6 +125,19 @@ function switchPanel(
 	registry.reconcile(visible);
 }
 
+function mountAttachedPanel(
+	cache: ChatTranscriptCache,
+	registry: ConversationPanelRegistry,
+	descriptor: ConversationPanelDescriptor,
+	target: Parameters<typeof port>[0] = { kind: 'end' },
+) {
+	seed(cache, descriptor.chatId);
+	registry.reconcile([descriptor]);
+	const panel = registry.panel(descriptor.surfaceId)!;
+	panel.attachPresentation(port(target));
+	return panel;
+}
+
 describe('ConversationPanelRegistry', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -186,10 +199,7 @@ describe('ConversationPanelRegistry', () => {
 		const loadTranscriptSnapshot = vi.fn();
 		const { cache, registry } = fixture({ retainInactiveWindows: () => retainInactive, loadTranscriptSnapshot });
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
-		seed(cache, 'hidden');
-		registry.reconcile([hidden]);
-		const original = registry.panel(hidden.surfaceId)!;
-		original.attachPresentation(port({ kind: 'end' }));
+		const original = mountAttachedPanel(cache, registry, hidden);
 		registry.prepareForReconcile([]);
 		registry.reconcile([], [hidden]);
 		cache.markStaleExcept(new Set());
@@ -205,10 +215,7 @@ describe('ConversationPanelRegistry', () => {
 	it.each([false, true])('preserves visible desktop/mobile handoff without parking (combined: %s)', retainInactive => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => retainInactive });
 		const desktop = presentation('chat-view:window-one', 'chat-1');
-		seed(cache);
-		registry.reconcile([desktop]);
-		const original = registry.panel(desktop.surfaceId)!;
-		original.attachPresentation(port({ kind: 'end' }));
+		const original = mountAttachedPanel(cache, registry, desktop);
 		const mobile = { ...desktop, presentation: 'mobile', windowId: null } as const;
 		for (const descriptor of [mobile, desktop]) {
 			registry.prepareForReconcile([descriptor]);
@@ -232,9 +239,7 @@ describe('ConversationPanelRegistry', () => {
 		} });
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
 		const target = { kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 } as const;
-		seed(cache, 'hidden');
-		registry.reconcile([hidden]);
-		registry.panel(hidden.surfaceId)!.attachPresentation(port(target));
+		mountAttachedPanel(cache, registry, hidden, target);
 		registry.prepareForReconcile([]);
 		registry.reconcile([], [hidden]);
 		registry.discardFullscreenHiddenPanels();
@@ -270,10 +275,7 @@ describe('ConversationPanelRegistry', () => {
 		const loadTranscriptSnapshot = vi.fn();
 		const { cache, registry } = fixture({ loadTranscriptSnapshot });
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
-		seed(cache, 'hidden');
-		registry.reconcile([hidden]);
-		const original = registry.panel(hidden.surfaceId)!;
-		original.attachPresentation(port({ kind: 'end' }));
+		const original = mountAttachedPanel(cache, registry, hidden);
 		registry.prepareForReconcile([]);
 		registry.reconcile([], [hidden]);
 		if (reason === 'stale') registry.markChatStale('hidden');
@@ -295,9 +297,7 @@ describe('ConversationPanelRegistry', () => {
 		const loadTranscriptSnapshot = vi.fn();
 		const { cache, registry } = fixture({ loadTranscriptSnapshot });
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
-		seed(cache, 'hidden');
-		registry.reconcile([hidden]);
-		registry.panel(hidden.surfaceId)!.attachPresentation(port({ kind: 'end' }));
+		mountAttachedPanel(cache, registry, hidden);
 		registry.reconcile([], [hidden]);
 		expect(registry.applyCommittedBatch({ chatId: 'hidden', transcriptViewId: 'view-1',
 			firstOrdinal: 3, lastOrdinal: 3, messages: [message(3)], resendCandidates: [], noticeRevision: 0,
@@ -314,10 +314,7 @@ describe('ConversationPanelRegistry', () => {
 	it.each(['host', 'chat', 'tab', 'mobile', 'delete'] as const)('does not retain a fullscreen panel after a %s change', kind => {
 		const { cache, registry } = fixture();
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
-		seed(cache, 'hidden');
-		registry.reconcile([hidden]);
-		const original = registry.panel(hidden.surfaceId)!;
-		original.attachPresentation(port({ kind: 'end' }));
+		mountAttachedPanel(cache, registry, hidden);
 		registry.reconcile([], [hidden]);
 		if (kind === 'delete') registry.removeChat('hidden');
 		else if (kind === 'tab') registry.reconcile([]);
@@ -332,10 +329,7 @@ describe('ConversationPanelRegistry', () => {
 	it('never grants a retained panel composer ownership', () => {
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
 		const { cache, registry } = fixture({ getSelectedChatId: () => 'hidden', getComposerAnchorSurfaceId: () => hidden.surfaceId });
-		seed(cache, 'hidden');
-		registry.reconcile([hidden]);
-		const original = registry.panel(hidden.surfaceId)!;
-		original.attachPresentation(port({ kind: 'end' }));
+		const original = mountAttachedPanel(cache, registry, hidden);
 		expect(registry.composerPanel).toBe(original);
 		registry.reconcile([], [hidden]);
 		expect(registry.composerPanel).toBeNull();
