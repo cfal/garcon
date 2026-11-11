@@ -35,6 +35,15 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
     ]);
     await page.addInitScript((persisted) => {
       localStorage.setItem('workspace_layout_v2', JSON.stringify(persisted));
+      const longTasks = { count: 0, totalMs: 0, maxMs: 0 };
+      Object.defineProperty(window, '__syntheticLongTasks', { value: longTasks });
+      new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          longTasks.count++;
+          longTasks.totalMs += entry.duration;
+          longTasks.maxMs = Math.max(longTasks.maxMs, entry.duration);
+        }
+      }).observe({ type: 'longtask', buffered: true });
     }, serializeWorkspaceLayout(layout));
     const socket = new Deferred<WebSocketRoute>();
     await page.routeWebSocket(/\/ws(?:\?|$)/, (route) => {
@@ -84,7 +93,7 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
     await cdp.send('Profiler.enable');
     const samples = [];
     await mkdir(OUTPUT, { recursive: true });
-    for (const target of [300, 1500, 3000]) {
+    for (const target of [300, 1500, 3000, 10200]) {
       phase(`delivering ${target} synthetic rows per split chat`);
       await cdp.send('Profiler.start');
       const startedAt = performance.now();
@@ -125,6 +134,34 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
       console.log(JSON.stringify(samples.at(-1)));
       await writeFile(join(OUTPUT, 'metrics.json'), JSON.stringify(samples, null, 2));
     }
+    phase('measuring single-row publication at a retained 10k-row interval');
+    const singleRowTimes = [];
+    for (let index = 0; index < 20; index++) {
+      const startedAt = performance.now();
+      const chat = chats[0]!;
+      const ordinal = ++chat.ordinal;
+      const content = `Synthetic single-row probe ${index}`;
+      connected.send(JSON.stringify(new ChatMessagesMessage(chat.chatId, chat.viewId,
+        [{ ordinal, message: new AssistantMessage(TIMESTAMP, content) }], ordinal, ordinal, [])));
+      await left.getByText(content, { exact: true }).waitFor();
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      singleRowTimes.push(performance.now() - startedAt);
+    }
+    singleRowTimes.sort((a, b) => a - b);
+    const interaction = {
+      singleRowP50Ms: singleRowTimes[10], singleRowP95Ms: singleRowTimes[19],
+      longTasks: await page.evaluate(() => Reflect.get(window, '__syntheticLongTasks')),
+    };
+    await writeFile(join(OUTPUT, 'interaction.json'), JSON.stringify(interaction, null, 2));
+    console.log(JSON.stringify(interaction));
+    const disclosureChat = chats[0]!;
+    const disclosureOrdinal = ++disclosureChat.ordinal;
+    const disclosureMarker = 'Synthetic disclosure target after single-row probes';
+    connected.send(JSON.stringify(new ChatMessagesMessage(disclosureChat.chatId, disclosureChat.viewId, [
+      { ordinal: disclosureOrdinal, message: new BashToolUseMessage(TIMESTAMP, 'synthetic-disclosure', 'printf synthetic') },
+      { ordinal: ++disclosureChat.ordinal, message: new AssistantMessage(TIMESTAMP, disclosureMarker) },
+    ], disclosureOrdinal, disclosureChat.ordinal, [])));
+    await left.getByText(disclosureMarker, { exact: true }).waitFor();
     await page.screenshot({ path: join(OUTPUT, 'desktop.png') });
 
     phase('checking disclosure, scrolling, and responsive layout after sustained delivery');
