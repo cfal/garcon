@@ -5,8 +5,9 @@ import {
 	WorkspaceWindowDndController,
 } from '../window-dnd.svelte.js';
 import {
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	portableSingletonDescriptor,
-	type WorkspacePartitionId,
+	type WorkspaceLayoutMutation,
 	type WorkspaceWindowId,
 } from '../surface-types.js';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures.js';
@@ -247,21 +248,18 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('blocks Chat edges but keeps the center available at the resource ceiling', () => {
 		const layout = createWorkspaceLayoutStore();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				...(
-					['git', 'commit', 'git-history', 'git-compare', 'chat-map', 'pull-requests'] as const
-				).map((kind, index) => ({
-					type: 'register-surface-in-new-window' as const,
-					surface: portableSingletonDescriptor(kind),
-					targetWindowId: 'window-main' as const,
-					edge: 'right' as const,
-					newWindowId: `window-${index + 2}` as WorkspaceWindowId,
-					partitionId: `partition-${index + 2}` as WorkspacePartitionId,
-				})),
-			]),
+		const newWindows = Array.from(
+			{ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 2 },
+			(_, index): WorkspaceLayoutMutation => ({
+				type: 'open-chat-in-new-window',
+				chatId: `capacity-chat-${index}`,
+				targetWindowId: 'window-main',
+				edge: 'right',
+				newWindowId: `window-${index + 2}`,
+				partitionId: `partition-${index + 2}`,
+			}),
 		);
+		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, newWindows));
 		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const target = windowElement('window-main');
 		dnd.beginChatDrag('chat-a');

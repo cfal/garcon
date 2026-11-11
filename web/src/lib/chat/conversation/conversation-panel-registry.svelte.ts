@@ -208,6 +208,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	reconcile(visible: readonly ConversationPanelDescriptor[]): void {
+		// Protects the whole incoming set before any panel hydrates or transfers its transcript.
+		this.options.cache.setVisibleChatIds(visible.map((item) => item.chatId));
 		const desired = new Map(visible.map((item) => [item.surfaceId, item]));
 		const admittedChatIds = new Set<string>();
 		const retainInactive = this.options.retainInactiveWindows?.() ?? false;
@@ -608,6 +610,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		this.#deleteStoredSurfaceStateForChat(chatId);
 		this.options.cache.remove(chatId);
+		this.options.cache.setVisibleChatIds([...this.#panels.values()].map((panel) => panel.chatId));
 		this.options.overlays.remove(chatId);
 		this.options.lifecycle.remove(chatId);
 	}
@@ -626,6 +629,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.#pendingSurfaceTransfers.clear();
 		this.#snapshotLoads.clear();
 		this.#visible = [];
+		this.options.cache.setVisibleChatIds([]);
 	}
 
 	#applyOverlayMutation(chatId: string, mutation: ConversationTranscriptOverlayMutation): void {

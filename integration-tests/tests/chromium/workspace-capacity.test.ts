@@ -101,12 +101,12 @@ test('opens generic commands as tabs when narrow geometry blocks new windows', a
   );
 }, 60_000);
 
-function capacityLayout(count: number, chatIds: string[]) {
+function capacityLayout(count: number, rows: number, chatIds: string[]) {
   let snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
     { type: 'close-window', windowId: 'window-files' },
     { type: 'set-window-chat', windowId: 'window-main', chatId: chatIds[0]! },
   ]);
-  const columns = count / 2;
+  const columns = count / rows;
   const columnIds: WorkspaceWindowId[] = ['window-main'];
   for (let index = 1; index < columns; index++) {
     const windowId: WorkspaceWindowId = `window-column-${index}`;
@@ -127,17 +127,24 @@ function capacityLayout(count: number, chatIds: string[]) {
     ]);
     columnIds.push(windowId);
   }
-  for (const [index, windowId] of columnIds.entries()) {
-    snapshot = reduceWorkspaceLayout(snapshot, [
-      {
-        type: 'open-chat-in-new-window',
-        chatId: `capacity-placeholder-row-${index}`,
-        targetWindowId: windowId,
-        edge: 'bottom',
-        newWindowId: `window-row-${index}`,
-        partitionId: `partition-row-${index}`,
-      },
-    ]);
+  for (const [column, windowId] of columnIds.entries()) {
+    let targetWindowId = windowId;
+    for (let row = 1; row < rows; row++) {
+      const newWindowId: WorkspaceWindowId = `window-row-${column}-${row}`;
+      const partitionId = `partition-row-${column}-${row}` as const;
+      snapshot = reduceWorkspaceLayout(snapshot, [
+        {
+          type: 'open-chat-in-new-window',
+          chatId: `capacity-placeholder-${newWindowId}`,
+          targetWindowId,
+          edge: 'bottom',
+          newWindowId,
+          partitionId,
+        },
+        { type: 'set-partition-ratio', partitionId, ratio: 1 / (rows - row + 1) },
+      ]);
+      targetWindowId = newWindowId;
+    }
   }
   const windows = collectWindowNodes(snapshot.desktopRoot);
   for (const [index, window] of windows.entries()) {
@@ -162,7 +169,7 @@ function capacityLayout(count: number, chatIds: string[]) {
       ]);
     }
   }
-  // The final window is created through the UI, exercising real admission above four.
+  // The final window exercises real split admission rather than restored topology.
   snapshot = reduceWorkspaceLayout(snapshot, [
     { type: 'close-window', windowId: windows.at(-1)!.id },
   ]);
@@ -172,7 +179,7 @@ function capacityLayout(count: number, chatIds: string[]) {
   };
 }
 
-for (const count of [4, 6, 8]) {
+for (const [count, rows] of [[4, 2], [6, 2], [8, 2], [12, 2], [16, 2], [25, 5]] as const) {
   test(`retains and exercises ${count} populated workspace windows`, async () => {
     await withChromiumFixture(
       `workspace-capacity-${count}`,
@@ -210,13 +217,15 @@ for (const count of [4, 6, 8]) {
             if (output.includes('capacity-terminal-ready\r\n')) terminalReady();
           }),
         );
-        await page.setViewportSize({ width: 2560, height: 1440 });
+        const viewport = { width: count <= 12 ? 2560 : 3840, height: rows === 5 ? 2160 : 1440 };
+        await page.setViewportSize(viewport);
         markPhase('populating independent conversations');
+        const turnsPerChat = 24;
         const chatIds: string[] = [];
         for (let chatIndex = 0; chatIndex < count - 3; chatIndex++) {
           const chatId = integration.newChatId();
           chatIds.push(chatId);
-          for (let turn = 0; turn < 24; turn++) {
+          for (let turn = 0; turn < turnsPerChat; turn++) {
             const content =
               `capacity-${chatIndex}-${turn}\n` +
               Array.from(
@@ -240,7 +249,7 @@ for (const count of [4, 6, 8]) {
             await integration.client.waitForTurnTerminal(chatId, accepted.turnId);
           }
         }
-        const { persisted, anchor } = capacityLayout(count, chatIds);
+        const { persisted, anchor } = capacityLayout(count, rows, chatIds);
         await page.addInitScript((layout) => {
           if (!localStorage.getItem('capacity-seeded')) {
             localStorage.setItem('workspace_layout_v2', JSON.stringify(layout));
@@ -251,6 +260,52 @@ for (const count of [4, 6, 8]) {
           waitUntil: 'domcontentloaded',
         });
         await page.locator('[data-chat-scroll-viewport]').first().waitFor();
+        await page.waitForFunction(
+          (expected) =>
+            document.querySelectorAll('[data-workspace-window-id]').length === expected,
+          count - 1,
+        );
+        markPhase('resizing and restoring the populated layout on the same host');
+        const rowDivider = page.locator('[role="separator"][aria-orientation="horizontal"]').first();
+        const initialRatio = await rowDivider.getAttribute('aria-valuenow');
+        await rowDivider.press('ArrowDown');
+        const resizedRatio = await rowDivider.getAttribute('aria-valuenow');
+        expect(resizedRatio).not.toBe(initialRatio);
+        const placements = await page
+          .locator('[data-workspace-window-id]')
+          .evaluateAll((windows) =>
+            windows.map((element) => ({
+              id: element.getAttribute('data-workspace-window-id'),
+              activeSurface: element.getAttribute('data-workspace-window-active-surface'),
+            })),
+          );
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForFunction((expected) => {
+          const windows = document.querySelectorAll('[data-workspace-window-id]');
+          return (
+            windows.length === expected.length &&
+            expected.every(({ id, activeSurface }, index) => {
+              const element = windows[index]!;
+              return (
+                element.getAttribute('data-workspace-window-id') === id &&
+                element.getAttribute('data-workspace-window-active-surface') === activeSurface
+              );
+            })
+          );
+        }, placements);
+        await page.waitForFunction(
+          (ratio) => document.querySelector('[role="separator"][aria-orientation="horizontal"]')
+            ?.getAttribute('aria-valuenow') === ratio,
+          resizedRatio,
+        );
+        await page.waitForFunction(
+          (expected) => document.querySelectorAll('[data-chat-scroll-viewport]').length === expected,
+          chatIds.length,
+        );
+        for (const [index, chatId] of chatIds.entries()) {
+          await page.locator(`[data-conversation-panel-chat-id="${chatId}"]`)
+            .getByText(`echo:capacity-${index}-${turnsPerChat - 1}`, { exact: false }).waitFor();
+        }
         await page
           .locator(`[data-workspace-window-titlebar="${anchor}"]`)
           .click({ position: { x: 20, y: 3 } });
@@ -276,7 +331,7 @@ for (const count of [4, 6, 8]) {
             const { width, height } = element.getBoundingClientRect();
             return { width, height };
           });
-        expect(hostSize).toEqual({ width: 2240, height: 1440 });
+        expect(hostSize).toEqual({ width: viewport.width - 320, height: viewport.height });
         const dimensions = await page
           .locator('[data-workspace-window-id]')
           .evaluateAll((windows) =>
@@ -373,7 +428,7 @@ for (const count of [4, 6, 8]) {
         expect(await page.locator('textarea[placeholder="Reply..."]').inputValue()).toBe(
           'capacity draft retained',
         );
-        await page.setViewportSize({ width: 2560, height: 1440 });
+        await page.setViewportSize(viewport);
         await page.waitForFunction(() => {
           const raw = localStorage.getItem('workspace_layout_v2');
           return raw !== null && JSON.parse(raw).root.type === 'window';
