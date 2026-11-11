@@ -37,6 +37,23 @@ function contents(messages: TranscriptMessage[]): string[] {
 }
 
 describe('ChatTranscriptCache', () => {
+	it('skips duplicate persistence but retains hidden-row frontier advances', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const persist = vi.spyOn(storage, 'persist');
+		const cache = new ChatTranscriptCache({ storage, limit: 100 });
+		const messages = [entry(1, 'synthetic')];
+		cache.replaceFromPage('chat', page('view', messages));
+		cache.flush();
+		persist.mockClear();
+		cache.applyMessages('chat', 'view', { firstOrdinal: 1, lastOrdinal: 1, messages });
+		cache.flush();
+		expect(persist).not.toHaveBeenCalled();
+		cache.applyMessages('chat', 'view', { firstOrdinal: 2, lastOrdinal: 3, messages: [] });
+		cache.flush();
+		expect(persist).toHaveBeenCalledOnce();
+		expect(storage.restore('chat')?.lastOrdinal).toBe(3);
+	});
+
 	it('retains a resumable recent tail from a wide interval through hydration', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const cache = new ChatTranscriptCache({ limit: 50, storage });

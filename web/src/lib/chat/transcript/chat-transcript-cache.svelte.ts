@@ -344,6 +344,10 @@ export class ChatTranscriptCache {
 				receivedOrdinal: applied.receivedOrdinal ?? append.firstOrdinal,
 			};
 		}
+		if (!applied.changed && applied.lastOrdinal === entry.lastOrdinal && !entry.stale) {
+			this.#lastAccessedAt.set(chatId, nowIso());
+			return { status: 'applied', changed: false, lastOrdinal: entry.lastOrdinal };
+		}
 		const windowed = applied.messages.slice(-this.#limit);
 		const next: ChatTranscriptSnapshot = {
 			...entry,
