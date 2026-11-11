@@ -6,15 +6,6 @@ import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { PinnedInsertPosition } from '$shared/settings';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
-/** Comparator ordering chats newest-first by activity, then creation time. */
-export function compareChatsByRecencyDesc(a: ChatSessionRecord, b: ChatSessionRecord): number {
-	const aIsDraft = a.status === 'draft';
-	const bIsDraft = b.status === 'draft';
-	// Local drafts have no server timestamps but represent the newest user activity.
-	if (aIsDraft !== bIsDraft) return aIsDraft ? -1 : 1;
-	return chatActivityTimeMs(b) - chatActivityTimeMs(a);
-}
-
 /** Returns a new array of chats ordered newest-first. */
 export function sortChatsByRecencyDesc(chats: ChatSessionRecord[]): ChatSessionRecord[] {
 	return withRecency(chats)
@@ -37,6 +28,7 @@ function withRecency(chats: ChatSessionRecord[]): ChatRecency[] {
 }
 
 function compareRecency(left: ChatRecency, right: ChatRecency): number {
+	// Local drafts have no server timestamps but represent the newest user activity.
 	return Number(right.draft) - Number(left.draft) || right.time - left.time;
 }
 
