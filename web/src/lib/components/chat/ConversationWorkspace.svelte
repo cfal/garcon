@@ -207,8 +207,11 @@
 	setAgentState(agentState);
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const hasSubagentEvents = $derived(
+		chatState.entries.some(({ message }) => message.type === 'codex-subagent-tool-use'),
+	);
 	const subagentModel = $derived(
-		buildSubagentManagementModel(chatState.displayMessages, {
+		buildSubagentManagementModel(hasSubagentEvents ? chatState.displayMessages : [], {
 			rootTitle: sessions.selectedChat?.title || 'Root',
 			rootModel: sessions.selectedChat?.model ?? agentState.model,
 			rootStatus: selectedIsProcessing ? 'running' : 'idle',

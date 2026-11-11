@@ -614,6 +614,12 @@ describe('buildConversationFeedRenderItems', () => {
 });
 
 describe('visiblePendingPermissionRequests', () => {
+	it('does not inspect rows when there are no pending permissions', () => {
+		const unreadable: ReturnType<typeof rows> = [];
+		Object.defineProperty(unreadable, Symbol.iterator, { value() { throw new Error('Unexpected scan'); } });
+		expect(visiblePendingPermissionRequests(unreadable, [])).toEqual([]);
+	});
+
 	it('returns pending requests without a visible transcript row', () => {
 		const pending = [pendingPermission('perm-1'), pendingPermission('perm-2')];
 		const visibleRows = rows([

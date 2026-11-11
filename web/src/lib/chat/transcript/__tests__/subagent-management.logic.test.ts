@@ -11,6 +11,16 @@ import { buildSubagentManagementModel } from '$lib/chat/transcript/subagent-mana
 const TS = '2024-01-01T00:00:00Z';
 
 describe('buildSubagentManagementModel', () => {
+	it.each([false, true])('does not fingerprint prompts without legacy correlation (subagent=%s)', (withSubagent) => {
+		const prompt = new UserMessage(TS, 'synthetic');
+		Object.defineProperty(prompt, 'content', { get() { throw new Error('Unexpected fingerprint'); } });
+		const messages: ChatMessage[] = [prompt];
+		if (withSubagent) messages.push(new CodexSubagentToolUseMessage(TS, 'spawn', 'spawn_agent', { taskName: 'synthetic' }));
+		const model = buildSubagentManagementModel(messages, { rootStatus: 'running' });
+		expect(model.subagents).toHaveLength(withSubagent ? 1 : 0);
+		expect(model.entries[0].status).toBe('running');
+	});
+
 	it('returns only the root entry when no subagents are present', () => {
 		const model = buildSubagentManagementModel([], {
 			rootTitle: 'Main chat',

@@ -53,13 +53,6 @@ export function buildSubagentManagementModel(
 	messages: ChatMessage[],
 	options: BuildSubagentManagementOptions = {},
 ): SubagentManagementModel {
-	const resultsByToolId = new Map<string, ToolResultMessage>();
-	for (const message of messages) {
-		if (message instanceof ToolResultMessage) {
-			resultsByToolId.set(message.toolId, message);
-		}
-	}
-
 	const rootStatus = options.rootStatus ?? 'idle';
 	const rootEntry: SubagentManagementEntry = {
 		id: 'root',
@@ -70,12 +63,21 @@ export function buildSubagentManagementModel(
 		statusLabel: statusLabelFor(rootStatus),
 	};
 
+	if (!messages.some((message) => message instanceof CodexSubagentToolUseMessage)) {
+		return { entries: [rootEntry], subagents: [] };
+	}
+	const resultsByToolId = new Map<string, ToolResultMessage>();
+	for (const message of messages) {
+		if (message instanceof ToolResultMessage) resultsByToolId.set(message.toolId, message);
+	}
+
 	const orderedSubagents: SubagentManagementEntry[] = [];
 	const subagentsByKey = new Map<string, SubagentManagementEntry>();
 	const aliasToKey = new Map<string, string>();
 	const reducerMetadata = new Map<SubagentManagementEntry, ReducerEntryMetadata>();
 	const knownAliases = collectKnownAliases(messages, resultsByToolId);
-	const userSourceFingerprints = new Set(
+	let fingerprints: Set<string> | null = null;
+	const userSourceFingerprints = () => fingerprints ??= new Set(
 		messages
 			.filter((message): message is UserMessage => message instanceof UserMessage)
 			.map((message) => codexSubagentSourceFingerprint(message.content)),
@@ -163,13 +165,13 @@ function isRejectedTextLifecycle(
 	action: CodexSubagentAction,
 	details: CodexSubagentDetails,
 	knownAliases: Set<string>,
-	userSourceFingerprints: Set<string>,
+	userSourceFingerprints: () => ReadonlySet<string>,
 ): boolean {
 	if (action !== 'agent_status' || details.lifecycleSource === 'structured') return false;
 	if (
 		details.lifecycleSource === 'legacy'
 		&& details.sourceFingerprint
-		&& userSourceFingerprints.has(details.sourceFingerprint)
+		&& userSourceFingerprints().has(details.sourceFingerprint)
 	) return true;
 	return !details.threadId
 		&& !aliasesFor(details).some((alias) => knownAliases.has(normalizeAlias(alias)));

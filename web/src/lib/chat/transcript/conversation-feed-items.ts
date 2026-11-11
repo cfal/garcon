@@ -289,6 +289,7 @@ export function visiblePendingPermissionRequests(
 	rows: ChatDisplayRow[],
 	pendingPermissionRequests: readonly PendingPermissionRequest[],
 ): PendingPermissionRequest[] {
+	if (pendingPermissionRequests.length === 0) return [];
 	const renderedPermissionOccurrences = new Set<string>();
 	const renderedExitPlanOccurrences = new Set<string>();
 	const terminalPermissionOccurrences = new Set<string>();
