@@ -740,6 +740,7 @@ export class WorkspacePresentationController {
 		resolveTarget?: () => string | null,
 	): Promise<boolean> {
 		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];
+		let removedSurfaceIds: string[] = [];
 		let presentationGeneration: number | null = null;
 		let presentationFrom: PresentationMode | null = null;
 		let presentationTo: PresentationMode | null = null;
@@ -747,6 +748,7 @@ export class WorkspacePresentationController {
 			mutations,
 			{
 				beforePublish: (next, base) => {
+					removedSurfaceIds = Object.keys(base.surfaces).filter((id) => !next.surfaces[id]);
 					presentationTo = options.presentationMode ?? this.#presentationMode;
 					try {
 						if (options.presentationMode) {
@@ -779,6 +781,7 @@ export class WorkspacePresentationController {
 					}
 				},
 				afterPublish: (next) => {
+					for (const surfaceId of removedSurfaceIds) this.#frames.release(surfaceId);
 					const presentationTarget = resolveTarget?.() ?? null;
 					if (presentationTarget && presentationTo) {
 						// Focus must follow the new bindings before reactive selection observes them.
