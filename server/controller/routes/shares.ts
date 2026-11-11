@@ -3,6 +3,11 @@
 
 import { markRouteNoAuth, markRouteResponseHeaders } from '../lib/http-route.js';
 import { withJsonBody } from '../lib/json-route.js';
+import {
+  createRateLimiter,
+  type RateLimiter,
+  type RequestIpServer,
+} from '../lib/rate-limit.js';
 import type { IShareStore } from '../chats/shares/store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type {
@@ -73,6 +78,19 @@ const PUBLIC_SHARE_HEADERS: Readonly<Record<string, string>> = {
   'X-Robots-Tag': 'noindex, nofollow, noarchive',
   'Referrer-Policy': 'no-referrer',
 };
+
+// Bounds unauthenticated token probing per client across every public share route, so a
+// prober cannot sidestep the limit by switching to the page or plain-text variant. A reader
+// fetches 200 messages per request, so scrolling a long transcript stays well under this budget.
+export const SHARED_CHAT_RATE_LIMIT_WINDOW_MS = 60_000;
+export const SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS = 60;
+// Rejected attempts extend the cooldown, so only a full quiet window guarantees admission.
+const SHARED_CHAT_RETRY_AFTER_SECONDS = SHARED_CHAT_RATE_LIMIT_WINDOW_MS / 1_000;
+
+const defaultSharedChatLimiter = createRateLimiter({
+  windowMs: SHARED_CHAT_RATE_LIMIT_WINDOW_MS,
+  maxRequests: SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS,
+});
 
 function htmlResponse(html: string, llmPath?: string): Response {
   const headers: Record<string, string> = {
@@ -237,7 +255,18 @@ export default function createShareRoutes(
   settings: SettingsDep,
   metadata: MetadataDep,
   transcripts: ShareTranscriptSnapshotPort,
+  options: { sharedChatLimiter?: Pick<RateLimiter, 'check'> } = {},
 ): RouteMap {
+  const sharedChatLimiter = options.sharedChatLimiter ?? defaultSharedChatLimiter;
+
+  function rateLimited(request: Request, server: unknown): Response | null {
+    const limited = sharedChatLimiter.check(request, server as RequestIpServer | undefined);
+    if (!limited) return null;
+    limited.headers.set('Retry-After', String(SHARED_CHAT_RETRY_AFTER_SECONDS));
+    limited.headers.set('Cache-Control', NO_STORE);
+    return limited;
+  }
+
   // POST /api/v1/chats/share - Creates or returns existing share.
   async function postShareChat(
     body: Record<string, unknown>,
@@ -331,14 +360,16 @@ export default function createShareRoutes(
 
   // GET /api/v1/shared - Public endpoint, returns snapshot by token.
   const getSharedChat: RouteHandler = async function getSharedChat(
-    _request: Request,
+    request: Request,
     url: URL,
+    server,
   ): Promise<Response> {
-    const token = url.searchParams.get('token');
-    if (!token) {
-      return publicJsonError('token query parameter is required', 400);
-    }
+    const limited = rateLimited(request, server);
+    if (limited) return limited;
 
+    // A missing token takes the same lookup as an unknown one, so neither its response
+    // nor its path through the store distinguishes it.
+    const token = url.searchParams.get('token') ?? '';
     let page: SharedChatMessagePage | undefined;
     const shared = await shareStore.getMessages(token, header => {
       const totalMessages = header.messageCount;
@@ -368,14 +399,15 @@ export default function createShareRoutes(
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
   const getLlmTranscript: RouteHandler = async function getLlmTranscript(
-    _request: Request,
+    request: Request,
     url: URL,
+    server,
   ): Promise<Response> {
-    const token = extractLlmTokenFromPath(url.pathname);
-    if (!token) {
-      return publicJsonError('Share token is required', 400);
-    }
+    const limited = rateLimited(request, server);
+    if (limited) return limited;
 
+    // An undecodable token takes the same lookup as an unknown one.
+    const token = extractLlmTokenFromPath(url.pathname) ?? '';
     const textPath = await shareStore.getTextPath(token);
     if (!textPath) {
       return publicJsonError('Share not found', 404);
@@ -389,7 +421,11 @@ export default function createShareRoutes(
   const getSharedChatPage: RouteHandler = async function getSharedChatPage(
     request: Request,
     url: URL,
+    server,
   ): Promise<Response> {
+    const limited = rateLimited(request, server);
+    if (limited) return limited;
+
     const shell = await loadSpaShell();
     const token = extractShareTokenFromPath(url.pathname);
     const snapshot = token ? await shareStore.getHeader(token) : null;
