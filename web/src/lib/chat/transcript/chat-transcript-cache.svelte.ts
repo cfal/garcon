@@ -46,7 +46,7 @@ export interface ChatTranscriptSnapshot {
 
 export interface ChatTranscriptCacheOptions {
 	limit: number;
-	maxEntries?: number;
+	maxHiddenEntries?: number;
 	storage?: LocalChatTranscriptStorage;
 	persistenceDelayMs?: number;
 	setTimeoutFn?: SetTimeoutFn;
@@ -160,14 +160,15 @@ export class ChatTranscriptCache {
 	#entries = new SvelteMap<string, ChatTranscriptSnapshot>();
 	#snapshotReads = new Set<{ chatId: string; current: boolean }>();
 	#lastAccessedAt = new Map<string, string>();
+	#visibleChatIds = new Set<string>();
 	#storage: LocalChatTranscriptStorage;
 	#limit: number;
-	#maxEntries: number;
+	#maxHiddenEntries: number;
 	#persistence: ChatTranscriptPersistenceQueue;
 
 	constructor(options: ChatTranscriptCacheOptions) {
 		this.#limit = options.limit;
-		this.#maxEntries = options.maxEntries ?? CHAT_TRANSCRIPT_CACHE_LIMIT;
+		this.#maxHiddenEntries = options.maxHiddenEntries ?? CHAT_TRANSCRIPT_CACHE_LIMIT;
 		this.#storage = options.storage ?? new LocalChatTranscriptStorage();
 		this.#persistence = new ChatTranscriptPersistenceQueue({
 			delayMs: options.persistenceDelayMs ?? 800,
@@ -204,6 +205,11 @@ export class ChatTranscriptCache {
 
 	markAccessed(chatId: string): void {
 		if (this.#entries.has(chatId)) this.#lastAccessedAt.set(chatId, nowIso());
+	}
+
+	setVisibleChatIds(chatIds: readonly string[]): void {
+		this.#visibleChatIds = new Set(chatIds);
+		this.#prune();
 	}
 
 	readAppliedCursor(chatId: string): ChatTranscriptAppliedCursor | null {
@@ -458,13 +464,16 @@ export class ChatTranscriptCache {
 	}
 
 	#prune(): void {
-		if (this.#entries.size <= this.#maxEntries) return;
-		const sorted = [...this.#entries.values()].sort((left, right) =>
+		const hidden = [...this.#entries.values()].filter(
+			(entry) => !this.#visibleChatIds.has(entry.chatId),
+		);
+		if (hidden.length <= this.#maxHiddenEntries) return;
+		hidden.sort((left, right) =>
 			(this.#lastAccessedAt.get(left.chatId) ?? '').localeCompare(
 				this.#lastAccessedAt.get(right.chatId) ?? '',
 			),
 		);
-		for (const entry of sorted.slice(0, this.#entries.size - this.#maxEntries)) {
+		for (const entry of hidden.slice(0, hidden.length - this.#maxHiddenEntries)) {
 			this.#entries.delete(entry.chatId);
 			this.#lastAccessedAt.delete(entry.chatId);
 		}

@@ -1861,6 +1861,63 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
 	});
 
+	it('replays hidden history when 25 newer visible chats fill the cursor shortlist', async () => {
+		vi.useFakeTimers();
+		localStorage.clear();
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const visibleChatIds = Array.from({ length: 25 }, (_, index) => `visible-${index}`);
+		cache.setVisibleChatIds(visibleChatIds);
+		try {
+			vi.setSystemTime(new Date(TS));
+			const initial = [{ ordinal: 1, message: new AssistantMessage(TS, 'initial') }];
+			cache.replace('hidden', 'view', initial, 1, null);
+			vi.setSystemTime(new Date('2024-01-01T00:00:01.000Z'));
+			for (const chatId of visibleChatIds) {
+				cache.replace(chatId, 'view', initial, 1, null);
+			}
+			expect(cache.listCursors(20).map(({ chatId }) => chatId)).not.toContain('hidden');
+			const deps = createReconnectDeps({
+				selectedChatId: visibleChatIds[0],
+				subscribeResponses: Object.fromEntries([
+					...visibleChatIds.map((chatId) => [chatId, deltaResponse(chatId, 'view', [], 1)]),
+					['hidden', deltaResponse('hidden', 'view', [messageJson(2, 'replayed')])],
+				]),
+			});
+			deps.panels.visibleChatIds.mockReturnValue(visibleChatIds);
+			deps.panels.panelsForChat.mockImplementation((chatId) =>
+				visibleChatIds.includes(chatId) ? [{}] : [],
+			);
+			deps.panels.transcriptCache.readAppliedCursor.mockImplementation((chatId) =>
+				cache.readAppliedCursor(chatId),
+			);
+			deps.panels.transcriptCache.markValidated.mockImplementation((chatId: string) =>
+				cache.markValidated(chatId),
+			);
+			deps.panels.markChatStale.mockImplementation((chatId) => cache.markStale(chatId));
+			deps.getBackgroundCursors.mockImplementation(() => cache.listCursors(20));
+			const applyBackground: NonNullable<ChatReconnectCoordinatorOptions['onBackgroundMessages']> =
+				(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
+					cache.applyMessages(chatId, transcriptViewId, { messages, firstOrdinal, lastOrdinal })
+						.status === 'applied';
+			deps.onBackgroundMessages.mockImplementation(applyBackground);
+
+			await reconnectAfterFirstConnection(deps);
+
+			expect(deps.ws.sendRequest).toHaveBeenCalledWith({
+				type: 'chat-subscribe',
+				chatId: 'hidden',
+				transcriptViewId: 'view',
+				afterOrdinal: 1,
+			});
+			expect(cache.get('hidden')?.messages.map(({ ordinal }) => ordinal)).toEqual([1, 2]);
+			expect(deps.markBackgroundStale).not.toHaveBeenCalled();
+		} finally {
+			cache.flush();
+			localStorage.clear();
+			vi.useRealTimers();
+		}
+	});
+
 	it('resumes a bounded set of background cached cursors', async () => {
 		const backgroundCursors = Array.from({ length: 25 }, (_, index) => ({
 			chatId: `chat-${index + 2}`,

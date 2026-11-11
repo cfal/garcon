@@ -6,7 +6,7 @@ import type {
 	WorkspaceWindowId,
 	WorkspaceWindowNode,
 } from '../surface-types';
-import { chatViewSurfaceId } from '../surface-types';
+import { WORKSPACE_WINDOW_RESOURCE_CEILING, chatViewSurfaceId } from '../surface-types';
 import { resolveWorkspaceWindowTabActions } from '../workspace-window-tab-actions';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 
@@ -163,10 +163,7 @@ describe('workspace window tab actions', () => {
 		const snapshot = snapshotWithWindows(
 			[
 				source,
-				workspaceWindow('window-two', ['terminal:two']),
-				workspaceWindow('window-three', ['terminal:three']),
-				workspaceWindow('window-four', ['terminal:four']),
-				...Array.from({ length: 4 }, (_, index) =>
+				...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 1 }, (_, index) =>
 					workspaceWindow(`window-extra-${index}`, [`terminal:extra-${index}`]),
 				),
 			],
@@ -175,7 +172,7 @@ describe('workspace window tab actions', () => {
 
 		const actions = resolveActions(snapshot, source, chatViewSurfaceId(source.id));
 
-		expect(actions.otherWindows).toHaveLength(7);
+		expect(actions.otherWindows).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING - 1);
 		expect(
 			Object.values(actions.newWindowEdges).every(
 				(result) => !result?.allowed && result?.reason === 'resource-ceiling',

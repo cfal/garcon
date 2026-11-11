@@ -17,7 +17,7 @@ import {
 	resolveWorkspaceSplitAdmission,
 	workspaceWindowsFitHost,
 } from '../window-geometry-policy';
-import { balanceWindowRow, computeWindowRects } from '../window-tree';
+import { balanceWindowRow, collectWindowNodes, computeWindowRects } from '../window-tree';
 
 function workspaceWindow(id: WorkspaceWindowId, surfaceIds: readonly string[] = [`chat:${id}`]) {
 	return {
@@ -70,6 +70,35 @@ function snapshot(root: DesktopWorkspaceNode): WorkspaceLayoutSnapshot {
 }
 
 describe('workspace split admission', () => {
+	it('admits or blocks splits in a 16-window grid by available space', () => {
+		let nextId = 0;
+		function grid(depth: number): DesktopWorkspaceNode {
+			const id = ++nextId;
+			if (depth === 0) return workspaceWindow(`window-${id}`);
+			return partition(
+				`grid-${id}`,
+				depth % 2 === 0 ? 'horizontal' : 'vertical',
+				0.5,
+				grid(depth - 1),
+				grid(depth - 1),
+			);
+		}
+		const layout = snapshot(grid(4));
+		const windows = collectWindowNodes(layout.desktopRoot);
+		expect(windows).toHaveLength(16);
+		for (const window of windows) {
+			for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
+				const request = { snapshot: layout, targetWindowId: window.id, edge };
+				expect(
+					resolveWorkspaceSplitAdmission({ ...request, hostSize: { width: 3200, height: 1920 } }),
+				).toEqual({ allowed: true });
+				expect(
+					resolveWorkspaceSplitAdmission({ ...request, hostSize: { width: 1600, height: 960 } }),
+				).toEqual({ allowed: false, reason: 'too-small' });
+			}
+		}
+	});
+
 	it.each([
 		['left', 719, 600, false],
 		['left', 720, 240, true],
