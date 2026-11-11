@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import type { ChatCanvas } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
@@ -63,12 +64,13 @@ test('fits a board after it loads while its view is hidden', async () => {
       await pending;
       await page.getByRole('tab').first().click();
       release();
-      await page.locator('.svelte-flow__node[data-id="box"]').waitFor({ state: 'attached' });
-      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await browserExpect(page.getByRole('button', { name: 'Add box', exact: true, includeHidden: true })).toBeEnabled();
+      await browserExpect(page.locator('.svelte-flow')).toHaveCount(0);
       await page.getByRole('tab', { name: 'Canvas', exact: true }).click();
-      await page.locator('.svelte-flow__node[data-id="box"]').waitFor({ state: 'visible' });
-      const zoom = await page.locator('.svelte-flow__viewport').evaluate((viewport) => new DOMMatrix(getComputedStyle(viewport).transform).a);
-      expect(zoom).toBeCloseTo(1, 2);
+      await browserExpect(page.locator('.svelte-flow__node[data-id="box"]')).toBeInViewport();
+      await browserExpect.poll(() => page.locator('.svelte-flow__viewport').evaluate(
+        (viewport) => new DOMMatrix(getComputedStyle(viewport).transform).a,
+      )).toBeCloseTo(1, 2);
     } finally { release(); }
   });
 }, 120_000);
