@@ -20,6 +20,28 @@ describe('CanvasDocumentState', () => {
 		expect(document.layout.chats('box-b')).toHaveLength(0);
 	});
 
+	it('shares unchanged validated elements across history without retaining caller-owned objects', () => {
+		const document = new CanvasDocumentState(canvasContent(), () => {});
+		const before = document.content;
+		document.renameBox('box-a', 'Renamed');
+		expect(document.content.nodes.find((node) => node.id === 'box-a')).not.toBe(
+			before.nodes.find((node) => node.id === 'box-a'),
+		);
+		for (const node of before.nodes.filter((node) => node.id !== 'box-a'))
+			expect(document.content.nodes.find((entry) => entry.id === node.id)).toBe(node);
+		expect(document.content.connections[0]).toBe(before.connections[0]);
+		const input = structuredClone(document.content);
+		input.title = 'Changed';
+		document.edit(input);
+		input.nodes[0].position.x = 999;
+		expect(document.content.nodes[0].position.x).not.toBe(999);
+		document.undo();
+		document.undo();
+		expect(document.content).toBe(before);
+		expect(() => document.rename('')).toThrow();
+		expect(document.content).toBe(before);
+	});
+
 	it('records membership and geometry as single reversible edits', () => {
 		const changed = vi.fn();
 		const document = new CanvasDocumentState(canvasContent(), changed);

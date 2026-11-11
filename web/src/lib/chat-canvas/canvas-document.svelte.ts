@@ -4,6 +4,7 @@ import {
 	type CanvasConnection,
 	type CanvasPosition,
 } from '$shared/chat-canvas';
+import { shareCanvasContent } from './canvas-content.js';
 import {
 	finishNodeMove,
 	moveChat,
@@ -45,8 +46,8 @@ export class CanvasDocumentState {
 	}
 
 	edit(content: CanvasContent): void {
-		const next = parseCanvasContent(content);
-		if (JSON.stringify(next) === JSON.stringify(this.content)) return;
+		const next = shareCanvasContent(this.content, parseCanvasContent(content));
+		if (next === this.content) return;
 		this.#undo = [...this.#undo.slice(-(HISTORY_LIMIT - 1)), this.content];
 		this.#redo = [];
 		this.content = next;
