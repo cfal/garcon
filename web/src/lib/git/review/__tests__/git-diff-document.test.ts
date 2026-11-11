@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
 import { createGitPatchIndex } from '../git-patch-index.js';
+import { gitReviewBodyBytes } from '../git-review-body-budget.js';
 import {
 	commitFileToReviewFile,
 	GitDiffDocumentController,
@@ -1041,7 +1042,11 @@ describe('GitDiffDocumentController', () => {
 				project: '/project',
 				documentId: 'doc',
 				files: [file('a.ts'), file('b.ts'), file('c.ts')],
-				limits: { ...limits, maxLoadedRows: 100 },
+				limits: {
+					...limits,
+					maxLoadedRows: 100,
+					maxLoadedPatchBytes: 3 * gitReviewBodyBytes(body('a.ts')),
+				},
 				firstBodyCandidates: ['a.ts', 'b.ts', 'c.ts'],
 			},
 			{
@@ -1259,7 +1264,7 @@ describe('GitDiffDocumentController', () => {
 
 	it('bounds cached bodies across document changes', async () => {
 		const controller = new GitDiffDocumentController();
-		const boundedLimits = { ...limits, maxLoadedPatchBytes: 150 };
+		const boundedLimits = { ...limits, maxLoadedPatchBytes: gitReviewBodyBytes(body('a.ts')) };
 		const loadBodies = vi.fn(
 			async (snapshot: { documentId: string }, files: Array<{ path: string }>) => ({
 				status: 'ready' as const,
@@ -1289,8 +1294,10 @@ describe('GitDiffDocumentController', () => {
 
 		open('doc-a', 'a.ts');
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded'));
 		open('doc-b', 'b.ts');
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded'));
 		open('doc-a', 'a.ts');
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(3));
 	});

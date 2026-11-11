@@ -12,6 +12,14 @@ export interface GitReviewBodyBudgetDecision {
 	reason?: 'collection-too-many-rows' | 'collection-too-many-bytes';
 }
 
+export function gitReviewBodyBytes(body: GitReviewFileBody | undefined): number {
+	if (!body) return 0;
+	return (
+		Math.max(body.patchBytes, (body.patch?.length ?? 0) * 2) +
+		(body.patchIndex?.estimatedBytes ?? 0)
+	);
+}
+
 export function decideGitReviewBodyBudget(
 	body: GitReviewFileBody,
 	purpose: GitReviewBodyPurpose,
@@ -27,20 +35,21 @@ export function decideGitReviewBodyBudget(
 	);
 	let { loadedRows, loadedBytes } = loadedGitReviewBodyTotals(currentBodies, body.path);
 	const evictedPaths: string[] = [];
+	const bodyBytes = gitReviewBodyBytes(body);
 
 	if (
 		purpose === 'visible' &&
 		(loadedRows + body.renderedRowCount > limits.maxLoadedRows ||
-			loadedBytes + body.patchBytes > limits.maxLoadedPatchBytes)
+			loadedBytes + bodyBytes > limits.maxLoadedPatchBytes)
 	) {
 		for (const [path, candidate] of loaded) {
 			if (pinnedPaths.has(path)) continue;
 			evictedPaths.push(path);
 			loadedRows -= candidate.renderedRowCount;
-			loadedBytes -= candidate.patchBytes;
+			loadedBytes -= gitReviewBodyBytes(candidate);
 			if (
 				loadedRows + body.renderedRowCount <= limits.maxLoadedRows &&
-				loadedBytes + body.patchBytes <= limits.maxLoadedPatchBytes
+				loadedBytes + bodyBytes <= limits.maxLoadedPatchBytes
 			) {
 				break;
 			}
@@ -48,7 +57,7 @@ export function decideGitReviewBodyBudget(
 	}
 
 	const rowsExceeded = loadedRows + body.renderedRowCount > limits.maxLoadedRows;
-	const bytesExceeded = loadedBytes + body.patchBytes > limits.maxLoadedPatchBytes;
+	const bytesExceeded = loadedBytes + bodyBytes > limits.maxLoadedPatchBytes;
 	return {
 		accept: !rowsExceeded && !bytesExceeded,
 		evictedPaths,
@@ -71,7 +80,7 @@ function loadedGitReviewBodyTotals(
 	for (const [path, body] of Object.entries(currentBodies)) {
 		if (path === excludedPath || body.bodyState !== 'loaded') continue;
 		loadedRows += body.renderedRowCount;
-		loadedBytes += body.patchBytes;
+		loadedBytes += gitReviewBodyBytes(body);
 	}
 	return { loadedRows, loadedBytes };
 }

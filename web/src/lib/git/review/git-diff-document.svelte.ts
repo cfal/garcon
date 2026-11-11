@@ -27,6 +27,7 @@ import { buildGitReviewBodyCommentContext } from '$lib/git/review/git-review-com
 import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
 import {
 	decideGitReviewBodyBudget,
+	gitReviewBodyBytes,
 	type GitReviewBodyBudgetDecision,
 } from './git-review-body-budget.js';
 import {
@@ -542,7 +543,7 @@ export class GitDiffDocumentController {
 
 	private aggregateLimitMessage(decision: GitReviewBodyBudgetDecision): string {
 		return decision.reason === 'collection-too-many-bytes'
-			? `Stopped loading after ${decision.loadedBytes.toLocaleString()} patch bytes.`
+			? `Stopped loading after ${decision.loadedBytes.toLocaleString()} estimated body bytes.`
 			: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
 	}
 
@@ -658,10 +659,10 @@ export class GitDiffDocumentController {
 	private cacheBody(file: GitCommitFileSummary, body: GitReviewFileBody, byteLimit: number): void {
 		const key = this.cacheKey(file);
 		const existing = this.bodyCache.get(key);
-		if (existing) this.bodyCacheBytes -= existing.patchBytes;
+		if (existing) this.bodyCacheBytes -= gitReviewBodyBytes(existing);
 		this.bodyCache.delete(key);
 		this.bodyCache.set(key, body);
-		this.bodyCacheBytes += body.patchBytes;
+		this.bodyCacheBytes += gitReviewBodyBytes(body);
 		while (
 			(this.bodyCacheBytes > byteLimit || this.bodyCache.size > MAX_CACHED_FILE_BODIES) &&
 			this.bodyCache.size > 0
@@ -670,7 +671,7 @@ export class GitDiffDocumentController {
 			if (oldestKey === undefined) break;
 			const evicted = this.bodyCache.get(oldestKey);
 			this.bodyCache.delete(oldestKey);
-			this.bodyCacheBytes -= evicted?.patchBytes ?? 0;
+			this.bodyCacheBytes -= gitReviewBodyBytes(evicted);
 		}
 	}
 

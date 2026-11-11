@@ -99,6 +99,7 @@ class GrowingUint8 {
 export class GitPatchIndex {
 	readonly rowCount: number;
 	readonly hunkCount: number;
+	readonly estimatedBytes: number;
 
 	toData(): GitPatchIndexData {
 		return { ...this.data };
@@ -111,6 +112,11 @@ export class GitPatchIndex {
 		this.data = { ...data };
 		this.rowCount = data.rowKinds.length;
 		this.hunkCount = data.hunkHeaders.length;
+		const buffers = new Set(Object.values(data).map((array) => array.buffer));
+		// Reserves split rows up front so lazy split indexing cannot invalidate cache accounting.
+		this.estimatedBytes =
+			[...buffers].reduce((bytes, buffer) => bytes + buffer.byteLength, 0) +
+			this.rowCount * 2 * Uint32Array.BYTES_PER_ELEMENT;
 	}
 
 	rowAt(index: number): GitRenderedDiffRow {

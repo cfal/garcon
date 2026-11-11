@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
-import { decideGitReviewBodyBudget } from '$lib/git/review/git-review-body-budget.js';
+import {
+	decideGitReviewBodyBudget,
+	gitReviewBodyBytes,
+} from '$lib/git/review/git-review-body-budget.js';
+import { createGitPatchIndex, getGitSplitPatchIndex } from '../git-patch-index.js';
 
 const limits = {
 	maxSummaryFiles: 100,
@@ -31,6 +35,32 @@ function body(path: string, rows: number, bytes: number): GitReviewFileBody {
 }
 
 describe('Git review body budget', () => {
+	it('accounts for indexed short lines and reserves lazy split arrays once', () => {
+		const patch = '@@ -1,3 +1,3 @@\n a\n b\n c\n';
+		const index = createGitPatchIndex(patch);
+		const indexed = { ...body('small.ts', index.rowCount, patch.length), patch, patchIndex: index };
+		const arrayBytes = Object.values(index.toData()).reduce(
+			(total, array) => total + array.byteLength,
+			0,
+		);
+		const estimate = patch.length * 2 + arrayBytes + index.rowCount * 8;
+		expect(gitReviewBodyBytes(indexed)).toBe(estimate);
+		getGitSplitPatchIndex(index);
+		expect(gitReviewBodyBytes(indexed)).toBe(estimate);
+		expect(
+			decideGitReviewBodyBudget(indexed, 'visible', {}, new Set(), {
+				...limits,
+				maxLoadedPatchBytes: estimate - 1,
+			}),
+		).toMatchObject({ accept: false, reason: 'collection-too-many-bytes' });
+		expect(
+			decideGitReviewBodyBudget(indexed, 'visible', {}, new Set(), {
+				...limits,
+				maxLoadedPatchBytes: estimate,
+			}),
+		).toMatchObject({ accept: true });
+	});
+
 	it('lets a visible body replace speculative bodies', () => {
 		const current = {
 			'a.ts': body('a.ts', 6, 60),
