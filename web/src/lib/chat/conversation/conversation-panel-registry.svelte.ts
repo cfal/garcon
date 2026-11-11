@@ -353,6 +353,12 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return operation.promise;
 	}
 
+	invalidateChatSnapshot(chatId: string): void {
+		this.options.cache.invalidateSnapshotReads(chatId);
+		const pending = this.#snapshotLoads.get(chatId);
+		if (pending) pending.refreshRequired = true;
+	}
+
 	async #waitForChatSnapshot(chatId: string, signal: AbortSignal): Promise<void> {
 		signal.throwIfAborted();
 		let pending = this.#snapshotLoads.get(chatId);
@@ -381,10 +387,14 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const handoffs = new Map(this.panelsForChat(chatId).map(panel => [panel, panel.transcript.snapshotHandoffGuard()]));
 		let readOptions = options;
 		for (;;) {
-			if (this.options.loadTranscriptSnapshot) {
-				await this.options.loadTranscriptSnapshot(loader.transcript, chatId, readOptions);
-			} else {
-				await loader.transcript.loadMessages(chatId, readOptions);
+			try {
+				if (this.options.loadTranscriptSnapshot) {
+					await this.options.loadTranscriptSnapshot(loader.transcript, chatId, readOptions);
+				} else {
+					await loader.transcript.loadMessages(chatId, readOptions);
+				}
+			} catch (error) {
+				if (!isCurrent() || !this.#snapshotLoads.get(chatId)?.refreshRequired) throw error;
 			}
 			if (!isCurrent()) return false;
 			const pending = this.#snapshotLoads.get(chatId)!;

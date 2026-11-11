@@ -108,7 +108,6 @@ export type EventRouterChatStateStore = Pick<
 	markRenderedChatStale: (chatId: string) => void;
 	removeChatTranscript: (chatId: string) => void;
 	markChatTranscriptStale: (chatId: string) => void;
-	markChatTranscriptValidated: (chatId: string) => void;
 };
 
 export interface EventRouterLifecycleStore {
@@ -246,7 +245,6 @@ function buildDispatch(
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
-		markChatTranscriptValidated: stores.chatState.markChatTranscriptValidated,
 		notifyCompletion: stores.notifyCompletion,
 	};
 
@@ -321,7 +319,6 @@ function buildDispatch(
 		const selectedChatId = stores.sessions.selectedChat?.id ?? null;
 		const cursor = stores.chatState.getChatCursor(chatId);
 		if (cursor?.transcriptViewId === transcriptViewId) {
-			stores.chatState.markChatTranscriptValidated(chatId);
 			return;
 		}
 		if (stores.chatState.isRenderedChat(chatId)) {

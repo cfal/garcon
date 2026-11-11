@@ -1667,7 +1667,7 @@ describe('ConversationSessionController', () => {
 			minimumLimit: 0,
 			purpose: 'activation',
 		});
-		expect(markValidated).toHaveBeenCalledWith('chat-1');
+		expect(markValidated).not.toHaveBeenCalled();
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.scrollToBottom).not.toHaveBeenCalled();
 	});

@@ -185,7 +185,7 @@
 		panels: conversationPanels,
 		conversationUi,
 		sessions,
-		getBackgroundCursors: () => transcriptCache.listCursors(20),
+		getBackgroundCursors: (limit) => transcriptCache.listCursors(limit),
 		markBackgroundStale: (chatId) => conversationPanels.markChatStale(chatId),
 		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
 			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {

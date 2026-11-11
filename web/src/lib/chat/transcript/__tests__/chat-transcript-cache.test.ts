@@ -52,6 +52,64 @@ describe('ChatTranscriptCache', () => {
 		localStorage.clear();
 	});
 
+	it('invalidates persisted tails, evicted drafts, and snapshot reads outside the visible set', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 1, storage });
+		cache.replaceFromPage('disk', page('view', [entry(1, 'disk')]));
+		cache.flush();
+		cache.replaceFromPage('draft', page('view', [entry(1, 'draft')]));
+		cache.replaceFromPage('visible', page('view', [entry(1, 'visible')]));
+		const diskRead = cache.trackSnapshotRead('disk');
+		const coldRead = cache.trackSnapshotRead('cold');
+		const visibleRead = cache.trackSnapshotRead('visible');
+		cache.markStaleExcept(new Set(['visible']));
+		cache.flush();
+		expect(storage.restore('disk')?.stale).toBe(true);
+		expect(storage.restore('draft')).toBeNull();
+		expect(storage.restore('visible')?.stale).toBe(false);
+		expect(diskRead.isCurrent()).toBe(false);
+		expect(coldRead.isCurrent()).toBe(false);
+		expect(visibleRead.isCurrent()).toBe(true);
+		for (const read of [diskRead, coldRead, visibleRead]) read.release();
+	});
+
+	it('keeps stale tails stale through duplicate, empty, hidden, and contiguous appends', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 100, storage });
+		cache.replaceFromPage('chat', page('view', [entry(1, 'one')]));
+		cache.flush();
+		cache.markStale('chat');
+		for (const append of [
+			{ firstOrdinal: 1, lastOrdinal: 1, messages: [entry(1, 'one')] },
+			{ firstOrdinal: 2, lastOrdinal: 1, messages: [] },
+			{ firstOrdinal: 2, lastOrdinal: 2, messages: [] },
+			{ firstOrdinal: 3, lastOrdinal: 3, messages: [entry(3, 'three')] },
+		]) {
+			expect(cache.applyMessages('chat', 'view', append).status).toBe('applied');
+			expect(cache.get('chat')?.stale).toBe(true);
+			cache.flush();
+			expect(storage.restore('chat')).toMatchObject({ lastOrdinal: 1, stale: true });
+		}
+		cache.markValidated('chat');
+		cache.flush();
+		expect(storage.restore('chat')).toMatchObject({ lastOrdinal: 3, stale: false });
+	});
+
+	it('fences validation attempts on a later continuity failure', () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat', page('view', [entry(1, 'one')]));
+		const validation = cache.trackReplayValidation('chat');
+		const snapshot = cache.trackSnapshotRead('chat');
+		cache.markStale('chat');
+		expect(validation.isCurrent()).toBe(false);
+		expect(snapshot.isCurrent()).toBe(true);
+		cache.invalidateSnapshotReads('chat');
+		expect(snapshot.isCurrent()).toBe(false);
+		snapshot.release();
+		validation.release();
+		cache.flush();
+	});
+
 	it('applies contiguous messages in memory before persistence flush', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const cache = new ChatTranscriptCache({ limit: 100, storage, persistenceDelayMs: 1000 });
@@ -238,7 +296,9 @@ describe('ChatTranscriptCache', () => {
 		const cache = new ChatTranscriptCache({ limit: 100, storage });
 		cache.hydrate('chat-1');
 		cache.markStale('chat-1');
-		storage.markValidated('chat-1');
+		storage.persist('chat-1', [entry(1, 'persisted')], {
+			transcriptViewId: 'generation-1', nextBeforeOrdinal: null, lastOrdinal: 1,
+		});
 
 		expect(storage.listCursors()).toHaveLength(1);
 		expect(cache.listCursors()).toEqual([]);

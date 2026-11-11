@@ -415,7 +415,6 @@ export class ConversationSessionController {
 		} else {
 			await transcript.loadMessages(chatId, loadOptions);
 		}
-		transcript.transcriptCache.markValidated(chatId);
 		if (deps.sessions.selectedChatId !== chatId) return;
 
 		if (options.restoreBottom !== false) this.#requestBottomRestore(chatId);
