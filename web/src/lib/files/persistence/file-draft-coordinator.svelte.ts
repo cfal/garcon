@@ -236,7 +236,10 @@ export class FileDraftCoordinator {
 			if (record && !this.options.repository.durable)
 				throw new Error(m.file_recovery_storage_unavailable());
 			if (record) await this.options.repository.putDraft(record);
-			else await this.options.repository.deleteDraft(documentId);
+			else {
+				await this.options.repository.deleteDraft(documentId);
+				this.available = this.available.filter((entry) => entry.documentId !== documentId);
+			}
 			document.recoveryError = null;
 		} catch (error) {
 			const cause = new Error(errorMessage(error));

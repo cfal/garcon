@@ -140,6 +140,28 @@ describe('FileDraftCoordinator', () => {
 		coordinator.destroy();
 	});
 
+	it('retires a recovery summary only after its clean checkpoint deletion succeeds', async () => {
+		const { repository, coordinator } = harness();
+		try {
+			const value = document();
+			await coordinator.settle(value);
+			await coordinator.initialize();
+			const [summary] = coordinator.available;
+			vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('Storage blocked'));
+			value.content = value.baseline;
+			await coordinator.settle(value);
+			expect(value.recoveryError).toBe('Storage blocked');
+			expect(coordinator.available).toEqual([summary]);
+			expect((await coordinator.read(summary))?.content).toBe('changed');
+			await coordinator.settle(value);
+			expect(value.recoveryError).toBeNull();
+			expect(coordinator.available).toEqual([]);
+			expect(await repository.getDraft(summary.documentId)).toBeNull();
+		} finally {
+			coordinator.destroy();
+		}
+	});
+
 	it('uses one draft slot across close and reopen', async () => {
 		const { repository, coordinator } = harness();
 		coordinator.closeDocument(document());
