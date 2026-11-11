@@ -115,7 +115,7 @@ describe('mermaid-loader', () => {
 		expect(mermaid.render.mock.calls.map((call) => call[1])).toEqual(['first', 'shared']);
 	});
 
-	it('bounds SVG bytes and refreshes entry recency', async () => {
+	it('evicts the least recently used entry at the entry-count limit', async () => {
 		const { renderMermaid } = await import('../mermaid-loader');
 		for (let index = 0; index < 64; index++) await renderMermaid(`item-${index}`, 'standard-light');
 		await renderMermaid('item-0', 'standard-light');
@@ -124,10 +124,30 @@ describe('mermaid-loader', () => {
 		expect(mermaid.render).toHaveBeenCalledTimes(65);
 		await renderMermaid('item-1', 'standard-light');
 		expect(mermaid.render).toHaveBeenCalledTimes(66);
+	});
+
+	it('evicts by aggregate SVG bytes before reaching the entry-count limit', async () => {
+		const { renderMermaid } = await import('../mermaid-loader');
+		mermaid.render.mockResolvedValue({ svg: 'x'.repeat(750_000) });
+		await renderMermaid('first', 'standard-light');
+		await renderMermaid('second', 'standard-light');
+		await renderMermaid('first', 'standard-light');
+		await renderMermaid('third', 'standard-light');
+		await renderMermaid('first', 'standard-light');
+		await renderMermaid('third', 'standard-light');
+		expect(mermaid.render).toHaveBeenCalledTimes(3);
+		await renderMermaid('second', 'standard-light');
+		expect(mermaid.render).toHaveBeenCalledTimes(4);
+	});
+
+	it('returns oversized SVGs without retaining them or evicting useful entries', async () => {
+		const { renderMermaid } = await import('../mermaid-loader');
+		await renderMermaid('retained', 'standard-light');
 		mermaid.render.mockResolvedValue({ svg: 'x'.repeat(3 * 1024 * 1024) });
+		expect(await renderMermaid('oversized', 'standard-light')).toHaveLength(3 * 1024 * 1024);
 		await renderMermaid('oversized', 'standard-light');
-		await renderMermaid('oversized', 'standard-light');
-		expect(mermaid.render).toHaveBeenCalledTimes(68);
+		await expect(renderMermaid('retained', 'standard-light')).resolves.toBe('<svg></svg>');
+		expect(mermaid.render).toHaveBeenCalledTimes(3);
 	});
 
 	it.each([0, 1, 2, 3, 4, 5, 6, 7, 8])('accepts fresh demand %i microtasks after cancellation', async (turns) => {

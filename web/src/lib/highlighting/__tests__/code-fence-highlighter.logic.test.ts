@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { highlightCodeFence, MAX_HIGHLIGHT_SEGMENTS } from '../code-fence-highlighter';
 import type { CodeHighlightSegment } from '../code-highlight-types';
+import { loadCodeFenceLanguage } from '../codemirror-language-registry';
 
 function segmentText(segments: CodeHighlightSegment[]): string {
 	return segments.map((segment) => segment.text).join('');
@@ -41,6 +42,34 @@ describe('highlightCodeFence', () => {
 		abort.abort();
 		expect(await cancelled).toEqual([{ text: source, className: null }]);
 		expect((await highlightCodeFence(source, 'typescript')).some((segment) => segment.className)).toBe(true);
+	});
+
+	it('skips parsing abandoned demand and parses surviving aliases only once', async () => {
+		const loaded = await loadCodeFenceLanguage('javascript');
+		expect(loaded).not.toBeNull();
+		const parse = vi.spyOn(loaded!.language.parser, 'parse');
+		try {
+			const abandonedSource = 'const syntheticAbandonedParse = 137;';
+			const abandoned = new AbortController();
+			const cancelled = highlightCodeFence(abandonedSource, 'js', abandoned.signal);
+			abandoned.abort();
+			await expect(cancelled).resolves.toEqual([{ text: abandonedSource, className: null }]);
+			expect(parse).not.toHaveBeenCalled();
+			const source = 'const syntheticSharedParse = 139;';
+			const abort = new AbortController();
+			const cancelledPeer = highlightCodeFence(source, 'js', abort.signal);
+			const survivor = highlightCodeFence(source, 'javascript');
+			const alias = highlightCodeFence(source, 'js');
+			abort.abort();
+			await expect(cancelledPeer).resolves.toEqual([{ text: source, className: null }]);
+			const highlighted = await survivor;
+			expect(await alias).toBe(highlighted);
+			expect(await highlightCodeFence(source, 'js')).toBe(highlighted);
+			expect(highlighted.some(segment => segment.className)).toBe(true);
+			expect(parse).toHaveBeenCalledExactlyOnceWith(source);
+		} finally {
+			parse.mockRestore();
+		}
 	});
 	it('highlights JavaScript keywords and preserves exact text', async () => {
 		const source = 'const value = 1;';
