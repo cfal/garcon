@@ -157,7 +157,7 @@
 		entryId?: string,
 	): Promise<void> {
 		const operationChatId = chatId;
-		if (!isVisible || !operationChatId || blocked) return;
+		if (!operationChatId || blocked) return;
 		mutations = { ...mutations, [operationChatId]: { kind, entryId } };
 		notice = null;
 		try {

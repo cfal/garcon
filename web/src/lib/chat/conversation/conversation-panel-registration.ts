@@ -130,7 +130,6 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		if (this.#destroyed) return () => {};
 		this.#presentation = port;
 		this.scroll.setViewportVisible(this.isPresentationVisible);
-		if (this.isPresentationVisible && port.getViewport()) this.#presentationReady?.();
 		this.resumePendingRestore();
 		return () => {
 			if (this.#presentation !== port) return;

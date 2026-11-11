@@ -306,7 +306,7 @@
 			surfaceIdentity,
 			rows: chatState.visibleRows,
 			mutationClock: chatState.feedMutationClock,
-			visible: isVisible && announcementsEnabled,
+			visible: announcementsEnabled,
 			pinnedToBottom,
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),

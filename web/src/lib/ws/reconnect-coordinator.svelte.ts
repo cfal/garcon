@@ -199,23 +199,26 @@ export class ChatReconnectCoordinator {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
-			const applied = panels.transcriptCache.readAppliedCursor(chatId);
-			if (
-				!applied ||
-				applied.transcriptViewId !== cursor.transcriptViewId ||
-				applied.lastOrdinal < message.throughOrdinal
-			) {
+			if (!this.#cacheReachedReplayFrontier(chatId, cursor.transcriptViewId, message.throughOrdinal)) {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
 			panels.transcriptCache.markValidated(chatId);
 		} catch {
+			// Stops replay from buffering live commits during snapshot recovery.
 			panels.abortReconnectReplay(replayToken, chatId);
 			if (epoch === this.#reconnectEpoch) await this.#loadRenderedSnapshot(chatId, epoch);
 		} finally {
 			validation.release();
 			panels.abortReconnectReplay(replayToken, chatId);
 		}
+	}
+
+	#cacheReachedReplayFrontier(chatId: string, transcriptViewId: string, throughOrdinal: number): boolean {
+		const applied = this.options.panels.transcriptCache.readAppliedCursor(chatId);
+		return applied !== null
+			&& applied.transcriptViewId === transcriptViewId
+			&& applied.lastOrdinal >= throughOrdinal;
 	}
 
 	async #loadRenderedSnapshot(chatId: string, epoch: number): Promise<void> {
@@ -356,10 +359,10 @@ export class ChatReconnectCoordinator {
 							throw new Error('Retained transcript replay could not finish');
 						}
 					}
-					const applied = cache.readAppliedCursor(cursor.chatId);
-					if (!validation.isCurrent() || !applied ||
-						applied.transcriptViewId !== cursor.transcriptViewId ||
-						applied.lastOrdinal < message.throughOrdinal) {
+					const reachedFrontier = this.#cacheReachedReplayFrontier(
+						cursor.chatId, cursor.transcriptViewId, message.throughOrdinal,
+					);
+					if (!validation.isCurrent() || !reachedFrontier) {
 						throw new Error('Transcript replay did not establish continuity');
 					}
 					cache.markValidated(cursor.chatId);

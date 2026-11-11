@@ -212,16 +212,16 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		fullscreenHidden: readonly VisibleChatPresentation[] = [],
 	): void {
 		const previous = new Map(this.#mounted.map(item => [item.surfaceId, item]));
-		const retained = fullscreenHidden.flatMap(item => {
+		const mounted = [...visible];
+		for (const item of fullscreenHidden) {
+			if (item.presentation === 'mobile') continue;
 			const panel = this.#panels.get(item.surfaceId);
+			if (panel?.chatId !== item.chatId || !panel.canRetainPresentation) continue;
 			const host = previous.get(item.surfaceId);
-			if (item.presentation === 'mobile' || panel?.chatId !== item.chatId ||
-				!panel.canRetainPresentation || host?.presentation !== item.presentation ||
-				host.windowId !== item.windowId) return [];
+			if (host?.presentation !== item.presentation || host.windowId !== item.windowId) continue;
 			panel.prepareForHide();
-			return [host];
-		});
-		const mounted = [...visible, ...retained];
+			mounted.push(host);
+		}
 		// Protects the whole incoming set before any panel hydrates or transfers its transcript.
 		this.options.cache.setMountedChatIds(mounted.map((item) => item.chatId));
 		const desired = new Map(mounted.map((item) => [item.surfaceId, item]));
@@ -237,8 +237,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		for (const [surfaceId, panel] of this.#panels) {
 			const next = desired.get(surfaceId);
-			if (next?.chatId === panel.chatId && (panel.isPresentationVisible ||
-				(next.presentation === previous.get(surfaceId)?.presentation && panel.canRetainPresentation))) continue;
+			if (next?.chatId === panel.chatId) {
+				if (panel.isPresentationVisible) continue;
+				const sameHost = next.presentation === previous.get(surfaceId)?.presentation;
+				if (sameHost && panel.canRetainPresentation) continue;
+			}
 			const prepared = this.#restoreTargets.get(surfaceId);
 			if (prepared?.chatId !== panel.chatId) {
 				this.#restoreTargets.set(surfaceId, {
@@ -356,7 +359,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	loadChatSnapshot(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<boolean> {
-		if (!this.#hasAdmittedPanel(chatId)) return Promise.resolve(false);
+		if (!this.#findAdmittedPanel(chatId)) return Promise.resolve(false);
 		const minimumLimit = this.options.combineMessages ? 0 : Math.max(0, Math.floor(options.minimumLimit ?? 0));
 		const pending = this.#snapshotLoads.get(chatId);
 		if (pending) {
@@ -403,9 +406,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (recoveringContinuity && isCurrent()) throw new Error('Transcript snapshot recovery did not establish continuity');
 			return false;
 		};
-		const loader = [...this.#panels.values()].find(
-			(panel) => panel.chatId === chatId && panel.isPresentationVisible && panel.snapshotAdmission === 'admitted',
-		);
+		const loader = this.#findAdmittedPanel(chatId);
 		if (!loader) return incomplete();
 		const handoffs = new Map(this.panelsForChat(chatId).map(panel => [panel, panel.transcript.snapshotHandoffGuard()]));
 		let readOptions = options;
@@ -452,8 +453,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return true;
 	}
 
-	#hasAdmittedPanel(chatId: string): boolean {
-		return [...this.#panels.values()].some(
+	#findAdmittedPanel(chatId: string): PanelRegistration | undefined {
+		return [...this.#panels.values()].find(
 			(panel) => panel.chatId === chatId && panel.isPresentationVisible && panel.snapshotAdmission === 'admitted',
 		);
 	}

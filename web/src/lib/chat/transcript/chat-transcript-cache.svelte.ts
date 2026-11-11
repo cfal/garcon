@@ -211,18 +211,22 @@ export class ChatTranscriptCache {
 	}
 
 	#trackValidation(guards: Set<TranscriptValidationGuard>, chatId: string) {
-		const read = { chatId, current: true };
-		guards.add(read);
+		const guard = { chatId, current: true };
+		guards.add(guard);
 		return {
-			isCurrent: () => read.current,
-			release: () => { guards.delete(read); },
+			isCurrent: () => guard.current,
+			release: () => { guards.delete(guard); },
 		};
 	}
 
-	invalidateSnapshotReads(chatId: string): void {
-		for (const read of this.#snapshotReads) {
-			if (read.chatId === chatId) read.current = false;
+	#invalidateGuards(guards: Set<TranscriptValidationGuard>, chatId: string): void {
+		for (const guard of guards) {
+			if (guard.chatId === chatId) guard.current = false;
 		}
+	}
+
+	invalidateSnapshotReads(chatId: string): void {
+		this.#invalidateGuards(this.#snapshotReads, chatId);
 	}
 
 	markAccessed(chatId: string): void {
@@ -383,7 +387,6 @@ export class ChatTranscriptCache {
 				windowed,
 				entry.nextBeforeOrdinal,
 			),
-			stale: entry.stale,
 		};
 		this.#entries.set(chatId, next);
 		this.#lastAccessedAt.set(chatId, nowIso());
@@ -393,9 +396,8 @@ export class ChatTranscriptCache {
 
 	markStale(chatId: string): void {
 		if (!chatId) return;
-		for (const read of this.#replayValidations) {
-			if (read.chatId === chatId) read.current = false;
-		}
+		// Per-chat staleness must not cancel the snapshot read that repairs it.
+		this.#invalidateGuards(this.#replayValidations, chatId);
 		this.#persistence.remove(chatId);
 		const current = this.#entries.get(chatId);
 		if (current) this.#entries.set(chatId, { ...current, stale: true });
@@ -405,8 +407,8 @@ export class ChatTranscriptCache {
 	markStaleExcept(chatIds: ReadonlySet<string>): void {
 		// Includes drafts and reads whose entries have already left the memory cache.
 		this.#persistence.removeExcept(chatIds);
-		for (const read of [...this.#snapshotReads, ...this.#replayValidations]) {
-			if (!chatIds.has(read.chatId)) read.current = false;
+		for (const guard of [...this.#snapshotReads, ...this.#replayValidations]) {
+			if (!chatIds.has(guard.chatId)) guard.current = false;
 		}
 		for (const [chatId, entry] of this.#entries) {
 			if (!chatIds.has(chatId)) this.#entries.set(chatId, { ...entry, stale: true });
@@ -454,9 +456,7 @@ export class ChatTranscriptCache {
 	remove(chatId: string): void {
 		if (!chatId) return;
 		this.invalidateSnapshotReads(chatId);
-		for (const read of this.#replayValidations) {
-			if (read.chatId === chatId) read.current = false;
-		}
+		this.#invalidateGuards(this.#replayValidations, chatId);
 		this.#entries.delete(chatId);
 		this.#lastAccessedAt.delete(chatId);
 		this.#storage.remove(chatId);
