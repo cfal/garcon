@@ -315,18 +315,16 @@ test.each([false, true])(
                     ) !== null,
                 })),
               );
-            expect(hidden).toHaveLength(count - 1);
-            expect(
-              hidden.every(
-                (entry) =>
-                  entry.inert &&
-                  entry.ariaHidden === "true" &&
-                  !entry.ownsComposer &&
-                  !entry.ownsCommands &&
-                  !entry.managedScroll &&
-                  !entry.liveAnnouncements,
-              ),
-            ).toBe(true);
+            expect(hidden).toEqual(
+              Array.from({ length: count - 1 }, () => ({
+                inert: true,
+                ariaHidden: "true",
+                ownsComposer: false,
+                ownsCommands: false,
+                managedScroll: false,
+                liveAnnouncements: false,
+              })),
+            );
             if (count === 25 && round === 0) {
               const counts = await hiddenModelCounts(fixture.page);
               await fixture.page.evaluate(() => {

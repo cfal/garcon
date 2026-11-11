@@ -405,7 +405,11 @@ async function reconnectAfterFirstConnection(
 	await coordinator.handleConnectionState(true);
 }
 
-function snapshotRecoveryFixture(messages: TranscriptMessage[]) {
+function snapshotRecoveryFixture(messageCount: number) {
+	const messages = Array.from({ length: messageCount }, (_, index) => ({
+		ordinal: index + 1,
+		message: new AssistantMessage(TS, `row-${index + 1}`),
+	}));
 	const cache = new ChatTranscriptCache({ limit: 100 });
 	const panels = new ConversationPanelRegistry({
 		cache,
@@ -431,7 +435,7 @@ function snapshotRecoveryFixture(messages: TranscriptMessage[]) {
 		limit: 50,
 		resendCandidates: [],
 	});
-	return { cache, panels, descriptor, page };
+	return { cache, panels, descriptor, messages, page };
 }
 
 describe('ChatReconnectCoordinator', () => {
@@ -440,8 +444,7 @@ describe('ChatReconnectCoordinator', () => {
 		{ cached: false, rejects: true }, { cached: true, rejects: true },
 	])('restarts a snapshot fenced by reconnect (cached: $cached, rejects: $rejects)', async ({ cached, rejects }) => {
 		localStorage.clear();
-		const messages = [1, 2].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) }));
-		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(messages);
+		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(2);
 		const held = deferred<CompleteChatHistoryResponse>();
 		const read = vi.spyOn(chatsApi, 'getChatMessages').mockReturnValueOnce(held.promise).mockResolvedValue(page(2));
 		if (cached) cache.replaceFromPage('chat-1', page(1));
@@ -475,8 +478,7 @@ describe('ChatReconnectCoordinator', () => {
 
 	it('refreshes beyond live commits discarded after a snapshot overtakes replay', async () => {
 		localStorage.clear();
-		const messages = [1, 2, 3].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) }));
-		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(messages);
+		const { cache, panels, descriptor, messages, page } = snapshotRecoveryFixture(3);
 		const oldSnapshot = deferred<CompleteChatHistoryResponse>();
 		const replacementSnapshot = deferred<CompleteChatHistoryResponse>();
 		const replay = deferred<Record<string, unknown>>();
@@ -517,8 +519,7 @@ describe('ChatReconnectCoordinator', () => {
 
 	it.each([true, false])('retries a rejected hidden snapshot after reconnect (revealed before rejection: %s)', async (revealBeforeRejection) => {
 		localStorage.clear();
-		const messages = [1, 2].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) }));
-		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(messages);
+		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(2);
 		const held = deferred<CompleteChatHistoryResponse>();
 		const read = vi.spyOn(chatsApi, 'getChatMessages').mockReturnValueOnce(held.promise).mockResolvedValue(page(2));
 		cache.replaceFromPage('chat-1', page(1));
@@ -556,9 +557,7 @@ describe('ChatReconnectCoordinator', () => {
 
 	it.each(['removed', 'fenced'] as const)('propagates a replacement snapshot failure after a %s loader rejects', async reason => {
 		localStorage.clear();
-		const { cache, panels, descriptor, page } = snapshotRecoveryFixture([
-			{ ordinal: 1, message: new AssistantMessage(TS, 'row-1') },
-		]);
+		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(1);
 		const held = deferred<CompleteChatHistoryResponse>();
 		const failure = new Error('Replacement snapshot failed');
 		const read = vi.spyOn(chatsApi, 'getChatMessages').mockReturnValueOnce(held.promise).mockRejectedValue(failure);
@@ -1855,16 +1854,15 @@ describe('ChatReconnectCoordinator', () => {
 	});
 
 	it.each([
-		{ initial: 'cache-only', order: 'snapshot-first' },
-		{ initial: 'cache-only', order: 'replay-first' },
-		{ initial: 'retained', order: 'snapshot-first' },
-		{ initial: 'retained', order: 'replay-first' },
-		{ initial: 'retained', order: 'before-reveal' },
-		{ initial: 'retained', order: 'rejected' },
-	] as const)('reveals a $initial background chat during recovery ($order)', async ({ initial, order }) => {
+		{ initial: 'cache-only', order: 'snapshot-first', expectedReads: 1 },
+		{ initial: 'cache-only', order: 'replay-first', expectedReads: 1 },
+		{ initial: 'retained', order: 'snapshot-first', expectedReads: 1 },
+		{ initial: 'retained', order: 'replay-first', expectedReads: 1 },
+		{ initial: 'retained', order: 'before-reveal', expectedReads: 0 },
+		{ initial: 'retained', order: 'rejected', expectedReads: 2 },
+	] as const)('reveals a $initial background chat during recovery ($order)', async ({ initial, order, expectedReads }) => {
 		localStorage.clear();
-		const messages = [1, 2, 3].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) }));
-		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(messages);
+		const { cache, panels, descriptor, messages, page } = snapshotRecoveryFixture(3);
 		cache.replaceFromPage('chat-1', page(1));
 		const snapshot = deferred<CompleteChatHistoryResponse>();
 		const replay = deferred<Record<string, unknown>>();
@@ -1936,7 +1934,7 @@ describe('ChatReconnectCoordinator', () => {
 				chatId: 'chat-1', transcriptViewId: 'generation-selected', messages: messages.slice(2),
 				firstOrdinal: 3, lastOrdinal: 3, resendCandidates: [], noticeRevision: 0,
 			}).kind).toBe('applied');
-			expect(read).toHaveBeenCalledTimes(order === 'before-reveal' ? 0 : order === 'rejected' ? 2 : 1);
+			expect(read).toHaveBeenCalledTimes(expectedReads);
 			expect(deps.onBackgroundMessages).not.toHaveBeenCalled();
 			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ stale: false, lastOrdinal: 3 });
 			expect(cache.get('chat-1')?.messages).toEqual(messages);
@@ -2280,7 +2278,7 @@ describe('ChatReconnectCoordinator', () => {
 
 	it('leaves a queued background candidate stale when live delivery loses continuity', async () => {
 		localStorage.clear();
-		const { cache, panels } = snapshotRecoveryFixture([]);
+		const { cache, panels } = snapshotRecoveryFixture(0);
 		const cursors = ['chat-1', 'chat-2'].map(chatId => ({ chatId, transcriptViewId: 'view', lastOrdinal: 1 }));
 		for (const { chatId } of cursors) {
 			cache.replace(chatId, 'view', [{ ordinal: 1, message: new AssistantMessage(TS, 'row-1') }], 1, null);

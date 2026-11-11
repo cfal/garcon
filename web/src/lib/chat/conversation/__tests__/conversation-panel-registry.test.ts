@@ -129,12 +129,11 @@ function mountAttachedPanel(
 	cache: ChatTranscriptCache,
 	registry: ConversationPanelRegistry,
 	descriptor: ConversationPanelDescriptor,
-	target: Parameters<typeof port>[0] = { kind: 'end' },
 ) {
 	seed(cache, descriptor.chatId);
 	registry.reconcile([descriptor]);
 	const panel = registry.panel(descriptor.surfaceId)!;
-	panel.attachPresentation(port(target));
+	panel.attachPresentation(port({ kind: 'end' }));
 	return panel;
 }
 
@@ -281,7 +280,9 @@ describe('ConversationPanelRegistry', () => {
 		} });
 		const hidden = presentation('chat-view:window-hidden', 'hidden');
 		const target = { kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 } as const;
-		const original = mountAttachedPanel(cache, registry, hidden, target);
+		seed(cache, hidden.chatId);
+		registry.reconcile([hidden]);
+		const original = registry.panel(hidden.surfaceId)!;
 		const view = port(target);
 		view.prepareForHide = () => { view.captureRestoreTarget = () => ({ kind: 'end' }); };
 		const detach = original.attachPresentation(view);
