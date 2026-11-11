@@ -405,6 +405,7 @@ export class FileTreeStore {
 	activate(): void {
 		if (this.#active) return;
 		this.#active = true;
+		this.childErrors = new Map();
 		this.#resumePendingWork();
 	}
 
@@ -587,6 +588,9 @@ export class FileTreeStore {
 			expanded.delete(path);
 		} else {
 			expanded.add(path);
+			const errors = new Map(this.childErrors);
+			errors.delete(path);
+			this.childErrors = errors;
 		}
 		this.expandedDirs = expanded;
 		const entries = this.childrenCache.get(path);
@@ -704,6 +708,7 @@ export class FileTreeStore {
 	setShowHiddenFiles(value: boolean): void {
 		this.showHiddenFiles = value;
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, String(value));
+		this.#reconcileDirectoryDemand();
 	}
 
 	setShowBreadcrumbs(value: boolean): void {

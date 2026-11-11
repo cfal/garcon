@@ -362,24 +362,58 @@ describe('FileTreeStore', () => {
 		);
 	});
 
-	it('loads expanded children and exposes retryable child failures', async () => {
-		const src = entry('src', 'directory');
-		vi.mocked(filesApi.getTree)
-			.mockResolvedValueOnce(response('/workspace/project', [src]))
-			.mockRejectedValueOnce(new Error('child failed'))
-			.mockResolvedValueOnce(response(src.path, [entry('index.ts', 'file', src.path)]));
+	it.each(['retry', 'reexpand', 'reactivate'])(
+		'retries a failed child listing on %s',
+		async (action) => {
+			const src = entry('src', 'directory');
+			vi.mocked(filesApi.getTree)
+				.mockResolvedValueOnce(response('/workspace/project', [src]))
+				.mockRejectedValueOnce(new Error('child failed'))
+				.mockResolvedValueOnce(response(src.path, [entry('index.ts', 'file', src.path)]));
+			store.setProjectState(availableProject());
+			store.activate();
+			await tick();
+
+			store.toggleDirectory(src.path);
+			await tick();
+			expect(store.expandedDirs.has(src.path)).toBe(true);
+			expect(store.childErrors.get(src.path)?.message).toBe('child failed');
+			store.setProjectState(availableProject());
+			await tick();
+			expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+
+			if (action === 'retry') store.retryDirectory(src.path);
+			else if (action === 'reexpand') {
+				store.toggleDirectory(src.path);
+				store.toggleDirectory(src.path);
+			} else {
+				store.deactivate();
+				store.activate();
+			}
+			await tick();
+			expect(store.childrenCache.get(src.path)?.[0]?.name).toBe('index.ts');
+		},
+	);
+
+	it('reloads an expanded hidden directory after its cold listing was evicted', async () => {
+		const hidden = entry('.hidden', 'directory');
+		const child = entry('child.ts', 'file', hidden.path);
+		vi.mocked(filesApi.getTree).mockImplementation(async ({ directoryPath } = {}) =>
+			response(directoryPath ?? undefined, directoryPath === hidden.path ? [child] : [hidden]),
+		);
 		store.setProjectState(availableProject());
 		store.activate();
 		await tick();
-
-		store.toggleDirectory(src.path);
+		store.setShowHiddenFiles(true);
+		store.toggleDirectory(hidden.path);
 		await tick();
-		expect(store.expandedDirs.has(src.path)).toBe(true);
-		expect(store.childErrors.get(src.path)?.message).toBe('child failed');
-
-		store.retryDirectory(src.path);
-		await tick();
-		expect(store.childrenCache.get(src.path)?.[0]?.name).toBe('index.ts');
+		store.setShowHiddenFiles(false);
+		for (let index = 0; index <= FILE_TREE_COLD_DIRECTORY_LIMIT; index++)
+			await store.fetchChildren(`/workspace/project/cold-${index}`);
+		expect(store.childrenCache.has(hidden.path)).toBe(false);
+		store.setShowHiddenFiles(true);
+		await vi.waitFor(() => expect(store.childrenCache.get(hidden.path)).toEqual([child]));
+		store.reset();
 	});
 
 	it('aborts and resumes incomplete work across presentation visibility', async () => {
