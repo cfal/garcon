@@ -8,6 +8,7 @@ import {
 import {
 	FILE_DRAFT_DATABASE_NAME,
 	FILE_DRAFT_STORE_NAME,
+	FILE_DRAFT_SUMMARY_STORE_NAME,
 	FILE_RECENT_STORE_NAME,
 	FILE_NAVIGATION_STORE_NAME,
 } from '$lib/files/persistence/file-draft-repository';
@@ -132,7 +133,12 @@ export async function clearBrowserPrivateData(logout: BrowserLogout): Promise<bo
 	try {
 		const filesCleared = await clearDatabaseData(
 			FILE_DRAFT_DATABASE_NAME,
-			[FILE_DRAFT_STORE_NAME, FILE_RECENT_STORE_NAME, FILE_NAVIGATION_STORE_NAME],
+			[
+				FILE_DRAFT_STORE_NAME,
+				FILE_DRAFT_SUMMARY_STORE_NAME,
+				FILE_RECENT_STORE_NAME,
+				FILE_NAVIGATION_STORE_NAME,
+			],
 			logout,
 		);
 		const mediaCleared = await clearDatabaseData(

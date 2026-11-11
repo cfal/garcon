@@ -180,6 +180,18 @@ for (const outcome of ['completed', 'expired'] as const) {
             ),
           ),
         ).toEqual(outcome === 'completed' ? ['fresh'] : ['fresh', 'old']);
+        expect(
+          await fresh.evaluate(async () => {
+            const repository = (globalThis as TestWindow).logoutRepository;
+            return {
+              fresh: (await repository.getDraft('fresh'))?.content ?? null,
+              old: (await repository.getDraft('old'))?.content ?? null,
+            };
+          }),
+        ).toEqual({
+          fresh: 'Fresh draft',
+          old: outcome === 'completed' ? null : 'Old draft',
+        });
       } finally {
         await fresh.close();
       }
