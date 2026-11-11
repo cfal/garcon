@@ -22,6 +22,7 @@ import {
 	authTokenIdentity,
 	publishCredentialPending,
 	credentialPendingDeadline,
+	CREDENTIAL_PENDING_KEY,
 	CREDENTIAL_PENDING_MS,
 } from '$lib/auth/session';
 import type {
@@ -38,8 +39,11 @@ import {
 	publishBrowserLogout,
 	retireBrowserData,
 	waitForBrowserLogoutCleanup,
+	BROWSER_LOGOUT_EPOCH_KEY,
+	BROWSER_LOGOUT_CLEANUP_KEY,
 	type BrowserLogout,
 } from '$lib/utils/browser-data-lifetime';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import {
 	clearBrowserPrivateData,
 	clearTabPrivateData,
@@ -138,10 +142,30 @@ export class AuthStore {
 			}
 			void this.reconcile();
 		};
+		const storage = (event: StorageEvent) => {
+			// Fences the document even if an unrelated write arrives before the epoch event.
+			if (!isBrowserDataCurrent()) {
+				this.#abandonFromPeer('epoch-changed');
+				return;
+			}
+			try {
+				if (event.storageArea && event.storageArea !== window.localStorage) return;
+			} catch {
+				// Retains credential verification when browser storage becomes unavailable.
+			}
+			if (
+				event.key === null ||
+				event.key === LOCAL_STORAGE_KEYS.authToken ||
+				event.key === BROWSER_LOGOUT_EPOCH_KEY ||
+				event.key === BROWSER_LOGOUT_CLEANUP_KEY ||
+				event.key === CREDENTIAL_PENDING_KEY
+			)
+				void this.reconcile();
+		};
 		const visible = () => {
 			if (document.visibilityState === 'visible') reconcile();
 		};
-		window.addEventListener('storage', reconcile);
+		window.addEventListener('storage', storage);
 		window.addEventListener('online', reconcile);
 		window.addEventListener('pageshow', reconcile);
 		document.addEventListener('visibilitychange', visible);
@@ -159,7 +183,7 @@ export class AuthStore {
 		}
 		this.#dispose = () => {
 			release();
-			window.removeEventListener('storage', reconcile);
+			window.removeEventListener('storage', storage);
 			window.removeEventListener('online', reconcile);
 			window.removeEventListener('pageshow', reconcile);
 			document.removeEventListener('visibilitychange', visible);
@@ -499,11 +523,7 @@ export class AuthStore {
 			return;
 		}
 		// A failed transport probe cannot revoke an independently accepted session.
-		if (
-			this.availability === 'active' &&
-			!this.#uncertainToken &&
-			isTransientProbeFailure(error)
-		) {
+		if (this.availability === 'active' && !this.#uncertainToken && isTransientProbeFailure(error)) {
 			this.#scheduleRepair(2_000);
 			return;
 		}
@@ -569,8 +589,7 @@ export class AuthStore {
 	#abandonFromPeer(reason: 'epoch-changed' | 'uncoordinated'): void {
 		if (this.#logoutTask || this.logoutPending) return;
 		this.#abandon();
-		const cleared =
-			reason === 'uncoordinated' ? clearTabPrivateData() : reconcileTabPrivateData();
+		const cleared = reason === 'uncoordinated' ? clearTabPrivateData() : reconcileTabPrivateData();
 		const incomplete = !cleared || reason === 'uncoordinated';
 		this.navigateAfterLogout(
 			`${appPath('/login')}?loggedOut=peer${incomplete ? '&cleanup=incomplete' : ''}`,
