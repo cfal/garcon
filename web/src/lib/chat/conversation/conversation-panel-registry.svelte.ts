@@ -418,7 +418,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 					await loader.transcript.loadMessages(chatId, readOptions);
 				}
 			} catch (error) {
-				if (!isCurrent() || !this.#snapshotLoads.get(chatId)?.refreshRequired) throw error;
+				if (!isCurrent()) throw error;
+				const canRetryRemovedLoader = retryAfterLoaderRemoval && this.#panels.get(loader.surfaceId) !== loader;
+				if (!this.#snapshotLoads.get(chatId)?.refreshRequired && !canRetryRemovedLoader) throw error;
 			}
 			if (!isCurrent()) return false;
 			const pending = this.#snapshotLoads.get(chatId)!;
