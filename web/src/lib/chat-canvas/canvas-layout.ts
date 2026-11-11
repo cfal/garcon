@@ -41,6 +41,7 @@ function boundsForBox(box: CanvasBox, count: number): CanvasBounds {
 }
 
 export function nodePosition(content: CanvasContent, node: CanvasNode): CanvasPosition {
+	if (node.type === 'box' || node.boxId === null) return node.position;
 	return new CanvasLayoutIndex(content).position(node);
 }
 
