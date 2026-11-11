@@ -543,7 +543,7 @@ export class GitDiffDocumentController {
 
 	private aggregateLimitMessage(decision: GitReviewBodyBudgetDecision): string {
 		return decision.reason === 'collection-too-many-bytes'
-			? `Stopped loading after ${decision.loadedBytes.toLocaleString()} estimated body bytes.`
+			? `Cannot load this file within the retained body byte budget (${decision.loadedBytes.toLocaleString()} bytes already loaded).`
 			: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
 	}
 

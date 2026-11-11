@@ -48,7 +48,7 @@ describe('Git review body budget', () => {
 		getGitSplitPatchIndex(index);
 		expect(gitReviewBodyBytes(indexed)).toBe(estimate);
 		expect(
-			decideGitReviewBodyBudget(indexed, 'visible', {}, new Set(), {
+			decideGitReviewBodyBudget(indexed, 'prefetch', {}, new Set(), {
 				...limits,
 				maxLoadedPatchBytes: estimate - 1,
 			}),
@@ -59,6 +59,39 @@ describe('Git review body budget', () => {
 				maxLoadedPatchBytes: estimate,
 			}),
 		).toMatchObject({ accept: true });
+	});
+
+	it('keeps one server-admitted visible body inspectable without displacing pinned bodies', () => {
+		const large = { ...body('large.ts', 5, 90), patch: 'x'.repeat(90) };
+		expect(gitReviewBodyBytes(large)).toBe(180);
+		expect(
+			decideGitReviewBodyBudget(
+				large,
+				'visible',
+				{
+					'old.ts': body('old.ts', 1, 20),
+				},
+				new Set(),
+				limits,
+			),
+		).toMatchObject({ accept: true, evictedPaths: ['old.ts'] });
+		expect(
+			decideGitReviewBodyBudget(
+				large,
+				'visible',
+				{
+					'pinned.ts': body('pinned.ts', 1, 20),
+				},
+				new Set(['pinned.ts']),
+				limits,
+			),
+		).toMatchObject({ accept: false });
+		expect(decideGitReviewBodyBudget(large, 'prefetch', {}, new Set(), limits)).toMatchObject({
+			accept: false,
+		});
+		expect(
+			decideGitReviewBodyBudget({ ...large, patchBytes: 101 }, 'visible', {}, new Set(), limits),
+		).toMatchObject({ accept: false });
 	});
 
 	it('lets a visible body replace speculative bodies', () => {

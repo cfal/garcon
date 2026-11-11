@@ -57,7 +57,13 @@ export function decideGitReviewBodyBudget(
 	}
 
 	const rowsExceeded = loadedRows + body.renderedRowCount > limits.maxLoadedRows;
-	const bytesExceeded = loadedBytes + bodyBytes > limits.maxLoadedPatchBytes;
+	// A server-admitted file remains inspectable when its text and indexes exceed the collection budget.
+	const standaloneVisible =
+		purpose === 'visible' &&
+		loaded.length === evictedPaths.length &&
+		body.patchBytes <= limits.maxFilePatchBytes &&
+		body.renderedRowCount <= limits.maxFileRows;
+	const bytesExceeded = !standaloneVisible && loadedBytes + bodyBytes > limits.maxLoadedPatchBytes;
 	return {
 		accept: !rowsExceeded && !bytesExceeded,
 		evictedPaths,
