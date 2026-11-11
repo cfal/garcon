@@ -4,6 +4,7 @@ import {
 	virtualItems,
 	type VirtualListSnapshot,
 	type VirtualMutationAnchor,
+	type VirtualResumeTarget,
 } from '$lib/virt/virtual-list-types.js';
 import type { QueueEntry } from '$lib/types/chat.js';
 
@@ -14,6 +15,7 @@ export class QueuedInputListController {
 		measurementAnchor: 'geometric',
 	});
 	#chatId: string | null = null;
+	#resumeTarget: VirtualResumeTarget | null = null;
 	#indexById = new Map<string, number>();
 	#expanded = $state<Record<string, boolean>>({});
 	#retained = $state<Partial<Record<'focus' | 'drag' | 'menu', string>>>({});
@@ -28,6 +30,25 @@ export class QueuedInputListController {
 			? this.virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
 			: undefined;
 		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
+	}
+
+	prepareForHide(): void {
+		if (this.#resumeTarget) return;
+		const position = this.virtual.viewportPosition;
+		const item = position ? this.virtual.snapshot.positions.itemAtOffset(position.paintedOffset) : null;
+		this.#resumeTarget = item && position
+			? { kind: 'anchor', key: item.key, viewportOffset: item.start - position.paintedOffset }
+			: { kind: 'start' };
+		this.virtual.suspend();
+	}
+
+	resume(): void {
+		if (!this.#resumeTarget) return;
+		const result = this.virtual.resume(this.#resumeTarget);
+		if (result.kind === 'not-ready') return;
+		if (result.kind === 'missing-key') this.virtual.resume({ kind: 'start' });
+		this.#resumeTarget = null;
+		this.virtual.remeasureAll();
 	}
 
 	observeTypography(): () => void {

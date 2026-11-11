@@ -339,7 +339,7 @@ describe('ChatTranscriptCache', () => {
 
 	it('evicts hidden chats before visible chats and releases protection with visibility', () => {
 		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 2 });
-		cache.setVisibleChatIds(['visible']);
+		cache.setMountedChatIds(['visible']);
 		cache.replaceFromPage('visible', page('view', [entry(1, 'visible')]));
 		cache.replaceFromPage('hidden-old', page('view', [entry(1, 'old')]));
 		cache.replaceFromPage('hidden-middle', page('view', [entry(1, 'middle')]));
@@ -349,23 +349,23 @@ describe('ChatTranscriptCache', () => {
 		expect(cache.get('hidden-middle')).not.toBeNull();
 		expect(cache.get('hidden-new')).not.toBeNull();
 
-		cache.setVisibleChatIds([]);
+		cache.setMountedChatIds([]);
 		expect(cache.get('visible')).toBeNull();
 		cache.flush();
 	});
 
 	it('bounds hidden entries independently of visible chats and prunes on release', () => {
 		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 1 });
-		cache.setVisibleChatIds(['chat-1', 'chat-2']);
+		cache.setMountedChatIds(['chat-1', 'chat-2']);
 		cache.replaceFromPage('chat-1', page('view', [entry(1, 'one')]));
 		cache.replaceFromPage('chat-2', page('view', [entry(1, 'two')]));
 		expect(cache.get('chat-1')).not.toBeNull();
 		expect(cache.get('chat-2')).not.toBeNull();
 
-		cache.setVisibleChatIds(['chat-1']);
+		cache.setMountedChatIds(['chat-1']);
 		expect(cache.get('chat-1')).not.toBeNull();
 		expect(cache.get('chat-2')).not.toBeNull();
-		cache.setVisibleChatIds([]);
+		cache.setMountedChatIds([]);
 		expect(cache.get('chat-1')).toBeNull();
 		expect(cache.get('chat-2')).not.toBeNull();
 		cache.flush();
@@ -380,7 +380,7 @@ describe('ChatTranscriptCache', () => {
 			hasMore: true,
 		});
 		cache.flush();
-		cache.setVisibleChatIds(['visible']);
+		cache.setMountedChatIds(['visible']);
 		cache.replaceFromPage('visible', page('view', [entry(1, 'visible')]));
 		cache.replaceFromPage('other-hidden', page('view', [entry(1, 'other')]));
 
@@ -409,7 +409,7 @@ describe('ChatTranscriptCache', () => {
 
 	it('still invalidates and removes protected entries without losing their visibility', () => {
 		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 1 });
-		cache.setVisibleChatIds(['visible']);
+		cache.setMountedChatIds(['visible']);
 		cache.replaceFromPage('visible', page('old-view', [entry(1, 'old')]));
 		cache.markStale('visible');
 		expect(cache.get('visible')?.stale).toBe(true);

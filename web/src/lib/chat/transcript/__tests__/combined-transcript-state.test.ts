@@ -1437,6 +1437,7 @@ describe('combined transcript intervals', () => {
 				getQueueContainer: () => undefined,
 				captureRestoreTarget: () => ({ kind: 'end' }),
 				closeTransients: vi.fn(),
+				prepareForHide: vi.fn(),
 			});
 			installHistory([...entries, assistant(602)], 200);
 			panel.completeInitialBottomRestore();
@@ -1736,7 +1737,7 @@ describe('combined transcript intervals', () => {
 			expect(overlay.includedResendCandidates).toEqual([]);
 			cache.flush();
 			// Injects a cache miss independently of visible-panel retention.
-			cache.setVisibleChatIds([]);
+			cache.setMountedChatIds([]);
 			cache.replace('synthetic-other-chat', 'synthetic-other-view', [assistant(1)], 1, null);
 			expect(cache.get(chatId)).toBeNull();
 			const replay = registry.beginReconnectReplay(chatId, viewId);
@@ -2004,7 +2005,7 @@ describe('combined transcript intervals', () => {
 			const newerEntries = right.entries;
 			const clearPeer = vi.spyOn(right, 'clearMessages');
 			// Injects a cache miss independently of visible-panel retention.
-			cache.setVisibleChatIds([]);
+			cache.setMountedChatIds([]);
 			cache.replace('synthetic-other-chat', 'synthetic-other-view', [assistant(1)], 1, null);
 			expect(cache.get(chatId)).toBeNull();
 			const recoveredView = sameView ? viewId : newerView;

@@ -39,6 +39,7 @@
 		_bodyWidth: number,
 		_contentHeight: number,
 	): void {
+		if (element.clientWidth === 0 || element.clientHeight === 0) return;
 		if (!collapsible) {
 			hasOverflow = false;
 			measuredCollapsedHeight = undefined;

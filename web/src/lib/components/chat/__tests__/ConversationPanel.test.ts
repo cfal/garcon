@@ -167,6 +167,7 @@ function makePanel() {
 	});
 	const prepareForInteractionLoss = vi.fn();
 	const panel: ConversationPanelRegistration = {
+		isPresentationVisible: true,
 		surfaceId: 'chat-view:window-panel-test',
 		chatId: 'chat-1',
 		transcript,

@@ -87,6 +87,7 @@
 	import {
 		renderedPortablePresentations,
 		visibleChatPresentations,
+		fullscreenHiddenChatPresentations,
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
@@ -204,6 +205,10 @@
 				},
 			];
 		}),
+	);
+	const fullscreenHiddenChats = $derived(
+		fullscreenHiddenChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop')
+			.filter(item => resolveChatSurfacePresentation(sessions.byId[item.chatId] ?? null, sessions.isLoadingChats) === 'conversation'),
 	);
 	const existingChatSurfaceIds = $derived.by(
 		() =>
@@ -445,9 +450,10 @@
 
 	$effect(() => {
 		const visible = chatPresentations;
+		const hidden = fullscreenHiddenChats;
 		const existingSurfaceIds = existingChatSurfaceIds;
 		untrack(() => {
-			conversationPanels.reconcile(visible);
+			conversationPanels.reconcile(visible, hidden);
 			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);
 		});
 	});
@@ -618,6 +624,7 @@
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
 				isVisible={!isMobile && (!projectedWindowId || projectedWindowId === workspaceWindow.id)}
+				retainFullscreenChats={!isMobile && snapshot.fullscreenWindowId !== null}
 				hasLeftSeparator={hasLeftSeparator(renderedRect)}
 				hasRightSeparator={hasRightSeparator(renderedRect)}
 				presentations={renderedPresentations}

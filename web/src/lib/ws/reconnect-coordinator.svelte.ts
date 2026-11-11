@@ -50,6 +50,7 @@ export interface ReconnectPanelRegistryPort {
 	finishReconnectReplay(token: number, chatId: string): TranscriptReplayApplyResult | 'stale';
 	abortReconnectReplay(token: number, chatId: string): void;
 	abortReconnectReplays(): void;
+	discardFullscreenHiddenPanels(): void;
 	noticeRevisionFor(chatId: string): number;
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult;
 }
@@ -122,6 +123,7 @@ export class ChatReconnectCoordinator {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
 			this.options.panels.abortReconnectReplays();
+			this.options.panels.discardFullscreenHiddenPanels();
 			this.options.conversationUi.markExecutionControlSocketDisconnected();
 			return;
 		}

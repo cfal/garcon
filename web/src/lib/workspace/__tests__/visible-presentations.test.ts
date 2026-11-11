@@ -5,6 +5,7 @@ import {
 	nextRetainedSingletonPresentationKeys,
 	renderedPortablePresentations,
 	visibleChatPresentations,
+	fullscreenHiddenChatPresentations,
 	visiblePresentationMap,
 	visiblePortablePresentations,
 } from '../visible-presentations';
@@ -56,6 +57,11 @@ describe('visiblePortablePresentations', () => {
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		expect(visibleChatPresentations(fullscreen, 'desktop')).toHaveLength(1);
+		expect(fullscreenHiddenChatPresentations(fullscreen, 'desktop')).toEqual([
+			{ surfaceId: 'chat-view:window-main', chatId: 'chat-1', presentation: 'window-main', windowId: 'window-main' },
+		]);
+		expect(fullscreenHiddenChatPresentations(fullscreen, 'mobile')).toEqual([]);
+		expect(fullscreenHiddenChatPresentations(snapshot, 'desktop')).toEqual([]);
 	});
 
 	it('returns at most the active mobile chat and omits empty chat descriptors', () => {

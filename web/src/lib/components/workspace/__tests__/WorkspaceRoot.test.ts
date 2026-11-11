@@ -554,6 +554,7 @@ function panelPresentation(
 		getQueueContainer: () => undefined,
 		captureRestoreTarget: () => target,
 		closeTransients: () => {},
+		prepareForHide: () => {},
 	};
 }
 
@@ -1098,6 +1099,77 @@ describe('WorkspaceRoot', () => {
 		expect(liveChat.getAttribute('data-visible')).toBe('true');
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('false');
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
+	});
+
+	it.each(['chat', 'viewport'])('does not mount an outgoing mobile chat in a fullscreen-hidden desktop host on %s change', async change => {
+		const { layout } = installContext();
+		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
+			{ type: 'open-chat-in-new-window', chatId: 'chat-b', targetWindowId: 'window-main',
+				edge: 'right', newWindowId: 'window-2', partitionId: 'partition-1' },
+			{ type: 'set-fullscreen-window', windowId: 'window-main' },
+			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId(change === 'viewport' ? 'window-2' : 'window-main'), returnStack: [] },
+		]));
+		const { container, rerender } = renderRoot(true);
+		await tick();
+		const desktopMounts: Node[] = [];
+		const observer = new MutationObserver(records => {
+			for (const record of records) {
+				if (!(record.target instanceof Element) || !record.target.closest('[data-workspace-window-id="window-2"]')) continue;
+				for (const node of record.addedNodes) {
+					if (node instanceof Element && (node.matches('[data-testid="conversation-panel"]') ||
+						node.querySelector('[data-testid="conversation-panel"]'))) desktopMounts.push(node);
+				}
+			}
+		});
+		observer.observe(container, { childList: true, subtree: true });
+		if (change === 'viewport') await rerender({ isMobile: false, chatActions });
+		else layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
+			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId('window-2'), returnStack: [] },
+		]));
+		await tick();
+		await Promise.resolve();
+		observer.disconnect();
+		expect(desktopMounts).toEqual([]);
+		expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1);
+	});
+
+	it('mounts a retained desktop chat only once when handed to mobile', async () => {
+		const { layout } = installContext();
+		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
+			{ type: 'open-chat-in-new-window', chatId: 'chat-b', targetWindowId: 'window-main',
+				edge: 'right', newWindowId: 'window-2', partitionId: 'partition-1' },
+			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId('window-2'), returnStack: [] },
+		]));
+		const { container, rerender } = renderRoot();
+		const panels = testContext.current?.conversationPanels as ConversationPanelRegistry;
+		const panel = panels.panel(chatViewSurfaceId('window-2'))!;
+		await waitFor(() => expect(panel.transcript.isLoadingMessages).toBe(false));
+		panel.attachPresentation(panelPresentation({ kind: 'end' }));
+		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
+			{ type: 'set-fullscreen-window', windowId: 'window-main' },
+		]));
+		await tick();
+		expect(panels.panel(chatViewSurfaceId('window-2'))).toBe(panel);
+		expect(panel.isPresentationVisible).toBe(false);
+		const mobileMounts = new Set<Element>();
+		const observer = new MutationObserver(records => {
+			for (const record of records) {
+				for (const node of record.addedNodes) {
+					if (!(node instanceof Element)) continue;
+					const added = node.matches('[data-testid="conversation-panel"]') ? [node]
+						: [...node.querySelectorAll('[data-testid="conversation-panel"]')];
+					for (const item of added) {
+						if (!item.closest('[data-workspace-window-id]')) mobileMounts.add(item);
+					}
+				}
+			}
+		});
+		observer.observe(container, { childList: true, subtree: true });
+		await rerender({ isMobile: true, chatActions });
+		await Promise.resolve();
+		observer.disconnect();
+		expect(mobileMounts.size).toBe(1);
+		expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1);
 	});
 
 	it('keeps one runtime while both windows render conversation panels', async () => {

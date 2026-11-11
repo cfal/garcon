@@ -269,6 +269,7 @@ function createReconnectDeps(
 		visibleChatIds: vi.fn(() => (sessions.selectedChatId ? [sessions.selectedChatId] : [])),
 		panelsForChat: vi.fn((chatId: string) => (chatId === sessions.selectedChatId ? [{}] : [])),
 		hasInactiveWindow: vi.fn((_chatId: string) => false),
+		discardFullscreenHiddenPanels: vi.fn(),
 		invalidateChatSnapshot: vi.fn(),
 		markChatStale: vi.fn((chatId: string) => chatState.transcriptCache.markStale(chatId)),
 		loadChatSnapshot: vi.fn(async (chatId: string) => {
@@ -1981,7 +1982,7 @@ describe('ChatReconnectCoordinator', () => {
 		localStorage.clear();
 		const cache = new ChatTranscriptCache({ limit: 100 });
 		const visibleChatIds = Array.from({ length: 25 }, (_, index) => `visible-${index}`);
-		cache.setVisibleChatIds(visibleChatIds);
+		cache.setMountedChatIds(visibleChatIds);
 		try {
 			vi.setSystemTime(new Date(TS));
 			const initial = [{ ordinal: 1, message: new AssistantMessage(TS, 'initial') }];

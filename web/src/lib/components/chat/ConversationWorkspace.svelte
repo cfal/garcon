@@ -358,7 +358,7 @@
 	);
 	function assertRenderedPanel(surfaceId: ChatViewSurfaceId, chatId: string) {
 		const panel = conversationPanels.panel(surfaceId);
-		if (panel?.chatId !== chatId) {
+		if (panel?.chatId !== chatId || !panel.isPresentationVisible) {
 			throw new StaleConversationSurfaceError(surfaceId, chatId);
 		}
 		return panel;

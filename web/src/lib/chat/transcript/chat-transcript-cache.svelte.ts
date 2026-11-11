@@ -168,7 +168,7 @@ export class ChatTranscriptCache {
 	#snapshotReads = new Set<TranscriptValidationGuard>();
 	#replayValidations = new Set<TranscriptValidationGuard>();
 	#lastAccessedAt = new Map<string, string>();
-	#visibleChatIds = new Set<string>();
+	#mountedChatIds = new Set<string>();
 	#storage: LocalChatTranscriptStorage;
 	#limit: number;
 	#maxHiddenEntries: number;
@@ -229,8 +229,8 @@ export class ChatTranscriptCache {
 		if (this.#entries.has(chatId)) this.#lastAccessedAt.set(chatId, nowIso());
 	}
 
-	setVisibleChatIds(chatIds: readonly string[]): void {
-		this.#visibleChatIds = new Set(chatIds);
+	setMountedChatIds(chatIds: readonly string[]): void {
+		this.#mountedChatIds = new Set(chatIds);
 		this.#prune();
 	}
 
@@ -505,7 +505,7 @@ export class ChatTranscriptCache {
 
 	#prune(): void {
 		const hidden = [...this.#entries.values()].filter(
-			(entry) => !this.#visibleChatIds.has(entry.chatId),
+			(entry) => !this.#mountedChatIds.has(entry.chatId),
 		);
 		if (hidden.length <= this.#maxHiddenEntries) return;
 		hidden.sort((left, right) =>

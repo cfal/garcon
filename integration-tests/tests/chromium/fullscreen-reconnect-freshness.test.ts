@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import type { WebSocketRoute } from 'playwright';
+import type { WebSocket as BrowserWebSocket, WebSocketRoute } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
@@ -24,14 +24,21 @@ function tiledChats(chatIds: readonly string[], offset = 0, depth = 0): object {
   };
 }
 
-test('refreshes fullscreen-hidden chats omitted from bounded reconnect replay', async () => {
-  await withChromiumFixture('fullscreen-reconnect-freshness', async ({ page, context, integration }, phase) => {
+test.each([false, true])('refreshes missed fullscreen history after reconnect (hide while offline: %s)', async hideWhileOffline => {
+  await withChromiumFixture(`fullscreen-reconnect-freshness-${hideWhileOffline}`, async ({ page, context, integration }, phase) => {
     await page.setViewportSize({ width: 3840, height: 2160 });
     await context.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
     let firstSocket: WebSocketRoute | undefined;
+    let browserSocket: BrowserWebSocket | undefined;
+    let allowReconnect = true;
     let dropFirstSocketMessages = false;
     const replayed = new Set<string>();
+    page.on('websocket', socket => { browserSocket ??= socket; });
     await context.routeWebSocket('**/ws?*', socket => {
+      if (!allowReconnect) {
+        socket.close({ code: 1000, reason: 'Synthetic offline interval' });
+        return;
+      }
       const first = firstSocket === undefined;
       firstSocket ??= socket;
       const server = socket.connectToServer();
@@ -65,6 +72,14 @@ test('refreshes fullscreen-hidden chats omitted from bounded reconnect replay', 
         .getByText(`echo:freshness-initial-${index}`, { exact: true }).waitFor();
     }
     const fullscreen = page.locator('[data-workspace-window-fullscreen="window-main"]');
+    if (hideWhileOffline) {
+      if (!firstSocket || !browserSocket) throw new Error('Browser socket did not connect');
+      allowReconnect = false;
+      const closed = new Promise<void>(resolve => browserSocket!.once('close', () => resolve()));
+      firstSocket.close({ code: 1000, reason: 'Synthetic reconnect' });
+      await closed;
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    }
     await fullscreen.click();
     await browserExpect(fullscreen).toHaveAttribute('aria-label', 'Exit fullscreen');
 
@@ -78,13 +93,17 @@ test('refreshes fullscreen-hidden chats omitted from bounded reconnect replay', 
       await integration.client.waitForTurnTerminal(chatId, turn.turnId);
     }
     if (!firstSocket) throw new Error('Browser socket did not connect');
-    firstSocket.close({ code: 1000, reason: 'Synthetic reconnect' });
-    await browserExpect.poll(() => replayed.size).toBe(21);
+    allowReconnect = true;
+    if (!hideWhileOffline) firstSocket.close({ code: 1000, reason: 'Synthetic reconnect' });
+    await browserExpect.poll(() => replayed.has(chatIds[0]!)).toBe(true);
+    if (!hideWhileOffline) await browserExpect(page.locator('[data-conversation-panel]')).toHaveCount(1);
 
     phase('restoring all windows, including those outside the 20-chat replay budget');
     await fullscreen.click();
     await browserExpect(fullscreen).toHaveAttribute('aria-label', 'Fullscreen');
-    expect(chatIds.slice(1).filter(chatId => !replayed.has(chatId))).toHaveLength(4);
+    const unreplayed = chatIds.slice(1).filter(chatId => !replayed.has(chatId));
+    if (hideWhileOffline) expect(unreplayed.length).toBeGreaterThanOrEqual(4);
+    else expect(unreplayed).toHaveLength(24);
     for (let index = 1; index < chatIds.length; index++) {
       await browserExpect(page.locator(`[data-conversation-panel-chat-id="${chatIds[index]}"]`)
         .getByText(`echo:freshness-missed-${index}`, { exact: true })).toBeVisible();

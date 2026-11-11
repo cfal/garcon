@@ -64,6 +64,63 @@ async function openMenu(id: string) {
 }
 
 describe('inline queue', () => {
+	it('closes a hidden queue menu without returning focus to its trigger', async () => {
+		const { rerender } = renderControls();
+		await openMenu('q0');
+		const trigger = row('q0').getByRole('button', { name: m.chat_queue_actions() });
+		const focus = vi.spyOn(trigger, 'focus');
+		try {
+			await rerender({ isVisible: false });
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			expect(focus).not.toHaveBeenCalled();
+		} finally {
+			focus.mockRestore();
+		}
+	});
+
+	it('captures a queue anchor only once before hidden geometry becomes zero', () => {
+		const controller = new QueuedInputListController();
+		controller.update('chat-1', makeQueue().entries);
+		const position = vi.spyOn(controller.virtual, 'viewportPosition', 'get').mockReturnValue({
+			paintedOffset: 48, logicalOffset: 48, distanceFromStart: 48, leadingContentReachable: true,
+		});
+		const suspend = vi.spyOn(controller.virtual, 'suspend');
+		const resume = vi.spyOn(controller.virtual, 'resume').mockReturnValue({ kind: 'scheduled' });
+		controller.prepareForHide();
+		position.mockReturnValue(null);
+		controller.prepareForHide();
+		controller.resume();
+		expect(suspend).toHaveBeenCalledOnce();
+		expect(resume).toHaveBeenCalledWith({ kind: 'anchor', key: 'q1', viewportOffset: -4 });
+		controller.virtual.destroy();
+	});
+
+	it('suspends hidden queue projection and resumes the current entries on reveal', async () => {
+		const update = vi.spyOn(QueuedInputListController.prototype, 'update');
+		const hide = vi.spyOn(QueuedInputListController.prototype, 'prepareForHide');
+		const resume = vi.spyOn(QueuedInputListController.prototype, 'resume');
+		const { rerender, unmount } = renderControls();
+		try {
+			await tick();
+			update.mockClear();
+			resume.mockClear();
+			await rerender({ isVisible: false });
+			expect(hide).toHaveBeenCalledOnce();
+			const queue = makeQueue(['q0', 'q1', 'q2', 'q3']);
+			await rerender({ queue });
+			expect(update).not.toHaveBeenCalled();
+			expect(resume).not.toHaveBeenCalled();
+			await rerender({ isVisible: true });
+			expect(update).toHaveBeenCalledWith('chat-1', queue.entries);
+			expect(resume).toHaveBeenCalledOnce();
+		} finally {
+			unmount();
+			update.mockRestore();
+			hide.mockRestore();
+			resume.mockRestore();
+		}
+	});
+
 	it('exposes the shared appearance hook on the rounded queue panel', () => {
 		const { container } = renderControls();
 		const panel = container.querySelector('[data-queue-status-summary]');

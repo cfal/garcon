@@ -16,6 +16,7 @@
 	interface Props {
 		chatMaxWidth: ChatMaxWidth;
 		isProcessing: boolean;
+		isVisible?: boolean;
 		status: ChatLoadingStatus | null;
 		agentId: string;
 		spinnerSelectionKey: string;
@@ -36,6 +37,7 @@
 	let {
 		chatMaxWidth,
 		isProcessing,
+		isVisible = true,
 		status,
 		agentId,
 		spinnerSelectionKey,
@@ -72,7 +74,7 @@
 		>
 			{#if isProcessing}
 				<LoadingStatus
-					isVisible={true}
+					{isVisible}
 					{status}
 					{agentId}
 					{spinnerSelectionKey}

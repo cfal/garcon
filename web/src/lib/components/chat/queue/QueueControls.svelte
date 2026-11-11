@@ -16,6 +16,7 @@
 	interface Props {
 		chatId: string | null;
 		queue: ChatQueueState | null;
+		isVisible?: boolean;
 		canInterrupt?: boolean;
 		canSteer?: boolean;
 		onInterrupt?: () => void | Promise<void>;
@@ -41,6 +42,7 @@
 	let {
 		chatId,
 		queue,
+		isVisible = true,
 		canInterrupt = false,
 		canSteer = false,
 		onInterrupt,
@@ -65,7 +67,12 @@
 	const entries = $derived(queue?.entries ?? []);
 	const entriesById = $derived(new Map(entries.map((entry) => [entry.id, entry])));
 	const listController = new QueuedInputListController();
-	$effect(() => listController.observeTypography());
+	export function prepareForHide(): void {
+		listController.prepareForHide();
+	}
+	$effect(() => {
+		if (isVisible) return listController.observeTypography();
+	});
 	const snapshot = $derived(listController.virtual.snapshot);
 	const renderedItems = $derived(listController.items(snapshot, entriesById));
 	let notice = $state<{ chatId: string; message: string } | null>(null);
@@ -96,26 +103,33 @@
 		);
 	});
 	const mutation = $derived(chatId ? mutations[chatId] : undefined);
-	const blocked = $derived(Boolean(mutation) || queue?.steeringEntryId != null);
+	const blocked = $derived(!isVisible || Boolean(mutation) || queue?.steeringEntryId != null);
 	const expanded = $derived(chatId !== null && expandedChatId === chatId);
 	const visibleNotice = $derived(notice?.chatId === chatId ? notice : null);
 	let scrollTarget: { chatId: string; element: HTMLDivElement } | null = null;
 
 	$effect(() => {
-		if (!chatId || !listElement) return;
+		if (!isVisible || !chatId || !listElement) return;
 		if (scrollTarget?.chatId === chatId && scrollTarget.element === listElement) return;
 		scrollTarget = { chatId, element: listElement };
 		listElement.scrollTop = 0;
 	});
 	$effect.pre(() => {
+		if (!isVisible) {
+			untrack(() => listController.prepareForHide());
+			return;
+		}
 		const targetChatId = chatId;
 		const currentEntries = entries;
 		untrack(() => listController.update(targetChatId, currentEntries));
 	});
+	$effect(() => {
+		if (isVisible && listElement) untrack(() => listController.resume());
+	});
 	onDestroy(() => listController.virtual.destroy());
 
 	$effect(() => {
-		if (!listElement || !chatId) return;
+		if (!isVisible || !listElement || !chatId) return;
 		const element = listElement;
 		const targetChatId = chatId;
 		let disposed = false;
@@ -143,7 +157,7 @@
 		entryId?: string,
 	): Promise<void> {
 		const operationChatId = chatId;
-		if (!operationChatId || blocked) return;
+		if (!isVisible || !operationChatId || blocked) return;
 		mutations = { ...mutations, [operationChatId]: { kind, entryId } };
 		notice = null;
 		try {
@@ -185,7 +199,7 @@
 		await moveRelative(entryId, target.id, direction === -1 ? 'before' : 'after');
 		await tick();
 		if (
-			chatId !== operationChatId ||
+			!isVisible || chatId !== operationChatId ||
 			!(focusedGrip instanceof HTMLElement) ||
 			focusedGrip.dataset.queueDragId !== entryId ||
 			focusedGrip.getAttribute('aria-pressed') !== 'true' ||
@@ -202,7 +216,7 @@
 		}
 		await tick();
 		if (
-			chatId === operationChatId &&
+			isVisible && chatId === operationChatId &&
 			(document.activeElement === focusedGrip || document.activeElement === document.body) &&
 			focusedGrip.isConnected
 		)
@@ -237,6 +251,7 @@
 							queue.steeringEntryId === entry.id ||
 							(mutation?.kind === 'steering' && mutation.entryId === entry.id)}
 						<QueuedInputTrayRow
+							{isVisible}
 							{chatId}
 							{entry}
 							position={index + 1}
