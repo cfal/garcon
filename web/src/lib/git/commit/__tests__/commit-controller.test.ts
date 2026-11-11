@@ -831,6 +831,30 @@ describe('CommitController', () => {
 		expect(controller.retainedDraftCount).toBe(2);
 	});
 
+	it('keeps authored messages without pinning every old target tree', async () => {
+		const targets = Array.from({ length: 12 }, (_, index) => targetCandidate(`/repo/${index}`));
+		mockedApi.getGitTargetCandidates.mockResolvedValue({ targets });
+		mockedApi.getGitWorkbenchSnapshot.mockImplementation(async () =>
+			snapshot([fileNode('synthetic.ts', { staged: true, hasUnstaged: false })]),
+		);
+		const controller = makeController();
+		await controller.setContext('/repo/0', '/repo/0');
+		await controller.setPresentationVisible(true);
+		for (const [index, target] of targets.entries()) {
+			await controller.target.selectTarget(target);
+			controller.message = `Draft ${index}`;
+		}
+		const fresh = deferred<GitWorkbenchSnapshotReady>();
+		mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(fresh.promise);
+		const restore = controller.target.selectTarget(targets[0]);
+		await vi.waitFor(() => expect(controller.message).toBe('Draft 0'));
+		expect(controller.tree).toEqual([]);
+		fresh.resolve(snapshot([fileNode('fresh.ts', { staged: true })]));
+		await restore;
+		expect(controller.fileNodes.map((node) => node.path)).toEqual(['fresh.ts']);
+		expect(controller.retainedDraftCount).toBe(12);
+	});
+
 	it('does not publish a generated message after invalidation retargets the same chat', async () => {
 		const generation = deferred<{ message: string }>();
 		mockedApi.generateCommitMessage.mockReturnValueOnce(generation.promise);

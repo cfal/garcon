@@ -948,12 +948,12 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	private pruneSnapshots(): void {
-		while (this.snapshots.size > 8) {
-			const cleanEntry = [...this.snapshots.entries()].find(
-				([key, snapshot]) => key !== this.target.identity && !snapshot.message.trim(),
-			);
-			if (!cleanEntry) return;
-			this.snapshots.delete(cleanEntry[0]);
+		let retained = 0;
+		for (const [key, snapshot] of [...this.snapshots].reverse()) {
+			if (key === this.target.identity || retained++ < 8) continue;
+			if (snapshot.message.trim()) {
+				this.snapshots.set(key, { ...snapshot, tree: [], intents: {} });
+			} else this.snapshots.delete(key);
 		}
 	}
 
