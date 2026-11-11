@@ -3,6 +3,23 @@ import { CanvasDocumentState } from '../canvas-document.svelte';
 import { canvasContent } from './canvas-fixtures';
 
 describe('CanvasDocumentState', () => {
+	it('shares one layout per content revision and refreshes through undo and replacement', () => {
+		const document = new CanvasDocumentState(canvasContent(), () => {});
+		const initial = document.layout;
+		expect(document.layout).toBe(initial);
+		expect(initial.chats('box-a')).toHaveLength(2);
+		document.moveToBox('chat-a', 'box-b');
+		expect(document.layout).not.toBe(initial);
+		expect(document.layout.chats('box-a')).toHaveLength(1);
+		expect(initial.chats('box-a')).toHaveLength(2);
+		document.undo();
+		expect(document.layout.chats('box-a')).toHaveLength(2);
+		document.redo();
+		expect(document.layout.chats('box-b')).toHaveLength(1);
+		document.replace(canvasContent());
+		expect(document.layout.chats('box-b')).toHaveLength(0);
+	});
+
 	it('records membership and geometry as single reversible edits', () => {
 		const changed = vi.fn();
 		const document = new CanvasDocumentState(canvasContent(), changed);

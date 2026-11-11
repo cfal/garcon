@@ -11,6 +11,7 @@ import {
 	removeCanvasElements,
 	boxChats,
 	CANVAS_BOX_WIDTH,
+	CanvasLayoutIndex,
 } from './canvas-layout.js';
 
 const HISTORY_LIMIT = 50;
@@ -19,6 +20,11 @@ export class CanvasDocumentState {
 	content: CanvasContent;
 	#undo = $state.raw<CanvasContent[]>([]);
 	#redo = $state.raw<CanvasContent[]>([]);
+	#layout = $derived.by(() => new CanvasLayoutIndex(this.content));
+
+	get layout(): CanvasLayoutIndex {
+		return this.#layout;
+	}
 
 	constructor(
 		content: CanvasContent,

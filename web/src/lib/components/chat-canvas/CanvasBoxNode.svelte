@@ -6,10 +6,8 @@
 	import CanvasHandles from './CanvasHandles.svelte';
 	let { id, selected }: NodeProps<CanvasFlowNode> = $props();
 	const view = getCanvasView();
-	const box = $derived(view.document.content.nodes.find((node) => node.id === id));
-	const count = $derived(
-		view.document.content.nodes.filter((node) => node.type === 'chat' && node.boxId === id).length,
-	);
+	const box = $derived(view.document.layout.byId.get(id));
+	const count = $derived(view.document.layout.chats(id).length);
 </script>
 
 <div

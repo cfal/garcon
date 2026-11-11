@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	availablePosition,
+	CanvasLayoutIndex,
 	boxBounds,
 	finishNodeMove,
 	moveChat,
@@ -10,6 +11,24 @@ import {
 import { canvasContent } from './canvas-fixtures';
 
 describe('canvas layout and membership', () => {
+	it('indexes membership once for a large projection without rescanning nodes', () => {
+		const content = canvasContent();
+		content.nodes = [content.nodes[0], ...Array.from({ length: 999 }, (_, index) => ({
+			id: `chat-${index}`, type: 'chat' as const, chatId: `synthetic-${index}`,
+			boxId: 'box-a', position: { x: 0, y: 0 },
+		}))];
+		let reads = 0;
+		const nodes = content.nodes;
+		Object.defineProperty(content, 'nodes', { get: () => { reads++; return nodes; } });
+		const layout = new CanvasLayoutIndex(content);
+		for (const node of nodes) layout.position(node);
+		const box = nodes[0];
+		if (box.type !== 'box') throw new Error('Expected box');
+		expect(layout.bounds(box).height).toBe(52 + 999 * 144 + 16 - 12);
+		expect(layout.position(nodes[999])).toEqual({ x: 16, y: 52 + 998 * 144 });
+		expect(reads).toBe(1);
+	});
+
 	it('stacks cards predictably and sizes their parent from membership', () => {
 		const content = canvasContent();
 		const box = content.nodes[0];

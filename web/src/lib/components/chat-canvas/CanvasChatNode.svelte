@@ -8,7 +8,7 @@
 	import CanvasHandles from './CanvasHandles.svelte';
 	let { id, selected }: NodeProps<CanvasFlowNode> = $props();
 	const view = getCanvasView();
-	const placement = $derived(view.document.content.nodes.find((node) => node.id === id));
+	const placement = $derived(view.document.layout.byId.get(id));
 	const chat = $derived(placement?.type === 'chat' ? view.chats[placement.chatId] : undefined);
 </script>
 
