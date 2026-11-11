@@ -37,6 +37,18 @@ describe('Markdown image recovery', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('does not create an observer after unmount during deferred scroll-root discovery', async () => {
+		const createObserver = vi.fn();
+		vi.stubGlobal('IntersectionObserver', createObserver);
+		const cache = new FileImageCache({ budgetBytes: 0 });
+		const view = render(Host, { cache, source: '![Capture](capture.png)', resolveImageFile });
+		view.unmount();
+		await tick();
+		expect(createObserver).not.toHaveBeenCalled();
+		expect(filesApi.readContent).not.toHaveBeenCalled();
+		cache.destroy();
+	});
+
 	it('reuses a warm image before the first intersection callback', async () => {
 		const cache = new FileImageCache({ budgetBytes: 1024 * 1024 });
 		const props = { cache, source: '![Capture](capture.png)', resolveImageFile };
@@ -70,6 +82,7 @@ describe('Markdown image recovery', () => {
 		'displays a successful reacquisition after a released failure on %s',
 		async (mode) => {
 			let enter: (visible: boolean) => void = () => {};
+			let observations = 0;
 			let observedRoot: Element | Document | null | undefined;
 			vi.stubGlobal(
 				'IntersectionObserver',
@@ -85,6 +98,7 @@ describe('Markdown image recovery', () => {
 						observedRoot = options?.root;
 					}
 					observe(target: Element) {
+						observations++;
 						enter = (isIntersecting) =>
 							this.callback(
 								[
@@ -109,7 +123,7 @@ describe('Markdown image recovery', () => {
 				},
 			);
 			const container = document.createElement('div');
-			container.style.overflowY = 'auto';
+			container.style.overflowY = 'hidden';
 			document.body.append(container);
 			const cache = new FileImageCache({ budgetBytes: 0 });
 			vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
@@ -117,6 +131,7 @@ describe('Markdown image recovery', () => {
 				props: { cache, source: '![Capture](capture.png)', resolveImageFile },
 				target: container,
 			});
+			container.style.overflowY = 'auto';
 			try {
 				await tick();
 				expect(observedRoot).toBe(container);
@@ -126,7 +141,7 @@ describe('Markdown image recovery', () => {
 				await tick();
 				if (mode === 'generation') {
 					cache.clear();
-					await tick();
+					await vi.waitFor(() => expect(observations).toBe(2));
 				}
 				enter(true);
 				await screen.findByRole('img', { name: 'Capture' });

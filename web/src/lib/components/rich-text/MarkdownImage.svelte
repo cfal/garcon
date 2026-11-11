@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -143,16 +143,20 @@
 			load();
 		}
 		if (typeof IntersectionObserver !== 'undefined') {
-			observer = new IntersectionObserver(
-				(entries) => {
-					if (!active) return;
-					nearby = entries.some((entry) => entry.isIntersecting);
-					if (nearby) load();
-					else release();
-				},
-				{ root: imageScrollRoot(target), rootMargin: '400px' },
-			);
-			observer.observe(target);
+			// Scroll areas enable overflow in sibling mount effects.
+			void tick().then(() => {
+				if (!active) return;
+				observer = new IntersectionObserver(
+					(entries) => {
+						if (!active) return;
+						nearby = entries.some((entry) => entry.isIntersecting);
+						if (nearby) load();
+						else release();
+					},
+					{ root: imageScrollRoot(target), rootMargin: '400px' },
+				);
+				observer.observe(target);
+			});
 		}
 		return () => {
 			active = false;
