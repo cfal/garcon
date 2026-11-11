@@ -23,6 +23,8 @@ import {
 	type QuickCommitStageMode,
 } from './commit-tree-reconciliation.js';
 
+const COLD_COMMIT_SNAPSHOT_LIMIT = 8;
+
 export interface QuickCommitPathIntent {
 	path: string;
 	desiredSelected: boolean;
@@ -950,7 +952,9 @@ export class CommitController implements PortableSingletonController {
 	private pruneSnapshots(): void {
 		let retained = 0;
 		for (const [key, snapshot] of [...this.snapshots].reverse()) {
-			if (key === this.target.identity || retained++ < 8) continue;
+			if (key === this.target.identity) continue;
+			retained += 1;
+			if (retained <= COLD_COMMIT_SNAPSHOT_LIMIT) continue;
 			if (snapshot.message.trim()) {
 				this.snapshots.set(key, { ...snapshot, tree: [], intents: {} });
 			} else this.snapshots.delete(key);
