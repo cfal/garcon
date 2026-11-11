@@ -137,10 +137,20 @@ async function openLayout(
   fixture: ChromiumFixture,
   chatIds: readonly string[],
 ): Promise<void> {
-  await fixture.page.goto(fixture.integration.garcon.baseUrl);
-  await fixture.page.evaluate((layout) => {
-    localStorage.setItem("workspace_layout_v2", JSON.stringify(layout));
-  }, chatLayout(chatIds));
+  const setupUrl = `${fixture.integration.garcon.baseUrl}/__fullscreen-layout-setup`;
+  await fixture.page.route(setupUrl, (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<!doctype html><title>Layout setup</title>",
+  }));
+  try {
+    // Unloads the app and its pending persistence before replacing its layout.
+    await fixture.page.goto(setupUrl);
+    await fixture.page.evaluate((layout) => {
+      localStorage.setItem("workspace_layout_v2", JSON.stringify(layout));
+    }, chatLayout(chatIds));
+  } finally {
+    await fixture.page.unroute(setupUrl);
+  }
   await fixture.page.goto(
     `${fixture.integration.garcon.baseUrl}/chat/${chatIds[0]}`,
   );
@@ -245,6 +255,27 @@ async function readingAnchor(
       throw new Error("Reading anchor did not settle");
     });
 }
+
+test("seeds a replacement layout after outgoing persistence flushes", async () => {
+  await withChromiumFixture("fullscreen-layout-seed-after-flush", async (fixture) => {
+    const chatIds = await seedChats(fixture, 3);
+    const previousLayout = chatLayout(chatIds.slice(0, 2));
+    await fixture.page.addInitScript((layout) => {
+      window.addEventListener("pagehide", () => {
+        // Models a pending app-owned write without relying on the debounce timing.
+        if (document.scripts.length === 0) return;
+        localStorage.setItem("workspace_layout_v2", JSON.stringify(layout));
+        sessionStorage.setItem("fixture:outgoing-layout-flushed", "true");
+      });
+    }, previousLayout);
+    await openLayout(fixture, chatIds.slice(0, 2));
+    await openLayout(fixture, chatIds);
+    expect(await fixture.page.evaluate(() =>
+      sessionStorage.getItem("fixture:outgoing-layout-flushed"),
+    )).toBe("true");
+    expect(await fixture.page.locator("[data-conversation-panel]").count()).toBe(3);
+  });
+});
 
 test.each([false, true])(
   "retains 2, 8, and 25 Chat trees through fullscreen (combined=%s)",
