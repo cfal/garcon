@@ -14,7 +14,7 @@
 	import type { CanvasPosition } from '$shared/chat-canvas';
 	import { isCanvasSide, CANVAS_MAX_NODES, CANVAS_MAX_CONNECTIONS } from '$shared/chat-canvas';
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
-	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
+	import type { CanvasController, CanvasViewport } from '$lib/chat-canvas/canvas-controller.svelte';
 	import { boxAt } from '$lib/chat-canvas/canvas-layout';
 	import { getWorkspaceWindowDnd } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -169,6 +169,10 @@
 		initialized = true;
 	}
 
+	function rememberViewport(_event: unknown, viewport: CanvasViewport): void {
+		if (viewportApplied) controller.setViewport(session.saved.id, viewport);
+	}
+
 	async function finishDrag(moved: CanvasFlowNode[]) {
 		const release = releaseInteraction;
 		const positions = new Map<string, CanvasPosition>();
@@ -278,9 +282,8 @@
 				if (next.size !== selectedIds.size || [...next].some((id) => !selectedIds.has(id)))
 					onselect(next);
 			})}
-		onmove={(_event, viewport) => {
-			if (viewportApplied) controller.setViewport(session.saved.id, viewport);
-		}}
+		onmovestart={rememberViewport}
+		onmove={rememberViewport}
 	>
 		<Background patternColor="hsl(var(--border))" gap={24} />
 	</SvelteFlow>

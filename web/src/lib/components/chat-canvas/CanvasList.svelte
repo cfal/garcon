@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { CanvasContent } from '$shared/chat-canvas';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import { boxChats } from '$lib/chat-canvas/canvas-layout';
@@ -23,7 +24,7 @@
 	} = $props();
 	let element = $state<HTMLDivElement>();
 	$effect(() => {
-		if (element) element.scrollTop = scrollTop;
+		if (element) element.scrollTop = untrack(() => scrollTop);
 	});
 	function title(id: string): string {
 		const node = content.nodes.find((entry) => entry.id === id);

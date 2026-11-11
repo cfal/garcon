@@ -141,7 +141,10 @@ describe('CanvasWorkspace retention', () => {
 				expect(first).not.toBeNull();
 				if (mode === 'list') {
 					first.scrollTop = 120;
+					const writeScroll = vi.spyOn(first, 'scrollTop', 'set');
 					await fireEvent.scroll(first);
+					expect(writeScroll).not.toHaveBeenCalled();
+					writeScroll.mockRestore();
 				}
 				session.document.renameBox('box-a', 'Retained edit');
 				const content = session.document.content;
