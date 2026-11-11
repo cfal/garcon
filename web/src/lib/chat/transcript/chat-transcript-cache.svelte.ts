@@ -346,6 +346,8 @@ export class ChatTranscriptCache {
 		}
 		if (!applied.changed && applied.lastOrdinal === entry.lastOrdinal && !entry.stale) {
 			this.#lastAccessedAt.set(chatId, nowIso());
+			// Redundant delivery also repairs failed writes and cross-tab snapshot eviction.
+			if (!this.#persistence.hasPending(chatId)) this.#persistence.schedule(entry);
 			return { status: 'applied', changed: false, lastOrdinal: entry.lastOrdinal };
 		}
 		const windowed = applied.messages.slice(-this.#limit);
