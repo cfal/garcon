@@ -17,7 +17,27 @@ export function compareChatsByRecencyDesc(a: ChatSessionRecord, b: ChatSessionRe
 
 /** Returns a new array of chats ordered newest-first. */
 export function sortChatsByRecencyDesc(chats: ChatSessionRecord[]): ChatSessionRecord[] {
-	return [...chats].sort(compareChatsByRecencyDesc);
+	return withRecency(chats)
+		.sort(compareRecency)
+		.map(({ chat }) => chat);
+}
+
+interface ChatRecency {
+	chat: ChatSessionRecord;
+	time: number;
+	draft: boolean;
+}
+
+function withRecency(chats: ChatSessionRecord[]): ChatRecency[] {
+	return chats.map((chat) => ({
+		chat,
+		time: chatActivityTimeMs(chat),
+		draft: chat.status === 'draft',
+	}));
+}
+
+function compareRecency(left: ChatRecency, right: ChatRecency): number {
+	return Number(right.draft) - Number(left.draft) || right.time - left.time;
 }
 
 /** Applies pin-placement policy without changing the order of unpinned chats. */
@@ -25,12 +45,14 @@ export function sortSidebarChatsByRecency(
 	chats: ChatSessionRecord[],
 	pinnedInsertPosition: PinnedInsertPosition,
 ): ChatSessionRecord[] {
-	const newestFirst = sortChatsByRecencyDesc(chats);
+	const ranked = withRecency(chats);
+	const newestFirst = [...ranked].sort(compareRecency).map(({ chat }) => chat);
 	if (pinnedInsertPosition === 'top') return newestFirst;
 
-	const pinnedOldestFirst = chats
-		.filter((chat) => chat.isPinned)
-		.sort((left, right) => compareChatsByRecencyDesc(right, left));
+	const pinnedOldestFirst = ranked
+		.filter(({ chat }) => chat.isPinned)
+		.sort((left, right) => compareRecency(right, left))
+		.map(({ chat }) => chat);
 	let pinnedIndex = 0;
 	return newestFirst.map((chat) =>
 		chat.isPinned ? (pinnedOldestFirst[pinnedIndex++] ?? chat) : chat,
