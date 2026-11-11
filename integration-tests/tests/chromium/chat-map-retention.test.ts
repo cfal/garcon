@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,8 +6,9 @@ import type { ChatRegistrySnapshot } from '../../../server/controller/chats/regi
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 
-test('restores both scroll axes of a deep Chat Map after hiding its renderer', async () => {
-  await withChromiumFixture('chat-map-scroll-retention', async ({ page, integration }) => {
+test('restores both scroll axes of a deep Chat Map across repeated renderer releases', async () => {
+  await withChromiumFixture('chat-map-scroll-retention', async (fixture) => {
+    const { page, integration } = fixture;
     const ids: string[] = [];
     for (let index = 0; index < 18; index++) {
       const chatId = integration.newChatId();
@@ -38,13 +39,17 @@ test('restores both scroll axes of a deep Chat Map after hiding its renderer', a
     const region = page.locator('[data-chat-map-scroll-region]');
     await browserExpect(region).toBeVisible();
     await browserExpect.poll(() => region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeGreaterThan(80);
-    await region.evaluate((element) => element.scrollTo({ top: 120, left: 80 }));
-    await browserExpect.poll(() => region.evaluate((element) => [element.scrollTop, element.scrollLeft])).toEqual([120, 80]);
     const windowId = await region.evaluate((element) => element.closest('[data-workspace-window-id]')!.getAttribute('data-workspace-window-id')!);
-    await clickWorkspaceWindowAddAction(page, 'Open Canvas', windowId);
-    await browserExpect(region).toHaveCount(0);
-    await page.getByRole('tab', { name: 'Chat Map', exact: true }).click();
-    await browserExpect(region).toBeVisible();
-    expect(await region.evaluate((element) => [element.scrollTop, element.scrollLeft])).toEqual([120, 80]);
+    for (const [top, left] of [[120, 80], [60, 40]]) {
+      await region.evaluate((element, position) => element.scrollTo(position), { top, left });
+      await browserExpect.poll(() => region.evaluate((element) => [element.scrollTop, element.scrollLeft])).toEqual([top, left]);
+      if (top === 120) await clickWorkspaceWindowAddAction(page, 'Open Canvas', windowId);
+      else await page.getByRole('tab', { name: 'Canvas', exact: true }).click();
+      await browserExpect(region).toHaveCount(0);
+      await page.getByRole('tab', { name: 'Chat Map', exact: true }).click();
+      await browserExpect(region).toBeVisible();
+      await browserExpect.poll(() => region.evaluate((element) => [element.scrollTop, element.scrollLeft])).toEqual([top, left]);
+    }
+    fixture.assertNoBrowserErrors();
   });
 }, 180_000);
