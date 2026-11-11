@@ -296,6 +296,33 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		};
 	}
 
+	it('loads adjacent visible bodies that fit patch limits despite retained index overhead', async () => {
+		const paths = ['large.ts', 'small.ts'];
+		const load = vi
+			.spyOn(gitApi, 'getGitReviewFileBodies')
+			.mockImplementation(async (_target, _document, files) => ready(files));
+		const controller = new GitVirtualReviewDocumentController({
+			...documentDeps(() => paths),
+			targetProjectPath: () => '/project',
+		});
+		try {
+			const summary = makeSummary(paths.map((path) => makeFile(path)));
+			summary.limits.maxLoadedPatchBytes = paths.reduce(
+				(total, path) => total + makeBody(path).patchBytes,
+				0,
+			);
+			controller.applySummary(summary, []);
+			controller.handleBodyDemand({ kind: 'viewport', documentId: 'doc', filePaths: paths });
+			await vi.waitFor(() => {
+				for (const path of paths) expect(controller.fileBodies[path]?.bodyState).toBe('loaded');
+			});
+			expect(controller.aggregateLimit).toBeNull();
+		} finally {
+			controller.reset();
+			load.mockRestore();
+		}
+	});
+
 	it('publishes indexed bodies while the rest of the batch is held and fences reset callbacks', async () => {
 		const paths = ['a.ts', 'b.ts'];
 		const held = Promise.withResolvers<ReturnType<typeof ready>>();

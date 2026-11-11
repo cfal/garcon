@@ -650,7 +650,7 @@ export class GitVirtualReviewDocumentController {
 
 	private aggregateLimitMessage(decision: GitReviewBodyBudgetDecision): string {
 		return decision.reason === 'collection-too-many-bytes'
-			? `Cannot load this file within the retained body byte budget (${decision.loadedBytes.toLocaleString()} bytes already loaded).`
+			? 'Cannot load this file within the collection patch byte limit.'
 			: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
 	}
 

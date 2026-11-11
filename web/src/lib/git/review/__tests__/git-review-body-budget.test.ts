@@ -115,6 +115,23 @@ describe('Git review body budget', () => {
 		});
 	});
 
+	it('admits adjacent visible bodies in server patch units while limiting prefetch memory', () => {
+		const large = { ...body('large.ts', 5, 90), patch: 'x'.repeat(90) };
+		const small = body('small.ts', 1, 10);
+		for (const [incoming, pinned] of [
+			[large, small],
+			[small, large],
+		]) {
+			const current = { [pinned.path]: pinned };
+			expect(
+				decideGitReviewBodyBudget(incoming, 'visible', current, new Set([pinned.path]), limits),
+			).toMatchObject({ accept: true, evictedPaths: [] });
+			expect(
+				decideGitReviewBodyBudget(incoming, 'prefetch', current, new Set([pinned.path]), limits),
+			).toMatchObject({ accept: false, reason: 'collection-too-many-bytes' });
+		}
+	});
+
 	it('stops prefetch instead of evicting visible bodies', () => {
 		const current = { 'a.ts': body('a.ts', 8, 80) };
 		const decision = decideGitReviewBodyBudget(

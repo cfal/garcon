@@ -34,6 +34,7 @@ export function decideGitReviewBodyBudget(
 		([path, candidate]) => path !== body.path && candidate.bodyState === 'loaded',
 	);
 	let { loadedRows, loadedBytes } = loadedGitReviewBodyTotals(currentBodies, body.path);
+	let loadedPatchBytes = loaded.reduce((total, [, candidate]) => total + candidate.patchBytes, 0);
 	const evictedPaths: string[] = [];
 	const bodyBytes = gitReviewBodyBytes(body);
 
@@ -47,6 +48,7 @@ export function decideGitReviewBodyBudget(
 			evictedPaths.push(path);
 			loadedRows -= candidate.renderedRowCount;
 			loadedBytes -= gitReviewBodyBytes(candidate);
+			loadedPatchBytes -= candidate.patchBytes;
 			if (
 				loadedRows + body.renderedRowCount <= limits.maxLoadedRows &&
 				loadedBytes + bodyBytes <= limits.maxLoadedPatchBytes
@@ -57,13 +59,10 @@ export function decideGitReviewBodyBudget(
 	}
 
 	const rowsExceeded = loadedRows + body.renderedRowCount > limits.maxLoadedRows;
-	// A server-admitted file remains inspectable when its text and indexes exceed the collection budget.
-	const standaloneVisible =
-		purpose === 'visible' &&
-		loaded.length === evictedPaths.length &&
-		body.patchBytes <= limits.maxFilePatchBytes &&
-		body.renderedRowCount <= limits.maxFileRows;
-	const bytesExceeded = !standaloneVisible && loadedBytes + bodyBytes > limits.maxLoadedPatchBytes;
+	// Visible admission uses the server's patch units; retained estimates constrain cold work.
+	const bytesExceeded =
+		(purpose === 'visible' ? loadedPatchBytes + body.patchBytes : loadedBytes + bodyBytes) >
+		limits.maxLoadedPatchBytes;
 	return {
 		accept: !rowsExceeded && !bytesExceeded,
 		evictedPaths,

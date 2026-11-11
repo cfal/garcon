@@ -771,6 +771,48 @@ describe('GitDiffDocumentController', () => {
 		expect(controller.aggregateLimit).toBeNull();
 	});
 
+	it('loads adjacent visible bodies without imposing a retained-byte terminal limit', async () => {
+		const controller = new GitDiffDocumentController();
+		const large = body('large.ts');
+		const small = body('small.ts');
+		const patchLimit = large.patchBytes + small.patchBytes;
+		expect(gitReviewBodyBytes(large) + gitReviewBodyBytes(small)).toBeGreaterThan(patchLimit);
+		try {
+			controller.open(
+				{
+					project: '/project',
+					documentId: 'doc',
+					files: [file(large.path), file(small.path)],
+					limits: { ...limits, maxLoadedRows: 100, maxLoadedPatchBytes: patchLimit },
+					firstBodyCandidates: [],
+				},
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					loadBodies: async (_snapshot, requested) =>
+						bodyResponse(
+							'doc',
+							requested.map(({ path }) => path),
+						),
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+				},
+			);
+			controller.handleBodyDemand({
+				kind: 'viewport',
+				documentId: 'doc',
+				filePaths: [large.path, small.path],
+			});
+			await vi.waitFor(() => {
+				expect(controller.fileBodies[large.path]?.bodyState).toBe('loaded');
+				expect(controller.fileBodies[small.path]?.bodyState).toBe('loaded');
+			});
+			expect(controller.aggregateLimit).toBeNull();
+		} finally {
+			controller.clear();
+		}
+	});
+
 	it('recycles a previously visible body after viewport demand moves away', async () => {
 		const controller = new GitDiffDocumentController();
 		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
