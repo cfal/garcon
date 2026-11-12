@@ -34,13 +34,13 @@ export function collectEagerAssets(
 	return { files, cssFiles, keysByFile };
 }
 
-export function assertLazyLanguageAssets(assets: readonly { file: string; names: readonly string[] }[]): void {
-	const eagerLanguages = assets.filter(({ names }) => names.some(name =>
+export function assertLazyRendererAssets(assets: readonly { file: string; names: readonly string[] }[]): void {
+	const eagerRenderers = assets.filter(({ names }) => names.some(name =>
 		name.startsWith('vendor-cm-lang-') || name.startsWith('vendor-codemirror') ||
 		name === 'vendor-cm-legacy-modes' || name === 'vendor-xterm' || name === 'vendor-canvas',
 	));
-	if (eagerLanguages.length > 0) {
-		throw new Error(`Optional renderer chunks must remain lazy: ${eagerLanguages.map(asset => asset.file).join(', ')}`);
+	if (eagerRenderers.length > 0) {
+		throw new Error(`Optional renderer chunks must remain lazy: ${eagerRenderers.map(asset => asset.file).join(', ')}`);
 	}
 }
 
