@@ -176,7 +176,6 @@
 						{session}
 						{controller}
 						{editing}
-						{visible}
 						{presentation}
 						selectedIds={ui.selectedIds}
 						onselect={(ids) => ui.select(ids)}
