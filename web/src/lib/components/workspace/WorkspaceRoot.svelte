@@ -87,6 +87,7 @@
 	import {
 		renderedPortablePresentations,
 		visibleChatPresentations,
+		fullscreenHiddenChatPresentations,
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
@@ -204,6 +205,10 @@
 				},
 			];
 		}),
+	);
+	const fullscreenHiddenChats = $derived(
+		fullscreenHiddenChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop')
+			.filter(item => resolveChatSurfacePresentation(sessions.byId[item.chatId] ?? null, sessions.isLoadingChats) === 'conversation'),
 	);
 	const existingChatSurfaceIds = $derived.by(
 		() =>
@@ -409,6 +414,9 @@
 	const mobilePanel = $derived(
 		mobileChatSurface ? conversationPanels.panel(mobileChatSurface.id) : null,
 	);
+	const mobilePanelRetainedOnDesktop = $derived(
+		mobilePanel !== null && conversationPanels.retainedWindowId(mobilePanel.surfaceId) !== null,
+	);
 	const mobileChatPresentation = $derived(
 		resolveChatSurfacePresentation(mobileChat, sessions.isLoadingChats),
 	);
@@ -445,9 +453,10 @@
 
 	$effect(() => {
 		const visible = chatPresentations;
+		const hidden = fullscreenHiddenChats;
 		const existingSurfaceIds = existingChatSurfaceIds;
 		untrack(() => {
-			conversationPanels.reconcile(visible);
+			conversationPanels.reconcile(visible, hidden);
 			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);
 		});
 	});
@@ -618,6 +627,7 @@
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
 				isVisible={!isMobile && (!projectedWindowId || projectedWindowId === workspaceWindow.id)}
+				retainFullscreenChats={!isMobile && snapshot.fullscreenWindowId !== null}
 				hasLeftSeparator={hasLeftSeparator(renderedRect)}
 				hasRightSeparator={hasRightSeparator(renderedRect)}
 				presentations={renderedPresentations}
@@ -659,7 +669,7 @@
 
 	{#if isMobile && mobileChatSurface}
 		<div class="absolute inset-0 overflow-hidden bg-background">
-			{#if mobileChat && mobilePanel}
+			{#if mobileChat && mobilePanel && !mobilePanelRetainedOnDesktop}
 				{#key mobilePanel}
 					{const panel = mobilePanel}
 					{const chat = mobileChat}
@@ -678,7 +688,7 @@
 						reserveMobileToolbar={true}
 					/>
 				{/key}
-			{:else if mobileChatPresentation === 'loading'}
+			{:else if mobileChatPresentation === 'loading' || mobilePanel}
 				<ChatLoadingState announcementsEnabled={mobileChatIsComposerAnchor} />
 			{:else}
 				<ChatEmptyState />

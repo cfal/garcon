@@ -81,7 +81,7 @@ describe('transcript reconnect replay state', () => {
 		expect(replay.applyPage(firstToken, 'chat-1', batch(1, 'stale-page'))).toBe('stale');
 		expect(replay.applyPage(secondToken, 'chat-2', retainedBatch)).toBe('stale');
 		expect(replay.applyPage(secondToken, 'chat-1', batch(1, 'wrong-view'))).toBe('stale');
-		replay.abort(firstToken);
+		expect(replay.abort(firstToken)).toBe(false);
 		expect(replay.buffer('chat-1', retainedBatch)).toBe(true);
 
 		expect(replay.finish(secondToken, 'chat-1')).toBe('applied');
@@ -89,11 +89,19 @@ describe('transcript reconnect replay state', () => {
 
 		const abortedToken = replay.begin('chat-1', 'view-2');
 		expect(replay.buffer('chat-1', batch(2, 'aborted', { transcriptViewId: 'view-2' }))).toBe(true);
-		replay.abort(abortedToken);
+		expect(replay.abort(abortedToken)).toBe(true);
+		expect(replay.abort(abortedToken)).toBe(false);
 		expect(replay.finish(abortedToken, 'chat-1')).toBe('stale');
 		expect(replay.buffer('chat-1', batch(2, 'ordinary', { transcriptViewId: 'view-2' }))).toBe(
 			false,
 		);
+	});
+
+	it('reports no lost commits when aborting an empty replay', () => {
+		const replay = new TranscriptReconnectReplayState(() => 'applied');
+		const token = replay.begin('chat-1', 'view-1');
+		expect(replay.abort(token)).toBe(false);
+		expect(replay.finish(token, 'chat-1')).toBe('stale');
 	});
 
 	it.each(['gap-detected', 'view-changed'] as const)(

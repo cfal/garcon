@@ -65,6 +65,11 @@ type TimeoutHandle = ReturnType<typeof setTimeout>;
 type SetTimeoutFn = (callback: () => void, delayMs: number) => TimeoutHandle;
 type ClearTimeoutFn = (timer: TimeoutHandle) => void;
 
+interface TranscriptValidationGuard {
+	chatId: string;
+	current: boolean;
+}
+
 function nowIso(): string {
 	return new Date().toISOString();
 }
@@ -109,8 +114,10 @@ class ChatTranscriptPersistenceQueue {
 		this.#scheduleDrain(this.#delayMs);
 	}
 
-	hasPending(chatId: string): boolean {
-		return this.#pending.has(chatId);
+	removeExcept(chatIds: ReadonlySet<string>): void {
+		for (const chatId of this.#pending.keys()) {
+			if (!chatIds.has(chatId)) this.#pending.delete(chatId);
+		}
 	}
 
 	remove(chatId: string): void {
@@ -158,9 +165,10 @@ class ChatTranscriptPersistenceQueue {
 
 export class ChatTranscriptCache {
 	#entries = new SvelteMap<string, ChatTranscriptSnapshot>();
-	#snapshotReads = new Set<{ chatId: string; current: boolean }>();
+	#snapshotReads = new Set<TranscriptValidationGuard>();
+	#replayValidations = new Set<TranscriptValidationGuard>();
 	#lastAccessedAt = new Map<string, string>();
-	#visibleChatIds = new Set<string>();
+	#mountedChatIds = new Set<string>();
 	#storage: LocalChatTranscriptStorage;
 	#limit: number;
 	#maxHiddenEntries: number;
@@ -195,20 +203,38 @@ export class ChatTranscriptCache {
 	}
 
 	trackSnapshotRead(chatId: string): { isCurrent(): boolean; release(): void } {
-		const read = { chatId, current: true };
-		this.#snapshotReads.add(read);
+		return this.#trackValidation(this.#snapshotReads, chatId);
+	}
+
+	trackReplayValidation(chatId: string): { isCurrent(): boolean; release(): void } {
+		return this.#trackValidation(this.#replayValidations, chatId);
+	}
+
+	#trackValidation(guards: Set<TranscriptValidationGuard>, chatId: string) {
+		const guard = { chatId, current: true };
+		guards.add(guard);
 		return {
-			isCurrent: () => read.current,
-			release: () => { this.#snapshotReads.delete(read); },
+			isCurrent: () => guard.current,
+			release: () => { guards.delete(guard); },
 		};
+	}
+
+	#invalidateGuards(guards: Set<TranscriptValidationGuard>, chatId: string): void {
+		for (const guard of guards) {
+			if (guard.chatId === chatId) guard.current = false;
+		}
+	}
+
+	invalidateSnapshotReads(chatId: string): void {
+		this.#invalidateGuards(this.#snapshotReads, chatId);
 	}
 
 	markAccessed(chatId: string): void {
 		if (this.#entries.has(chatId)) this.#lastAccessedAt.set(chatId, nowIso());
 	}
 
-	setVisibleChatIds(chatIds: readonly string[]): void {
-		this.#visibleChatIds = new Set(chatIds);
+	setMountedChatIds(chatIds: readonly string[]): void {
+		this.#mountedChatIds = new Set(chatIds);
 		this.#prune();
 	}
 
@@ -265,7 +291,7 @@ export class ChatTranscriptCache {
 		};
 		this.#entries.set(chatId, entry);
 		this.#lastAccessedAt.set(chatId, now);
-		this.#persistence.schedule(entry);
+		if (!entry.stale) this.#persistence.schedule(entry);
 		this.#prune();
 		return snapshotFromEntry(entry);
 	}
@@ -361,28 +387,43 @@ export class ChatTranscriptCache {
 				windowed,
 				entry.nextBeforeOrdinal,
 			),
-			stale: false,
 		};
 		this.#entries.set(chatId, next);
 		this.#lastAccessedAt.set(chatId, nowIso());
-		this.#persistence.schedule(next);
+		if (!next.stale) this.#persistence.schedule(next);
 		return { status: 'applied', changed: applied.changed, lastOrdinal: next.lastOrdinal };
 	}
 
 	markStale(chatId: string): void {
 		if (!chatId) return;
+		// Per-chat staleness must not cancel the snapshot read that repairs it.
+		this.#invalidateGuards(this.#replayValidations, chatId);
 		this.#persistence.remove(chatId);
 		const current = this.#entries.get(chatId);
 		if (current) this.#entries.set(chatId, { ...current, stale: true });
 		this.#storage.markStale(chatId);
 	}
 
+	markStaleExcept(chatIds: ReadonlySet<string>): void {
+		// Includes drafts and reads whose entries have already left the memory cache.
+		this.#persistence.removeExcept(chatIds);
+		for (const guard of [...this.#snapshotReads, ...this.#replayValidations]) {
+			if (!chatIds.has(guard.chatId)) guard.current = false;
+		}
+		for (const [chatId, entry] of this.#entries) {
+			if (!chatIds.has(chatId)) this.#entries.set(chatId, { ...entry, stale: true });
+		}
+		this.#storage.markStaleExcept(chatIds);
+	}
+
 	markValidated(chatId: string): void {
 		if (!chatId) return;
 		const current = this.#entries.get(chatId);
-		if (current) this.#entries.set(chatId, { ...current, stale: false });
-		// A pending replacement validates on write; the stored snapshot may still belong to an older view.
-		if (!this.#persistence.hasPending(chatId)) this.#storage.markValidated(chatId);
+		if (!current) return;
+		const validated = { ...current, stale: false };
+		this.#entries.set(chatId, validated);
+		// Persists the validated frontier, not an older snapshot whose draft was cancelled.
+		this.#persistence.schedule(validated);
 	}
 
 	listCursors(limit = 20): ChatTranscriptCursor[] {
@@ -414,9 +455,8 @@ export class ChatTranscriptCache {
 
 	remove(chatId: string): void {
 		if (!chatId) return;
-		for (const read of this.#snapshotReads) {
-			if (read.chatId === chatId) read.current = false;
-		}
+		this.invalidateSnapshotReads(chatId);
+		this.#invalidateGuards(this.#replayValidations, chatId);
 		this.#entries.delete(chatId);
 		this.#lastAccessedAt.delete(chatId);
 		this.#storage.remove(chatId);
@@ -465,7 +505,7 @@ export class ChatTranscriptCache {
 
 	#prune(): void {
 		const hidden = [...this.#entries.values()].filter(
-			(entry) => !this.#visibleChatIds.has(entry.chatId),
+			(entry) => !this.#mountedChatIds.has(entry.chatId),
 		);
 		if (hidden.length <= this.#maxHiddenEntries) return;
 		hidden.sort((left, right) =>

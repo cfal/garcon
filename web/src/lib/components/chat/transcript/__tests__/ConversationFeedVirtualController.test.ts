@@ -283,6 +283,30 @@ describe('ConversationFeedVirtualController', () => {
 		expect(exposure.controller.renderedIndexes(exposure.controller.snapshot)).not.toContain(0);
 	});
 
+	it.each([false, true])('restores pending summary focus only without hide/reveal before the frame (hidden: %s)', async hidden => {
+		const { exposure, unmount } = await renderController({ groupFocusMode: true });
+		await exposure.setPinned(false);
+		vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+		try {
+			const original = document.querySelector<HTMLButtonElement>('[data-chat-tool-group]')!;
+			original.focus();
+			await exposure.prependGroup();
+			const replacement = document.querySelector<HTMLButtonElement>('[data-chat-tool-group]')!;
+			expect(replacement).not.toBe(original);
+			const focus = vi.spyOn(replacement, 'focus');
+			if (hidden) {
+				await exposure.hide();
+				await exposure.showAtLayout(400, 40);
+			}
+			await vi.advanceTimersByTimeAsync(32);
+			expect(focus).toHaveBeenCalledTimes(hidden ? 0 : 1);
+			expect(document.activeElement === replacement).toBe(!hidden);
+		} finally {
+			unmount();
+			vi.useRealTimers();
+		}
+	});
+
 	it('attaches one observer to the viewport and items, never the sizer', async () => {
 		const { exposure } = await renderController();
 		const viewport = exposure.viewport();

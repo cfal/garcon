@@ -139,7 +139,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.chatState.discardChat(chatId);
 				deps.panels.handleViewReplacement(chatId);
 			},
-			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,

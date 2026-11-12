@@ -83,8 +83,12 @@ export class TranscriptReconnectReplayState {
 		return 'applied';
 	}
 
-	abort(token: number): void {
-		if (this.#active?.token === token) this.#active = null;
+	/** Reports whether buffered live batches were discarded. */
+	abort(token: number): boolean {
+		const replay = this.#active;
+		if (!replay || replay.token !== token) return false;
+		this.#active = null;
+		return replay.buffered.length > 0;
 	}
 
 	reset(): void {

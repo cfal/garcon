@@ -35,6 +35,9 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		transcript?: ActiveTranscriptState;
+		isVisible?: boolean;
+		onCoverageChange?: () => void;
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -58,6 +61,9 @@
 	}
 
 	const {
+		transcript,
+		isVisible = true,
+		onCoverageChange,
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -70,7 +76,7 @@
 	const initialChatContext = untrack(() => chatContext);
 	const pendingPermissions: PendingPermissionRequest[] = [];
 
-	const chatState = new ActiveTranscriptState();
+	const chatState = untrack(() => transcript ?? new ActiveTranscriptState());
 	let viewportPort: ConversationViewportPort | null = null;
 	let navigationResult = $state('idle');
 	async function navigateToTool(ordinal: number, presentation = false): Promise<void> {
@@ -273,7 +279,8 @@
 		{onUserScrollIntent}
 	{isPreparingInitialScroll}
 	onLoadEarlier={retryEarlierPage}
-	isVisible={true}
+	{isVisible}
+	{onCoverageChange}
 	pinnedToBottom={true}
 		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
 		onViewportPortChange={(port) => (viewportPort = port)}

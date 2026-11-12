@@ -110,7 +110,7 @@
 		get identity() { return questionTarget; },
 		get excludedResendOrdinals() { return panel.transcript.excludedResendOrdinals; },
 		canReply: canReplyToQuestion,
-		canSubmit: (ordinal) => canReplyToQuestion(ordinal)
+		canSubmit: (ordinal) => isVisible && canReplyToQuestion(ordinal)
 			&& executors.isReady(chat.executorId ?? 'local') && modelCatalog.isValidated,
 		recordedAnswer: (ordinal, questionId) => recordedQuestionAnswers.get(JSON.stringify([ordinal, questionId])),
 	});
@@ -207,6 +207,7 @@
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	let conversationViewport = $state<ConversationViewportPort | null>(null);
 	let queueControlsContainer = $state<HTMLDivElement>();
+	let queuePresentation = $state<{ prepareForHide(): void }>();
 	let feedPresentation = $state<ConversationFeedPresentationPort | null>(null);
 	let detachedRestoreTarget: ConversationPanelRestoreTarget | null = null;
 
@@ -230,11 +231,16 @@
 				captureRestoreTarget: () =>
 					feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
 				closeTransients: () => feedPresentation?.closeTransients(),
+				prepareForHide: () => {
+					feedPresentation?.prepareForHide();
+					queuePresentation?.prepareForHide();
+				},
 			}),
 		);
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		const viewport = conversationViewport;
 		if (viewport) panel.resumePendingRestore();
 	});
@@ -249,6 +255,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void chatId;
 		void panel.transcript.loadStatus;
 		void panel.transcript.displayMessageCount;
@@ -260,6 +267,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void panel.transcript.pagingRevision;
 		void panel.transcript.feedMutationClock.dataRevision;
 		void panel.transcript.isLoadingMessages;
@@ -290,6 +298,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void queueControlsContainer;
 		void scrollContainer;
 		void chatId;
@@ -297,6 +306,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void scrollContainer;
 		void chatId;
 		return panel.scroll.observeScrollContainerResize();
@@ -304,7 +314,7 @@
 
 	$effect(() => {
 		const region = scrollContainer;
-		if (!region) return;
+		if (!region || !isVisible) return;
 		return registerManagedWorkspaceScrollRegion(region, 'primary', (_element, direction) =>
 			panel.scroll.scrollFeedHalfPage(direction),
 		);
@@ -368,8 +378,10 @@
 	<div bind:this={queueControlsContainer} class={queueShellClass}>
 		<div class={cn(dockFrameClass, 'flex min-h-0 flex-col')}>
 			<QueueControls
+				bind:this={queuePresentation}
 				{chatId}
 				{queue}
+				{isVisible}
 				{canInterrupt}
 				{canSteer}
 				{announcementsEnabled}
@@ -404,6 +416,7 @@
 
 	<ConversationPanelStatusDock
 		chatMaxWidth={localSettings.chatMaxWidth}
+		{isVisible}
 		{isProcessing}
 		status={panel.lifecycle.loadingStatus}
 		agentId={chat.agentId}

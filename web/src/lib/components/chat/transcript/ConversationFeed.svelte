@@ -295,11 +295,18 @@
 	let virtualRoot: HTMLDivElement | null = $state(null);
 
 	$effect.pre(() => {
+		if (!isVisible) {
+			untrack(() => {
+				announcerState.reset();
+				announcementBatcher.enqueue({ kind: 'clear' });
+			});
+			return;
+		}
 		const input = {
 			surfaceIdentity,
 			rows: chatState.visibleRows,
 			mutationClock: chatState.feedMutationClock,
-			visible: isVisible && announcementsEnabled,
+			visible: announcementsEnabled,
 			pinnedToBottom,
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
@@ -348,11 +355,13 @@
 	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
 
 	$effect(() => {
+		if (!isVisible) return;
 		void projection.geometry.geometryRevision;
 		untrack(() => onCoverageChange?.());
 	});
 
 	$effect.pre(() => {
+		if (!isVisible) return;
 		toolGroups.reconcile(
 			surfaceIdentity,
 			new Set(chatState.visibleRows.map((row) => row.id)),
@@ -401,6 +410,7 @@
 			captureRestoreTarget: () =>
 				virtualController.captureRestoreTarget(chatState.transcriptViewId, pinnedToBottom),
 			closeTransients,
+			prepareForHide,
 		};
 		onPresentationPortChange?.(port);
 		return () => onPresentationPortChange?.(null);
@@ -411,16 +421,17 @@
 		return () => onRegisterPrepareHide?.(null);
 	});
 
-	$effect(() =>
-		retention.observeSelection({
+	$effect(() => {
+		if (!isVisible) return;
+		return retention.observeSelection({
 			get root() {
 				return virtualRoot;
 			},
 			get visible() {
 				return isVisible;
 			},
-		}),
-	);
+		});
+	});
 
 	$effect(() => {
 		if (isVisible) return;
@@ -485,6 +496,7 @@
 				{@const item = itemIndex === undefined ? undefined : projection.model.items[itemIndex]}
 				{#if item}
 					<ConversationFeedVirtualRow
+						{isVisible}
 						{virtualItem}
 						{item}
 						controller={virtualController}

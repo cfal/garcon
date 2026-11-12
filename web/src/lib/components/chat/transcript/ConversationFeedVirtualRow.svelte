@@ -21,6 +21,7 @@
 	}
 
 	interface Props {
+		isVisible: boolean;
 		virtualItem: VirtualItem;
 		item: ConversationVirtualFeedItem;
 		controller: ConversationFeedVirtualController;
@@ -47,6 +48,7 @@
 	}
 
 	let {
+		isVisible,
 		virtualItem,
 		item,
 		controller,
@@ -102,6 +104,7 @@
 >
 	<svelte:boundary>
 		<ConversationFeedVirtualItem
+			{isVisible}
 			{item}
 			{renderModel}
 			{showThinking}

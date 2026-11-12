@@ -751,6 +751,7 @@ export class ConversationScrollController {
 	}
 
 	#canRequestPage(direction: TranscriptPageDirection, explicitRequest = false): boolean {
+		if (!this.#isViewportVisible) return false;
 		if (this.#activeTargetNavigations > 0) return false;
 		if (this.#isPageMutationInProgress) {
 			const canPreempt = this.deps.chatState.combinedMode && explicitRequest

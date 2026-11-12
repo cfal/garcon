@@ -469,7 +469,6 @@ function createDeps(chat = createRunningChat()) {
 			);
 		}),
 		transcriptCache: {
-			markValidated: vi.fn(),
 			readAppliedCursor: vi.fn(() => ({
 				transcriptViewId: 'generation-1',
 				lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
@@ -1667,7 +1666,7 @@ describe('ConversationSessionController', () => {
 			minimumLimit: 0,
 			purpose: 'activation',
 		});
-		expect(markValidated).toHaveBeenCalledWith('chat-1');
+		expect(markValidated).not.toHaveBeenCalled();
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(deps.scrollToBottom).not.toHaveBeenCalled();
 	});

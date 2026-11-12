@@ -112,6 +112,15 @@ export function visibleChatPresentations(
 	return presentations;
 }
 
+export function fullscreenHiddenChatPresentations(
+	snapshot: WorkspaceLayoutSnapshot,
+	mode: 'desktop' | 'mobile',
+): VisibleChatPresentation[] {
+	if (mode !== 'desktop' || !snapshot.fullscreenWindowId) return [];
+	return visibleChatPresentations({ ...snapshot, fullscreenWindowId: null }, mode)
+		.filter(item => item.windowId !== snapshot.fullscreenWindowId);
+}
+
 function visibleDesktopPresentationKeys(
 	visible: readonly PortablePresentation[],
 ): ReadonlySet<string> {

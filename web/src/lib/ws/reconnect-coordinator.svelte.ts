@@ -33,12 +33,14 @@ export interface ReconnectWsPort {
 }
 
 export interface ReconnectPanelRegistryPort {
-	readonly transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor' | 'markValidated'>;
+	readonly transcriptCache: Pick<ChatTranscriptCache,
+		'readAppliedCursor' | 'markValidated' | 'markStaleExcept' | 'trackReplayValidation'>;
 	visibleChatIds(): readonly string[];
 	panelsForChat(chatId: string): readonly unknown[];
 	hasInactiveWindow(chatId: string): boolean;
 	markChatStale(chatId: string): void;
 	loadChatSnapshot(chatId: string): Promise<boolean>;
+	invalidateChatSnapshot(chatId: string): void;
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
 	applyReconnectReplayPage(
 		token: number,
@@ -48,6 +50,7 @@ export interface ReconnectPanelRegistryPort {
 	finishReconnectReplay(token: number, chatId: string): TranscriptReplayApplyResult | 'stale';
 	abortReconnectReplay(token: number, chatId: string): void;
 	abortReconnectReplays(): void;
+	discardFullscreenHiddenPanels(): void;
 	noticeRevisionFor(chatId: string): number;
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult;
 }
@@ -68,7 +71,7 @@ export interface ChatReconnectCoordinatorOptions {
 	conversationUi: ReconnectConversationUiState;
 	sessions: Pick<ChatSessionsPort, 'selectedChatId' | 'quietRefreshChats'>;
 	getExecutionControl?: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
-	getBackgroundCursors: () => ChatTranscriptCursor[];
+	getBackgroundCursors: (limit: number) => ChatTranscriptCursor[];
 	markBackgroundStale: (chatId: string) => void;
 	onBackgroundMessages?: (
 		chatId: string,
@@ -120,6 +123,7 @@ export class ChatReconnectCoordinator {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
 			this.options.panels.abortReconnectReplays();
+			this.options.panels.discardFullscreenHiddenPanels();
 			this.options.conversationUi.markExecutionControlSocketDisconnected();
 			return;
 		}
@@ -163,12 +167,14 @@ export class ChatReconnectCoordinator {
 	async #resumeRenderedChat(chatId: string, epoch: number): Promise<void> {
 		const panels = this.options.panels;
 		const cursor = panels.transcriptCache.readAppliedCursor(chatId);
+		panels.invalidateChatSnapshot(chatId);
 		panels.markChatStale(chatId);
 		if (!cursor?.transcriptViewId) {
 			await this.#loadRenderedSnapshot(chatId, epoch);
 			return;
 		}
 		const replayToken = panels.beginReconnectReplay(chatId, cursor.transcriptViewId);
+		const validation = panels.transcriptCache.trackReplayValidation(chatId);
 		try {
 			const message = await this.#replayTranscript({
 				chatId,
@@ -186,43 +192,44 @@ export class ChatReconnectCoordinator {
 					}) === 'applied',
 			});
 			if (!message) return;
+			if (!validation.isCurrent()) throw new Error('Transcript continuity changed during replay');
 			const replayResult = panels.finishReconnectReplay(replayToken, chatId);
 			if (replayResult === 'stale') return;
-			if (replayResult !== 'applied') {
-				await this.#loadRenderedSnapshot(chatId, epoch);
-				return;
-			}
-			const applied = panels.transcriptCache.readAppliedCursor(chatId);
 			if (
-				!applied ||
-				applied.transcriptViewId !== cursor.transcriptViewId ||
-				applied.lastOrdinal < message.throughOrdinal
+				replayResult !== 'applied' ||
+				!this.#cacheReachedReplayFrontier(chatId, cursor.transcriptViewId, message.throughOrdinal)
 			) {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
 			panels.transcriptCache.markValidated(chatId);
 		} catch {
+			// Stops replay from buffering live commits during snapshot recovery.
 			panels.abortReconnectReplay(replayToken, chatId);
 			if (epoch === this.#reconnectEpoch) await this.#loadRenderedSnapshot(chatId, epoch);
 		} finally {
+			validation.release();
 			panels.abortReconnectReplay(replayToken, chatId);
 		}
+	}
+
+	#cacheReachedReplayFrontier(chatId: string, transcriptViewId: string, throughOrdinal: number): boolean {
+		const applied = this.options.panels.transcriptCache.readAppliedCursor(chatId);
+		return applied !== null
+			&& applied.transcriptViewId === transcriptViewId
+			&& applied.lastOrdinal >= throughOrdinal;
 	}
 
 	async #loadRenderedSnapshot(chatId: string, epoch: number): Promise<void> {
 		const panels = this.options.panels;
 		if (epoch !== this.#reconnectEpoch) return;
-		let loaded: boolean;
+		// A pending read may predate live commits discarded with an abandoned replay.
+		panels.invalidateChatSnapshot(chatId);
 		try {
-			loaded = await panels.loadChatSnapshot(chatId);
+			await panels.loadChatSnapshot(chatId);
 		} catch {
 			if (epoch === this.#reconnectEpoch) panels.markChatStale(chatId);
-			return;
 		}
-		if (!loaded || epoch !== this.#reconnectEpoch || panels.panelsForChat(chatId).length === 0)
-			return;
-		panels.transcriptCache.markValidated(chatId);
 	}
 
 	async #reconcileGlobalState(
@@ -318,10 +325,14 @@ export class ChatReconnectCoordinator {
 
 	async #resumeBackgroundChats(excludedChatIds: Set<string>, epoch: number): Promise<void> {
 		const cursors = this.options
-			.getBackgroundCursors()
+			.getBackgroundCursors(BACKGROUND_RESUME_LIMIT + excludedChatIds.size)
 			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
 			.filter((cursor) => cursor.transcriptViewId && cursor.lastOrdinal > 0)
 			.slice(0, BACKGROUND_RESUME_LIMIT);
+		const cache = this.options.panels.transcriptCache;
+		// Captures cursors first, then invalidates even persisted-only and pending-only tails.
+		cache.markStaleExcept(excludedChatIds);
+		const validations = new Map(cursors.map((cursor) => [cursor.chatId, cache.trackReplayValidation(cursor.chatId)]));
 		const replayTokens = this.#beginParkedBackgroundReplays(cursors);
 
 		let shouldRefresh = false;
@@ -330,6 +341,8 @@ export class ChatReconnectCoordinator {
 				if (epoch !== this.#reconnectEpoch) return;
 				const replayToken = replayTokens.get(cursor.chatId) ?? null;
 				try {
+					const validation = validations.get(cursor.chatId)!;
+					if (!validation.isCurrent()) throw new Error('Transcript continuity changed before replay');
 					const message = await this.#replayTranscript({
 						chatId: cursor.chatId,
 						transcriptViewId: cursor.transcriptViewId,
@@ -344,8 +357,14 @@ export class ChatReconnectCoordinator {
 						if (result !== 'applied') {
 							throw new Error('Retained transcript replay could not finish');
 						}
-						this.options.panels.transcriptCache.markValidated(cursor.chatId);
 					}
+					const reachedFrontier = this.#cacheReachedReplayFrontier(
+						cursor.chatId, cursor.transcriptViewId, message.throughOrdinal,
+					);
+					if (!validation.isCurrent() || !reachedFrontier) {
+						throw new Error('Transcript replay did not establish continuity');
+					}
+					cache.markValidated(cursor.chatId);
 					shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
 				} catch {
 					if (replayToken !== null) {
@@ -354,10 +373,14 @@ export class ChatReconnectCoordinator {
 					}
 					if (epoch !== this.#reconnectEpoch) return;
 					this.options.markBackgroundStale(cursor.chatId);
+					if (this.options.panels.panelsForChat(cursor.chatId).length > 0) {
+						await this.#loadRenderedSnapshot(cursor.chatId, epoch);
+					}
 					shouldRefresh = true;
 				}
 			}
 		} finally {
+			for (const validation of validations.values()) validation.release();
 			for (const [chatId, replayToken] of replayTokens) {
 				this.options.panels.abortReconnectReplay(replayToken, chatId);
 			}
