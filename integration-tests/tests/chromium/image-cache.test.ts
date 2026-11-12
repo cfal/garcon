@@ -123,7 +123,10 @@ test('retains inline images across chat switches and evicts them when the cache 
     await page.waitForTimeout(1100);
     await browserExpect(image).toHaveAttribute('src', originalSource!);
     await moveAboveScroller(500);
-    await browserExpect(image).toHaveCount(0);
+    await browserExpect(thumbnail.locator('img')).toHaveCount(0);
+    await browserExpect(image).toHaveCount(1);
+    await browserExpect(image).not.toHaveAttribute('aria-busy', 'true');
+    await browserExpect(thumbnail.getByRole('status')).toHaveCount(0);
     await thumbnail.evaluate((element: HTMLElement) => { element.style.transform = ''; });
     await decoded();
     await browserExpect(image).toHaveAttribute('src', originalSource!);

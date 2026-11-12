@@ -248,16 +248,17 @@
 	/>
 {/snippet}
 
-{#snippet loading()}
+{#snippet placeholder()}
+	{@const released = Boolean(size && !lease)}
 	<span
 		class="placeholder text-muted-foreground"
-		role="status"
-		aria-label={m.image_loading()}
-		aria-busy="true"
+		role={released ? 'img' : 'status'}
+		aria-label={released ? imageName : m.image_loading()}
+		aria-busy={released ? undefined : 'true'}
 		style:width={size ? `${size.width}px` : undefined}
 		style:aspect-ratio={size ? `${size.width} / ${size.height}` : undefined}
 	>
-		<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+		{#if !released}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{/if}
 	</span>
 {/snippet}
 
@@ -298,7 +299,7 @@
 		</span>
 	{:else if source}
 		{#if externalRetryPending}
-			{@render loading()}
+			{@render placeholder()}
 		{/if}
 		{#key attempt}
 			{@const current = attempt}
@@ -321,7 +322,7 @@
 			{/if}
 		{/key}
 	{:else}
-		{@render loading()}
+		{@render placeholder()}
 	{/if}
 </span>
 
