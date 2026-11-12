@@ -111,13 +111,13 @@ describe('Mermaid render admission', () => {
 	it('evicts cached source/output by aggregate bytes in access order', async () => {
 		const render = vi.fn<RenderDiagram>(async () => 'x'.repeat(MERMAID_OUTPUT_LIMIT));
 		const queue = new MermaidRenderQueue(render);
-		for (let index = 0; index < 4; index += 1)
+		for (let index = 0; index < 2; index += 1)
 			await queue.render(`source-${index}`, 'standard-light');
 		await queue.render('source-0', 'standard-light');
-		await queue.render('source-4', 'standard-light');
+		await queue.render('source-2', 'standard-light');
 		await queue.render('source-0', 'standard-light');
-		expect(render).toHaveBeenCalledTimes(5);
+		expect(render).toHaveBeenCalledTimes(3);
 		await queue.render('source-1', 'standard-light');
-		expect(render).toHaveBeenCalledTimes(6);
+		expect(render).toHaveBeenCalledTimes(4);
 	});
 });

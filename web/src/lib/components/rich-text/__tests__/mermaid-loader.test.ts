@@ -144,8 +144,12 @@ describe('mermaid-loader', () => {
 		const { renderMermaid } = await import('../mermaid-loader');
 		await renderMermaid('retained', 'standard-light');
 		mermaid.render.mockResolvedValue({ svg: 'x'.repeat(3 * 1024 * 1024) });
-		await expect(renderMermaid('oversized', 'standard-light')).rejects.toThrow('Rendered diagram is too large');
-		await expect(renderMermaid('oversized', 'standard-light')).rejects.toThrow('Rendered diagram is too large');
+		await expect(renderMermaid('oversized', 'standard-light')).rejects.toThrow(
+			'Rendered diagram is too large',
+		);
+		await expect(renderMermaid('oversized', 'standard-light')).rejects.toThrow(
+			'Rendered diagram is too large',
+		);
 		await expect(renderMermaid('retained', 'standard-light')).resolves.toBe('<svg></svg>');
 		expect(mermaid.render).toHaveBeenCalledTimes(3);
 	});
