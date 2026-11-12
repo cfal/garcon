@@ -18,12 +18,14 @@
 		onOpenChat,
 		currentTime = new Date(),
 		presentation = 'window-main',
+		visible = true,
 	}: {
 		controller: ChatBoardController;
 		sessions: ChatSessionsPort;
 		onOpenChat: (chatId: string) => void;
 		currentTime?: Date;
 		presentation?: PresentationHostId;
+		visible?: boolean;
 	} = $props();
 
 	const localSettings = createLocalSettingsStore();
@@ -41,4 +43,4 @@
 	});
 </script>
 
-<ChatBoardPanel {controller} {sessions} {presentation} {onOpenChat} />
+<ChatBoardPanel {controller} {sessions} {presentation} {visible} {onOpenChat} />

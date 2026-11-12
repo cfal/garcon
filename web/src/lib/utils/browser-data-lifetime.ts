@@ -1,7 +1,7 @@
 import { createRandomId } from './random-id';
 
 export const BROWSER_LOGOUT_EPOCH_KEY = 'garcon.logout-epoch';
-const CLEANUP_KEY = 'garcon.logout-cleanup';
+export const BROWSER_LOGOUT_CLEANUP_KEY = 'garcon.logout-cleanup';
 const CLEANUP_LIMIT_MS = 10_000;
 
 export interface BrowserLogout {
@@ -32,7 +32,9 @@ export function browserDocumentEpoch(): string | null {
 
 function pendingCleanup(): { epoch: string; deadline: number } | null {
 	try {
-		const value = JSON.parse(globalThis.localStorage?.getItem(CLEANUP_KEY) ?? 'null');
+		const value = JSON.parse(
+			globalThis.localStorage?.getItem(BROWSER_LOGOUT_CLEANUP_KEY) ?? 'null',
+		);
 		if (
 			typeof value?.epoch !== 'string' ||
 			!Number.isSafeInteger(value.deadline) ||
@@ -69,8 +71,11 @@ export function canClearBrowserData(logout: BrowserLogout): boolean {
 
 export function finishBrowserLogoutCleanup(logout: BrowserLogout): void {
 	try {
-		if (JSON.parse(globalThis.localStorage?.getItem(CLEANUP_KEY) ?? 'null')?.epoch === logout.epoch)
-			globalThis.localStorage.removeItem(CLEANUP_KEY);
+		if (
+			JSON.parse(globalThis.localStorage?.getItem(BROWSER_LOGOUT_CLEANUP_KEY) ?? 'null')?.epoch ===
+			logout.epoch
+		)
+			globalThis.localStorage.removeItem(BROWSER_LOGOUT_CLEANUP_KEY);
 	} catch {
 		/* The bounded notice expires when storage is unavailable. */
 	}
@@ -90,7 +95,7 @@ export function publishBrowserLogout(): BrowserLogout {
 	const notice = { epoch: createRandomId(), deadline: Date.now() + CLEANUP_LIMIT_MS };
 	try {
 		// The admission gate precedes the epoch so fresh documents cannot write during cleanup.
-		globalThis.localStorage.setItem(CLEANUP_KEY, JSON.stringify(notice));
+		globalThis.localStorage.setItem(BROWSER_LOGOUT_CLEANUP_KEY, JSON.stringify(notice));
 		globalThis.localStorage.setItem(BROWSER_LOGOUT_EPOCH_KEY, notice.epoch);
 		return { ...notice, coordinated: true };
 	} catch {

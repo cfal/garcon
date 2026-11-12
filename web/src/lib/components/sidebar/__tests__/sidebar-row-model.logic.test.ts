@@ -601,6 +601,32 @@ describe('sidebar row model', () => {
 		]);
 	});
 
+	it.each([
+		['/', '/a/b'],
+		['C:\\', 'c:/a/b'],
+		['relative', 'relative/a/b'],
+		[' /a// ', '/a/b'],
+	])('walks normalized ancestors from %s to %s', (root, child) => {
+		const chats = [
+			chat('child', child),
+			chat('root', root),
+			chat('remote', child, { executorId: 'worker' }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project',
+			currentTime: TEST_NOW,
+			groupNestedProjectPaths: true,
+		});
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'child')).toMatchObject({
+			groupProjectPath: root,
+		});
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'remote')).toMatchObject(
+			{ groupProjectPath: child },
+		);
+	});
+
 	it('builds project keys from nested grouping for collapse pruning', () => {
 		expect(
 			buildSidebarProjectKeys({

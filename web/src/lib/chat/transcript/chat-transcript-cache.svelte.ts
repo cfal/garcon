@@ -114,6 +114,10 @@ class ChatTranscriptPersistenceQueue {
 		this.#scheduleDrain(this.#delayMs);
 	}
 
+	hasPending(chatId: string): boolean {
+		return this.#pending.has(chatId);
+	}
+
 	removeExcept(chatIds: ReadonlySet<string>): void {
 		for (const chatId of this.#pending.keys()) {
 			if (!chatIds.has(chatId)) this.#pending.delete(chatId);
@@ -375,6 +379,12 @@ export class ChatTranscriptCache {
 				expectedOrdinal: applied.expectedOrdinal ?? entry.lastOrdinal + 1,
 				receivedOrdinal: applied.receivedOrdinal ?? append.firstOrdinal,
 			};
+		}
+		if (!applied.changed && applied.lastOrdinal === entry.lastOrdinal && !entry.stale) {
+			this.#lastAccessedAt.set(chatId, nowIso());
+			// Redundant delivery also repairs failed writes and cross-tab snapshot eviction.
+			if (!this.#persistence.hasPending(chatId)) this.#persistence.schedule(entry);
+			return { status: 'applied', changed: false, lastOrdinal: entry.lastOrdinal };
 		}
 		const windowed = applied.messages.slice(-this.#limit);
 		const next: ChatTranscriptSnapshot = {

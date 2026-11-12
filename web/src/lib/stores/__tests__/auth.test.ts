@@ -9,6 +9,8 @@ import {
 	canDispatchAuthenticated,
 	setAuthDispatchAvailable,
 	publishCredentialPending,
+	CREDENTIAL_PENDING_KEY,
+	notifyAuthRejection,
 } from '$lib/auth/session';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import type { AuthSessionResponse } from '$shared/auth';
@@ -22,7 +24,8 @@ vi.mock('$lib/api/auth.js', () => ({
 	changePassword: vi.fn(),
 	logout: vi.fn(),
 }));
-vi.mock('$lib/utils/browser-data-lifetime', () => ({
+vi.mock('$lib/utils/browser-data-lifetime', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/utils/browser-data-lifetime')>()),
 	captureBrowserDataLifetime: vi.fn(),
 	isBrowserDataCurrent: vi.fn(() => true),
 	canPersistBrowserData: vi.fn(() => true),
@@ -51,17 +54,21 @@ function session(revision = 1, username = user.username): AuthSessionResponse {
 }
 const invalid = () => new ApiError(401, 'Invalid session', 'AUTH_SESSION_INVALID');
 const stores: AuthStore[] = [];
-function store() {
-	const auth = new AuthStore();
+function store(navigateAfterLogout?: (url: string) => void) {
+	const auth = new AuthStore(navigateAfterLogout);
 	stores.push(auth);
 	return auth;
 }
-async function signedIn() {
+async function signedIn(navigateAfterLogout?: (url: string) => void) {
 	setAuthToken(session().token);
-	const auth = store();
+	const auth = store(navigateAfterLogout);
 	await auth.checkAuthStatus();
 	return auth;
 }
+function storageEvent(key: string | null, newValue: string | null = null): StorageEvent {
+	return new StorageEvent('storage', { key, newValue, storageArea: localStorage });
+}
+
 beforeEach(() => {
 	vi.useFakeTimers();
 	vi.resetAllMocks();
@@ -602,6 +609,197 @@ describe('session ordering and credential operations', () => {
 	});
 });
 
+describe('storage event filtering', () => {
+	it('ignores session storage, including clear events', async () => {
+		const auth = await signedIn();
+		auth.start();
+		vi.mocked(api.getUser).mockClear();
+		for (const key of [LOCAL_STORAGE_KEYS.authToken, null]) {
+			window.dispatchEvent(new StorageEvent('storage', { key, storageArea: sessionStorage }));
+		}
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).not.toHaveBeenCalled();
+	});
+	it.each(['chat_snapshot_synthetic', 'chat_draft_synthetic', LOCAL_STORAGE_KEYS.localSettings])(
+		'ignores unrelated writes and removals for %s',
+		async (key) => {
+			const auth = await signedIn();
+			auth.start();
+			vi.mocked(api.getUser).mockClear();
+			window.dispatchEvent(storageEvent(key, 'synthetic'));
+			window.dispatchEvent(storageEvent(key));
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.getUser).not.toHaveBeenCalled();
+			expect(auth.isAuthenticated).toBe(true);
+		},
+	);
+
+	it.each([
+		LOCAL_STORAGE_KEYS.authToken,
+		lifetime.BROWSER_LOGOUT_EPOCH_KEY,
+		lifetime.BROWSER_LOGOUT_CLEANUP_KEY,
+		CREDENTIAL_PENDING_KEY,
+		null,
+	])('reconciles automatically for %s, including removal', async (key) => {
+		const auth = await signedIn();
+		auth.start();
+		vi.mocked(api.getUser).mockClear();
+		for (const newValue of key === null ? [null] : ['synthetic', null]) {
+			window.dispatchEvent(storageEvent(key, newValue));
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.getUser).toHaveBeenCalledExactlyOnceWith(session().token);
+			vi.mocked(api.getUser).mockClear();
+		}
+	});
+
+	it.each([LOCAL_STORAGE_KEYS.authToken, null])(
+		'verifies retained memory authority after storage removal (%s)',
+		async (key) => {
+			const auth = await signedIn();
+			auth.start();
+			if (key === null) localStorage.clear();
+			else localStorage.removeItem(key);
+			vi.mocked(api.getUser).mockClear().mockRejectedValue(invalid());
+			window.dispatchEvent(storageEvent(key));
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.getUser).toHaveBeenCalledExactlyOnceWith(session().token);
+			expect(auth.availability).toBe('reauth-required');
+			expect(auth.presentationOwner?.key).toBe(user.id);
+			expect(canDispatchAuthenticated()).toBe(false);
+		},
+	);
+
+	it.each([lifetime.BROWSER_LOGOUT_EPOCH_KEY, 'chat_snapshot_synthetic', null])(
+		'fences an already-changed epoch before filtering %s',
+		async (key) => {
+			const navigate = vi.fn();
+			const auth = await signedIn(navigate);
+			auth.start();
+			vi.mocked(api.getUser).mockClear();
+			vi.mocked(lifetime.isBrowserDataCurrent).mockReturnValue(false);
+			window.dispatchEvent(storageEvent(key));
+			expect(auth.logoutPending).toBe(true);
+			expect(auth.token).toBeNull();
+			expect(auth.presentationOwner).toBeNull();
+			expect(getAuthToken()).toBeNull();
+			expect(canDispatchAuthenticated()).toBe(false);
+			expect(lifetime.retireBrowserData).toHaveBeenCalledTimes(1);
+			expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=peer');
+			expect(api.getUser).not.toHaveBeenCalled();
+		},
+	);
+
+	it('waits for logout cleanup before verifying a stored replacement', async () => {
+		const auth = await signedIn();
+		auth.start();
+		const pending = Promise.withResolvers<void>();
+		vi.mocked(lifetime.waitForBrowserLogoutCleanup).mockReturnValue(pending.promise);
+		vi.mocked(api.getUser).mockClear();
+		window.dispatchEvent(storageEvent(lifetime.BROWSER_LOGOUT_CLEANUP_KEY, 'pending'));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).not.toHaveBeenCalled();
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(2).token, epoch: null }),
+		);
+		pending.resolve();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledExactlyOnceWith(session(2).token);
+		expect(auth.token).toBe(session(2).token);
+	});
+
+	it('honors peer credential-pending notices before requiring sign-in', async () => {
+		const auth = await signedIn();
+		auth.start();
+		publishCredentialPending(auth.token!);
+		vi.mocked(api.getUser).mockClear().mockRejectedValue(invalid());
+		window.dispatchEvent(
+			storageEvent(CREDENTIAL_PENDING_KEY, localStorage.getItem(CREDENTIAL_PENDING_KEY)),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledExactlyOnceWith(session().token);
+		expect(auth.availability).toBe('repairing');
+		await vi.advanceTimersByTimeAsync(35_001);
+		expect(auth.availability).toBe('reauth-required');
+	});
+
+	it('coalesces relevant wakeups without queuing probes for unrelated events', async () => {
+		const auth = await signedIn();
+		auth.start();
+		const pending = Promise.withResolvers<{ user: typeof user }>();
+		vi.mocked(api.getUser).mockClear().mockReturnValueOnce(pending.promise);
+		window.dispatchEvent(storageEvent(LOCAL_STORAGE_KEYS.authToken));
+		window.dispatchEvent(storageEvent(CREDENTIAL_PENDING_KEY));
+		window.dispatchEvent(storageEvent(lifetime.BROWSER_LOGOUT_CLEANUP_KEY));
+		expect(api.getUser).toHaveBeenCalledTimes(1);
+		pending.resolve({ user });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		const next = Promise.withResolvers<{ user: typeof user }>();
+		vi.mocked(api.getUser).mockClear().mockReturnValueOnce(next.promise);
+		window.dispatchEvent(storageEvent(LOCAL_STORAGE_KEYS.authToken));
+		window.dispatchEvent(storageEvent('chat_draft_synthetic', 'synthetic'));
+		next.resolve({ user });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps memory authority usable when storage and BroadcastChannel are unavailable', async () => {
+		const auth = await signedIn();
+		vi.stubGlobal('BroadcastChannel', undefined);
+		auth.start();
+		vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+			throw new Error('Unavailable');
+		});
+		vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+			throw new Error('Unavailable');
+		});
+		vi.mocked(api.getUser).mockClear();
+		window.dispatchEvent(storageEvent(LOCAL_STORAGE_KEYS.authToken));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledExactlyOnceWith(session().token);
+		expect(auth.isAuthenticated).toBe(true);
+		expect(auth.persistenceWarning).toBe(true);
+	});
+
+	it('never lifts the server auth-storage fence on a relevant storage event', async () => {
+		const auth = await signedIn();
+		auth.start();
+		auth.sessionRejected(auth.token, 'AUTH_STORAGE_UNAVAILABLE');
+		vi.mocked(api.getUser).mockClear();
+		window.dispatchEvent(storageEvent(LOCAL_STORAGE_KEYS.authToken));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).not.toHaveBeenCalled();
+		expect(auth.availability).toBe('storage-unavailable');
+	});
+
+	it('ignores hidden visibility changes and removes every wakeup listener on disposal', async () => {
+		const auth = await signedIn();
+		const addWindow = vi.spyOn(window, 'addEventListener');
+		const removeWindow = vi.spyOn(window, 'removeEventListener');
+		const addDocument = vi.spyOn(document, 'addEventListener');
+		const removeDocument = vi.spyOn(document, 'removeEventListener');
+		auth.start();
+		auth.start();
+		vi.mocked(api.getUser).mockClear();
+		vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).not.toHaveBeenCalled();
+		auth.destroy();
+		for (const event of ['storage', 'online', 'pageshow']) {
+			const listeners = addWindow.mock.calls.filter(([type]) => type === event);
+			expect(listeners).toHaveLength(1);
+			expect(removeWindow).toHaveBeenCalledWith(event, listeners[0][1]);
+		}
+		const visible = addDocument.mock.calls.find(([type]) => type === 'visibilitychange')!;
+		expect(removeDocument).toHaveBeenCalledWith('visibilitychange', visible[1]);
+		const reject = vi.spyOn(auth, 'sessionRejected');
+		notifyAuthRejection(auth.token, 'AUTH_SESSION_INVALID');
+		expect(reject).not.toHaveBeenCalled();
+	});
+});
+
 describe('same-origin repair', () => {
 	it.each([false, true])(
 		'retains a successful replacement while validating newer storage (candidate valid: %s)',
@@ -829,8 +1027,13 @@ describe('same-origin repair', () => {
 				LOCAL_STORAGE_KEYS.authToken,
 				JSON.stringify({ token: session(2).token, epoch: null }),
 			);
-			(event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event));
-			await auth.reconcile();
+			vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+			vi.mocked(api.getUser).mockClear();
+			(event === 'visibilitychange' ? document : window).dispatchEvent(
+				event === 'storage' ? storageEvent(LOCAL_STORAGE_KEYS.authToken) : new Event(event),
+			);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.getUser).toHaveBeenCalledExactlyOnceWith(session(2).token);
 			expect(auth.token).toBe(session(2).token);
 		},
 	);

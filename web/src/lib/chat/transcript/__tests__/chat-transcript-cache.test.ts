@@ -6,6 +6,7 @@ import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage, TranscriptPage } from '$shared/chat-view';
 import ChatTranscriptCacheDerivedReaderTestHost from './ChatTranscriptCacheDerivedReaderTestHost.svelte';
 import * as lifetime from '$lib/utils/browser-data-lifetime';
+import * as recovery from '$lib/utils/local-storage-cache-recovery';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -37,6 +38,62 @@ function contents(messages: TranscriptMessage[]): string[] {
 }
 
 describe('ChatTranscriptCache', () => {
+	it.each(['remove', 'replace'] as const)('repairs a snapshot after another writer performs %s and a duplicate arrives', (action) => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ storage, limit: 100 });
+		const messages = [entry(1, 'synthetic')];
+		cache.replaceFromPage('chat', page('view', messages));
+		cache.flush();
+		if (action === 'remove') storage.remove('chat');
+		else storage.persist('chat', [entry(1, 'older snapshot')], {
+			transcriptViewId: 'older-view', lastOrdinal: 1, nextBeforeOrdinal: null,
+		});
+		cache.applyMessages('chat', 'view', { firstOrdinal: 1, lastOrdinal: 1, messages });
+		cache.flush();
+		expect(storage.restore('chat')).toMatchObject({ transcriptViewId: 'view', entries: messages });
+	});
+
+	it('retries a failed snapshot write on duplicate delivery', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ storage, limit: 100 });
+		const messages = [entry(1, 'synthetic')];
+		const write = vi.spyOn(recovery, 'setLocalStorageWithCacheRecovery').mockImplementation(() => {
+			throw new DOMException('Synthetic quota failure', 'QuotaExceededError');
+		});
+		try {
+			cache.replaceFromPage('chat', page('view', messages));
+			cache.flush();
+		} finally {
+			write.mockRestore();
+		}
+		expect(storage.restore('chat')).toBeNull();
+		cache.applyMessages('chat', 'view', { firstOrdinal: 1, lastOrdinal: 1, messages });
+		cache.flush();
+		expect(storage.restore('chat')).toMatchObject({ transcriptViewId: 'view', entries: messages });
+	});
+
+	it('coalesces duplicate repair writes without replacing rows and retains hidden-row frontier advances', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const persist = vi.spyOn(storage, 'persist');
+		const cache = new ChatTranscriptCache({ storage, limit: 100 });
+		const messages = [entry(1, 'synthetic')];
+		cache.replaceFromPage('chat', page('view', messages));
+		cache.flush();
+		persist.mockClear();
+		const previous = cache.get('chat')!.messages;
+		for (let index = 0; index < 10; index++) {
+			cache.applyMessages('chat', 'view', { firstOrdinal: 1, lastOrdinal: 1, messages });
+		}
+		expect(cache.get('chat')!.messages).toBe(previous);
+		cache.flush();
+		expect(persist).toHaveBeenCalledOnce();
+		persist.mockClear();
+		cache.applyMessages('chat', 'view', { firstOrdinal: 2, lastOrdinal: 3, messages: [] });
+		cache.flush();
+		expect(persist).toHaveBeenCalledOnce();
+		expect(storage.restore('chat')?.lastOrdinal).toBe(3);
+	});
+
 	it('retains a resumable recent tail from a wide interval through hydration', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const cache = new ChatTranscriptCache({ limit: 50, storage });

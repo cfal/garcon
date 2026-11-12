@@ -941,6 +941,22 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId).toBe(ref);
 	});
 
+	it('reconcileProcessing replaces changed records without mutating the published catalog', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'a' }), makeServerSession({ id: 'b', title: 'B' })]);
+		const previous = store.byId;
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running' }]);
+		expect(store.byId).not.toBe(previous);
+		expect(store.byId.a).not.toBe(previous.a);
+		expect(store.byId.b).toBe(previous.b);
+		expect(previous.a?.isProcessing).toBe(false);
+		expect(previous.a?.processingPhase).toBeNull();
+		expect(store.byId.a?.processingPhase).toBe('running');
+		const updated = store.byId;
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running' }]);
+		expect(store.byId).toBe(updated);
+	});
+
 	it('upsertFromServer preserves WS-authoritative isProcessing over stale REST snapshot', () => {
 		const store = new ChatSessionsStore();
 

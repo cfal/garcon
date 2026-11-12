@@ -14,23 +14,36 @@ export class MinuteClockStore {
 	#timeoutId: ReturnType<typeof setTimeout> | null = null;
 	#intervalId: ReturnType<typeof setInterval> | null = null;
 	#visibilityListener = () => {
-		if (document.visibilityState === 'visible') this.#refresh();
+		this.#stop();
+		if (document.visibilityState === 'visible') {
+			this.#refresh();
+			this.#start();
+		}
 	};
 
 	constructor() {
 		if (typeof window === 'undefined') return;
-		this.#timeoutId = setTimeout(() => {
-			this.#refresh();
-			this.#intervalId = setInterval(() => this.#refresh(), MINUTE_MS);
-		}, msUntilNextMinute());
+		if (document.visibilityState === 'visible') this.#start();
 		document.addEventListener('visibilitychange', this.#visibilityListener);
 	}
 
-	destroy(): void {
+	#start(): void {
+		this.#timeoutId = setTimeout(() => {
+			this.#timeoutId = null;
+			this.#refresh();
+			this.#intervalId = setInterval(() => this.#refresh(), MINUTE_MS);
+		}, msUntilNextMinute());
+	}
+
+	#stop(): void {
 		if (this.#timeoutId !== null) clearTimeout(this.#timeoutId);
 		if (this.#intervalId !== null) clearInterval(this.#intervalId);
 		this.#timeoutId = null;
 		this.#intervalId = null;
+	}
+
+	destroy(): void {
+		this.#stop();
 		if (typeof window !== 'undefined') {
 			document.removeEventListener('visibilitychange', this.#visibilityListener);
 		}

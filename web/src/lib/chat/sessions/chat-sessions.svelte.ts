@@ -965,18 +965,17 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.#processingSnapshot = snapshot;
 		this.#processingOverrides.clear();
 
-		let changed = false;
-		const nextById = { ...this.#baseById };
+		let nextById = this.#baseById;
 
-		for (const [id, record] of Object.entries(nextById)) {
+		for (const [id, record] of Object.entries(this.#baseById)) {
 			const phase = snapshot.get(id) ?? null;
 			if (record.processingPhase !== phase || record.isProcessing !== (phase !== null)) {
+				if (nextById === this.#baseById) nextById = { ...this.#baseById };
 				nextById[id] = { ...record, isProcessing: phase !== null, processingPhase: phase };
-				changed = true;
 			}
 		}
 
-		if (changed) {
+		if (nextById !== this.#baseById) {
 			this.#baseById = nextById;
 		}
 		return transitions.filter((transition) => transition.previousPhase !== transition.phase);

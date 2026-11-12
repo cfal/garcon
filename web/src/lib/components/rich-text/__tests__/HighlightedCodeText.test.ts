@@ -42,12 +42,29 @@ describe('HighlightedCodeText', () => {
 			text: 'const first = 1;',
 		});
 		await waitFor(() => expect(highlightCodeFence).toHaveBeenCalled());
+		const signal = vi.mocked(highlightCodeFence).mock.calls[0][2];
+		expect(signal?.aborted).toBe(false);
 
 		await rerender({ language: 'text', text: 'Synthetic replacement' });
+		expect(signal?.aborted).toBe(true);
 		highlight.resolve([{ text: 'const first = 1;', className: 'cm-code-keyword' }]);
 		await highlight.promise;
 		await tick();
 		expect(container.textContent).toBe('Synthetic replacement');
 		expect(container.querySelector('span')).toBeNull();
+	});
+
+	it('cancels pending highlighting when a virtual row unmounts', async () => {
+		const highlight = Promise.withResolvers<CodeHighlightSegment[]>();
+		vi.mocked(highlightCodeFence).mockReturnValue(highlight.promise);
+		const view = render(HighlightedCodeText, { language: 'js', text: 'const synthetic = 1;' });
+		await waitFor(() => expect(highlightCodeFence).toHaveBeenCalledOnce());
+		const signal = vi.mocked(highlightCodeFence).mock.calls[0][2];
+		expect(signal?.aborted).toBe(false);
+		view.unmount();
+		expect(signal?.aborted).toBe(true);
+		highlight.resolve([{ text: 'const synthetic = 1;', className: 'cm-code-keyword' }]);
+		await highlight.promise;
+		await tick();
 	});
 });

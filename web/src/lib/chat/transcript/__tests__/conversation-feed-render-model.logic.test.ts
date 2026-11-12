@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AssistantMessage,
+	AskUserQuestionToolUseMessage,
+	PermissionRequestMessage,
+	PermissionResolvedMessage,
 	CommandOutputMessage,
 	CommandResultMessage,
 	BashToolUseMessage,
@@ -10,15 +13,96 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
+import { buildConversationFeedRenderModel } from '../conversation-feed-items.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
 
-function row(ordinal: number, message: ChatMessage): ChatDisplayRow {
+function row(ordinal: number, message: ChatMessage): Extract<ChatDisplayRow, { kind: 'message' }> {
 	return { kind: 'message', id: `generation-1:${ordinal}`, ordinal, message };
 }
 
 describe('ConversationFeedRenderModelController', () => {
+	it.each(['wrapper-first', 'use-first'])('matches full rebuilds across FIFO tools and %s permissions', (order) => {
+		const question = new AskUserQuestionToolUseMessage(TS, 'shared-question', undefined, []);
+		const wrapper = new PermissionRequestMessage(TS, 'permission', question);
+		const source: ChatMessage[] = [
+			...(order === 'wrapper-first' ? [wrapper, question] : [question, wrapper]),
+			new ReadToolUseMessage(TS, 'duplicate', '/a'),
+			new ReadToolUseMessage(TS, 'duplicate', '/b'),
+			new AssistantMessage(TS, 'interleaved'),
+			new ToolResultMessage(TS, 'duplicate', { raw: 'first' }, false),
+			new PermissionResolvedMessage(TS, 'permission', true),
+			new ToolResultMessage(TS, 'shared-question', { raw: 'answer' }, false),
+			new ToolResultMessage(TS, 'duplicate', { raw: 'second' }, false),
+		];
+		const controller = new ConversationFeedRenderModelController();
+		const entries: ChatDisplayRow[] = [];
+		for (const [index, message] of source.entries()) {
+			const previous = controller.reconcile('surface', [...entries]);
+			const previousResults = new Map(previous.toolResultByUseRowId);
+			const previousResultRows = new Map(previous.toolResultRowIdByUseRowId);
+			const previousTerminals = new Map(previous.permissionTerminalByOccurrence);
+			entries.push(row(index + 1, message));
+			const actual = controller.reconcileDetailed('surface', [...entries]);
+			expect(actual.change.kind).toBe('tail-appended');
+			expect(actual.model).toEqual(buildConversationFeedRenderModel(entries));
+			expect(previous.toolResultByUseRowId).toEqual(previousResults);
+			expect(previous.toolResultRowIdByUseRowId).toEqual(previousResultRows);
+			expect(previous.permissionTerminalByOccurrence).toEqual(previousTerminals);
+			for (const [itemIndex, item] of previous.items.entries()) {
+				expect(actual.model.items[itemIndex]).toBe(item);
+			}
+		}
+	});
+
+	it.each([false, true])('refreshes delivery state when an append is %s', (append) => {
+		const controller = new ConversationFeedRenderModelController();
+		const message = new UserMessage(TS, 'Synthetic pending input');
+		const pending: ChatDisplayRow = { ...row(1, message), awaitingDelivery: true };
+		const previous = controller.reconcile('surface', [pending]);
+		const delivered = row(1, message);
+		const rows = append ? [delivered, row(2, new AssistantMessage(TS, 'Delivered'))] : [delivered];
+		const actual = controller.reconcileDetailed('surface', rows);
+		expect(actual.change.kind).toBe('rebuilt');
+		expect(actual.model).toEqual(buildConversationFeedRenderModel(rows));
+		expect(actual.model.items[0]).not.toHaveProperty('awaitingDelivery');
+		expect(previous.items[0]).toHaveProperty('awaitingDelivery', true);
+	});
+
+	it.each(['prepend', 'replacement', 'surface', 'reset'])('resets FIFO pairing after %s', (transition) => {
+		const controller = new ConversationFeedRenderModelController();
+		const oldUse = row(2, new ReadToolUseMessage(TS, 'reused-tool', '/old'));
+		const previous = controller.reconcile('surface', [oldUse]);
+		const newUse = row(1, new ReadToolUseMessage(TS, 'reused-tool', '/new'));
+		const rows = transition === 'prepend' ? [newUse, oldUse] : [newUse];
+		const surface = transition === 'surface' ? 'replacement-surface' : 'surface';
+		if (transition === 'reset') controller.reset();
+		expect(controller.reconcileDetailed(surface, rows).change.kind).toBe('rebuilt');
+		const result = new ToolResultMessage(TS, 'reused-tool', { raw: 'Synthetic result' }, false);
+		const appended = [...rows, row(3, result)];
+		const actual = controller.reconcileDetailed(surface, appended);
+		expect(actual.change.kind).toBe('tail-appended');
+		expect(actual.model).toEqual(buildConversationFeedRenderModel(appended));
+		expect(actual.model.toolResultByUseRowId.get(newUse.id)).toBe(result);
+		expect(actual.model.toolResultByUseRowId.has(oldUse.id)).toBe(false);
+		expect(previous.toolResultByUseRowId.size).toBe(0);
+	});
+
+	it('does not read old tool identifiers again on an ordinary append', () => {
+		let reads = 0;
+		const tool = new ReadToolUseMessage(TS, 'old', '/a');
+		Object.defineProperty(tool, 'toolId', { get: () => { reads++; return 'old'; } });
+		const first = row(1, tool);
+		const controller = new ConversationFeedRenderModelController();
+		const previous = controller.reconcile('surface', [first]);
+		reads = 0;
+		const next = controller.reconcile('surface', [first, row(2, new AssistantMessage(TS, 'next'))]);
+		expect(reads).toBe(0);
+		expect(next.items[0]).toBe(previous.items[0]);
+		expect(previous.items).toHaveLength(1);
+	});
+
 	it('rebuilds prior output when a complete result makes Markdown eligible', () => {
 		const controller = new ConversationFeedRenderModelController();
 		const context = { executorId: 'local', projectPath: '/project' };

@@ -9,7 +9,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { isSidebarChatInactive } from './chat-inactivity';
 import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
 import type { PinnedInsertPosition } from '$shared/settings';
-import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
+import { normalizeProjectPath } from '$lib/utils/project-path.js';
 import { effectiveExecutorId } from '$shared/executors';
 import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import {
@@ -162,20 +162,19 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 		});
 	}
 
-	const projects = Array.from(projectsByNormalizedPath.values()).sort(
-		(left, right) => left.normalizedPath.length - right.normalizedPath.length,
-	);
 	const groupPathByNormalizedPath = new Map<string, string>();
 
-	for (const project of projects) {
-		const group =
-			(project.normalizedPath &&
-				projects.find(
-					(candidate) =>
-						candidate.executorId === project.executorId &&
-						isProjectPathAncestor(candidate.normalizedPath, project.normalizedPath),
-				)) ||
-			project;
+	for (const project of projectsByNormalizedPath.values()) {
+		let group = project;
+		let ancestor = project.normalizedPath;
+		// Chooses the outermost known ancestor without scanning unrelated projects.
+		while (ancestor) {
+			group =
+				projectsByNormalizedPath.get(sidebarProjectKey(ancestor, project.executorId)) ?? group;
+			const separator = ancestor.lastIndexOf('/');
+			if (separator < 0 || ancestor === '/') break;
+			ancestor = separator === 0 ? '/' : ancestor.slice(0, separator);
+		}
 		groupPathByNormalizedPath.set(
 			sidebarProjectKey(project.normalizedPath, project.executorId),
 			group.originalPath,

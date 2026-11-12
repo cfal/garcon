@@ -362,9 +362,11 @@
 
 	$effect.pre(() => {
 		if (!isVisible) return;
+		const validRowIds = toolGroups.expandedMemberIds.size > 0 || itemState.hasDisclosureOverrides
+			? new Set(chatState.visibleRows.map((row) => row.id)) : new Set<string>();
 		toolGroups.reconcile(
 			surfaceIdentity,
-			new Set(chatState.visibleRows.map((row) => row.id)),
+			validRowIds,
 		);
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
@@ -385,7 +387,7 @@
 			settleRevealWaiters(true);
 			itemState.reconcile(
 				input.surfaceIdentity,
-				new Set(input.rows.map((row) => row.id)),
+				validRowIds,
 				pendingPermissionOccurrences,
 			);
 		});
@@ -489,6 +491,7 @@
 			data-chat-virtual-model-count={projection.model.items.length}
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
 			data-chat-transcript-entry-count={chatState.entries.length}
+			data-chat-transcript-first-ordinal={chatState.entries[0]?.ordinal}
 			{@attach virtualController.sizer}
 		>
 			{#each virtualItems as virtualItem (virtualItem.key)}

@@ -24,6 +24,7 @@
 		"format:check": "prettier --check .",
 		"lint": "svelte-kit sync && eslint . --max-warnings=0",
 		"profile:chat-ingestion": "bun scripts/benchmark-transcript-ingestion.ts",
+		"profile:chat-projection": "bun scripts/benchmark-transcript-projection.ts",
 		"profile:eager-assets": "bun run build && bun scripts/report-eager-assets.ts",
 		"profile:sidebar-projection": "bun scripts/benchmark-sidebar-projection.ts",
 		"profile:chat-board-projection": "bun scripts/benchmark-chat-board-projection.ts",

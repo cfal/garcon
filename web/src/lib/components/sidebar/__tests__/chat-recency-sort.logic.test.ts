@@ -139,8 +139,14 @@ describe('sortChatsByRecencyDesc', () => {
 
 	it('orders by creation time when it postdates the recorded activity', () => {
 		const chats = [
-			makeChat('a', { createdAt: '2026-03-01T00:00:00.000Z', lastActivityAt: '2026-01-01T00:00:00.000Z' }),
-			makeChat('b', { createdAt: '2026-01-01T00:00:00.000Z', lastActivityAt: '2026-02-01T00:00:00.000Z' }),
+			makeChat('a', {
+				createdAt: '2026-03-01T00:00:00.000Z',
+				lastActivityAt: '2026-01-01T00:00:00.000Z',
+			}),
+			makeChat('b', {
+				createdAt: '2026-01-01T00:00:00.000Z',
+				lastActivityAt: '2026-02-01T00:00:00.000Z',
+			}),
 		];
 
 		expect(sortChatsByRecencyDesc(chats).map((chat) => chat.id)).toEqual(['a', 'b']);
@@ -148,6 +154,21 @@ describe('sortChatsByRecencyDesc', () => {
 });
 
 describe('sortSidebarChatsByRecency', () => {
+	it('reads timestamps once per chat, including bottom-placed pins', () => {
+		let reads = 0;
+		const chats = Array.from({ length: 200 }, (_, index) => {
+			const chat = makeChat(String(index), { isPinned: index % 2 === 0 });
+			Object.defineProperty(chat, 'lastActivityAt', {
+				get() {
+					reads++;
+					return new Date(1_700_000_000_000 + ((index * 97) % 200) * 1000).toISOString();
+				},
+			});
+			return chat;
+		});
+		expect(sortSidebarChatsByRecency(chats, 'bottom')).toHaveLength(chats.length);
+		expect(reads).toBe(chats.length);
+	});
 	it('puts only the pinned subset oldest-first when pins are added at the bottom', () => {
 		const chats = [
 			makeChat('pinned-new', {

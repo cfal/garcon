@@ -1,5 +1,6 @@
 import { parseTranscriptMessages, type TranscriptMessage } from '$shared/chat-view';
 import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
+import { serializeTranscriptWithinBudget } from './bounded-transcript-json';
 import {
 	CHAT_TRANSCRIPT_INDEX_KEY as INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX as SNAPSHOT_PREFIX,
@@ -95,38 +96,6 @@ function windowEntries(
 	return entries.slice(-limit);
 }
 
-// Uses a conservative 32-character allowance for non-string values before allocating JSON.
-// Checks the exact escaped size after serialization.
-function serializeSnapshotWithinBudget(envelope: ChatSnapshotEnvelope): string | null {
-	let estimatedCharacters = 0;
-	let visitedValues = 0;
-	function visit(value: unknown, depth: number): boolean {
-		visitedValues += 1;
-		if (visitedValues > MAX_SNAPSHOT_VALUES || depth > MAX_SNAPSHOT_DEPTH) return false;
-		estimatedCharacters += typeof value === 'string' ? value.length + 2 : 32;
-		if (estimatedCharacters > MAX_SNAPSHOT_CHARACTERS) return false;
-		if (value === null || typeof value !== 'object') return true;
-		if ('toJSON' in value) return false;
-		if (Array.isArray(value)) {
-			if (value.length > MAX_SNAPSHOT_VALUES - visitedValues) return false;
-			for (const item of value) {
-				if (!visit(item, depth + 1)) return false;
-			}
-			return true;
-		}
-		const record = value as Record<string, unknown>;
-		for (const key in record) {
-			if (!Object.hasOwn(record, key)) continue;
-			estimatedCharacters += key.length + 3;
-			if (estimatedCharacters > MAX_SNAPSHOT_CHARACTERS) return false;
-			if (!visit(record[key], depth + 1)) return false;
-		}
-		return true;
-	}
-	if (!visit(envelope, 0)) return null;
-	const serialized = JSON.stringify(envelope);
-	return serialized.length <= MAX_SNAPSHOT_CHARACTERS ? serialized : null;
-}
 
 function upsertEntry(
 	index: ChatSnapshotIndex,
@@ -271,7 +240,9 @@ export class LocalChatTranscriptStorage {
 			entries: retainedEntries,
 		};
 		try {
-			const serialized = serializeSnapshotWithinBudget(envelope);
+			const serialized = serializeTranscriptWithinBudget(envelope, {
+				characters: MAX_SNAPSHOT_CHARACTERS, values: MAX_SNAPSHOT_VALUES, depth: MAX_SNAPSHOT_DEPTH,
+			});
 			if (serialized === null) {
 				this.remove(chatId);
 				return;

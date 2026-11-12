@@ -78,7 +78,7 @@ describe('MermaidBlock', () => {
 		const source = 'flowchart LR\nA --> B';
 		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledOnce());
-		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light');
+		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light', expect.any(AbortSignal));
 		expect(screen.queryByText('mermaid')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Copy code' })).toBeNull();
 		expect(screen.getAllByRole('button')).toHaveLength(1);
@@ -91,7 +91,7 @@ describe('MermaidBlock', () => {
 
 		rendered.component.setThemeId('colorblind-light');
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
-		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'colorblind-light');
+		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'colorblind-light', expect.any(AbortSignal));
 	});
 
 	it('keeps the inline diagram visible while a theme render is pending', async () => {
@@ -132,9 +132,12 @@ describe('MermaidBlock', () => {
 		const source = 'flowchart LR\nA --> B';
 		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
 		await waitFor(() => expect(pending).toHaveLength(1));
+		const firstSignal = mockedRenderMermaid.mock.calls[0][2];
+		expect(firstSignal?.aborted).toBe(false);
 
 		rendered.component.setThemeId('colorblind-light');
 		await waitFor(() => expect(pending).toHaveLength(2));
+		expect(firstSignal?.aborted).toBe(true);
 		pending[0]?.reject(new Error('stale failure'));
 		await tick();
 		expect(screen.queryByText('stale failure')).toBeNull();
@@ -147,6 +150,30 @@ describe('MermaidBlock', () => {
 
 		pending[2]?.resolve('<svg aria-label="current diagram"></svg>');
 		await waitFor(() => expect(screen.getByLabelText('current diagram')).toBeTruthy());
+	});
+
+	it('releases render demand on source replacement and virtual unmount', async () => {
+		const first = Promise.withResolvers<string>();
+		const replacement = Promise.withResolvers<string>();
+		mockedRenderMermaid.mockReturnValueOnce(first.promise).mockReturnValueOnce(replacement.promise);
+		const view = render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledOnce());
+		const firstSignal = mockedRenderMermaid.mock.calls[0][2];
+		expect(firstSignal?.aborted).toBe(false);
+		await view.rerender({ text: 'flowchart LR\nC --> D' });
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
+		expect(firstSignal?.aborted).toBe(true);
+		const replacementSignal = mockedRenderMermaid.mock.calls[1][2];
+		expect(replacementSignal?.aborted).toBe(false);
+		first.resolve('<svg aria-label="Stale synthetic diagram"></svg>');
+		await first.promise;
+		await tick();
+		expect(screen.queryByLabelText('Stale synthetic diagram')).toBeNull();
+		view.unmount();
+		expect(replacementSignal?.aborted).toBe(true);
+		replacement.reject(new DOMException('Cancelled', 'AbortError'));
+		await Promise.allSettled([first.promise, replacement.promise]);
+		await tick();
 	});
 
 	it('preserves manual viewer zoom and position across a theme render', async () => {

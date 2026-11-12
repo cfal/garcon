@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CanvasEditorState } from '../canvas-editor-state.svelte';
 import { CanvasDocumentState } from '$lib/chat-canvas/canvas-document.svelte';
+import { CanvasLayoutIndex } from '$lib/chat-canvas/canvas-layout';
 import { canvasContent } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 
 function setup() {
@@ -36,6 +37,30 @@ function press(
 }
 
 describe('canvas keyboard ownership', () => {
+	it('shares one layout when nudging all 1,000 detached cards', () => {
+		const nodes = Array.from({ length: 1_000 }, (_, index) => ({
+			id: `node-${index}`, type: 'chat' as const, chatId: `${1780000000000000 + index}`,
+			boxId: null, position: { x: index * 400, y: 0 },
+		}));
+		const canvas = new CanvasDocumentState({ title: 'Synthetic', nodes, connections: [] }, vi.fn());
+		const editor = new CanvasEditorState({ document: canvas, disabled: false });
+		const target = document.createElement('div');
+		press(editor, target, 'a', { ctrlKey: true });
+		const position = vi.spyOn(CanvasLayoutIndex.prototype, 'position');
+		try {
+			expect(press(editor, target, 'ArrowRight').defaultPrevented).toBe(true);
+			expect(position).toHaveBeenCalledTimes(nodes.length);
+			expect(new Set(position.mock.contexts).size).toBe(1);
+			expect(canvas.content.nodes.map(node => node.position)).toEqual(
+				nodes.map(node => ({ x: node.position.x + 10, y: 0 })),
+			);
+			canvas.undo();
+			expect(canvas.content.nodes).toEqual(nodes);
+		} finally {
+			position.mockRestore();
+		}
+	});
+
 	it('selects focused nodes and supports removing and undoing placements', () => {
 		const { document: canvas, editor } = setup();
 		const node = document.createElement('div');

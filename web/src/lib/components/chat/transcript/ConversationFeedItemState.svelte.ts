@@ -50,6 +50,10 @@ export class ConversationFeedItemState {
 	#disclosureOverrides = $state.raw(new Map<string, boolean>());
 	#permissionDrafts = $state.raw(new Map<string, PermissionQuestionDraft>());
 
+	get hasDisclosureOverrides(): boolean {
+		return this.#disclosureOverrides.size > 0;
+	}
+
 	disclosurePort(rowId: string): ConversationDisclosureStatePort {
 		return {
 			open: (kind, localId, defaultOpen) =>

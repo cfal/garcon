@@ -127,76 +127,91 @@ interface ConversationToolPairs {
 	permissionWrapperRowIdByResultRowId: Map<string, string>;
 }
 
-function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
-	const pendingByToolId = new Map<string, PendingToolUse[]>();
-	const pendingPermissionWrappersByToolId = new Map<string, string[]>();
-	const toolResultByUseRowId = new Map<string, ToolResultMessage>();
-	const toolResultRowIdByUseRowId = new Map<string, string>();
-	const toolUseByResultRowId = new Map<string, ToolUseChatMessage>();
-	const permissionWrapperRowIdByResultRowId = new Map<string, string>();
-	for (const row of rows) {
-		if (row.kind !== 'message') continue;
-		const message = row.message;
-		if (
-			message instanceof PermissionRequestMessage &&
-			message.requestedTool instanceof AskUserQuestionToolUseMessage
-		) {
-			const toolId = message.requestedTool.toolId;
-			const pendingUse = pendingByToolId
-				.get(toolId)
-				?.find(
-					(candidate) =>
-						candidate.message instanceof AskUserQuestionToolUseMessage &&
-						!candidate.permissionWrapperRowId,
-				);
-			if (pendingUse) {
-				pendingUse.permissionWrapperRowId = row.id;
-			} else {
-				const wrappers = pendingPermissionWrappersByToolId.get(toolId) ?? [];
-				wrappers.push(row.id);
-				pendingPermissionWrappersByToolId.set(toolId, wrappers);
+export class ConversationToolPairing {
+	#pendingByToolId = new Map<string, PendingToolUse[]>();
+	#pendingPermissionWrappersByToolId = new Map<string, string[]>();
+	#toolResultByUseRowId = new Map<string, ToolResultMessage>();
+	#toolResultRowIdByUseRowId = new Map<string, string>();
+
+	append(rows: ChatDisplayRow[]): ConversationToolPairs {
+		const pendingByToolId = this.#pendingByToolId;
+		const pendingPermissionWrappersByToolId = this.#pendingPermissionWrappersByToolId;
+		let toolResultByUseRowId = this.#toolResultByUseRowId;
+		let toolResultRowIdByUseRowId = this.#toolResultRowIdByUseRowId;
+		const toolUseByResultRowId = new Map<string, ToolUseChatMessage>();
+		const permissionWrapperRowIdByResultRowId = new Map<string, string>();
+		for (const row of rows) {
+			if (row.kind !== 'message') continue;
+			const message = row.message;
+			if (
+				message instanceof PermissionRequestMessage &&
+				message.requestedTool instanceof AskUserQuestionToolUseMessage
+			) {
+				const toolId = message.requestedTool.toolId;
+				const pendingUse = pendingByToolId
+					.get(toolId)
+					?.find(
+						(candidate) =>
+							candidate.message instanceof AskUserQuestionToolUseMessage &&
+							!candidate.permissionWrapperRowId,
+					);
+				if (pendingUse) {
+					pendingUse.permissionWrapperRowId = row.id;
+				} else {
+					const wrappers = pendingPermissionWrappersByToolId.get(toolId) ?? [];
+					wrappers.push(row.id);
+					pendingPermissionWrappersByToolId.set(toolId, wrappers);
+				}
+				continue;
 			}
-			continue;
-		}
-		if (isToolUseMessage(message)) {
-			const pending = pendingByToolId.get(message.toolId) ?? [];
-			const pendingUse: PendingToolUse = { rowId: row.id, message };
-			if (message instanceof AskUserQuestionToolUseMessage) {
-				const wrappers = pendingPermissionWrappersByToolId.get(message.toolId);
-				const permissionWrapperRowId = wrappers?.shift();
-				if (permissionWrapperRowId) pendingUse.permissionWrapperRowId = permissionWrapperRowId;
-				if (wrappers?.length === 0) pendingPermissionWrappersByToolId.delete(message.toolId);
+			if (isToolUseMessage(message)) {
+				const pending = pendingByToolId.get(message.toolId) ?? [];
+				const pendingUse: PendingToolUse = { rowId: row.id, message };
+				if (message instanceof AskUserQuestionToolUseMessage) {
+					const wrappers = pendingPermissionWrappersByToolId.get(message.toolId);
+					const permissionWrapperRowId = wrappers?.shift();
+					if (permissionWrapperRowId) pendingUse.permissionWrapperRowId = permissionWrapperRowId;
+					if (wrappers?.length === 0) pendingPermissionWrappersByToolId.delete(message.toolId);
+				}
+				pending.push(pendingUse);
+				pendingByToolId.set(message.toolId, pending);
+				continue;
 			}
-			pending.push(pendingUse);
-			pendingByToolId.set(message.toolId, pending);
-			continue;
+			if (!(message instanceof ToolResultMessage)) continue;
+			const pending = pendingByToolId.get(message.toolId);
+			if (!pending) continue;
+			const toolUse = pending.shift();
+			if (!toolUse) continue;
+			if (pending.length === 0) pendingByToolId.delete(message.toolId);
+			// Previously published render models must retain their original lookup maps.
+			if (toolResultByUseRowId === this.#toolResultByUseRowId) {
+				toolResultByUseRowId = new Map(toolResultByUseRowId);
+				toolResultRowIdByUseRowId = new Map(toolResultRowIdByUseRowId);
+			}
+			toolResultByUseRowId.set(toolUse.rowId, message);
+			toolResultRowIdByUseRowId.set(toolUse.rowId, row.id);
+			toolUseByResultRowId.set(row.id, toolUse.message);
+			if (toolUse.permissionWrapperRowId) {
+				permissionWrapperRowIdByResultRowId.set(row.id, toolUse.permissionWrapperRowId);
+			}
 		}
-		if (!(message instanceof ToolResultMessage)) continue;
-		const pending = pendingByToolId.get(message.toolId);
-		if (!pending) continue;
-		const toolUse = pending.shift();
-		if (!toolUse) continue;
-		if (pending.length === 0) pendingByToolId.delete(message.toolId);
-		toolResultByUseRowId.set(toolUse.rowId, message);
-		toolResultRowIdByUseRowId.set(toolUse.rowId, row.id);
-		toolUseByResultRowId.set(row.id, toolUse.message);
-		if (toolUse.permissionWrapperRowId) {
-			permissionWrapperRowIdByResultRowId.set(row.id, toolUse.permissionWrapperRowId);
-		}
+		this.#toolResultByUseRowId = toolResultByUseRowId;
+		this.#toolResultRowIdByUseRowId = toolResultRowIdByUseRowId;
+		return {
+			toolResultByUseRowId,
+			toolResultRowIdByUseRowId,
+			toolUseByResultRowId,
+			permissionWrapperRowIdByResultRowId,
+		};
 	}
-	return {
-		toolResultByUseRowId,
-		toolResultRowIdByUseRowId,
-		toolUseByResultRowId,
-		permissionWrapperRowIdByResultRowId,
-	};
 }
 
 export function buildConversationFeedRenderModel(
 	rows: ChatDisplayRow[],
+	pairing = new ConversationToolPairing(),
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
-	const toolPairs = pairToolResults(rows);
+	const toolPairs = pairing.append(rows);
 	const duplicate = trailingDiagnosticNoticeDuplicate(rows);
 	const permissionTerminalByOccurrence = new Map<string, PermissionTerminalState>();
 
@@ -289,6 +304,7 @@ export function visiblePendingPermissionRequests(
 	rows: ChatDisplayRow[],
 	pendingPermissionRequests: readonly PendingPermissionRequest[],
 ): PendingPermissionRequest[] {
+	if (pendingPermissionRequests.length === 0) return [];
 	const renderedPermissionOccurrences = new Set<string>();
 	const renderedExitPlanOccurrences = new Set<string>();
 	const terminalPermissionOccurrences = new Set<string>();

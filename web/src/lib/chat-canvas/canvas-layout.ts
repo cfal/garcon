@@ -24,46 +24,74 @@ export function boxChats(content: CanvasContent, boxId: string | null): CanvasCh
 	);
 }
 
-export function boxBounds(content: CanvasContent, box: CanvasBox): CanvasBounds {
-	const count = boxChats(content, box.id).length;
-	return {
-		...box.position,
-		width: CANVAS_BOX_WIDTH,
-		height:
-			CANVAS_BOX_HEADER +
-			Math.max(1, count) * (CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP) +
-			CANVAS_BOX_PADDING -
-			CANVAS_CHAT_GAP,
-	};
-}
-
-export function nodePosition(content: CanvasContent, node: CanvasNode): CanvasPosition {
-	if (node.type === 'box' || node.boxId === null) return node.position;
-	const box = content.nodes.find((entry) => entry.id === node.boxId);
-	if (!box) return node.position;
-	return {
-		x: box.position.x + CANVAS_BOX_PADDING,
-		y:
-			box.position.y +
-			CANVAS_BOX_HEADER +
-			boxChats(content, box.id).findIndex((entry) => entry.id === node.id) *
-				(CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP),
-	};
-}
-
 export function boxAt(content: CanvasContent, point: CanvasPosition): CanvasBox | null {
-	return (
-		[...content.nodes].reverse().find((node): node is CanvasBox => {
-			if (node.type !== 'box') return false;
-			const bounds = boxBounds(content, node);
-			return (
+	return new CanvasLayoutIndex(content).boxAt(point);
+}
+
+export class CanvasLayoutIndex {
+	readonly byId = new Map<string, CanvasNode>();
+	readonly #children = new Map<string | null, CanvasChat[]>();
+	readonly #ranks = new Map<string, number>();
+	readonly #boxes: CanvasBox[] = [];
+
+	constructor(content: CanvasContent) {
+		for (const node of content.nodes) {
+			this.byId.set(node.id, node);
+			if (node.type === 'box') {
+				this.#boxes.push(node);
+			} else {
+				let children = this.#children.get(node.boxId);
+				if (!children) {
+					children = [];
+					this.#children.set(node.boxId, children);
+				}
+				this.#ranks.set(node.id, children.length);
+				children.push(node);
+			}
+		}
+	}
+
+	chats(boxId: string | null): readonly CanvasChat[] {
+		return this.#children.get(boxId) ?? [];
+	}
+
+	bounds(box: CanvasBox): CanvasBounds {
+		const count = this.#children.get(box.id)?.length ?? 0;
+		return {
+			...box.position,
+			width: CANVAS_BOX_WIDTH,
+			height:
+				CANVAS_BOX_HEADER +
+				Math.max(1, count) * (CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP) +
+				CANVAS_BOX_PADDING -
+				CANVAS_CHAT_GAP,
+		};
+	}
+
+	position(node: CanvasNode): CanvasPosition {
+		if (node.type === 'box' || node.boxId === null) return node.position;
+		const box = this.byId.get(node.boxId);
+		if (!box) return node.position;
+		return {
+			x: box.position.x + CANVAS_BOX_PADDING,
+			y: box.position.y + CANVAS_BOX_HEADER +
+				(this.#ranks.get(node.id) ?? -1) * (CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP),
+		};
+	}
+
+	boxAt(point: CanvasPosition): CanvasBox | null {
+		for (let index = this.#boxes.length - 1; index >= 0; index--) {
+			const box = this.#boxes[index]!;
+			const bounds = this.bounds(box);
+			if (
 				point.x >= bounds.x &&
 				point.x <= bounds.x + bounds.width &&
 				point.y >= bounds.y &&
 				point.y <= bounds.y + bounds.height
-			);
-		}) ?? null
-	);
+			) return box;
+		}
+		return null;
+	}
 }
 
 export function moveChat(
@@ -104,11 +132,12 @@ export function finishNodeMove(
 				: node,
 		),
 	};
+	const layout = new CanvasLayoutIndex(geometry);
 	const moves = new Map<string, { chat: CanvasChat; index: number }>();
 	for (const node of content.nodes) {
 		const position = positions.get(node.id);
 		if (!position || node.type !== 'chat' || (node.boxId && movedBoxes.has(node.boxId))) continue;
-		const box = boxAt(geometry, {
+		const box = layout.boxAt({
 			x: position.x + CANVAS_CARD_WIDTH / 2,
 			y: position.y + CANVAS_CARD_HEIGHT / 2,
 		});
@@ -126,20 +155,26 @@ export function finishNodeMove(
 		});
 	}
 	const orderedGroups = new Map<string, CanvasChat[]>();
-	for (const box of geometry.nodes) {
-		if (box.type !== 'box') continue;
-		const arrivals = [...moves.values()]
-			.filter((move) => move.chat.boxId === box.id)
-			.sort((left, right) => left.index - right.index);
-		if (!arrivals.length) continue;
-		const siblings = boxChats(geometry, box.id).filter((chat) => !moves.has(chat.id));
+	const arrivalsByBox = new Map<string, { chat: CanvasChat; index: number }[]>();
+	for (const move of moves.values()) {
+		if (!move.chat.boxId) continue;
+		let arrivals = arrivalsByBox.get(move.chat.boxId);
+		if (!arrivals) {
+			arrivals = [];
+			arrivalsByBox.set(move.chat.boxId, arrivals);
+		}
+		arrivals.push(move);
+	}
+	for (const [boxId, arrivals] of arrivalsByBox) {
+		arrivals.sort((left, right) => left.index - right.index);
+		const siblings = layout.chats(boxId).filter((chat) => !moves.has(chat.id));
 		let previousIndex = -1;
 		for (const { chat, index } of arrivals) {
 			const insertAt = Math.min(siblings.length, Math.max(previousIndex + 1, index));
 			siblings.splice(insertAt, 0, chat);
 			previousIndex = insertAt;
 		}
-		orderedGroups.set(box.id, siblings);
+		orderedGroups.set(boxId, siblings);
 	}
 	return {
 		...content,
@@ -155,13 +190,14 @@ export function removeCanvasElements(
 	content: CanvasContent,
 	ids: ReadonlySet<string>,
 ): CanvasContent {
+	const layout = new CanvasLayoutIndex(content);
 	return {
 		...content,
 		nodes: content.nodes
 			.filter((node) => !ids.has(node.id))
 			.map((node) =>
 				node.type === 'chat' && node.boxId && ids.has(node.boxId)
-					? { ...node, boxId: null, position: nodePosition(content, node) }
+					? { ...node, boxId: null, position: layout.position(node) }
 					: node,
 			),
 		connections: content.connections.filter(
@@ -174,11 +210,12 @@ export function availablePosition(
 	content: CanvasContent,
 	position: CanvasPosition,
 ): CanvasPosition {
+	const layout = new CanvasLayoutIndex(content);
 	const occupied = content.nodes.map((node) =>
 		node.type === 'box'
-			? boxBounds(content, node)
+			? layout.bounds(node)
 			: {
-					...nodePosition(content, node),
+					...layout.position(node),
 					width: CANVAS_CARD_WIDTH,
 					height: CANVAS_CARD_HEIGHT,
 				},

@@ -7,10 +7,9 @@ import {
 import {
 	finishNodeMove,
 	moveChat,
-	nodePosition,
 	removeCanvasElements,
-	boxChats,
 	CANVAS_BOX_WIDTH,
+	CanvasLayoutIndex,
 } from './canvas-layout.js';
 
 const HISTORY_LIMIT = 50;
@@ -19,6 +18,11 @@ export class CanvasDocumentState {
 	content: CanvasContent;
 	#undo = $state.raw<CanvasContent[]>([]);
 	#redo = $state.raw<CanvasContent[]>([]);
+	#layout = $derived.by(() => new CanvasLayoutIndex(this.content));
+
+	get layout(): CanvasLayoutIndex {
+		return this.#layout;
+	}
 
 	constructor(
 		content: CanvasContent,
@@ -136,7 +140,7 @@ export class CanvasDocumentState {
 	moveToBox(id: string, boxId: string | null): void {
 		const node = this.content.nodes.find((entry) => entry.id === id);
 		if (!node) return;
-		const position = nodePosition(this.content, node);
+		const position = this.layout.position(node);
 		this.edit(
 			moveChat(this.content, id, boxId, { x: position.x + CANVAS_BOX_WIDTH + 24, y: position.y }),
 		);
@@ -145,7 +149,7 @@ export class CanvasDocumentState {
 	reorderChat(id: string, direction: -1 | 1): void {
 		const node = this.content.nodes.find((entry) => entry.id === id);
 		if (node?.type !== 'chat' || node.boxId === null) return;
-		const siblings = boxChats(this.content, node.boxId);
+		const siblings = this.layout.chats(node.boxId);
 		const index = siblings.findIndex((entry) => entry.id === id);
 		const target = index + direction;
 		if (target < 0 || target >= siblings.length) return;

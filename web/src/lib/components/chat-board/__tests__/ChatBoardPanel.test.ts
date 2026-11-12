@@ -154,6 +154,25 @@ afterEach(() => {
 });
 
 describe('ChatBoardPanel', () => {
+	it('retains hidden lane rows and refreshes them on reveal', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		const { rerender } = render(ChatBoardPanelTestHost, {
+			controller, sessions, onOpenChat: vi.fn(), visible: true,
+		});
+		await rerender({ visible: false });
+		sessions.byId = { 'chat-1': chat('chat-1', 'Updated title') };
+		await tick();
+		expect(screen.getByRole('button', { name: 'Open Polish onboarding' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Open Updated title' })).toBeNull();
+		await rerender({ visible: true });
+		expect(screen.getByRole('button', { name: 'Open Updated title' })).toBeTruthy();
+	});
+
 	it('invalidates measured lane rows when Interface typography changes', async () => {
 		const { controller } = createController({ revision: 1, boards: [board] });
 		await controller.refresh(true);

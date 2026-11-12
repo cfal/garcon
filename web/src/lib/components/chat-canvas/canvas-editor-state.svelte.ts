@@ -1,5 +1,4 @@
 import type { CanvasDocumentState } from '$lib/chat-canvas/canvas-document.svelte';
-import { nodePosition } from '$lib/chat-canvas/canvas-layout';
 
 export class CanvasEditorState {
 	selectedIds = $state<ReadonlySet<string>>(new Set());
@@ -68,9 +67,10 @@ export class CanvasEditorState {
 			const dx = event.key === 'ArrowLeft' ? -distance : event.key === 'ArrowRight' ? distance : 0;
 			const dy = event.key === 'ArrowUp' ? -distance : event.key === 'ArrowDown' ? distance : 0;
 			const positions = new Map<string, { x: number; y: number }>();
+			const layout = document.layout;
 			for (const node of document.content.nodes) {
 				if (!this.selectedIds.has(node.id)) continue;
-				const point = nodePosition(document.content, node);
+				const point = layout.position(node);
 				positions.set(node.id, { x: point.x + dx, y: point.y + dy });
 			}
 			document.move(positions);
