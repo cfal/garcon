@@ -92,9 +92,17 @@ describe('ConversationFeedProjectionState', () => {
 		for (let index = 0; index < 160; index++) {
 			seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
 			const toolId = `tool-${index % 7}`;
-			const message = seed % 4 === 0 ? new ToolResultMessage(TS, toolId, { raw: 'synthetic' }, false)
-				: seed % 4 === 1 ? new AssistantMessage(TS, 'synthetic')
-				: new ReadToolUseMessage(TS, toolId, '/synthetic');
+			let message: ChatMessage;
+			switch (seed % 4) {
+				case 0:
+					message = new ToolResultMessage(TS, toolId, { raw: 'synthetic' }, false);
+					break;
+				case 1:
+					message = new AssistantMessage(TS, 'synthetic');
+					break;
+				default:
+					message = new ReadToolUseMessage(TS, toolId, '/synthetic');
+			}
 			const nextRow: ChatDisplayRow = { kind: 'message', id: `generated:${index}`, ordinal: index + 1, message };
 			config = { ...config, rows: [...config.rows, nextRow], mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
 			const savedPrevious = new Map(previous.model.indexByRowId);

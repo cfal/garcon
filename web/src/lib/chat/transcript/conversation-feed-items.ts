@@ -183,7 +183,7 @@ export class ConversationToolPairing {
 			const toolUse = pending.shift();
 			if (!toolUse) continue;
 			if (pending.length === 0) pendingByToolId.delete(message.toolId);
-			// Published lookup maps also belong to the previous scroll-anchor model.
+			// Previously published render models must retain their original lookup maps.
 			if (toolResultByUseRowId === this.#toolResultByUseRowId) {
 				toolResultByUseRowId = new Map(toolResultByUseRowId);
 				toolResultRowIdByUseRowId = new Map(toolResultRowIdByUseRowId);

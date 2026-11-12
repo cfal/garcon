@@ -243,18 +243,22 @@ export class ConversationFeedProjectionState {
 			if (visibleAppendedItems.length === 0) {
 				return this.#commitProjection(input, reconciliation.model, previous.model, geometry);
 			}
-			const combined = input.combineToolUseMessages
-				? appendCombinedConversationTail(previous.model, input, visibleAppendedItems) : null;
-			if (input.combineToolUseMessages && !combined) return null;
-			const appended = combined?.model ?? appendConversationVirtualTranscriptTail(
-				previous.model,
-				input.surfaceIdentity,
-				visibleAppendedItems,
-			);
-			if (!appended) return null;
-			model = appended;
+			let insertIndex = previous.model.transcriptEndIndex;
+			if (input.combineToolUseMessages) {
+				const combined = appendCombinedConversationTail(previous.model, input, visibleAppendedItems);
+				if (!combined) return null;
+				model = combined.model;
+				insertIndex = combined.changedIndex;
+			} else {
+				const appended = appendConversationVirtualTranscriptTail(
+					previous.model,
+					input.surfaceIdentity,
+					visibleAppendedItems,
+				);
+				if (!appended) return null;
+				model = appended;
+			}
 			if (mutationKinds.size === 0) mutationKinds.add('presentation-structure');
-			const insertIndex = combined?.changedIndex ?? previous.model.transcriptEndIndex;
 			const insertedItems = model.items.slice(
 				insertIndex,
 				model.transcriptEndIndex,

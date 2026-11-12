@@ -1,4 +1,4 @@
-import { AssistantMessage, ReadToolUseMessage, ToolResultMessage } from '../../common/chat-types.js';
+import { AssistantMessage, ReadToolUseMessage, ToolResultMessage, type ChatMessage } from '../../common/chat-types.js';
 import { ConversationFeedProjectionState, type ConversationFeedProjectionInput } from '../src/lib/components/chat/transcript/ConversationFeedProjectionState.svelte.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
@@ -7,11 +7,20 @@ const sizes = (process.env.GARCON_PROFILE_SIZES ?? '1000,3000,10000,30000').spli
 
 function row(index: number): ConversationFeedProjectionInput['rows'][number] {
 	const toolId = `tool-${Math.floor(index / 3)}`;
+	let message: ChatMessage;
+	switch (index % 3) {
+		case 0:
+			message = new ReadToolUseMessage(timestamp, toolId, '/synthetic');
+			break;
+		case 1:
+			message = new ToolResultMessage(timestamp, toolId, { raw: 'synthetic' }, false);
+			break;
+		default:
+			message = new AssistantMessage(timestamp, 'Synthetic response');
+	}
 	return {
 		kind: 'message', id: `synthetic:${index}`, ordinal: index + 1,
-		message: index % 3 === 0 ? new ReadToolUseMessage(timestamp, toolId, '/synthetic')
-			: index % 3 === 1 ? new ToolResultMessage(timestamp, toolId, { raw: 'synthetic' }, false)
-			: new AssistantMessage(timestamp, 'Synthetic response'),
+		message,
 	};
 }
 

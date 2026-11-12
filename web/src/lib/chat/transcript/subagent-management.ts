@@ -77,11 +77,14 @@ export function buildSubagentManagementModel(
 	const reducerMetadata = new Map<SubagentManagementEntry, ReducerEntryMetadata>();
 	const knownAliases = collectKnownAliases(messages, resultsByToolId);
 	let fingerprints: Set<string> | null = null;
-	const userSourceFingerprints = () => fingerprints ??= new Set(
-		messages
-			.filter((message): message is UserMessage => message instanceof UserMessage)
-			.map((message) => codexSubagentSourceFingerprint(message.content)),
-	);
+	function userSourceFingerprints(): ReadonlySet<string> {
+		fingerprints ??= new Set(
+			messages
+				.filter((message): message is UserMessage => message instanceof UserMessage)
+				.map((message) => codexSubagentSourceFingerprint(message.content)),
+		);
+		return fingerprints;
+	}
 	let eventOrder = 0;
 
 	for (const message of messages) {

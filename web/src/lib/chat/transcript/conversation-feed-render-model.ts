@@ -19,6 +19,14 @@ export interface ConversationFeedRenderModelReconciliation {
 	change: ConversationFeedRenderModelChange;
 }
 
+function canAppendWithoutRevision(row: ChatDisplayRow): boolean {
+	// Commands can revise earlier output; local notices depend on the final durable row.
+	return row.kind === 'message'
+		&& row.message.type !== 'command-output'
+		&& row.message.type !== 'command-result'
+		&& row.message.type !== 'transcript-notice';
+}
+
 export class ConversationFeedRenderModelController {
 	#surfaceIdentity: string | null = null;
 	#rows: ChatDisplayRow[] = [];
@@ -40,28 +48,17 @@ export class ConversationFeedRenderModelController {
 			return { model: this.#model, change: { kind: 'unchanged' } };
 		}
 
-		if (this.#model && !this.#hasLocalNotices && rows.length > this.#rows.length
-			&& this.#samePrefix(rows, this.#rows.length)) {
-			const appendedRows = rows.slice(this.#rows.length);
-			// Commands can revise earlier output; local notices depend on the final durable row.
-			if (appendedRows.every(row => row.kind === 'message'
-				&& row.message.type !== 'command-output' && row.message.type !== 'command-result'
-				&& row.message.type !== 'transcript-notice')) {
-				const suffix = buildConversationFeedRenderModel(appendedRows, this.#pairing);
-				const appendedItems = suffix.items.map(item => ({ ...item, index: item.index + this.#rows.length }));
-				const terminals = suffix.permissionTerminalByOccurrence.size === 0
-					? this.#model.permissionTerminalByOccurrence
-					: new Map([...this.#model.permissionTerminalByOccurrence, ...suffix.permissionTerminalByOccurrence]);
-				this.#model = { ...suffix, items: [...this.#model.items, ...appendedItems],
-					permissionTerminalByOccurrence: terminals };
-				this.#rows = rows;
-				return { model: this.#model, change: { kind: 'tail-appended', appendedItems } };
-			}
+		const extendsPrevious = this.#model !== null
+			&& rows.length > this.#rows.length
+			&& this.#samePrefix(rows, this.#rows.length);
+		if (this.#model && extendsPrevious && !this.#hasLocalNotices) {
+			const appended = this.#appendTailModel(this.#model, rows);
+			if (appended) return appended;
 		}
 		this.#pairing = new ConversationToolPairing();
 		const builtModel = buildConversationFeedRenderModel(rows, this.#pairing);
 		this.#hasLocalNotices = rows.some(row => row.kind === 'local-notice');
-		const appendedItems = this.#appendedTailItems(rows, builtModel.items);
+		const appendedItems = extendsPrevious ? this.#appendedTailItems(builtModel.items) : null;
 		let model = builtModel;
 		if (appendedItems && this.#model) {
 			model = { ...builtModel, items: [...this.#model.items, ...appendedItems] };
@@ -87,6 +84,33 @@ export class ConversationFeedRenderModelController {
 		this.#surfaceIdentity = surfaceIdentity;
 	}
 
+	#appendTailModel(
+		previous: ConversationFeedRenderModel,
+		rows: ChatDisplayRow[],
+	): ConversationFeedRenderModelReconciliation | null {
+		const appendedRows = rows.slice(this.#rows.length);
+		if (!appendedRows.every(canAppendWithoutRevision)) return null;
+
+		const suffix = buildConversationFeedRenderModel(appendedRows, this.#pairing);
+		const appendedItems = suffix.items.map((item) => ({
+			...item,
+			index: item.index + this.#rows.length,
+		}));
+		const terminals = suffix.permissionTerminalByOccurrence.size === 0
+			? previous.permissionTerminalByOccurrence
+			: new Map([
+				...previous.permissionTerminalByOccurrence,
+				...suffix.permissionTerminalByOccurrence,
+			]);
+		this.#model = {
+			...suffix,
+			items: [...previous.items, ...appendedItems],
+			permissionTerminalByOccurrence: terminals,
+		};
+		this.#rows = rows;
+		return { model: this.#model, change: { kind: 'tail-appended', appendedItems } };
+	}
+
 	#sameRows(rows: ChatDisplayRow[]): boolean {
 		return rows.length === this.#rows.length && this.#samePrefix(rows, rows.length);
 	}
@@ -109,13 +133,10 @@ export class ConversationFeedRenderModelController {
 	}
 
 	#appendedTailItems(
-		rows: ChatDisplayRow[],
 		nextItems: ConversationFeedRenderItem[],
 	): ConversationFeedRenderItem[] | null {
 		const previousItems = this.#model?.items;
-		if (!previousItems || rows.length <= this.#rows.length) return null;
-		if (!this.#samePrefix(rows, this.#rows.length)) return null;
-		if (nextItems.length <= previousItems.length) return null;
+		if (!previousItems || nextItems.length <= previousItems.length) return null;
 		for (const [index, previous] of previousItems.entries()) {
 			const next = nextItems[index];
 			if (!next || next.kind !== previous.kind || next.id !== previous.id) return null;
