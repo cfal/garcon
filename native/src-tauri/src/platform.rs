@@ -35,7 +35,8 @@ fn launcher_url_allowed(url: &Url, dev_url: Option<&Url>) -> bool {
         (url.scheme(), url.host_str()),
         ("tauri", Some("localhost")) | ("http" | "https", Some("tauri.localhost"))
     ) && url.port().is_none();
-    let dev = cfg!(debug_assertions) && dev_url.is_some_and(|dev| dev.origin() == url.origin());
+    // Tauri development mode also supports release-profile Rust builds.
+    let dev = tauri::is_dev() && dev_url.is_some_and(|dev| dev.origin() == url.origin());
     (local || dev)
         && url.username().is_empty()
         && url.password().is_none()
@@ -126,5 +127,57 @@ mod tests {
                 "{input}"
             );
         }
+    }
+
+    #[test]
+    fn configured_dev_origin_follows_tauri_mode_not_rust_profile() {
+        let dev_url = Url::parse("http://127.0.0.1:1430/").unwrap();
+        for mode in [
+            ConnectionMode::Switcher,
+            ConnectionMode::SingleWebview,
+            ConnectionMode::Disabled,
+        ] {
+            for path in ["/", "/index.html"] {
+                let url = dev_url.join(path).unwrap();
+                assert_eq!(
+                    main_navigation_allowed(mode, None, &url, Some(&dev_url)),
+                    tauri::is_dev(),
+                    "{mode:?}: {url}"
+                );
+                assert!(!main_navigation_allowed(mode, None, &url, None));
+            }
+        }
+    }
+
+    #[test]
+    fn configured_dev_origin_keeps_launcher_and_ios_navigation_confined() {
+        let dev_url = Url::parse("http://127.0.0.1:1430/").unwrap();
+        for input in [
+            "http://127.0.0.1:1431/",
+            "https://127.0.0.1:1430/",
+            "http://localhost:1430/",
+            "http://other.test:1430/",
+            "http://127.0.0.1:1430/other",
+            "http://user@127.0.0.1:1430/",
+            "http://user:password@127.0.0.1:1430/",
+        ] {
+            assert!(
+                !launcher_url_allowed(&Url::parse(input).unwrap(), Some(&dev_url)),
+                "{input}"
+            );
+        }
+        let deployment = Deployment::parse("https://synthetic.test/mount/").unwrap();
+        assert!(!main_navigation_allowed(
+            ConnectionMode::SingleWebview,
+            Some(&deployment),
+            &dev_url,
+            Some(&dev_url)
+        ));
+        assert!(main_navigation_allowed(
+            ConnectionMode::SingleWebview,
+            Some(&deployment),
+            deployment.url(),
+            Some(&dev_url)
+        ));
     }
 }
