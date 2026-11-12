@@ -302,28 +302,10 @@ export function resolveMermaidThemeId(presentation: ThemeRendererPresentation): 
 	return rendererThemeIdFor(presentation);
 }
 
-export async function renderMermaid(
-	source: string,
-	themeId: MermaidThemeId,
-	signal?: AbortSignal,
-): Promise<string> {
-	signal?.throwIfAborted();
-	const key = renderKey(source, themeId);
-	const cached = cachedSvg(key);
-	if (cached !== undefined) return cached;
-	let job = inflightRenders.get(key);
-	if (!job) {
-		const created: RenderJob = { consumers: 0, promise: Promise.resolve('') };
-		const release = () => {
-			if (inflightRenders.get(key) === created) inflightRenders.delete(key);
-		};
-		const requireDemand = () => {
-			if (created.consumers > 0) return;
-			// New demand must not join a rejected job before its promise cleanup runs.
-			release();
-			throw new DOMException('Render abandoned', 'AbortError');
-		};
-		created.promise = enqueue(async () => {
+function createRenderJob(key: string, source: string, themeId: MermaidThemeId): RenderJob {
+	const job: RenderJob = {
+		consumers: 0,
+		promise: enqueue(async () => {
 			requireDemand();
 			const mermaid = await loadMermaid();
 			requireDemand();
@@ -335,19 +317,42 @@ export async function renderMermaid(
 			const { svg } = await mermaid.render(id, source);
 			cacheSvg(key, svg);
 			return svg;
-		});
-		inflightRenders.set(key, created);
-		void created.promise.then(release, release);
-		job = created;
+		}),
+	};
+
+	function release(): void {
+		if (inflightRenders.get(key) === job) inflightRenders.delete(key);
 	}
-	const shared = job;
-	shared.consumers += 1;
+
+	function requireDemand(): void {
+		if (job.consumers > 0) return;
+		// New demand must not join a rejected job before its promise cleanup runs.
+		release();
+		throw new DOMException('Render abandoned', 'AbortError');
+	}
+
+	inflightRenders.set(key, job);
+	void job.promise.then(release, release);
+	return job;
+}
+
+export async function renderMermaid(
+	source: string,
+	themeId: MermaidThemeId,
+	signal?: AbortSignal,
+): Promise<string> {
+	signal?.throwIfAborted();
+	const key = renderKey(source, themeId);
+	const cached = cachedSvg(key);
+	if (cached !== undefined) return cached;
+	const job = inflightRenders.get(key) ?? createRenderJob(key, source, themeId);
+	job.consumers += 1;
 	return new Promise<string>((resolve, reject) => {
 		let active = true;
 		const finish = () => {
 			if (!active) return false;
 			active = false;
-			shared.consumers -= 1;
+			job.consumers -= 1;
 			signal?.removeEventListener('abort', abort);
 			return true;
 		};
@@ -355,9 +360,13 @@ export async function renderMermaid(
 			if (finish()) reject(signal?.reason);
 		};
 		signal?.addEventListener('abort', abort, { once: true });
-		void shared.promise.then(
-			(svg) => { if (finish()) resolve(svg); },
-			(error: unknown) => { if (finish()) reject(error); },
+		void job.promise.then(
+			(svg) => {
+				if (finish()) resolve(svg);
+			},
+			(error: unknown) => {
+				if (finish()) reject(error);
+			},
 		);
 	});
 }

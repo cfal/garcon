@@ -68,10 +68,9 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		}
 		renderError = '';
 
-		let active = true;
 		const abort = new AbortController();
 		const isCurrentRender = () =>
-			active && currentText === text && currentThemeId === mermaidThemeId;
+			!abort.signal.aborted && currentText === text && currentThemeId === mermaidThemeId;
 		renderMermaid(currentText, currentThemeId, abort.signal).then(
 			(svg) => {
 				if (!isCurrentRender()) return;
@@ -87,10 +86,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 				loading = false;
 			},
 		);
-		return () => {
-			active = false;
-			abort.abort();
-		};
+		return () => abort.abort();
 	});
 
 	onDestroy(() => {

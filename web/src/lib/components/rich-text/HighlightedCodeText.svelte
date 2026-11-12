@@ -36,10 +36,10 @@ The raw source remains visible while the language package loads.
 	$effect(() => {
 		const currentText = text;
 		const currentLanguage = language;
-		const abort = new AbortController();
 
 		asyncSegments = null;
 		if (!currentText || !shouldAttemptCodeFenceHighlight(currentLanguage)) return;
+		const abort = new AbortController();
 
 		void (async () => {
 			try {
@@ -52,9 +52,7 @@ The raw source remains visible while the language package loads.
 			}
 		})();
 
-		return () => {
-			abort.abort();
-		};
+		return () => abort.abort();
 	});
 </script>
 
