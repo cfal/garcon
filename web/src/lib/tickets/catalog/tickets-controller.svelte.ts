@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import type {
 	Ticket,
 	TicketBootstrap,
@@ -190,6 +191,8 @@ export class TicketsController implements PortableSingletonController {
 		this.#collectionQuery = null;
 		this.detail.releaseReadOnly();
 		this.mutations.reset();
+		// Unobserved derived values retain their cached projection until read again.
+		untrack(() => this.displayedCollection);
 		this.stale = true;
 	}
 

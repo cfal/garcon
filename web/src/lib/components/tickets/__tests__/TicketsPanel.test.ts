@@ -24,6 +24,26 @@ afterEach(() => {
 });
 
 describe('Tickets surface', () => {
+	it('clears the cached collection projection after its last renderer unmounts', async () => {
+		const { controller, view } = await mount();
+		controller.select('G-1');
+		await controller.refresh();
+		const draft = controller.drafts.open('fields', controller.detail.current)!;
+		draft.setField('title', 'Retained edit');
+		await tick();
+		expect(screen.getByRole('button', { name: 'Open G-1' })).toBeTruthy();
+		view.unmount();
+		const project = vi.spyOn(controller.mutations, 'collection');
+		controller.setPresentationVisible(false);
+		controller.releaseReadOnly();
+		await tick();
+		// Reading displayedCollection here would itself refresh the otherwise-retained cache.
+		expect(project).toHaveBeenCalledExactlyOnceWith(null, controller.collectionQuery);
+		expect(project).toHaveReturnedWith(null);
+		expect(controller.drafts.needsExitGuard).toBe(true);
+		expect(draft.field('title')).toBe('Retained edit');
+	});
+
 	it.each(['Synthetic assigned chat', '', null])(
 		'opens a chat assignee from the detail field with title %j',
 		async (title) => {
