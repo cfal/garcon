@@ -448,6 +448,29 @@ describe('ConversationMessage actions', () => {
 		});
 	});
 
+	it.each([
+		{ pointerType: 'touch', message: new AssistantMessage('2026-01-01T00:00:00.000Z', 'Synthetic output') },
+		{ pointerType: 'pen', message: new UserMessage('2026-01-01T00:00:00.000Z', 'Synthetic input') },
+	])('cancels pending $pointerType menus across hide and reveal', async ({ pointerType, message }) => {
+		vi.useFakeTimers();
+		try {
+			const { rerender } = render(ConversationMessageHost, { message });
+			const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+			await fireEvent.pointerDown(trigger, { pointerType, clientX: 24, clientY: 36 });
+			await rerender({ message, isVisible: false });
+			await fireEvent.contextMenu(trigger);
+			expect(trigger.getAttribute('data-state')).toBe('closed');
+			await rerender({ message, isVisible: true });
+			await vi.advanceTimersByTimeAsync(800);
+			expect(trigger.getAttribute('data-state')).toBe('closed');
+			await fireEvent.contextMenu(trigger);
+			expect(trigger.getAttribute('data-state')).toBe('open');
+		} finally {
+			cleanup();
+			vi.useRealTimers();
+		}
+	});
+
 	it('lets markdown links handle touch without opening the message menu', async () => {
 		render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', '[example](https://example.com)'),

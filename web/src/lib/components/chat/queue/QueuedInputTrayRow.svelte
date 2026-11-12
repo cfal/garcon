@@ -37,6 +37,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	interface Props {
+		isVisible: boolean;
 		chatId: string;
 		entry: QueueEntry;
 		position: number;
@@ -60,6 +61,7 @@
 		onKeyboardMove: (direction: -1 | 1) => Promise<void>;
 	}
 	let {
+		isVisible,
 		chatId,
 		entry,
 		position,
@@ -100,6 +102,12 @@
 	let menuOpen = $state(false);
 	let dragging = $state(false);
 	let edge = $state<Edge | null>(null);
+	$effect.pre(() => {
+		if (!isVisible) {
+			menuOpen = false;
+			keyboardDrag.finish();
+		}
+	});
 	const attachmentNames = $derived(
 		entry.attachments.map((attachment) => attachment.name).join(', '),
 	);
@@ -292,7 +300,8 @@
 							class="size-4"
 						/>{/if}</DropdownMenuTrigger
 				>
-				<DropdownMenuContent align="end" class="w-56" getFocusReturnTarget={() => menuTrigger}>
+				<DropdownMenuContent align="end" class="w-56" getFocusReturnTarget={() => menuTrigger}
+					onCloseAutoFocus={(event) => { if (!isVisible) event.preventDefault(); }}>
 					{#if canInterrupt}<DropdownMenuItem
 							disabled={blocked}
 							onSelect={onInterrupt}

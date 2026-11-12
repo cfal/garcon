@@ -140,7 +140,6 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			loadMessages: vi.fn().mockResolvedValue([]),
 			removeChatTranscript: vi.fn(),
 			markChatTranscriptStale: vi.fn(),
-			markChatTranscriptValidated: vi.fn(),
 		},
 		lifecycle: {
 			currentChatId: () => 'chat-a',

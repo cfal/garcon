@@ -31,7 +31,7 @@ type SessionTranscriptState = Pick<
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+	transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor'>;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
 	getKnownHeadForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
@@ -49,7 +49,7 @@ export type SessionTranscriptLoadTarget = Pick<
 	ActiveTranscriptPort,
 	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+	transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor'>;
 };
 
 export type PanelTranscriptSnapshotLoader = (options: ChatLoadMessagesOptions) => Promise<boolean>;

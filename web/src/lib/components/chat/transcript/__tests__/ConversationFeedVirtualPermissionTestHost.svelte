@@ -77,6 +77,7 @@
 </script>
 
 <ConversationFeedVirtualItem
+	isVisible={true}
 	{item}
 	renderModel={buildConversationFeedRenderModel([])}
 	showThinking={true}

@@ -5,7 +5,10 @@ import type {
 	ActiveTranscriptState,
 	ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import {
+	CHAT_TRANSCRIPT_CACHE_LIMIT,
+	ChatTranscriptCache,
+} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import {
@@ -15,7 +18,10 @@ import {
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
-import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+import {
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
+	type ChatViewSurfaceId,
+} from '$lib/workspace/surface-types.js';
 
 function message(ordinal: number): TranscriptMessage {
 	return {
@@ -39,6 +45,7 @@ function presentation(
 
 function fixture(
 	options: {
+		maxHiddenEntries?: number;
 		loadTranscriptSnapshot?: (
 			transcript: import('$lib/chat/transcript/active-transcript-state.svelte.js').ActiveTranscriptState,
 			chatId: string,
@@ -49,7 +56,11 @@ function fixture(
 			retainInactiveWindows?: () => boolean;
 	} = {},
 ) {
-	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+	const cache = new ChatTranscriptCache({
+		limit: 100,
+		maxHiddenEntries: options.maxHiddenEntries,
+		persistenceDelayMs: 60_000,
+	});
 	const overlays = new ConversationTranscriptOverlayStore();
 	const lifecycles = new Map<string, ConversationLifecycleState>();
 	const lifecycle = {
@@ -100,6 +111,7 @@ function port(
 		getQueueContainer: () => undefined,
 		captureRestoreTarget: () => target,
 		closeTransients: vi.fn(),
+		prepareForHide: vi.fn(),
 	};
 }
 
@@ -113,10 +125,438 @@ function switchPanel(
 	registry.reconcile(visible);
 }
 
+function mountAttachedPanel(
+	cache: ChatTranscriptCache,
+	registry: ConversationPanelRegistry,
+	descriptor: ConversationPanelDescriptor,
+) {
+	seed(cache, descriptor.chatId);
+	registry.reconcile([descriptor]);
+	const panel = registry.panel(descriptor.surfaceId)!;
+	panel.attachPresentation(port({ kind: 'end' }));
+	return panel;
+}
+
 describe('ConversationPanelRegistry', () => {
 	beforeEach(() => {
 		localStorage.clear();
 	});
+
+	it('bounds retention to 25 visible and 25 hidden chat tails', () => {
+		expect(WORKSPACE_WINDOW_RESOURCE_CEILING).toBe(25);
+		expect(CHAT_TRANSCRIPT_CACHE_LIMIT).toBe(25);
+	});
+
+	it.each([false, true])('retains attached fullscreen chats without parking them (combined: %s)', async (retainInactive) => {
+		const loadTranscriptSnapshot = vi.fn();
+		const { cache, registry } = fixture({ retainInactiveWindows: () => retainInactive, loadTranscriptSnapshot });
+		const left = presentation('chat-view:window-left', 'left');
+		const right = presentation('chat-view:window-right', 'right');
+		seed(cache, 'left');
+		seed(cache, 'right');
+		registry.reconcile([left, right]);
+		const original = registry.panel(right.surfaceId)!;
+		const view = port({ kind: 'end' });
+		original.attachPresentation(view);
+		registry.prepareForReconcile([left]);
+		registry.reconcile([left], [right]);
+		expect(registry.panel(right.surfaceId)).toBe(original);
+		expect(registry.visibleChatIds()).toEqual(['left']);
+		expect(registry.hasInactiveWindow('right')).toBe(false);
+		expect(original.isPresentationVisible).toBe(false);
+		expect(view.closeTransients).toHaveBeenCalled();
+		expect(await registry.loadChatSnapshot('right')).toBe(false);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.reconcile([left], [right]);
+		expect(registry.panel(right.surfaceId)).toBe(original);
+		expect(view.prepareForHide).toHaveBeenCalledOnce();
+		for (const ordinal of [2, 3]) {
+			expect(registry.applyCommittedBatch({ chatId: 'right', transcriptViewId: 'view-1',
+				firstOrdinal: ordinal, lastOrdinal: ordinal, messages: [message(ordinal)],
+				resendCandidates: [], noticeRevision: 0,
+			})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+		}
+		registry.reconcile([left, right]);
+		expect(registry.panel(right.surfaceId)).toBe(original);
+		expect(original.isPresentationVisible).toBe(true);
+		expect(original.transcript.entries).toEqual([message(1), message(2), message(3)]);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('never creates a hidden panel or retains an unattached panel', () => {
+		const { cache, registry } = fixture();
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		seed(cache, 'hidden');
+		registry.reconcile([], [hidden]);
+		expect(registry.panel(hidden.surfaceId)).toBeNull();
+		registry.reconcile([hidden]);
+		expect(registry.panel(hidden.surfaceId)).not.toBeNull();
+		registry.reconcile([], [hidden]);
+		expect(registry.panel(hidden.surfaceId)).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each(['loading', 'stale', 'view-mismatch', 'panel-ahead'] as const)(
+		'discards an attached panel with %s history instead of retaining it', async condition => {
+			const loadTranscriptSnapshot = vi.fn(async (transcript: ActiveTranscriptState, chatId: string) => {
+				seed(cache, chatId);
+				transcript.installCachedSnapshot(chatId);
+			});
+			const { cache, registry } = fixture({ loadTranscriptSnapshot });
+			const hidden = presentation('chat-view:window-hidden', 'hidden');
+			try {
+				const original = mountAttachedPanel(cache, registry, hidden);
+				if (condition === 'loading') original.transcript.beginSnapshotLoad();
+				else if (condition === 'stale') cache.markStale(hidden.chatId);
+				else if (condition === 'view-mismatch') cache.replace(hidden.chatId, 'view-2', [message(1)], 1, null);
+				else {
+					registry.applyCommittedBatch({ chatId: hidden.chatId, transcriptViewId: 'view-1',
+						firstOrdinal: 2, lastOrdinal: 2, messages: [message(2)], resendCandidates: [], noticeRevision: 0,
+					});
+					seed(cache, hidden.chatId);
+				}
+				registry.prepareForReconcile([]);
+				registry.reconcile([], [hidden]);
+				expect(registry.panel(hidden.surfaceId)).toBeNull();
+				expect(await registry.loadChatSnapshot(hidden.chatId)).toBe(false);
+				expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+				registry.reconcile([hidden]);
+				const restored = registry.panel(hidden.surfaceId)!;
+				expect(restored).not.toBe(original);
+				expect(restored.isPresentationVisible).toBe(true);
+				expect(restored.transcript.entries).toEqual([message(1)]);
+				expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(condition === 'stale' ? 1 : 0);
+			} finally {
+				registry.destroy();
+				cache.flush();
+			}
+		},
+	);
+
+	it.each([false, true])('rechecks hidden freshness before reveal (combined: %s)', retainInactive => {
+		const loadTranscriptSnapshot = vi.fn();
+		const { cache, registry } = fixture({ retainInactiveWindows: () => retainInactive, loadTranscriptSnapshot });
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		const original = mountAttachedPanel(cache, registry, hidden);
+		registry.prepareForReconcile([]);
+		registry.reconcile([], [hidden]);
+		cache.markStaleExcept(new Set());
+		registry.prepareForReconcile([hidden]);
+		registry.reconcile([hidden]);
+		expect(registry.panel(hidden.surfaceId)).not.toBe(original);
+		expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+		expect(registry.hasInactiveWindow('hidden')).toBe(false);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each([false, true])('preserves visible desktop/mobile handoff without parking (combined: %s)', retainInactive => {
+		const { cache, registry } = fixture({ retainInactiveWindows: () => retainInactive });
+		const desktop = presentation('chat-view:window-one', 'chat-1');
+		const original = mountAttachedPanel(cache, registry, desktop);
+		const mobile = { ...desktop, presentation: 'mobile', windowId: null } as const;
+		for (const descriptor of [mobile, desktop]) {
+			registry.prepareForReconcile([descriptor]);
+			registry.reconcile([descriptor]);
+			expect(registry.panel(desktop.surfaceId)).toBe(original);
+			expect(original.isPresentationVisible).toBe(true);
+			expect(registry.hasInactiveWindow('chat-1')).toBe(false);
+		}
+		registry.reconcile([], [desktop]);
+		registry.prepareForReconcile([mobile]);
+		registry.reconcile([mobile]);
+		expect(registry.panel(desktop.surfaceId)).not.toBe(original);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps the reading target when a hidden panel is discarded', async () => {
+		const { cache, registry } = fixture({ loadTranscriptSnapshot: async (transcript, chatId) => {
+			seed(cache, chatId);
+			transcript.installCachedSnapshot(chatId);
+		} });
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		const target = { kind: 'row', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -12 } as const;
+		seed(cache, hidden.chatId);
+		registry.reconcile([hidden]);
+		const original = registry.panel(hidden.surfaceId)!;
+		const view = port(target);
+		view.prepareForHide = () => { view.captureRestoreTarget = () => ({ kind: 'end' }); };
+		const detach = original.attachPresentation(view);
+		registry.prepareForReconcile([]);
+		registry.reconcile([], [hidden]);
+		expect(original.captureRestoreTarget()).toEqual(target);
+		detach();
+		registry.discardFullscreenHiddenPanels();
+		registry.reconcile([hidden]);
+		await registry.loadChatSnapshot('hidden');
+		expect(registry.panel(hidden.surfaceId)!.captureRestoreTarget()).toEqual(target);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps 24 fullscreen-hidden cache bases pinned under background churn', () => {
+		const { cache, registry } = fixture();
+		const presentations = Array.from({ length: 25 }, (_, index) =>
+			presentation(`chat-view:window-${index}`, `chat-${index}`));
+		for (const { chatId } of presentations) seed(cache, chatId);
+		registry.reconcile(presentations);
+		const originals = presentations.map(({ surfaceId }) => registry.panel(surfaceId)!);
+		for (const panel of originals) panel.attachPresentation(port({ kind: 'end' }));
+		registry.prepareForReconcile(presentations.slice(0, 1));
+		registry.reconcile(presentations.slice(0, 1), presentations.slice(1));
+		for (let index = 0; index < 26; index++) seed(cache, `background-${index}`);
+		for (let index = 0; index < presentations.length; index++) {
+			const item = presentations[index]!;
+			expect(registry.panel(item.surfaceId)).toBe(originals[index]);
+			expect(cache.get(item.chatId)?.messages).toEqual([message(1)]);
+		}
+		expect(cache.get('background-0')).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each(['stale', 'view-replacement', 'disconnect'] as const)('discards hidden panels on %s without loading hidden snapshots', async reason => {
+		const loadTranscriptSnapshot = vi.fn();
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		const original = mountAttachedPanel(cache, registry, hidden);
+		const visible = [presentation('chat-view:window-visible', 'visible')];
+		if (reason === 'stale') visible.push(presentation('chat-view:window-duplicate', 'hidden'));
+		seed(cache, 'visible');
+		registry.reconcile([...visible, hidden]);
+		const bystanders = visible.map(({ surfaceId }) => registry.panel(surfaceId));
+		registry.prepareForReconcile(visible);
+		registry.reconcile(visible, [hidden]);
+		if (reason === 'stale') registry.markChatStale('hidden');
+		else if (reason === 'view-replacement') registry.handleViewReplacement('hidden');
+		else registry.discardFullscreenHiddenPanels();
+		expect(registry.panel(hidden.surfaceId)).toBeNull();
+		expect(cache.get('hidden')?.stale).toBe(true);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		for (const [index, { surfaceId }] of visible.entries()) {
+			expect(registry.panel(surfaceId)).toBe(bystanders[index]);
+		}
+		expect(registry.visibleChatIds()).toEqual(visible.map(({ chatId }) => chatId));
+		registry.reconcile(visible, [hidden]);
+		expect(registry.panel(hidden.surfaceId)).toBeNull();
+		registry.reconcile([...visible, hidden]);
+		expect(registry.panel(hidden.surfaceId)).not.toBe(original);
+		expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('discards a retained panel on a live gap and leaves recovery for reveal', async () => {
+		const loadTranscriptSnapshot = vi.fn();
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		mountAttachedPanel(cache, registry, hidden);
+		registry.reconcile([], [hidden]);
+		expect(registry.applyCommittedBatch({ chatId: 'hidden', transcriptViewId: 'view-1',
+			firstOrdinal: 3, lastOrdinal: 3, messages: [message(3)], resendCandidates: [], noticeRevision: 0,
+		}).kind).toBe('chat-recovery-required');
+		expect(registry.panel(hidden.surfaceId)).toBeNull();
+		expect(await registry.loadChatSnapshot('hidden')).toBe(false);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.reconcile([hidden]);
+		expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each(['host', 'chat', 'tab', 'mobile', 'delete'] as const)('does not retain a fullscreen panel after a %s change', kind => {
+		const { cache, registry } = fixture();
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		mountAttachedPanel(cache, registry, hidden);
+		registry.reconcile([], [hidden]);
+		if (kind === 'delete') registry.removeChat('hidden');
+		else if (kind === 'tab') registry.reconcile([]);
+		else if (kind === 'mobile') registry.reconcile([], [{ ...hidden, presentation: 'mobile', windowId: null }]);
+		else if (kind === 'host') registry.reconcile([], [{ ...hidden, presentation: 'window-other', windowId: 'window-other' }]);
+		else registry.reconcile([], [{ ...hidden, chatId: 'replacement' }]);
+		expect(registry.panel(hidden.surfaceId)).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('never grants a retained panel composer ownership', () => {
+		const hidden = presentation('chat-view:window-hidden', 'hidden');
+		const { cache, registry } = fixture({ getSelectedChatId: () => 'hidden', getComposerAnchorSurfaceId: () => hidden.surfaceId });
+		const original = mountAttachedPanel(cache, registry, hidden);
+		expect(registry.composerPanel).toBe(original);
+		registry.reconcile([], [hidden]);
+		expect(registry.composerPanel).toBeNull();
+		registry.reconcile([hidden]);
+		expect(registry.composerPanel).toBe(original);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('protects the entire incoming set before hydrating panels from storage', () => {
+		const { cache, registry } = fixture({ maxHiddenEntries: 1 });
+		const visible = ['first', 'second', 'third'].map((id) =>
+			presentation(`chat-view:window-${id}`, `chat-${id}`),
+		);
+		try {
+			for (const { chatId } of visible) {
+				seed(cache, chatId);
+				cache.flush();
+			}
+			expect(cache.get(visible[0]!.chatId)).toBeNull();
+			// Hydration runs during reconciliation, before asynchronous snapshot loading.
+			registry.reconcile(visible);
+			for (const { chatId, surfaceId } of visible) {
+				expect(cache.get(chatId)?.messages).toEqual([message(1)]);
+				expect(registry.panel(surfaceId)?.transcript.entries).toEqual([message(1)]);
+			}
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
+	it.each([false, true])(
+		'keeps visible chats cached after switching at the window limit (retain inactive: %s)',
+		async (retainInactive) => {
+			const { cache, registry } = fixture({
+				retainInactiveWindows: () => retainInactive,
+				loadTranscriptSnapshot: async (transcript, chatId) => {
+					seed(cache, chatId);
+					transcript.installCachedSnapshot(chatId);
+					cache.flush();
+				},
+			});
+			const visible = Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING }, (_, index) =>
+				presentation(`chat-view:window-${index}`, `chat-${index}`),
+			);
+			function applyMessage(chatId: string, ordinal: number) {
+				return registry.applyCommittedBatch({
+					chatId,
+					transcriptViewId: 'view-1',
+					messages: [message(ordinal)],
+					firstOrdinal: ordinal,
+					lastOrdinal: ordinal,
+					resendCandidates: [],
+					noticeRevision: 0,
+				});
+			}
+			try {
+				registry.reconcile(visible);
+				await Promise.all(visible.map(({ chatId }) => registry.loadChatSnapshot(chatId)));
+				const outgoing = visible[visible.length - 1]!;
+				visible[visible.length - 1] = presentation(outgoing.surfaceId, 'chat-new');
+				registry.prepareForReconcile(visible);
+				registry.reconcile(visible);
+				await registry.loadChatSnapshot('chat-new');
+				for (const { chatId, surfaceId } of visible) {
+					expect(applyMessage(chatId, 2)).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+					expect(
+						registry.panel(surfaceId)?.transcript.entries.map(({ ordinal }) => ordinal),
+					).toEqual([1, 2]);
+				}
+				for (const ordinal of [2, 3]) {
+					expect(applyMessage(outgoing.chatId, ordinal)).toEqual({
+						kind: 'applied',
+						localRecoverySurfaceIds: [],
+					});
+				}
+				expect(cache.get(outgoing.chatId)?.lastOrdinal).toBe(3);
+				expect(registry.hasInactiveWindow(outgoing.chatId)).toBe(retainInactive);
+				for (let index = 0; index < CHAT_TRANSCRIPT_CACHE_LIMIT; index += 1) {
+					seed(cache, `background-${index}`);
+					cache.flush();
+				}
+				for (let index = 0; index < CHAT_TRANSCRIPT_CACHE_LIMIT; index += 1) {
+					expect(cache.get(`background-${index}`)?.lastOrdinal).toBe(1);
+				}
+				for (const { chatId } of visible) {
+					expect(cache.get(chatId)?.lastOrdinal).toBe(2);
+				}
+				expect(cache.get(outgoing.chatId)).toBeNull();
+			} finally {
+				registry.destroy();
+				cache.flush();
+			}
+		},
+	);
+
+	it.each(['close', 'delete', 'destroy'] as const)(
+		'releases visible cache protection on %s without releasing a remaining duplicate',
+		(action) => {
+			const { cache, registry } = fixture({ maxHiddenEntries: 1 });
+			seed(cache);
+			const remaining = presentation('chat-view:window-right', 'chat-1');
+			registry.reconcile([presentation('chat-view:window-left', 'chat-1'), remaining]);
+			registry.reconcile([remaining]);
+			seed(cache, 'background');
+			seed(cache, 'background-next');
+			expect(cache.get('chat-1')).not.toBeNull();
+			expect(cache.get('background')).toBeNull();
+
+			switch (action) {
+				case 'close':
+					registry.reconcile([]);
+					break;
+				case 'delete':
+					registry.removeChat('chat-1');
+					expect(cache.get('chat-1')).toBeNull();
+					seed(cache);
+					break;
+				case 'destroy':
+					registry.destroy();
+					break;
+			}
+			seed(cache, 'background-new');
+			expect(cache.get('chat-1')).toBeNull();
+			expect(cache.get('background-new')).not.toBeNull();
+			registry.destroy();
+			cache.flush();
+		},
+	);
+
+	it.each([false, true])(
+		'keeps moved chats cached while creating a new panel (retain inactive: %s)',
+		async (retainInactive) => {
+			const { cache, registry } = fixture({
+				maxHiddenEntries: 2,
+				retainInactiveWindows: () => retainInactive,
+				loadTranscriptSnapshot: async (transcript, chatId) => {
+					seed(cache, chatId);
+					transcript.installCachedSnapshot(chatId);
+				},
+			});
+			seed(cache, 'chat-1');
+			seed(cache, 'chat-2');
+			registry.reconcile([
+				presentation('chat-view:window-left', 'chat-1'),
+				presentation('chat-view:window-right', 'chat-2'),
+			]);
+			seed(cache, 'background-a');
+			seed(cache, 'background-b');
+			registry
+				.prepareChatSurfaceTransfer({
+					chatId: 'chat-1',
+					sourceSurfaceId: 'chat-view:window-left',
+					destinationSurfaceId: 'chat-view:window-right',
+				})
+				.publish();
+			registry.reconcile([
+				presentation('chat-view:window-left', 'chat-new'),
+				presentation('chat-view:window-right', 'chat-1'),
+			]);
+			await registry.loadChatSnapshot('chat-new');
+			expect(cache.get('chat-1')).not.toBeNull();
+			expect(cache.get('chat-2')).toBeNull();
+			expect(cache.get('chat-new')).not.toBeNull();
+			expect(registry.panel('chat-view:window-right')?.transcript.entries).toEqual([message(1)]);
+			registry.destroy();
+			cache.flush();
+		},
+	);
 
 	it('restores an expanded transcript immediately after rapid chat switches', () => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
@@ -310,6 +750,30 @@ describe('ConversationPanelRegistry', () => {
 			]);
 		}
 		cache.flush();
+	});
+
+	it.each(['abort', 'abort-all', 'supersede'] as const)('fences snapshots when %s discards buffered live commits', operation => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		const token = registry.beginReconnectReplay('chat-1', 'view-1');
+		const snapshot = cache.trackSnapshotRead('chat-1');
+		try {
+			registry.applyCommittedBatch({
+				chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(2)],
+				firstOrdinal: 2, lastOrdinal: 2, resendCandidates: [], noticeRevision: 0,
+			});
+			expect(cache.get('chat-1')?.stale).toBe(false);
+			if (operation === 'abort') registry.abortReconnectReplay(token, 'chat-1');
+			else if (operation === 'abort-all') registry.abortReconnectReplays();
+			else registry.beginReconnectReplay('chat-1', 'view-1');
+			expect(snapshot.isCurrent()).toBe(false);
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ stale: true, lastOrdinal: 1 });
+		} finally {
+			snapshot.release();
+			registry.destroy();
+			cache.flush();
+			localStorage.clear();
+		}
 	});
 
 	it('keeps duplicate surfaces independent while sharing lifecycle identity', () => {

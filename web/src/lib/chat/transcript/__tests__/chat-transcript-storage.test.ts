@@ -53,7 +53,7 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(snapshot()).toEqual(before);
 		storage.remove('fresh-0');
 		storage.markStale('fresh-1');
-		storage.markValidated('fresh-2');
+		storage.markStaleExcept(new Set(['fresh-2']));
 		expect(storage.restore('fresh-3')).toBeNull();
 		expect(storage.listCursors()).toEqual([]);
 		storage.clearAll();
@@ -144,12 +144,12 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(storage.restore('chat-2')).toBeNull();
 	});
 
-	it('preserves stale bit and clears it after validation', () => {
+	it('preserves stale bit until a validated snapshot is persisted', () => {
 		persist(storage, 'chat-1', [entry(1, 'hello')]);
 		storage.markStale('chat-1');
 
 		expect(storage.restore('chat-1')?.stale).toBe(true);
-		storage.markValidated('chat-1');
+		persist(storage, 'chat-1', [entry(1, 'hello')]);
 		expect(storage.restore('chat-1')?.stale).toBe(false);
 	});
 

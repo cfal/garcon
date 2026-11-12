@@ -37,6 +37,7 @@
 		workspaceWindow,
 		isCurrent,
 		isVisible,
+		retainFullscreenChats = false,
 		hasLeftSeparator = false,
 		hasRightSeparator = false,
 		presentations,
@@ -55,6 +56,7 @@
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
 		isVisible: boolean;
+		retainFullscreenChats?: boolean;
 		hasLeftSeparator?: boolean;
 		hasRightSeparator?: boolean;
 		presentations: readonly RenderedPortablePresentation[];
@@ -81,7 +83,7 @@
 	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
 	const activeChatIsLive = $derived(isCurrent && activeSurface?.type === 'chat');
 	const activeSurfaceIsCommandOwner = $derived(
-		workspace.focusOwner.kind !== 'chat-list' &&
+		isVisible && workspace.focusOwner.kind !== 'chat-list' &&
 			workspace.focusOwner.surfaceId === activeSurface?.id,
 	);
 	const activeChat = $derived(
@@ -92,13 +94,17 @@
 	const activePanel = $derived(
 		activeSurface?.type === 'chat' ? conversationPanels.panel(activeSurface.id) : null,
 	);
+	const retainedInThisWindow = $derived(
+		retainFullscreenChats && activePanel !== null &&
+			conversationPanels.retainedWindowId(activePanel.surfaceId) === workspaceWindow.id,
+	);
 	const composerPanel = $derived(conversationPanels.composerPanel);
 	const activeChatIsComposerAnchor = $derived(
 		activeSurface?.type === 'chat' &&
 			activeSurface.chatId !== null &&
 			conversationPanels.isComposerTarget(activeSurface.id, activeSurface.chatId),
 	);
-	const activeChatOwnsComposer = $derived(activePanel !== null && activePanel === composerPanel);
+	const activeChatOwnsComposer = $derived(isVisible && activePanel !== null && activePanel === composerPanel);
 	const activeChatPresentation = $derived(
 		resolveChatSurfacePresentation(activeChat, sessions.isLoadingChats),
 	);
@@ -338,7 +344,7 @@
 				class:pointer-events-none={!chatIsActive}
 				onfocusin={() => workspace.noteSurfaceFocus(chatSurface.id)}
 			>
-				{#if isVisible && chatIsActive && activeChat && activePanel}
+				{#if chatIsActive && activeChat && activePanel && (isVisible || retainedInThisWindow)}
 					{#key activePanel}
 						<!-- Keeps the admitted chat stable while panel registration publication catches up. -->
 						{const panel = activePanel}

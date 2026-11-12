@@ -353,6 +353,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	prepareForHide(): void {
 		if (this.#destroyed || !this.#configuredVisible) return;
+		this.#clearPendingToolGroupFocus();
 		this.#hiddenAnchor = this.options.pinned ? null : this.#captureVirtualAnchor(true);
 		this.#hiddenViewportWidth = this.#viewportWidth();
 		this.#hiddenResumeResult = null;

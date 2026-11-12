@@ -1,7 +1,12 @@
+<script module lang="ts">
+	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	export const panelMounts: { panel: ConversationPanelRegistration; visible: boolean }[] = [];
+</script>
+
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
-	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 
 	let {
@@ -21,6 +26,7 @@
 		actions: ConversationPanelActions | null;
 		composerInsetPx?: number;
 	} = $props();
+	untrack(() => panelMounts.push({ panel, visible: panel.isPresentationVisible }));
 </script>
 
 <button

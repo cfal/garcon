@@ -28,7 +28,7 @@ import {
 } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+import type { ChatViewSurfaceId, WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 import type {
 	ChatSurfaceTransfer,
@@ -114,7 +114,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
-	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
+	#mounted = $state.raw<readonly ConversationPanelDescriptor[]>([]);
 	// Parked transcripts must not retain the reconciliation scope and its retired panels.
 	#onSnapshotResendCandidates: NonNullable<ActiveTranscriptStateOptions['onSnapshotResendCandidates']> = (chatId, candidates, frontier) => {
 		this.publishSnapshotResendCandidates(chatId, candidates, frontier);
@@ -207,8 +207,24 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return this.options.overlays.noticeRevisionFor(chatId);
 	}
 
-	reconcile(visible: readonly ConversationPanelDescriptor[]): void {
-		const desired = new Map(visible.map((item) => [item.surfaceId, item]));
+	reconcile(
+		visible: readonly ConversationPanelDescriptor[],
+		fullscreenHidden: readonly VisibleChatPresentation[] = [],
+	): void {
+		const previous = new Map(this.#mounted.map(item => [item.surfaceId, item]));
+		const mounted = [...visible];
+		for (const item of fullscreenHidden) {
+			if (item.presentation === 'mobile') continue;
+			const panel = this.#panels.get(item.surfaceId);
+			if (panel?.chatId !== item.chatId || !panel.canRetainPresentation) continue;
+			const host = previous.get(item.surfaceId);
+			if (host?.presentation !== item.presentation || host.windowId !== item.windowId) continue;
+			panel.prepareForHide();
+			mounted.push(host);
+		}
+		// Protects the whole incoming set before any panel hydrates or transfers its transcript.
+		this.options.cache.setMountedChatIds(mounted.map((item) => item.chatId));
+		const desired = new Map(mounted.map((item) => [item.surfaceId, item]));
 		const admittedChatIds = new Set<string>();
 		const retainInactive = this.options.retainInactiveWindows?.() ?? false;
 		if (!retainInactive) this.#inactiveWindows.clear();
@@ -221,7 +237,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		for (const [surfaceId, panel] of this.#panels) {
 			const next = desired.get(surfaceId);
-			if (next?.chatId === panel.chatId) continue;
+			if (next?.chatId === panel.chatId) {
+				if (panel.isPresentationVisible) continue;
+				const sameHost = next.presentation === previous.get(surfaceId)?.presentation;
+				if (sameHost && panel.canRetainPresentation) continue;
+			}
 			const prepared = this.#restoreTargets.get(surfaceId);
 			if (prepared?.chatId !== panel.chatId) {
 				this.#restoreTargets.set(surfaceId, {
@@ -229,7 +249,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 					target: panel.prepareForHide(),
 				});
 			}
-			const transcript = retainInactive ? panel.detachTranscript() : null;
+			const transcript = retainInactive && next?.chatId !== panel.chatId ? panel.detachTranscript() : null;
 			if (transcript) {
 				this.#inactiveWindows.park({
 					surfaceId,
@@ -245,6 +265,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		for (const item of visible) {
 			const existing = this.#panels.get(item.surfaceId);
 			if (existing) {
+				existing.resumePresentation();
+				this.#restoreTargets.delete(item.surfaceId);
 				if (existing.updateSnapshotAdmission(item.snapshotAdmission)) {
 					admittedChatIds.add(item.chatId);
 				}
@@ -287,7 +309,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				if (this.#panels.get(item.surfaceId) === panel) this.markChatStale(item.chatId);
 			});
 		}
-		this.#visible = [...visible];
+		this.#mounted = mounted;
 		for (const chatId of admittedChatIds) {
 			void this.loadChatSnapshot(chatId).catch(() => {
 				this.options.cache.markStale(chatId);
@@ -306,8 +328,14 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	panel(surfaceId: ChatViewSurfaceId): ConversationPanelRegistration | null {
-		void this.#visible;
+		void this.#mounted;
 		return this.#panels.get(surfaceId) ?? null;
+	}
+
+	retainedWindowId(surfaceId: ChatViewSurfaceId): WorkspaceWindowId | null {
+		const panel = this.panel(surfaceId);
+		if (!panel || panel.isPresentationVisible) return null;
+		return this.#mounted.find(item => item.surfaceId === surfaceId)?.windowId ?? null;
 	}
 
 	get composerPanel(): ConversationPanelRegistration | null {
@@ -315,7 +343,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const selectedChatId = this.options.getSelectedChatId();
 		if (!surfaceId || !selectedChatId) return null;
 		const panel = this.panel(surfaceId);
-		return panel?.chatId === selectedChatId ? panel : null;
+		return panel?.chatId === selectedChatId && panel.isPresentationVisible ? panel : null;
 	}
 
 	isComposerTarget(surfaceId: ChatViewSurfaceId, chatId: string): boolean {
@@ -326,12 +354,12 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	panelsForChat(chatId: string): readonly ConversationPanelRegistration[] {
-		void this.#visible;
+		void this.#mounted;
 		return [...this.#panels.values()].filter((panel) => panel.chatId === chatId);
 	}
 
 	loadChatSnapshot(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<boolean> {
-		if (!this.#hasAdmittedPanel(chatId)) return Promise.resolve(false);
+		if (!this.#findAdmittedPanel(chatId)) return Promise.resolve(false);
 		const minimumLimit = this.options.combineMessages ? 0 : Math.max(0, Math.floor(options.minimumLimit ?? 0));
 		const pending = this.#snapshotLoads.get(chatId);
 		if (pending) {
@@ -349,6 +377,12 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		};
 		this.#snapshotLoads.set(chatId, operation);
 		return operation.promise;
+	}
+
+	invalidateChatSnapshot(chatId: string): void {
+		this.options.cache.invalidateSnapshotReads(chatId);
+		const pending = this.#snapshotLoads.get(chatId);
+		if (pending) pending.refreshRequired = true;
 	}
 
 	async #waitForChatSnapshot(chatId: string, signal: AbortSignal): Promise<void> {
@@ -372,17 +406,21 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (recoveringContinuity && isCurrent()) throw new Error('Transcript snapshot recovery did not establish continuity');
 			return false;
 		};
-		const loader = [...this.#panels.values()].find(
-			(panel) => panel.chatId === chatId && panel.snapshotAdmission === 'admitted',
-		);
+		const loader = this.#findAdmittedPanel(chatId);
 		if (!loader) return incomplete();
 		const handoffs = new Map(this.panelsForChat(chatId).map(panel => [panel, panel.transcript.snapshotHandoffGuard()]));
 		let readOptions = options;
 		for (;;) {
-			if (this.options.loadTranscriptSnapshot) {
-				await this.options.loadTranscriptSnapshot(loader.transcript, chatId, readOptions);
-			} else {
-				await loader.transcript.loadMessages(chatId, readOptions);
+			try {
+				if (this.options.loadTranscriptSnapshot) {
+					await this.options.loadTranscriptSnapshot(loader.transcript, chatId, readOptions);
+				} else {
+					await loader.transcript.loadMessages(chatId, readOptions);
+				}
+			} catch (error) {
+				if (!isCurrent()) throw error;
+				const canRetryRemovedLoader = retryAfterLoaderRemoval && this.#panels.get(loader.surfaceId) !== loader;
+				if (!this.#snapshotLoads.get(chatId)?.refreshRequired && !canRetryRemovedLoader) throw error;
 			}
 			if (!isCurrent()) return false;
 			const pending = this.#snapshotLoads.get(chatId)!;
@@ -417,19 +455,21 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return true;
 	}
 
-	#hasAdmittedPanel(chatId: string): boolean {
-		return [...this.#panels.values()].some(
-			(panel) => panel.chatId === chatId && panel.snapshotAdmission === 'admitted',
+	#findAdmittedPanel(chatId: string): PanelRegistration | undefined {
+		return [...this.#panels.values()].find(
+			(panel) => panel.chatId === chatId && panel.isPresentationVisible && panel.snapshotAdmission === 'admitted',
 		);
 	}
 
 	visibleChatIds(): readonly string[] {
-		return [...new Set(this.#visible.map((item) => item.chatId))];
+		return [...new Set(this.#mounted
+			.filter(item => this.#panels.get(item.surfaceId)?.isPresentationVisible)
+			.map(item => item.chatId))];
 	}
 
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number {
 		const previous = this.#reconnectReplays.get(chatId);
-		if (previous) previous.replay.abort(previous.replayToken);
+		if (previous) this.abortReconnectReplay(previous.token, chatId);
 
 		const token = ++this.#reconnectReplayEpoch;
 		const replay = new TranscriptReconnectReplayState((replayChatId, batch) =>
@@ -463,15 +503,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	abortReconnectReplay(token: number, chatId: string): void {
 		const active = this.#reconnectReplays.get(chatId);
 		if (!active || active.token !== token) return;
-		active.replay.abort(active.replayToken);
+		const discardedLiveCommits = active.replay.abort(active.replayToken);
 		this.#reconnectReplays.delete(chatId);
+		if (discardedLiveCommits) {
+			this.invalidateChatSnapshot(chatId);
+			this.markChatStale(chatId);
+		}
 	}
 
 	abortReconnectReplays(): void {
-		for (const active of this.#reconnectReplays.values()) {
-			active.replay.abort(active.replayToken);
+		for (const [chatId, active] of this.#reconnectReplays) {
+			this.abortReconnectReplay(active.token, chatId);
 		}
-		this.#reconnectReplays.clear();
 	}
 
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult {
@@ -485,6 +528,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			messages: batch.messages,
 		});
 		if (outcome.status !== 'applied') {
+			this.#discardHiddenPanels(batch.chatId);
 			this.#inactiveWindows.removeChat(batch.chatId);
 			const pending = this.#snapshotLoads.get(batch.chatId);
 			if (pending) pending.refreshRequired = true;
@@ -499,7 +543,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (overlayMutation.feedStructureChanged) {
 				panel.transcript.applySharedOverlayMutation(overlayMutation);
 			}
-			if (result !== 'applied') localRecoverySurfaceIds.push(panel.surfaceId);
+			if (result !== 'applied') {
+				if (panel.isPresentationVisible) localRecoverySurfaceIds.push(panel.surfaceId);
+				else this.#discardHiddenPanels(batch.chatId);
+			}
 		}
 		this.#inactiveWindows.applySharedCommit(commit, overlayMutation);
 		return { kind: 'applied', localRecoverySurfaceIds };
@@ -577,6 +624,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	handleViewReplacement(chatId: string): void {
+		this.#discardHiddenPanels(chatId);
 		this.#snapshotLoads.delete(chatId);
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.invalidatePendingLoads();
 		this.#inactiveWindows.removeChat(chatId);
@@ -608,13 +656,35 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		this.#deleteStoredSurfaceStateForChat(chatId);
 		this.options.cache.remove(chatId);
+		this.#mounted = this.#mounted.filter(item => this.#panels.has(item.surfaceId));
+		this.options.cache.setMountedChatIds([...this.#panels.values()].map((panel) => panel.chatId));
 		this.options.overlays.remove(chatId);
 		this.options.lifecycle.remove(chatId);
 	}
 
 	markChatStale(chatId: string): void {
+		this.#discardHiddenPanels(chatId);
 		this.#inactiveWindows.removeChat(chatId);
 		this.options.cache.markStale(chatId);
+	}
+
+	discardFullscreenHiddenPanels(): void {
+		this.#discardHiddenPanels();
+	}
+
+	#discardHiddenPanels(chatId?: string): void {
+		let removed = false;
+		for (const [surfaceId, panel] of this.#panels) {
+			if (panel.isPresentationVisible || (chatId !== undefined && panel.chatId !== chatId)) continue;
+			this.#restoreTargets.set(surfaceId, { chatId: panel.chatId, target: panel.captureRestoreTarget() });
+			panel.destroy();
+			this.#panels.delete(surfaceId);
+			this.options.cache.markStale(panel.chatId);
+			removed = true;
+		}
+		if (!removed) return;
+		this.#mounted = this.#mounted.filter(item => this.#panels.has(item.surfaceId));
+		this.options.cache.setMountedChatIds(this.#mounted.map(item => item.chatId));
 	}
 
 	destroy(): void {
@@ -625,7 +695,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.#restoreTargets.clear();
 		this.#pendingSurfaceTransfers.clear();
 		this.#snapshotLoads.clear();
-		this.#visible = [];
+		this.#mounted = [];
+		this.options.cache.setMountedChatIds([]);
 	}
 
 	#applyOverlayMutation(chatId: string, mutation: ConversationTranscriptOverlayMutation): void {

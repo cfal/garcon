@@ -36,6 +36,9 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		transcript?: ActiveTranscriptState;
+		isVisible?: boolean;
+		onCoverageChange?: () => void;
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -60,6 +63,9 @@
 	}
 
 	const {
+		transcript,
+		isVisible = true,
+		onCoverageChange,
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -72,7 +78,7 @@
 	const initialChatContext = untrack(() => chatContext);
 	const pendingPermissions: PendingPermissionRequest[] = [];
 
-	const chatState = new ActiveTranscriptState();
+	const chatState = untrack(() => transcript ?? new ActiveTranscriptState());
 	function replaceThinkingTranscript(viewId: string): void {
 		chatState.replaceGeneration('chat-1', viewId, [
 			{ ordinal: 1, message: new ThinkingMessage('2026-07-01T00:00:00.000Z', 'Synthetic thinking body') },
@@ -282,7 +288,8 @@
 		{onUserScrollIntent}
 	{isPreparingInitialScroll}
 	onLoadEarlier={retryEarlierPage}
-	isVisible={true}
+	{isVisible}
+	{onCoverageChange}
 	pinnedToBottom={true}
 		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
 		onViewportPortChange={(port) => (viewportPort = port)}

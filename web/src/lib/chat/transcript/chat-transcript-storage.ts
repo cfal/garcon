@@ -289,22 +289,18 @@ export class LocalChatTranscriptStorage {
 		}
 	}
 
-	markValidated(chatId: string): void {
-		if (!chatId || !canPersistBrowserData()) return;
+	markStaleExcept(chatIds: ReadonlySet<string>): void {
+		if (!canPersistBrowserData()) return;
 		try {
-			if (!hasSnapshot(chatId)) {
-				this.remove(chatId);
-				return;
-			}
 			const index = readIndex();
-			writeIndex(
-				upsertEntry(index, chatId, {
-					stale: false,
-					lastValidatedAt: nowIso(),
-				}),
-			);
+			writeIndex({
+				...index,
+				entries: index.entries.map((entry) =>
+					chatIds.has(entry.chatId) ? entry : { ...entry, stale: true },
+				),
+			});
 		} catch {
-			// Leaves validation best-effort.
+			// Leaves stale marking best-effort.
 		}
 	}
 

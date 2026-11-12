@@ -21,19 +21,12 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		onNavigateToChat: vi.fn(),
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
-		markChatTranscriptValidated: vi.fn(),
 		notifyCompletion: vi.fn(),
 		...overrides,
 	};
 }
 
 describe('handleAgentComplete', () => {
-	it('marks transcript validated instead of deleting on successful completion', () => {
-		const ctx = createCtx();
-		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
-		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
-	});
-
 	it('notifies on successful completion', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
@@ -41,10 +34,9 @@ describe('handleAgentComplete', () => {
 		expect(ctx.notifyCompletion).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('does not notify or mark validated when exitCode is 1', () => {
+	it('does not notify when exitCode is 1', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 1), ctx);
-		expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
 		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
@@ -53,7 +45,6 @@ describe('handleAgentComplete', () => {
 		(exitCode) => {
 			const ctx = createCtx();
 			handleAgentComplete(new AgentRunFinishedMessage('chat-1', exitCode), ctx);
-			expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
 			expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 		},
 	);
@@ -65,7 +56,6 @@ describe('handleAgentComplete', () => {
 			ctx,
 		);
 
-		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
 		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 

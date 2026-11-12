@@ -12,6 +12,12 @@ import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-setting
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { AssistantMessage } from '$shared/chat-types';
+import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
+import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
+import { ConversationToolGroupState } from '../ConversationToolGroupState.svelte.js';
+import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS } from '../conversation-feed-announcer.js';
 
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
@@ -558,6 +564,78 @@ describe('ConversationFeed', () => {
 
 		expect(status?.textContent).toBe('Repeated update');
 		expect(status?.firstElementChild).not.toBe(firstNode);
+	});
+
+	it('suspends hidden feed projection and coverage until committed rows are revealed', async () => {
+		const transcript = new ActiveTranscriptState();
+		const messages = [1, 2, 3].map(ordinal => ({
+			ordinal, message: new AssistantMessage('2026-01-01T00:00:00.000Z', `Synthetic row ${ordinal}`),
+		}));
+		transcript.replaceGeneration('chat-1', 'generation-1', messages.slice(0, 1), {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const project = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');
+		const reconcileGroups = vi.spyOn(ConversationToolGroupState.prototype, 'reconcile');
+		const closeTransients = vi.spyOn(ConversationFeedRetentionState.prototype, 'closeAllTransients');
+		const onCoverageChange = vi.fn();
+		const { container, rerender, unmount } = render(ConversationFeedTestHost, { transcript, onCoverageChange });
+		try {
+			await screen.findByText('Synthetic row 1');
+			const originalRow = container.querySelector('[data-chat-row-id="generation-1:1"]');
+			closeTransients.mockClear();
+			await rerender({ isVisible: false });
+			expect(closeTransients).toHaveBeenCalled();
+			project.mockClear();
+			reconcileGroups.mockClear();
+			onCoverageChange.mockClear();
+			for (const entry of messages.slice(1)) {
+				expect(transcript.applyMessages('chat-1', 'generation-1', [entry], entry.ordinal, entry.ordinal)).toBe('applied');
+				await tick();
+			}
+			expect(transcript.entries).toEqual(messages);
+			expect(project).not.toHaveBeenCalled();
+			expect(reconcileGroups).not.toHaveBeenCalled();
+			expect(onCoverageChange).not.toHaveBeenCalled();
+			expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(1);
+			await rerender({ isVisible: true });
+			await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
+			expect(container.querySelector('[data-chat-row-id="generation-1:1"]')).toBe(originalRow);
+			expect([...container.querySelectorAll<HTMLElement>('[data-chat-row-id]')].map(row => row.dataset.chatRowId))
+				.toEqual(['generation-1:1', 'generation-1:2', 'generation-1:3']);
+			expect(onCoverageChange).toHaveBeenCalled();
+		} finally {
+			unmount();
+			transcript.transcriptCache.flush();
+			localStorage.clear();
+		}
+	});
+
+	it('cancels queued announcements on hide and does not announce hidden updates on reveal', async () => {
+		vi.useFakeTimers();
+		try {
+			const { container, rerender } = render(ConversationFeedTestHost, {
+				transcriptScenario: 'row-ids', showAnnouncementTrigger: true,
+			});
+			const status = container.querySelector<HTMLElement>('[role="status"]')!;
+			const announce = screen.getByRole('button', { name: 'Announce' });
+			await fireEvent.click(announce);
+			expect(status.textContent).toBe('');
+			await rerender({ isVisible: false });
+			await vi.advanceTimersByTimeAsync(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+			expect(status.textContent).toBe('');
+			await fireEvent.click(announce);
+			await vi.advanceTimersByTimeAsync(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+			expect(status.textContent).toBe('');
+			await rerender({ isVisible: true });
+			await vi.advanceTimersByTimeAsync(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+			expect(status.textContent).toBe('');
+			await fireEvent.click(announce);
+			await vi.advanceTimersByTimeAsync(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+			expect(status.textContent).toBe('Repeated update');
+		} finally {
+			cleanup();
+			vi.useRealTimers();
+		}
 	});
 
 	it('renders a bounded virtual range instead of every loaded transcript row', () => {

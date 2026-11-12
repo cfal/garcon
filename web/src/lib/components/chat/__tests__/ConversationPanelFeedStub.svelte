@@ -33,6 +33,7 @@
 			viewportOffset: 12,
 		}),
 		closeTransients: () => {},
+		prepareForHide: () => {},
 	};
 	const viewport: ConversationViewportPort = {
 		isReady: () => true,

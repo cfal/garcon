@@ -17,6 +17,7 @@ export interface ConversationPanelPresentationPort {
 	getViewport(): ConversationViewportPort | null;
 	getQueueContainer(): HTMLDivElement | undefined;
 	captureRestoreTarget(): ConversationPanelRestoreTarget | null;
+	prepareForHide(): void;
 	closeTransients(): void;
 }
 
@@ -26,6 +27,7 @@ export interface ConversationPanelRegistration {
 	readonly transcript: ActiveTranscriptState;
 	readonly lifecycle: ConversationLifecycleState;
 	readonly scroll: ConversationScrollController;
+	readonly isPresentationVisible: boolean;
 	attachPresentation(port: ConversationPanelPresentationPort): () => void;
 	captureRestoreTarget(): ConversationPanelRestoreTarget;
 	completeInitialBottomRestore(): void;
@@ -50,6 +52,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	#applyingRestoreEpoch: number | null = null;
 	#restoreResumeRequested = false;
 	#destroyed = false;
+	#visible = true;
 	#snapshotAdmission: ConversationPanelSnapshotAdmission;
 	#rowNavigation: AbortController | null = null;
 	#lifetime = new AbortController();
@@ -91,6 +94,25 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		return this.#snapshotAdmission;
 	}
 
+	get isPresentationVisible(): boolean {
+		return this.#visible && !this.#destroyed;
+	}
+
+	get canRetainPresentation(): boolean {
+		const cursor = this.transcript.transcriptCache.readAppliedCursor(this.chatId);
+		if (this.#destroyed || this.#presentation === null || this.transcript.isLoadingMessages) return false;
+		if (!cursor || cursor.stale) return false;
+		return cursor.transcriptViewId === this.transcript.transcriptViewId
+			&& cursor.lastOrdinal >= this.transcript.lastOrdinal;
+	}
+
+	resumePresentation(): void {
+		if (this.isPresentationVisible) return;
+		this.#visible = true;
+		this.scroll.setViewportVisible(true);
+		this.resumePendingRestore();
+	}
+
 	installInitialSnapshot(): void {
 		if (!this.#destroyed && this.#initialSnapshotHandoff?.() && !this.transcript.isLoadingMessages) {
 			this.transcript.installCachedSnapshot(this.chatId);
@@ -107,19 +129,19 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	attachPresentation(port: ConversationPanelPresentationPort): () => void {
 		if (this.#destroyed) return () => {};
 		this.#presentation = port;
-		this.scroll.setViewportVisible(true);
-		if (port.getViewport()) this.#presentationReady?.();
+		this.scroll.setViewportVisible(this.isPresentationVisible);
 		this.resumePendingRestore();
 		return () => {
 			if (this.#presentation !== port) return;
 			this.#rowNavigation?.abort();
-			this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
+			if (this.isPresentationVisible) this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
 			port.closeTransients();
 			this.#presentation = null;
 		};
 	}
 
 	resumePendingRestore(): void {
+		if (!this.isPresentationVisible) return;
 		if (this.#presentation?.getViewport()) this.#presentationReady?.();
 		if (this.#applyingRestoreEpoch !== null) {
 			this.#restoreResumeRequested = true;
@@ -134,7 +156,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	captureRestoreTarget(): ConversationPanelRestoreTarget {
-		if (this.#presentation) {
+		if (this.isPresentationVisible && this.#presentation) {
 			this.#lastTarget = this.#presentation.captureRestoreTarget() ?? this.#lastTarget;
 		}
 		return this.#lastTarget;
@@ -145,8 +167,11 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	prepareForHide(): ConversationPanelRestoreTarget {
+		if (!this.isPresentationVisible) return this.#lastTarget;
 		this.#rowNavigation?.abort();
 		const target = this.captureRestoreTarget();
+		this.#presentation?.prepareForHide();
+		this.#visible = false;
 		this.#presentation?.closeTransients();
 		this.scroll.setViewportVisible(false);
 		this.scroll.cancelNativeScroll();
@@ -232,7 +257,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 
 	#waitForPresentation(signal: AbortSignal): Promise<void> {
 		signal.throwIfAborted();
-		if (this.#presentation?.getViewport()) return Promise.resolve();
+		if (this.isPresentationVisible && this.#presentation?.getViewport()) return Promise.resolve();
 		return new Promise((resolve, reject) => {
 			const finish = () => {
 				if (this.#presentationReady === finish) this.#presentationReady = null;
@@ -248,7 +273,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	async #applyPendingRestore(): Promise<void> {
 		const restoreEpoch = this.#readyRestoreEpoch;
 		if (
-			this.#destroyed ||
+			!this.isPresentationVisible ||
 			restoreEpoch === null ||
 			restoreEpoch !== this.#restoreEpoch ||
 			this.#applyingRestoreEpoch !== null

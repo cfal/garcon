@@ -89,6 +89,11 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Test native host
         run: bun run test:host
+      - name: Test launcher navigation without debug assertions
+        if: runner.os == 'Linux'
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --config 'profile.test.package.garcon-native.debug-assertions=false' platform::tests
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --features tauri/custom-protocol --config 'profile.test.package.garcon-native.debug-assertions=false' platform::tests
       - name: Build native packages
         run: bun run tauri build --ci --no-sign --target '${{ matrix.target }}' --bundles '${{ matrix.bundles }}' -- --locked
       - name: Install Linux smoke driver

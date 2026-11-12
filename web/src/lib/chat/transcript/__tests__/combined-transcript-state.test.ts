@@ -152,8 +152,8 @@ function scrolling(transcript: ActiveTranscriptState, scrollContainer: HTMLDivEl
 	return { controller, viewport };
 }
 
-function panelFixture(options: { maxEntries?: number; retainInactive?: boolean } = {}) {
-	const cache = new ChatTranscriptCache({ limit: 100, maxEntries: options.maxEntries });
+function panelFixture(options: { maxHiddenEntries?: number; retainInactive?: boolean } = {}) {
+	const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: options.maxHiddenEntries });
 	caches.add(cache);
 	const overlays = new ConversationTranscriptOverlayStore();
 	const lifecycle = new ConversationLifecycleState();
@@ -1437,6 +1437,7 @@ describe('combined transcript intervals', () => {
 				getQueueContainer: () => undefined,
 				captureRestoreTarget: () => ({ kind: 'end' }),
 				closeTransients: vi.fn(),
+				prepareForHide: vi.fn(),
 			});
 			installHistory([...entries, assistant(602)], 200);
 			panel.completeInitialBottomRestore();
@@ -1704,7 +1705,7 @@ describe('combined transcript intervals', () => {
 	);
 
 	it('replaces same-view lost tails in every mounted panel and the shared cache', async () => {
-		const { cache, overlays, registry, mount } = panelFixture({ maxEntries: 1, retainInactive: true });
+		const { cache, overlays, registry, mount } = panelFixture({ maxHiddenEntries: 1, retainInactive: true });
 		const original = Array.from({ length: 100 }, (_, index) => index === 79 ? input(80) : assistant(index + 1));
 		const retained = original.slice(0, 80);
 		const candidates = [{ ordinal: 80, content: 'Synthetic input 80', attachmentNames: [] }];
@@ -1735,6 +1736,8 @@ describe('combined transcript intervals', () => {
 			expect(overlay.resendCandidates).toEqual(candidates);
 			expect(overlay.includedResendCandidates).toEqual([]);
 			cache.flush();
+			// Injects a cache miss independently of visible-panel retention.
+			cache.setMountedChatIds([]);
 			cache.replace('synthetic-other-chat', 'synthetic-other-view', [assistant(1)], 1, null);
 			expect(cache.get(chatId)).toBeNull();
 			const replay = registry.beginReconnectReplay(chatId, viewId);
@@ -1983,7 +1986,7 @@ describe('combined transcript intervals', () => {
 		{ persisted: false, sameView: true },
 		{ persisted: true, sameView: true },
 	])('preserves a distinct peer after eviction (persisted $persisted, same-view retry $sameView)', async ({ persisted, sameView }) => {
-		const { cache, registry, mount } = panelFixture({ maxEntries: 1 });
+		const { cache, registry, mount } = panelFixture({ maxHiddenEntries: 1 });
 		installHistory(Array.from({ length: 101 }, (_, index) => assistant(index + 1)));
 		mount('left', 'matching', 'right');
 		try {
@@ -2001,6 +2004,8 @@ describe('combined transcript intervals', () => {
 			});
 			const newerEntries = right.entries;
 			const clearPeer = vi.spyOn(right, 'clearMessages');
+			// Injects a cache miss independently of visible-panel retention.
+			cache.setMountedChatIds([]);
 			cache.replace('synthetic-other-chat', 'synthetic-other-view', [assistant(1)], 1, null);
 			expect(cache.get(chatId)).toBeNull();
 			const recoveredView = sameView ? viewId : newerView;

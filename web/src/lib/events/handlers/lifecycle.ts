@@ -30,7 +30,6 @@ export interface LifecycleContext {
 	onNavigateToChat: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
-	markChatTranscriptValidated: (chatId: string) => void;
 	notifyCompletion: (chatId: string) => void;
 }
 
@@ -52,10 +51,6 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 			ctx.onNavigateToChat(completedChatId);
 		}
 		ctx.clearPendingChatId();
-	}
-
-	if (completedChatId && !runFailed) {
-		ctx.markChatTranscriptValidated(completedChatId);
 	}
 
 	if (agentRunSucceeded(msg) && !successorIsProcessing) ctx.notifyCompletion(msg.chatId);

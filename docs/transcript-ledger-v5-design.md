@@ -732,6 +732,14 @@ The decisions:
   the loaded interval and reading target across chat switches. A browser
   reload, an evicted window, or a non-combined switch uses the bounded recent
   cache instead; a replaced transcript view requires its new snapshot.
+  Desktop fullscreen may retain healthy, already-attached active Chat panels
+  in their original windows. Hidden panels retain committed data but suspend
+  presentation work; they do not own commands or the composer. This fast path
+  is bounded by the workspace window ceiling and is distinct from inactive
+  transcript parking. Disconnect, uncertain continuity, view replacement,
+  deletion, and host or active-surface changes discard hidden panels; reveal
+  uses ordinary snapshot recovery. Background reconnect remains bounded,
+  and any cache not authoritatively reconciled stays stale.
   Section 4.4 defines that lifecycle. No live-edge timer participates in
   correctness, and memory eviction never truncates the ledger.
 - **L8 View stability.** `transcriptViewId` changes only through manual

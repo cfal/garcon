@@ -185,7 +185,7 @@
 		panels: conversationPanels,
 		conversationUi,
 		sessions,
-		getBackgroundCursors: () => transcriptCache.listCursors(20),
+		getBackgroundCursors: (limit) => transcriptCache.listCursors(limit),
 		markBackgroundStale: (chatId) => conversationPanels.markChatStale(chatId),
 		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
 			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {
@@ -361,7 +361,7 @@
 	);
 	function assertRenderedPanel(surfaceId: ChatViewSurfaceId, chatId: string) {
 		const panel = conversationPanels.panel(surfaceId);
-		if (panel?.chatId !== chatId) {
+		if (panel?.chatId !== chatId || !panel.isPresentationVisible) {
 			throw new StaleConversationSurfaceError(surfaceId, chatId);
 		}
 		return panel;

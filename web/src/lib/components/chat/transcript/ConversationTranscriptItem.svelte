@@ -26,6 +26,7 @@
 	}
 
 	interface Props {
+		isVisible?: boolean;
 		item: ConversationFeedRenderItem;
 		renderModel: ConversationFeedRenderModel;
 		showThinking?: boolean;
@@ -50,6 +51,7 @@
 	}
 
 	let {
+		isVisible = true,
 		item,
 		renderModel,
 		showThinking = true,
@@ -115,6 +117,7 @@
 	{@const permTerminal = permissionTerminalFor(message)}
 	<svelte:boundary>
 		<ConversationMessage
+			{isVisible}
 			{message}
 			rowId={item.id}
 			awaitingDelivery={item.awaitingDelivery}
