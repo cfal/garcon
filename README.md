@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#why-garcon">Why Garcon</a> &middot;
-  <a href="#see-it-in-action">See It In Action</a> &middot;
-  <a href="#automate-and-delegate">Automate And Delegate</a>
+  <a href="#install">Install</a> &middot;
+  <a href="#keep-it-running">Keep It Running</a> &middot;
+  <a href="#for-ai-agents">For AI Agents</a> &middot;
+  <a href="#why-garcon">Why Garcon</a>
 </p>
 
 <p align="center">
@@ -26,32 +26,223 @@
 
 Garcon runs agents, terminals, files, Git, and pull request commands on the host under your account, using the agent logins and model endpoints you configure.
 
-## Quick Start
+## Install
+
+Requirements: [Bun](https://bun.sh/), `git`, a modern browser, and at least one coding agent CLI (signed in) or API provider. Pull request features also need an authenticated GitHub CLI (`gh`).
+
+Choose one path:
+
+| You want to                                 | Do this                                       |
+| ------------------------------------------- | --------------------------------------------- |
+| Try it in a terminal                        | [Run once](#run-once)                         |
+| Keep it running, start at login, auto-restart | [Keep it running](#keep-it-running)         |
+| Run everything inside a container           | [Docker](#docker)                             |
+| Download a prebuilt server                  | [Release downloads](#release-downloads)       |
+
+### Run once
 
 ```bash
 git clone https://github.com/cfal/garcon.git
 cd garcon
 bun run setup
-bun run start
+bun run start --project-base-dir ~/repos
 ```
 
-Open `http://127.0.0.1:8080`. On first launch, create an account at `/setup`, then connect agents and API providers in Settings. Authentication is enabled by default.
+Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C.
 
-Requirements:
-
-- [Bun](https://bun.sh/), `git`, and a modern browser.
-- At least one working coding agent or API provider.
-- Optional pull request support: an authenticated GitHub CLI on the selected executor, with support for `gh auth status --json hosts` and `gh api --paginate --slurp`.
-
-Garcon publishes an official multi-platform container image for every commit on `main`:
+### Docker
 
 ```bash
 docker pull ghcr.io/cfal/garcon:main
 ```
 
-The [Docker guide](docs/docker.md) covers running the published image, building the current checkout, image tags, volumes, agent login, Git, SSH, and toolchains.
+The image bundles Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. Agents, terminals, and Git run inside the container, so your host's agent logins and language toolchains are not visible there. See the [Docker guide](docs/docker.md) for compose setup, volumes, agent login, and toolchains.
+
+### Release downloads
 
 Starting with v0.4.0, [GitHub releases](https://github.com/cfal/garcon/releases) include server/CLI archives, source, checksums, provenance, and explicitly labeled native previews. Native previews are not signed production distributions; Android connections remain disabled and iOS is simulator-only. Human publication starts Docker promotion to the exact version tag and, for the current stable release, `latest`. See [release verification and operations](docs/releases.md).
+
+## First Run
+
+1. Open `http://127.0.0.1:8080`. On first launch, `/setup` asks you to create an account. Authentication is on by default.
+2. Open **Settings**. Coding agents use their existing CLI login; sign in from the agent's settings page if it shows **Not connected**. Add API endpoints under **Providers**.
+3. Start a chat and pick a project folder under your `--project-base-dir`.
+
+## Where Things Live
+
+| What                | Default                          | Override                                            |
+| ------------------- | -------------------------------- | --------------------------------------------------- |
+| Config and state    | `~/.garcon`                      | `--config-dir` or `GARCON_CONFIG_DIR`               |
+| Workspace data      | `<config>/workspace-default/`    | `--workspace <name>` or `--workspace-dir <path>`    |
+| Running instance    | `<config>/runtime.json`          | Written by the server while it runs                 |
+| Projects root       | your home folder                 | `--project-base-dir` or `GARCON_PROJECT_BASE_DIR`   |
+| Address             | `127.0.0.1:8080`                 | `--port`, `--bind-address`                          |
+
+The workspace holds chats, transcripts, settings, accounts, and tickets. On Linux and macOS, `~` resolves from `HOME`, so launches with a different `HOME` (another user, `sudo`, or an agent sandbox) use a different config folder and appear to lose state. Windows always uses `%USERPROFILE%\.garcon`. Set `GARCON_CONFIG_DIR` explicitly for anything long-running.
+
+The projects root is also a file-access boundary: Garcon's file browser and project pickers stay inside it.
+
+Only one server can use a workspace at a time. A second copy fails with `Workspace is already in use or could not be locked`.
+
+Run `bun run help` for every option, and see the [server configuration reference](docs/cli.md#server-configuration) for agent CLI overrides such as `CLAUDE_BINARY` and `GARCON_CODEX_CLI`.
+
+## Keep It Running
+
+Each recipe starts Garcon at login, restarts it after a crash, writes a log, pins the config folder, and runs as your normal user. While the service runs, do not also start Garcon by hand on the same config folder.
+
+Use absolute paths. Services do not load your shell profile, so set `PATH` to include the folders that hold `bun` and your agent CLIs. Copy the value from `echo $PATH` in a working terminal.
+
+### Linux (systemd user service)
+
+`~/.config/systemd/user/garcon.service`:
+
+```ini
+[Unit]
+Description=Garcon
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/garcon
+Environment=GARCON_CONFIG_DIR=%h/.garcon
+Environment=PATH=%h/.bun/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.bun/bin/bun run start --project-base-dir %h/repos
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now garcon
+loginctl enable-linger "$USER"     # optional: start at boot without logging in
+systemctl --user status garcon     # status
+journalctl --user -u garcon -f     # log
+systemctl --user restart garcon    # restart
+systemctl --user disable --now garcon && rm ~/.config/systemd/user/garcon.service  # remove
+```
+
+### macOS (LaunchAgent)
+
+`~/Library/LaunchAgents/app.garcon.plist`, with `you` replaced by your user name:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>app.garcon</string>
+  <key>WorkingDirectory</key><string>/Users/you/garcon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/.bun/bin/bun</string>
+    <string>run</string>
+    <string>start</string>
+    <string>--project-base-dir</string>
+    <string>/Users/you/repos</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GARCON_CONFIG_DIR</key><string>/Users/you/.garcon</string>
+    <key>PATH</key><string>/Users/you/.bun/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/you/Library/Logs/garcon.log</string>
+  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/garcon.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/app.garcon.plist  # install and start
+launchctl print gui/$(id -u)/app.garcon       # status
+tail -f ~/Library/Logs/garcon.log             # log
+launchctl kickstart -k gui/$(id -u)/app.garcon  # restart
+launchctl bootout gui/$(id -u)/app.garcon && rm ~/Library/LaunchAgents/app.garcon.plist  # remove
+```
+
+### Windows (Task Scheduler)
+
+Run in a normal, non-administrator PowerShell window. Set the first two paths:
+
+```powershell
+$repo = 'D:\repos\garcon'
+$projects = 'D:\repos'
+$config = "$env:USERPROFILE\.garcon"
+$bun = (Get-Command bun).Source
+$hostDir = "$env:LOCALAPPDATA\garcon-host"
+New-Item -ItemType Directory -Force $hostDir | Out-Null
+
+@"
+`$env:GARCON_CONFIG_DIR = '$config'
+Set-Location '$repo'
+while (`$true) {
+  & '$bun' run start --project-base-dir '$projects' *>> '$hostDir\garcon.log'
+  Start-Sleep -Seconds 10
+}
+"@ | Set-Content "$hostDir\run.ps1"
+
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$hostDir\run.ps1`""
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName Garcon -Action $action -Trigger $trigger -Settings $settings
+Start-ScheduledTask -TaskName Garcon
+```
+
+```powershell
+Get-ScheduledTask -TaskName Garcon | Get-ScheduledTaskInfo                 # status
+Get-Content "$env:LOCALAPPDATA\garcon-host\garcon.log" -Tail 50 -Wait     # log
+Stop-ScheduledTask -TaskName Garcon                                        # stop the restart loop
+Stop-Process -Id (Get-Content "$env:USERPROFILE\.garcon\runtime.json" | ConvertFrom-Json).pid  # stop the server
+Start-ScheduledTask -TaskName Garcon                                       # start
+Unregister-ScheduledTask -TaskName Garcon -Confirm:$false                  # remove
+```
+
+Stopping only the server process makes the loop restart it within about 10 seconds. Stop the task first to stop Garcon.
+
+## Windows Notes
+
+- The default config folder is `%USERPROFILE%\.garcon`. Garcon ignores `HOME` on Windows, so Git Bash, PowerShell, and scheduled tasks share one folder. Set `GARCON_CONFIG_DIR` only to use a different location.
+- Codex runs from the native `codex.exe` bundled with Garcon. Set `GARCON_CODEX_CLI` only to use a different Codex build.
+- Always run Garcon as the same non-administrator user. A copy started as administrator can leave files in the config folder that a normal-user copy cannot open.
+
+## Troubleshooting
+
+| Symptom                                           | Cause and fix                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `Workspace is already in use or could not be locked` | Another copy is running on the same config folder. Check `<config>/runtime.json` for its `pid` and `baseUrl`, or stop the service. |
+| Port 8080 is in use                               | Another Garcon or app owns it. Stop it or pass `--port`.                                          |
+| Chats or settings disappeared                     | Garcon started with a different config folder. Find every `.garcon` folder and pin the right one with `GARCON_CONFIG_DIR`. |
+| Projects open in the wrong folder                 | Pass `--project-base-dir`; the default is your home folder.                                       |
+| An agent shows Not connected or is missing        | Its CLI is not on the service's `PATH` or not signed in. Add its folder to `PATH` or set its binary override. |
+| Permission or access denied on the config folder  | It was created by another user or an administrator copy. Return ownership to your user.           |
+
+## For AI Agents
+
+### Setting up Garcon for a user
+
+Follow these rules when asked to install or host Garcon:
+
+- Use the [Keep it running](#keep-it-running) recipe for the user's OS. Do not write a custom service manager or edit files in the Garcon repository.
+- Confirm these with the user before writing anything: the repository path, the projects folder (`--project-base-dir`), and the config folder (`GARCON_CONFIG_DIR`). Resolve `bun` and every path to an absolute path and check that each exists.
+- Before starting, check for a running copy: read `<config>/runtime.json` (`pid`, `baseUrl`, `workspaceDir`) and check whether port 8080 is in use. Never start a second copy on the same config folder. Never print `localCapability` from that file; it is a credential.
+- If more than one `.garcon` folder exists, show the user what each contains and ask which to keep. Do not merge or delete workspaces without explicit approval.
+- Run as the user's normal account, never as root or administrator.
+- Verify the result: `curl -fsS http://127.0.0.1:8080/api/v1/auth/status` returns JSON, the log shows no startup error, and after killing the server process the service brings it back with the same chats.
+- Give the user the status, log, stop, start, and remove commands from the recipe.
+
+### Using Garcon from an agent
+
+The [garcon-skills](https://github.com/cfal/garcon-skills) package and the [CLI](#automate-and-delegate) let agents start, monitor, message, and delegate to other Garcon chats, schedule prompts, and manage tickets.
+
+### Developing Garcon
+
+Read [AGENTS.md](AGENTS.md) for the repository's engineering rules, then [docs/file-structure.md](docs/file-structure.md). Validate changes with `bun run check`, `bun run test`, and `bun run start --port 0`; never stop a server you did not start.
 
 ## Why Garcon
 
@@ -123,9 +314,7 @@ Garcon keeps that development loop coherent:
 
 Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
 
-Claude Code requires version 2.1.238 or newer. A model ending in `[Nk]` sets a per-chat auto-compaction window without a per-model configuration table. For example, `gpt-6-astra[922k]` launches Claude with `--model gpt-6-astra[1m] --autocompact 922k`; Claude strips `[1m]` before calling the provider. `N` must be an integer from 100 through 1000 (thousands of tokens). The suffix should reflect the model's supported **input** limit, not input plus output; Claude reserves additional compaction headroom below it. Garcon retains the annotated model in the chat configuration. Custom endpoints must include that exact annotated ID in their model catalog.
-
-Existing `[1m]` names keep Claude's native compaction policy. An explicit `[Nk]` annotation overrides `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for that child process only; other environment and Claude settings remain in effect. Changes between numeric caps use a verified runtime control between turns without restarting. The control updates the child process's environment, which may also be inherited by its tools. Adding or removing a numeric cap, changing other startup-only options, or failing runtime verification resumes the same native session in a new process. Initial launches and one-shot queries retain `--autocompact`. See [Claude's context-window documentation](https://code.claude.com/docs/en/model-config#context-window-and-auto-compaction).
+Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 
 ## Automate And Delegate
 
@@ -168,19 +357,7 @@ The installer links the skills for Claude, Codex, Pi, and other compatible agent
 
 ## Tickets
 
-Open **Tickets** from a workspace window's add menu. Create work without starting a chat, switch between list and board, and filter by project, status, priority, label, assignee, or readiness. The detail pane shares properties, comments, relationships, and activity across both layouts. On narrow screens, Back returns to the collection. Status menus provide a keyboard equivalent to board dragging; closing asks for Done or Canceled. Moving a card changes only its status, not its assignee.
-
-**New chat from ticket** opens the normal New Chat dialog with an editable ticket prompt. **Create & open chat** first saves a new ticket, then opens that dialog. Choose the executor, directory or worktree, model, permissions, and preambles before starting. Opening or starting the chat does not assign the ticket or change its status; the agent can use ticket tools to claim and update it. Cancelling New Chat leaves the ticket unchanged.
-
-Settings > Automation > **Ticket chat prompt** configures the template with `{{ticket_id}}`, `{{ticket_title}}`, `{{ticket_project}}`, and `{{ticket_description}}`. Only `{{ticket_id}}` is required; the other fields can be omitted, reordered, or repeated. Project is a label, not the chat's execution directory. Empty templates restore the default. Templates are limited to 32,000 characters and expanded prompts to 256,000 characters; variables inside ticket content are not expanded again. Settings use `ui.ticketChat.customPrompt`, with no separate model or executor preference.
-
-Project is an editable grouping string, not a directory permission. Enter any name, use an exact project filter, or accept the default from the selected chat's repository/folder. If Git fails or cannot identify the primary checkout, the default is the chat's project path. Tickets are also available through the [CLI](docs/cli.md#tickets) and the `garcon-ticket-*` agent commands. Agent command settings do not disable human ticket management.
-
-Drafts stay in the current browser tab's recovery storage when available. Save and comment shortcuts use Cmd/Ctrl+Enter; Enter in a multiline field inserts a newline. After an uncertain save, **Retry same request** confirms the original operation and refreshes current server values. Conflicts preserve local text for review. Recovery is not a backup: copy text before closing if storage reports a warning. Different accounts and replacement ticket databases never inherit a draft's write authority.
-
-Comment removal retains previous text in activity history; it is not redaction. Tickets live in the workspace's `tickets.sqlite`, independently of chats and transcripts. Back up a live store through SQLite's backup API or `VACUUM INTO`, not by copying only the main file while WAL writes are active. A damaged or unknown-schema store is left unavailable for explicit recovery, never rebuilt from transcripts.
-
-Activity's **Open source** opens the originating chat at the visible ticket-command result, including older rows outside the loaded transcript. If the transcript was reloaded or the exact result is missing, it opens the chat with a notification instead. Deleted chats cannot be opened. Source addresses remain immutable; navigation never substitutes a row from a replacement transcript.
+Track workspace work without starting a chat: list and board views, comments, relationships, attributed history, and **New chat from ticket**. See the [tickets guide](docs/tickets.md) and [ticket CLI](docs/cli.md#tickets).
 
 ## Path-Prefix Deployments
 

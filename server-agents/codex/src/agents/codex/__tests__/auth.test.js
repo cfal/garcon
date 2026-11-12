@@ -4,11 +4,11 @@ import os from 'os';
 import path from 'path';
 
 import {
-  buildCodexLoginStatusCommand,
   createCodexAuthStatusResolver,
   getCodexAuthStatus,
   resolveCodexExecAuthStatus,
 } from '../codex-auth.js';
+import { bundledCodexCliPath } from '../app-server/cli.js';
 
 function createFakeProc({ stdout = '', stderr = '', exitCode = 0 }) {
   return {
@@ -77,9 +77,8 @@ describe('getCodexAuthStatus', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [command, options] = spawnMock.mock.calls[0];
-    expect(command[0]).toBe(process.execPath);
-    expect(command[1]).toEndWith('/node_modules/.bin/codex');
-    expect(command.slice(2)).toEqual(['login', 'status']);
+    expect(command[0]).toBe(bundledCodexCliPath());
+    expect(command.slice(1)).toEqual(['login', 'status']);
     expect(options.stdin).toBe('ignore');
     expect(options.stdout).toBe('pipe');
     expect(options.stderr).toBe('pipe');
@@ -123,17 +122,6 @@ describe('getCodexAuthStatus', () => {
 
     await expect(getCodexAuthStatus(config)).resolves.toMatchObject({ kind: 'none' });
     await expect(fs.stat(codexHome)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
-  });
-
-  it('invokes a bundled Windows batch shim directly', () => {
-    expect(buildCodexLoginStatusCommand(
-      { command: 'C:\\repo\\node_modules\\.bin\\codex.cmd', source: 'bundled' },
-      { platform: 'win32', executable: 'C:\\bun.exe' },
-    )).toEqual([
-      'C:\\repo\\node_modules\\.bin\\codex.cmd',
-      'login',
-      'status',
-    ]);
   });
 
   it('does not let an incidental OPENAI_API_KEY override stored ChatGPT auth', async () => {
