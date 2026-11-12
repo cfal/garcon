@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	availablePosition,
 	CanvasLayoutIndex,
-	boxBounds,
 	finishNodeMove,
 	moveChat,
-	nodePosition,
 	removeCanvasElements,
 } from '../canvas-layout';
 import { canvasContent } from './canvas-fixtures';
@@ -33,9 +31,13 @@ describe('canvas layout and membership', () => {
 		const content = canvasContent();
 		const box = content.nodes[0];
 		if (box.type !== 'box') throw new Error('Expected box');
-		expect(nodePosition(content, content.nodes[2])).toEqual({ x: 16, y: 52 });
-		expect(nodePosition(content, content.nodes[3])).toEqual({ x: 16, y: 196 });
-		expect(boxBounds(content, box)).toMatchObject({ width: 332, height: 344 });
+		const layout = new CanvasLayoutIndex(content);
+		expect(layout.position(content.nodes[2])).toEqual({ x: 16, y: 52 });
+		expect(layout.position(content.nodes[3])).toEqual({ x: 16, y: 196 });
+		expect(layout.bounds(box)).toMatchObject({ width: 332, height: 344 });
+		const emptyBox = content.nodes[1];
+		if (emptyBox.type !== 'box') throw new Error('Expected empty box');
+		expect(layout.bounds(emptyBox)).toMatchObject({ width: 332, height: 200 });
 	});
 
 	it('moves a box and its children without altering their membership or order', () => {
@@ -47,7 +49,7 @@ describe('canvas layout and membership', () => {
 				['chat-a', { x: -784, y: 952 }],
 			]),
 		);
-		expect(nodePosition(moved, moved.nodes[2])).toEqual({ x: -784, y: 952 });
+		expect(new CanvasLayoutIndex(moved).position(moved.nodes[2])).toEqual({ x: -784, y: 952 });
 		expect(moved.nodes[2]).toEqual(original.nodes[2]);
 		expect(original.nodes[0].position).toEqual({ x: 0, y: 0 });
 	});

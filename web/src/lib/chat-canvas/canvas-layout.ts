@@ -24,27 +24,6 @@ export function boxChats(content: CanvasContent, boxId: string | null): CanvasCh
 	);
 }
 
-export function boxBounds(content: CanvasContent, box: CanvasBox): CanvasBounds {
-	return boundsForBox(box, boxChats(content, box.id).length);
-}
-
-function boundsForBox(box: CanvasBox, count: number): CanvasBounds {
-	return {
-		...box.position,
-		width: CANVAS_BOX_WIDTH,
-		height:
-			CANVAS_BOX_HEADER +
-			Math.max(1, count) * (CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP) +
-			CANVAS_BOX_PADDING -
-			CANVAS_CHAT_GAP,
-	};
-}
-
-export function nodePosition(content: CanvasContent, node: CanvasNode): CanvasPosition {
-	if (node.type === 'box' || node.boxId === null) return node.position;
-	return new CanvasLayoutIndex(content).position(node);
-}
-
 export function boxAt(content: CanvasContent, point: CanvasPosition): CanvasBox | null {
 	return new CanvasLayoutIndex(content).boxAt(point);
 }
@@ -62,7 +41,10 @@ export class CanvasLayoutIndex {
 				this.#boxes.push(node);
 			} else {
 				let children = this.#children.get(node.boxId);
-				if (!children) this.#children.set(node.boxId, children = []);
+				if (!children) {
+					children = [];
+					this.#children.set(node.boxId, children);
+				}
 				this.#ranks.set(node.id, children.length);
 				children.push(node);
 			}
@@ -74,7 +56,16 @@ export class CanvasLayoutIndex {
 	}
 
 	bounds(box: CanvasBox): CanvasBounds {
-		return boundsForBox(box, this.#children.get(box.id)?.length ?? 0);
+		const count = this.#children.get(box.id)?.length ?? 0;
+		return {
+			...box.position,
+			width: CANVAS_BOX_WIDTH,
+			height:
+				CANVAS_BOX_HEADER +
+				Math.max(1, count) * (CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP) +
+				CANVAS_BOX_PADDING -
+				CANVAS_CHAT_GAP,
+		};
 	}
 
 	position(node: CanvasNode): CanvasPosition {
@@ -168,7 +159,10 @@ export function finishNodeMove(
 	for (const move of moves.values()) {
 		if (!move.chat.boxId) continue;
 		let arrivals = arrivalsByBox.get(move.chat.boxId);
-		if (!arrivals) arrivalsByBox.set(move.chat.boxId, arrivals = []);
+		if (!arrivals) {
+			arrivals = [];
+			arrivalsByBox.set(move.chat.boxId, arrivals);
+		}
 		arrivals.push(move);
 	}
 	for (const [boxId, arrivals] of arrivalsByBox) {
