@@ -3,6 +3,7 @@ import { ApiError } from '$lib/api/client.js';
 import { CanvasDocumentState } from './canvas-document.svelte.js';
 import type { CanvasRecoveryPort } from './canvas-recovery.js';
 import { claimCanvasRecovery } from './canvas-recovery-lease.js';
+import { canvasContentsEqual } from './canvas-content.js';
 
 export interface CanvasSessionPort {
 	update(request: UpdateCanvasRequest): Promise<ChatCanvas>;
@@ -38,7 +39,7 @@ export class CanvasSession {
 		let content = canvas.content;
 		try {
 			const draft = recovery.read(canvas.id);
-			if (draft && JSON.stringify(draft.content) !== JSON.stringify(content)) {
+			if (draft && !canvasContentsEqual(draft.content, content)) {
 				content = draft.content;
 				this.conflict = draft.revision !== canvas.revision;
 			}
@@ -51,8 +52,7 @@ export class CanvasSession {
 
 	get dirty(): boolean {
 		return (
-			this.#request !== null ||
-			JSON.stringify(this.document.content) !== JSON.stringify(this.saved.content)
+			this.#request !== null || !canvasContentsEqual(this.document.content, this.saved.content)
 		);
 	}
 

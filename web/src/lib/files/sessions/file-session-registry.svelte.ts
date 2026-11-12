@@ -22,7 +22,7 @@ import { FileDocumentState } from '$lib/files/documents/file-document-state.svel
 import {
 	createFileDraftRepository,
 	type FileDraftRepository,
-	type FileDraft,
+	type FileDraftSummary,
 } from '$lib/files/persistence/file-draft-repository.js';
 import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import {
@@ -206,7 +206,7 @@ export class FileSessionRegistry {
 		return Object.values(this.documents).some((document) => document.dirty || document.saving);
 	}
 
-	get recoveredDrafts(): readonly FileDraft[] {
+	get recoveredDrafts(): readonly FileDraftSummary[] {
 		return this.#drafts?.available ?? [];
 	}
 
@@ -674,21 +674,27 @@ export class FileSessionRegistry {
 			if (this.#destroyed) return false;
 			if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
 				return true;
-			const draft = this.#drafts?.find(
+			const drafts = this.#drafts;
+			const draft = drafts?.find(
 				document.canonicalFileRootPath,
 				document.relativePath,
 				document.executorId,
 			);
-			if (!draft) return true;
+			if (!draft || !drafts) return true;
 			const choice = await new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
 				this.#openMainInert(() => {
 					this.#draftResolve = resolve;
 					this.draftRequest = { fileName: document.relativePath };
 				});
 			});
-			if (choice === 'cancel' || this.#destroyed) return false;
-			if (choice === 'resume') document.pendingRecoveryContent = draft.content;
-			else this.#drafts?.discard(draft);
+			if (choice === 'cancel' || this.#destroyed || this.#drafts !== drafts) return false;
+			if (choice === 'resume') {
+				const body = await drafts.read(draft);
+				if (!body || this.#destroyed || this.#drafts !== drafts) return false;
+				if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
+					return true;
+				document.pendingRecoveryContent = body.content;
+			} else drafts.discard(draft);
 			return true;
 		});
 	}
@@ -714,6 +720,8 @@ export class FileSessionRegistry {
 
 	#completeDraftRecovery(session: FileViewSession): void {
 		if (
+			this.#destroyed ||
+			this.documents[session.documentId] !== session.document ||
 			session.loadError ||
 			!session.loadedRevision ||
 			session.document.pendingRecoveryContent !== null
@@ -741,10 +749,13 @@ export class FileSessionRegistry {
 		if (session) this.#download(session.document.currentContent(), session.fileName);
 	}
 
-	exportDraft(documentId: string): void {
+	async exportDraft(documentId: string): Promise<void> {
+		const drafts = this.#drafts;
 		const draft = this.recoveredDrafts.find((entry) => entry.documentId === documentId);
-		if (draft)
-			this.#download(draft.content, draft.normalizedRelativePath.split('/').pop() ?? 'draft.txt');
+		if (!draft || !drafts) return;
+		const body = await drafts.read(draft);
+		if (body && !this.#destroyed && this.#drafts === drafts)
+			this.#download(body.content, draft.normalizedRelativePath.split('/').pop() ?? 'draft.txt');
 	}
 
 	#download(content: string, fileName: string): void {

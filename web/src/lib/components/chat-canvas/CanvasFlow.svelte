@@ -14,7 +14,7 @@
 	import type { CanvasPosition } from '$shared/chat-canvas';
 	import { isCanvasSide, CANVAS_MAX_NODES, CANVAS_MAX_CONNECTIONS } from '$shared/chat-canvas';
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
-	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
+	import type { CanvasController, CanvasViewport } from '$lib/chat-canvas/canvas-controller.svelte';
 	import { boxAt } from '$lib/chat-canvas/canvas-layout';
 	import { getWorkspaceWindowDnd } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -28,7 +28,6 @@
 		controller,
 		selectedIds,
 		editing,
-		visible,
 		presentation,
 		onselect,
 		onerror,
@@ -37,7 +36,6 @@
 		controller: CanvasController;
 		selectedIds: ReadonlySet<string>;
 		editing: boolean;
-		visible: boolean;
 		presentation: string;
 		onselect: (ids: ReadonlySet<string>) => void;
 		onerror: (message: string) => void;
@@ -89,7 +87,6 @@
 	});
 	$effect(() => {
 		if (
-			!visible ||
 			!initialized ||
 			!element ||
 			session.reloading ||
@@ -110,7 +107,7 @@
 		);
 	});
 	$effect(() => {
-		if (!visible || !initialized || !width || !height || viewportApplied) return;
+		if (!initialized || !width || !height || viewportApplied) return;
 		const frame = requestAnimationFrame(() => {
 			const viewport = controller.viewport(session.saved.id);
 			viewportApplied = true;
@@ -120,7 +117,7 @@
 		return () => cancelAnimationFrame(frame);
 	});
 	$effect(() => {
-		if (!visible || !editing) {
+		if (!editing) {
 			untrack(cancelInteraction);
 			return;
 		}
@@ -169,6 +166,10 @@
 		initialized = true;
 	}
 
+	function rememberViewport(_event: unknown, viewport: CanvasViewport): void {
+		if (viewportApplied) controller.setViewport(session.saved.id, viewport);
+	}
+
 	async function finishDrag(moved: CanvasFlowNode[]) {
 		const release = releaseInteraction;
 		const positions = new Map<string, CanvasPosition>();
@@ -192,8 +193,7 @@
 
 	// Only document-owned connections are projected; Svelte Flow must not insert rejected edges.
 	function connect(connection: Connection) {
-		if (!visible || !editing || interactionCancelled || connection.source === connection.target)
-			return;
+		if (!editing || interactionCancelled || connection.source === connection.target) return;
 		const liveIds = new Set(session.document.content.nodes.map((node) => node.id));
 		if (!liveIds.has(connection.source) || !liveIds.has(connection.target)) return;
 		if (session.document.content.connections.length >= CANVAS_MAX_CONNECTIONS) {
@@ -278,9 +278,8 @@
 				if (next.size !== selectedIds.size || [...next].some((id) => !selectedIds.has(id)))
 					onselect(next);
 			})}
-		onmoveend={(_event, viewport) => {
-			if (viewportApplied) controller.setViewport(session.saved.id, viewport);
-		}}
+		onmovestart={rememberViewport}
+		onmove={rememberViewport}
 	>
 		<Background patternColor="hsl(var(--border))" gap={24} />
 	</SvelteFlow>

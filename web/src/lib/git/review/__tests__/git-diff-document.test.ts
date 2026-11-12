@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
 import { createGitPatchIndex } from '../git-patch-index.js';
+import { gitReviewBodyBytes } from '../git-review-body-budget.js';
 import {
 	commitFileToReviewFile,
 	GitDiffDocumentController,
@@ -770,6 +771,48 @@ describe('GitDiffDocumentController', () => {
 		expect(controller.aggregateLimit).toBeNull();
 	});
 
+	it('loads adjacent visible bodies without imposing a retained-byte terminal limit', async () => {
+		const controller = new GitDiffDocumentController();
+		const large = body('large.ts');
+		const small = body('small.ts');
+		const patchLimit = large.patchBytes + small.patchBytes;
+		expect(gitReviewBodyBytes(large) + gitReviewBodyBytes(small)).toBeGreaterThan(patchLimit);
+		try {
+			controller.open(
+				{
+					project: '/project',
+					documentId: 'doc',
+					files: [file(large.path), file(small.path)],
+					limits: { ...limits, maxLoadedRows: 100, maxLoadedPatchBytes: patchLimit },
+					firstBodyCandidates: [],
+				},
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					loadBodies: async (_snapshot, requested) =>
+						bodyResponse(
+							'doc',
+							requested.map(({ path }) => path),
+						),
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+				},
+			);
+			controller.handleBodyDemand({
+				kind: 'viewport',
+				documentId: 'doc',
+				filePaths: [large.path, small.path],
+			});
+			await vi.waitFor(() => {
+				expect(controller.fileBodies[large.path]?.bodyState).toBe('loaded');
+				expect(controller.fileBodies[small.path]?.bodyState).toBe('loaded');
+			});
+			expect(controller.aggregateLimit).toBeNull();
+		} finally {
+			controller.clear();
+		}
+	});
+
 	it('recycles a previously visible body after viewport demand moves away', async () => {
 		const controller = new GitDiffDocumentController();
 		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
@@ -1041,7 +1084,11 @@ describe('GitDiffDocumentController', () => {
 				project: '/project',
 				documentId: 'doc',
 				files: [file('a.ts'), file('b.ts'), file('c.ts')],
-				limits: { ...limits, maxLoadedRows: 100 },
+				limits: {
+					...limits,
+					maxLoadedRows: 100,
+					maxLoadedPatchBytes: 3 * gitReviewBodyBytes(body('a.ts')),
+				},
 				firstBodyCandidates: ['a.ts', 'b.ts', 'c.ts'],
 			},
 			{
@@ -1257,9 +1304,66 @@ describe('GitDiffDocumentController', () => {
 		expect(loadBodies).toHaveBeenCalledTimes(2);
 	});
 
+	it('rejects oversized cache entries without evicting smaller bodies', async () => {
+		const controller = new GitDiffDocumentController();
+		const byteLimit = 900;
+		const patch = `diff --git a/large.ts b/large.ts\n@@ -0,0 +1 @@\n+${'x'.repeat(500)}\n`;
+		const patchIndex = createGitPatchIndex(patch);
+		const large = {
+			...body('large.ts'),
+			patch,
+			patchIndex,
+			patchBytes: patch.length,
+			renderedRowCount: patchIndex.rowCount,
+		};
+		expect(gitReviewBodyBytes(large)).toBeGreaterThan(byteLimit);
+		expect(gitReviewBodyBytes(body('a.ts')) + gitReviewBodyBytes(body('b.ts'))).toBeLessThan(
+			byteLimit,
+		);
+		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (snapshot, files) => ({
+			status: 'ready',
+			documentId: snapshot.documentId,
+			files: Object.fromEntries(
+				files.map(({ path }) => [path, path === large.path ? large : body(path)]),
+			),
+			errors: {},
+			deferredFiles: [],
+		}));
+		try {
+			for (const path of ['a.ts', 'b.ts', large.path, 'a.ts', 'b.ts', large.path]) {
+				controller.open(
+					{
+						project: '/project',
+						documentId: path,
+						files: [file(path)],
+						limits: { ...limits, maxLoadedPatchBytes: byteLimit },
+						firstBodyCandidates: [path],
+					},
+					{
+						contextLines: 5,
+						diffMode: 'unified',
+						loadBodies,
+						onError: vi.fn(),
+						commentSource: testCommentSource(),
+					},
+				);
+				await vi.waitFor(() => expect(controller.fileBodies[path]?.bodyState).toBe('loaded'));
+				expect(controller.aggregateLimit).toBeNull();
+			}
+			expect(loadBodies.mock.calls.map(([, files]) => files.map(({ path }) => path))).toEqual([
+				['a.ts'],
+				['b.ts'],
+				[large.path],
+				[large.path],
+			]);
+		} finally {
+			controller.clear();
+		}
+	});
+
 	it('bounds cached bodies across document changes', async () => {
 		const controller = new GitDiffDocumentController();
-		const boundedLimits = { ...limits, maxLoadedPatchBytes: 150 };
+		const boundedLimits = { ...limits, maxLoadedPatchBytes: gitReviewBodyBytes(body('a.ts')) };
 		const loadBodies = vi.fn(
 			async (snapshot: { documentId: string }, files: Array<{ path: string }>) => ({
 				status: 'ready' as const,
@@ -1289,8 +1393,10 @@ describe('GitDiffDocumentController', () => {
 
 		open('doc-a', 'a.ts');
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded'));
 		open('doc-b', 'b.ts');
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded'));
 		open('doc-a', 'a.ts');
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(3));
 	});

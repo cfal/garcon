@@ -187,7 +187,9 @@ describe('SingletonSurfaceRegistry', () => {
 				entry: { key: 'synthetic-old-recovery', raw: 'Synthetic old-store draft', draft: null },
 			},
 		];
+		const releaseReadOnly = vi.spyOn(tickets, 'releaseReadOnly');
 		registry.disposeSurface('tickets');
+		expect(releaseReadOnly).toHaveBeenCalledOnce();
 		expect(registry.ticketsIfPresent()).toBe(tickets);
 		const exit = new Event('beforeunload', { cancelable: true });
 		window.dispatchEvent(exit);

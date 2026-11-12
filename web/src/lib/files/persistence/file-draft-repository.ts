@@ -6,9 +6,10 @@ import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 
 export const FILE_DRAFT_DATABASE_NAME = 'garcon-file-drafts-v1';
 export const FILE_DRAFT_STORE_NAME = 'drafts';
+export const FILE_DRAFT_SUMMARY_STORE_NAME = 'draft-summaries';
 export const FILE_RECENT_STORE_NAME = 'recents';
 export const FILE_NAVIGATION_STORE_NAME = 'navigation';
-export const FILE_DRAFT_SCHEMA_VERSION = 2;
+export const FILE_DRAFT_SCHEMA_VERSION = 3;
 export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 24 * 1024 * 1024;
 export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024;
 export const FILE_DRAFT_LIMIT = 20;
@@ -24,6 +25,14 @@ export interface FileDraft {
 	normalizedRelativePath: string;
 	content: string;
 	savedAt: number;
+}
+
+export interface FileDraftSummary extends Omit<FileDraft, 'content'> {
+	contentBytes: number;
+}
+
+export function summarizeFileDraft({ content, ...metadata }: FileDraft): FileDraftSummary {
+	return { ...metadata, contentBytes: content.length * 2 };
 }
 
 export interface FileRecentLocationV1 {
@@ -57,7 +66,8 @@ export interface FileDraftRepository {
 	readonly durable: boolean;
 	putDraft(record: FileDraft): Promise<void>;
 	deleteDraft(documentId: string): Promise<void>;
-	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraft[]>;
+	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraftSummary[]>;
+	getDraft(documentId: string): Promise<FileDraft | null>;
 	clearDrafts(userNamespace: string, deploymentId: string): Promise<void>;
 	putRecent(record: FileRecentLocationV1): Promise<void>;
 	getRecents(userNamespace: string, deploymentId: string): Promise<FileRecentLocationV1[]>;
@@ -90,33 +100,71 @@ export function createFileDraftRepository(
 		durable: true,
 		async putDraft(record) {
 			const database = await open();
-			await runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
-				for (const id of draftEvictions(record, records)) {
-					await indexedDbRequest(store.delete(id));
-				}
-				await indexedDbRequest(store.put(record));
-			});
+			await runTransaction(
+				database,
+				[FILE_DRAFT_SUMMARY_STORE_NAME, FILE_DRAFT_STORE_NAME],
+				'readwrite',
+				async (summaries, transaction) => {
+					const bodies = transaction.objectStore(FILE_DRAFT_STORE_NAME);
+					const summary = summarizeFileDraft(record);
+					const records = await readDraftSummaries(
+						summaries,
+						record.userNamespace,
+						record.deploymentId,
+					);
+					for (const id of draftEvictions(summary, records)) {
+						await indexedDbRequest(summaries.delete(id));
+						await indexedDbRequest(bodies.delete(id));
+					}
+					await indexedDbRequest(summaries.put(summary));
+					await indexedDbRequest(bodies.put(record));
+				},
+			);
 		},
 		async deleteDraft(documentId) {
-			await write(await open(), FILE_DRAFT_STORE_NAME, (store) => store.delete(documentId));
+			await runTransaction(
+				await open(),
+				[FILE_DRAFT_SUMMARY_STORE_NAME, FILE_DRAFT_STORE_NAME],
+				'readwrite',
+				async (summaries, transaction) => {
+					await indexedDbRequest(summaries.delete(documentId));
+					await indexedDbRequest(transaction.objectStore(FILE_DRAFT_STORE_NAME).delete(documentId));
+				},
+			);
 		},
 		async getDrafts(userNamespace, deploymentId) {
 			return latestDrafts(
-				await getAll<FileDraft>(await open(), FILE_DRAFT_STORE_NAME),
+				await runTransaction(await open(), FILE_DRAFT_SUMMARY_STORE_NAME, 'readonly', (store) =>
+					readDraftSummaries(store, userNamespace, deploymentId),
+				),
 				userNamespace,
 				deploymentId,
 			);
 		},
+		async getDraft(documentId) {
+			return runTransaction(
+				await open(),
+				FILE_DRAFT_STORE_NAME,
+				'readonly',
+				async (store) =>
+					(await indexedDbRequest<FileDraft | undefined>(store.get(documentId))) ?? null,
+			);
+		},
 		async clearDrafts(userNamespace, deploymentId) {
-			await runTransaction(await open(), FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
-				for (const record of records) {
-					if (record.userNamespace === userNamespace && record.deploymentId === deploymentId) {
-						await indexedDbRequest(store.delete(record.documentId));
+			await runTransaction(
+				await open(),
+				[FILE_DRAFT_SUMMARY_STORE_NAME, FILE_DRAFT_STORE_NAME],
+				'readwrite',
+				async (summaries, transaction) => {
+					const records = await readDraftSummaries(summaries, userNamespace, deploymentId);
+					for (const record of records) {
+						await indexedDbRequest(summaries.delete(record.documentId));
+						await indexedDbRequest(
+							transaction.objectStore(FILE_DRAFT_STORE_NAME).delete(record.documentId),
+						);
 					}
-				}
-			});
+				},
+			);
 		},
 		async putRecent(record) {
 			const database = await open();
@@ -180,14 +228,23 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 	return {
 		durable,
 		async putDraft(record) {
-			for (const id of draftEvictions(record, [...drafts.values()])) drafts.delete(id);
+			for (const id of draftEvictions(
+				summarizeFileDraft(record),
+				[...drafts.values()].map(summarizeFileDraft),
+			))
+				drafts.delete(id);
 			drafts.set(record.documentId, structuredClone(record));
 		},
 		async deleteDraft(documentId) {
 			drafts.delete(documentId);
 		},
 		async getDrafts(userNamespace, deploymentId) {
-			return structuredClone(latestDrafts([...drafts.values()], userNamespace, deploymentId));
+			return structuredClone(
+				latestDrafts([...drafts.values()].map(summarizeFileDraft), userNamespace, deploymentId),
+			);
+		},
+		async getDraft(documentId) {
+			return structuredClone(drafts.get(documentId) ?? null);
 		},
 		async clearDrafts(userNamespace, deploymentId) {
 			for (const [id, record] of drafts) {
@@ -259,6 +316,19 @@ function openDatabase(
 				if (request.result.objectStoreNames.contains(storeName)) continue;
 				request.result.createObjectStore(storeName, { keyPath });
 			}
+			if (!request.result.objectStoreNames.contains(FILE_DRAFT_SUMMARY_STORE_NAME)) {
+				const summaries = request.result.createObjectStore(FILE_DRAFT_SUMMARY_STORE_NAME, {
+					keyPath: 'documentId',
+				});
+				summaries.createIndex('scope', ['userNamespace', 'deploymentId']);
+				const cursor = request.transaction!.objectStore(FILE_DRAFT_STORE_NAME).openCursor();
+				cursor.onsuccess = () => {
+					const entry = cursor.result;
+					if (!entry) return;
+					summaries.put(summarizeFileDraft(entry.value as FileDraft));
+					entry.continue();
+				};
+			}
 		};
 		request.onsuccess = () => {
 			const database = request.result;
@@ -295,17 +365,18 @@ async function getAll<T>(database: IDBDatabase, storeName: string): Promise<T[]>
 
 async function runTransaction<T>(
 	database: IDBDatabase,
-	storeName: string,
+	storeNames: string | string[],
 	mode: IDBTransactionMode,
-	operation: (store: IDBObjectStore) => Promise<T>,
+	operation: (store: IDBObjectStore, transaction: IDBTransaction) => Promise<T>,
 ): Promise<T> {
 	if (mode === 'readwrite' && !canPersistBrowserData()) throw new Error('Browser session ended');
-	const transaction = database.transaction([storeName], mode);
+	const names = typeof storeNames === 'string' ? [storeNames] : storeNames;
+	const transaction = database.transaction(names, mode);
 	const completion = indexedDbTransactionCompletion(transaction);
 	// A request failure also aborts the transaction; both promises must be observed.
 	void completion.catch(() => undefined);
 	try {
-		const result = await operation(transaction.objectStore(storeName));
+		const result = await operation(transaction.objectStore(names[0]), transaction);
 		await completion;
 		return result;
 	} catch (error) {
@@ -343,11 +414,11 @@ export function fileDraftKey(
 }
 
 function latestDrafts(
-	records: readonly FileDraft[],
+	records: readonly FileDraftSummary[],
 	userNamespace: string,
 	deploymentId: string,
-): FileDraft[] {
-	const latest = new Map<string, FileDraft>();
+): FileDraftSummary[] {
+	const latest = new Map<string, FileDraftSummary>();
 	for (const record of [...records].sort((a, b) => b.savedAt - a.savedAt)) {
 		if (
 			!parseExecutorId(record.executorId) ||
@@ -368,8 +439,18 @@ function latestDrafts(
 	return [...latest.values()].slice(0, FILE_DRAFT_LIMIT);
 }
 
-function draftEvictions(record: FileDraft, records: readonly FileDraft[]): string[] {
-	let bytes = record.content.length * 2;
+function readDraftSummaries(
+	store: IDBObjectStore,
+	userNamespace: string,
+	deploymentId: string,
+): Promise<FileDraftSummary[]> {
+	return indexedDbRequest<FileDraftSummary[]>(
+		store.index('scope').getAll([userNamespace, deploymentId]),
+	);
+}
+
+function draftEvictions(record: FileDraftSummary, records: readonly FileDraftSummary[]): string[] {
+	let bytes = record.contentBytes;
 	if (bytes > FILE_DRAFT_DOCUMENT_LIMIT_BYTES) throw new Error(m.file_recovery_document_limit());
 	let count = 1;
 	const evicted: string[] = [];
@@ -381,12 +462,12 @@ function draftEvictions(record: FileDraft, records: readonly FileDraft[]): strin
 				entry.canonicalFileRootPath === record.canonicalFileRootPath &&
 				entry.normalizedRelativePath === record.normalizedRelativePath) ||
 			count >= FILE_DRAFT_LIMIT ||
-			bytes + entry.content.length * 2 > FILE_DRAFT_TOTAL_LIMIT_BYTES
+			bytes + entry.contentBytes > FILE_DRAFT_TOTAL_LIMIT_BYTES
 		) {
 			evicted.push(entry.documentId);
 		} else {
 			count += 1;
-			bytes += entry.content.length * 2;
+			bytes += entry.contentBytes;
 		}
 	}
 	return evicted;

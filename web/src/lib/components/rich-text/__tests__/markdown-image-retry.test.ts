@@ -37,6 +37,124 @@ describe('Markdown image recovery', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('does not create an observer after unmount during deferred scroll-root discovery', async () => {
+		const createObserver = vi.fn();
+		vi.stubGlobal('IntersectionObserver', createObserver);
+		const cache = new FileImageCache({ budgetBytes: 0 });
+		const view = render(Host, { cache, source: '![Capture](capture.png)', resolveImageFile });
+		view.unmount();
+		await tick();
+		expect(createObserver).not.toHaveBeenCalled();
+		expect(filesApi.readContent).not.toHaveBeenCalled();
+		cache.destroy();
+	});
+
+	it('reuses a warm image before the first intersection callback', async () => {
+		const cache = new FileImageCache({ budgetBytes: 1024 * 1024 });
+		const props = { cache, source: '![Capture](capture.png)', resolveImageFile };
+		const first = render(Host, props);
+		const url = (await screen.findByRole('img')).getAttribute('src');
+		first.unmount();
+		vi.stubGlobal(
+			'IntersectionObserver',
+			class implements IntersectionObserver {
+				root = null;
+				rootMargin = '400px';
+				scrollMargin = '0px';
+				thresholds = [0];
+				observe() {}
+				unobserve() {}
+				takeRecords() {
+					return [];
+				}
+				disconnect() {}
+			},
+		);
+		const next = render(Host, props);
+		await tick();
+		expect(screen.getByRole('img').getAttribute('src')).toBe(url);
+		expect(filesApi.readContent).toHaveBeenCalledOnce();
+		next.unmount();
+		cache.destroy();
+	});
+
+	it.each(['reentry', 'generation'] as const)(
+		'displays a successful reacquisition after a released failure on %s',
+		async (mode) => {
+			let enter: (visible: boolean) => void = () => {};
+			let observations = 0;
+			let observedRoot: Element | Document | null | undefined;
+			vi.stubGlobal(
+				'IntersectionObserver',
+				class implements IntersectionObserver {
+					root = null;
+					rootMargin = '400px';
+					scrollMargin = '0px';
+					thresholds = [0];
+					constructor(
+						private callback: IntersectionObserverCallback,
+						options?: IntersectionObserverInit,
+					) {
+						observedRoot = options?.root;
+					}
+					observe(target: Element) {
+						observations++;
+						enter = (isIntersecting) =>
+							this.callback(
+								[
+									{
+										target,
+										isIntersecting,
+										intersectionRatio: Number(isIntersecting),
+										time: 0,
+										boundingClientRect: target.getBoundingClientRect(),
+										intersectionRect: target.getBoundingClientRect(),
+										rootBounds: null,
+									},
+								],
+								this,
+							);
+					}
+					unobserve() {}
+					disconnect() {}
+					takeRecords() {
+						return [];
+					}
+				},
+			);
+			const container = document.createElement('div');
+			container.style.overflowY = 'hidden';
+			document.body.append(container);
+			const cache = new FileImageCache({ budgetBytes: 0 });
+			vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
+			const view = render(Host, {
+				props: { cache, source: '![Capture](capture.png)', resolveImageFile },
+				target: container,
+			});
+			container.style.overflowY = 'auto';
+			try {
+				await tick();
+				expect(observedRoot).toBe(container);
+				enter(true);
+				await screen.findByText('Unable to load image');
+				enter(false);
+				await tick();
+				if (mode === 'generation') {
+					cache.clear();
+					await vi.waitFor(() => expect(observations).toBe(2));
+				}
+				enter(true);
+				await screen.findByRole('img', { name: 'Capture' });
+				expect(screen.queryByText('Unable to load image')).toBeNull();
+				expect(filesApi.readContent).toHaveBeenCalledTimes(2);
+			} finally {
+				view.unmount();
+				cache.destroy();
+				container.remove();
+			}
+		},
+	);
+
 	it('retries a missing image in place, with a themed error row and one request per attempt', async () => {
 		vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
 		const { container } = render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
@@ -292,8 +410,8 @@ describe('Markdown image recovery', () => {
 		await fireEvent.click(await screen.findByRole('button', { name: 'Retry image Capture' }));
 		await screen.findByRole('img');
 		expect(filesApi.readContent).toHaveBeenCalledTimes(2);
-		expect(observe).toHaveBeenCalledOnce();
-		expect(disconnect).toHaveBeenCalledTimes(2);
+		expect(observe).toHaveBeenCalledTimes(2);
+		expect(disconnect).toHaveBeenCalledOnce();
 	});
 
 	it.each(['/outside/capture.png', 'notes.txt'])(

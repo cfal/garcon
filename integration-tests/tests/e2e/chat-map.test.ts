@@ -92,6 +92,12 @@ describe("Lightpanda Chat Map", () => {
         "Chat Map parent deletion",
         { afterIndex: deleteCursor },
       );
+      // Deleting the selected chat focuses its neighbor and releases the hidden Map renderer.
+      await app.waitForSelectedChat(forkId);
+      await fixture.page.waitForFunction(
+        () => document.querySelector("[data-chat-map-panel]") === null,
+      );
+      await app.selectWorkspaceWindowSurfaceById("singleton:chat-map");
       await fixture.page.waitForFunction(
         ({ parentId, childId }) => {
           const missing = document.querySelector<HTMLElement>(
@@ -115,6 +121,8 @@ describe("Lightpanda Chat Map", () => {
         { parentId: source.id, childId: forkId },
       );
 
+      const mapWindowId = await app.workspaceWindowIdForSurface("singleton:chat-map");
+      await app.selectWorkspaceWindowSurfaceById(`chat-view:${mapWindowId}`);
       await app.setViewport(390, 844);
       await fixture.page.waitForSelector(
         'nav[aria-label="Workspace navigation"]',

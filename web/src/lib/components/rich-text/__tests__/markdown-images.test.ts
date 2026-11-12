@@ -230,7 +230,7 @@ describe('Markdown images', () => {
 	);
 
 	it('starts one authenticated request only when the preview becomes visible', async () => {
-		let enter: () => void = () => {};
+		let enter: (visible?: boolean) => void = () => {};
 		const disconnect = vi.fn();
 		vi.stubGlobal(
 			'IntersectionObserver',
@@ -244,12 +244,12 @@ describe('Markdown images', () => {
 				takeRecords = () => [];
 				constructor(private callback: IntersectionObserverCallback) {}
 				observe(target: Element): void {
-					enter = () =>
+					enter = (visible = true) =>
 						this.callback(
 							[
 								{
 									target,
-									isIntersecting: true,
+									isIntersecting: visible,
 									intersectionRatio: 1,
 									time: 0,
 									boundingClientRect: target.getBoundingClientRect(),
@@ -272,10 +272,39 @@ describe('Markdown images', () => {
 		enter();
 		enter();
 		await waitFor(() => expect(filesApi.readContent).toHaveBeenCalledOnce());
-		expect(disconnect).toHaveBeenCalledOnce();
+		expect(disconnect).not.toHaveBeenCalled();
 		await screen.findByRole('img');
+		const target = view.container.querySelector('.markdown-image')!;
+		vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 240, 120));
+		target.setAttribute('tabindex', '0');
+		(target as HTMLElement).focus();
+		enter(false);
+		await tick();
+		expect(screen.queryByRole('img')).not.toBeNull();
+		(target as HTMLElement).blur();
+		await tick();
+		await tick();
+		expect(target.querySelector('img')).toBeNull();
+		const retainedImage = screen.getByRole('img', { name: 'Capture' });
+		expect(retainedImage.hasAttribute('aria-busy')).toBe(false);
+		expect(screen.queryByRole('status')).toBeNull();
+		expect(retainedImage.style.width).toBe('240px');
+		expect(retainedImage.style.aspectRatio).toBe('240 / 120');
+		expect(retainedImage.querySelector('svg.animate-spin')).toBeNull();
+		expect(URL.revokeObjectURL).toHaveBeenCalled();
+		const reload = Promise.withResolvers<typeof imageResult>();
+		vi.mocked(filesApi.readContent).mockReturnValueOnce(reload.promise);
+		enter();
+		await tick();
+		const reloading = screen.getByRole('status', { name: 'Loading image...' });
+		expect(reloading.getAttribute('aria-busy')).toBe('true');
+		expect(reloading.style.width).toBe('240px');
+		expect(reloading.style.aspectRatio).toBe('240 / 120');
+		reload.resolve(imageResult);
+		await waitFor(() => expect(target.querySelector('img')).not.toBeNull());
+		expect(filesApi.readContent).toHaveBeenCalledTimes(2);
 		view.unmount();
-		expect(disconnect).toHaveBeenCalledTimes(2);
+		expect(disconnect).toHaveBeenCalledOnce();
 	});
 
 	it.each(['executorId', 'executorContextKey'] as const)(

@@ -20,6 +20,42 @@ afterEach(() => {
 });
 
 describe('SurfaceFrameRegistry', () => {
+	it('forgets a destroyed surface without reusing a transfer generation', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const old = frames.beginTransfer('file:1', 'window-main');
+		const wait = frames.waitFor(old);
+		const rejected = expect(wait).rejects.toMatchObject({ name: 'AbortError' });
+		frames.register('file:1', 'window-sidebar', handle('old'));
+		frames.release('file:1');
+		await rejected;
+		expect(frames.focus('file:1', 'window-sidebar')).toBe(false);
+		const next = frames.beginTransfer('file:1', 'window-main');
+		expect(next.generation).toBeGreaterThan(old.generation);
+		await expect(frames.waitFor(old)).rejects.toMatchObject({ name: 'AbortError' });
+		const destination = handle('new');
+		frames.register('file:1', 'window-main', destination);
+		await expect(frames.waitFor(next)).resolves.toBe(destination);
+		frames.destroy();
+	});
+
+	it.each(['registered', 'timeout', 'cancelled'] as const)(
+		'removes abort listeners after a %s wait',
+		async (outcome) => {
+			vi.useFakeTimers();
+			const frames = new SurfaceFrameRegistry();
+			const expectation = frames.beginTransfer('file:1', 'window-main');
+			const remove = vi.spyOn(expectation.signal, 'removeEventListener');
+			const wait = frames.waitFor(expectation);
+			const settled = wait.catch(() => undefined);
+			if (outcome === 'registered') frames.register('file:1', 'window-main', handle('current'));
+			else if (outcome === 'cancelled') frames.cancel('file:1');
+			else await vi.advanceTimersByTimeAsync(FRAME_REGISTRATION_TIMEOUT_MS);
+			await settled;
+			expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+			frames.destroy();
+		},
+	);
+
 	it('resolves only the exact destination generation', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const staleHandle = handle('stale');

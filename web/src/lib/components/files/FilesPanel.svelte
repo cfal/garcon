@@ -19,7 +19,7 @@
 	import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
 	import Download from '@lucide/svelte/icons/download';
 	import { Button } from '$lib/components/ui/button';
-	import type { FileDraft } from '$lib/files/persistence/file-draft-repository.js';
+	import type { FileDraftSummary } from '$lib/files/persistence/file-draft-repository.js';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -66,7 +66,7 @@
 		});
 	}
 
-	async function openRecoveredFile(draft: FileDraft): Promise<void> {
+	async function openRecoveredFile(draft: FileDraftSummary): Promise<void> {
 		try {
 			await files.open({
 				executorId: draft.executorId,
@@ -81,7 +81,7 @@
 		}
 	}
 
-	function recoveredFileLabel(draft: FileDraft, path: string): string {
+	function recoveredFileLabel(draft: FileDraftSummary, path: string): string {
 		return effectiveExecutorId(draft.executorId) === 'local'
 			? path
 			: `${executors.label(draft.executorId)}: ${path}`;

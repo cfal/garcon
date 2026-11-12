@@ -3,6 +3,7 @@ import {
 	createFileDraftRepository,
 	createMemoryFileDraftRepository,
 	fileDraftKey,
+	summarizeFileDraft,
 	FILE_DRAFT_DOCUMENT_LIMIT_BYTES,
 	FILE_DRAFT_LIMIT,
 	type FileDraft,
@@ -27,8 +28,13 @@ describe('file draft repository', () => {
 		await repository.putDraft(draft());
 		await repository.putDraft({ ...draft(), content: 'latest', savedAt: 2 });
 		expect(await repository.getDrafts('user', 'deployment')).toEqual([
-			{ ...draft(), content: 'latest', savedAt: 2 },
+			summarizeFileDraft({ ...draft(), content: 'latest', savedAt: 2 }),
 		]);
+		expect(await repository.getDraft(draft().documentId)).toEqual({
+			...draft(),
+			content: 'latest',
+			savedAt: 2,
+		});
 	});
 
 	it('retries a transient IndexedDB open failure', async () => {
@@ -71,10 +77,16 @@ describe('file draft repository', () => {
 				content: executorId ?? 'original local',
 			});
 		}
-		await repository.putDraft({ ...draft(), executorId: 'local', content: 'latest local', savedAt: 2 });
+		await repository.putDraft({
+			...draft(),
+			executorId: 'local',
+			content: 'latest local',
+			savedAt: 2,
+		});
 		const recovered = await repository.getDrafts('user', 'deployment');
 		expect(recovered).toHaveLength(3);
-		expect(recovered.map((item) => item.content).sort()).toEqual(
+		const bodies = await Promise.all(recovered.map((item) => repository.getDraft(item.documentId)));
+		expect(bodies.map((item) => item?.content).sort()).toEqual(
 			[executors[1], executors[2], 'latest local'].sort(),
 		);
 		await repository.deleteDraft(
@@ -102,7 +114,7 @@ describe('file draft repository', () => {
 		await expect(repository.putDraft({ ...draft(), content: content + 'x' })).rejects.toThrow(
 			'too large',
 		);
-		expect((await repository.getDrafts('user', 'deployment'))[0].content).toBe(content);
+		expect((await repository.getDraft(draft().documentId))?.content).toBe(content);
 	});
 
 	it('evicts older backups to stay within the total byte budget', async () => {

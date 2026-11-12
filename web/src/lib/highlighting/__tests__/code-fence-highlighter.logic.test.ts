@@ -71,6 +71,27 @@ describe('highlightCodeFence', () => {
 			parse.mockRestore();
 		}
 	});
+
+	it('falls back to complete source when token output exceeds the segment budget', async () => {
+		const source = 'const item = "synthetic"; '.repeat(3_000);
+		await expect(highlightCodeFence(source, 'js')).resolves.toEqual([
+			{ text: source, className: null },
+		]);
+		const diff = '+synthetic\n'.repeat(3_000);
+		await expect(highlightCodeFence(diff, 'diff')).resolves.toEqual([
+			{ text: diff, className: null },
+		]);
+	});
+
+	it('skips cancelled work before and after language loading', async () => {
+		const controller = new AbortController();
+		const pending = highlightCodeFence('const item = 1;', 'js', controller.signal);
+		controller.abort();
+		await expect(pending).resolves.toEqual([{ text: 'const item = 1;', className: null }]);
+		await expect(highlightCodeFence('const item = 1;', 'js', controller.signal)).resolves.toEqual([
+			{ text: 'const item = 1;', className: null },
+		]);
+	});
 	it('highlights JavaScript keywords and preserves exact text', async () => {
 		const source = 'const value = 1;';
 		const segments = await highlightCodeFence(source, 'js');

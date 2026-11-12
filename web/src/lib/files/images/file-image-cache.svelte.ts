@@ -3,6 +3,7 @@ import { ApiError } from '$lib/api/client.js';
 import { getFileRevision, readContent } from '$lib/api/files.js';
 import type { FileRevision } from '$shared/file-contracts';
 import { decodeFileImage } from './decode-file-image.js';
+import { FileImageLoadQueue } from './file-image-load-queue.js';
 
 export interface FileImageTarget {
 	executorId: string;
@@ -15,6 +16,8 @@ interface CachedImage {
 	url: string;
 	revision: FileRevision;
 	estimatedBytes: number;
+	width: number;
+	height: number;
 }
 
 export interface FileImageLease {
@@ -55,6 +58,7 @@ class ImageEntry {
 class InvalidImageError extends Error {}
 
 export class FileImageCache {
+	readonly #loads = new FileImageLoadQueue();
 	readonly #entries = new Map<string, ImageEntry>();
 	readonly #idle = new Map<string, ImageEntry>();
 	#budgetBytes: number;
@@ -222,9 +226,15 @@ export class FileImageCache {
 		const controller = new AbortController();
 		const operation = { controller, promise: Promise.resolve() };
 		entry.operation = operation;
-		operation.promise = this.#load(entry, controller).finally(() => {
-			if (entry.operation === operation) entry.operation = null;
-		});
+		operation.promise = this.#loads
+			.run(() => this.#load(entry, controller), controller.signal)
+			.catch(() => {
+				if (this.#isCurrent(entry) && entry.operation === operation && !controller.signal.aborted)
+					this.#drop(entry);
+			})
+			.finally(() => {
+				if (entry.operation === operation) entry.operation = null;
+			});
 		return operation.promise;
 	}
 
@@ -269,6 +279,8 @@ export class FileImageCache {
 			entry.image = {
 				url: candidateUrl,
 				revision,
+				width: dimensions.width,
+				height: dimensions.height,
 				estimatedBytes: Math.max(
 					MIN_IMAGE_BYTES,
 					blob.size + dimensions.width * dimensions.height * 4,

@@ -35,7 +35,7 @@ export class WorkspacePresentationFrames {
 		this.clearError(surfaceId);
 		this.#bumpVersion(surfaceId);
 		await this.settle(expectation);
-		return generation === this.#presentationGeneration;
+		return !expectation.signal.aborted && generation === this.#presentationGeneration;
 	}
 
 	beginTransition(
@@ -107,15 +107,24 @@ export class WorkspacePresentationFrames {
 		this.errors = remaining;
 	}
 
+	release(surfaceId: string): void {
+		this.deps.frames?.release(surfaceId);
+		const { [surfaceId]: _removed, ...remaining } = this.versions;
+		this.versions = remaining;
+		this.clearError(surfaceId);
+	}
+
 	async settle(expectation: FrameExpectation): Promise<void> {
 		const frames = this.deps.frames;
 		if (!frames) return;
 		try {
 			const handle = await frames.waitFor(expectation);
+			if (expectation.signal.aborted) return;
 			await handle.attachRetainedRenderer();
+			if (expectation.signal.aborted) return;
 			this.clearError(expectation.surfaceId);
 		} catch (error) {
-			if (isAbortError(error)) return;
+			if (expectation.signal.aborted || isAbortError(error)) return;
 			this.errors = {
 				...this.errors,
 				[expectation.surfaceId]:

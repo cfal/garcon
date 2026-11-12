@@ -466,6 +466,7 @@ for (const [count, rows] of [[4, 2], [6, 2], [8, 2], [12, 2], [16, 2], [25, 5]] 
         await editor.focus();
         await page.keyboard.press('Control+s');
         await page.locator('[aria-label="Unsaved"]').waitFor({ state: 'hidden' });
+        await cdp.send('HeapProfiler.collectGarbage');
         const stressMetrics = await cdp.send('Performance.getMetrics');
         await page.reload({ waitUntil: 'domcontentloaded' });
         await page.waitForFunction(
@@ -484,11 +485,12 @@ for (const [count, rows] of [[4, 2], [6, 2], [8, 2], [12, 2], [16, 2], [25, 5]] 
         ).toEqual(['window-main']);
         await cdp.send('HeapProfiler.collectGarbage');
         const afterMetrics = await cdp.send('Performance.getMetrics');
-        const values = Object.fromEntries(
-          beforeMetrics.metrics.map(({ name, value }) => [name, value]),
-        );
-        expect(values.JSHeapUsedSize).toBeLessThan(768 * 1024 * 1024);
-        expect(values.Nodes).toBeLessThan(100_000);
+        for (const sample of [beforeMetrics, stressMetrics, afterMetrics]) {
+          const measured = Object.fromEntries(sample.metrics.map(({ name, value }) => [name, value]));
+          expect(measured.JSHeapUsedSize).toBeLessThan(768 * 1024 * 1024);
+          expect(measured.Nodes).toBeLessThan(100_000);
+        }
+        const values = Object.fromEntries(afterMetrics.metrics.map(({ name, value }) => [name, value]));
         samples.sort((a, b) => a - b);
         paintSamples.sort((a, b) => a - b);
         const report = {

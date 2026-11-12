@@ -16,15 +16,20 @@ async function privateDatabaseRows(page: Page, seed: boolean): Promise<number[]>
   return page.evaluate(async (seed) => {
     const counts: number[] = [];
     for (const { name, version, stores } of [
-      { name: 'garcon-file-drafts-v1', version: 2, stores: { drafts: 'documentId', recents: 'key', navigation: 'key' } },
+      {
+        name: 'garcon-file-drafts-v1', version: 3,
+        stores: { drafts: 'documentId', 'draft-summaries': 'documentId', recents: 'key', navigation: 'key' },
+      },
       { name: 'garcon-local-media', version: 1, stores: { 'completion-sounds': null } },
     ]) {
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         const request = indexedDB.open(name, version);
         request.onupgradeneeded = () => {
           for (const [store, keyPath] of Object.entries(stores)) {
-            if (!request.result.objectStoreNames.contains(store))
-              request.result.createObjectStore(store, keyPath ? { keyPath } : undefined);
+            if (!request.result.objectStoreNames.contains(store)) {
+              const created = request.result.createObjectStore(store, keyPath ? { keyPath } : undefined);
+              if (store === 'draft-summaries') created.createIndex('scope', ['userNamespace', 'deploymentId']);
+            }
           }
         };
         request.onsuccess = () => resolve(request.result);
@@ -90,7 +95,7 @@ test('confirmed logout clears browser data and sibling tabs but not another devi
         sessionStorage.setItem('garcon-ticket-draft-v1:synthetic', 'Synthetic ticket draft');
       });
       await peer.evaluate(() => sessionStorage.setItem('chat-canvas-recovery-v1:synthetic', 'Synthetic canvas draft'));
-      expect(await privateDatabaseRows(page, true)).toEqual([1, 1, 1, 1]);
+      expect(await privateDatabaseRows(page, true)).toEqual([1, 1, 1, 1, 1]);
       const settings = await authenticationSettings(page);
       await settings.getByRole('button', { name: 'Log out', exact: true }).click();
       const confirm = page.getByRole('dialog', { name: 'Log out of this browser?', exact: true });
@@ -109,7 +114,7 @@ test('confirmed logout clears browser data and sibling tabs but not another devi
       expect(await page.evaluate(() => sessionStorage.getItem('garcon-ticket-draft-v1:synthetic'))).toBeNull();
       expect(await peer.evaluate(() => sessionStorage.getItem('chat-canvas-recovery-v1:synthetic'))).toBeNull();
       expect(await page.evaluate(() => localStorage.getItem('unrelated-app'))).toBe('Preserved');
-      expect(await privateDatabaseRows(page, false)).toEqual([0, 0, 0, 0]);
+      expect(await privateDatabaseRows(page, false)).toEqual([0, 0, 0, 0, 0]);
       expect((await fetch(`${base}/api/v1/auth/user`, { headers: { Authorization: `Bearer ${integration.garcon.authToken}` } })).status).toBe(401);
       await browserExpect(other.getByRole('button', { name: 'More actions', exact: true })).toBeVisible();
       const independentToken = await other.evaluate(() => (JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null));

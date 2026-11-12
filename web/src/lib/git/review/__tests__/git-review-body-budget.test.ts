@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
-import { decideGitReviewBodyBudget } from '$lib/git/review/git-review-body-budget.js';
+import {
+	decideGitReviewBodyBudget,
+	gitReviewBodyBytes,
+} from '$lib/git/review/git-review-body-budget.js';
+import { createGitPatchIndex, getGitSplitPatchIndex } from '../git-patch-index.js';
 
 const limits = {
 	maxSummaryFiles: 100,
@@ -31,6 +35,65 @@ function body(path: string, rows: number, bytes: number): GitReviewFileBody {
 }
 
 describe('Git review body budget', () => {
+	it('accounts for indexed short lines and reserves lazy split arrays once', () => {
+		const patch = '@@ -1,3 +1,3 @@\n a\n b\n c\n';
+		const index = createGitPatchIndex(patch);
+		const indexed = { ...body('small.ts', index.rowCount, patch.length), patch, patchIndex: index };
+		const arrayBytes = Object.values(index.toData()).reduce(
+			(total, array) => total + array.byteLength,
+			0,
+		);
+		const estimate = patch.length * 2 + arrayBytes + index.rowCount * 8;
+		expect(gitReviewBodyBytes(indexed)).toBe(estimate);
+		getGitSplitPatchIndex(index);
+		expect(gitReviewBodyBytes(indexed)).toBe(estimate);
+		expect(
+			decideGitReviewBodyBudget(indexed, 'prefetch', {}, new Set(), {
+				...limits,
+				maxLoadedPatchBytes: estimate - 1,
+			}),
+		).toMatchObject({ accept: false, reason: 'collection-too-many-bytes' });
+		expect(
+			decideGitReviewBodyBudget(indexed, 'visible', {}, new Set(), {
+				...limits,
+				maxLoadedPatchBytes: estimate,
+			}),
+		).toMatchObject({ accept: true });
+	});
+
+	it('keeps one server-admitted visible body inspectable without displacing pinned bodies', () => {
+		const large = { ...body('large.ts', 5, 90), patch: 'x'.repeat(90) };
+		expect(gitReviewBodyBytes(large)).toBe(180);
+		expect(
+			decideGitReviewBodyBudget(
+				large,
+				'visible',
+				{
+					'old.ts': body('old.ts', 1, 20),
+				},
+				new Set(),
+				limits,
+			),
+		).toMatchObject({ accept: true, evictedPaths: ['old.ts'] });
+		expect(
+			decideGitReviewBodyBudget(
+				large,
+				'visible',
+				{
+					'pinned.ts': body('pinned.ts', 1, 20),
+				},
+				new Set(['pinned.ts']),
+				limits,
+			),
+		).toMatchObject({ accept: false });
+		expect(decideGitReviewBodyBudget(large, 'prefetch', {}, new Set(), limits)).toMatchObject({
+			accept: false,
+		});
+		expect(
+			decideGitReviewBodyBudget({ ...large, patchBytes: 101 }, 'visible', {}, new Set(), limits),
+		).toMatchObject({ accept: false });
+	});
+
 	it('lets a visible body replace speculative bodies', () => {
 		const current = {
 			'a.ts': body('a.ts', 6, 60),
@@ -50,6 +113,23 @@ describe('Git review body budget', () => {
 			loadedRows: 4,
 			loadedBytes: 40,
 		});
+	});
+
+	it('admits adjacent visible bodies in server patch units while limiting prefetch memory', () => {
+		const large = { ...body('large.ts', 5, 90), patch: 'x'.repeat(90) };
+		const small = body('small.ts', 1, 10);
+		for (const [incoming, pinned] of [
+			[large, small],
+			[small, large],
+		]) {
+			const current = { [pinned.path]: pinned };
+			expect(
+				decideGitReviewBodyBudget(incoming, 'visible', current, new Set([pinned.path]), limits),
+			).toMatchObject({ accept: true, evictedPaths: [] });
+			expect(
+				decideGitReviewBodyBudget(incoming, 'prefetch', current, new Set([pinned.path]), limits),
+			).toMatchObject({ accept: false, reason: 'collection-too-many-bytes' });
+		}
 	});
 
 	it('stops prefetch instead of evicting visible bodies', () => {

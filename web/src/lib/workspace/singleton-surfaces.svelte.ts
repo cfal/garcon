@@ -195,6 +195,7 @@ export class SingletonSurfaceRegistry {
 	disposeSurface(kind: PortableSingletonKind): void {
 		if (kind === 'tickets' && this.ticketsIfPresent()?.drafts.needsExitGuard) {
 			this.setPresentationVisible(kind, false);
+			this.ticketsIfPresent()?.releaseReadOnly();
 			return;
 		}
 		this.#destroySurface(kind);

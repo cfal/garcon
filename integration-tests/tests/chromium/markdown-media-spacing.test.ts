@@ -52,8 +52,12 @@ test('spaces standalone chat media without changing inline images on desktop and
         if (await expand.isVisible()) await expand.click();
         const markdown = row.locator('.markdown-body');
         await browserExpect(markdown.locator('.mermaid-thumbnail')).toHaveCount(3);
-        for (const image of await markdown.locator('img').all()) {
-          await image.scrollIntoViewIfNeeded();
+        const images = markdown.locator('.markdown-image');
+        await browserExpect(images).toHaveCount(5);
+        for (const wrapper of await images.all()) {
+          await wrapper.scrollIntoViewIfNeeded();
+          const image = wrapper.locator('img');
+          await browserExpect(image).toBeVisible();
           await browserExpect.poll(() => image.evaluate((element) =>
             element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0,
           )).toBe(true);
@@ -86,6 +90,7 @@ test('spaces standalone chat media without changing inline images on desktop and
         }
         expect(blocks[8].marginTop).toBe(0);
         expect(blocks[8].marginBottom).toBe(4);
+        await markdown.getByText('Inline text', { exact: true }).scrollIntoViewIfNeeded();
         const inline = markdown.getByRole('img', { name: 'Inline', exact: true });
         expect(await inline.evaluate((element) => {
           const style = getComputedStyle(element.closest('.markdown-image')!);

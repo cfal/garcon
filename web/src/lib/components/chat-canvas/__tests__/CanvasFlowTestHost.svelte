@@ -35,7 +35,6 @@
 		{controller}
 		selectedIds={new Set()}
 		{editing}
-		visible
 		presentation="window-main"
 		onselect={() => {}}
 		onerror={(message) => {

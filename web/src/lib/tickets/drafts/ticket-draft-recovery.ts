@@ -58,6 +58,16 @@ export interface TicketRecoveryEntry {
 	readonly draft: TicketDraftSnapshot | null;
 }
 
+function parsedRecoveryEntry(key: string, draft: TicketDraftSnapshot): TicketRecoveryEntry {
+	return {
+		key,
+		draft,
+		get raw() {
+			return JSON.stringify(draft);
+		},
+	};
+}
+
 export interface TicketRecoveryPort {
 	partitions(viewerKey: string): TicketDraftPartition[];
 	list(partition: TicketDraftPartition): TicketRecoveryEntry[];
@@ -211,7 +221,7 @@ export function createTicketRecovery(storage: () => Storage): TicketRecoveryPort
 				} catch {
 					/* Unreadable text remains available for explicit recovery. */
 				}
-				entries.push({ key, raw, draft });
+				entries.push(draft ? parsedRecoveryEntry(key, draft) : { key, raw, draft });
 			}
 			return entries;
 		},

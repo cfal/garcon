@@ -557,4 +557,14 @@ describe('ticket recovery partitions', () => {
 		recovery.write({ ...initial, id: 'overflow' });
 		expect(tab.length).toBe(20);
 	});
+
+	it('serializes valid recovery only for export while retaining exact malformed text', () => {
+		const tab = storage();
+		const recovery = createTicketRecovery(() => tab);
+		recovery.write(initial);
+		const [entry] = recovery.list(initial);
+		expect(Object.getOwnPropertyDescriptor(entry, 'raw')?.get).toBeTypeOf('function');
+		expect(JSON.parse(entry.raw)).toEqual(initial);
+		expect(entry.draft).toEqual(initial);
+	});
 });

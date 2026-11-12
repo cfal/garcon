@@ -38,6 +38,21 @@ function adapter(id: string, doc = 'abc', anchor = doc.length, readOnly = false)
 }
 
 describe('FileDocumentRuntime', () => {
+	it('hands off fallback content without eagerly serializing a second snapshot', () => {
+		const value = document();
+		value.setStoredContent('abc');
+		const serialize = vi.spyOn(FileDocumentRuntime.prototype, 'content');
+		const runtime = new FileDocumentRuntime(value, 'abc');
+		expect(serialize).not.toHaveBeenCalled();
+		expect(value.content).toBe('abc');
+		runtime.applyUserEdit('changed');
+		expect(value.content).toBe('changed');
+		value.dispose();
+		expect(value.content).toBe('');
+		expect(value.baseline).toBe('');
+		serialize.mockRestore();
+	});
+
 	it('rejects a stale transaction anywhere in a batch before mutating any owner', () => {
 		const value = document();
 		const runtime = new FileDocumentRuntime(value, 'abc');

@@ -75,6 +75,31 @@ describe('FileImageCache', () => {
 		expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 	});
 
+	it('bounds in-flight reads and decodes and removes cancelled pending loads', async () => {
+		const { cache, read, decode } = setup();
+		const blocked = deferred<{ width: number; height: number }>();
+		decode.mockReturnValue(blocked.promise);
+		const leases = Array.from({ length: 8 }, (_, index) =>
+			cache.acquire({ ...target, filePath: `${index}.png` }),
+		);
+		const loading = leases.map((lease) => lease.ensureCurrent());
+		await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(4));
+		expect(read).toHaveBeenCalledTimes(4);
+		leases[4].release();
+		leases[5].release();
+		blocked.resolve({ width: 32, height: 32 });
+		await Promise.all(loading);
+		expect(read).toHaveBeenCalledTimes(6);
+		expect(read.mock.calls.map(([params]) => params.filePath)).toEqual([
+			'0.png',
+			'1.png',
+			'2.png',
+			'3.png',
+			'6.png',
+			'7.png',
+		]);
+	});
+
 	it('aborts cold reads only after the last lease releases and fences late responses', async () => {
 		const { cache, read } = setup();
 		const pending = deferred<typeof result>();

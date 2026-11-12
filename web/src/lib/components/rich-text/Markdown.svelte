@@ -49,6 +49,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
+	import { scheduleMarkdownTokenCacheTrim } from './markdown-token-cache';
 	import MarkdownImage from './MarkdownImage.svelte';
 	import MarkdownLinkActions from './MarkdownLinkActions.svelte';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
@@ -175,6 +176,13 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	const markdownOptions = $derived(
 		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
 	);
+
+	$effect(() => {
+		source;
+		markdownOptions;
+		markdownExtensions;
+		scheduleMarkdownTokenCacheTrim();
+	});
 
 	function openImageFile(rawHref: string): void {
 		onLinkNavigate?.({ rawHref, kind: 'file' });

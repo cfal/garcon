@@ -199,14 +199,31 @@ describe('Chromium Chat Canvas', () => {
         ).toHaveLength(2);
 
         markPhase('hiding canvas nodes behind an opened chat');
+        const beforeWheel = await page.locator('.svelte-flow__viewport').evaluate(
+          (viewport) => getComputedStyle(viewport).transform,
+        );
+        await page.locator('.svelte-flow__pane').dispatchEvent('wheel', {
+          deltaX: 20, deltaY: 20, deltaMode: 0, bubbles: true, cancelable: true,
+        });
+        await page.waitForFunction(
+          (before) => getComputedStyle(document.querySelector('.svelte-flow__viewport')!).transform !== before,
+          beforeWheel,
+        );
+        const retainedViewport = await page.locator('.svelte-flow__viewport').evaluate(
+          (viewport) => getComputedStyle(viewport).transform,
+        );
         await page.locator(node('card')).click();
         await page
           .getByRole('button', { name: 'Open chat', exact: true })
           .click();
-        await page.locator(node('card')).waitFor({ state: 'hidden' });
-        expect(await page.locator('.svelte-flow__node:visible').count()).toBe(0);
+        await page.locator(node('card')).waitFor({ state: 'detached' });
+        expect(await page.locator('.svelte-flow__node').count()).toBe(0);
         await page.getByRole('tab', { name: 'Canvas', exact: true }).click();
         await page.locator(node('card')).waitFor({ state: 'visible' });
+        await page.waitForFunction(
+          (expected) => getComputedStyle(document.querySelector('.svelte-flow__viewport')!).transform === expected,
+          retainedViewport,
+        );
 
         markPhase('opening chats alongside and preserving canvas navigation');
         await page.locator(node('card')).click();

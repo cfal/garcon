@@ -129,4 +129,44 @@ new file mode 120000
 
 		expect(getGitSplitPatchIndex(index)).toBe(getGitSplitPatchIndex(index));
 	});
+
+	it.each([PATCH, '@@ -0,0 +1,2 @@\n+first\n+second\n', ''])(
+		'reserves enough bytes for lazy split indexes without changing its estimate (case %#)',
+		(patch) => {
+			const index = createGitPatchIndex(patch);
+			const unifiedBytes = Object.values(index.toData()).reduce(
+				(bytes, array) => bytes + array.buffer.byteLength,
+				0,
+			);
+			const beforeSplit = index.estimatedBytes;
+			expect(beforeSplit).toBe(unifiedBytes + index.rowCount * 2 * Uint32Array.BYTES_PER_ELEMENT);
+			const splitBytes = Object.values(getGitSplitPatchIndex(index).toData()).reduce(
+				(bytes, array) => bytes + array.buffer.byteLength,
+				0,
+			);
+			expect(beforeSplit).toBeGreaterThanOrEqual(unifiedBytes + splitBytes);
+			expect(index.estimatedBytes).toBe(beforeSplit);
+		},
+	);
+
+	it('counts a shared backing buffer once, including bytes outside its views', () => {
+		const original = createGitPatchIndex(PATCH);
+		const data = original.toData();
+		const shared = new Uint32Array(data.textStarts.length + data.textEnds.length + 16);
+		const textStarts = shared.subarray(0, data.textStarts.length);
+		const textEnds = shared.subarray(
+			data.textStarts.length,
+			data.textStarts.length + data.textEnds.length,
+		);
+		textStarts.set(data.textStarts);
+		textEnds.set(data.textEnds);
+		const restored = restoreGitPatchIndex(PATCH, { ...data, textStarts, textEnds });
+		expect(restored.estimatedBytes).toBe(
+			original.estimatedBytes -
+				data.textStarts.buffer.byteLength -
+				data.textEnds.buffer.byteLength +
+				shared.buffer.byteLength,
+		);
+		expect(restored.rowAt(2)).toEqual(original.rowAt(2));
+	});
 });

@@ -5,7 +5,10 @@
 
 import type { WsConnection, DrainCursor, WsMessage } from './connection.svelte';
 
-export type WsMessageLog = Pick<WsConnection, 'messages' | 'trimOffset' | 'registerCursor'>;
+export type WsMessageLog = Pick<
+	WsConnection,
+	'messages' | 'trimOffset' | 'registerCursor' | 'trimConsumedMessages'
+>;
 
 export interface DrainHandle {
 	/** Returns all messages received since the last drain call. */
@@ -28,6 +31,7 @@ export function createDrainCursor(connection: WsMessageLog): DrainHandle {
 		const start = Math.max(0, localIndex);
 		const messages = log.slice(start);
 		cursor.current = offset + log.length;
+		connection.trimConsumedMessages();
 		return messages;
 	}
 

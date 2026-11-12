@@ -40,6 +40,7 @@ function fixture(messages: unknown[], enabled = true, focused = false, processin
 			timestamp: Date.now(),
 		})),
 		trimOffset: 0,
+		trimConsumedMessages: () => {},
 		registerCursor: vi.fn(() => vi.fn()),
 	} satisfies WsMessageLog;
 	const delivery = { show: vi.fn(), close: vi.fn() } satisfies Pick<BrowserNotificationDeliveryPort, 'show' | 'close'>;

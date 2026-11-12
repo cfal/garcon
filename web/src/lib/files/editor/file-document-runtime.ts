@@ -43,8 +43,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 		this.#canonical = this.#createCanonicalState(normalizeDocument(content));
 		this.#baseline = this.#normalizeBaseline();
 		Object.assign(document, fileTextMetadata(content));
-		document.setStoredContent(this.content());
-		document.editorRuntime = this;
+		document.attachRuntime(this);
 	}
 
 	get canonicalState(): EditorState {
@@ -175,6 +174,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	}
 
 	#replaceDocument(content: Text): void {
+		this.#serialized = null;
 		const previous = this.#canonical.doc;
 		const changes = documentChanges(previous.toString(), content.toString());
 		this.#canonical = this.#createCanonicalState(content);
@@ -228,6 +228,7 @@ export class FileDocumentRuntime implements FileDocumentRuntimePort {
 	}
 
 	#documentChanged(): void {
+		this.#serialized = null;
 		this.document.bufferVersion += 1;
 		this.document.dirty = !this.#matchesBaseline();
 		this.document.notifyChanged();

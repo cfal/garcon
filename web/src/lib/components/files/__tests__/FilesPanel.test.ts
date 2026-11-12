@@ -99,7 +99,7 @@ describe('FilesPanel', () => {
 			});
 			await fileSessions.initializeRecovery('user');
 			const open = vi.spyOn(fileSessions, 'open').mockResolvedValue(null);
-			const exportDraft = vi.spyOn(fileSessions, 'exportDraft').mockReturnValue(undefined);
+			const exportDraft = vi.spyOn(fileSessions, 'exportDraft').mockResolvedValue(undefined);
 			const gitSurfaceDeps = createGitSurfaceTestDeps();
 			const singletonSurfaces = new SingletonSurfaceRegistry({
 		...unusedSingletonFactories,

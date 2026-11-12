@@ -7,6 +7,7 @@ import {
 	resizeVisibleFileTreeColumnBoundary,
 } from '$lib/files/tree/file-tree.svelte.js';
 import { FILE_TREE_PARENT_ROW_KEY } from '$lib/files/tree/file-tree-render-rows.js';
+import { FILE_TREE_COLD_DIRECTORY_LIMIT } from '$lib/files/tree/file-tree-cache.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
@@ -102,6 +103,44 @@ describe('FileTreeStore', () => {
 		vi.resetAllMocks();
 		mockStorage.clear();
 		store = new FileTreeStore();
+	});
+
+	it('reloads evicted expanded descendants when a collapsed branch is reopened', async () => {
+		const parent = entry('src', 'directory');
+		const nested = entry('nested', 'directory', parent.path);
+		const leaf = entry('child.ts', 'file', nested.path);
+		vi.mocked(filesApi.getTree).mockImplementation(async ({ directoryPath } = {}) => {
+			if (directoryPath === '/workspace/project') return response(directoryPath, [parent]);
+			if (directoryPath === parent.path) return response(directoryPath, [nested]);
+			if (directoryPath === nested.path) return response(directoryPath, [leaf]);
+			return response(directoryPath ?? undefined);
+		});
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.toggleDirectory(parent.path);
+		await tick();
+		store.toggleDirectory(nested.path);
+		await tick();
+		store.filterInput = 'child';
+		expect(store.filteredRows.map((row) => row.entry.name)).toContain('child.ts');
+		store.toggleDirectory(parent.path);
+		for (let index = 0; index <= FILE_TREE_COLD_DIRECTORY_LIMIT; index += 1) {
+			await store.fetchChildren(`/workspace/project/cold-${index}`);
+		}
+		expect(store.childrenCache.has(parent.path)).toBe(false);
+		expect(store.childrenCache.has(nested.path)).toBe(false);
+		expect(store.expandedDirs.has(nested.path)).toBe(true);
+		store.toggleDirectory(parent.path);
+		await vi.waitFor(() =>
+			expect(store.filteredRows.map((row) => row.entry.name)).toContain('child.ts'),
+		);
+		expect(
+			vi
+				.mocked(filesApi.getTree)
+				.mock.calls.filter(([params]) => params?.directoryPath === nested.path),
+		).toHaveLength(2);
+		store.reset();
 	});
 
 	it('starts at the chat project and captures the canonical base and anchor', async () => {
@@ -323,24 +362,58 @@ describe('FileTreeStore', () => {
 		);
 	});
 
-	it('loads expanded children and exposes retryable child failures', async () => {
-		const src = entry('src', 'directory');
-		vi.mocked(filesApi.getTree)
-			.mockResolvedValueOnce(response('/workspace/project', [src]))
-			.mockRejectedValueOnce(new Error('child failed'))
-			.mockResolvedValueOnce(response(src.path, [entry('index.ts', 'file', src.path)]));
+	it.each(['retry', 'reexpand', 'reactivate'])(
+		'retries a failed child listing on %s',
+		async (action) => {
+			const src = entry('src', 'directory');
+			vi.mocked(filesApi.getTree)
+				.mockResolvedValueOnce(response('/workspace/project', [src]))
+				.mockRejectedValueOnce(new Error('child failed'))
+				.mockResolvedValueOnce(response(src.path, [entry('index.ts', 'file', src.path)]));
+			store.setProjectState(availableProject());
+			store.activate();
+			await tick();
+
+			store.toggleDirectory(src.path);
+			await tick();
+			expect(store.expandedDirs.has(src.path)).toBe(true);
+			expect(store.childErrors.get(src.path)?.message).toBe('child failed');
+			store.setProjectState(availableProject());
+			await tick();
+			expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+
+			if (action === 'retry') store.retryDirectory(src.path);
+			else if (action === 'reexpand') {
+				store.toggleDirectory(src.path);
+				store.toggleDirectory(src.path);
+			} else {
+				store.deactivate();
+				store.activate();
+			}
+			await tick();
+			expect(store.childrenCache.get(src.path)?.[0]?.name).toBe('index.ts');
+		},
+	);
+
+	it('reloads an expanded hidden directory after its cold listing was evicted', async () => {
+		const hidden = entry('.hidden', 'directory');
+		const child = entry('child.ts', 'file', hidden.path);
+		vi.mocked(filesApi.getTree).mockImplementation(async ({ directoryPath } = {}) =>
+			response(directoryPath ?? undefined, directoryPath === hidden.path ? [child] : [hidden]),
+		);
 		store.setProjectState(availableProject());
 		store.activate();
 		await tick();
-
-		store.toggleDirectory(src.path);
+		store.setShowHiddenFiles(true);
+		store.toggleDirectory(hidden.path);
 		await tick();
-		expect(store.expandedDirs.has(src.path)).toBe(true);
-		expect(store.childErrors.get(src.path)?.message).toBe('child failed');
-
-		store.retryDirectory(src.path);
-		await tick();
-		expect(store.childrenCache.get(src.path)?.[0]?.name).toBe('index.ts');
+		store.setShowHiddenFiles(false);
+		for (let index = 0; index <= FILE_TREE_COLD_DIRECTORY_LIMIT; index++)
+			await store.fetchChildren(`/workspace/project/cold-${index}`);
+		expect(store.childrenCache.has(hidden.path)).toBe(false);
+		store.setShowHiddenFiles(true);
+		await vi.waitFor(() => expect(store.childrenCache.get(hidden.path)).toEqual([child]));
+		store.reset();
 	});
 
 	it('aborts and resumes incomplete work across presentation visibility', async () => {

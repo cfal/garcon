@@ -19,6 +19,7 @@ import { gitDocumentKey, type GitReviewDocumentRef } from '$lib/api/git-client.j
 import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
 import {
 	decideGitReviewBodyBudget,
+	gitReviewBodyBytes,
 	type GitReviewBodyBudgetDecision,
 } from './git-review-body-budget.js';
 import {
@@ -355,8 +356,7 @@ export class GitVirtualReviewDocumentController {
 	invalidateFile(filePath: string): void {
 		for (const key of Array.from(this.bodyCache.keys())) {
 			if (this.bodyCache.get(key)?.path === filePath) {
-				this.bodyCacheBytes -= this.bodyCache.get(key)?.patchBytes ?? 0;
-				this.bodyCache.delete(key);
+				this.dropCachedBody(key);
 			}
 		}
 		this.replaceFileBodies(
@@ -377,8 +377,7 @@ export class GitVirtualReviewDocumentController {
 		for (const key of Array.from(this.bodyCache.keys())) {
 			const filePath = this.bodyCache.get(key)?.path;
 			if (!filePath || !paths.has(filePath)) {
-				this.bodyCacheBytes -= this.bodyCache.get(key)?.patchBytes ?? 0;
-				this.bodyCache.delete(key);
+				this.dropCachedBody(key);
 			}
 		}
 	}
@@ -649,7 +648,7 @@ export class GitVirtualReviewDocumentController {
 
 	private aggregateLimitMessage(decision: GitReviewBodyBudgetDecision): string {
 		return decision.reason === 'collection-too-many-bytes'
-			? `Stopped loading after ${decision.loadedBytes.toLocaleString()} patch bytes.`
+			? 'Cannot load this file within the collection patch byte limit.'
 			: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
 	}
 
@@ -719,21 +718,25 @@ export class GitVirtualReviewDocumentController {
 		body: GitReviewFileBody,
 	): void {
 		const key = this.cacheKey(file, guard);
-		const previous = this.bodyCache.get(key);
-		if (previous) this.bodyCacheBytes -= previous.patchBytes;
-		this.bodyCache.delete(key);
-		this.bodyCache.set(key, body);
-		this.bodyCacheBytes += body.patchBytes;
+		this.dropCachedBody(key);
 		const byteLimit = this.summary?.limits.maxLoadedPatchBytes ?? 10_000_000;
+		const bytes = gitReviewBodyBytes(body);
+		if (bytes > byteLimit) return;
+		this.bodyCache.set(key, body);
+		this.bodyCacheBytes += bytes;
 		while (
 			(this.bodyCache.size > MAX_CACHED_FILE_BODIES || this.bodyCacheBytes > byteLimit) &&
 			this.bodyCache.size > 0
 		) {
 			const oldestKey = this.bodyCache.keys().next().value;
 			if (oldestKey === undefined) break;
-			this.bodyCacheBytes -= this.bodyCache.get(oldestKey)?.patchBytes ?? 0;
-			this.bodyCache.delete(oldestKey);
+			this.dropCachedBody(oldestKey);
 		}
+	}
+
+	private dropCachedBody(key: string): void {
+		this.bodyCacheBytes -= gitReviewBodyBytes(this.bodyCache.get(key));
+		this.bodyCache.delete(key);
 	}
 
 	private clearBodyInFlightLoads(): void {

@@ -584,6 +584,111 @@ describe('Tickets controller', () => {
 		expect(draft.field('title')).toBe('Retained local edit');
 	});
 
+	it('releases closed read-only projections while preserving dirty editors and recovery', async () => {
+		const { controller } = harness();
+		controller.select('G-1');
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		const draft = controller.drafts.open('fields', controller.detail.current, {
+			title: 'Initial',
+		})!;
+		draft.setField('title', 'Retained edit');
+		expect(controller.detail.cacheSize).toBeGreaterThan(0);
+		controller.setPresentationVisible(false);
+		controller.releaseReadOnly();
+		expect(controller.collection).toBeNull();
+		expect(controller.detail.current).toBeNull();
+		expect(controller.detail.cacheSize).toBe(0);
+		expect(controller.drafts.needsExitGuard).toBe(true);
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		expect(controller.detail.current?.ticket.id).toBe('G-1');
+		expect(draft.field('title')).toBe('Retained edit');
+	});
+
+	it.each(['mutation', 'fields'] as const)(
+		'keeps closed projections released after a late %s success',
+		async (kind) => {
+			const { controller, api, setItems, setRevision } = harness();
+			controller.select('G-1');
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			const saved = deferred<TicketWriteResult>();
+			api.mutate.mockReturnValueOnce(saved.promise);
+			const payload = {
+				action: 'update',
+				ticketId: 'G-1',
+				expectedRevision: 1,
+				patch: { title: 'Saved title' },
+			} as const;
+			const draft =
+				kind === 'fields' ? controller.drafts.open('fields', controller.detail.current)! : null;
+			draft?.setField('title', 'Saved title');
+			const pending = draft ? draft.submit(payload) : controller.mutate(ticket(), payload);
+			controller.setPresentationVisible(false);
+			controller.releaseReadOnly();
+			const updated = ticket(1, { revision: 2, title: 'Saved title' });
+			setItems([updated]);
+			setRevision(2);
+			saved.resolve({ success: true, storeId: STORE, collectionRevision: 2, ticket: updated });
+			await pending;
+			expect(controller.mutations.busy('G-1')).toBe(false);
+			expect(controller.saveFeedback).toBeNull();
+			expect(controller.collection).toBeNull();
+			expect(controller.detail.cacheSize).toBe(0);
+			expect(controller.drafts.needsExitGuard).toBe(false);
+			if (draft) expect(draft.dirty).toBe(false);
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			expect(controller.detail.current?.ticket).toEqual(updated);
+			expect(controller.collection?.counts.collectionRevision).toBe(2);
+		},
+	);
+
+	it.each(['mutation', 'fields'] as const)(
+		'retains hidden %s confirmation until authoritative refresh catches up',
+		async (kind) => {
+			const { controller, api, setItems, setRevision } = harness();
+			controller.setPresentationVisible(true);
+			await controller.refresh();
+			const saved = deferred<TicketWriteResult>();
+			api.mutate.mockReturnValueOnce(saved.promise);
+			const payload = {
+				action: 'update',
+				ticketId: 'G-1',
+				expectedRevision: 1,
+				patch: { title: 'Saved title' },
+			} as const;
+			const draft =
+				kind === 'fields' ? controller.drafts.open('fields', { ticket: ticket() })! : null;
+			draft?.setField('title', 'Saved title');
+			const pending = draft ? draft.submit(payload) : controller.mutate(ticket(), payload);
+			controller.setPresentationVisible(false);
+			const updated = ticket(1, { revision: 2, title: 'Saved title' });
+			setItems([updated]);
+			setRevision(2);
+			saved.resolve({ success: true, storeId: STORE, collectionRevision: 2, ticket: updated });
+			await pending;
+			const refresh = deferred<void>();
+			const counts = api.counts.getMockImplementation()!;
+			api.counts.mockImplementationOnce(async (...args) => {
+				await refresh.promise;
+				return counts(...args);
+			});
+			try {
+				controller.setPresentationVisible(true);
+				expect(controller.mutations.busy('G-1')).toBe(true);
+				expect(controller.displayedCollection?.windows.list?.items[0]?.title).toBe('Saved title');
+				expect(await controller.mutate(ticket(), payload)).toBe(false);
+			} finally {
+				refresh.resolve();
+				await controller.refresh();
+			}
+			expect(controller.mutations.busy('G-1')).toBe(false);
+			expect(controller.collection?.windows.list?.items[0]?.title).toBe('Saved title');
+		},
+	);
+
 	it('replaces an old detail error with the current refresh outcome', async () => {
 		const { controller, api } = harness();
 		const unavailable = new ApiError(413, 'Detail unavailable', 'TICKET_RESULT_TOO_LARGE');

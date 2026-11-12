@@ -8,6 +8,7 @@ function connection(messages: Array<Record<string, unknown>>): WsMessageLog {
 	return {
 		messages: messages.map((data) => ({ data, timestamp: Date.now() })),
 		trimOffset: 0,
+		trimConsumedMessages: () => {},
 		registerCursor(cursor: DrainCursor) {
 			cursor.current = 0;
 			return vi.fn();

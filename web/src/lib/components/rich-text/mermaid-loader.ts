@@ -1,4 +1,5 @@
 import type { MermaidConfig } from 'mermaid';
+import { MermaidRenderQueue } from './mermaid-render-queue';
 import {
 	rendererThemeIdFor,
 	type RendererThemeId,
@@ -245,53 +246,17 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 
 let loadPromise: Promise<Mermaid> | null = null;
 let initializedTheme: MermaidThemeId | null = null;
-let operationTail: Promise<void> = Promise.resolve();
 let renderCounter = 0;
-
-const svgCache = new Map<string, string>();
-interface RenderJob {
-	promise: Promise<string>;
-	consumers: number;
-}
-const inflightRenders = new Map<string, RenderJob>();
-const MAX_CACHE_SIZE = 64;
-const MAX_CACHE_BYTES = 4 * 1024 * 1024;
-let cacheBytes = 0;
-
-function cachedSvg(key: string): string | undefined {
-	const svg = svgCache.get(key);
-	if (svg !== undefined) {
-		svgCache.delete(key);
-		svgCache.set(key, svg);
+const renders = new MermaidRenderQueue(async (source, themeId, signal) => {
+	const mermaid = await loadMermaid();
+	signal.throwIfAborted();
+	if (initializedTheme !== themeId) {
+		mermaid.initialize(THEME_CONFIGS[themeId]);
+		initializedTheme = themeId;
 	}
-	return svg;
-}
-
-function cacheSvg(key: string, svg: string): void {
-	const bytes = (key.length + svg.length) * 2;
-	if (bytes > MAX_CACHE_BYTES) return;
-	while (svgCache.size >= MAX_CACHE_SIZE || cacheBytes + bytes > MAX_CACHE_BYTES) {
-		const oldest = svgCache.entries().next().value;
-		if (!oldest) break;
-		cacheBytes -= (oldest[0].length + oldest[1].length) * 2;
-		svgCache.delete(oldest[0]);
-	}
-	svgCache.set(key, svg);
-	cacheBytes += bytes;
-}
-
-function renderKey(source: string, themeId: MermaidThemeId): string {
-	return `${themeId}\0${source}`;
-}
-
-function enqueue<T>(operation: () => Promise<T>): Promise<T> {
-	const result = operationTail.then(operation, operation);
-	operationTail = result.then(
-		() => undefined,
-		() => undefined,
-	);
-	return result;
-}
+	const id = `mermaid-${++renderCounter}-${Date.now()}`;
+	return (await mermaid.render(id, source)).svg;
+});
 
 async function loadMermaid(): Promise<Mermaid> {
 	loadPromise ??= import('mermaid').then(({ default: mermaid }) => mermaid);
@@ -302,71 +267,10 @@ export function resolveMermaidThemeId(presentation: ThemeRendererPresentation): 
 	return rendererThemeIdFor(presentation);
 }
 
-function createRenderJob(key: string, source: string, themeId: MermaidThemeId): RenderJob {
-	const job: RenderJob = {
-		consumers: 0,
-		promise: enqueue(async () => {
-			requireDemand();
-			const mermaid = await loadMermaid();
-			requireDemand();
-			if (initializedTheme !== themeId) {
-				mermaid.initialize(THEME_CONFIGS[themeId]);
-				initializedTheme = themeId;
-			}
-			const id = `mermaid-${++renderCounter}-${Date.now()}`;
-			const { svg } = await mermaid.render(id, source);
-			cacheSvg(key, svg);
-			return svg;
-		}),
-	};
-
-	function release(): void {
-		if (inflightRenders.get(key) === job) inflightRenders.delete(key);
-	}
-
-	function requireDemand(): void {
-		if (job.consumers > 0) return;
-		// New demand must not join a rejected job before its promise cleanup runs.
-		release();
-		throw new DOMException('Render abandoned', 'AbortError');
-	}
-
-	inflightRenders.set(key, job);
-	void job.promise.then(release, release);
-	return job;
-}
-
-export async function renderMermaid(
+export function renderMermaid(
 	source: string,
 	themeId: MermaidThemeId,
 	signal?: AbortSignal,
 ): Promise<string> {
-	signal?.throwIfAborted();
-	const key = renderKey(source, themeId);
-	const cached = cachedSvg(key);
-	if (cached !== undefined) return cached;
-	const job = inflightRenders.get(key) ?? createRenderJob(key, source, themeId);
-	job.consumers += 1;
-	return new Promise<string>((resolve, reject) => {
-		let active = true;
-		const finish = () => {
-			if (!active) return false;
-			active = false;
-			job.consumers -= 1;
-			signal?.removeEventListener('abort', abort);
-			return true;
-		};
-		const abort = () => {
-			if (finish()) reject(signal?.reason);
-		};
-		signal?.addEventListener('abort', abort, { once: true });
-		void job.promise.then(
-			(svg) => {
-				if (finish()) resolve(svg);
-			},
-			(error: unknown) => {
-				if (finish()) reject(error);
-			},
-		);
-	});
+	return renders.render(source, themeId, signal);
 }
