@@ -1,6 +1,6 @@
 import type {
   CanonicalFileIdentity, DirectoryEntry, FileRevisionResponse, FileTreeResponse,
-  SaveTextRequest, SaveTextResponse, FileRevision, DirectorySelectionRequest, DirectorySelectionResult,
+  SaveTextRequest, SaveTextResponse, FileRevision,
 } from '@garcon/common/file-contracts';
 import type { ExecutorCallOptions } from './resources.js';
 
@@ -28,7 +28,6 @@ export interface ExecutionFileRead {
 }
 
 export interface ExecutionFilesService {
-  chooseDirectory(request: DirectorySelectionRequest, options?: ExecutorCallOptions): Promise<DirectorySelectionResult>;
   tree(request: { readonly directoryPath?: string }, options?: ExecutorCallOptions): Promise<FileTreeResponse>;
   browse(request: { readonly directoryPath?: string }, options?: ExecutorCallOptions): Promise<readonly ExecutionFileEntry[]>;
   list(request: { readonly projectPath: string }, options?: ExecutorCallOptions): Promise<{ readonly files: readonly ExecutionFileEntry[]; readonly truncated: boolean }>;

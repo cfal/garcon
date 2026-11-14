@@ -32,7 +32,7 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 44;
+export const EXECUTOR_PROTOCOL_REVISION = 43;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
@@ -217,7 +217,6 @@ export const SESSION_INSTALLATION_METHODS: ReadonlySet<string> = new Set<keyof E
 ]);
 
 export function rpcContinuity(method: string): RpcContinuity {
-  if (method === 'files.chooseDirectory') return 'session';
   if (method.startsWith('files.') || isGitRpcMethod(method)) return 'journaled';
   return Object.hasOwn(CONTINUITY, method) ? CONTINUITY[method as ClassifiedMethod] : 'session';
 }

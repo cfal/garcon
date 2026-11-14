@@ -45,7 +45,6 @@ vi.mock('$lib/api/git', () => ({
 }));
 
 vi.mock('$lib/api/files', () => ({
-	selectDirectory: vi.fn(async () => ({ status: 'unsupported' })),
 	browseDirectory: vi.fn(async () => []),
 	createDirectory: vi.fn(),
 }));
@@ -304,7 +303,6 @@ describe('NewChatForm', () => {
 		localStorage.clear();
 		vi.unstubAllGlobals();
 		vi.mocked(filesApi.browseDirectory).mockReset().mockResolvedValue([]);
-		vi.mocked(filesApi.selectDirectory).mockReset().mockResolvedValue({ status: 'unsupported' });
 		vi.mocked(filesApi.createDirectory).mockReset();
 		vi.mocked(gitApi.getGitWorktrees).mockReset();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
@@ -472,6 +470,161 @@ describe('NewChatForm', () => {
 		expect(loadPreambles).not.toHaveBeenCalled();
 	});
 
+	it.each(['instance', 'base'] as const)('resets mobile folder navigation when the same executor %s changes', async (change) => {
+		stubMatchMedia(true);
+		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { byExecutor: { [remote.id]: { defaultPath: '/worker/project', pinnedPaths: [], recentPaths: [] } } },
+			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: remote.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
+		}));
+		const oldListing = deferred<Awaited<ReturnType<typeof filesApi.browseDirectory>>>();
+		const newListing = deferred<Awaited<ReturnType<typeof filesApi.browseDirectory>>>();
+		let replaced = false;
+		vi.mocked(filesApi.browseDirectory).mockImplementation((path) => {
+			if (replaced) return newListing.promise;
+			return path === '/worker'
+				? Promise.resolve([{ name: 'root-child', path: '/worker/root-child', type: 'directory' }])
+				: oldListing.promise;
+		});
+		let executors!: ExecutorsStore;
+		render(NewChatFormTestHost, { executorSnapshots: [localExecutor, remote],
+			onExecutors: store => { executors = store; } });
+		await screen.findByText('This folder has no Git worktrees. New chats will use this folder.');
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'root-child' }));
+		const oldDialog = screen.getByRole('dialog', { name: 'Select Directory' });
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Select this directory' }).disabled).toBe(false);
+		executors.applySnapshot([localExecutor, { ...remote, label: 'Renamed worker' }]);
+		await tick();
+		expect(screen.getByRole('dialog', { name: 'Select Directory' })).toBe(oldDialog);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Select this directory' }).disabled).toBe(false);
+		const nextRoot = change === 'base' ? '/replacement' : '/worker';
+		replaced = true;
+		executors.applySnapshot([localExecutor, { ...remote,
+			...(change === 'instance' ? { instanceId: 'replacement-instance' } : { projectBasePath: nextRoot }),
+		}]);
+		await tick();
+		await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(nextRoot, expect.any(AbortSignal), remote.id));
+		expect(screen.getByRole('dialog', { name: 'Select Directory' })).not.toBe(oldDialog);
+		const confirm = screen.getByRole<HTMLButtonElement>('button', { name: 'Select this directory' });
+		expect(confirm.disabled).toBe(true);
+		await fireEvent.click(confirm);
+		oldListing.resolve([]);
+		await tick();
+		expect(confirm.disabled).toBe(true);
+		expect(screen.queryByRole('button', { name: 'Worker: /worker/root-child' })).toBeNull();
+		newListing.resolve([]);
+		await waitFor(() => expect(confirm.disabled).toBe(false));
+	});
+
+	it('debounces manual path typing without validating intermediate edits', async () => {
+		stubMatchMedia(false);
+		await renderSubmittableForm(vi.fn());
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		const field = screen.getByRole('textbox', { name: 'Project Path' });
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockClear();
+		for (const value of ['/workspace/m', '/workspace/man', '/workspace/manual']) {
+			await fireEvent.input(field, { target: { value } });
+		}
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
+		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/manual', { executorId: 'local' }));
+	});
+
+	it.each([localExecutor, remoteExecutor])('offers direct mobile manual entry and reports invalid paths without Git ($kind)', async (executor) => {
+		stubMatchMedia(true);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockImplementation(async (path) => path.endsWith('/missing')
+			? { valid: false, errorCode: 'path_not_found' }
+			: { valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: ['/workspace/project'], byExecutor: { [executor.id]: {
+				defaultPath: `${executor.projectBasePath}/project`, pinnedPaths: [], recentPaths: [],
+			} } },
+			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: executor.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
+		}));
+		const services = { ...localExecutor.executorServices, git: false };
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { onStartChat, executorSnapshots: [
+			{ ...localExecutor, executorServices: services }, { ...remoteExecutor, executorServices: services },
+		] });
+		const prompt = await screen.findByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Retained Files-only draft' } });
+		await screen.findByText('Git unavailable');
+		await fireEvent.click(screen.getByRole('button', { name: 'Enter path' }));
+		const field = screen.getByRole('textbox', { name: 'Project Path' });
+		expect(document.activeElement).toBe(field);
+		expect(screen.queryByRole('dialog', { name: 'Select Directory' })).toBeNull();
+		expect(filesApi.browseDirectory).not.toHaveBeenCalled();
+		const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+		field.dispatchEvent(escape);
+		expect(escape.defaultPrevented).toBe(false);
+		await fireEvent.input(field, { target: { value: `${executor.projectBasePath}/missing` } });
+		await screen.findByText('Path does not exist.');
+		expect(screen.queryByText('Git unavailable')).toBeNull();
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(true);
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		expect(onStartChat).not.toHaveBeenCalled();
+		const chosenPath = `${executor.projectBasePath}/manual`;
+		await fireEvent.input(field, { target: { value: chosenPath } });
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: executor.id, projectPath: chosenPath, firstMessage: 'Retained Files-only draft',
+		}), PROSPECTIVE_CHAT_ID);
+	});
+
+	it.each([false, true].flatMap(isMobile => [localExecutor, remoteExecutor].map(executor => ({ executor, isMobile }))))(
+		'browses root subfolders and accepts a manual path ($executor.kind, mobile: $isMobile)', async ({ executor, isMobile }) => {
+		stubMatchMedia(isMobile);
+		const rootPath = executor.projectBasePath;
+		const projectPath = `${rootPath}/project`;
+		const pastedPath = `${rootPath}/manual folder`;
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(filesApi.browseDirectory).mockImplementation(async (path) => path === rootPath
+			? [{ name: 'root-child', path: `${rootPath}/root-child`, type: 'directory' }]
+			: []);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: [projectPath], byExecutor: { [executor.id]: {
+				defaultPath: projectPath, pinnedPaths: [], recentPaths: [],
+			} } },
+			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: executor.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
+		}));
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { onStartChat,
+			executorSnapshots: [localExecutor, { ...remoteExecutor, executorServices: localExecutor.executorServices }],
+		});
+		const prompt = await screen.findByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Retained manual-path draft' } });
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		expect(screen.queryByRole('textbox', { name: 'Project Path' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await screen.findByRole('button', { name: 'root-child' });
+		expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(rootPath, expect.any(AbortSignal), executor.id);
+		if (isMobile) {
+			await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+			expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-expanded')).toBe('false');
+		}
+		const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+		expect(field.value).toBe(projectPath);
+		await fireEvent.input(field, { target: { value: pastedPath } });
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith(pastedPath, { executorId: executor.id }));
+		expect(onStartChat).not.toHaveBeenCalled();
+		expect(prompt.value).toBe('Retained manual-path draft');
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: executor.id, projectPath: pastedPath, firstMessage: 'Retained manual-path draft',
+		}), PROSPECTIVE_CHAT_ID);
+	});
+
 	it.each([
 		{ isMobile: false, executor: localExecutor },
 		{ isMobile: true, executor: localExecutor },
@@ -519,7 +672,8 @@ describe('NewChatForm', () => {
 		const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
 		expect(submit.disabled).toBe(true);
 		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
-		await fireEvent.click(await screen.findByRole('button', { name: 'Create directory "fresh"' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'New directory' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Directory name' }), { target: { value: 'fresh' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 		await waitFor(() => expect(filesApi.createDirectory).toHaveBeenCalledExactlyOnceWith({
 			executorId: executor.id, parentPath: executor.projectBasePath, name: 'fresh',
@@ -999,62 +1153,6 @@ describe('NewChatForm', () => {
 		expect(document.activeElement).toBe(feature);
 		expect(prompt.value).toBe('Preserve this draft');
 		expect(gitApi.getGitWorktrees).toHaveBeenCalledOnce();
-	});
-
-	async function pendingFolderSelection() {
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
-		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };
-		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
-			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: remote.id,
-				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
-			paths: { byExecutor: { [remote.id]: { defaultPath: '/worker/project',
-				pinnedPaths: ['/worker/project', '/worker/other'], recentPaths: [] } } },
-		}));
-		let executors!: ExecutorsStore;
-		render(NewChatFormTestHost, { executorSnapshots: [localExecutor, remote],
-			onExecutors: store => { executors = store; } });
-		await screen.findByText('This folder has no Git worktrees. New chats will use this folder.');
-		const pending = deferred<Awaited<ReturnType<typeof filesApi.selectDirectory>>>();
-		vi.mocked(filesApi.selectDirectory).mockReturnValueOnce(pending.promise);
-		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
-		const signal = vi.mocked(filesApi.selectDirectory).mock.calls.at(-1)![2];
-		return { executors, remote, pending, signal };
-	}
-
-	it('keeps the native folder dialog pending across equivalent and unrelated executor snapshots', async () => {
-		const { executors, remote, pending, signal } = await pendingFolderSelection();
-		for (const snapshot of [
-			[localExecutor, { ...remote }],
-			[{ ...localExecutor, label: 'Renamed other owner' }, { ...remote, label: 'Renamed selected owner' }],
-			[localExecutor, { ...remote, executorServices: { ...remote.executorServices, git: false } }],
-		]) {
-			executors.applySnapshot(snapshot);
-			await tick();
-			expect(signal.aborted).toBe(false);
-			expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-busy')).toBe('true');
-		}
-		pending.resolve({ status: 'cancelled' });
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-busy')).toBe('false'));
-	});
-
-	it.each(['instance', 'base', 'files', 'bulk', 'path'] as const)('cancels the native folder dialog when its %s changes', async (change) => {
-		const { executors, remote, pending, signal } = await pendingFolderSelection();
-		if (change === 'path') {
-			await fireEvent.click(screen.getByRole('button', { name: 'Worker: /worker/other' }));
-		} else {
-			executors.applySnapshot([localExecutor, { ...remote,
-				...(change === 'instance' ? { instanceId: 'replacement-worker' } : {}),
-				...(change === 'base' ? { projectBasePath: '/replacement-base' } : {}),
-				...(change === 'files' ? { executorServices: { ...remote.executorServices, files: false } } : {}),
-				...(change === 'bulk' ? { bulk: { availability: 'offline' as const, lastError: null } } : {}),
-			}]);
-		}
-		await tick();
-		expect(signal.aborted).toBe(true);
-		pending.resolve({ status: 'selected', path: '/worker/stale' });
-		await tick();
-		expect(screen.queryByRole('button', { name: 'Worker: /worker/stale' })).toBeNull();
 	});
 
 	it('shows Git unavailability during bulk loss and reloads only on the selected executor', async () => {

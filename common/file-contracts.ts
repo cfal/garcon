@@ -57,33 +57,6 @@ export interface CreateDirectoryRequest {
   name: string;
 }
 
-export interface DirectorySelectionRequest {
-  directoryPath?: string;
-}
-
-export type DirectorySelectionResult =
-  | { status: 'selected'; path: string }
-  | { status: 'cancelled' }
-  | { status: 'unsupported' };
-
-export function parseDirectorySelectionRequest(value: unknown): DirectorySelectionRequest | null {
-  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'directoryPath')) return null;
-  if (value.directoryPath === undefined) return {};
-  return typeof value.directoryPath === 'string' && value.directoryPath.length > 0
-    && value.directoryPath.length <= 4096 && !value.directoryPath.includes('\0')
-    ? { directoryPath: value.directoryPath } : null;
-}
-
-export function parseDirectorySelectionResult(value: unknown): DirectorySelectionResult | null {
-  if (!isRecord(value)) return null;
-  if (value.status === 'cancelled' || value.status === 'unsupported') {
-    return Object.keys(value).length === 1 ? { status: value.status } : null;
-  }
-  return value.status === 'selected' && Object.keys(value).length === 2
-    && typeof value.path === 'string' && value.path.length > 0 && value.path.length <= 4096
-    && !value.path.includes('\0') ? { status: 'selected', path: value.path } : null;
-}
-
 // One directory as browsing lists it and as creation returns it.
 export interface DirectoryEntry {
   name: string;

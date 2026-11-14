@@ -32,7 +32,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
       const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
       const projects = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true });
-      const projectCard = projects.getByRole('button', { name: client.executorId === 'local' ? project : `Integration worker: ${project}`, exact: true });
+      const projectCard = projects.getByRole('button', { name: /[\\/]web-project$/ });
       await projectCard.click();
       await browserExpect(dialog.locator('#project-path-input')).toHaveCount(0);
       await dialog.locator('button[aria-label*=" / "]').first().click();
@@ -48,26 +48,31 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(worktrees.getByRole('button', { name: 'Select a different worktree', exact: true })).toHaveCount(0);
       await browserExpect(dialog.getByText('No preambles will be applied', { exact: true })).toBeVisible();
       await browserExpect(dialog.getByRole('button', { name: 'Clear preambles', exact: true })).toHaveCount(0);
-      phase('selecting and cancelling a system folder without losing the prompt');
-      let chosenFolder: string | null = null;
-      await page.route('**/api/v1/files/select-directory?*', async (route) => {
-        expect(new URL(route.request().url()).searchParams.get('executorId')).toBe(client.executorId);
-        await route.fulfill({ json: chosenFolder ? { status: 'selected', path: chosenFolder } : { status: 'cancelled' } });
-      });
+      phase('browsing root subfolders and entering a full path without losing the prompt');
       await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
-      await browserExpect(dialog.getByRole('button', { name: 'Choose folder', exact: true })).toBeEnabled();
+      const folderBrowser = dialog.getByRole('dialog', { name: 'Select Directory', exact: true });
+      const pathField = dialog.getByRole('textbox', { name: 'Project Path', exact: true });
+      await browserExpect(folderBrowser.getByRole('button', { name: 'web-project', exact: true })).toBeVisible();
+      await browserExpect(folderBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
+      await browserExpect(pathField).toHaveValue(project);
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
-      await browserExpect(dialog.getByRole('dialog', { name: 'Select Directory', exact: true })).toHaveCount(0);
-      chosenFolder = otherProject;
-      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
-      const chosenCard = projects.getByRole('button', { name: client.executorId === 'local' ? otherProject : `Integration worker: ${otherProject}`, exact: true });
-      await browserExpect(chosenCard).toHaveAttribute('aria-pressed', 'true');
-      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
-      await projectCard.click();
+      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-1440.png`) });
+      await folderBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
+      await browserExpect(pathField).toHaveValue(toExecutorPath(otherProject));
+      await page.keyboard.press('Escape');
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await pathField.fill(toExecutorPath(join(executionDirs.project, 'missing-folder')));
+      await pathField.press('Enter');
+      await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+      await pathField.fill(toExecutorPath(project));
+      await pathField.press('Enter');
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
-      await page.unroute('**/api/v1/files/select-directory?*');
+      await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       phase('toggling a card pin without changing the selected project or prompt');
-      const otherProjectSelect = projects.getByRole('button', { name: client.executorId === 'local' ? otherProject : `Integration worker: ${otherProject}`, exact: true });
+      const otherProjectSelect = projects.getByRole('button', { name: /[\\/]other-project$/ });
       const pinCard = (client.executorId === 'local' ? otherProjectSelect : projectCard).locator('..');
       await pinCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
       await browserExpect(pinCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
@@ -99,8 +104,6 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await parentCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
       await browserExpect(parentCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
       await browserExpect(selectedWorktree).toBeChecked();
-      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
-      await mkdir(artifacts, { recursive: true });
       for (const width of [1440, 390, 360]) {
         phase(`checking the worktree list at ${width}px`);
         const cdp = await context.newCDPSession(page);
@@ -128,6 +131,25 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(Math.abs(pathBounds.y - titleBounds.y)).toBeLessThanOrEqual(1);
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: join(artifacts, `worktree-landing-${executionBackend}-${width}.png`) });
+        if (width === 390) {
+          await dialog.getByRole('button', { name: 'Enter path', exact: true }).click();
+          await browserExpect(pathField).toBeFocused();
+          await browserExpect(page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
+          phase('browsing root subfolders on mobile before explicit selection');
+          await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+          const mobileBrowser = page.getByRole('dialog', { name: 'Select Directory', exact: true });
+          await browserExpect(mobileBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
+          await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-390.png`) });
+          await mobileBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
+          await mobileBrowser.getByRole('button', { name: 'Select this directory', exact: true }).click();
+          await browserExpect(pathField).toHaveValue(toExecutorPath(otherProject));
+          await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+          await pathField.fill(toExecutorPath(project));
+          await pathField.press('Enter');
+          await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+          await selectedWorktree.click();
+          await browserExpect(selectedWorktree).toBeChecked();
+        }
         await cdp.detach();
       }
       phase('submitting the captured executor and worktree');
@@ -139,11 +161,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(payload.projectPath).toBe(toExecutorPath(linked));
       await browserExpect(dialog).toHaveCount(0);
       await browserExpect.poll(async () => (await client.listChats()).sessions.some(chat => chat.projectPath === toExecutorPath(linked))).toBe(true);
+      phase('closing the folder list and landing page with consecutive Escape presses');
+      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await browserExpect(folderBrowser).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await browserExpect(dialog).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(dialog).toHaveCount(0);
       assertNoBrowserErrors();
       console.info(`Worktree landing assertions completed: ${executionBackend}`);
     }, undefined, {
       executionBackend,
-      serverEnvironment: { CI: '1', ...(windowsGitPath ? { PATH: windowsGitPath } : {}) },
+      serverEnvironment: windowsGitPath ? { PATH: windowsGitPath } : {},
     });
   }, 120_000);
 }

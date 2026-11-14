@@ -464,6 +464,20 @@ describe('NewChatFormState', () => {
 		expect(formState.validationStatus).toBe('valid');
 	});
 
+	it('keeps manual path edits unvalidated until the debounce effect runs', async () => {
+		formState.error = 'Previous error';
+		formState.editProjectPath('/workspace/manual');
+		expect(formState.projectPath).toBe('/workspace/manual');
+		expect(formState.selectedProjectPath).toBe('/workspace/manual');
+		expect(formState.error).toBeNull();
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
+		formState.validateChangedPath();
+		await vi.advanceTimersByTimeAsync(299);
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/manual', { executorId: 'local' });
+	});
+
 	it('cancels typed-path debounce when a directory is explicitly selected and rechecks the same directory', async () => {
 		formState.projectPath = '/workspace/typed';
 		formState.validateChangedPath();

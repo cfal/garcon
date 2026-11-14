@@ -1,17 +1,11 @@
 import { AgentCallError, type ExecutionFilesService, type ExecutorCallOptions } from '@garcon/server-agent-interface';
-import { MAX_FILE_SAVE_BYTES, isFileRevision, parseDirectoryEntry, parseDirectorySelectionResult, parseSaveTextRequest, parseSaveTextResponse } from '../../../common/file-contracts.js';
+import { MAX_FILE_SAVE_BYTES, isFileRevision, parseDirectoryEntry, parseSaveTextRequest, parseSaveTextResponse } from '../../../common/file-contracts.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import type { RemoteSessions } from './executor-client.js';
 import { decodeFileData, invalidFileData } from '../transport/file-protocol.js';
 
 export class RemoteFilesService implements ExecutionFilesService {
   constructor(private readonly sessions: RemoteSessions) {}
-
-  async chooseDirectory(request: Parameters<ExecutionFilesService['chooseDirectory']>[0], options?: ExecutorCallOptions) {
-    const result = parseDirectorySelectionResult(await this.sessions.call('', 'files.chooseDirectory', request, { timeoutMs: 300_000, ...options }));
-    if (!result) throw invalidFileData();
-    return result;
-  }
 
   async tree(request: Parameters<ExecutionFilesService['tree']>[0], options?: ExecutorCallOptions) { return this.sessions.call('', 'files.tree', request, options); }
   async browse(request: Parameters<ExecutionFilesService['browse']>[0], options?: ExecutorCallOptions) { return this.sessions.call('', 'files.browse', request, options); }

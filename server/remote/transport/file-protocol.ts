@@ -1,5 +1,5 @@
 import type { ExecutionFileTarget, ExecutionFilesService, ExecutionFileRead } from '@garcon/server-agent-interface';
-import { MAX_FILE_VIEW_BYTES, parseDirectorySelectionRequest } from '../../../common/file-contracts.js';
+import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 import { DomainError } from '../../common/domain-error.js';
 import { isRecord } from '../../../common/json.js';
 
@@ -7,7 +7,6 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 type Method<K extends keyof ExecutionFilesService> = Call<Parameters<ExecutionFilesService[K]>[0], Awaited<ReturnType<ExecutionFilesService[K]>>>;
 
 export interface FileRpcMethods {
-  'files.chooseDirectory': Method<'chooseDirectory'>;
   'files.tree': Method<'tree'>;
   'files.browse': Method<'browse'>;
   'files.list': Method<'list'>;
@@ -40,10 +39,6 @@ export function invalidFileData(): DomainError {
 
 export function validateFileRpcRequest(method: string, request: unknown): void {
   if (!isRecord(request)) throw invalidFileData();
-  if (method === 'files.chooseDirectory') {
-    if (!parseDirectorySelectionRequest(request)) throw invalidFileData();
-    return;
-  }
   const validPath = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 4096 && !value.includes('\0');
   if (method === 'files.tree' || method === 'files.browse') {
     if (request.directoryPath !== undefined && !validPath(request.directoryPath)) throw invalidFileData();

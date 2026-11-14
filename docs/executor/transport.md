@@ -437,10 +437,6 @@ gets its 5 seconds.
 
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
 
-The interactive `files.chooseDirectory` call uses bulk with `session` continuity.
-Its native dialog ends with cancellation, disconnection or a five-minute deadline;
-reconnection never replays it. Its selected path is validated on that same executor.
-
 RPC errors validate their domain and error code before entering application
 code. Unknown domains and unknown provider error codes retire the malformed
 session rather than introducing values outside the typed error contract.

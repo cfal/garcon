@@ -15,14 +15,12 @@ import {
 	FILE_REVISION_HEADER,
 	isFileRevision,
 	parseDirectoryEntry,
-	parseDirectorySelectionResult,
 	parseFileIdentityResponse,
 	parseFileRevisionResponse,
 	parseFileTreeResponse,
 	parseReadTextResponse,
 	parseSaveTextResponse,
 	type DirectoryEntry,
-	type DirectorySelectionResult,
 	type FileRevision,
 	type FileRevisionResponse,
 	type FileSaveConflictResolution,
@@ -78,21 +76,6 @@ export interface FileEntry {
 	path: string;
 	relativePath?: string;
 	type?: 'file' | 'directory';
-}
-
-/** Opens the system folder dialog on the captured executor. */
-export async function selectDirectory(
-	executorId: string,
-	directoryPath: string | undefined,
-	signal: AbortSignal,
-): Promise<DirectorySelectionResult> {
-	const query = new URLSearchParams({ executorId });
-	const payload = await apiPost<unknown>(`/api/v1/files/select-directory?${query}`, {
-		...(directoryPath ? { directoryPath } : {}),
-	}, { signal, timeoutMs: 300_000 });
-	const result = parseDirectorySelectionResult(payload);
-	if (!result) throw new Error('Invalid directory selection response');
-	return result;
 }
 
 /** Builds query string from chatId/projectPath/filePath. */

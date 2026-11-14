@@ -9,7 +9,6 @@ The historical [Executor Interfaces](./interface.md) and [Executors In The App](
 Make the existing file experience work against the selected executor:
 
 - Browse directories and select a project path, including before a chat exists.
-- Select a folder through the executor's native desktop dialog, with Garcon browsing on headless hosts.
 - Create one directory inside a browsed directory while selecting a project path.
 - Resolve canonical file identities and populate file lists and autocomplete.
 - Read text and binary content within the existing viewer limits.
@@ -38,24 +37,11 @@ The limits below describe the supported protocol.
 | [File contracts](../../common/file-contracts.ts) | Define executor-qualified canonical root/relative-path identity, opaque revisions, conflict policy, tree responses, and a 4 MiB content limit. |
 | [Revision operations](../../server/runtime/files/file-revision.ts) | Read bytes with before/after revision checks on an opened handle. Revisions derive from filesystem metadata, not a content hash. |
 | Directory creation | Creates one named child of an existing directory inside the executor's project base. Never creates intermediate directories or replaces an existing entry. |
-| Native folder selection | `POST /api/v1/files/select-directory?executorId=...` calls `files.chooseDirectory` on the selected executor. Its optional directory hint and selected path are validated within that executor's base. Missing hints fall back to the validated base. Cancellation preserves the selection; unsupported desktops use Garcon browsing. |
 | Text saves | Serialize Garcon writes using a file lock, re-resolve the target, compare the expected revision, and return a revision from the opened write handle. The current implementation truncates/writes in place; it is not an atomic rename. |
 | [Browser file sessions](../../web/src/lib/files/sessions/file-session-registry.svelte.ts) | Own executor-qualified live documents, views, and save/conflict handling. |
 | [Executor RPC](../../server/remote/transport/rpc-protocol.ts) | Already carries executor-level methods such as project inspection alongside provider calls. A second generic RPC framework is unnecessary. |
 
 Local and remote use the same executor-service implementation and editor behavior, without parallel route implementations.
-
-Native folder selection uses bulk with session continuity, a five-minute deadline,
-and one dialog at a time per executor process. Cancellation and disconnect retire
-the owned helper; reconnection never replays the request. Windows uses a system
-folder dialog, macOS uses Finder selection, and desktop Linux uses Zenity or
-KDialog. A remote dialog appears on the executor's desktop. SSH, CI and hosts
-without a desktop return `unsupported`; helper failures remain errors. This
-browser interaction is not part of the CLI forwarding allowlist. Protocol revision
-44 requires matching controller and worker builds; stored settings do not migrate.
-The picker HTTP route disables the socket's ordinary idle timeout while the
-executor's five-minute deadline remains in force, so waiting for a user does not
-close the dialog early.
 
 ## Architecture And Ownership
 
