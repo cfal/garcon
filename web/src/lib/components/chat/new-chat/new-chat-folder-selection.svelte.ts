@@ -2,7 +2,7 @@ import { selectDirectory } from '$lib/api/files';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
 
 type FolderSelectionForm = Pick<NewChatFormState,
-	'executorId' | 'worktreeContextKey' | 'nonblankPath' | 'browseStartPath' | 'projectBasePath'
+	'executorId' | 'nonblankPath' | 'browseStartPath' | 'projectBasePath'
 	| 'filesAvailable' | 'isUpdatingPinnedPath' | 'selectProjectPath' | 'showBrowser'>;
 
 export class NewChatFolderSelection {
@@ -10,7 +10,10 @@ export class NewChatFolderSelection {
 	failed = $state(false);
 	#request: AbortController | null = null;
 
-	constructor(private readonly getForm: () => FolderSelectionForm) {}
+	constructor(
+		private readonly getForm: () => FolderSelectionForm,
+		private readonly getContextKey: () => string,
+	) {}
 
 	get form(): FolderSelectionForm { return this.getForm(); }
 
@@ -25,10 +28,10 @@ export class NewChatFolderSelection {
 		if (this.pending || !this.form.filesAvailable || this.form.isUpdatingPinnedPath) return;
 		const request = new AbortController();
 		const executorId = this.form.executorId;
-		const context = this.form.worktreeContextKey;
+		const context = this.getContextKey();
 		const path = this.form.nonblankPath;
 		const current = () => this.#request === request && !request.signal.aborted
-			&& this.form.executorId === executorId && this.form.worktreeContextKey === context
+			&& this.form.executorId === executorId && this.getContextKey() === context
 			&& this.form.nonblankPath === path;
 		this.#request = request;
 		this.pending = true;

@@ -118,6 +118,28 @@ describe('files route', () => {
     expect(response.status).toBe(400);
     expect(calls).toBe(0);
   });
+
+  it('keeps the picker request alive beyond the HTTP idle timeout', async () => {
+    const routes = createExecutorFilesRoutes({ getChat: () => null }, {
+      files: async () => ({ chooseDirectory: async (_selection, options) => {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        options.signal.throwIfAborted();
+        return { status: 'cancelled' };
+      } }),
+      inspectProject: async () => { throw new Error('Must not inspect'); },
+    });
+    const server = Bun.serve({
+      hostname: '127.0.0.1', port: 0, idleTimeout: 1,
+      fetch: (request, owner) => routes['/api/v1/files/select-directory'].POST(request, new URL(request.url), owner),
+    });
+    try {
+      const response = await fetch(`${server.url}api/v1/files/select-directory?executorId=local`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'cancelled' });
+    } finally { await server.stop(true); }
+  });
   it('cancels project inspection before dispatching file operations', async () => {
     for (const [endpoint, method] of [
       ['list', 'GET'], ['identity', 'GET'], ['revision', 'GET'],

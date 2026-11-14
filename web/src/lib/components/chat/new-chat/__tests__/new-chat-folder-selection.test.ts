@@ -11,7 +11,7 @@ function fixture() {
 		browseStartPath: '/workspace', projectBasePath: '/workspace', filesAvailable: true,
 		isUpdatingPinnedPath: false, showBrowser: false, selectProjectPath: vi.fn(),
 	};
-	return { form, selection: new NewChatFolderSelection(() => form), browser: vi.fn() };
+	return { form, selection: new NewChatFolderSelection(() => form, () => form.worktreeContextKey), browser: vi.fn() };
 }
 
 function deferred() {

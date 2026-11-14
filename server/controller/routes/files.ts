@@ -7,6 +7,7 @@ import { FILE_REVISION_HEADER, parseCreateDirectoryRequest, parseDirectorySelect
 import type { IChatRegistry } from '../chats/store.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { withJsonBody } from '../lib/json-route.js';
+import { disableRequestIdleTimeout } from '../lib/http-route.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { resolveProjectPathFromUrl } from './project-path-resolver.js';
@@ -73,6 +74,7 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
         const selection = parseDirectorySelectionRequest(body);
         if (!selection) throw new ValidationDomainError('Invalid directory selection request');
         context?.assertCurrent?.();
+        disableRequestIdleTimeout(request, server);
         const service = await files(executorId);
         context?.assertCurrent?.();
         const result = await service.chooseDirectory(selection, { signal: request.signal, timeoutMs: 300_000 });

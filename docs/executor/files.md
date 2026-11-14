@@ -53,6 +53,9 @@ KDialog. A remote dialog appears on the executor's desktop. SSH, CI and hosts
 without a desktop return `unsupported`; helper failures remain errors. This
 browser interaction is not part of the CLI forwarding allowlist. Protocol revision
 44 requires matching controller and worker builds; stored settings do not migrate.
+The picker HTTP route disables the socket's ordinary idle timeout while the
+executor's five-minute deadline remains in force, so waiting for a user does not
+close the dialog early.
 
 ## Architecture And Ownership
 

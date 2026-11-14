@@ -20,7 +20,12 @@
 	const id = $props.id();
 	let chooseProjectButton = $state<HTMLButtonElement | null>(null);
 	let directoryBrowser = $state<DirectoryBrowser>();
-	const folderSelection = new NewChatFolderSelection(() => form);
+	const folderContextKey = $derived(JSON.stringify([
+		form.pathContextKey,
+		executors.get(form.executorId)?.bulk?.availability,
+	]));
+	const folderPath = $derived(form.nonblankPath);
+	const folderSelection = new NewChatFolderSelection(() => form, () => folderContextKey);
 	const worktrees = $derived(form.listedWorktrees);
 	const canLoad = $derived(
 		form.worktreesAvailable && form.gitRepoStatus === 'git' && form.validationStatus === 'valid',
@@ -40,8 +45,8 @@
 		});
 	});
 	$effect(() => {
-		form.worktreeContextKey;
-		form.nonblankPath;
+		folderContextKey;
+		folderPath;
 		return () => folderSelection.cancel();
 	});
 	onDestroy(() => {

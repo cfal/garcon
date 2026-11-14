@@ -1001,6 +1001,62 @@ describe('NewChatForm', () => {
 		expect(gitApi.getGitWorktrees).toHaveBeenCalledOnce();
 	});
 
+	async function pendingFolderSelection() {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: remote.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
+			paths: { byExecutor: { [remote.id]: { defaultPath: '/worker/project',
+				pinnedPaths: ['/worker/project', '/worker/other'], recentPaths: [] } } },
+		}));
+		let executors!: ExecutorsStore;
+		render(NewChatFormTestHost, { executorSnapshots: [localExecutor, remote],
+			onExecutors: store => { executors = store; } });
+		await screen.findByText('This folder has no Git worktrees. New chats will use this folder.');
+		const pending = deferred<Awaited<ReturnType<typeof filesApi.selectDirectory>>>();
+		vi.mocked(filesApi.selectDirectory).mockReturnValueOnce(pending.promise);
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		const signal = vi.mocked(filesApi.selectDirectory).mock.calls.at(-1)![2];
+		return { executors, remote, pending, signal };
+	}
+
+	it('keeps the native folder dialog pending across equivalent and unrelated executor snapshots', async () => {
+		const { executors, remote, pending, signal } = await pendingFolderSelection();
+		for (const snapshot of [
+			[localExecutor, { ...remote }],
+			[{ ...localExecutor, label: 'Renamed other owner' }, { ...remote, label: 'Renamed selected owner' }],
+			[localExecutor, { ...remote, executorServices: { ...remote.executorServices, git: false } }],
+		]) {
+			executors.applySnapshot(snapshot);
+			await tick();
+			expect(signal.aborted).toBe(false);
+			expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-busy')).toBe('true');
+		}
+		pending.resolve({ status: 'cancelled' });
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-busy')).toBe('false'));
+	});
+
+	it.each(['instance', 'base', 'files', 'bulk', 'path'] as const)('cancels the native folder dialog when its %s changes', async (change) => {
+		const { executors, remote, pending, signal } = await pendingFolderSelection();
+		if (change === 'path') {
+			await fireEvent.click(screen.getByRole('button', { name: 'Worker: /worker/other' }));
+		} else {
+			executors.applySnapshot([localExecutor, { ...remote,
+				...(change === 'instance' ? { instanceId: 'replacement-worker' } : {}),
+				...(change === 'base' ? { projectBasePath: '/replacement-base' } : {}),
+				...(change === 'files' ? { executorServices: { ...remote.executorServices, files: false } } : {}),
+				...(change === 'bulk' ? { bulk: { availability: 'offline' as const, lastError: null } } : {}),
+			}]);
+		}
+		await tick();
+		expect(signal.aborted).toBe(true);
+		pending.resolve({ status: 'selected', path: '/worker/stale' });
+		await tick();
+		expect(screen.queryByRole('button', { name: 'Worker: /worker/stale' })).toBeNull();
+	});
+
 	it('shows Git unavailability during bulk loss and reloads only on the selected executor', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };

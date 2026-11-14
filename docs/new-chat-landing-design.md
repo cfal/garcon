@@ -29,6 +29,9 @@ Headless executors retain Garcon's folder browser. Cancellation keeps the curren
 selection; dialog failures offer explicit browsing. No automatic retries reopen a
 dialog. The pending request is cancelled or fenced when its project, executor,
 connection generation or owning screen changes.
+Equivalent executor snapshots and unrelated Git capability updates do not cancel
+folder selection. Its stable context includes only the selected executor's path
+identity, Files readiness and bulk-lane availability.
 This change adds a typed POST `/api/v1/files/select-directory` endpoint and the
 bulk, session-scoped `files.chooseDirectory` executor operation. Protocol revision
 44 prevents mixed builds. CLI forwarding does not allow this browser interaction.
