@@ -17,6 +17,8 @@
 	import { onDestroy, untrack } from 'svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
+	import type { ComposerQuestion } from '$lib/chat/composer/composer-question.js';
+	import { setComposerQuestionPresentation } from '$lib/chat/composer/composer-question-context.js';
 
 	type OpenAutoInput = FileOpenRequest;
 
@@ -43,6 +45,7 @@
 		chatTitleUpdate?: { chatId: string; title: string };
 		selectedChatId?: string;
 		removableChatId?: string;
+		dockedQuestion?: ComposerQuestion | null;
 	}
 
 	let {
@@ -68,7 +71,9 @@
 		chatTitleUpdate,
 		selectedChatId = 'chat-1',
 		removableChatId,
+		dockedQuestion = null,
 	}: Props = $props();
+	setComposerQuestionPresentation({ get question() { return dockedQuestion; } });
 	const executorStore = setExecutorsTestContext(
 		untrack(() => executors ?? [{ ...localExecutor, projectBasePath }]),
 	);

@@ -5,6 +5,8 @@ import type {
 import type { QueueEntry } from '$lib/types/chat.js';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { GitRefSortKey } from '$lib/api/git.js';
+import type { ResponseChoiceStatus } from '$lib/chat/conversation/response-choice-controller.svelte.js';
+import type { ResponseChoiceAnswer } from '$lib/chat/composer/response-choices.js';
 
 export class StaleConversationSurfaceError extends Error {
 	constructor(surfaceId: ChatViewSurfaceId, chatId: string) {
@@ -14,7 +16,15 @@ export class StaleConversationSurfaceError extends Error {
 }
 
 export interface ConversationPanelActions {
+	choiceStatus(key: string): ResponseChoiceStatus | undefined;
 	reload(surfaceId: ChatViewSurfaceId, chatId: string): void;
+	answerChoice(
+		surfaceId: ChatViewSurfaceId,
+		chatId: string,
+		transcriptViewId: string,
+		questionKey: string,
+		answers: readonly ResponseChoiceAnswer[],
+	): Promise<boolean>;
 	decidePermission(
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,

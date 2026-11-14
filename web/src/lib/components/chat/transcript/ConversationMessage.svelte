@@ -71,6 +71,7 @@
 	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
 	import { historicalAskUserQuestion } from '$lib/chat/transcript/ask-user-question-history.js';
+	import { getComposerQuestionPresentation, hasComposerQuestionPresentation } from '$lib/chat/composer/composer-question-context.js';
 	import type {
 		ConversationDisclosureStatePort,
 		PermissionQuestionDraft,
@@ -233,10 +234,19 @@
 		return historicalAskUserQuestion(pairedToolUse, asToolResult);
 	});
 	function ignorePermissionDecision(): void {}
+	const questionPresentation = hasComposerQuestionPresentation() ? getComposerQuestionPresentation() : undefined;
+	const dockedQuestion = $derived(questionPresentation?.question);
+	const dockedText = $derived(dockedQuestion?.kind === 'plain'
+		? dockedQuestion.sources.find(source => source.ordinal === forkUpToSeq)?.contentWithoutOptions
+		: undefined);
+	const asyncQuestionDocked = $derived(dockedQuestion?.kind === 'async' && dockedQuestion.ordinal === forkUpToSeq);
+	const permissionQuestionDocked = $derived(dockedQuestion?.kind === 'permission'
+		&& dockedQuestion.request.permissionOccurrenceId === asPermissionRequest?.permissionOccurrenceId);
 
 	const showNonAssistantHeader = $derived(Boolean(asError));
 
 	function getFormattedContent(): string {
+		if (asAssistant && dockedText !== undefined) return dockedText;
 		if (message instanceof AssistantMessage || message instanceof ErrorMessage || message.type === 'command-output') {
 			return String(message.content || '');
 		}
@@ -809,7 +819,13 @@
 					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
 						<CommandStatusRow {message} />
 					{:else if asAssistant?.questions}
-						<AsyncQuestionMessage questions={asAssistant.questions} ordinal={forkUpToSeq} />
+						{#if asyncQuestionDocked}
+							{#each asAssistant.questions.questions as prompt (prompt.id)}
+								<p class="text-sm whitespace-pre-wrap break-words">{prompt.prompt}</p>
+							{/each}
+						{:else}
+							<AsyncQuestionMessage questions={asAssistant.questions} ordinal={forkUpToSeq} />
+						{/if}
 					{:else if asAssistant || asCommandOutput}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
@@ -903,6 +919,11 @@
 					{:else if asAgentSwitch}
 						<AgentSwitchRow message={asAgentSwitch} />
 					{:else if asPermissionRequest}
+						{#if permissionQuestionDocked && dockedQuestion?.kind === 'permission'}
+							{#each dockedQuestion.request.requestedTool.questions as prompt (prompt.id)}
+								<p class="text-sm whitespace-pre-wrap break-words">{prompt.prompt}</p>
+							{/each}
+						{:else}
 						<PermissionRequestRow
 							request={asPermissionRequest}
 							terminal={permissionTerminal}
@@ -917,6 +938,7 @@
 										onPermissionDraftChange(asPermissionRequest.permissionOccurrenceId, draft)
 								: undefined}
 						/>
+						{/if}
 					{/if}
 				</div>
 			</div>

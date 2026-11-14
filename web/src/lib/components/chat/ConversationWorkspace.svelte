@@ -17,6 +17,10 @@
 	} from './conversation-panel-actions.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { recentRecallPrompts } from '$lib/chat/composer/prompt-recall';
+	import { composerQuestion, composerQuestionKey } from '$lib/chat/composer/composer-question.js';
+	import { formatResponseChoiceAnswers } from '$lib/chat/composer/response-choices.js';
+	import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
+	import { ResponseChoiceController } from '$lib/chat/conversation/response-choice-controller.svelte.js';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -374,7 +378,78 @@
 		return agent?.executionPolicy === 'conversation';
 	}
 
+	const choiceInputs = new AcceptedInputSubmissionService();
+	const choiceReplies = new ResponseChoiceController();
+	$effect(() => {
+		choiceReplies.prune(new Set(sessions.order));
+	});
 	const panelActions: ConversationPanelActions = {
+		choiceStatus(key) {
+			return choiceReplies.status(key);
+		},
+		async answerChoice(surfaceId, chatId, transcriptViewId, questionKey, answers) {
+			const panel = assertRenderedPanel(surfaceId, chatId);
+			if (sessions.selectedChatId !== chatId || !allowsConversationalActions(chatId)) return false;
+			if (panel.transcript.transcriptViewId !== transcriptViewId) return false;
+			const question = composerQuestion(
+				panel.transcript.entries,
+				conversationUi.pendingPermissionsFor(chatId),
+				{
+					chatId,
+					transcriptViewId,
+					isProcessing: sessions.isChatProcessing(chatId),
+					hasLaterMessages: panel.transcript.hasLaterMessages,
+				},
+			);
+			if (
+				question?.kind !== 'plain' ||
+				composerQuestionKey(question, chatId, transcriptViewId) !== questionKey
+			)
+				return false;
+			const answer = formatResponseChoiceAnswers(question.questions, answers);
+			if (answer === null) return false;
+			const chat = sessions.byId[chatId];
+			if (
+				!chat?.agentOwnershipEpoch ||
+				!executors.isReady(chat.executorId ?? 'local') ||
+				!rootModelCatalog.forExecutor(chat.executorId).isValidated
+			)
+				return false;
+			const target = {
+				chatId,
+				transcriptViewId,
+				expectedAgentId: chat.agentId,
+				expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch,
+				excludedResendOrdinals: [...panel.transcript.excludedResendOrdinals],
+			};
+			const enqueue = requiresQueuedSubmission({
+				isProcessing: false,
+				control: conversationUi.getExecutionControl(chatId),
+			});
+			return choiceReplies.submit(
+				composerQuestionKey(question, chatId, transcriptViewId),
+				chatId,
+				async () => {
+					if (enqueue) {
+						const result = await choiceInputs.enqueue({ ...target, content: answer }).submit();
+						if (!sessions.byId[chatId]) return true;
+						conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+					} else {
+						await choiceInputs.run({ ...target, command: answer }).submit();
+						const current = sessions.byId[chatId];
+						if (
+							current?.agentOwnershipEpoch === target.expectedAgentOwnershipEpoch &&
+							panel.transcript.transcriptViewId === transcriptViewId
+						) {
+							conversationLifecycles.forChat(chatId).beginTurn(chatId);
+						}
+					}
+					if (sessions.byId[chatId] && panel.transcript.transcriptViewId === transcriptViewId)
+						conversationPanels.clearResendExclusions(chatId);
+					return true;
+				},
+			);
+		},
 		reload(surfaceId, chatId) {
 			const panel = assertRenderedPanel(surfaceId, chatId);
 			void controller.loadPanelChat(chatId, panel.transcript, (options) =>

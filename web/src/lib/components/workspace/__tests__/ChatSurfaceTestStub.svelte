@@ -28,7 +28,12 @@
 		panelAction = `${surfaceId}:${chatId}:${action}`;
 	}
 	const panelActions = {
+		choiceStatus: () => undefined,
 		reload: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'reload'),
+		answerChoice: async (surfaceId, chatId) => {
+			recordPanelAction(surfaceId, chatId, 'answer-choice');
+			return true;
+		},
 		decidePermission: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'permission'),
 		exitPlanMode: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'plan'),
 		fork: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'fork'),
@@ -40,18 +45,21 @@
 		steerQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'steer'),
 		pauseQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'pause'),
 		resumeQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'resume'),
-		reportQueueControlError: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'queue-error'),
+		reportQueueControlError: (surfaceId, chatId) =>
+			recordPanelAction(surfaceId, chatId, 'queue-error'),
 		editQueue: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'edit-queue'),
 		moveQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'move-queue'),
 		deleteQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'delete-queue'),
 		stop: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'stop'),
 		openCommit: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'commit'),
-		chooseProjectFolder: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'project-path'),
+		chooseProjectFolder: (surfaceId, chatId) =>
+			recordPanelAction(surfaceId, chatId, 'project-path'),
 		toggleBranch: async (surfaceId, chatId) =>
 			recordPanelAction(surfaceId, chatId, 'toggle-branch'),
 		closeBranch: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'close-branch'),
 		createBranch: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'create-branch'),
-		switchBranch: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'switch-branch'),
+		switchBranch: async (surfaceId, chatId) =>
+			recordPanelAction(surfaceId, chatId, 'switch-branch'),
 		searchBranches: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'search-branch'),
 		sortBranches: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'sort-branch'),
 		closeSwitchBranchDialog: (surfaceId, chatId) =>
@@ -112,8 +120,8 @@
 	data-testid="chat-surface-stub"
 	data-navigator-open-count={navigatorOpenCount}
 	data-visible={isVisible}
-		data-interactive={isInteractive}
-		data-panel-action={panelAction}
+	data-interactive={isInteractive}
+	data-panel-action={panelAction}
 >
 	Chat surface
 	<textarea aria-label="Chat focus target" bind:value={draft}></textarea>

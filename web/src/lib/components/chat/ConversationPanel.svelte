@@ -5,6 +5,10 @@
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
 	import ComposerAvailabilityNotice from './composer/ComposerAvailabilityNotice.svelte';
+	import ComposerQuestionDock from './composer/ComposerQuestionDock.svelte';
+	import { composerQuestion, composerQuestionKey } from '$lib/chat/composer/composer-question.js';
+	import { setComposerQuestionPresentation } from '$lib/chat/composer/composer-question-context.js';
+	import { asyncQuestionDraftKey } from '$lib/chat/conversation/async-question-controller.svelte.js';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import MessageRenderFallback from './transcript/MessageRenderFallback.svelte';
 	import QueueControls from './queue/QueueControls.svelte';
@@ -105,7 +109,7 @@
 		return Boolean(chat.agentOwnershipEpoch && panel.transcript.transcriptViewId
 			&& !panel.transcript.hasLaterMessages && ordinal > lastOwnershipBoundary);
 	}
-	setAsyncQuestionPanel({
+	const asyncQuestionPanel = setAsyncQuestionPanel({
 		controller: asyncQuestions,
 		get identity() { return questionTarget; },
 		get excludedResendOrdinals() { return panel.transcript.excludedResendOrdinals; },
@@ -163,14 +167,69 @@
 		}),
 	);
 	const queueVisible = $derived((queue?.entries.length ?? 0) > 0);
+	let dismissedQuestionKey = $state('');
+	const activeQuestion = $derived(
+		composerQuestion(panel.transcript.entries, pendingPermissions, {
+			chatId,
+			transcriptViewId: panel.transcript.transcriptViewId,
+			isProcessing,
+			hasLaterMessages: panel.transcript.hasLaterMessages,
+		}),
+	);
+	const questionKey = $derived(
+		activeQuestion
+			? composerQuestionKey(activeQuestion, chatId, panel.transcript.transcriptViewId)
+			: '',
+	);
+	const choiceDeliveryStatus = $derived(
+		activeQuestion?.kind === 'plain' ? actions?.choiceStatus(questionKey) : undefined,
+	);
+	const questionVisible = $derived.by(() => {
+		if (
+			!ownsComposer ||
+			!isVisible ||
+			!activeQuestion ||
+			dismissedQuestionKey === questionKey ||
+			choiceDeliveryStatus === 'sent'
+		)
+			return false;
+		if (activeQuestion.kind !== 'async') return true;
+		return (
+			canReplyToQuestion(activeQuestion.ordinal) &&
+			(activeQuestion.message.questions?.questions.some((prompt) => {
+				const draft = asyncQuestions.get(
+					asyncQuestionDraftKey(questionTarget, activeQuestion.ordinal, prompt.id),
+				);
+				return (
+					!draft?.dismissed &&
+					draft?.status !== 'sent' &&
+					!recordedQuestionAnswers.has(JSON.stringify([activeQuestion.ordinal, prompt.id]))
+				);
+			}) ??
+				false)
+		);
+	});
+	const answerEnabled = $derived(
+		Boolean(
+			actions &&
+			isCommandOwner &&
+			isVisible &&
+			executors.isReady(executorId) &&
+			modelCatalog.isValidated,
+		),
+	);
+	setComposerQuestionPresentation({
+		get question() { return questionVisible ? activeQuestion : null; },
+	});
+	const inputDockVisible = $derived(queueVisible || questionVisible);
 	const capSpace = $derived(
-		composerCapReservation(reserveStatusCap, queueVisible, availabilityNotice !== null),
+		composerCapReservation(reserveStatusCap, inputDockVisible, availabilityNotice !== null),
 	);
 	const dockShellClass = $derived(
 		cn(CHAT_DOCK_SHELL_BASE_CLASS, CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth]),
 	);
 	const queueShellClass = $derived.by(() => {
-		if (!queueVisible) return '';
+		if (!inputDockVisible) return '';
 		return cn(
 			'flex min-h-0 flex-col',
 			CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth],
@@ -377,6 +436,28 @@
 
 	<div bind:this={queueControlsContainer} class={queueShellClass}>
 		<div class={cn(dockFrameClass, 'flex min-h-0 flex-col')}>
+			{#if questionVisible && activeQuestion}
+				<ComposerQuestionDock
+					question={activeQuestion}
+					identity={questionKey}
+					asyncPanel={asyncQuestionPanel}
+					deliveryStatus={choiceDeliveryStatus}
+					canAnswer={answerEnabled}
+					onDecision={(permissionOccurrenceId, decision) =>
+						actions?.decidePermission(surfaceId, chatId, permissionOccurrenceId, decision)}
+					onSubmit={(answers) =>
+						actions?.answerChoice(
+							surfaceId,
+							chatId,
+							panel.transcript.transcriptViewId,
+							questionKey,
+							answers,
+						) ?? Promise.resolve(false)}
+					onDismiss={() => {
+						dismissedQuestionKey = questionKey;
+					}}
+				/>
+			{/if}
 			<QueueControls
 				bind:this={queuePresentation}
 				{chatId}

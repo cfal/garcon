@@ -2,7 +2,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
-import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/chats.js';
+import {
+	createQueuedInput,
+	getChatExecutionControl,
+	getChatMessages,
+	runChat,
+	stopChat,
+} from '$lib/api/chats.js';
 import { getGitRefs, type GitQuickSummaryReady } from '$lib/api/git.js';
 import { ToolResultMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
@@ -15,6 +21,12 @@ import { ConversationSessionController } from '$lib/chat/conversation/conversati
 import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+import type {
+	AgentTurnCommandResponse,
+	QueueEntryCommandResponse,
+} from '$shared/chat-command-contracts';
+import { emptyChatQueueState, type ChatQueueState } from '$shared/queue-state';
+import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 
 vi.mock('$lib/notifications/completion-sound.js', () => ({ playCompletionSound: vi.fn() }));
 
@@ -96,6 +108,17 @@ const mockGetChatMessages = vi.mocked(getChatMessages);
 const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockStopChat = vi.mocked(stopChat);
 const mockGetGitRefs = vi.mocked(getGitRefs);
+const mockRunChat = vi.mocked(runChat);
+const mockCreateQueuedInput = vi.mocked(createQueuedInput);
+const ACCEPTED_CHOICE = {
+	success: true,
+	commandType: 'run',
+	clientRequestId: 'synthetic-choice-command',
+	chatId: 'chat-1',
+	turnId: 'synthetic-choice-turn',
+	status: 'accepted',
+	acceptedAt: '2026-01-01T00:00:00.000Z',
+} satisfies AgentTurnCommandResponse;
 
 describe('ConversationWorkspace Escape abort handling', () => {
 	it.each(['conversation', 'literal', null] as const)('gates sibling prose and completion sounds with %s policy', async (executionPolicy) => {
@@ -124,6 +147,20 @@ describe('ConversationWorkspace Escape abort handling', () => {
 	});
 	beforeEach(() => {
 		reconnectHarness.onBackgroundMessages = null;
+		mockRunChat.mockReset();
+		mockRunChat.mockResolvedValue(ACCEPTED_CHOICE);
+		mockCreateQueuedInput.mockReset();
+		mockCreateQueuedInput.mockResolvedValue({
+			...ACCEPTED_CHOICE,
+			commandType: 'queue-entry-create',
+			entryId: 'synthetic-choice-entry',
+			control: {
+				serverInstanceId: 'server-instance-test',
+				queue: emptyChatQueueState(),
+				version: 101,
+				updatedAt: null,
+			},
+		} satisfies QueueEntryCommandResponse);
 		mockGetChatMessages.mockResolvedValue({
 			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
@@ -175,6 +212,184 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		});
 		mockGetGitRefs.mockReset();
 		mockGetGitRefs.mockResolvedValue({ refs: [] });
+	});
+
+	it('sends a slash-prefixed choice literally without entering the composer command dispatcher or changing its draft', async () => {
+		const submit = vi.spyOn(ConversationSessionController.prototype, 'submitForChat');
+		try {
+			const { component } = render(ConversationWorkspaceEscapeHost);
+			await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+			const key = await component.seedChoice();
+			const attachment = new File(['synthetic attachment'], 'synthetic.txt', {
+				type: 'text/plain',
+			});
+			component.setChoiceDraft('Retained composer text', [attachment]);
+			expect(await component.answerChoice('/clear')).toBe(true);
+			expect(mockRunChat).toHaveBeenCalledOnce();
+			expect(mockRunChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					chatId: 'chat-1',
+					transcriptViewId: 'gen-choices',
+					expectedAgentId: 'claude',
+					expectedAgentOwnershipEpoch: 'epoch-1',
+					command: '/clear',
+				}),
+			);
+			expect(submit).not.toHaveBeenCalled();
+			expect(component.choiceDraft()).toMatchObject({
+				text: 'Retained composer text',
+				attachments: [attachment],
+			});
+			expect(component.choiceStatus(key)).toBe('sent');
+		} finally {
+			submit.mockRestore();
+		}
+	});
+
+	it('sends all selected answers from a multi-question response through the same admission path', async () => {
+		const { component } = render(ConversationWorkspaceEscapeHost);
+		await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+		await component.seedChoice('Which features do you want? Select all that apply.\n- Outline\n- Diagram\n- Example\n\nWhich format do you prefer?\n- Short\n- Detailed');
+		expect(await component.answerChoices([
+			{ questionId: '1:question-1', selectedOptionIds: ['option-1', 'option-2'] },
+			{ questionId: '1:question-2', selectedOptionIds: ['option-1'] },
+		])).toBe(true);
+		expect(mockRunChat).toHaveBeenCalledOnce();
+		expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({
+			command: 'Which features do you want? Select all that apply.\n- Outline\n- Diagram\n\nWhich format do you prefer?\nShort',
+		}));
+	});
+
+	it('rejects incomplete or invalid multi-question answers before dispatch', async () => {
+		const { component } = render(ConversationWorkspaceEscapeHost);
+		await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+		await component.seedChoice('Which features do you want? Select all that apply.\n- Outline\n- Diagram\n\nWhich format do you prefer?\n- Short\n- Detailed');
+		expect(await component.answerChoices([{ questionId: '1:question-1', selectedOptionIds: ['option-1'] }])).toBe(false);
+		expect(await component.answerChoices([
+			{ questionId: '1:question-1', selectedOptionIds: ['missing-option'] },
+			{ questionId: '1:question-2', selectedOptionIds: ['option-1'] },
+		])).toBe(false);
+		expect(await component.answerChoices([
+			{ questionId: '1:question-1', selectedOptionIds: ['option-1'] },
+			{ questionId: '1:question-2', selectedOptionIds: ['option-1', 'option-2'] },
+		])).toBe(false);
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
+	it('keeps a pending answer attached to its captured view and ownership epoch', async () => {
+		let resolveRun!: (response: AgentTurnCommandResponse) => void;
+		mockRunChat.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const { component } = render(ConversationWorkspaceEscapeHost);
+		await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+		const key = await component.seedChoice();
+		const pending = component.answerChoice('/clear');
+		await waitFor(() => expect(mockRunChat).toHaveBeenCalledOnce());
+		expect(component.choiceStatus(key)).toBe('sending');
+		component.changeChoiceTarget('replacement-view', 'replacement-epoch');
+		resolveRun(ACCEPTED_CHOICE);
+		expect(await pending).toBe(true);
+		expect(mockRunChat.mock.calls[0][0]).toMatchObject({
+			transcriptViewId: 'gen-choices',
+			expectedAgentOwnershipEpoch: 'epoch-1',
+			command: '/clear',
+		});
+		expect(mockRunChat).toHaveBeenCalledOnce();
+		expect(await component.answerChoice('/clear')).toBe(false);
+	});
+
+	it.each(['nonempty', 'paused'] as const)(
+		'queues a choice behind a %s queue without changing the composer draft',
+		async (kind) => {
+			const { component } = render(ConversationWorkspaceEscapeHost);
+			await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+			await component.seedChoice();
+			const queue: ChatQueueState = emptyChatQueueState();
+			if (kind === 'paused')
+				queue.pause = {
+					id: 'synthetic-pause',
+					kind: 'manual',
+					pausedAt: '2026-01-01T00:00:00.000Z',
+				};
+			else
+				queue.entries.push({
+					id: 'existing-entry',
+					content: 'Existing queued input',
+					kind: 'turn',
+					attachments: [],
+					revision: 0,
+					createdAt: '2026-01-01T00:00:00.000Z',
+					updatedAt: '2026-01-01T00:00:00.000Z',
+				});
+			component.setChoiceQueue(queue);
+			component.setChoiceDraft('Retained queued draft', []);
+			expect(await component.answerChoice('/clear')).toBe(true);
+			expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+				expect.objectContaining({
+					chatId: 'chat-1',
+					transcriptViewId: 'gen-choices',
+					expectedAgentOwnershipEpoch: 'epoch-1',
+					content: '/clear',
+				}),
+			);
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(component.choiceDraft().text).toBe('Retained queued draft');
+		},
+	);
+
+	it('does not recreate queue controls or resend state after the originating chat is deleted', async () => {
+		let resolveQueue!: (response: QueueEntryCommandResponse) => void;
+		mockCreateQueuedInput.mockImplementationOnce(() => new Promise(resolve => { resolveQueue = resolve; }));
+		const { component } = render(ConversationWorkspaceEscapeHost);
+		await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+		await component.seedChoice();
+		component.setChoiceQueue({ ...emptyChatQueueState(), pause: {
+			id: 'synthetic-pause', kind: 'manual', pausedAt: '2026-01-01T00:00:00.000Z',
+		} });
+		const targets = component.choiceCleanupTargets();
+		const publishControl = vi.spyOn(targets.conversationUi, 'setExecutionControlFromLiveUpdate');
+		const clearResend = vi.spyOn(targets.transcript, 'clearResendExclusions');
+		const pending = component.answerChoice('/clear');
+		await waitFor(() => expect(mockCreateQueuedInput).toHaveBeenCalledOnce());
+		component.deleteChoiceChat();
+		resolveQueue({
+			...ACCEPTED_CHOICE,
+			entryId: 'synthetic-choice-entry',
+			control: { serverInstanceId: 'server-instance-test', queue: emptyChatQueueState(), version: 101, updatedAt: null },
+		});
+		expect(await pending).toBe(true);
+		expect(publishControl).not.toHaveBeenCalled();
+		expect(clearResend).not.toHaveBeenCalled();
+	});
+
+	it('guards repeat clicks while sending and after uncertain delivery', async () => {
+		let rejectRun!: (reason: Error) => void;
+		mockRunChat.mockImplementationOnce(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectRun = reject;
+				}),
+		);
+		mockRunChat.mockRejectedValueOnce(new Error('Synthetic second lost reply'));
+		const { component } = render(ConversationWorkspaceEscapeHost);
+		await waitFor(() => expect(mockGetChatMessages).toHaveBeenCalled());
+		const key = await component.seedChoice();
+		const pending = component.answerChoice('/clear');
+		await waitFor(() => expect(mockRunChat).toHaveBeenCalledOnce());
+		expect(await component.answerChoice('/clear')).toBe(false);
+		expect(mockRunChat).toHaveBeenCalledOnce();
+		const uncertain = expect(pending).rejects.toBeInstanceOf(CommandOutcomeUnknownError);
+		rejectRun(new Error('Synthetic first lost reply'));
+		await uncertain;
+		expect(mockRunChat).toHaveBeenCalledTimes(2);
+		expect(mockRunChat.mock.calls[1][0]).toEqual(mockRunChat.mock.calls[0][0]);
+		expect(component.choiceStatus(key)).toBe('unknown');
+		expect(await component.answerChoice('/clear')).toBe(false);
+		expect(mockRunChat).toHaveBeenCalledTimes(2);
 	});
 
 	it('patches activity for a tool-only background reconnect batch', () => {
