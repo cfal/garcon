@@ -740,6 +740,7 @@ describe('NewChatFormState', () => {
 		await formState.loadWorktrees();
 		formState.selectListedWorktree(item.path);
 		expect(formState.projectPath).toBe(item.path);
+		expect(formState.selectedProjectPath).toBe('/workspace/main');
 		expect(formState.firstMessage).toBe('Keep this unsent draft');
 		expect(formState.listedWorktrees).toEqual([item]);
 		expect(formState.validationStatus).toBe('checking');

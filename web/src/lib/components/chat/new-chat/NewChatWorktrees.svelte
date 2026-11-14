@@ -4,7 +4,6 @@
 	import { getExecutors } from '$lib/context';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import DirectoryBrowser from '$lib/components/project-paths/DirectoryBrowser.svelte';
-	import ProjectPinnedPathToggleButton from '$lib/components/project-paths/ProjectPinnedPathToggleButton.svelte';
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -69,13 +68,6 @@
 			>
 				<FolderOpen class="size-4" aria-hidden="true" />{m.chat_new_chat_choose_project()}
 			</button>
-			<ProjectPinnedPathToggleButton
-				isPinned={form.isPinnedPath}
-				disabled={!form.nonblankPath || form.isUpdatingPinnedPath}
-				loading={form.isUpdatingPinnedPath}
-				onToggle={() => form.togglePinnedPath()}
-				class="shrink-0 rounded-md border border-border px-3 text-muted-foreground hover:bg-accent"
-			/>
 			{@render children?.()}
 		</div>
 		{#if form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath}
@@ -113,13 +105,6 @@
 						aria-hidden="true"
 					/>
 				</button>
-				<button
-					type="button"
-					onclick={() => form.openWorktreeModal()}
-					disabled={form.isUpdatingPinnedPath}
-					class="text-xs text-interactive-accent hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-					>{m.chat_new_chat_select_different_worktree()}</button
-				>
 			</div>
 		{/if}
 	</div>

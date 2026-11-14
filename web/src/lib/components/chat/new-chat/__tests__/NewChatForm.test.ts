@@ -371,6 +371,7 @@ describe('NewChatForm', () => {
 			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
 		});
 		expect(await screen.findByText('No preambles will be applied')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Clear preambles' })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
 		await waitFor(() => expect(loadPreambles).toHaveBeenCalledOnce());
@@ -668,6 +669,7 @@ describe('NewChatForm', () => {
 			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
 		});
 		expect(await screen.findByText('No preambles will be applied')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Clear preambles' })).toBeNull();
 	});
 
 	it('retries a failed automatic preamble preview without opening the picker', async () => {
@@ -1083,7 +1085,7 @@ describe('NewChatForm', () => {
 		expect(prompt.value).toBe('Keep this draft during retry');
 	});
 
-	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
+	it('shows worktrees inline without a redundant picker button', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({
@@ -1110,17 +1112,9 @@ describe('NewChatForm', () => {
 
 		render(NewChatFormTestHost);
 
-		const openButton = await screen.findByRole('button', { name: 'Select a different worktree' });
-		await fireEvent.click(openButton);
-
-		const worktreeDialog = await screen.findByRole('dialog', { name: 'Select worktree' });
-		expect(worktreeDialog).toBeTruthy();
-		expect(worktreeDialog.textContent).toContain('New worktree');
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-		await waitFor(() => {
-			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
-		});
+		expect(await screen.findByRole('radio', { name: /main/ })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Select a different worktree' })).toBeNull();
+		expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
 	});
 
 	it('opens the model selector at recents when multiple recent targets exist', async () => {
@@ -2094,15 +2088,17 @@ describe('New Chat saved projects', () => {
 		await waitFor(() => expect(document.activeElement).toBe(screen.getByPlaceholderText('How can I help you today?')));
 	});
 
-	it('keeps empty-state guidance available when the final saved project is removed', async () => {
+	it('keeps the selected folder pinnable when its final saved pin is removed', async () => {
 		const snapshot = makeSnapshot({ paths: { pinnedProjectPaths: ['/local'] } });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(snapshot);
 		let settings!: RemoteSettingsStore;
 		render(NewChatFormTestHost, { props: { onRemoteSettings: store => { settings = store; } } });
-		await screen.findByRole('button', { name: '/local' });
+		const selected = await screen.findByRole('button', { name: '/local' });
+		await fireEvent.click(selected);
 		settings.applySnapshot({ ...snapshot, paths: { ...snapshot.paths, pinnedProjectPaths: [] } });
-		await screen.findByText('Pin a project path to bookmark it here');
-		expect(screen.queryByRole('button', { name: '/local' })).toBeNull();
+		await waitFor(() => expect(selected.getAttribute('aria-pressed')).toBe('true'));
+		expect(screen.getByRole('button', { name: '/local' })).toBe(selected);
+		expect(selected.parentElement?.querySelector('button[aria-label="Pin project path"]')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Choose folder' })).toBeTruthy();
 	});
 });

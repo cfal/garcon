@@ -59,7 +59,6 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import NewChatWorktrees from './NewChatWorktrees.svelte';
 	import NewChatProjects from './NewChatProjects.svelte';
-	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import FileVideo from '@lucide/svelte/icons/file-video';
@@ -880,23 +879,6 @@
 		{/if}
 	</div>
 </div>
-
-{#if form.worktreeModalOpen}
-	<GitWorktreePickerModal
-		worktrees={form.worktreeItems}
-		isLoading={form.isLoadingWorktrees}
-		isCreating={form.isCreatingWorktree}
-		errorMessage={form.worktreeError}
-		onSelect={(path) => form.selectWorktree(path)}
-		onCreate={async (path, branch, baseRef) => {
-			await form.createWorktree(path, branch, baseRef);
-		}}
-		onRefresh={() => {
-			void form.loadWorktrees();
-		}}
-		onClose={() => form.closeWorktreeModal()}
-	/>
-{/if}
 
 {#if composerEditor.open}
 	{#snippet expandedEditorHeaderStatus()}

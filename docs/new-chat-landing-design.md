@@ -5,6 +5,8 @@ existing composer. Compact project cards use one column within a narrow content
 area. Each card shows its folder name and a truncated path, with full paths on hover and
 executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
+Each card has its own pin toggle on the right. Selection uses highlighting without
+a checkmark, and pinning a card preserves the selected project and prompt.
 
 Project cards reuse the existing executor-qualified pinned and recent paths. Pinned
 folders appear first; recent folders retain their recorded order. Duplicate drive-letter
@@ -15,18 +17,20 @@ project on its owning executor, including the primary checkout. Worktrees use sm
 flat rows with titles on the left and muted, root-abbreviated paths such as
 `…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
 Selecting a row changes the new chat's target without clearing its prompt.
-A Choose folder button retains executor-owned folder browsing, and pinning remains available.
+A Choose folder button retains executor-owned folder browsing. Worktree selection
+uses the inline list without a separate picker button.
 Ordinary folders remain usable when they are not Git repositories.
-Browser folder handles do not expose the absolute executor path required to start a
-chat. Native Explorer/Finder selection requires a separate desktop integration that
-can establish whether the selected folder belongs to the chosen executor.
+Native Explorer/Finder selection remains requested. Its integration must return a
+full path belonging to the selected executor; Garcon's folder browser remains the
+current implementation while the native path connection is being designed.
 This change does not introduce environment presets or change stored settings,
 execution admission, provider configuration, HTTP or WebSocket contracts.
 
 The existing NewChatDialog remains the owner of open/close, focus containment,
 ticket prefills, draft creation and navigation. Its presentation fills the
 available viewport and returns to the previous workspace on Close or Escape.
-The form, prompt editor, model selector and worktree management dialog retain their owners.
+The form, prompt editor and model selector retain their owners. The preamble summary
+uses an add button to open selection and only shows Clear when a preamble will apply.
 The landing page scrolls within the keyboard-adjusted viewport on mobile.
 
 Worktree discovery uses the existing executor-qualified Git API. Loading, empty,

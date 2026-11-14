@@ -24,7 +24,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await runFixtureGit(project, 'worktree', 'add', '-b', 'feature/design-preview', linked);
       await client.put('/api/v1/app/settings', { paths: {
         ...(client.executorId === 'local'
-          ? { recentProjectPaths: [project], pinnedProjectPaths: [project, otherProject] }
+          ? { recentProjectPaths: [project, otherProject], pinnedProjectPaths: [project, otherProject] }
           : { byExecutor: { [client.executorId]: { defaultPath: project, pinnedPaths: [project, otherProject] } } }),
       } });
       await page.addInitScript(seedLocalSettings, { composerStatusBarGitProjects: false, composerStatusBarNonGitProjects: false });
@@ -44,8 +44,21 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const worktrees = dialog.getByRole('region', { name: 'Worktrees', exact: true });
       await browserExpect(worktrees.getByText('feature/design-preview', { exact: true })).toBeVisible();
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+      await browserExpect(worktrees.getByRole('button', { name: /Pin project path/ })).toHaveCount(0);
+      await browserExpect(worktrees.getByRole('button', { name: 'Select a different worktree', exact: true })).toHaveCount(0);
+      await browserExpect(dialog.getByText('No preambles will be applied', { exact: true })).toBeVisible();
+      await browserExpect(dialog.getByRole('button', { name: 'Clear preambles', exact: true })).toHaveCount(0);
+      phase('toggling a card pin without changing the selected project or prompt');
+      const otherProjectSelect = projects.getByRole('button', { name: client.executorId === 'local' ? otherProject : `Integration worker: ${otherProject}`, exact: true });
+      const pinCard = (client.executorId === 'local' ? otherProjectSelect : projectCard).locator('..');
+      await pinCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
+      await browserExpect(pinCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      await pinCard.getByRole('button', { name: 'Pin project path', exact: true }).click();
+      await browserExpect(pinCard.getByRole('button', { name: 'Unpin project path', exact: true })).toBeEnabled();
       phase('switching projects without losing the prompt');
-      await projects.getByRole('button', { name: client.executorId === 'local' ? otherProject : `Integration worker: ${otherProject}`, exact: true }).click();
+      await otherProjectSelect.click();
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
       await browserExpect(worktrees.getByRole('radio', { name: /feature\/design-preview/ })).toHaveCount(0);
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
@@ -61,6 +74,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
       await page.keyboard.press('ArrowDown');
       await browserExpect(selectedWorktree).toBeChecked();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
@@ -72,7 +86,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await worktrees.scrollIntoViewIfNeeded();
         expect(await worktrees.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        const cards = await projects.getByRole('button').evaluateAll(elements => elements.map(element => {
+        const cards = await projects.locator('[data-slot="new-chat-project-card"]').evaluateAll(elements => elements.map(element => {
           const bounds = element.getBoundingClientRect();
           return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
         }));

@@ -78,6 +78,7 @@ export class NewChatFormState {
 
 	// Path
 	projectPath = $state('');
+	#selectedProjectPath = $state<string | null>(null);
 	#pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
@@ -194,6 +195,7 @@ export class NewChatFormState {
 		if (executorId === this.executorId) return;
 		this.#executorModelCandidate ??= this.resolvedModelSelection;
 		this.executorId = executorId;
+		this.#selectedProjectPath = null;
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
@@ -221,6 +223,10 @@ export class NewChatFormState {
 
 	get nonblankPath(): string {
 		return this.projectPath.trim() ? this.projectPath : '';
+	}
+
+	get selectedProjectPath(): string {
+		return this.#selectedProjectPath ?? this.nonblankPath;
 	}
 
 	get isPinnedPath(): boolean {
@@ -681,8 +687,10 @@ export class NewChatFormState {
 
 	selectWorktree(worktreePath: string): void {
 		if (!this.worktreesAvailable) return;
+		const projectPath = this.selectedProjectPath;
 		this.#cancelWorktreeLoad();
 		this.selectProjectPath(worktreePath);
+		this.#selectedProjectPath = projectPath;
 		this.worktreeModalOpen = false;
 	}
 
@@ -728,6 +736,7 @@ export class NewChatFormState {
 
 	selectProjectPath(path: string): void {
 		this.projectPath = path;
+		this.#selectedProjectPath = path;
 		this.clearError();
 		this.#pathValidation.validateSelectedPath();
 	}
@@ -875,6 +884,7 @@ export class NewChatFormState {
 			modelProtocol: seed.modelProtocol,
 		});
 		this.projectPath = seed.projectPath;
+		this.#selectedProjectPath = null;
 		this.restoreExecutionModes(seed.permissionMode, seed.thinkingMode);
 		this.replaceAgentSettingsById(seed.agentSettingsById);
 		this.chatTags = [...seed.tags];
@@ -885,6 +895,7 @@ export class NewChatFormState {
 
 	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
 	reseed(prefill: string, prospectiveChatId?: ChatId): void {
+		this.#selectedProjectPath = null;
 		this.#pathCompletion.reset();
 		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
