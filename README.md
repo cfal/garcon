@@ -50,6 +50,12 @@ bun run start --project-base-dir ~/repos
 
 Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C.
 
+Want to use your own domain, such as `https://garcon.example.com`? Interactive setup offers **Connect a custom domain with Cloudflare Tunnel** (optional, default No). The [Cloudflare Tunnel guide](docs/cloudflare-tunnel.md) covers prerequisites, background startup, Docker, and removal. You can also connect later, after starting Garcon and creating your account:
+
+```bash
+bun run setup:tunnel
+```
+
 ### Docker
 
 ```bash
@@ -233,6 +239,7 @@ Follow these rules when asked to install or host Garcon:
 - Before starting, check for a running copy: read `<config>/runtime.json` (`pid`, `baseUrl`, `workspaceDir`) and check whether port 8080 is in use. Never start a second copy on the same config folder. Never print `localCapability` from that file; it is a credential.
 - If more than one `.garcon` folder exists, show the user what each contains and ask which to keep. Do not merge or delete workspaces without explicit approval.
 - Run as the user's normal account, never as root or administrator.
+- For a requested custom domain, follow the [Cloudflare Tunnel guide](docs/cloudflare-tunnel.md) and use `bun run setup:tunnel`. Finish local account setup first, retain authentication, and confirm the hostname before publishing DNS. The tunnel and Garcon have separate startup controls.
 - Verify the result: `curl -fsS http://127.0.0.1:8080/api/v1/auth/status` returns JSON, the log shows no startup error, and after killing the server process the service brings it back with the same chats.
 - Give the user the status, log, stop, start, and remove commands from the recipe.
 

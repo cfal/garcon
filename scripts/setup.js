@@ -1,5 +1,6 @@
 import { lstat, rm } from "node:fs/promises";
 import path from "node:path";
+import { offerTunnelSetup } from './setup-tunnel.js';
 
 const repositoryRoot = path.resolve(import.meta.dir, "..");
 const integrationTestsRoot = path.join(repositoryRoot, "integration-tests");
@@ -94,3 +95,5 @@ const installRoots = [
 for (const installRoot of installRoots) {
   await installDependencies(installRoot);
 }
+
+await offerTunnelSetup();
