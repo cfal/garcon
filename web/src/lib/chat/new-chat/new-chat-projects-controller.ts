@@ -2,7 +2,7 @@ import type { NewChatFormState } from './new-chat-form-state.svelte';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { executorPinnedPathGroups } from '$lib/project-paths/executor-pinned-paths';
-
+import { projectPathKey } from '$lib/project-paths/project-path-key';
 type ProjectForm = Pick<
 	NewChatFormState,
 	| 'executorId'
@@ -13,10 +13,6 @@ type ProjectForm = Pick<
 	| 'showBrowser'
 	| 'selectProjectPath'
 >;
-
-function projectPathKey(path: string): string {
-	return /^[a-z]:[/\\]/i.test(path) ? path.replaceAll('\\', '/') : path;
-}
 
 export class NewChatProjectsController {
 	constructor(

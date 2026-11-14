@@ -308,7 +308,6 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
-
 	it('selects the saved pin with its owner while preserving prompt and attachments', () => {
 		mockRemoteSettings.snapshot = makeSnapshot({
 			paths: {
@@ -667,8 +666,9 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/local/draft');
 	});
 
-	it('ignores a worktree load superseded after the modal closes', async () => {
+	it('reloads the inline list after closing a pending modal and ignores superseded results', async () => {
 		const first = deferred<{ worktrees: GitWorktreeItem[] }>();
+		const inline = deferred<{ worktrees: GitWorktreeItem[] }>();
 		const second = deferred<{ worktrees: GitWorktreeItem[] }>();
 		let firstSignal: AbortSignal | null | undefined;
 		vi.mocked(gitApi.getGitWorktrees)
@@ -676,13 +676,15 @@ describe('NewChatFormState', () => {
 				firstSignal = options?.signal;
 				return first.promise;
 			})
+			.mockImplementationOnce(() => inline.promise)
 			.mockImplementationOnce(() => second.promise);
 
 		formState.projectPath = '/workspace/repo-a';
 		const firstLoad = formState.loadWorktrees();
 		formState.closeWorktreeModal();
 		expect(firstSignal?.aborted).toBe(true);
-		expect(formState.isLoadingWorktrees).toBe(false);
+		expect(formState.isLoadingWorktrees).toBe(true);
+		expect(gitApi.getGitWorktrees).toHaveBeenCalledTimes(2);
 
 		formState.projectPath = '/workspace/repo-b';
 		const secondLoad = formState.loadWorktrees();
@@ -715,9 +717,96 @@ describe('NewChatFormState', () => {
 			],
 		});
 		await firstLoad;
+		inline.resolve({ worktrees: [] });
+		await inline.promise;
 
 		expect(formState.worktreeItems.map((worktree) => worktree.path)).toEqual(['/workspace/repo-b']);
 		expect(formState.isLoadingWorktrees).toBe(false);
+	});
+
+	it('retains the known project inventory and draft when selecting an existing worktree', async () => {
+		const item = {
+			name: 'feature',
+			path: '/workspace/feature',
+			branch: 'feature',
+			isCurrent: false,
+			isMain: false,
+			isPathMissing: false,
+			lastModifiedAt: null,
+		} satisfies GitWorktreeItem;
+		formState.projectPath = '/workspace/main';
+		formState.firstMessage = 'Keep this unsent draft';
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({ worktrees: [item] });
+		await formState.loadWorktrees();
+		formState.selectListedWorktree(item.path);
+		expect(formState.projectPath).toBe(item.path);
+		expect(formState.firstMessage).toBe('Keep this unsent draft');
+		expect(formState.listedWorktrees).toEqual([item]);
+		expect(formState.validationStatus).toBe('checking');
+		expect(gitApi.getGitWorktrees).toHaveBeenCalledOnce();
+	});
+
+	it('rejects missing and unlisted rows, and inventories from another project or executor generation', async () => {
+		const item = {
+			name: 'feature',
+			path: '/workspace/feature',
+			branch: 'feature',
+			isCurrent: false,
+			isMain: false,
+			isPathMissing: false,
+			lastModifiedAt: null,
+		} satisfies GitWorktreeItem;
+		formState.projectPath = '/workspace/main';
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			worktrees: [item, { ...item, path: '/workspace/missing', isPathMissing: true }],
+		});
+		await formState.loadWorktrees();
+		formState.selectListedWorktree('/workspace/missing');
+		formState.selectListedWorktree('/workspace/not-listed');
+		expect(formState.projectPath).toBe('/workspace/main');
+		formState.projectPath = '/workspace/other';
+		expect(formState.listedWorktrees).toEqual([]);
+		formState.selectListedWorktree(item.path);
+		expect(formState.projectPath).toBe('/workspace/other');
+		formState.projectPath = '/workspace/main';
+		executors.applySnapshot([{ ...localExecutor, instanceId: 'replacement' }]);
+		expect(formState.listedWorktrees).toEqual([]);
+		formState.selectListedWorktree(item.path);
+		expect(formState.projectPath).toBe('/workspace/main');
+	});
+
+	it('does not publish a late worktree list after the selected project changes', async () => {
+		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		formState.projectPath = '/workspace/main';
+		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
+		const loading = formState.loadWorktrees();
+		formState.projectPath = '/workspace/other';
+		listing.resolve({
+			worktrees: [
+				{
+					name: 'old',
+					path: '/workspace/old',
+					branch: 'old',
+					isCurrent: false,
+					isMain: false,
+					isPathMissing: false,
+					lastModifiedAt: null,
+				},
+			],
+		});
+		await loading;
+		expect(formState.listedWorktrees).toEqual([]);
+		formState.selectListedWorktree('/workspace/old');
+		expect(formState.projectPath).toBe('/workspace/other');
+	});
+
+	it.each([
+		['C:\\repo\\feature ', 'C:/repo/feature ', true],
+		['C:\\repo\\feature ', 'C:/repo/feature', false],
+		['/repo/feature\\name', '/repo/feature/name', false],
+	])('matches only drive-letter slash aliases: %s and %s', (selected, listed, matches) => {
+		formState.projectPath = selected;
+		expect(formState.isSelectedWorktree(listed)).toBe(matches);
 	});
 
 	it('loads startup defaults from server settings', async () => {

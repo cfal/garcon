@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import type { Page, Request } from 'playwright';
 import {
   parseReorderChatRequest,
@@ -20,6 +21,7 @@ import {
   type ChromiumFixture as BaseChromiumFixture,
 } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { saveNewChatProject } from '../../support/new-chat-project.js';
 
 const CHAT_ROW_SELECTOR = '[data-sidebar-virtual-row][data-sidebar-virtual-list-row="normal"]';
 
@@ -221,6 +223,7 @@ async function startNewOpenAiChat(fixture: ChromiumFixture): Promise<string> {
   );
   const eventCursor = fixture.integration.client.markEvents();
 
+  await saveNewChatProject(fixture.integration.client, fixture.integration.dirs.project);
   await fixture.page.getByRole('button', { name: 'New Chat', exact: true }).click();
   const dialog = fixture.page.getByRole('dialog');
   await dialog.waitFor({ state: 'visible' });
@@ -240,10 +243,10 @@ async function startNewOpenAiChat(fixture: ChromiumFixture): Promise<string> {
     await fixture.page.getByRole('button', { name: 'Integration Echo', exact: true }).click();
   }
 
-  const projectPathInput = dialog.getByRole('textbox', { name: 'Project Path' });
-  if ((await projectPathInput.inputValue()) !== fixture.integration.dirs.project) {
-    await projectPathInput.fill(fixture.integration.dirs.project);
-  }
+  const projectCard = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true })
+    .getByRole('button', { name: fixture.integration.dirs.project, exact: true });
+  await projectCard.click();
+  await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByPlaceholder('How can I help you today?').fill(content);
 
   await fixture.page.waitForFunction(

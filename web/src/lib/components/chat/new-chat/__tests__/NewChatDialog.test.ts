@@ -154,7 +154,7 @@ describe('NewChatDialog', () => {
 		const textarea = document.querySelector('textarea')!;
 		await waitFor(() => expect(textarea.value).toBe(scheduledSeed.prefill));
 		expect(onCreateDraft).not.toHaveBeenCalled();
-		expect(await screen.findByRole('textbox', { name: 'Project Path' })).toHaveProperty('value', '/workspace/scheduled');
+		expect(await screen.findByText('/workspace/scheduled', { exact: true })).toBeTruthy();
 		await fireEvent.input(textarea, { target: { value: 'Edited 1000000000000001' } });
 		const send = screen.getByRole('button', { name: 'Start session' });
 		await waitFor(() => expect(send).toHaveProperty('disabled', false));
@@ -174,9 +174,9 @@ describe('NewChatDialog', () => {
 		await waitFor(() => expect(document.querySelector('textarea')?.value).toBe(scheduledSeed.prefill));
 		shell.openNewChatDialog({ ...scheduledSeed, prefill: 'Replacement', startup: { ...scheduledSeed.startup!, projectPath: '/workspace/replacement' } });
 		await waitFor(() => expect(document.querySelector('textarea')?.value).toBe('Replacement'));
-		expect(await screen.findByRole('textbox', { name: 'Project Path' })).toHaveProperty('value', '/workspace/replacement');
+		expect(await screen.findByText('/workspace/replacement', { exact: true })).toBeTruthy();
 		shell.openNewChatDialog();
-		await waitFor(() => expect(screen.getByRole('textbox', { name: 'Project Path' })).toHaveProperty('value', '/workspace'));
+		await waitFor(() => expect(screen.getByRole('button', { name: '/workspace' }).getAttribute('aria-pressed')).toBe('true'));
 		expect(document.querySelector('textarea')?.value).not.toBe('Replacement');
 	});
 
@@ -322,14 +322,14 @@ describe('NewChatDialog', () => {
 		render(NewChatDialogTestHost);
 		const landing = await screen.findByRole('dialog', { name: 'New Chat' });
 		expect(within(landing).getByRole('heading', { name: 'What would you like to work on?' })).toBeTruthy();
-		expect(within(landing).getByText('Choose a saved project or enter a folder to start a new chat.')).toBeTruthy();
+		expect(within(landing).getByText('Choose a project, then select a worktree to start a new chat.')).toBeTruthy();
 		await within(landing).findByRole('region', { name: 'Saved and recent projects' });
 	});
 
 	it('closes the landing screen from its header', async () => {
 		render(NewChatDialogTestHost);
 
-		await screen.findByRole('textbox', { name: 'Project Path' });
+		await screen.findByRole('button', { name: 'Choose project' });
 		const closeButton = screen.getByRole('button', { name: 'Close' });
 		expect(closeButton.closest('header')).toBeTruthy();
 		expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(1);

@@ -79,9 +79,8 @@ for (const overflowing of [false, true]) {
 
         phase('new-chat model selection after repeated switching');
         await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
-        const input = page.locator('#project-path-input');
-        await browserExpect(input).toBeVisible();
         const dialog = page.getByRole('dialog');
+        await browserExpect(dialog.getByRole('region', { name: 'Worktrees', exact: true })).toBeVisible();
         const trigger = dialog
           .locator('[data-slot="composer-bottom-bar"] button')
           .filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') });
@@ -95,7 +94,7 @@ for (const overflowing of [false, true]) {
         await model.click();
         await browserExpect(trigger).toContainText(modelLabel);
         await page.keyboard.press('Escape');
-        await browserExpect(input).toBeHidden();
+        await browserExpect(dialog).toBeHidden();
         await cdp.detach();
         assertNoBrowserErrors();
       },

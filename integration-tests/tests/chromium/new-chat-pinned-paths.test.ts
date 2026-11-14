@@ -30,10 +30,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const prompt = dialog.getByPlaceholder('How can I help you today?');
       await prompt.fill('Synthetic retained draft');
       const pins = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true });
-      const path = dialog.locator('#project-path-input');
       const localPin = pins.getByRole('button', { name: sharedPath, exact: true });
-      await browserExpect(path).toHaveValue(sharedPath);
-      await browserExpect(dialog.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
+      const worktrees = dialog.getByRole('region', { name: 'Worktrees', exact: true });
       phase('validating a selected project without advancing the debounce clock');
       await page.clock.install();
       await page.clock.pauseAt(new Date());
@@ -46,6 +44,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await selectedPinValidation;
       await page.clock.resume();
       await browserExpect(localPin).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(worktrees.getByText(sharedPath, { exact: true })).toBeVisible();
       const offlinePin = pins.getByRole('button', { name: 'Offline worker: /projects/archive', exact: true });
       await browserExpect(offlinePin).toBeDisabled();
       await browserExpect(offlinePin).toHaveAccessibleDescription('Waiting for connection');
@@ -67,6 +66,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect(workerPin).toHaveAttribute('aria-pressed', 'true');
         await browserExpect(localPin).toHaveAttribute('aria-pressed', 'false');
         await browserExpect(prompt).toBeFocused();
+        await browserExpect(worktrees.getByText(sharedPath, { exact: true })).toBeVisible();
       }
       await browserExpect(prompt).toHaveValue('Synthetic retained draft');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
@@ -96,7 +96,6 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(pins.getByRole('button', { name: 'Offline worker: /projects/replacement', exact: true })).toBeDisabled();
       await browserExpect(offlinePin).toHaveCount(0);
       await browserExpect(prompt).toHaveValue('Synthetic retained draft');
-      await browserExpect(path).toHaveValue(sharedPath);
       phase('showing guidance when all saved projects are removed');
       await client.put('/api/v1/app/settings', { paths: {
         pinnedProjectPaths: [], recentProjectPaths: [],

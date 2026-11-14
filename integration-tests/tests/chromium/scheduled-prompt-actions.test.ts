@@ -71,7 +71,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect(prompt).toBeFocused();
         expect(rendered.expandedText).toMatch(new RegExp(`^Review ${rendered.chatId} on \\d{4}-\\d{2}-\\d{2}; literal \\{\\{chat_id\\}\\}$`));
         const newChat = page.getByRole('dialog').filter({ has: prompt });
-        await browserExpect(newChat.getByRole('textbox', { name: 'Project Path', exact: true })).toHaveValue(integration.executionDirs.project);
+        await browserExpect(newChat.getByRole('region', { name: 'Worktrees', exact: true })
+          .getByText(integration.executionDirs.project, { exact: true })).toBeVisible();
         await browserExpect(newChat.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
         expect((await client.listChats()).sessions).toEqual([]);
         expect(await client.getScheduledPrompts()).toEqual(before);

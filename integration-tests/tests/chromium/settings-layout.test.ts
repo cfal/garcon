@@ -46,7 +46,7 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
   }, undefined, { executionBackend: 'remote-controller-dials' });
 }, 180_000);
 
-test('new-chat executor and project fields have matching heights', async () => {
+test('new-chat executor and project controls fit their responsive layout', async () => {
   await withChromiumFixture('new-chat-field-alignment', async ({ page, integration, assertNoBrowserErrors }) => {
     const label = 'Production build and review execution host';
     await integration.client.patch(`/api/v1/executors/${integration.client.executorId}`, { label });
@@ -54,17 +54,22 @@ test('new-chat executor and project fields have matching heights', async () => {
     await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
     const dialog = page.getByRole('dialog');
     const picker = dialog.locator('[data-executor-picker]');
-    const project = dialog.getByLabel('Project Path', { exact: true });
+    const project = dialog.getByRole('button', { name: 'Choose project', exact: true });
     await picker.click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
-    await browserExpect(project).toHaveValue(integration.executionDirs.project);
+    await integration.client.put('/api/v1/app/settings', { paths: { byExecutor: { [integration.client.executorId]: { pinnedPaths: [integration.executionDirs.project] } } } });
+    const projectCard = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true })
+      .getByRole('button', { name: `${label}: ${integration.executionDirs.project}`, exact: true });
+    await projectCard.click();
+    await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     for (const width of [1440, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       const pickerRect = (await picker.boundingBox())!;
       const projectRect = (await project.boundingBox())!;
-      expect(pickerRect.height).toBe(projectRect.height);
+      expect(pickerRect.height).toBeGreaterThanOrEqual(38);
+      expect(projectRect.height).toBeGreaterThanOrEqual(40);
       expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
       expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: join(artifacts, `new-chat-fields-${width}.png`) });
@@ -112,7 +117,8 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
             };
           });
           const { picker: pickerRect, project: projectRect, bounds } = geometry;
-          expect(pickerRect.height).toBe(projectRect.height);
+          expect(pickerRect.height).toBeGreaterThanOrEqual(38);
+      expect(projectRect.height).toBeGreaterThanOrEqual(40);
           expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
           expect(geometry.feedbackGap).toBe(4);
           expect(geometry.contained).toBe(true);

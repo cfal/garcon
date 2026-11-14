@@ -4,84 +4,77 @@ import { mkdir, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { descriptorPathsDirectory } from '../../../server/runtime/files/directory-creation.js';
+import { saveNewChatProject } from '../../support/new-chat-project.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  // Creating needs executors that name open descriptors by path; elsewhere the picker hides the controls.
   test.skipIf(descriptorPathsDirectory() === null)(`directory browser selects and creates directories on the owning executor (${executionBackend})`, async () => {
-    await withChromiumFixture(`directory-browser-${executionBackend}`, async ({ page, context, integration, browserErrors, failedResponses }, phase) => {
+    await withChromiumFixture(`directory-browser-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
       const root = integration.executionDirs.project;
       for (const name of ['alpha/nested', 'alpha/notes', 'beta']) await mkdir(join(root, name), { recursive: true });
+      await saveNewChatProject(integration.client, root);
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
       const screenshot = (name: string) => page.screenshot({ path: join(artifacts, `directory-browser-${executionBackend}-${name}.png`) });
-      const input = page.locator('#project-path-input');
       const browser = page.getByRole('dialog', { name: 'Select Directory', exact: true });
       const control = (name: string) => browser.getByRole('button', { name, exact: true });
-      const openNewChat = async () => {
-        await page.goto(integration.garcon.baseUrl);
-        await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
-        await browserExpect(input).toBeVisible();
-        if (executionBackend === 'in-process') return;
-        await page.getByRole('dialog').locator('[data-executor-picker]').click();
-        await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
-      };
       const creations: string[] = [];
-      page.on('request', (request) => {
+      page.on('request', request => {
         const url = new URL(request.url());
         if (request.method() === 'POST' && url.pathname === '/api/v1/files/directories') {
           creations.push(`${url.searchParams.get('executorId')} ${url.searchParams.get('path')} ${request.postData()}`);
         }
       });
-
-      phase('touch sheet opens on the field directory and navigates without selecting');
       const cdp = await context.newCDPSession(page);
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
       await page.setViewportSize({ width: 390, height: 844 });
-      await openNewChat();
-      const initialPath = await input.inputValue();
-      await input.click();
+      await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      const landing = page.getByRole('dialog', { name: 'New Chat', exact: true });
+      const choose = landing.getByRole('button', { name: 'Choose project', exact: true });
+      const projectCard = landing.getByRole('button', { name: integration.client.executorId === 'local' ? root : `Integration worker: ${root}`, exact: true });
+      await projectCard.click();
+      const worktrees = landing.getByRole('region', { name: 'Worktrees', exact: true });
+      const selectedPath = () => worktrees.getByText(root, { exact: true });
+      const prompt = landing.getByPlaceholder('How can I help you today?');
+      await prompt.fill('Preserve this directory-selection draft');
+
+      phase('touch navigation remains unselected until confirmation');
+      await choose.click();
       await browserExpect(control('alpha')).toBeVisible();
-      await browserExpect(control('beta')).toBeVisible();
+      for (const target of [browser.locator('[aria-current="location"]'), ...['alpha', 'Cancel', 'New directory', 'Select this directory'].map(control)]) {
+        expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      }
       await screenshot('sheet');
-      const touchTargets = [browser.locator('[aria-current="location"]'), ...['alpha', 'Cancel', 'New directory', 'Select this directory'].map(control)];
-      for (const target of touchTargets) expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       await control('alpha').click();
       await browserExpect(control('nested')).toBeVisible();
-      await browserExpect(control('notes')).toBeVisible();
       await control('nested').click();
       await browserExpect(browser.getByText('No subdirectories')).toBeVisible();
       await control('Parent directory').click();
       await browserExpect(control('notes')).toBeVisible();
       await control('Cancel').click();
       await browserExpect(browser).toHaveCount(0);
-      await browserExpect(input).toHaveValue(initialPath);
+      await browserExpect(selectedPath()).toBeVisible();
 
-      phase('touch sheet creates a directory and selects it on confirmation');
-      await input.click();
+      phase('touch creation selects only on confirmation');
+      await choose.click();
       await control('alpha').click();
-      await browserExpect(control('nested')).toBeVisible();
       await browser.getByRole('textbox', { name: 'Filter directories...' }).fill('touch');
-      await browserExpect(control('nested')).toHaveCount(0);
       await control('Create directory "touch"').click();
       const name = browser.getByRole('textbox', { name: 'Directory name' });
       await browserExpect(name).toBeFocused();
-      await browserExpect(name).toHaveValue('touch');
       expect(await name.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
       await name.fill('touch created ');
       await screenshot('sheet-create');
       await control('Create').click();
-      const confirm = control('Select this directory');
-      await browserExpect(confirm).toBeFocused();
-      await browserExpect(browser.getByText('No subdirectories')).toBeVisible();
+      await browserExpect(control('Select this directory')).toBeFocused();
       const touchCreated = join(root, 'alpha', 'touch created');
       expect((await stat(touchCreated)).isDirectory()).toBe(true);
-      await browserExpect(input).toHaveValue(initialPath);
-      await confirm.click();
+      await control('Select this directory').click();
       await browserExpect(browser).toHaveCount(0);
-      await browserExpect(input).toHaveValue(touchCreated);
+      await browserExpect(worktrees.getByText(touchCreated, { exact: true })).toBeVisible();
 
-      phase('touch sheet falls back from a missing path and Escape leaves one step at a time');
-      await input.click();
+      phase('Escape cancels creation before closing the browser');
+      await choose.click();
       await control('Parent directory').click();
       await control('New directory').click();
       await name.fill('ghost');
@@ -90,63 +83,32 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(control('New directory')).toBeFocused();
       await page.keyboard.press('Escape');
       await browserExpect(browser).toHaveCount(0);
-      await browserExpect(input).toHaveValue(touchCreated);
       expect(await readdir(join(root, 'alpha'))).not.toContain('ghost');
 
-      // The touch field opens the sheet on focus, so the stale path is written without focusing it.
-      const stalePath = join(root, 'alpha', 'ghost', 'deeper');
-      await input.evaluate((element, value) => {
-        (element as HTMLInputElement).value = value;
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-      }, stalePath);
-      await input.click();
-      await browserExpect(browser.getByRole('textbox', { name: 'Filter directories...' })).toHaveValue('ghost');
-      await browserExpect(browser.locator('[aria-current="location"]')).toHaveText('alpha');
-      await browserExpect(control('Create directory "ghost"')).toBeVisible();
-      await control('Cancel').click();
-      await browserExpect(browser).toHaveCount(0);
-      await browserExpect(input).toHaveValue(stalePath);
-
-      phase('desktop popover follows the typed path and creates from it');
+      phase('desktop chooser traverses nested folders without closing');
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
-      await cdp.detach();
       await page.setViewportSize({ width: 1280, height: 800 });
-      await openNewChat();
-      await input.fill(join(root, 'al'));
-      await browserExpect(control('alpha')).toBeVisible();
-      await browserExpect(control('beta')).toHaveCount(0);
-      await input.press('ArrowDown');
-      await browserExpect(control('alpha')).toBeFocused();
-      await page.keyboard.press('ArrowUp');
-      await browserExpect(input).toBeFocused();
+      await projectCard.click();
+      await choose.click();
       await control('alpha').click();
-      await browserExpect(input).toHaveValue(join(root, 'alpha'));
-      await browserExpect(control('nested')).toBeVisible();
-      await browserExpect(control('touch created')).toBeVisible();
-      const desktopCreated = join(root, 'alpha', 'desktop created');
-      await input.fill(desktopCreated);
-      await browserExpect(page.getByText('Path does not exist.', { exact: true })).toBeVisible();
-      await browserExpect(control('nested')).toHaveCount(0);
-      await control('Create directory "desktop created"').click();
-      const deskName = browser.getByRole('textbox', { name: 'Directory name' });
-      await browserExpect(deskName).toHaveValue('desktop created');
-      await screenshot('popover-create');
-      await page.keyboard.press('Escape');
-      await browserExpect(deskName).toHaveCount(0);
       await browserExpect(browser).toBeVisible();
-      await control('New directory').click();
-      await deskName.fill('desktop created');
-      await deskName.press('Enter');
-      await browserExpect(input).toHaveValue(desktopCreated);
-      await browserExpect(input).toBeFocused();
+      await browserExpect(control('nested')).toBeVisible();
+      await control('nested').click();
       await browserExpect(browser.getByText('No subdirectories')).toBeVisible();
-      expect((await stat(desktopCreated)).isDirectory()).toBe(true);
-      await browserExpect(page.getByText('Path does not exist.', { exact: true })).toHaveCount(0);
-      await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
-      await input.press('Enter');
-      await page.getByPlaceholder('How can I help you today?').fill('Synthetic first message');
-      await browserExpect(page.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
-
+      await control('Parent directory').click();
+      await control('New directory').click();
+      await name.fill('desktop created');
+      await screenshot('popover-create');
+      await name.press('Enter');
+      const desktopCreated = join(root, 'alpha', 'desktop created');
+      await browserExpect(name).toHaveCount(0);
+      await browserExpect(browser).toBeVisible();
+      await browserExpect(browser.getByText('No subdirectories')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(browser).toHaveCount(0);
+      await browserExpect(worktrees.getByText(desktopCreated, { exact: true })).toBeVisible();
+      await browserExpect(prompt).toHaveValue('Preserve this directory-selection draft');
+      await browserExpect(landing.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
       const executorId = integration.client.executorId;
       expect(creations).toEqual([
         `${executorId} ${join(root, 'alpha')} {"name":"touch created"}`,
@@ -155,12 +117,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect((await readdir(join(root, 'alpha'))).sort()).toEqual(['desktop created', 'nested', 'notes', 'touch created']);
       if (executionBackend !== 'in-process') expect(await readdir(integration.dirs.project)).toEqual([]);
       expect((await integration.client.listChats()).sessions).toEqual([]);
-      // Listing the stale path and its missing parent are the only requests expected to fail.
-      expect(failedResponses.map((response) => {
-        const [status, method, url] = response.split(' ');
-        return `${status} ${method} ${new URL(url!).pathname} ${new URL(url!).searchParams.get('path')}`;
-      })).toEqual([stalePath, join(root, 'alpha', 'ghost')].map((path) => `404 GET /api/v1/files/browse ${path}`));
-      expect(browserErrors.splice(0)).toEqual(Array(2).fill('console.error: Failed to load resource: the server responded with a status of 404 (Not Found)'));
+      await cdp.detach();
+      assertNoBrowserErrors();
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 120_000);
 }

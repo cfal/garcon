@@ -7,7 +7,7 @@ import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fi
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`project path field retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
+  test(`project worktree selection retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
     await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
       const project = join(integration.executionDirs.project, 'repository ');
       await mkdir(project);
@@ -26,32 +26,29 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         });
         catalog = response.snapshot;
       }
+      await integration.client.put('/api/v1/app/settings', { paths: integration.client.executorId === 'local'
+        ? { recentProjectPaths: [project], pinnedProjectPaths: [] }
+        : { byExecutor: { [integration.client.executorId]: { recentPaths: [project], pinnedPaths: [], defaultPath: project } } },
+      });
       await page.goto(integration.garcon.baseUrl);
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
-      const input = page.locator('#project-path-input');
-      const field = page.locator('[data-slot="project-path-field"]');
-      await browserExpect(input).toBeVisible();
-      if (executionBackend !== 'in-process') {
-        await page.getByRole('dialog').locator('[data-executor-picker]').click();
-        await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
-      }
-      await input.fill(project);
-      const prompt = page.getByPlaceholder('How can I help you today?');
-      await browserExpect(field.locator('.text-status-success-foreground')).toBeVisible();
-      await input.press('Enter');
+      const landing = page.getByRole('dialog', { name: 'New Chat', exact: true });
+      const projectCard = landing.getByRole('button', { name: integration.client.executorId === 'local' ? project : `Integration worker: ${project}`, exact: true });
+      await projectCard.focus();
+      await page.keyboard.press('Enter');
+      const field = landing.getByRole('region', { name: 'Worktrees', exact: true });
+      const primary = field.getByRole('radio', { name: /main.*Main checkout/ });
+      await browserExpect(primary).toBeChecked();
+      const prompt = landing.getByPlaceholder('How can I help you today?');
       await browserExpect(prompt).toBeFocused();
-      const inputBounds = (await input.boundingBox())!;
-      await page.mouse.click(inputBounds.x + inputBounds.width - 12, inputBounds.y + inputBounds.height / 2);
-      await browserExpect(input).toBeFocused();
-      await input.press('Enter');
-      await browserExpect(prompt).toBeFocused();
-      await browserExpect(page.getByRole('dialog', { name: 'Select Directory', exact: true })).toHaveCount(0);
+      await prompt.fill('Preserve this worktree draft');
+      await browserExpect(landing.locator('#project-path-input')).toHaveCount(0);
 
       phase('pin the owning executor path');
       await page.getByRole('button', { name: 'Pin project path', exact: true }).click();
       await browserExpect(page.getByRole('button', { name: 'Unpin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
-      await browserExpect(input).not.toHaveAttribute('readonly');
-      await browserExpect(page.getByRole('dialog').getByRole('button', { name: project, exact: true })).toBeVisible();
+      await browserExpect(landing.getByRole('button', { name: 'Choose project', exact: true })).toBeEnabled();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
 
       phase('preamble eligibility distinguishes the spaced project from its sibling');
       const assertExactPreambleScope = async () => {
@@ -69,14 +66,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(picker.getByRole('option', { name: /feature/ })).toBeVisible();
       await page.keyboard.press('Escape');
       await browserExpect(picker).toHaveCount(0);
-      await browserExpect(input).toHaveValue(project);
+      await browserExpect(primary).toBeChecked();
 
       phase('worktree selection updates only the draft');
       await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
       await picker.getByRole('option', { name: /feature/ }).click();
-      await browserExpect(input).toHaveValue(worktree);
-      await input.press('Enter');
-      await browserExpect(prompt).toBeFocused();
+      const feature = field.getByRole('radio', { name: /feature/ });
+      await browserExpect(feature).toBeChecked();
+      await browserExpect(prompt).toHaveValue('Preserve this worktree draft');
       expect((await integration.client.listChats()).sessions).toEqual([]);
       await assertExactPreambleScope();
 
@@ -88,28 +85,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const touch = width < 1000;
         await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: touch });
         await page.setViewportSize({ width, height: 900 });
-        if (touch) {
-          expect(await input.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+        await browserExpect.poll(() => field.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        for (const radio of await field.getByRole('radio').all()) {
+          expect((await radio.locator('..').boundingBox())!.height).toBeGreaterThanOrEqual(64);
         }
-        expect(await field.evaluate(element => {
-          const feedback = element.nextElementSibling!;
-          return feedback.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
-        })).toBe(4);
-        expect(await field.evaluate(element => {
-          const fieldBounds = element.getBoundingClientRect();
-          const controls = [...element.firstElementChild!.children]
-            .filter(child => child.checkVisibility({ checkVisibilityCSS: true }))
-            .map(child => child.getBoundingClientRect());
-          return controls.every((rect, index) => {
-            const fitsWithinField = rect.left >= fieldBounds.left && rect.right <= fieldBounds.right + 1;
-            if (!fitsWithinField) return false;
-            return controls.slice(index + 1).every(other => {
-              const horizontallySeparated = rect.right <= other.left || other.right <= rect.left;
-              const verticallySeparated = rect.bottom <= other.top || other.bottom <= rect.top;
-              return horizontallySeparated || verticallySeparated;
-            });
-          });
-        })).toBe(true);
         await page.screenshot({ path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
       }
       await cdp.detach();

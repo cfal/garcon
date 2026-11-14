@@ -57,7 +57,7 @@
 		getOptionalWorkspaceShortcuts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import NewChatWorktrees from './NewChatWorktrees.svelte';
 	import NewChatProjects from './NewChatProjects.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -66,7 +66,6 @@
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -295,6 +294,7 @@
 			initialContentReady &&
 			form.validationStatus === 'valid' &&
 			!form.showBrowser &&
+			!document.activeElement?.closest('[data-slot="new-chat-worktrees"]') &&
 			canFocusTextarea()
 		) {
 			untrack(returnTextareaFocus);
@@ -471,7 +471,8 @@
 				return 'cancelled';
 			}
 			if (
-				executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
+				executionKey !== sourceExecutionKey ||
+				form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -514,7 +515,9 @@
 			});
 			if (result.kind !== 'expanded') return;
 			if (
-				!conversationInput || executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
+				!conversationInput ||
+				executionKey !== sourceExecutionKey ||
+				form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -540,7 +543,9 @@
 
 	function handleSubmit(): void {
 		if (!form.canSubmit || promptTransformPending) return;
-		const command = conversationInput ? parseSnippetCommand(form.firstMessage) : { kind: 'none' as const };
+		const command = conversationInput
+			? parseSnippetCommand(form.firstMessage)
+			: { kind: 'none' as const };
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -656,82 +661,12 @@
 		>
 			<div class="space-y-2">
 				<NewChatProjects {form} />
-				<ProjectPathField
-					id="project-path-input"
-					aria-label={m.chat_new_chat_project_path()}
-					bind:value={form.projectPath}
-					readonly={form.isUpdatingPinnedPath}
-					placeholder={form.projectBasePath}
-					class="h-[42px] sm:pointer-fine:h-[38px]"
-					validationStatus={form.validationStatus}
-					validationError={form.validationError}
-					onfocus={(event) => {
-						if (isMobile && form.filesAvailable) event.currentTarget.blur();
-						if (form.isUpdatingPinnedPath) return;
-						form.handlePathFocus();
-					}}
-					oninput={() => {
-						form.clearError();
-						form.resetTabCompletions();
-					}}
-					onkeydown={(event) => {
-						if (event.key === 'Tab' && form.filesAvailable) {
-							event.preventDefault();
-							if (form.isUpdatingPinnedPath) return;
-							void form.handleTabCompletion();
-						}
-						if (event.key === 'Enter') {
-							event.preventDefault();
-							form.showBrowser = false;
-							textareaRef?.focus();
-						}
-					}}
-					pin={{
-						isPinned: form.isPinnedPath,
-						disabled: !form.nonblankPath || form.isUpdatingPinnedPath,
-						loading: form.isUpdatingPinnedPath,
-						onToggle: () => form.togglePinnedPath(),
-					}}
-					browser={{
-						open: form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath,
-						executorId: form.executorId,
-						executorContextKey: form.pathContextKey,
-						currentPath: form.nonblankPath || form.browseStartPath || form.projectBasePath,
-						basePath: form.projectBasePath,
-						isMobile,
-						onSelect: (path) => {
-							if (form.isUpdatingPinnedPath) return;
-							// Rechecks a newly created directory even when the field's path is unchanged.
-							form.selectProjectPath(path);
-						},
-						onClose: () => (form.showBrowser = false),
-					}}
-					feedback={{
-						class: '-mt-1',
-						error: form.validationStatus === 'invalid' ? form.validationError : null,
-						worktree:
-							form.gitAvailable && form.gitRepoStatus === 'git'
-								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.openWorktreeModal() }
-								: undefined,
-					}}
-				>
-					{#snippet leading()}
-						<ExecutorSelector
-							{executors}
-							executorId={form.executorId}
-							service="agents"
-							presentation="field"
-							class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
-							onSelect={(executorId) => form.selectExecutor(executorId)}
-						/>
-					{/snippet}
+				<NewChatWorktrees {form} {isMobile}>
 					<ChatTagToggleButton
 						active={form.chatTags.length > 0}
 						onToggle={() => form.toggleTagInput()}
 					/>
-
-				</ProjectPathField>
-
+				</NewChatWorktrees>
 
 				<ChatTagEditor
 					tags={form.chatTags}
@@ -763,7 +698,9 @@
 						{/if}
 					</div>
 				{:else if form.modelSelectionPending}
-					<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
+					<p role="status" class="text-sm text-muted-foreground">
+						{m.chat_composer_loading_models()}
+					</p>
 				{/if}
 			</div>
 
@@ -886,7 +823,10 @@
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
 							<div class="relative group">
-								<div data-slot="composer-attachment-preview" class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+								<div
+									data-slot="composer-attachment-preview"
+									class="w-16 h-16 rounded-lg overflow-hidden border border-border"
+								>
 									{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
 										<img
 											src={form.imageUrlFor(file, idx)}

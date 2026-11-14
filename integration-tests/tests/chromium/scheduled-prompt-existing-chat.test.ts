@@ -52,7 +52,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const prompt = page.getByPlaceholder('How can I help you today?');
       const dialog = page.getByRole('dialog').filter({ has: prompt });
       await browserExpect(prompt).toHaveValue(rendered.expandedText);
-      await browserExpect(dialog.getByRole('textbox', { name: 'Project Path', exact: true })).toHaveValue(integration.executionDirs.project);
+      await browserExpect(dialog.getByRole('region', { name: 'Worktrees', exact: true })
+        .getByText(integration.executionDirs.project, { exact: true })).toBeVisible();
       await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
       expect((await client.listChats()).sessions.map(chat => chat.id)).toEqual([sourceId]);
       expect(await client.getMessages(sourceId)).toEqual(sourceMessages);
