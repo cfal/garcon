@@ -13,7 +13,7 @@
 	} from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
-	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { createLocalSettingsStore, type LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { onDestroy, untrack } from 'svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
@@ -22,6 +22,7 @@
 
 	interface Props {
 		isVisible?: boolean;
+		localSettings?: LocalSettingsStore;
 		executors?: readonly ExecutorSnapshot[];
 		executorUpdate?: readonly ExecutorSnapshot[];
 		chatContext?: ConversationMessageChatContext;
@@ -47,6 +48,7 @@
 
 	let {
 		isVisible = true,
+		localSettings: suppliedLocalSettings,
 		executors,
 		executorUpdate,
 		chatContext,
@@ -129,7 +131,7 @@
 	appShell.openNewChatDialog = (seed) => openNewChatDialog({ prefill: seed?.prefill ?? '' });
 	setAppShell(appShell);
 
-	const localSettings = createLocalSettingsStore();
+	const localSettings = untrack(() => suppliedLocalSettings ?? createLocalSettingsStore());
 	localSettings.autoExpandTools = false;
 	localSettings.alwaysExpandCliMessages = initialHost.alwaysExpandCliMessages;
 	setLocalSettings(localSettings);

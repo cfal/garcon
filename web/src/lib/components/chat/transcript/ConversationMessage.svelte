@@ -248,7 +248,10 @@
 		cn(
 			'chat-message',
 			cssType,
-			message instanceof UserMessage ? 'flex justify-start min-w-0' : 'flow-root',
+			message instanceof UserMessage && 'flex min-w-0',
+			message instanceof UserMessage
+				? localSettings.userMessageAlignment === 'right' ? 'justify-end' : 'justify-start'
+				: 'flow-root',
 		),
 	);
 
@@ -581,7 +584,7 @@
 	>
 		{#if asUser}
 			<div
-				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
+				class="user-message-row group/message mt-1 flex min-w-0 max-w-[85%] items-stretch gap-1.5"
 				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
 				style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
 				style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}

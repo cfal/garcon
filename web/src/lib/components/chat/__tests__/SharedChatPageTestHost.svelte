@@ -1,18 +1,23 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import SharedChatPage from '../SharedChatPage.svelte';
-	import { setAppTitle, setChatSessions, setThemeRuntime } from '$lib/context';
+	import { setAppTitle, setChatSessions, setLocalSettings, setThemeRuntime } from '$lib/context';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title';
 	import { getThemeProfile } from '$lib/theme/themes.js';
+	import { createLocalSettingsStore, type LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 	interface Props {
+		localSettings?: LocalSettingsStore;
 		token?: string;
 		chatTitles?: Record<string, string>;
 	}
 
-	let { token = 'share-token', chatTitles = {} }: Props = $props();
+	let { token = 'share-token', chatTitles = {}, localSettings: suppliedLocalSettings }: Props = $props();
 	setAppTitle(createAppTitleStore());
+	const localSettings = untrack(() => suppliedLocalSettings ?? createLocalSettingsStore());
+	setLocalSettings(localSettings);
+	onDestroy(() => localSettings.destroy());
 
 	const sessions = createChatSessionsStore();
 	for (const [chatId, title] of Object.entries(untrack(() => chatTitles))) {

@@ -5,6 +5,7 @@ import {
 	INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
 	IMAGE_CACHE_SIZE_MIB_VALUES,
 	INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
+	USER_MESSAGE_ALIGNMENT_VALUES,
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte.ts';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -238,6 +239,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
+		expect(store.userMessageAlignment).toBe('right');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.imageCacheSizeMiB).toBe(64);
 		expect(store.inlineMermaidThumbnailSize).toBe('medium');
@@ -269,6 +271,51 @@ describe('LocalSettingsStore', () => {
 		expect(store.steerWithCtrlEnter).toBe(true);
 		expect(store.codeEditorVimMode).toBe(false);
 
+		store.destroy();
+	});
+
+	it.each(USER_MESSAGE_ALIGNMENT_VALUES)('persists and restores %s user messages', (alignment) => {
+		const store = createLocalSettingsStore();
+		store.set('userMessageAlignment', alignment);
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+			userMessageAlignment: alignment,
+		});
+		const restored = createLocalSettingsStore();
+		expect(restored.userMessageAlignment).toBe(alignment);
+		expect(restored.snapshot().userMessageAlignment).toBe(alignment);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([undefined, null, '', 'center', 'RIGHT', true, 1, [], {}])(
+		'defaults missing or malformed user message alignment to right: %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ userMessageAlignment: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.userMessageAlignment).toBe('right');
+			store.destroy();
+		},
+	);
+
+	it('synchronizes user message alignment across tabs and resets it when storage is removed', () => {
+		const store = createLocalSettingsStore();
+		for (const alignment of USER_MESSAGE_ALIGNMENT_VALUES) {
+			const newValue = JSON.stringify({ ...store.snapshot(), userMessageAlignment: alignment });
+			localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+			window.dispatchEvent(new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings, newValue, storageArea: localStorage,
+			}));
+			expect(store.userMessageAlignment).toBe(alignment);
+		}
+		store.set('userMessageAlignment', 'left');
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(new StorageEvent('storage', {
+			key: LOCAL_STORAGE_KEYS.localSettings, newValue: null, storageArea: localStorage,
+		}));
+		expect(store.userMessageAlignment).toBe('right');
 		store.destroy();
 	});
 

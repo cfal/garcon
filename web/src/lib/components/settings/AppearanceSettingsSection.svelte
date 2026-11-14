@@ -7,6 +7,7 @@
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX,
 		isChatMaxWidth,
+		isUserMessageAlignment,
 		isInlineImageThumbnailSize,
 		isInlineMermaidThumbnailSize,
 		type ChatMaxWidth,
@@ -44,6 +45,10 @@
 		if (isChatMaxWidth(value)) {
 			ls.set('chatMaxWidth', value);
 		}
+	}
+
+	function setUserMessageAlignment(value: string): void {
+		if (isUserMessageAlignment(value)) ls.set('userMessageAlignment', value);
 	}
 
 	function setInlineImageThumbnailSize(value: string): void {
@@ -163,6 +168,20 @@
 		{@render settingRow(m.settings_auto_hide_chat_scrollbar(), ls.autoHideChatScrollbar, () =>
 			ls.toggle('autoHideChatScrollbar'),
 		)}
+		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+			<label class="min-w-0 text-sm font-medium text-foreground" for="local-user-message-alignment">
+				{m.settings_user_message_alignment()}
+			</label>
+			<select
+				id="local-user-message-alignment"
+				class="select-native w-full sm:w-auto sm:shrink-0"
+				value={ls.userMessageAlignment}
+				onchange={(event) => setUserMessageAlignment(event.currentTarget.value)}
+			>
+				<option value="left">{m.settings_user_message_alignment_left()}</option>
+				<option value="right">{m.settings_user_message_alignment_right()}</option>
+			</select>
+		</div>
 		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
 			<label class="min-w-0 text-sm font-medium text-foreground" for="local-inline-image-size">
 				{m.settings_inline_image_thumbnail_size()}
