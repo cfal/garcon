@@ -39,8 +39,8 @@
 	{:else if status === 'complete' || status === 'error'}
 		<span
 			class={status === 'complete'
-				? 'size-2 rounded-full bg-status-success-foreground'
-				: 'size-2 rounded-full bg-status-error-foreground'}
+				? 'size-2 rounded-full bg-sidebar-chat-complete'
+				: 'size-2 rounded-full bg-sidebar-chat-error'}
 			aria-hidden="true"
 		></span>
 	{:else if status === 'pending-user-action'}

@@ -6,8 +6,8 @@ import SidebarChatStatusIndicator from '../SidebarChatStatusIndicator.svelte';
 describe('SidebarChatStatusIndicator', () => {
 	it.each([
 		['working', 'Chat is processing', '.sidebar-chat-status-spinner'],
-		['complete', 'Chat complete', '.bg-status-success-foreground'],
-		['error', 'Chat error', '.bg-status-error-foreground'],
+		['complete', 'Chat complete', '.bg-sidebar-chat-complete'],
+		['error', 'Chat error', '.bg-sidebar-chat-error'],
 		['pending-user-action', 'Pending user action', '.text-status-warning'],
 	] as const)('renders the %s indicator with an accessible label', (status, label, selector) => {
 		const view = render(SidebarChatStatusIndicator, { status });

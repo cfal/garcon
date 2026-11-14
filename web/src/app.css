@@ -106,6 +106,8 @@
 	--color-sidebar-chat-item-hover-bg: hsl(var(--sidebar-chat-item-hover-bg));
 	--color-sidebar-chat-item-selected-bg: hsl(var(--sidebar-chat-item-selected-bg));
 	--color-sidebar-chat-item-selected-foreground: hsl(var(--sidebar-chat-item-selected-foreground));
+	--color-sidebar-chat-complete: hsl(var(--sidebar-chat-complete));
+	--color-sidebar-chat-error: hsl(var(--sidebar-chat-error));
 	--color-sidebar-badge-pinned-bg: hsl(var(--sidebar-badge-pinned-bg));
 	--color-sidebar-badge-pinned-foreground: hsl(var(--sidebar-badge-pinned-foreground));
 	--color-sidebar-badge-pinned-border: hsl(var(--sidebar-badge-pinned-border));
@@ -251,6 +253,8 @@
 }
 
 :root {
+	--sidebar-chat-complete: 142 76% 36%;
+	--sidebar-chat-error: 0 84% 50%;
 	--chat-board-shadow: 0 1px 2px color-mix(in oklab, hsl(var(--foreground)) 10%, transparent);
 	--safe-area-inset-top: env(safe-area-inset-top);
 	--safe-area-inset-right: env(safe-area-inset-right);
@@ -262,6 +266,11 @@
 	--app-viewport-offset-top: 0px;
 	--app-viewport-center-y: 50dvh;
 	--processing-pulse-duration: 2.4s;
+}
+
+.dark {
+	--sidebar-chat-complete: 142 72% 45%;
+	--sidebar-chat-error: 0 84% 60%;
 }
 
 .chat-board-reduce-motion [data-chat-board-skeleton],
