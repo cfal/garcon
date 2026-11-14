@@ -17,13 +17,13 @@ Common options and environment variables:
 - `GARCON_BIND_ADDRESS` / `--bind-address`: server bind address.
 - `GARCON_BASE_PATH` / `--base-path`: URL mount for the webapp, API, and WebSockets. Defaults to the origin root; requires a restart, not a rebuild.
 - `GARCON_PUBLIC_URL` / `--public-url`: external HTTP(S) base URL for executor onboarding and shared-page metadata. Its pathname must match the configured base path.
-- `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon`.
+- `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon` from `HOME`; Windows uses `%USERPROFILE%\.garcon` and ignores `HOME`.
 - `GARCON_WORKSPACE` / `--workspace`: named workspace under the config directory.
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
 - `GARCON_TERMINAL_SHELL`: shell used by terminal sessions.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: native CLI overrides.
-- `GARCON_CODEX_CLI`: Codex CLI override.
+- `GARCON_CODEX_CLI`: Codex CLI override. By default Garcon runs the native binary from its bundled `@openai/codex` platform package, then falls back to `codex` on `PATH`.
 - `GARCON_CURSOR_BINARY`: Cursor Agent CLI override.
 - `CURSOR_API_KEY`: Cursor Agent API key for native sessions.
 - `GARCON_PI_BINARY` / `PI_BINARY`: Pi CLI override.

@@ -31,6 +31,7 @@
   },
   "scripts": {
     "setup": "bun scripts/setup.js",
+    "setup:tunnel": "bun scripts/setup-tunnel.js",
     "build": "bun scripts/build-web.js",
     "build-exe:compile": "bun scripts/build-exe.js",
     "build-exe:smoke": "bun scripts/smoke-exe.js",

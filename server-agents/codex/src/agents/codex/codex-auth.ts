@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfig } from '../../config.js';
-import { resolveCodexCli, type ResolvedCodexCli } from './app-server/cli.js';
+import { resolveCodexCli } from './app-server/cli.js';
 
 export interface CodexAuthStatus {
   authenticated: boolean;
@@ -28,18 +28,6 @@ interface CodexAuthStatusResolverOptions {
 
 const CODEX_AUTH_STATUS_TIMEOUT_MS = 10_000;
 const CODEX_AUTH_STATUS_ERROR_OUTPUT_LIMIT = 1_000;
-
-export function buildCodexLoginStatusCommand(
-  resolved: ResolvedCodexCli,
-  runtime: { readonly platform: NodeJS.Platform; readonly executable: string } = {
-    platform: process.platform,
-    executable: process.execPath,
-  },
-): string[] {
-  return resolved.source === 'bundled' && runtime.platform !== 'win32'
-    ? [runtime.executable, resolved.command, 'login', 'status']
-    : [resolved.command, 'login', 'status'];
-}
 
 export function createCodexAuthStatusResolver(
   config: CodexConfig,
@@ -97,7 +85,7 @@ async function runCodexLoginStatus(
   const env = effectiveCodexEnvironment(config);
   const resolved = await resolveCodexCli({ env });
   signal.throwIfAborted();
-  const proc = Bun.spawn(buildCodexLoginStatusCommand(resolved), {
+  const proc = Bun.spawn([resolved.command, 'login', 'status'], {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

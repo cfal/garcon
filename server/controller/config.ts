@@ -4,7 +4,7 @@
 
 import path from 'path';
 import os from 'os';
-import { resolveConfigDirectory } from '@garcon/common/config-dir';
+import { resolveConfigDirectory, resolveHomeDirectory } from '@garcon/common/config-dir';
 import { defaultUserShell } from '../common/user-shell.js';
 import { parsePublicUrl } from './executors/public-url.js';
 import { parseBasePath } from '@garcon/common/base-path';
@@ -134,7 +134,7 @@ function parseServerConfig(): ServerConfig {
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
     testEnvironment: envValue('NODE_ENV') === 'test',
     projectBasePath: parseProjectBasePath(),
-    homeDirectoryPath: path.resolve(envValue('HOME') ?? os.homedir()),
+    homeDirectoryPath: path.resolve(resolveHomeDirectory(envValue('HOME') ?? undefined)),
     userShell: defaultUserShell(),
     maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 50 * 1024 * 1024),
     maxConnections: envInt('MAX_CONNECTIONS', 1024),
