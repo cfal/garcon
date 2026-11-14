@@ -1,7 +1,8 @@
 # New chat landing screen
 
 New Chat opens a full-page start screen with pinned and recent project folders above the
-existing composer. Each project card shows its folder name and full path, with
+existing composer. Compact project cards use one column within a narrow content
+area. Each card shows its folder name and a truncated path, with full paths on hover and
 executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
 
@@ -10,10 +11,14 @@ folders appear first; recent folders retain their recorded order. Duplicate driv
 Windows paths with different slash styles appear once, retaining the pinned spelling.
 POSIX backslashes and exact whitespace remain significant. A selectable worktree
 list replaces the permanent directory text field. It lists worktrees for the selected
-project on its owning executor, including the primary checkout, with branch names
-and full paths. Selecting a row changes the new chat's target without clearing its prompt.
-A Choose project button retains folder browsing, and pinning remains available.
+project on its owning executor, including the primary checkout. Worktrees use smaller,
+flat title-only rows with full-path hover titles and accessible path labels.
+Selecting a row changes the new chat's target without clearing its prompt.
+A Choose folder button retains executor-owned folder browsing, and pinning remains available.
 Ordinary folders remain usable when they are not Git repositories.
+Browser folder handles do not expose the absolute executor path required to start a
+chat. Native Explorer/Finder selection requires a separate desktop integration that
+can establish whether the selected folder belongs to the chosen executor.
 This change does not introduce environment presets or change stored settings,
 execution admission, provider configuration, HTTP or WebSocket contracts.
 

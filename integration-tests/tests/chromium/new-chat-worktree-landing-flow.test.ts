@@ -72,6 +72,17 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await worktrees.scrollIntoViewIfNeeded();
         expect(await worktrees.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        const cards = await projects.getByRole('button').evaluateAll(elements => elements.map(element => {
+          const bounds = element.getBoundingClientRect();
+          return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+        }));
+        expect(cards).toHaveLength(2);
+        expect(cards[0]!.x).toBe(cards[1]!.x);
+        expect(cards[1]!.y).toBeGreaterThan(cards[0]!.y);
+        expect(cards.every(card => card.height <= 56)).toBe(true);
+        const worktreeRow = selectedWorktree.locator('..');
+        expect((await worktreeRow.boundingBox())!.height).toBeLessThanOrEqual(44);
+        await browserExpect(worktreeRow).toHaveAttribute('title', toExecutorPath(linked));
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: join(artifacts, `worktree-landing-${executionBackend}-${width}.png`) });
         await cdp.detach();

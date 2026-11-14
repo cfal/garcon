@@ -37,7 +37,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await projectCard.focus();
       await page.keyboard.press('Enter');
       const field = landing.getByRole('region', { name: 'Worktrees', exact: true });
-      const primary = field.getByRole('radio', { name: /main.*Main checkout/ });
+      const primary = field.getByRole('radio', { name: /^main/ });
       await browserExpect(primary).toBeChecked();
       const prompt = landing.getByPlaceholder('How can I help you today?');
       await browserExpect(prompt).toBeFocused();
@@ -47,7 +47,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       phase('pin the owning executor path');
       await page.getByRole('button', { name: 'Pin project path', exact: true }).click();
       await browserExpect(page.getByRole('button', { name: 'Unpin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
-      await browserExpect(landing.getByRole('button', { name: 'Choose project', exact: true })).toBeEnabled();
+      await browserExpect(landing.getByRole('button', { name: 'Choose folder', exact: true })).toBeEnabled();
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
 
       phase('preamble eligibility distinguishes the spaced project from its sibling');

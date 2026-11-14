@@ -193,9 +193,9 @@ async function chooseProject(path: string): Promise<void> {
 	vi.mocked(filesApi.browseDirectory).mockResolvedValueOnce([
 		{ name: 'project selection', path, type: 'directory' },
 	]);
-	await fireEvent.click(screen.getByRole('button', { name: 'Choose project' }));
+	await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 	await fireEvent.click(await screen.findByRole('button', { name: 'project selection' }));
-	await fireEvent.click(screen.getByRole('button', { name: 'Choose project' }));
+	await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 }
 
 async function inputAtCaret(
@@ -515,7 +515,7 @@ describe('NewChatForm', () => {
 		await fireEvent.input(messageInput, { target: { value: 'Synthetic first message' } });
 		const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
 		expect(submit.disabled).toBe(true);
-		await fireEvent.click(screen.getByRole('button', { name: 'Choose project' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Create directory "fresh"' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 		await waitFor(() => expect(filesApi.createDirectory).toHaveBeenCalledExactlyOnceWith({
@@ -523,7 +523,7 @@ describe('NewChatForm', () => {
 		}));
 		await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Directory name' })).toBeNull());
 		if (isMobile) await fireEvent.click(screen.getByRole('button', { name: 'Select this directory' }));
-		if (!isMobile) await fireEvent.click(screen.getByRole('button', { name: 'Choose project' }));
+		if (!isMobile) await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 		expect(screen.queryByRole('dialog', { name: 'Select Directory' })).toBeNull();
 		await waitFor(() => expect(submit.disabled).toBe(false));
 		expect(screen.queryByText('Path does not exist.')).toBeNull();
@@ -714,7 +714,7 @@ describe('NewChatForm', () => {
 			await vi.advanceTimersByTimeAsync(0);
 			const prompt = screen.getByPlaceholderText('How can I help you today?');
 			expect(document.activeElement).toBe(prompt);
-			const path = screen.getByRole('button', { name: 'Choose project' });
+			const path = screen.getByRole('button', { name: 'Choose folder' });
 			path.focus();
 			await vi.advanceTimersByTimeAsync(50);
 			expect(document.activeElement).toBe(path);
@@ -805,7 +805,7 @@ describe('NewChatForm', () => {
 
 		const { container } = render(NewChatFormTestHost);
 
-		const projectPathInput = screen.getByRole('button', { name: 'Choose project', hidden: true });
+		const projectPathInput = screen.getByRole('button', { name: 'Choose folder', hidden: true });
 		const messageInput = screen.getByPlaceholderText('How can I help you today?');
 		const hiddenFormContainer = container.querySelector(
 			'[data-slot="new-chat-form-content"][aria-hidden="true"]',
@@ -904,7 +904,7 @@ describe('NewChatForm', () => {
 		expect(screen.getByRole('button', { name: '/workspace/project' })).toBeTruthy();
 		await fireEvent.click(toggleButton);
 
-		const projectPathInput = screen.getByRole('button', { name: 'Choose project' }) as HTMLButtonElement;
+		const projectPathInput = screen.getByRole('button', { name: 'Choose folder' }) as HTMLButtonElement;
 		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
 		expect(projectPathInput.disabled).toBe(true);
@@ -2103,6 +2103,6 @@ describe('New Chat saved projects', () => {
 		settings.applySnapshot({ ...snapshot, paths: { ...snapshot.paths, pinnedProjectPaths: [] } });
 		await screen.findByText('Pin a project path to bookmark it here');
 		expect(screen.queryByRole('button', { name: '/local' })).toBeNull();
-		expect(screen.getByRole('button', { name: 'Choose project' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Choose folder' })).toBeTruthy();
 	});
 });

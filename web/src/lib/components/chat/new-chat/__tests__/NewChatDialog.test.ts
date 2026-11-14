@@ -329,7 +329,7 @@ describe('NewChatDialog', () => {
 	it('closes the landing screen from its header', async () => {
 		render(NewChatDialogTestHost);
 
-		await screen.findByRole('button', { name: 'Choose project' });
+		await screen.findByRole('button', { name: 'Choose folder' });
 		const closeButton = screen.getByRole('button', { name: 'Close' });
 		expect(closeButton.closest('header')).toBeTruthy();
 		expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(1);

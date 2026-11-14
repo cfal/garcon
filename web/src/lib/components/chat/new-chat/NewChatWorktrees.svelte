@@ -6,7 +6,6 @@
 	import DirectoryBrowser from '$lib/components/project-paths/DirectoryBrowser.svelte';
 	import ProjectPinnedPathToggleButton from '$lib/components/project-paths/ProjectPinnedPathToggleButton.svelte';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -48,7 +47,7 @@
 	}
 </script>
 
-<section aria-labelledby={id + '-heading'} class="min-w-0 space-y-3" data-slot="new-chat-worktrees">
+<section aria-labelledby={id + '-heading'} class="min-w-0 space-y-2" data-slot="new-chat-worktrees">
 	<div class="relative min-w-0">
 		<div class="flex min-w-0 flex-wrap items-stretch gap-2">
 			<ExecutorSelector
@@ -96,7 +95,7 @@
 		{/if}
 	</div>
 	<div class="flex items-center justify-between gap-2">
-		<h3 id={id + '-heading'} class="text-sm font-medium text-foreground">
+		<h3 id={id + '-heading'} class="text-xs font-medium text-muted-foreground">
 			{m.chat_new_chat_worktrees()}
 		</h3>
 		{#if canLoad}
@@ -148,17 +147,18 @@
 			<div
 				role="radiogroup"
 				aria-labelledby={id + '-heading'}
-				class="max-h-64 space-y-2 overflow-y-auto overscroll-contain p-1"
+				class="max-h-48 space-y-0.5 overflow-y-auto overscroll-contain"
 			>
 				{#each worktrees as worktree (worktree.path)}
 					<label
-						class="flex min-h-16 min-w-0 items-start gap-3 rounded-xl border p-3 {form.isSelectedWorktree(
+						title={worktree.path}
+						class="group flex min-h-11 min-w-0 items-center gap-2 rounded-md px-2 py-1 pointer-fine:min-h-8 {form.isSelectedWorktree(
 							worktree.path,
 						)
-							? 'border-primary bg-accent text-accent-foreground'
-							: 'border-border bg-card text-foreground'} {worktree.isPathMissing
+							? 'bg-accent text-accent-foreground'
+							: 'text-muted-foreground'} {worktree.isPathMissing
 							? 'opacity-50'
-							: 'cursor-pointer hover:bg-accent/60'}"
+							: 'cursor-pointer hover:bg-accent/60 hover:text-foreground'}"
 					>
 						<input
 							type="radio"
@@ -167,19 +167,14 @@
 							checked={form.isSelectedWorktree(worktree.path)}
 							disabled={worktree.isPathMissing || form.isUpdatingPinnedPath}
 							onchange={() => form.selectListedWorktree(worktree.path)}
-							class="mt-1 shrink-0 accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+							class="size-3 shrink-0 accent-primary focus-visible:ring-2 focus-visible:ring-ring"
 						/>
-						<GitBranch class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-						<span class="min-w-0 flex-1 text-sm">
-							<span class="block break-all font-medium"
-								>{worktree.branch || worktree.name}{#if worktree.isMain}<span
-										class="ml-2 text-xs font-normal text-muted-foreground"
-										>{m.chat_new_chat_worktree_main()}</span
-									>{/if}</span
-							>
-							<span class="mt-1 block break-all text-xs text-muted-foreground">{worktree.path}</span
-							>
-							{#if worktree.isPathMissing}<span class="mt-1 block text-xs text-destructive"
+						<span class="min-w-0 flex-1 text-xs">
+							<span class="block truncate">{worktree.branch || worktree.name}</span>
+							{#if worktree.isMain}<span class="sr-only">{m.chat_new_chat_worktree_main()}</span
+								>{/if}
+							<span class="sr-only">{worktree.path}</span>
+							{#if worktree.isPathMissing}<span class="sr-only"
 									>{m.chat_new_chat_worktree_missing()}</span
 								>{/if}
 						</span>
@@ -190,7 +185,7 @@
 				{m.chat_new_chat_worktrees_empty()}
 			</p>{/if}
 	{:else}
-		<div class="rounded-xl border border-border bg-card p-3 text-sm text-foreground">
+		<div class="rounded-md border border-border bg-card p-2 text-xs text-foreground">
 			<p class="break-all">{form.nonblankPath}</p>
 			<p class="mt-1 text-xs text-muted-foreground">{m.chat_new_chat_worktrees_non_git()}</p>
 		</div>

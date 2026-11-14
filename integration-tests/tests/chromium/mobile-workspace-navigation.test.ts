@@ -172,6 +172,6 @@ test('keeps mobile workspace commands reachable before selecting a chat', async 
     }
     await page.getByRole('button', { name: 'New Chat', exact: true }).click();
     await page.getByRole('dialog', { name: 'New Chat', exact: true })
-      .getByRole('button', { name: 'Choose project', exact: true }).waitFor();
+      .getByRole('button', { name: 'Choose folder', exact: true }).waitFor();
   });
 }, 120_000);

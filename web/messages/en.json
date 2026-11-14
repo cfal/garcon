@@ -1,5 +1,5 @@
 {
-	"chat_new_chat_choose_project": "Choose project",
+	"chat_new_chat_choose_project": "Choose folder",
 	"chat_new_chat_worktrees": "Worktrees",
 	"chat_new_chat_worktrees_executor_unavailable": "Worktrees are unavailable while this executor is offline.",
 	"chat_new_chat_worktrees_choose_project": "Select a saved project or choose a project to see its worktrees.",

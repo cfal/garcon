@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
-test('New Chat project browsing keeps its draft and returns focus to Choose project', async () => {
+test('New Chat project browsing keeps its draft and returns focus to Choose folder', async () => {
   await withChromiumFixture('new-chat-focus', async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
     const root = integration.executionDirs.project;
     await mkdir(join(root, 'alpha', 'nested'), { recursive: true });
@@ -26,7 +26,7 @@ test('New Chat project browsing keeps its draft and returns focus to Choose proj
     await browserExpect(project).toHaveAttribute('aria-pressed', 'true');
     const draft = 'Synthetic project picker draft';
     await prompt.fill(draft);
-    const chooseProject = newChat.getByRole('button', { name: 'Choose project', exact: true });
+    const chooseProject = newChat.getByRole('button', { name: 'Choose folder', exact: true });
     const browser = page.getByRole('dialog', { name: 'Select Directory', exact: true });
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });

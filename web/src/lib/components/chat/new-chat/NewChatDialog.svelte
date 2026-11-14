@@ -75,9 +75,9 @@
 		<div
 			class="landing-insets min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,var(--safe-area-inset-bottom,0px))]"
 		>
-			<div class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center py-6 sm:py-12">
-				<div class="mb-6 space-y-2">
-					<h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
+			<div class="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center py-4 sm:py-6">
+				<div class="mb-4 space-y-1">
+					<h2 class="text-xl font-semibold tracking-tight sm:text-2xl">
 						{m.chat_new_chat_landing_heading()}
 					</h2>
 					<Dialog.Description>{m.chat_new_chat_landing_description()}</Dialog.Description>

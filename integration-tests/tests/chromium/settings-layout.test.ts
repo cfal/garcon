@@ -54,7 +54,7 @@ test('new-chat executor and project controls fit their responsive layout', async
     await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
     const dialog = page.getByRole('dialog');
     const picker = dialog.locator('[data-executor-picker]');
-    const project = dialog.getByRole('button', { name: 'Choose project', exact: true });
+    const project = dialog.getByRole('button', { name: 'Choose folder', exact: true });
     await picker.click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
     await integration.client.put('/api/v1/app/settings', { paths: { byExecutor: { [integration.client.executorId]: { pinnedPaths: [integration.executionDirs.project] } } } });

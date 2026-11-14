@@ -122,7 +122,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       const picker = dialog.locator('[data-executor-picker]');
-      const project = dialog.getByRole('button', { name: 'Choose project', exact: true });
+      const project = dialog.getByRole('button', { name: 'Choose folder', exact: true });
       const pickerRect = (await picker.boundingBox())!;
       const projectRect = (await project.boundingBox())!;
       expect(pickerRect.height).toBeGreaterThanOrEqual(38);
