@@ -110,6 +110,9 @@ test('serializes launchd and systemd arguments without expansion and keeps servi
   const linux = tunnelService({ ...options, platform: 'linux' });
   expect(linux.files[0][1]).toContain('$$USER%% \\"quotes\\"');
   expect(linux.commands.every(command => command.includes('--user'))).toBe(true);
+  const customConfig = tunnelService({ ...options, platform: 'linux', configHome: '/home/user/custom-config' });
+  expect(customConfig.files[0][0]).toBe('/home/user/custom-config/systemd/user/garcon-tunnel.service');
+  expect(() => tunnelService({ ...options, platform: 'linux', configHome: 'relative' })).toThrow('absolute path');
   const mac = tunnelService({ ...options, platform: 'darwin' });
   expect(mac.files[0][1]).toContain('&amp; files/tunnel.log');
   expect(mac.files[0][1]).toContain('&quot;quotes&quot;');
@@ -117,14 +120,17 @@ test('serializes launchd and systemd arguments without expansion and keeps servi
 });
 
 test('Windows uses a hidden normal-user task with a restart loop and refuses an unrelated task', () => {
-  const service = tunnelService({ platform: 'win32', home: 'C:\\Users\\user', directory: "C:\\Users\\user's folder\\cloudflare", command: ['C:\\tools\\cloudflared.exe', 'tunnel', 'run', 'id'], windowsDirectory: 'C:\\Windows' });
+  const service = tunnelService({ platform: 'win32', home: 'C:\\Users\\user', directory: "C:\\Users\\José's folder\\cloudflare", command: ['C:\\tools\\cloudflared.exe', 'tunnel', 'run', 'id'], windowsDirectory: 'C:\\Windows' });
   expect(service.files[0][1]).toContain('Start-Sleep -Seconds 10');
   expect(service.files[0][1]).toContain("$ErrorActionPreference = 'Continue'");
-  expect(service.files[0][1]).toContain("user''s folder");
+  expect(service.files[0][1]).toContain("José''s folder");
+  expect([...Buffer.from(service.files[0][1]).subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
   const registration = Buffer.from(service.commands[0].at(-1), 'base64').toString('utf16le');
   expect(registration).toContain('-RunLevel Limited');
   expect(registration).toContain('-WindowStyle Hidden');
   expect(registration).toContain('-MultipleInstances IgnoreNew');
   expect(registration).toContain('already belongs to another configuration');
+  expect(registration).toContain('$existing.Principal.UserId -notin @($user, $identity.User.Value)');
+  expect(registration).toContain("$existing.Principal.RunLevel -ne 'Limited'");
   expect(registration).not.toContain('-Force');
 });

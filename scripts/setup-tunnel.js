@@ -32,7 +32,8 @@ export async function setupTunnel(ask, configDir) {
   const background = (await ask('Keep the tunnel running in the background and start it at login? [Y/n]: ')).trim();
   if (background === '' || /^y(es)?$/i.test(background)) {
     await installTunnelService({ platform: process.platform, home: homedir(), directory,
-      command: result.command, uid: process.getuid?.(), windowsDirectory: process.env.SystemRoot });
+      command: result.command, uid: process.getuid?.(), windowsDirectory: process.env.SystemRoot,
+      configHome: process.env.XDG_CONFIG_HOME });
     console.log('Tunnel startup configured. Checking your public URL…');
     try {
       await checkAuthentication(`https://${hostname}`);

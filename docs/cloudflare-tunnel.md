@@ -36,6 +36,8 @@ These controls affect only the tunnel. Stopping Garcon remains a separate operat
 
 ### Linux
 
+Linux installs the unit under `$XDG_CONFIG_HOME/systemd/user/` when `XDG_CONFIG_HOME` is set, otherwise under `~/.config/systemd/user/`. Use that directory in the removal command if customized.
+
 ```bash
 systemctl --user status garcon-tunnel
 journalctl --user -u garcon-tunnel -f
@@ -47,7 +49,7 @@ Remove automatic startup:
 
 ```bash
 systemctl --user disable --now garcon-tunnel
-rm ~/.config/systemd/user/garcon-tunnel.service
+rm "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/garcon-tunnel.service"
 systemctl --user daemon-reload
 ```
 

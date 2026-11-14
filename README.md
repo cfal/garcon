@@ -100,7 +100,7 @@ Use absolute paths. Services do not load your shell profile, so set `PATH` to in
 
 ### Linux (systemd user service)
 
-`~/.config/systemd/user/garcon.service`:
+Create `~/.config/systemd/user/` first, or `$XDG_CONFIG_HOME/systemd/user/` if customized. Save this as `garcon.service` in that directory:
 
 ```ini
 [Unit]
@@ -126,12 +126,12 @@ loginctl enable-linger "$USER"     # optional: start at boot without logging in
 systemctl --user status garcon     # status
 journalctl --user -u garcon -f     # log
 systemctl --user restart garcon    # restart
-systemctl --user disable --now garcon && rm ~/.config/systemd/user/garcon.service  # remove
+systemctl --user disable --now garcon && rm "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/garcon.service"  # remove
 ```
 
 ### macOS (LaunchAgent)
 
-`~/Library/LaunchAgents/app.garcon.plist`, with `you` replaced by your user name:
+Create `~/Library/LaunchAgents/` first. Save this as `~/Library/LaunchAgents/app.garcon.plist`, with `you` replaced by your user name:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -178,25 +178,37 @@ Run in a normal, non-administrator PowerShell window. Set the first two paths:
 $repo = 'D:\repos\garcon'
 $projects = 'D:\repos'
 $config = "$env:USERPROFILE\.garcon"
-$bun = (Get-Command bun).Source
+$bun = (Get-Command bun -CommandType Application -ErrorAction Stop).Source
+$powershell = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
 $hostDir = "$env:LOCALAPPDATA\garcon-host"
+foreach ($folder in @($repo, $projects)) {
+  if (!(Test-Path -LiteralPath $folder -PathType Container)) { throw "Folder does not exist: $folder" }
+}
 New-Item -ItemType Directory -Force $hostDir | Out-Null
 
-@"
-`$env:GARCON_CONFIG_DIR = '$config'
-Set-Location '$repo'
-while (`$true) {
-  & '$bun' run start --project-base-dir '$projects' *>> '$hostDir\garcon.log'
+@{ repo = $repo; projects = $projects; config = $config; bun = $bun; path = $env:PATH } |
+  ConvertTo-Json | Set-Content "$hostDir\host.json" -Encoding UTF8
+@'
+$ErrorActionPreference = 'Continue'
+$hostConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'host.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$env:GARCON_CONFIG_DIR = $hostConfig.config
+$env:PATH = $hostConfig.path
+Set-Location -LiteralPath $hostConfig.repo
+while ($true) {
+  & $hostConfig.bun run start --config-dir $hostConfig.config --project-base-dir $hostConfig.projects *>> (Join-Path $PSScriptRoot 'garcon.log')
   Start-Sleep -Seconds 10
 }
-"@ | Set-Content "$hostDir\run.ps1"
+'@ | Set-Content "$hostDir\run.ps1" -Encoding UTF8
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+$action = New-ScheduledTaskAction -Execute $powershell `
   -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$hostDir\run.ps1`""
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+$principal = New-ScheduledTaskPrincipal -UserId $taskUser `
+  -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
   -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName Garcon -Action $action -Trigger $trigger -Settings $settings
+Register-ScheduledTask -TaskName Garcon -Action $action -Trigger $trigger -Principal $principal -Settings $settings
 Start-ScheduledTask -TaskName Garcon
 ```
 
@@ -204,7 +216,12 @@ Start-ScheduledTask -TaskName Garcon
 Get-ScheduledTask -TaskName Garcon | Get-ScheduledTaskInfo                 # status
 Get-Content "$env:LOCALAPPDATA\garcon-host\garcon.log" -Tail 50 -Wait     # log
 Stop-ScheduledTask -TaskName Garcon                                        # stop the restart loop
-Stop-Process -Id (Get-Content "$env:USERPROFILE\.garcon\runtime.json" | ConvertFrom-Json).pid  # stop the server
+$hostConfig = Get-Content "$env:LOCALAPPDATA\garcon-host\host.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+$runtime = Get-Content -LiteralPath (Join-Path $hostConfig.config 'runtime.json') -Raw | ConvertFrom-Json
+$serverProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($runtime.pid)"
+if ($serverProcess.ExecutablePath -eq $hostConfig.bun -and $serverProcess.CommandLine -and $serverProcess.CommandLine.Contains($hostConfig.config)) {
+  Stop-Process -Id $serverProcess.ProcessId                                  # stop only this Garcon server
+}
 Start-ScheduledTask -TaskName Garcon                                       # start
 Unregister-ScheduledTask -TaskName Garcon -Confirm:$false                  # remove
 ```

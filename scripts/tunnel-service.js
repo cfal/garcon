@@ -5,10 +5,11 @@ const xml = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').repl
 const ps = value => `'${value.replaceAll("'", "''")}'`;
 const unit = value => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%').replaceAll('$', () => '$$').replaceAll('\n', '\\n').replaceAll('\r', '\\r')}"`;
 
-export function tunnelService({ platform, home, directory, command, uid, windowsDirectory }) {
+export function tunnelService({ platform, home, directory, command, uid, windowsDirectory, configHome }) {
   const paths = platform === 'win32' ? path.win32 : path.posix;
   if (platform === 'linux') {
-    const file = paths.join(home, '.config/systemd/user/garcon-tunnel.service');
+    if (configHome && !paths.isAbsolute(configHome)) throw new Error('XDG_CONFIG_HOME must be an absolute path.');
+    const file = paths.join(configHome || paths.join(home, '.config'), 'systemd/user/garcon-tunnel.service');
     return {
       files: [[file, `[Unit]\nDescription=Garcon Cloudflare Tunnel\nAfter=network-online.target\n\n[Service]\nExecStart=${command.map(unit).join(' ')}\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n`]],
       commands: [['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', 'enable', '--now', 'garcon-tunnel.service']],
@@ -30,16 +31,18 @@ export function tunnelService({ platform, home, directory, command, uid, windows
   // Windows command-line quoting keeps a path containing spaces within one -File argument.
   if (runner.includes('"')) throw new Error('The tunnel directory cannot contain a double quote.');
   const args = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${runner}"`;
-  // PowerShell 5 can turn native stderr into errors; connector logs must not terminate the runner.
-  const script = `$ErrorActionPreference = 'Continue'\n$exe = ${ps(command[0])}\n$argsForTunnel = @(${command.slice(1).map(ps).join(', ')})\nwhile ($true) {\n  & $exe @argsForTunnel *>> ${ps(paths.join(directory, 'tunnel.log'))}\n  Start-Sleep -Seconds 10\n}\n`;
+  // PowerShell 5 requires a BOM for Unicode paths and can treat native stderr as errors.
+  const script = `\uFEFF$ErrorActionPreference = 'Continue'\n$exe = ${ps(command[0])}\n$argsForTunnel = @(${command.slice(1).map(ps).join(', ')})\nwhile ($true) {\n  & $exe @argsForTunnel *>> ${ps(paths.join(directory, 'tunnel.log'))}\n  Start-Sleep -Seconds 10\n}\n`;
   const registration = `$ErrorActionPreference = 'Stop'
 $exe = ${ps(powershell)}
 $arguments = ${ps(args)}
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$user = $identity.Name
 $existing = Get-ScheduledTask -TaskName 'GarconTunnel' -ErrorAction SilentlyContinue
 if ($existing) {
   if ($existing.Actions.Count -ne 1 -or $existing.Actions[0].Execute -ne $exe -or $existing.Actions[0].Arguments -ne $arguments) { throw 'GarconTunnel already belongs to another configuration.' }
+  if ($existing.Principal.UserId -notin @($user, $identity.User.Value) -or $existing.Principal.RunLevel -ne 'Limited' -or $existing.Principal.LogonType -ne 'Interactive') { throw 'GarconTunnel must run as the current user with limited interactive rights. Remove the conflicting task before rerunning setup.' }
 } else {
-  $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
   $action = New-ScheduledTaskAction -Execute $exe -Argument $arguments
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
