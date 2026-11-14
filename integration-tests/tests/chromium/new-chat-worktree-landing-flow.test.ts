@@ -76,6 +76,11 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(selectedWorktree).toBeChecked();
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      phase('unpinning the parent project while retaining its selected worktree');
+      const parentCard = projectCard.locator('..');
+      await parentCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
+      await browserExpect(parentCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
+      await browserExpect(selectedWorktree).toBeChecked();
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
       for (const width of [1440, 390, 360]) {

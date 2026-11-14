@@ -7,6 +7,8 @@ executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
 Each card has its own pin toggle on the right. Selection uses highlighting without
 a checkmark, and pinning a card preserves the selected project and prompt.
+The pin uses the same icon in both states: faded when unpinned, fully visible and
+rotated 45 degrees when pinned. Action labels remain Pin and Unpin.
 
 Project cards reuse the existing executor-qualified pinned and recent paths. Pinned
 folders appear first; recent folders retain their recorded order. Duplicate drive-letter

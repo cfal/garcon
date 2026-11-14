@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Pin from '@lucide/svelte/icons/pin';
-	import PinOff from '@lucide/svelte/icons/pin-off';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -51,9 +50,14 @@
 >
 	{#if loading}
 		<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
-	{:else if isPinned}
-		<PinOff class={resolvedIconClass} aria-hidden="true" />
 	{:else}
-		<Pin class={resolvedIconClass} aria-hidden="true" />
+		<Pin
+			class={cn(
+				resolvedIconClass,
+				'transition-[opacity,rotate] duration-150 motion-reduce:transition-none',
+				isPinned ? 'rotate-45 opacity-100' : 'opacity-40',
+			)}
+			aria-hidden="true"
+		/>
 	{/if}
 </button>
