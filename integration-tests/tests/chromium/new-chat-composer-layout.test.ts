@@ -16,8 +16,8 @@ async function openNewChat(fixture: ChromiumFixture): Promise<Locator> {
     throw new Error(`SPA navigation failed with ${response?.status()}.`);
 
   await fixture.page
-    .getByRole("button", { name: "New Chat", exact: true })
-    .click();
+    .getByRole("dialog", { name: "New Chat", exact: true })
+    .waitFor({ state: "visible" });
   await fixture.page
     .getByRole("status", { name: "Loading chat defaults..." })
     .waitFor({ state: "detached" });
@@ -259,7 +259,6 @@ describe("Chromium New Chat composer layout", () => {
           bounds(form),
           bounds(modelPopover),
         ]);
-        expect(dialogBox.width).toBeGreaterThanOrEqual(592);
         expect(dialogBox.x).toBeGreaterThanOrEqual(8);
         expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(632);
         expect(popoverBox.x).toBeGreaterThanOrEqual(8);

@@ -28,9 +28,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           : { byExecutor: { [client.executorId]: { defaultPath: project, pinnedPaths: [project, otherProject] } } }),
       } });
       await page.addInitScript(seedLocalSettings, { composerStatusBarGitProjects: false, composerStatusBarNonGitProjects: false });
+      phase('opening the landing screen automatically in an empty workspace');
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
       const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
+      await browserExpect(dialog).toBeVisible();
       const projects = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true });
       const projectCard = projects.getByRole('button', { name: /[\\/]web-project$/ });
       await projectCard.click();
@@ -59,9 +60,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
       await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-1440.png`) });
+      phase('closing folder browsing with the check button and outside click');
+      await folderBrowser.getByRole('button', { name: 'Close', exact: true }).click();
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await browserExpect(pathField).toHaveValue(project);
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await browserExpect(folderBrowser).toBeVisible();
+      await dialog.locator('[data-slot="directory-browser-dismiss"]').click({ position: { x: 8, y: 8 } });
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await browserExpect(pathField).toHaveValue(project);
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
       await folderBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
       await browserExpect(pathField).toHaveValue(toExecutorPath(otherProject));
-      await page.keyboard.press('Escape');
+      await folderBrowser.getByRole('button', { name: 'Close', exact: true }).click();
       await browserExpect(folderBrowser).toHaveCount(0);
       await pathField.fill(toExecutorPath(join(executionDirs.project, 'missing-folder')));
       await pathField.press('Enter');

@@ -15,7 +15,7 @@ test('New Chat project browsing keeps its draft and returns focus to Choose fold
     await page.goto(integration.garcon.baseUrl);
     const newChatButton = page.getByRole('button', { name: 'New Chat', exact: true }).first();
     await browserExpect(newChatButton).toBeVisible();
-    await newChatButton.click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
 
     const newChat = page.getByRole('dialog', { name: 'New Chat', exact: true });
     const prompt = newChat.getByPlaceholder('How can I help you today?');

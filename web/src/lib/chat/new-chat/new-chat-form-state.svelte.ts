@@ -735,11 +735,16 @@ export class NewChatFormState {
 	// Path validation
 
 	selectProjectPath(path: string): void {
-		this.editProjectPath(path);
+		this.#updateProjectPath(path);
 		this.#pathValidation.validateSelectedPath();
 	}
 
 	editProjectPath(path: string): void {
+		this.#updateProjectPath(path);
+		this.#pathValidation.validateChangedPath();
+	}
+
+	#updateProjectPath(path: string): void {
 		this.projectPath = path;
 		this.#selectedProjectPath = path;
 		this.clearError();

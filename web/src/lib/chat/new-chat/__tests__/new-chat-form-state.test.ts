@@ -464,12 +464,15 @@ describe('NewChatFormState', () => {
 		expect(formState.validationStatus).toBe('valid');
 	});
 
-	it('keeps manual path edits unvalidated until the debounce effect runs', async () => {
+	it('invalidates prior path confidence immediately while debouncing manual validation', async () => {
 		formState.error = 'Previous error';
+		formState.validationStatus = 'valid';
+		formState.gitRepoStatus = 'git';
 		formState.editProjectPath('/workspace/manual');
 		expect(formState.projectPath).toBe('/workspace/manual');
 		expect(formState.selectedProjectPath).toBe('/workspace/manual');
 		expect(formState.error).toBeNull();
+		expect(formState.validationStatus).toBe('checking');
 		expect(chatsApi.validateStart).not.toHaveBeenCalled();
 		formState.validateChangedPath();
 		await vi.advanceTimersByTimeAsync(299);

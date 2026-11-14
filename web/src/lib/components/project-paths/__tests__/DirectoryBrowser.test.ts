@@ -48,6 +48,53 @@ function rowNames(): string[] {
 
 afterEach(() => vi.resetAllMocks());
 
+it.each(['footer', 'outside'] as const)('closes the desktop browser from %s without selecting its initial root', async (closeFrom) => {
+	browseTree();
+	const { view, onSelect, onClose } = renderBrowser({ currentPath: '/repo/', isMobile: false });
+	await screen.findByRole('button', { name: 'alpha' });
+	const close = closeFrom === 'footer'
+		? within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })
+		: view.container.querySelector<HTMLButtonElement>('[data-slot="directory-browser-dismiss"]')!;
+	close.focus();
+	expect(document.activeElement).toBe(close);
+	expect(close.getAttribute('type')).toBe('button');
+	await fireEvent.click(close);
+	expect(onClose).toHaveBeenCalledOnce();
+	expect(onSelect).not.toHaveBeenCalled();
+});
+
+it.each(['pending', 'failed'] as const)('keeps the desktop close button available while a listing is %s', async (listing) => {
+	const pending = Promise.withResolvers<Awaited<ReturnType<typeof browseDirectory>>>();
+	if (listing === 'pending') vi.mocked(browseDirectory).mockReturnValueOnce(pending.promise);
+	else vi.mocked(browseDirectory).mockRejectedValueOnce(new ApiError(403, 'Permission denied', 'PERMISSION_DENIED'));
+	const { view, onSelect, onClose } = renderBrowser({ currentPath: '/repo/', isMobile: false });
+	await waitFor(() => expect(browseDirectory).toHaveBeenCalledOnce());
+	if (listing === 'failed') await screen.findByRole('alert');
+	const close = within(screen.getByRole('dialog')).getByRole<HTMLButtonElement>('button', { name: 'Close' });
+	expect(close.disabled).toBe(false);
+	await fireEvent.click(close);
+	expect(onClose).toHaveBeenCalledOnce();
+	expect(onSelect).not.toHaveBeenCalled();
+	view.unmount();
+	if (listing === 'pending') {
+		expect(vi.mocked(browseDirectory).mock.calls[0][1]?.aborted).toBe(true);
+		pending.resolve([]);
+		await tick();
+		expect(onSelect).not.toHaveBeenCalled();
+	}
+});
+
+it('retains the directory already selected by desktop navigation when the check button closes browsing', async () => {
+	browseTree();
+	const { onSelect, onClose } = renderBrowser({ currentPath: '/repo/', isMobile: false });
+	await fireEvent.click(await screen.findByRole('button', { name: 'alpha' }));
+	await screen.findByRole('button', { name: 'nested' });
+	expect(onSelect).toHaveBeenCalledExactlyOnceWith('/repo/alpha');
+	await fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+	expect(onClose).toHaveBeenCalledOnce();
+	expect(onSelect).toHaveBeenCalledExactlyOnceWith('/repo/alpha');
+});
+
 it('keeps trailing spaces when filtering directory names', async () => {
 	vi.mocked(browseDirectory).mockReset().mockResolvedValue([
 		{ name: 'project', path: '/repo/project', type: 'directory' },
@@ -174,20 +221,22 @@ describe.each([{ isMobile: false }, { isMobile: true }])('directory browser (mob
 	});
 });
 
-it('ignores a creation that settles after the popover closed', async () => {
+it('ignores a creation that settles after the check button closes the popover', async () => {
 	browseTree();
 	const pending = Promise.withResolvers<{ name: string; path: string; type: 'directory' }>();
 	vi.mocked(createDirectory).mockReturnValueOnce(pending.promise);
 	const opener = document.createElement('button');
 	document.body.append(opener);
 	opener.focus();
-	const { view, onSelect } = renderBrowser({ currentPath: '/repo/', isMobile: false });
+	const { view, onSelect, onClose } = renderBrowser({ currentPath: '/repo/', isMobile: false });
 	await screen.findByRole('button', { name: 'alpha' });
 	await fireEvent.click(screen.getByRole('button', { name: 'New directory' }));
 	const name = screen.getByRole('textbox', { name: 'Directory name' });
 	await fireEvent.input(name, { target: { value: 'fresh' } });
 	await fireEvent.keyDown(name, { key: 'Enter' });
 	expect(createDirectory).toHaveBeenCalledOnce();
+	await fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+	expect(onClose).toHaveBeenCalledOnce();
 	view.unmount();
 	document.body.focus();
 	opener.blur();

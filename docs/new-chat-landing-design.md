@@ -1,5 +1,11 @@
 # New chat landing screen
 
+An empty workspace opens New Chat after its chat list loads successfully, without
+requiring a click through the empty-chat placeholder. Closing the screen stays
+closed for that empty period; an existing chat or draft rearms the behavior for
+when the last chat is later removed. Explicit chat and ticket destinations and
+other active dialogs retain priority. Loading and failed lists do not trigger it.
+
 New Chat opens a full-page start screen with pinned and recent project folders above the
 existing composer. Compact project cards use one column within a narrow content
 area. Each card shows its folder name and a truncated path, with full paths on hover and
@@ -27,6 +33,9 @@ manual paths, and Enter validates without starting a session. Desktop navigation
 selects the entered folder; mobile navigation requires Select this directory.
 Closing the browser leaves the path field available. Worktree selection uses the
 inline list without a separate picker button. Ordinary non-Git folders remain usable.
+The desktop dropdown includes a bottom check button that closes browsing without
+changing the current path, including while its listing loads or reports an error.
+Clicking outside also closes it. Mobile retains explicit directory confirmation.
 Mobile also offers Enter path directly, without opening the full-screen browser.
 Typing retains the existing debounced validation and shows path errors even when
 the executor cannot provide Git services.

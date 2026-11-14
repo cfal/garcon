@@ -48,7 +48,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
-	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
+	import { isBareChatRoute, restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
 	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
@@ -78,6 +78,7 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
+	import { EmptyWorkspaceLandingController } from './empty-workspace-landing-controller.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -271,6 +272,26 @@
 				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
 			);
 		},
+	});
+	const emptyWorkspaceLanding = new EmptyWorkspaceLandingController(handleNewChat);
+
+	$effect(() => {
+		const snapshot = {
+			chatListStatus: sessions.chatListStatus,
+			chatListError: sessions.chatListError,
+			chatCount: sessions.orderedChats.length,
+			isBareRoute: isBareChatRoute(appPathname(page.url.pathname)),
+			hasNavigationTarget: Boolean(
+				page.params.id || routeTicketId || sessions.selectedChatId ||
+				chatNavigation.pendingChatTarget,
+			),
+			newChatDialogOpen: appShell.newChatDialogOpen,
+			anotherDialogOpen: Boolean(
+				appShell.showSettings || appShell.showOnboardingWizard || appShell.showPreambles ||
+				appShell.showSnippets || appShell.showScheduledPrompts || appShell.chatPreambleSelectionTarget,
+			),
+		};
+		untrack(() => emptyWorkspaceLanding.observe(snapshot));
 	});
 
 	$effect(() => {

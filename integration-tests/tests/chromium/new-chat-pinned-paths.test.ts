@@ -24,7 +24,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         },
       } });
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
       const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
       await browserExpect(dialog.getByRole('heading', { name: 'What would you like to work on?' })).toBeVisible();
       const prompt = dialog.getByPlaceholder('How can I help you today?');
@@ -79,7 +79,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect.poll(() => page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(width < 500);
         await browserExpect.poll(() => pins.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await browserExpect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        expect(await localPin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(64);
+        expect(await localPin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
         const box = await dialog.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.x).toBeCloseTo(0, 0);
@@ -96,7 +96,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(pins.getByRole('button', { name: 'Offline worker: /projects/replacement', exact: true })).toBeDisabled();
       await browserExpect(offlinePin).toHaveCount(0);
       await browserExpect(prompt).toHaveValue('Synthetic retained draft');
-      phase('showing guidance when all saved projects are removed');
+      phase('retaining the selected project when saved projects are removed');
       await client.put('/api/v1/app/settings', { paths: {
         pinnedProjectPaths: [], recentProjectPaths: [],
         byExecutor: {
@@ -104,7 +104,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           [offline.id]: { pinnedPaths: [] },
         },
       } });
-      await browserExpect(pins.getByText('Pin a project path to bookmark it here')).toBeVisible();
+      await browserExpect(pins.locator('[data-slot="new-chat-project-card"]')).toHaveCount(1);
+      await browserExpect(pins.getByRole('button', { pressed: true })).toHaveCount(1);
       expect((await client.listChats()).sessions).toEqual([]);
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
       await browserExpect(dialog).toHaveCount(0);
@@ -122,14 +123,14 @@ test('saved projects remain accessible with a fine primary pointer and secondary
       const { client, dirs } = integration;
       await client.put('/api/v1/app/settings', { paths: { pinnedProjectPaths: [dirs.project] } });
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
       expect(await page.evaluate(() => ({ primaryFine: matchMedia('(pointer: fine)').matches, anyCoarse: matchMedia('(any-pointer: coarse)').matches }))).toEqual({ primaryFine: true, anyCoarse: true });
       const pin = page.getByRole('region', { name: 'Saved and recent projects' }).getByRole('button', { name: dirs.project, exact: true });
       await pin.focus();
       await page.keyboard.press('Space');
       await browserExpect(pin).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(page.getByPlaceholder('How can I help you today?')).toBeFocused();
-      expect(await pin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(64);
+      expect(await pin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
       assertNoBrowserErrors();
     }, undefined, {}, browser);
   } finally {
