@@ -11,6 +11,7 @@ export function shouldOfferTunnel({ stdin = process.stdin, stdout = process.stdo
 }
 
 export async function setupTunnel(ask, configDir) {
+  const directory = path.join(resolveConfigDirectory(configDir), 'cloudflare');
   const cloudflared = Bun.which('cloudflared');
   if (!cloudflared) {
     throw new Error('Install cloudflared first: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/\nThen run: bun run setup:tunnel');
@@ -27,13 +28,18 @@ export async function setupTunnel(ask, configDir) {
   if (!/^y(es)?$/i.test((await ask('Already logged in with cloudflared on this machine? [y/N]: ')).trim())) {
     await runCommand([cloudflared, 'tunnel', 'login']);
   }
-  const directory = path.join(resolveConfigDirectory(configDir), 'cloudflare');
   const result = await connectTunnel({ directory, hostname, origin, cloudflared });
   const background = (await ask('Keep the tunnel running in the background and start it at login? [Y/n]: ')).trim();
   if (background === '' || /^y(es)?$/i.test(background)) {
     await installTunnelService({ platform: process.platform, home: homedir(), directory,
       command: result.command, uid: process.getuid?.(), windowsDirectory: process.env.SystemRoot });
-    console.log(`Tunnel startup configured. Open https://${hostname} after Cloudflare connects. Sign in with your Garcon account.`);
+    console.log('Tunnel startup configured. Checking your public URL…');
+    try {
+      await checkAuthentication(`https://${hostname}`);
+      console.log(`Ready: https://${hostname}. Sign in with your Garcon account.`);
+    } catch {
+      console.log(`Public reachability is not yet confirmed. Open https://${hostname} after Cloudflare connects; check the tunnel log if it stays unavailable.`);
+    }
   } else {
     const quoted = result.command.map(arg => `'${arg.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`).join(' ');
     console.log(`Tunnel configured. Run it in a terminal with:\n${process.platform === 'win32' ? '& ' : ''}${quoted}`);
