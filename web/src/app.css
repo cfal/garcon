@@ -581,7 +581,6 @@
 
 	.markdown-body th,
 	.markdown-body td {
-		padding: 0.5rem 0.75rem;
 		border: 1px solid hsl(var(--border));
 		text-align: left;
 		font-size: calc(0.875rem * var(--text-scale, 1));
@@ -592,9 +591,15 @@
 	}
 }
 
-/* The typography plugin decorates inline code with literal backticks from the
-   utilities layer; chat inline code already renders as a bordered chip. */
 @layer utilities {
+	/* Keeps bordered cells inset despite the typography plugin's edge resets. */
+	.markdown-body th,
+	.markdown-body td {
+		padding: 0.5rem 0.75rem;
+	}
+
+	/* The typography plugin decorates inline code with literal backticks from the
+	   utilities layer; chat inline code already renders as a bordered chip. */
 	.markdown-body :not(pre) > code::before,
 	.markdown-body :not(pre) > code::after {
 		content: none;
