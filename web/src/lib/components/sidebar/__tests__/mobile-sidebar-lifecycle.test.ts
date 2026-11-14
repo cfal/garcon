@@ -33,6 +33,7 @@ function createChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: 'Preview',

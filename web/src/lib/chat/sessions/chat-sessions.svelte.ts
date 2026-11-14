@@ -775,6 +775,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
+		// Existing activity belongs to live events and list refreshes; command replies can lag both.
+		if (previous?.status === 'running') next.activityStatus = previous.activityStatus;
 		this.#projectBindings.publishIfChanged(
 			entry.id,
 			previous?.projectPath,
@@ -874,6 +876,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	/** Updates a chat record field, such as title after rename. */
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
+		// Live status changes supersede list snapshots requested before their arrival.
+		if ('activityStatus' in patch) this.#nextServerEntryGeneration++;
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
 		this.#projectBindings.publishIfChanged(

@@ -29,6 +29,7 @@ function response() {
       isActive: false,
       isProcessing: false,
       processingPhase: null,
+      activityStatus: null,
       canReloadFromNativeHistory: true,
       isUnread: true,
     }],
@@ -38,6 +39,18 @@ function response() {
 }
 
 describe('chat list contract', () => {
+  it('validates nullable activity status independently of unread state', () => {
+    for (const activityStatus of [null, 'working', 'complete', 'error', 'pending-user-action']) {
+      const value = response();
+      value.sessions[0].activityStatus = activityStatus;
+      expect(parseChatListResponse(value).sessions[0].activityStatus).toBe(activityStatus);
+    }
+    for (const activityStatus of [undefined, 'idle', true]) {
+      const value = response();
+      value.sessions[0].activityStatus = activityStatus;
+      expect(() => parseChatListResponse(value)).toThrow('activityStatus');
+    }
+  });
   it('preserves optional executor identity and rejects malformed explicit IDs', () => {
     for (const executorId of [undefined, null, 'local', '22222222-2222-4222-8222-222222222222']) {
       const value = response();

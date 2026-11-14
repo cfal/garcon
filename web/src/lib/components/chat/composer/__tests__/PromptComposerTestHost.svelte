@@ -307,6 +307,7 @@
 		isProcessing: selectedIsProcessing,
 		processingPhase: selectedIsProcessing ? 'running' : null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: selectedStatus,
 		agentOwnershipEpoch: selectedStatus === 'draft' ? null : 'epoch-1',

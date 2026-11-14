@@ -54,6 +54,7 @@ function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): Ch
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: `Chat ${index} preview`,

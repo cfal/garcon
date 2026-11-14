@@ -49,6 +49,7 @@ function chat(id = TARGET_CHAT_ID): ChatListEntry {
     isActive: true,
     isProcessing: true,
     processingPhase: 'running',
+    activityStatus: null,
     canReloadFromNativeHistory: false,
     isUnread: false,
   };

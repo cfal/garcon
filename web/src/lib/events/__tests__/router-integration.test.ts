@@ -66,6 +66,7 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
@@ -106,6 +107,7 @@ function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
 			thinkingMode: 'none',
 			projectPath: '/repo',
 			tags: [],
+			activityStatus: null,
 			canReloadFromNativeHistory: false,
 			activity: { createdAt: TS, lastActivityAt: TS },
 		},
@@ -208,6 +210,35 @@ function renderRouterWithRawMessages(
 describe('event router integration', () => {
 	afterEach(() => {
 		vi.mocked(getChatSnapshot).mockReset();
+	});
+
+	it.each(['working', 'complete', 'error', 'pending-user-action', null] as const)(
+		'updates a background chat activity status to %s through normalize + filter + handler',
+		(activityStatus) => {
+			const stores = createStores();
+			renderRouterWithRawMessages(
+				[{ type: 'chat-activity-updated', chatId: 'chat-b', activityStatus }],
+				stores,
+			);
+			expect(stores.sessions.patchChat).toHaveBeenCalledExactlyOnceWith('chat-b', {
+				activityStatus,
+			});
+			expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		},
+	);
+
+	it('drops malformed chat activity events without patching the sidebar', () => {
+		const stores = createStores();
+		const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			renderRouterWithRawMessages(
+				[{ type: 'chat-activity-updated', chatId: 'chat-b', activityStatus: 'unknown' }],
+				stores,
+			);
+			expect(stores.sessions.patchChat).not.toHaveBeenCalled();
+		} finally {
+			diagnostic.mockRestore();
+		}
 	});
 
 	it.each([

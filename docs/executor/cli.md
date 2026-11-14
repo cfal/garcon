@@ -104,6 +104,11 @@ or network bandwidth.
 
 ## HTTP Transparency
 
+Chat list entries and snapshot chat summaries include nullable `activityStatus`
+(`working`, `complete`, `error`, or `pending-user-action`). Direct controller
+HTTP and the executor gateway return the same field through the existing
+allowlisted bulk reads. No new forwarding route or authority is introduced.
+
 Both endpoints serve the same application request. For example:
 
 ```text

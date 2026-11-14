@@ -21,6 +21,7 @@ const chat = {
 	isProcessing: false,
 	processingPhase: null,
 	isUnread: false,
+	activityStatus: null,
 	canReloadFromNativeHistory: false,
 	status: 'draft',
 	lastMessage: '',

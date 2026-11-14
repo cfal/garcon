@@ -220,6 +220,8 @@ function createFixture(overrides = {}) {
     ...overrides.settings,
   };
   const metadata = {
+    getChatMetadata: mock(() => null),
+    updateRunOutcome: mock(() => undefined),
     repair: mock(async () => {}),
     updateFromAppendedMessages: mock(() => undefined),
     invalidateTranscriptView: mock(() => undefined),
@@ -1064,7 +1066,9 @@ describe('server event wiring', () => {
     expect(fixture.published.map((message) => message.type)).toEqual([
       'chat-messages',
       'chat-messages',
+      'chat-activity-updated',
       'chat-processing-updated',
+      'chat-activity-updated',
       'agent-run-finished',
     ]);
     expect(fixture.published[0]).toMatchObject({
@@ -1073,7 +1077,7 @@ describe('server event wiring', () => {
       lastOrdinal: 2,
       messages: [{ ordinal: 2, message: { content: 'answer' } }],
     });
-    expect(fixture.published[3]).toMatchObject({
+    expect(fixture.published[5]).toMatchObject({
       type: 'agent-run-finished',
       outcome: 'finished',
     });
@@ -1083,6 +1087,44 @@ describe('server event wiring', () => {
       'finished',
       {},
     );
+  });
+
+  it('publishes working, actionable permission, resumed work and settled results in the queued fanout', async () => {
+    let phase = 'running';
+    let outcome = null;
+    const fixture = createFixture({
+      processing: { phase: () => phase },
+      metadata: {
+        getChatMetadata: () => ({ lastRunOutcome: outcome }),
+        updateRunOutcome: (_chatId, _viewId, next) => { outcome = next; },
+      },
+    });
+    const latestStatus = () => fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus;
+    fixture.queue.processing('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('working');
+    const permission = {
+      type: 'permission', chatId: 'chat-1', viewId: 'view-1', runId: 'turn-1',
+      row: { kind: 'permission-requested', ordinal: 3, at, providerMeta: null,
+        lifecycle: { kind: 'requested', permissionOccurrenceId: 'occurrence-1',
+          requestedTool: new BashToolUseMessage(at, 'tool-1', 'pwd'), options: [] } },
+    };
+    fixture.agent.transcript(permission);
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('pending-user-action');
+    fixture.agent.transcript({ ...permission, row: { ...permission.row, ordinal: 4,
+      kind: 'permission-resolved', lifecycle: { kind: 'resolved', permissionOccurrenceId: 'occurrence-1', decision: { allow: true } } } });
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('working');
+    phase = null;
+    fixture.agent.transcript(terminalCommit('failed'));
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('error');
+    fixture.agent.transcript(terminalCommit('finished'));
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('complete');
+    expect(fixture.published.findIndex(message => message.type === 'chat-messages'))
+      .toBeLessThan(fixture.published.findIndex(message => message.activityStatus === 'pending-user-action'));
   });
 
   it('fails a successful process receipt when cwd settlement fails without publishing success', async () => {
@@ -1134,10 +1176,11 @@ describe('server event wiring', () => {
       await Promise.resolve();
       await fixture.wiring.waitForIdle();
       expect(fixture.published.map(message => message.type)).toEqual([
-        'chat-messages', 'chat-transient-feed-mutation', 'chat-transient-feed-mutation',
+        'chat-messages', 'chat-transient-feed-mutation', 'chat-activity-updated',
+        'chat-transient-feed-mutation', 'chat-activity-updated',
       ]);
       expect(fixture.published[1]).toMatchObject({ transientRevision: 1, mutation: { kind: 'upsert' } });
-      expect(fixture.published[2]).toMatchObject({
+      expect(fixture.published[3]).toMatchObject({
         serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: view.viewId,
         transientRevision: 2, mutation: { kind: 'remove', permissionOccurrenceId: occurrence },
       });
@@ -1244,6 +1287,48 @@ describe('server event wiring', () => {
     expect(fixture.published.filter(message => message.type === 'agent-run-failed')).toHaveLength(2);
   });
 
+  it.each(['agent', 'queue'])('shows a %s startup failure without requiring a ledger terminal', async source => {
+    let current = { transcriptViewId: 'view-1', lastRunOutcome: null };
+    const fixture = createFixture({ metadata: {
+      getChatMetadata: () => current,
+      updateRunOutcome: (_chatId, _viewId, outcome) => {
+        current = { ...current, lastRunOutcome: outcome };
+        return true;
+      },
+    } });
+    if (source === 'agent') fixture.agent.failed('chat-1', 'Synthetic startup failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic startup failure', turn);
+    await fixture.wiring.waitForIdle();
+    expect(current.lastRunOutcome).toBe('failed');
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1))
+      .toEqual({ type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: 'error' });
+    expect(fixture.published.some(message => message.type === 'chat-messages')).toBe(false);
+  });
+
+  it.each(['agent', 'queue'].flatMap(source => ['successor', 'working', 'replacement'].map(change => [source, change])))
+  ('fences a late %s failure against %s after command settlement waits', async (source, change) => {
+    const entered = Promise.withResolvers();
+    const settlement = Promise.withResolvers();
+    let current = { transcriptViewId: 'view-1', lastRunOutcome: null };
+    let phase = null;
+    const updateRunOutcome = mock(() => true);
+    const fixture = createFixture({
+      metadata: { getChatMetadata: () => current, updateRunOutcome },
+      processing: { phase: () => phase },
+      commandLedger: { settleTerminal: async () => { entered.resolve(); await settlement.promise; } },
+    });
+    if (source === 'agent') fixture.agent.failed('chat-1', 'Synthetic old failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic old failure', turn);
+    await entered.promise;
+    if (change === 'working') phase = 'running';
+    else current = { transcriptViewId: change === 'replacement' ? 'view-2' : 'view-1', lastRunOutcome: 'finished' };
+    settlement.resolve();
+    await fixture.wiring.waitForIdle();
+    expect(updateRunOutcome).not.toHaveBeenCalled();
+    expect(current.lastRunOutcome).toBe(change === 'working' ? null : 'finished');
+    expect(fixture.published.some(message => message.activityStatus === 'error')).toBe(false);
+  });
+
   it('offers queued steers to a run once it can take steering input', async () => {
     const fixture = createFixture();
 
@@ -1322,7 +1407,7 @@ describe('server event wiring', () => {
       type: 'chat-transcript-replaced',
       previousTranscriptViewId: 'view-1',
       transcriptViewId: 'view-2',
-    })]);
+    }), { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: null }]);
   });
 
   it('broadcasts a view replacement before rows from the replacement producer', async () => {
@@ -1365,6 +1450,7 @@ describe('server event wiring', () => {
         previousTranscriptViewId: 'view-1',
         transcriptViewId: 'view-2',
       }),
+      { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: null },
       expect.objectContaining({
         type: 'chat-messages',
         transcriptViewId: 'view-2',
@@ -1406,6 +1492,7 @@ describe('server event wiring', () => {
         intent: 'stop',
       },
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'stopping' },
+      { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: 'working' },
     ]);
   });
 
@@ -1416,7 +1503,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
     expect(fixture.commandLedger.markInterruptedWithoutRunTerminal).toHaveBeenCalledWith('chat-1', 'reserved-start', 'user-stop');
     expect(fixture.published.map((event) => event.type))
-      .toEqual(['chat-messages', 'chat-session-stopped', 'chat-processing-updated']);
+      .toEqual(['chat-messages', 'chat-session-stopped', 'chat-processing-updated', 'chat-activity-updated']);
   });
 
   it('repairs an idle processing phase before publishing an already-idle Stop', async () => {
@@ -1427,6 +1514,7 @@ describe('server event wiring', () => {
 
     expect(fixture.published).toMatchObject([
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
+      { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: null },
       {
         type: 'chat-session-stopped',
         chatId: 'chat-1',

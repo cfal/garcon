@@ -74,6 +74,18 @@ function action(overrides = {}) {
 }
 
 describe('ChatTransientFeedStore', () => {
+  it('exposes only current actionable controls as list attention', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
+    feed.apply(permissionEvent());
+    expect(feed.hasPendingUserAction(CHAT_ID)).toBe(true);
+    feed.apply(runEndedEvent());
+    expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
+    feed.apply(permissionEvent({ runId: 'run-2' }));
+    feed.deleteChat(CHAT_ID);
+    expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
+    expect(new ChatTransientFeedStore('server-2').hasPendingUserAction(CHAT_ID)).toBe(false);
+  });
   it('projects a durable permission request and fences its actionability', () => {
     const feed = new ChatTransientFeedStore('server-1');
 

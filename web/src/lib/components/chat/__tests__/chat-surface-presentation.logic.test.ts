@@ -23,6 +23,7 @@ function chat(status: ChatSessionRecord['status']): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status,
 		tags: [],

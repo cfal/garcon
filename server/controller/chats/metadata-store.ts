@@ -12,6 +12,7 @@ import { createLogger } from '../../common/log.js';
 import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { isRecord } from '../../../common/json.js';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import type { ChatRunOutcome } from '../../../common/chat-activity.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -43,6 +44,7 @@ export interface ChatMetadata {
   lastMessage: string;
   firstMessage: string;
   source: MetadataSource;
+  lastRunOutcome?: ChatRunOutcome | null;
   identity?: ChatMetadataIdentity;
 }
 
@@ -56,6 +58,7 @@ interface AgentPreviewMetadata {
 interface MetadataIndexOptions {
   metadataPath?: string | null;
   saveDelayMs?: number;
+  readRunOutcome?(chatId: string, transcriptViewId: string): Promise<ChatRunOutcome | null>;
 }
 
 interface MetadataTranscriptSource {
@@ -82,6 +85,7 @@ export class MetadataIndex {
   #closed = false;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #savePromise: Promise<void> = Promise.resolve();
+  readonly #readRunOutcome: MetadataIndexOptions['readRunOutcome'];
 
   constructor(
     registry: IChatRegistry,
@@ -94,6 +98,7 @@ export class MetadataIndex {
     this.#carryOver = carryOver;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
+    this.#readRunOutcome = options.readRunOutcome;
   }
 
   async init(): Promise<void> {
@@ -173,12 +178,22 @@ export class MetadataIndex {
       lastMessage,
       firstMessage,
       source: 'live',
+      lastRunOutcome: appendedMessages.some(message => message.type === 'user-message')
+        ? null : current?.lastRunOutcome ?? null,
       ...(identity ?? current?.identity
         ? { identity: identity ?? current?.identity }
         : {}),
     });
     this.#validatedChatIds.add(key);
     this.#scheduleSave();
+  }
+
+  updateRunOutcome(chatId: string, transcriptViewId: string, outcome: ChatRunOutcome): boolean {
+    const current = this.getChatMetadata(chatId);
+    if (!current || current.transcriptViewId !== transcriptViewId
+      || this.#transcripts.getExistingTranscriptViewId(chatId) !== transcriptViewId) return false;
+    this.#metadataByChatId.set(chatId, { ...current, lastRunOutcome: outcome });
+    return true;
   }
 
   // Recomputes the cached preview from the complete replacement view.
@@ -222,6 +237,7 @@ export class MetadataIndex {
     });
     this.#validatedChatIds.add(key);
     this.#scheduleSave();
+    await this.#repairRunOutcome(key);
   }
 
   addNewChatMetadata(chatId: string, firstMessage: string): void {
@@ -262,6 +278,21 @@ export class MetadataIndex {
       const session = this.#registry.getChat(chatId);
       if (!session) continue;
       this.#repairChatMetadata(chatId, session);
+      await this.#repairRunOutcome(chatId);
+    }
+  }
+
+  async #repairRunOutcome(chatId: string): Promise<void> {
+    const current = this.getChatMetadata(chatId);
+    if (!this.#readRunOutcome || !current?.transcriptViewId) return;
+    try {
+      const outcome = await this.#readRunOutcome(chatId, current.transcriptViewId);
+      if (this.#closed || this.getChatMetadata(chatId) !== current
+        || this.#transcripts.getExistingTranscriptViewId(chatId) !== current.transcriptViewId) return;
+      this.#metadataByChatId.set(chatId, { ...current, lastRunOutcome: outcome });
+      this.#scheduleSave();
+    } catch (error) {
+      logger.warn(`metadata: failed to repair run outcome for ${chatId}:`, errorMessage(error));
     }
   }
 
@@ -373,7 +404,10 @@ export class MetadataIndex {
     if (!this.#metadataPath) return;
     const snapshot = {
       version: METADATA_VERSION,
-      chats: Object.fromEntries(this.#metadataByChatId),
+      chats: Object.fromEntries([...this.#metadataByChatId].map(([chatId, entry]) => {
+        const { lastRunOutcome: _outcome, ...stored } = entry;
+        return [chatId, stored];
+      })),
     };
     await writeJsonFileAtomic(this.#metadataPath, snapshot, { mode: 0o600 });
   }
@@ -406,6 +440,7 @@ function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadat
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
     lastMessage: lastMessagePreview(typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage),
     firstMessage,
+    lastRunOutcome: null,
     source: isMetadataSource(value.source)
       ? value.source
       : 'startup',

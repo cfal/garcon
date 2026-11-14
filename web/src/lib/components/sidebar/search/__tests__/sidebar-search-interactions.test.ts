@@ -33,6 +33,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,

@@ -896,6 +896,10 @@ executor is ready delivers it.
 
 ## Chat Metadata
 
+Chat-list and chat-snapshot API summaries include nullable `activityStatus`:
+`working`, `complete`, `error`, or `pending-user-action`. The controller and
+executor CLI gateway return the same status; this does not change CLI syntax.
+
 Set lifecycle and metadata to explicit desired values:
 
 ```bash

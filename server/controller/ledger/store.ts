@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 
 import { lstat, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import { LedgerActivityWorker } from './activity-worker.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import {
   encodeDrafts,
@@ -139,6 +140,7 @@ export class TranscriptLedgerStore {
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
   readonly #staging: StagingViews;
   #anchorReadEpoch = 0;
+  #activityWorker: LedgerActivityWorker | null = null;
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
@@ -617,6 +619,41 @@ export class TranscriptLedgerStore {
     });
   }
 
+  // Captures one ledger snapshot and keeps SQLite JSON inspection off the controller loop.
+  async lastRunOutcome(chatId: string, viewId: TranscriptViewId): Promise<'finished' | 'failed' | 'interrupted' | null> {
+    const epoch = this.#anchorReadEpoch;
+    const chatGeneration = this.#staging.generation(chatId);
+    const assertReadCurrent = () => {
+      if (epoch !== this.#anchorReadEpoch || this.#staging.generation(chatId) !== chatGeneration) {
+        throw new LedgerBulkOperationAbandonedError(chatId);
+      }
+      if (!this.existingCurrentView(chatId)) throw new TranscriptViewNotInitializedError(chatId);
+      this.#read(chatId, entry => this.#assertCurrent(entry, viewId));
+    };
+    if (!this.existingCurrentView(chatId)) throw new TranscriptViewNotInitializedError(chatId);
+    const beforeOrdinal = this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return entry.nextOrdinal;
+    });
+    this.#activityWorker ??= new LedgerActivityWorker();
+    let outcome;
+    try {
+      outcome = await this.#activityWorker.read({
+        kind: 'read-run-outcome',
+        databasePath: path.join(this.#rootDirectory, chatId, 'ledger.sqlite'),
+        viewId,
+        beforeOrdinal,
+      });
+    } catch (error) {
+      const code = error instanceof Error ? (error as Error & { code?: unknown }).code : null;
+      if (code !== UNDECODABLE_LEDGER_ROW && !(typeof code === 'string' && code.startsWith('SQLITE_'))) throw error;
+      assertReadCurrent();
+      return this.#read(chatId, () => { throw error; });
+    }
+    assertReadCurrent();
+    return outcome;
+  }
+
   nativeActivityState(chatId: string): TranscriptNativeActivityState {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
@@ -742,6 +779,7 @@ export class TranscriptLedgerStore {
   }
 
   closeChat(chatId: string): void {
+    this.#activityWorker?.retire(path.join(this.#rootDirectory, chatId, 'ledger.sqlite'));
     this.#staging.abandon(chatId);
     const entry = this.#connections.get(chatId) ?? this.#failedCloseEntries.get(chatId);
     if (!entry) return;
@@ -792,6 +830,8 @@ export class TranscriptLedgerStore {
 
   close(): void {
     this.#anchorReadEpoch++;
+    this.#activityWorker?.close();
+    this.#activityWorker = null;
     this.#staging.abandonAll();
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);

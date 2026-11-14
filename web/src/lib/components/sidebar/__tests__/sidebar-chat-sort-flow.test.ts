@@ -33,6 +33,7 @@ function createChat(): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		lastMessage: 'First chat preview',

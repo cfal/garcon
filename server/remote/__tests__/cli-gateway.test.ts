@@ -46,6 +46,19 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
   return { root, dataDir, gateway, discover, call, replace, deny() { allowed = false; }, disconnect() { live?.close(); live = null; } };
 }
 
+test.each(['working', 'complete', 'error', 'pending-user-action', null] as const)(
+  'preserves activity status %s in list and snapshot responses', async (activityStatus) => {
+    const list = { sessions: [{ id: '1000000000000001', activityStatus }] };
+    const snapshot = { chat: { id: '1000000000000001', activityStatus } };
+    const f = await fixture({
+      '/api/v1/chats': { GET: () => Response.json(list) },
+      '/api/v1/chats/snapshot': { GET: () => Response.json(snapshot) },
+    });
+    expect(await (await f.call('/api/v1/chats')).json()).toEqual(list);
+    expect(await (await f.call('/api/v1/chats/snapshot?chatId=1000000000000001&limit=0')).json()).toEqual(snapshot);
+  },
+);
+
 test('private role descriptors prove a live endpoint and never expose the controller capability or directory', async () => {
   const f = await fixture({}, null);
   const connection = await f.discover();

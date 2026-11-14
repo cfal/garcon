@@ -23,6 +23,7 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
     settings,
     metadata,
     processing,
+    transientFeeds: { hasPendingUserAction: () => false },
     canReloadFromNativeHistory: () => false,
   });
 }

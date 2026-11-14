@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
-import type { ChatListEntry } from '$shared/chat-list';
+import type { ChatListEntry, ChatListResponse } from '$shared/chat-list';
 
 function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	const processingPhase =
@@ -23,6 +23,7 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		isProcessing: processingPhase !== null,
 		processingPhase,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
@@ -32,6 +33,41 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 }
 
 describe('ChatSessionsStore', () => {
+	it.each(['working', 'complete', 'error', 'pending-user-action', null] as const)(
+		'preserves live %s activity when an older command response arrives',
+		(activityStatus) => {
+			const store = new ChatSessionsStore();
+			store.upsertFromServer([makeServerSession({ activityStatus: 'complete' })]);
+			store.patchChat('a', { activityStatus });
+			store.upsertServerChat(makeServerSession({ activityStatus: 'error' }));
+			expect(store.byId.a.activityStatus).toBe(activityStatus);
+		},
+	);
+
+	it('hydrates activity status and updates a record when only its status changed', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ activityStatus: 'complete' })]);
+		const previous = store.byId.a;
+		expect(previous.activityStatus).toBe('complete');
+		store.upsertFromServer([makeServerSession({ activityStatus: 'error' })]);
+		expect(store.byId.a).not.toBe(previous);
+		expect(store.byId.a.activityStatus).toBe('error');
+	});
+
+	it('rechecks a list snapshot superseded by a live activity update', async () => {
+		let resolveList!: (value: ChatListResponse) => void;
+		const listChats = vi.fn()
+			.mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve; }))
+			.mockResolvedValue({ sessions: [makeServerSession({ activityStatus: 'error' })], total: 1, lastSelectedChatId: null });
+		const store = new ChatSessionsStore({ listChats });
+		store.upsertFromServer([makeServerSession({ activityStatus: 'working' })]);
+		const refresh = store.quietRefreshChats();
+		store.patchChat('a', { activityStatus: 'error' });
+		resolveList({ sessions: [makeServerSession({ activityStatus: 'working' })], total: 1, lastSelectedChatId: null });
+		await refresh;
+		expect(listChats).toHaveBeenCalledTimes(2);
+		expect(store.byId.a.activityStatus).toBe('error');
+	});
 	it('remembers a deep-link visit before hydration and prunes absent targets afterward', () => {
 		const store = new ChatSessionsStore();
 		store.setSelectedChatId('deep-link');
