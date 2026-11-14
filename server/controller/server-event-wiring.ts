@@ -1,4 +1,5 @@
-import type { ChatMessage, ChatStopIntent, ChatStopOutcome } from '../../common/chat-types.js';
+import type { ChatMessage, ChatProcessingPhase, ChatStopIntent, ChatStopOutcome } from '../../common/chat-types.js';
+import { projectChatActivityStatus } from './chats/chat-activity-status.js';
 import type { ExecutorManager } from './executors/manager.js';
 import { effectiveExecutorId } from '../../common/executors.js';
 import type { TranscriptSearchStatusV1 } from '../../common/chat-search.js';
@@ -14,7 +15,7 @@ import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
 import type { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import type { AppliedTransientFeedEvent, ChatTransientFeedStore } from './chats/chat-transient-feed.js';
-import type { MetadataIndex } from './chats/metadata-store.js';
+import type { ChatMetadata, MetadataIndex } from './chats/metadata-store.js';
 import type { ShareStore } from './chats/shares/store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
@@ -39,6 +40,7 @@ import {
   ChatSessionCreatedMessage,
   ChatProjectPathUpdatedMessage,
   ChatProcessingUpdatedMessage,
+  ChatActivityUpdatedMessage,
   ChatTitleUpdatedMessage,
   ChatSessionDeletedWsMessage,
   ChatReadUpdatedV1Message,
@@ -306,8 +308,15 @@ export function wireServerEvents({
   function broadcastAgentFailure(
     chatId: string,
     message: string,
-    turnMetadata?: TurnEventMetadata,
+    turnMetadata: TurnEventMetadata | undefined,
+    failedAttempt: ChatMetadata | null,
   ): void {
+    if (failedAttempt?.transcriptViewId
+      && metadata.getChatMetadata(chatId) === failedAttempt
+      && processing.phase(chatId) === null
+      && metadata.updateRunOutcome(chatId, failedAttempt.transcriptViewId, 'failed')) {
+      broadcastActivity(chatId);
+    }
     broadcast(
       new AgentRunFailedMessage(
         chatId,
@@ -356,6 +365,7 @@ export function wireServerEvents({
   ): Promise<void> {
     if (!chatExists(chatId)) return;
     if (!markTurnFailure(chatId, turnMetadata)) return;
+    const failedAttempt = metadata.getChatMetadata(chatId);
     await settleExecutionCommand(
       chatId,
       turnMetadata,
@@ -363,7 +373,7 @@ export function wireServerEvents({
       agentErrorMessage,
       agentErrorCode,
     );
-    if (chatExists(chatId)) broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
+    if (chatExists(chatId)) broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata, failedAttempt);
     await markPublicTurnTerminal(chatId, turnMetadata);
   }
 
@@ -372,14 +382,29 @@ export function wireServerEvents({
     queueErrorMessage: string,
     options: TurnEventMetadata,
   ): Promise<void> {
-    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+    broadcastProcessing(chatId, processing.phase(chatId));
     if (!markTurnFailure(chatId, options)) return;
+    const failedAttempt = metadata.getChatMetadata(chatId);
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
-    broadcastAgentFailure(chatId, queueErrorMessage, options);
+    broadcastAgentFailure(chatId, queueErrorMessage, options, failedAttempt);
     await markPublicTurnTerminal(chatId, options);
   }
 
   const chatExists = (chatId: string) => chatRegistry.hasChat(chatId);
+
+  function broadcastActivity(chatId: string, phase = processing.phase(chatId)): void {
+    if (!chatExists(chatId)) return;
+    broadcast(new ChatActivityUpdatedMessage(chatId, projectChatActivityStatus({
+      processingPhase: phase,
+      pendingUserAction: transientFeeds.hasPendingUserAction(chatId),
+      lastRunOutcome: metadata.getChatMetadata(chatId)?.lastRunOutcome ?? null,
+    })));
+  }
+
+  function broadcastProcessing(chatId: string, phase: ChatProcessingPhase | null): void {
+    broadcast(new ChatProcessingUpdatedMessage(chatId, phase));
+    broadcastActivity(chatId, phase);
+  }
 
   const transcriptFanout = createTranscriptEventFanout({
     chatExists,
@@ -408,6 +433,7 @@ export function wireServerEvents({
         mutation.transientRevision,
         mutation.mutation,
       ));
+      broadcastActivity(mutation.chatId);
     });
   };
   agentRegistry.onPermissionRetired(control => {
@@ -416,6 +442,13 @@ export function wireServerEvents({
   agentRegistry.onTranscriptCommitted(async (event) => {
     if (event.type === 'view-replaced') metadata.invalidateTranscriptView(event.chatId);
     transcriptFanout(event);
+    if (event.type === 'run-ended' || event.type === 'view-replaced') {
+      scheduleChatTask(event.chatId, 'chat activity publication', () => {
+        if (!chatExists(event.chatId)) return;
+        if (event.type === 'run-ended') metadata.updateRunOutcome(event.chatId, event.viewId, event.row.outcome);
+        broadcastActivity(event.chatId);
+      });
+    }
     // A committed Preambles-updated notice invalidates the per-chat selection
     // cache. Scheduling here, immediately after the fanout has enqueued the
     // notice's chat-messages task on the per-chat queue, fixes the broadcast
@@ -446,7 +479,7 @@ export function wireServerEvents({
     const phase = processing.phase(chatId);
     scheduleChatTask(chatId, 'processing broadcast', () => {
       if (!chatExists(chatId)) return;
-      broadcast(new ChatProcessingUpdatedMessage(chatId, phase));
+      broadcastProcessing(chatId, phase);
     });
   };
   queue.onProcessingInvalidated((chatId) => {
@@ -482,7 +515,7 @@ export function wireServerEvents({
     }
     if (chatExists(chatId)) {
       if (result.kind === 'failed') publishProcessing(chatId);
-      else broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+      else broadcastProcessing(chatId, processing.phase(chatId));
     }
     return result;
   };

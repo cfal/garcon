@@ -45,6 +45,7 @@ function snapshot(overrides: Partial<ChatSnapshotResponse> = {}): ChatSnapshotRe
       thinkingMode: 'high',
       projectPath: '/work/project',
       tags: ['cli', 'review'],
+      activityStatus: null,
       canReloadFromNativeHistory: true,
       activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
     },

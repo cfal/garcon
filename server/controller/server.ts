@@ -463,6 +463,7 @@ export async function startServer(): Promise<void> {
     // Chat infrastructure uses the agent registry through narrow injected APIs.
     const metadata = new MetadataIndex(chatRegistry, agentRegistry, carryOver, {
       metadataPath: path.join(workspaceDir, 'chat-metadata.json'),
+      readRunOutcome: (chatId, viewId) => transcriptLedger.lastRunOutcome(chatId, viewId),
     });
     await metadata.init();
 
@@ -603,6 +604,7 @@ export async function startServer(): Promise<void> {
       settings,
       metadata,
       processing: chatProcessingActivity,
+      transientFeeds,
       canReloadFromNativeHistory(_chatId, session) {
         return Boolean(
           session.agentSessionId

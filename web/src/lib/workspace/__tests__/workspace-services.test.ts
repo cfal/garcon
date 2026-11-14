@@ -106,6 +106,7 @@ function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		...overrides,

@@ -53,6 +53,7 @@ import {
   type ProjectUnavailableReason,
 } from './project-resolution';
 import { isRecord } from './json';
+import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -204,6 +205,14 @@ export class ChatProcessingUpdatedMessage {
   constructor(
     public chatId: string,
     public phase: ChatProcessingPhase | null,
+  ) {}
+}
+
+export class ChatActivityUpdatedMessage {
+  readonly type = 'chat-activity-updated' as const;
+  constructor(
+    public chatId: string,
+    public activityStatus: ChatActivityStatus | null,
   ) {}
 }
 
@@ -465,6 +474,7 @@ export type ServerWsMessage =
   | ChatProjectPathUpdatedMessage
   | ChatSessionStoppedMessage
   | ChatProcessingUpdatedMessage
+  | ChatActivityUpdatedMessage
   | ChatExecutionControlUpdatedMessage
   | ChatOperationalNoticeMessage
   | ReconnectStateMessage
@@ -796,6 +806,13 @@ export function parseServerWsMessage(
         : CHAT_PROCESSING_PHASES.find((entry) => entry === data.phase);
       return chatId && phase !== undefined
         ? new ChatProcessingUpdatedMessage(chatId, phase)
+        : null;
+    }
+    case 'chat-activity-updated': {
+      const chatId = requiredStr(data.chatId);
+      const activityStatus = data.activityStatus;
+      return chatId && (activityStatus === null || isChatActivityStatus(activityStatus))
+        ? new ChatActivityUpdatedMessage(chatId, activityStatus)
         : null;
     }
     case 'chat-execution-control-updated': {

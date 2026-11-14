@@ -616,6 +616,10 @@ export class TranscriptLedgerService {
     return view ? previewMessages(this.#store.previewEdges(chatId, view.viewId)) : null;
   }
 
+  lastRunOutcome(chatId: string, viewId: string): Promise<'finished' | 'failed' | 'interrupted' | null> {
+    return this.#store.lastRunOutcome(chatId, transcriptViewId(viewId));
+  }
+
   resendCandidates(chatId: string): readonly ResendCandidate[] {
     return this.#store.resendCandidates(chatId).map((row) => ({
       ordinal: row.ordinal,

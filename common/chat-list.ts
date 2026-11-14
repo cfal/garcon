@@ -7,6 +7,7 @@ import { parseParentChatRef, type ParentChatRef } from './chat-parentage.js';
 import { parseChatId } from './chat-id.js';
 import { isRecord } from './json.js';
 import { isExecutorId } from './executors.js';
+import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity.js';
 
 export interface ChatListEntry {
   id: string;
@@ -39,6 +40,7 @@ export interface ChatListEntry {
   isActive: boolean;
   isProcessing: boolean;
   processingPhase: ChatProcessingPhase | null;
+  activityStatus: ChatActivityStatus | null;
   canReloadFromNativeHistory: boolean;
   isUnread: boolean;
 }
@@ -134,6 +136,8 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   );
   const isUnread = requireBoolean(value.isUnread, field('isUnread'));
   const processingPhase = value.processingPhase;
+  const activityStatus = value.activityStatus;
+  if (activityStatus !== null && !isChatActivityStatus(activityStatus)) fail(field('activityStatus'));
   if (processingPhase !== null && !isChatProcessingPhase(processingPhase)) {
     fail(field('processingPhase'));
   }
@@ -168,6 +172,7 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
     isActive,
     isProcessing,
     processingPhase,
+    activityStatus,
     canReloadFromNativeHistory,
     isUnread,
   };

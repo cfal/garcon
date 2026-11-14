@@ -33,6 +33,7 @@ function makeServerChat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		tags: [],
 		parentChat: null,

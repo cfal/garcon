@@ -26,6 +26,7 @@ function snapshot(overrides = {}) {
       projectPath: '/work/project',
       tags: ['cli', 'review'],
       canReloadFromNativeHistory: true,
+      activityStatus: 'working',
       activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
     },
     processingPhase: 'running',
@@ -74,6 +75,16 @@ function snapshot(overrides = {}) {
 }
 
 describe('chat snapshot contract', () => {
+  test('validates the nullable chat activity status', () => {
+    for (const activityStatus of [null, 'working', 'complete', 'error', 'pending-user-action']) {
+      const value = snapshot();
+      value.chat.activityStatus = activityStatus;
+      expect(parseChatSnapshotResponse(value).chat.activityStatus).toBe(activityStatus);
+    }
+    const value = snapshot();
+    value.chat.activityStatus = 'idle';
+    expect(() => parseChatSnapshotResponse(value)).toThrow('activityStatus');
+  });
   test('parses available and unavailable transcript snapshots', () => {
     expect(parseChatSnapshotResponse(snapshot())).toMatchObject({
       chat: { id: CHAT_ID, tags: ['cli', 'review'] },

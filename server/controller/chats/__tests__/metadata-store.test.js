@@ -76,6 +76,56 @@ describe('metadata-store', () => {
   });
 
   describe('extractPreviewText uses full message content', () => {
+    it('retains a completed result through output and clears it for the next input', () => {
+      metadata.updateRunOutcome(chatId, 'view-1', 'finished');
+      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBe('finished');
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [{
+        type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'Late output',
+      }]);
+      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBe('finished');
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [{
+        type: 'user-message', timestamp: '2026-01-03T00:00:00Z', content: 'New input',
+      }]);
+      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBeNull();
+      metadata.updateRunOutcome(chatId, 'old-view', 'failed');
+      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBeNull();
+    });
+
+    it('fences a startup outcome repair against a newer live result', async () => {
+      const entered = Promise.withResolvers();
+      const read = Promise.withResolvers();
+      const registry = makeRegistry({ repairing: session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        readRunOutcome: async () => { entered.resolve(); return read.promise; },
+      });
+      index.addNewChatMetadata('repairing', 'Generic input');
+      const repair = index.repair();
+      await entered.promise;
+      index.updateRunOutcome('repairing', 'view-1', 'failed');
+      read.resolve('finished');
+      await repair;
+      expect(index.getChatMetadata('repairing').lastRunOutcome).toBe('failed');
+    });
+
+    it('keeps runtime outcomes out of persistence and reconstructs them from the ledger source', async () => {
+      const metadataPath = path.join(tmpDir, 'activity-metadata.json');
+      const registry = makeRegistry({ 'runtime-chat': session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, { metadataPath });
+      index.addNewChatMetadata('runtime-chat', 'Generic input');
+      index.updateRunOutcome('runtime-chat', 'view-1', 'failed');
+      await index.flush();
+      const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+      expect(saved.chats['runtime-chat']).not.toHaveProperty('lastRunOutcome');
+      const restarted = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        metadataPath, readRunOutcome: async () => 'finished',
+      });
+      await restarted.init();
+      await restarted.repair();
+      expect(restarted.getChatMetadata('runtime-chat').lastRunOutcome).toBe('finished');
+      await restarted.close();
+      await restarted.flush();
+      await index.close();
+    });
     it('keeps full multiline content from assistant-message', () => {
       metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'first line\nsecond line\nthird' },

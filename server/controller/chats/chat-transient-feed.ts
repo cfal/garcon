@@ -111,6 +111,10 @@ export class ChatTransientFeedStore {
     return record ? snapshotOf(this.serverInstanceId, record) : null;
   }
 
+  hasPendingUserAction(chatId: string): boolean {
+    return (this.#records.get(chatId)?.rows.size ?? 0) > 0;
+  }
+
   validateAction(action: ChatTransientControlAction): TransientFeedRow {
     if (action.serverInstanceId !== this.serverInstanceId) {
       throw new TransientControlActionError('TRANSIENT_CONTROL_SERVER_RESTARTED');
