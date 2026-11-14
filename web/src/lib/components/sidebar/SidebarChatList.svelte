@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
 	import * as m from '$lib/paraglide/messages.js';
 	import Search from '@lucide/svelte/icons/search';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
@@ -36,6 +37,7 @@
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
+		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
@@ -74,6 +76,7 @@
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		onToggleProjectCollapsed,
+		onNewProjectChat,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onChatSelect,
@@ -186,6 +189,7 @@
 		{isFiltered}
 		{displayOptions}
 		{onToggleProjectCollapsed}
+		{onNewProjectChat}
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{reorder}

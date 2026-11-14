@@ -1,4 +1,5 @@
 {
+	"sidebar_project_new_chat": "New chat in {project}",
 	"tickets_title": "Tickets",
 	"tickets_source_address": "Recorded source: chat {chat}, view {view}, row {ordinal}",
 	"tickets_new": "New ticket",

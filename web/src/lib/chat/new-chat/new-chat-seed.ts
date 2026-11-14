@@ -1,3 +1,4 @@
+import type { NewChatProjectTarget } from './new-chat-project-target';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ChatId } from '$shared/chat-id';
 import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
@@ -17,6 +18,7 @@ export interface NewChatStartupSeed extends ResolvedModelSelection {
 
 export interface NewChatDialogSeed {
 	readonly prefill?: string;
+	readonly project?: NewChatProjectTarget;
 	readonly startup?: NewChatStartupSeed;
 	readonly prospectiveChatId?: ChatId;
 }

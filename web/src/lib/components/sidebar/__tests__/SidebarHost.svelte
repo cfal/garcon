@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
+	import { localExecutor } from '$lib/executors/__tests__/fixtures';
+	import type { ExecutorSnapshot } from '$shared/executors';
+	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import { buildSidebarChatListProjection } from '../sidebar-row-model';
@@ -36,6 +38,8 @@
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface SidebarHostProps {
+		appShell?: AppShellStore;
+		executors?: readonly ExecutorSnapshot[];
 		chats?: ChatSessionRecord[];
 		chatSessions?: ChatSessionsStore;
 		isMobile?: boolean;
@@ -62,6 +66,8 @@
 	}
 
 	let {
+		appShell,
+		executors,
 		chats = [],
 		chatSessions,
 		isMobile = false,
@@ -87,8 +93,9 @@
 		onNewChat = () => {},
 	}: SidebarHostProps = $props();
 	let displayedChats = $derived(chatSessions?.orderedChats ?? chats);
+	untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
 
-	setAppShell({
+	setAppShell(untrack(() => appShell) ?? {
 		onSidebarRecenterRequested() {
 			return () => {};
 		},

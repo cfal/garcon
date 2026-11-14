@@ -258,6 +258,7 @@
 		snippetInteractionGeneration += 1;
 		form.reseed(seed?.prefill ?? '', seed?.prospectiveChatId);
 		if (seed?.startup) form.restoreStartup(seed.startup);
+		else if (seed?.project) form.selectProjectTarget(seed.project);
 		form.loadSettingsAndModels();
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;

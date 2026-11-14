@@ -1,6 +1,9 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { getExecutors } from '$lib/context';
+	import Plus from '@lucide/svelte/icons/plus';
+	import { effectiveExecutorId } from '$shared/executors';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 	import type { SidebarVirtualProjectHeaderRow } from './sidebar-virtual-chat-list';
 	import SidebarGroupHeader from './SidebarGroupHeader.svelte';
@@ -9,9 +12,15 @@
 		row: SidebarVirtualProjectHeaderRow;
 		containsSelectedChat?: boolean;
 		onToggle?: (projectKey: string) => void;
+		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 	}
 
-	let { row, containsSelectedChat = false, onToggle }: SidebarProjectHeaderRowProps = $props();
+	let {
+		row,
+		containsSelectedChat = false,
+		onToggle,
+		onNewProjectChat,
+	}: SidebarProjectHeaderRowProps = $props();
 	const executors = getExecutors();
 	const executorLabel = $derived(
 		(row.executorId ?? 'local') === 'local' ? '' : executors.label(row.executorId),
@@ -60,6 +69,23 @@
 				class="min-w-0 flex-1 basis-0 truncate text-left text-[11px] font-normal text-muted-foreground/80 [direction:rtl]"
 				data-sidebar-project-header-parent><bdi dir="ltr">{parentLabel}</bdi></span
 			>
+		{/if}
+	{/snippet}
+	{#snippet actions()}
+		{#if row.projectPath.trim() && onNewProjectChat}
+			<button
+				type="button"
+				class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+				aria-label={m.sidebar_project_new_chat({ project: fullLabel })}
+				title={m.sidebar_project_new_chat({ project: fullLabel })}
+				onclick={() =>
+					onNewProjectChat?.({
+						executorId: effectiveExecutorId(row.executorId),
+						projectPath: row.projectPath,
+					})}
+			>
+				<Plus class="size-4" aria-hidden="true" />
+			</button>
 		{/if}
 	{/snippet}
 </SidebarGroupHeader>

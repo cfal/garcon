@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
+import { createAppShellStore } from '$lib/stores/app-shell.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 import { getSavedSearches } from '$lib/api/settings';
 import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
@@ -64,6 +66,81 @@ describe('sidebar search dialog flow', () => {
 
 	afterEach(() => {
 		cleanup();
+	});
+
+	it.each([false, true])(
+		'opens a project chat without toggling its collapsed group (mobile: %s)',
+		async (isMobile) => {
+			const appShell = createAppShellStore();
+			appShell.setSidebarOpen(true);
+			const { container } = render(SidebarHost, {
+				appShell,
+				isMobile,
+				autoLoadSavedSearches: false,
+				chats: [createChat('chat-1', 'First chat')],
+				collapsedProjectKeys: new Set(['path:/tmp/project']),
+			});
+			await fireEvent.click(
+				await screen.findByRole('button', { name: 'New chat in /tmp/project' }),
+			);
+			expect(appShell.newChatDialogOpen).toBe(true);
+			expect(appShell.newChatDialogSeed).toEqual({
+				project: { executorId: 'local', projectPath: '/tmp/project' },
+			});
+			expect(appShell.sidebarOpen).toBe(!isMobile);
+			expect(
+				container.querySelector('[data-sidebar-project-collapsed]')?.getAttribute('aria-expanded'),
+			).toBe('false');
+		},
+	);
+
+	it('keeps identical project paths on different executors distinct', async () => {
+		const appShell = createAppShellStore();
+		render(SidebarHost, {
+			appShell,
+			autoLoadSavedSearches: false,
+			executors: [localExecutor, remoteExecutor],
+			chats: [
+				createChat('local-chat', 'Local chat'),
+				createChat('remote-chat', 'Remote chat', { executorId: remoteExecutor.id }),
+			],
+		});
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'New chat in Worker: /tmp/project' }),
+		);
+		expect(appShell.newChatDialogSeed).toEqual({
+			project: { executorId: remoteExecutor.id, projectPath: '/tmp/project' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'New chat in /tmp/project' }));
+		expect(appShell.newChatDialogSeed?.project?.executorId).toBe('local');
+	});
+
+	it.each(['none', 'activity', 'status'] as const)(
+		'omits project actions in %s grouping',
+		(sidebarGrouping) => {
+			render(SidebarHost, {
+				chats: [createChat('chat-1', 'First chat')],
+				sidebarGrouping,
+				autoLoadSavedSearches: false,
+			});
+			expect(screen.queryByRole('button', { name: /^New chat in / })).toBeNull();
+		},
+	);
+
+	it('uses the displayed parent folder when nested projects are combined', async () => {
+		const appShell = createAppShellStore();
+		render(SidebarHost, {
+			appShell,
+			autoLoadSavedSearches: false,
+			sidebarGroupNestedProjectPaths: true,
+			chats: [
+				createChat('parent', 'Parent'),
+				createChat('child', 'Child', { projectPath: '/tmp/project/child' }),
+			],
+		});
+		await fireEvent.click(await screen.findByRole('button', { name: 'New chat in /tmp/project' }));
+		expect(appShell.newChatDialogSeed?.project?.projectPath).toBe('/tmp/project');
+		expect(screen.getAllByRole('button', { name: /^New chat in / })).toHaveLength(1);
 	});
 
 	it('registers the chat list viewport as the primary scroll region', async () => {
