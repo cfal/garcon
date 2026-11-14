@@ -592,7 +592,8 @@
 }
 
 @layer utilities {
-	/* Keeps bordered cells inset despite the typography plugin's edge resets. */
+	/* The typography plugin pads cells from the utilities layer and zeroes the
+	   outer inline padding of edge columns; bordered cells keep a uniform inset. */
 	.markdown-body th,
 	.markdown-body td {
 		padding: 0.5rem 0.75rem;
