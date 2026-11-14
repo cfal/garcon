@@ -4,6 +4,7 @@
 	// under the field that follows the typed path.
 
 	import { onDestroy, tick } from 'svelte';
+	import Check from '@lucide/svelte/icons/check';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import CornerLeftUp from '@lucide/svelte/icons/corner-left-up';
@@ -514,6 +515,18 @@
 
 		<div class="min-h-0 flex-1 overflow-y-auto">
 			{@render directoryList()}
+		</div>
+		<div class="flex shrink-0 justify-end border-t border-border p-1.5">
+			<Button
+				type="button"
+				size="icon"
+				class="size-11 sm:pointer-fine:size-9"
+				aria-label={m.common_close()}
+				title={m.common_close()}
+				onclick={onClose}
+			>
+				<Check class="size-4" aria-hidden="true" />
+			</Button>
 		</div>
 	</div>
 {/if}

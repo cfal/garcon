@@ -18,6 +18,8 @@ import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ListChatsResponse } from '$lib/api/chats';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -258,6 +260,7 @@ describe('AppShell responsive workspace binding', () => {
 	afterEach(() => {
 		cleanup();
 		page.url = new URL('http://localhost');
+		page.params = {};
 		document.querySelector('[data-mobile-sidebar-focus-trigger]')?.remove();
 		testContext.current = null;
 		vi.unstubAllGlobals();
@@ -511,6 +514,106 @@ describe('AppShell responsive workspace binding', () => {
 		render(AppShell);
 
 		await waitFor(() => expect(sessions.refreshChats).toHaveBeenCalledOnce());
+	});
+
+	it('opens the empty landing only after hydration and preserves its dismissal across refreshes', async () => {
+		installContext();
+		const pending = deferred<ListChatsResponse>();
+		const empty = { sessions: [], total: 0, lastSelectedChatId: null } satisfies ListChatsResponse;
+		const listChats = vi.fn<() => Promise<ListChatsResponse>>()
+			.mockReturnValueOnce(pending.promise).mockResolvedValue(empty);
+		const sessions = new ChatSessionsStore({ listChats });
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		render(AppShell);
+		await waitFor(() => expect(listChats).toHaveBeenCalledOnce());
+		expect(appShell.newChatDialogOpen).toBe(false);
+		pending.resolve(empty);
+		await waitFor(() => expect(appShell.newChatDialogOpen).toBe(true));
+		expect(appShell.newChatDialogRequestId).toBe(1);
+		appShell.closeNewChatDialog();
+		await sessions.quietRefreshChats();
+		await tick();
+		expect(appShell.newChatDialogOpen).toBe(false);
+		expect(appShell.newChatDialogRequestId).toBe(1);
+	});
+
+	it('keeps initial load errors visible and opens the landing after a successful retry', async () => {
+		installContext();
+		const empty = { sessions: [], total: 0, lastSelectedChatId: null } satisfies ListChatsResponse;
+		const listChats = vi.fn<() => Promise<ListChatsResponse>>()
+			.mockRejectedValueOnce(new Error('Chat list unavailable')).mockResolvedValue(empty);
+		const sessions = new ChatSessionsStore({ listChats });
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		render(AppShell);
+		await waitFor(() => expect(sessions.chatListStatus).toBe('error'));
+		expect(appShell.newChatDialogOpen).toBe(false);
+		await sessions.refreshChats();
+		await waitFor(() => expect(appShell.newChatDialogOpen).toBe(true));
+	});
+
+	it('counts a retained draft and opens the landing after the last chat is removed', async () => {
+		installContext();
+		const sessions = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [], total: 0, lastSelectedChatId: null }),
+		});
+		sessions.createDraft({ id: 'draft-1', projectPath: '/repo', startup: {
+			agentId: 'claude', model: 'opus', permissionMode: 'default', thinkingMode: 'none',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} }, firstMessage: 'Synthetic draft',
+		} });
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		render(AppShell);
+		await waitFor(() => expect(sessions.chatListStatus).toBe('ready'));
+		expect(sessions.orderedChats).toHaveLength(1);
+		expect(appShell.newChatDialogOpen).toBe(false);
+		sessions.removeChat('draft-1');
+		await waitFor(() => expect(appShell.newChatDialogOpen).toBe(true));
+	});
+
+	it('preserves an explicit seeded New Chat and does not reopen it after dismissal', async () => {
+		installContext();
+		const sessions = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [], total: 0, lastSelectedChatId: null }),
+		});
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		appShell.openNewChatDialog({ prefill: 'Synthetic seeded prompt' });
+		render(AppShell);
+		await waitFor(() => expect(sessions.chatListStatus).toBe('ready'));
+		expect(appShell.newChatDialogRequestId).toBe(1);
+		expect(appShell.newChatDialogSeed?.prefill).toBe('Synthetic seeded prompt');
+		appShell.closeNewChatDialog();
+		await sessions.quietRefreshChats();
+		await tick();
+		expect(appShell.newChatDialogOpen).toBe(false);
+	});
+
+	it('leaves a chat deep link in control even when the hydrated list is empty', async () => {
+		installContext();
+		page.url = new URL('http://localhost/chat/linked-chat');
+		page.params = { id: 'linked-chat' };
+		const sessions = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [], total: 0, lastSelectedChatId: null }),
+		});
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		render(AppShell);
+		await waitFor(() => expect(sessions.chatListStatus).toBe('ready'));
+		expect(appShell.newChatDialogOpen).toBe(false);
+	});
+
+	it('opens the empty landing when a restored workspace references a chat that no longer exists', async () => {
+		const workspace = installContext();
+		await workspace.showChatInCurrentWindow('removed-chat');
+		const sessions = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [], total: 0, lastSelectedChatId: null }),
+		});
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		render(AppShell);
+		await waitFor(() => expect(appShell.newChatDialogOpen).toBe(true));
 	});
 
 	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {

@@ -8,7 +8,7 @@ test('new chat restores an unsent prompt after closing and after reload', async 
     const newChat = page.getByRole('button', { name: 'New Chat', exact: true }).first();
     const prompt = page.getByPlaceholder('How can I help you today?');
 
-    await newChat.click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
     await browserExpect(prompt).toBeFocused();
     await prompt.fill('Unsent prompt');
     await prompt.press('Escape');
@@ -21,14 +21,14 @@ test('new chat restores an unsent prompt after closing and after reload', async 
     await browserExpect(prompt).toHaveCount(0);
 
     await page.reload();
-    await newChat.click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
     await browserExpect(prompt).toHaveValue('Unsent prompt, continued');
 
     await prompt.fill('');
     await prompt.press('Escape');
     await browserExpect(prompt).toHaveCount(0);
     await page.reload();
-    await newChat.click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
     await browserExpect(prompt).toBeFocused();
     await browserExpect(prompt).toHaveValue('');
 

@@ -108,19 +108,26 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     await browserExpect(page.getByText('The chat project changed', { exact: true })).toHaveCount(0);
 
     phase('new-chat project target');
+    await integration.client.put('/api/v1/app/settings', { paths: { byExecutor: { [integration.client.executorId]: { pinnedPaths: [integration.executionDirs.project] } } } });
     await page.getByRole('button', { name: 'New Chat', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.locator('[data-executor-picker]').click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
-    await browserExpect(dialog.getByLabel('Project Path', { exact: true })).toHaveValue(executionDirs.project);
+    const projectCard = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true })
+      .getByRole('button', { name: `${label}: ${executionDirs.project}`, exact: true });
+    await projectCard.click();
+    await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
+    await browserExpect(dialog.getByRole('region', { name: 'Worktrees', exact: true })
+      .getByText(executionDirs.project, { exact: true })).toBeVisible();
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       const picker = dialog.locator('[data-executor-picker]');
-      const path = dialog.getByLabel('Project Path', { exact: true });
+      const project = dialog.getByRole('button', { name: 'Choose folder', exact: true });
       const pickerRect = (await picker.boundingBox())!;
-      const pathRect = (await path.boundingBox())!;
-      expect(pickerRect.height).toBe(pathRect.height);
-      expect(width === 390 ? pickerRect.y + pickerRect.height <= pathRect.y : pickerRect.x + pickerRect.width <= pathRect.x).toBe(true);
+      const projectRect = (await project.boundingBox())!;
+      expect(pickerRect.height).toBeGreaterThanOrEqual(38);
+      expect(projectRect.height).toBeGreaterThanOrEqual(40);
+      expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
       expect(await picker.locator('.executor-label').evaluate(element => getComputedStyle(element).display)).not.toBe('none');
       await page.screenshot({ path: join(artifacts, `new-chat-host-${width}.png`) });
     }

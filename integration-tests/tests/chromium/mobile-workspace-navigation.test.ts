@@ -171,6 +171,7 @@ test('keeps mobile workspace commands reachable before selecting a chat', async 
       expect(await page.locator('[data-composer-shell]').isVisible()).toBe(false);
     }
     await page.getByRole('button', { name: 'New Chat', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Project Path', exact: true }).waitFor();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Choose folder', exact: true }).waitFor();
   });
 }, 120_000);

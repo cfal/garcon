@@ -1,0 +1,192 @@
+import { expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
+import { mkdir } from 'node:fs/promises';
+import { dirname, delimiter, join } from 'node:path';
+import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { toExecutorPath } from '../../../server/common/executor-path.js';
+
+const windowsGitPath = process.platform === 'win32'
+  ? [dirname(Bun.which('git')!), dirname(process.execPath), join(process.env.SystemRoot ?? 'C:/Windows', 'System32')].join(delimiter)
+  : undefined;
+
+for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`New Chat selects a worktree from the chosen project (${executionBackend})`, async () => {
+    await withChromiumFixture(`new-chat-worktree-landing-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
+      const { client, executionDirs } = integration;
+      const project = join(executionDirs.project, 'web-project');
+      const otherProject = join(executionDirs.project, 'other-project');
+      const linked = join(executionDirs.project, 'design-preview');
+      await Promise.all([project, otherProject].map(path => mkdir(path, { recursive: true })));
+      await initializeFixtureRepository(project);
+      await initializeFixtureRepository(otherProject);
+      await runFixtureGit(project, 'worktree', 'add', '-b', 'feature/design-preview', linked);
+      await client.put('/api/v1/app/settings', { paths: {
+        ...(client.executorId === 'local'
+          ? { recentProjectPaths: [project, otherProject], pinnedProjectPaths: [project, otherProject] }
+          : { byExecutor: { [client.executorId]: { defaultPath: project, pinnedPaths: [project, otherProject] } } }),
+      } });
+      await page.addInitScript(seedLocalSettings, { composerStatusBarGitProjects: false, composerStatusBarNonGitProjects: false });
+      phase('opening the landing screen automatically in an empty workspace');
+      await page.goto(integration.garcon.baseUrl);
+      const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
+      await browserExpect(dialog).toBeVisible();
+      const projects = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true });
+      const projectCard = projects.getByRole('button', { name: /[\\/]web-project$/ });
+      await projectCard.click();
+      await browserExpect(dialog.locator('#project-path-input')).toHaveCount(0);
+      await dialog.locator('button[aria-label*=" / "]').first().click();
+      await page.getByRole('button', { name: 'Chat Completions', exact: true }).click();
+      await page.getByRole('button', { name: 'Integration Fake OpenAI', exact: true }).click();
+      await page.getByRole('option', { name: 'Integration Echo', exact: true }).click();
+      const prompt = dialog.getByPlaceholder('How can I help you today?');
+      await prompt.fill('Review the selected worktree layout.');
+      const worktrees = dialog.getByRole('region', { name: 'Worktrees', exact: true });
+      await browserExpect(worktrees.getByText('feature/design-preview', { exact: true })).toBeVisible();
+      await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+      await browserExpect(worktrees.getByRole('button', { name: /Pin project path/ })).toHaveCount(0);
+      await browserExpect(worktrees.getByRole('button', { name: 'Select a different worktree', exact: true })).toHaveCount(0);
+      await browserExpect(dialog.getByText('No preambles will be applied', { exact: true })).toBeVisible();
+      await browserExpect(dialog.getByRole('button', { name: 'Clear preambles', exact: true })).toHaveCount(0);
+      phase('browsing root subfolders and entering a full path without losing the prompt');
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      const folderBrowser = dialog.getByRole('dialog', { name: 'Select Directory', exact: true });
+      const pathField = dialog.getByRole('textbox', { name: 'Project Path', exact: true });
+      await browserExpect(folderBrowser.getByRole('button', { name: 'web-project', exact: true })).toBeVisible();
+      await browserExpect(folderBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
+      await browserExpect(pathField).toHaveValue(project);
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
+      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-1440.png`) });
+      phase('closing folder browsing with the check button and outside click');
+      await folderBrowser.getByRole('button', { name: 'Close', exact: true }).click();
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await browserExpect(pathField).toHaveValue(project);
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await browserExpect(folderBrowser).toBeVisible();
+      await dialog.locator('[data-slot="directory-browser-dismiss"]').click({ position: { x: 8, y: 8 } });
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await browserExpect(pathField).toHaveValue(project);
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await folderBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
+      await browserExpect(pathField).toHaveValue(toExecutorPath(otherProject));
+      await folderBrowser.getByRole('button', { name: 'Close', exact: true }).click();
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await pathField.fill(toExecutorPath(join(executionDirs.project, 'missing-folder')));
+      await pathField.press('Enter');
+      await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+      await pathField.fill(toExecutorPath(project));
+      await pathField.press('Enter');
+      await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+      await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      phase('toggling a card pin without changing the selected project or prompt');
+      const otherProjectSelect = projects.getByRole('button', { name: /[\\/]other-project$/ });
+      const pinCard = (client.executorId === 'local' ? otherProjectSelect : projectCard).locator('..');
+      await pinCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
+      await browserExpect(pinCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      await pinCard.getByRole('button', { name: 'Pin project path', exact: true }).click();
+      await browserExpect(pinCard.getByRole('button', { name: 'Unpin project path', exact: true })).toBeEnabled();
+      phase('switching projects without losing the prompt');
+      await otherProjectSelect.click();
+      await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+      await browserExpect(worktrees.getByRole('radio', { name: /feature\/design-preview/ })).toHaveCount(0);
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      await projectCard.click();
+      const selectedWorktree = worktrees.getByRole('radio', { name: /feature\/design-preview/ });
+      phase('selecting a worktree with the keyboard');
+      await selectedWorktree.focus();
+      await page.keyboard.press('Space');
+      await browserExpect(selectedWorktree).toBeChecked();
+      await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
+      await browserExpect(selectedWorktree).toBeFocused();
+      await page.keyboard.press('ArrowUp');
+      await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+      await page.keyboard.press('ArrowDown');
+      await browserExpect(selectedWorktree).toBeChecked();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      phase('unpinning the parent project while retaining its selected worktree');
+      const parentCard = projectCard.locator('..');
+      await parentCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
+      await browserExpect(parentCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
+      await browserExpect(selectedWorktree).toBeChecked();
+      for (const width of [1440, 390, 360]) {
+        phase(`checking the worktree list at ${width}px`);
+        const cdp = await context.newCDPSession(page);
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: width < 500 });
+        await page.setViewportSize({ width, height: 900 });
+        await worktrees.scrollIntoViewIfNeeded();
+        expect(await worktrees.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        const cards = await projects.locator('[data-slot="new-chat-project-card"]').evaluateAll(elements => elements.map(element => {
+          const bounds = element.getBoundingClientRect();
+          return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+        }));
+        expect(cards).toHaveLength(2);
+        expect(cards[0]!.x).toBe(cards[1]!.x);
+        expect(cards[1]!.y).toBeGreaterThan(cards[0]!.y);
+        expect(cards.every(card => card.height <= 56)).toBe(true);
+        const worktreeRow = selectedWorktree.locator('..');
+        expect((await worktreeRow.boundingBox())!.height).toBeLessThanOrEqual(44);
+        await browserExpect(worktreeRow).toHaveAttribute('title', toExecutorPath(linked));
+        const compactPath = worktreeRow.getByText('…/design-preview', { exact: true });
+        await browserExpect(compactPath).toBeVisible();
+        const titleBounds = (await worktreeRow.getByText('feature/design-preview', { exact: true }).boundingBox())!;
+        const pathBounds = (await compactPath.boundingBox())!;
+        expect(pathBounds.x).toBeGreaterThanOrEqual(titleBounds.x + titleBounds.width);
+        expect(Math.abs(pathBounds.y - titleBounds.y)).toBeLessThanOrEqual(1);
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: join(artifacts, `worktree-landing-${executionBackend}-${width}.png`) });
+        if (width === 390) {
+          await dialog.getByRole('button', { name: 'Enter path', exact: true }).click();
+          await browserExpect(pathField).toBeFocused();
+          await browserExpect(page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
+          phase('browsing root subfolders on mobile before explicit selection');
+          await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+          const mobileBrowser = page.getByRole('dialog', { name: 'Select Directory', exact: true });
+          await browserExpect(mobileBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
+          await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-390.png`) });
+          await mobileBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
+          await mobileBrowser.getByRole('button', { name: 'Select this directory', exact: true }).click();
+          await browserExpect(pathField).toHaveValue(toExecutorPath(otherProject));
+          await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+          await pathField.fill(toExecutorPath(project));
+          await pathField.press('Enter');
+          await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+          await selectedWorktree.click();
+          await browserExpect(selectedWorktree).toBeChecked();
+        }
+        await cdp.detach();
+      }
+      phase('submitting the captured executor and worktree');
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const started = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/chats/start');
+      await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
+      const payload = (await started).postDataJSON();
+      expect(payload.executorId ?? 'local').toBe(client.executorId);
+      expect(payload.projectPath).toBe(toExecutorPath(linked));
+      await browserExpect(dialog).toHaveCount(0);
+      await browserExpect.poll(async () => (await client.listChats()).sessions.some(chat => chat.projectPath === toExecutorPath(linked))).toBe(true);
+      phase('closing the folder list and landing page with consecutive Escape presses');
+      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await browserExpect(folderBrowser).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(folderBrowser).toHaveCount(0);
+      await browserExpect(dialog).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(dialog).toHaveCount(0);
+      assertNoBrowserErrors();
+      console.info(`Worktree landing assertions completed: ${executionBackend}`);
+    }, undefined, {
+      executionBackend,
+      serverEnvironment: windowsGitPath ? { PATH: windowsGitPath } : {},
+    });
+  }, 120_000);
+}

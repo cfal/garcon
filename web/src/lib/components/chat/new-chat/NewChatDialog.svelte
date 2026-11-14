@@ -9,6 +9,8 @@
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types';
 	import NewChatForm from './NewChatForm.svelte';
+	import X from '@lucide/svelte/icons/x';
+	import * as m from '$lib/paraglide/messages.js';
 
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
@@ -49,7 +51,8 @@
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="safe-viewport-dialog top-[var(--app-viewport-center-y)] h-auto max-h-[calc(var(--app-height)-1rem)] max-w-3xl overflow-x-hidden overflow-y-auto p-0 sm:top-[50%] sm:max-h-[90dvh] sm:max-w-3xl"
+		class="top-(--app-viewport-offset-top) left-0 flex h-(--app-height) max-h-(--app-height) max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-background p-0 shadow-none sm:max-w-none"
+		data-new-chat-landing
 		showCloseButton={false}
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),
@@ -58,12 +61,49 @@
 			e.preventDefault();
 		}}
 	>
-		{#key appShell.newChatDialogRequestId}
-			<NewChatForm
-				seed={appShell.newChatDialogSeed}
-				onStartChat={handleStartChat}
-				onCancel={() => appShell.closeNewChatDialog()}
-			/>
-		{/key}
+		<header class="landing-insets flex shrink-0 items-center justify-between gap-4 py-3">
+			<Dialog.Title class="text-sm font-medium">{m.command_new_chat()}</Dialog.Title>
+			<button
+				type="button"
+				onclick={() => appShell.closeNewChatDialog()}
+				aria-label={m.common_close()}
+				class="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			>
+				<X class="size-5" aria-hidden="true" />
+			</button>
+		</header>
+		<div
+			class="landing-insets min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,var(--safe-area-inset-bottom,0px))]"
+		>
+			<div class="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center py-4 sm:py-6">
+				<div class="mb-4 space-y-1">
+					<h2 class="text-xl font-semibold tracking-tight sm:text-2xl">
+						{m.chat_new_chat_landing_heading()}
+					</h2>
+					<Dialog.Description>{m.chat_new_chat_landing_description()}</Dialog.Description>
+				</div>
+				{#key appShell.newChatDialogRequestId}
+					<NewChatForm
+						seed={appShell.newChatDialogSeed}
+						onStartChat={handleStartChat}
+						onCancel={() => appShell.closeNewChatDialog()}
+					/>
+				{/key}
+			</div>
+		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+<style>
+	.landing-insets {
+		padding-left: max(1rem, var(--safe-area-inset-left, 0px));
+		padding-right: max(1rem, var(--safe-area-inset-right, 0px));
+	}
+
+	@media (min-width: 640px) {
+		.landing-insets {
+			padding-left: max(1.5rem, var(--safe-area-inset-left, 0px));
+			padding-right: max(1.5rem, var(--safe-area-inset-right, 0px));
+		}
+	}
+</style>

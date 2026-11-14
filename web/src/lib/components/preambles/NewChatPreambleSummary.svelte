@@ -1,7 +1,7 @@
 <script lang="ts">
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import Pencil from '@lucide/svelte/icons/pencil';
+	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
@@ -164,9 +164,9 @@
 		title={m.preamble_selection_edit()}
 		onclick={onEdit}
 	>
-		<Pencil class="h-4 w-4" aria-hidden="true" />
+		<Plus class="h-4 w-4" aria-hidden="true" />
 	</Button>
-	{#if onClear}
+	{#if onClear && selectedCount > 0}
 		<Button
 			type="button"
 			variant="ghost"

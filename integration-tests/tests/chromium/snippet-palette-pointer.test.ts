@@ -4,6 +4,7 @@ import type { Locator } from 'playwright';
 import type { SnippetsMutationResponse, SnippetsSnapshot } from '../../../common/snippets.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { Deferred } from '../../support/deferred.js';
+import { saveNewChatProject } from '../../support/new-chat-project.js';
 
 async function settlePaletteLayout(palette: Locator): Promise<void> {
   // Allows layout-driven boundary events to fire before checking keyboard selection.
@@ -38,13 +39,15 @@ test('a parked mouse cannot replace snippet selection during loading, opening, f
     });
 
     try {
+      await saveNewChatProject(client, integration.dirs.project);
       await page.goto(integration.garcon.baseUrl);
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
       const composer = page.getByPlaceholder('How can I help you today?');
       const newChat = page.getByRole('dialog').filter({ has: composer });
-      await newChat.getByRole('textbox', { name: 'Project Path', exact: true }).fill(integration.dirs.project);
-      const pathDismiss = page.locator('[data-slot="directory-browser-dismiss"]');
-      if (await pathDismiss.isVisible()) await pathDismiss.click({ position: { x: 4, y: 4 } });
+      const projectCard = newChat.getByRole('region', { name: 'Saved and recent projects', exact: true })
+        .getByRole('button', { name: integration.dirs.project, exact: true });
+      await projectCard.click();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
 
       const palette = page.getByRole('dialog', { name: 'Insert Snippet', exact: true });
       const search = palette.getByRole('combobox', { name: 'Search snippets' });
