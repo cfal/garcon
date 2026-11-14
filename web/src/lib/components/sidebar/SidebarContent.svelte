@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { untrack } from 'svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';

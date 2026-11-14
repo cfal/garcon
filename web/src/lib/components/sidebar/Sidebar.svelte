@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { typographyScale } from '$lib/theme/typography.js';
 	import { untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
@@ -65,6 +65,7 @@
 		isMobile?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onNewChat: () => void;
+		onNewProjectChat: (project: NewChatProjectTarget) => void;
 		/** Applies the optimistic local removal (store + navigation) a
 		 *  ChatSessionDeletedWsMessage would trigger, without waiting for
 		 *  the server. Used by bulk delete so the list updates instantly. */
@@ -100,6 +101,7 @@
 		isMobile = false,
 		onChatSelect,
 		onNewChat,
+		onNewProjectChat,
 		onLocallyDeleteChat,
 		onQuietRefresh,
 		onRequestDeleteChat,
@@ -206,8 +208,7 @@
 
 	function handleNewProjectChat(project: NewChatProjectTarget): void {
 		if (selection.isActive) selection.exit();
-		if (isMobile) appShell.setSidebarOpen(false);
-		appShell.openNewChatDialog({ project });
+		onNewProjectChat(project);
 	}
 
 	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(

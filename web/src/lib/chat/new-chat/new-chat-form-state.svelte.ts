@@ -30,8 +30,7 @@ import {
 	newChatExecutorPreferences,
 } from './new-chat-executor-preferences';
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
-import type { NewChatStartupSeed } from './new-chat-seed';
-import type { NewChatProjectTarget } from './new-chat-project-target';
+import type { NewChatProjectTarget, NewChatStartupSeed } from './new-chat-seed';
 import { resolveNewChatModelSelection } from './new-chat-model-selection';
 import type { ChatId } from '$shared/chat-id';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
@@ -584,29 +583,20 @@ export class NewChatFormState {
 		const abort = new AbortController();
 		this.#worktreeAbort = abort;
 		const requestVersion = ++this.#worktreeRequestVersion;
+		const current = () =>
+			this.#isCurrentWorktreeLoad(requestVersion, abort.signal) &&
+			executorId === this.executorId &&
+			projectPath === this.nonblankPath &&
+			contextKey === this.pathContextKey;
 		this.isLoadingWorktrees = true;
 		this.worktreeError = null;
 
 		try {
 			const result = await getGitWorktrees({ executorId, projectPath }, { signal: abort.signal });
-			if (
-				executorId !== this.executorId ||
-				projectPath !== this.nonblankPath ||
-				contextKey !== this.pathContextKey
-			)
-				return;
-			if (!this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) return;
+			if (!current()) return;
 			this.worktreeItems = result.worktrees;
 		} catch (error) {
-			if (
-				isAbortError(error) ||
-				!this.#isCurrentWorktreeLoad(requestVersion, abort.signal) ||
-				executorId !== this.executorId ||
-				projectPath !== this.nonblankPath ||
-				contextKey !== this.pathContextKey
-			) {
-				return;
-			}
+			if (isAbortError(error) || !current()) return;
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktreeItems = [];
 		} finally {
@@ -809,12 +799,11 @@ export class NewChatFormState {
 
 	// Reseed / reset
 
-	selectProjectTarget(project: NewChatProjectTarget): void {
+	/** Seeds a fresh form with a project while keeping the target executor's startup defaults. */
+	seedProject(project: NewChatProjectTarget): void {
 		this.selectExecutor(project.executorId);
 		this.#executorModelCandidate = null;
 		this.#startupSelectionAutomatic = true;
-		this.#startupSelectionPending = true;
-		this.#reconcileStartupSelection();
 		this.selectProjectPath(project.projectPath);
 	}
 

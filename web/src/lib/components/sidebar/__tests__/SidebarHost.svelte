@@ -2,7 +2,7 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import type { ExecutorSnapshot } from '$shared/executors';
-	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import { buildSidebarChatListProjection } from '../sidebar-row-model';
@@ -38,7 +38,6 @@
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface SidebarHostProps {
-		appShell?: AppShellStore;
 		executors?: readonly ExecutorSnapshot[];
 		chats?: ChatSessionRecord[];
 		chatSessions?: ChatSessionsStore;
@@ -63,10 +62,10 @@
 		onRequestRecenter?: () => void;
 		onChatSelect?: (chatId: string) => void;
 		onNewChat?: () => void;
+		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 	}
 
 	let {
-		appShell,
 		executors,
 		chats = [],
 		chatSessions,
@@ -91,11 +90,12 @@
 		onRequestRecenter = () => {},
 		onChatSelect = () => {},
 		onNewChat = () => {},
+		onNewProjectChat = () => {},
 	}: SidebarHostProps = $props();
 	let displayedChats = $derived(chatSessions?.orderedChats ?? chats);
 	untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
 
-	setAppShell(untrack(() => appShell) ?? {
+	setAppShell({
 		onSidebarRecenterRequested() {
 			return () => {};
 		},
@@ -298,6 +298,7 @@
 	{isMobile}
 	{onChatSelect}
 	{onNewChat}
+	{onNewProjectChat}
 	{onQuietRefresh}
 	onRequestDeleteChat={() => {}}
 	onRequestRenameChat={() => {}}

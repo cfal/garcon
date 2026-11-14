@@ -26,7 +26,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await page.goto(`${integration.garcon.baseUrl}/chat/${existingId}`);
       await collapseCanonicalFilesWindow(page);
       const header = page.locator('[data-sidebar-project-header]').filter({ has: page.locator('[data-sidebar-group-header-label]') }).first();
-      const plus = header.locator('..').getByRole('button', { name: /^New chat in / });
+      const plus = header.locator('xpath=ancestor::*[@data-sidebar-group-header][1]').getByRole('button', { name: /^New chat in / });
       const dialog = page.getByRole('dialog').filter({ has: page.getByPlaceholder('How can I help you today?') });
       const prompt = dialog.getByPlaceholder('How can I help you today?');
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();

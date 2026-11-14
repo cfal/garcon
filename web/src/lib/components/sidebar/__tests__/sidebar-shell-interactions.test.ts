@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
-import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 import { getSavedSearches } from '$lib/api/settings';
@@ -68,36 +67,29 @@ describe('sidebar search dialog flow', () => {
 		cleanup();
 	});
 
-	it.each([false, true])(
-		'opens a project chat without toggling its collapsed group (mobile: %s)',
-		async (isMobile) => {
-			const appShell = createAppShellStore();
-			appShell.setSidebarOpen(true);
-			const { container } = render(SidebarHost, {
-				appShell,
-				isMobile,
-				autoLoadSavedSearches: false,
-				chats: [createChat('chat-1', 'First chat')],
-				collapsedProjectKeys: new Set(['path:/tmp/project']),
-			});
-			await fireEvent.click(
-				await screen.findByRole('button', { name: 'New chat in /tmp/project' }),
-			);
-			expect(appShell.newChatDialogOpen).toBe(true);
-			expect(appShell.newChatDialogSeed).toEqual({
-				project: { executorId: 'local', projectPath: '/tmp/project' },
-			});
-			expect(appShell.sidebarOpen).toBe(!isMobile);
-			expect(
-				container.querySelector('[data-sidebar-project-collapsed]')?.getAttribute('aria-expanded'),
-			).toBe('false');
-		},
-	);
+	it('starts a project chat without toggling its collapsed group', async () => {
+		const onNewProjectChat = vi.fn();
+		const { container } = render(SidebarHost, {
+			onNewProjectChat,
+			autoLoadSavedSearches: false,
+			chats: [createChat('chat-1', 'First chat')],
+			collapsedProjectKeys: new Set(['path:/tmp/project']),
+		});
+		await fireEvent.click(await screen.findByRole('button', { name: 'New chat in /tmp/project' }));
+		expect(onNewProjectChat).toHaveBeenCalledExactlyOnceWith({
+			executorId: 'local',
+			projectPath: '/tmp/project',
+		});
+		expect(
+			container.querySelector('[data-sidebar-project-collapsed]')?.getAttribute('aria-expanded'),
+		).toBe('false');
+		expect(screen.getByRole('heading', { name: 'project 1' })).toBeTruthy();
+	});
 
 	it('keeps identical project paths on different executors distinct', async () => {
-		const appShell = createAppShellStore();
+		const onNewProjectChat = vi.fn();
 		render(SidebarHost, {
-			appShell,
+			onNewProjectChat,
 			autoLoadSavedSearches: false,
 			executors: [localExecutor, remoteExecutor],
 			chats: [
@@ -108,11 +100,15 @@ describe('sidebar search dialog flow', () => {
 		await fireEvent.click(
 			await screen.findByRole('button', { name: 'New chat in Worker: /tmp/project' }),
 		);
-		expect(appShell.newChatDialogSeed).toEqual({
-			project: { executorId: remoteExecutor.id, projectPath: '/tmp/project' },
+		expect(onNewProjectChat).toHaveBeenLastCalledWith({
+			executorId: remoteExecutor.id,
+			projectPath: '/tmp/project',
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'New chat in /tmp/project' }));
-		expect(appShell.newChatDialogSeed?.project?.executorId).toBe('local');
+		expect(onNewProjectChat).toHaveBeenLastCalledWith({
+			executorId: 'local',
+			projectPath: '/tmp/project',
+		});
 	});
 
 	it.each(['none', 'activity', 'status'] as const)(
@@ -128,9 +124,9 @@ describe('sidebar search dialog flow', () => {
 	);
 
 	it('uses the displayed parent folder when nested projects are combined', async () => {
-		const appShell = createAppShellStore();
+		const onNewProjectChat = vi.fn();
 		render(SidebarHost, {
-			appShell,
+			onNewProjectChat,
 			autoLoadSavedSearches: false,
 			sidebarGroupNestedProjectPaths: true,
 			chats: [
@@ -139,7 +135,10 @@ describe('sidebar search dialog flow', () => {
 			],
 		});
 		await fireEvent.click(await screen.findByRole('button', { name: 'New chat in /tmp/project' }));
-		expect(appShell.newChatDialogSeed?.project?.projectPath).toBe('/tmp/project');
+		expect(onNewProjectChat).toHaveBeenCalledWith({
+			executorId: 'local',
+			projectPath: '/tmp/project',
+		});
 		expect(screen.getAllByRole('button', { name: /^New chat in / })).toHaveLength(1);
 	});
 

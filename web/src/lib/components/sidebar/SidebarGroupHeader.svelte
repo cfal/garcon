@@ -45,44 +45,49 @@
 </script>
 
 <div
-	class={cn('flex h-full items-center bg-card', separated && 'border-t border-sidebar-border')}
-	role="heading"
-	aria-level={level === 'executor' ? 2 : 3}
+	class={cn(
+		'flex h-full items-center bg-card',
+		separated && 'border-t border-sidebar-border',
+		containsSelectedChat && 'bg-sidebar-chat-item-selected-bg',
+	)}
+	data-sidebar-group-header
 >
-	<button
-		type="button"
-		class={cn(
-			'flex h-full min-w-0 flex-1 items-center pr-3 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
-			levelClasses[level],
-			containsSelectedChat &&
-				'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-		)}
-		style={`padding-left:${sidebarHeaderInset(depth)}px;`}
-		aria-expanded={!isCollapsed}
-		onclick={onToggle}
-		{...rest}
-	>
-		<ChevronRight
+	<!-- Actions sit outside the heading so its accessible name stays the group label. -->
+	<div class="h-full min-w-0 flex-1" role="heading" aria-level={level === 'executor' ? 2 : 3}>
+		<button
+			type="button"
 			class={cn(
-				'size-3 shrink-0 text-muted-foreground/80 transition-transform motion-reduce:transition-none',
-				!isCollapsed && 'rotate-90',
+				'flex h-full w-full items-center pr-3 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
+				levelClasses[level],
+				containsSelectedChat && 'text-sidebar-chat-item-selected-foreground',
 			)}
-			aria-hidden="true"
-		/>
-		{@render icon?.()}
-		{@render label()}
-		<!-- An expanded group lists its chats, so only a collapsed group summarizes them. -->
-		{#if isCollapsed}
-			<span
+			style={`padding-left:${sidebarHeaderInset(depth)}px;`}
+			aria-expanded={!isCollapsed}
+			onclick={onToggle}
+			{...rest}
+		>
+			<ChevronRight
 				class={cn(
-					'ml-auto shrink-0 pl-2 text-[11px] font-normal normal-case tracking-normal tabular-nums text-muted-foreground',
-					containsSelectedChat && 'text-sidebar-chat-item-selected-foreground/80',
+					'size-3 shrink-0 text-muted-foreground/80 transition-transform motion-reduce:transition-none',
+					!isCollapsed && 'rotate-90',
 				)}
-				data-sidebar-group-header-count
-			>
-				{count}
-			</span>
-		{/if}
-	</button>
+				aria-hidden="true"
+			/>
+			{@render icon?.()}
+			{@render label()}
+			<!-- An expanded group lists its chats, so only a collapsed group summarizes them. -->
+			{#if isCollapsed}
+				<span
+					class={cn(
+						'ml-auto shrink-0 pl-2 text-[11px] font-normal normal-case tracking-normal tabular-nums text-muted-foreground',
+						containsSelectedChat && 'text-sidebar-chat-item-selected-foreground/80',
+					)}
+					data-sidebar-group-header-count
+				>
+					{count}
+				</span>
+			{/if}
+		</button>
+	</div>
 	{@render actions?.()}
 </div>

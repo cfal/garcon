@@ -397,7 +397,11 @@ describe('SidebarVirtualSortableChatList', () => {
 			name: 'Executor unavailable (22222222) 1',
 		});
 		expect(button.getAttribute('aria-expanded')).toBe('false');
-		expect(button.classList.contains('bg-sidebar-chat-item-selected-bg')).toBe(true);
+		expect(
+			button
+				.closest('[data-sidebar-group-header]')
+				?.classList.contains('bg-sidebar-chat-item-selected-bg'),
+		).toBe(true);
 		expect(button.getAttribute('title')).toContain(remoteExecutor.id);
 		await fireEvent.click(button);
 		expect(onToggleProjectCollapsed).toHaveBeenCalledWith('executor:removed');

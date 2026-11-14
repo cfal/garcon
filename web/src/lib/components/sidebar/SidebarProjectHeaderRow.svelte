@@ -3,7 +3,7 @@
 	import { getExecutors } from '$lib/context';
 	import Plus from '@lucide/svelte/icons/plus';
 	import { effectiveExecutorId } from '$shared/executors';
-	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 	import type { SidebarVirtualProjectHeaderRow } from './sidebar-virtual-chat-list';
 	import SidebarGroupHeader from './SidebarGroupHeader.svelte';
@@ -41,8 +41,17 @@
 		[executorLabel, row.projectPath || m.sidebar_project_unknown()].filter(Boolean).join(': '),
 	);
 
+	const newChatLabel = $derived(m.sidebar_project_new_chat({ project: fullLabel }));
+
 	function handleToggle(): void {
 		onToggle?.(row.collapseKey);
+	}
+
+	function handleNewChat(): void {
+		onNewProjectChat?.({
+			executorId: effectiveExecutorId(row.executorId),
+			projectPath: row.projectPath,
+		});
 	}
 </script>
 
@@ -72,17 +81,14 @@
 		{/if}
 	{/snippet}
 	{#snippet actions()}
+		<!-- The unknown-project group has no folder to start in. -->
 		{#if row.projectPath.trim() && onNewProjectChat}
 			<button
 				type="button"
 				class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-				aria-label={m.sidebar_project_new_chat({ project: fullLabel })}
-				title={m.sidebar_project_new_chat({ project: fullLabel })}
-				onclick={() =>
-					onNewProjectChat?.({
-						executorId: effectiveExecutorId(row.executorId),
-						projectPath: row.projectPath,
-					})}
+				aria-label={newChatLabel}
+				title={newChatLabel}
+				onclick={handleNewChat}
 			>
 				<Plus class="size-4" aria-hidden="true" />
 			</button>

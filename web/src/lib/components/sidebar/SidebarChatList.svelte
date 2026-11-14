@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import * as m from '$lib/paraglide/messages.js';
 	import Search from '@lucide/svelte/icons/search';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';

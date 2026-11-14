@@ -309,77 +309,44 @@ describe('NewChatFormState', () => {
 	});
 
 	it.each(['local', remoteExecutor.id])(
-		'preserves the seeded project on %s while settings load',
+		'keeps a seeded project on %s and applies that executor startup defaults',
 		async (executorId) => {
-			const otherExecutorId = executorId === 'local' ? remoteExecutor.id : 'local';
+			const recent = { apiProviderId: null, modelEndpointId: null, modelProtocol: null };
 			mockRemoteSettings.ensureLoaded.mockResolvedValue(
 				makeSnapshot({
 					recentAgentSettings: [
 						{
-							executorId: otherExecutorId,
+							...recent,
+							executorId: executorId === 'local' ? remoteExecutor.id : 'local',
 							agentId: 'claude',
 							model: 'opus',
-							apiProviderId: null,
-							modelEndpointId: null,
-							modelProtocol: null,
 						},
+						{ ...recent, executorId, agentId: 'codex', model: 'gpt-5.4' },
 					],
 					paths: { recentProjectPaths: ['/unrelated'] },
 				}),
 			);
 			formState.reseed('Retained message');
-			formState.selectProjectTarget({ executorId, projectPath: '/workspace/project' });
+			formState.seedProject({ executorId, projectPath: '/workspace/project' });
 			await formState.loadSettingsAndModels();
 			expect(formState.executorId).toBe(executorId);
 			expect(formState.projectPath).toBe('/workspace/project');
 			expect(formState.firstMessage).toBe('Retained message');
+			expect(formState.agentId).toBe('codex');
+			expect(formState.modelValue).toBe('gpt-5.4');
 			expect(chatsApi.validateStart).toHaveBeenCalledWith('/workspace/project', { executorId });
 		},
 	);
 
-	it('preserves an unavailable project target and prevents submit without falling back to Local', async () => {
-		const executorId = 'removed-executor';
+	it('keeps an unavailable seeded project owner and blocks submit without falling back to Local', async () => {
 		formState.reseed('Retained message');
-		formState.selectProjectTarget({ executorId, projectPath: '/worker/project' });
+		formState.seedProject({ executorId: 'removed-executor', projectPath: '/worker/project' });
 		await formState.loadSettingsAndModels();
-		expect(formState.executorId).toBe(executorId);
+		expect(formState.executorId).toBe('removed-executor');
 		expect(formState.projectPath).toBe('/worker/project');
 		expect(formState.executorReady).toBe(false);
 		expect(formState.canSubmit).toBe(false);
 	});
-
-	it.each(['local', remoteExecutor.id])(
-		'uses normal new-chat model defaults on the seeded executor %s',
-		async (executorId) => {
-			mockRemoteSettings.ensureLoaded.mockResolvedValue(
-				makeSnapshot({
-					recentAgentSettings: [
-						{
-							executorId: executorId === 'local' ? remoteExecutor.id : 'local',
-							agentId: 'claude',
-							model: 'opus',
-							apiProviderId: null,
-							modelEndpointId: null,
-							modelProtocol: null,
-						},
-						{
-							executorId,
-							agentId: 'codex',
-							model: 'gpt-5.4',
-							apiProviderId: null,
-							modelEndpointId: null,
-							modelProtocol: null,
-						},
-					],
-				}),
-			);
-			formState.reseed('');
-			formState.selectProjectTarget({ executorId, projectPath: '/workspace/project' });
-			await formState.loadSettingsAndModels();
-			expect(formState.agentId).toBe('codex');
-			expect(formState.modelValue).toBe('gpt-5.4');
-		},
-	);
 
 	it('selects the saved pin with its owner while preserving prompt and attachments', () => {
 		mockRemoteSettings.snapshot = makeSnapshot({

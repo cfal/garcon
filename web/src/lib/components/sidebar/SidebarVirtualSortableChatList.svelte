@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
