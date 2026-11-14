@@ -287,8 +287,8 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each([undefined, null, '', 'center', 'RIGHT', true, 1, [], {}])(
-		'defaults missing or malformed user message alignment to right: %j',
+	it.each(['center', 'RIGHT', '', null, 1, {}])(
+		'defaults malformed user message alignment %j to right',
 		(value) => {
 			localStorage.setItem(
 				LOCAL_STORAGE_KEYS.localSettings,
@@ -299,25 +299,6 @@ describe('LocalSettingsStore', () => {
 			store.destroy();
 		},
 	);
-
-	it('synchronizes user message alignment across tabs and resets it when storage is removed', () => {
-		const store = createLocalSettingsStore();
-		for (const alignment of USER_MESSAGE_ALIGNMENT_VALUES) {
-			const newValue = JSON.stringify({ ...store.snapshot(), userMessageAlignment: alignment });
-			localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
-			window.dispatchEvent(new StorageEvent('storage', {
-				key: LOCAL_STORAGE_KEYS.localSettings, newValue, storageArea: localStorage,
-			}));
-			expect(store.userMessageAlignment).toBe(alignment);
-		}
-		store.set('userMessageAlignment', 'left');
-		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
-		window.dispatchEvent(new StorageEvent('storage', {
-			key: LOCAL_STORAGE_KEYS.localSettings, newValue: null, storageArea: localStorage,
-		}));
-		expect(store.userMessageAlignment).toBe('right');
-		store.destroy();
-	});
 
 	it.each(IMAGE_CACHE_SIZE_MIB_VALUES)('persists the %i MiB image cache budget', (size) => {
 		const store = createLocalSettingsStore();

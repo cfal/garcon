@@ -342,7 +342,10 @@ function parseChatMaxWidth(value: unknown): ChatMaxWidth {
 }
 
 export function isUserMessageAlignment(value: unknown): value is UserMessageAlignment {
-	return value === 'left' || value === 'right';
+	return (
+		typeof value === 'string' &&
+		USER_MESSAGE_ALIGNMENT_VALUES.includes(value as UserMessageAlignment)
+	);
 }
 
 function parseUserMessageAlignment(value: unknown): UserMessageAlignment {

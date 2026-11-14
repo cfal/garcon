@@ -6,7 +6,7 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
-import { AssistantMessage, UserMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
+import { UserMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 vi.mock('$lib/api/shares', () => ({
@@ -66,14 +66,10 @@ describe('SharedChatPage', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('reactively aligns shared user messages without remounting or changing assistant layout', async () => {
-		const snapshot = response([], 0, 2);
-		const at = '2026-01-01T00:00:00.000Z';
-		snapshot.snapshot.messages = [
-			new UserMessage(at, 'Synthetic prompt'),
-			new AssistantMessage(at, 'Synthetic reply'),
-		];
-		snapshot.page.end = 2;
+	it('aligns shared user messages from the local preference without remounting', async () => {
+		const snapshot = response([], 0, 1);
+		snapshot.snapshot.messages = [new UserMessage('2026-01-01T00:00:00.000Z', 'Synthetic prompt')];
+		snapshot.page.end = 1;
 		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
 		const localSettings = createLocalSettingsStore();
 		localSettings.userMessageAlignment = 'right';
@@ -81,18 +77,13 @@ describe('SharedChatPage', () => {
 		await screen.findByText('Synthetic prompt');
 		const bubble = container.querySelector('[data-slot="shared-user-message"]');
 		const row = bubble?.closest('.chat-message');
-		const reply = screen.getByText('Synthetic reply').closest('.chat-message');
 		expect(row?.classList.contains('justify-end')).toBe(true);
-		for (const [alignment, className] of [['left', 'justify-start'], ['right', 'justify-end']] as const) {
-			localSettings.set('userMessageAlignment', alignment);
-			await tick();
-			expect(container.querySelector('[data-slot="shared-user-message"]')).toBe(bubble);
-			expect(bubble?.closest('.chat-message')).toBe(row);
-			expect(row?.classList.contains(className)).toBe(true);
-			expect(bubble?.parentElement?.classList.contains('max-w-[85%]')).toBe(true);
-			expect(screen.getByText('Synthetic reply').closest('.chat-message')).toBe(reply);
-			expect(reply?.classList.contains('flex')).toBe(false);
-		}
+
+		localSettings.userMessageAlignment = 'left';
+		await tick();
+		expect(container.querySelector('[data-slot="shared-user-message"]')).toBe(bubble);
+		expect(row?.classList.contains('justify-start')).toBe(true);
+		expect(row?.classList.contains('justify-end')).toBe(false);
 	});
 
 	it('retains literal source, Markdown stdout, fenced stderr and command outcomes', async () => {

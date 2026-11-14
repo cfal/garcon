@@ -4,6 +4,7 @@
 	import {
 		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
 		INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
+		USER_MESSAGE_ALIGNMENT_VALUES,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX,
 		isChatMaxWidth,
@@ -13,6 +14,7 @@
 		type ChatMaxWidth,
 		type InlineImageThumbnailSize,
 		type InlineMermaidThumbnailSize,
+		type UserMessageAlignment,
 	} from '$lib/stores/local-settings.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ThemeSettingsCard from './ThemeSettingsCard.svelte';
@@ -28,6 +30,10 @@
 		{ value: 'medium', label: m.settings_chat_max_width_medium },
 		{ value: 'small', label: m.settings_chat_max_width_small },
 	];
+	const userMessageAlignmentLabels: Record<UserMessageAlignment, () => string> = {
+		left: m.settings_user_message_alignment_left,
+		right: m.settings_user_message_alignment_right,
+	};
 	const inlineImageThumbnailSizeLabels: Record<InlineImageThumbnailSize, () => string> = {
 		small: m.settings_inline_image_thumbnail_size_small,
 		medium: m.settings_inline_image_thumbnail_size_medium,
@@ -178,8 +184,9 @@
 				value={ls.userMessageAlignment}
 				onchange={(event) => setUserMessageAlignment(event.currentTarget.value)}
 			>
-				<option value="left">{m.settings_user_message_alignment_left()}</option>
-				<option value="right">{m.settings_user_message_alignment_right()}</option>
+				{#each USER_MESSAGE_ALIGNMENT_VALUES as alignment (alignment)}
+					<option value={alignment}>{userMessageAlignmentLabels[alignment]()}</option>
+				{/each}
 			</select>
 		</div>
 		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">

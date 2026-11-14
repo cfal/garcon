@@ -289,9 +289,10 @@
 						<div
 							class={cn(
 								'chat-message mt-3',
-								message instanceof UserMessage && 'flex min-w-0',
-								message instanceof UserMessage &&
-									(localSettings.userMessageAlignment === 'right' ? 'justify-end' : 'justify-start'),
+								message instanceof UserMessage && [
+									'flex min-w-0',
+									localSettings.userMessageAlignment === 'right' ? 'justify-end' : 'justify-start',
+								],
 							)}
 						>
 							{#if message instanceof UserMessage}

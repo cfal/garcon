@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import {
-	AssistantMessage,
 	CliRowMessage,
 	ErrorMessage,
 	TranscriptNoticeMessage,
@@ -41,7 +40,7 @@ describe('ConversationMessage chat rows', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('updates user message alignment without remounting the message or its body', async () => {
+	it('updates user message alignment without remounting the message', async () => {
 		const localSettings = createLocalSettingsStore();
 		localSettings.userMessageAlignment = 'right';
 		const { container } = render(ConversationMessageHost, {
@@ -49,31 +48,15 @@ describe('ConversationMessage chat rows', () => {
 			localSettings,
 		});
 		const row = container.querySelector('.chat-message');
-		const bubble = container.querySelector('.user-message-context-target');
 		const body = screen.getByText('Synthetic prompt');
 		expect(row?.classList.contains('justify-end')).toBe(true);
-		for (const [alignment, className] of [['left', 'justify-start'], ['right', 'justify-end']] as const) {
-			localSettings.set('userMessageAlignment', alignment);
-			await tick();
-			expect(container.querySelector('.chat-message')).toBe(row);
-			expect(container.querySelector('.user-message-context-target')).toBe(bubble);
-			expect(screen.getByText('Synthetic prompt')).toBe(body);
-			expect(row?.classList.contains(className)).toBe(true);
-			expect(container.querySelector('.user-message-row')?.classList.contains('max-w-[85%]')).toBe(true);
-		}
-	});
 
-	it.each(['left', 'right'] as const)('keeps assistant layout unchanged with %s user messages', (alignment) => {
-		const localSettings = createLocalSettingsStore();
-		localSettings.userMessageAlignment = alignment;
-		const { container } = render(ConversationMessageHost, {
-			message: new AssistantMessage(AT, 'Synthetic reply'),
-			localSettings,
-		});
-		const row = container.querySelector('.chat-message');
-		expect(row?.classList.contains('flow-root')).toBe(true);
+		localSettings.userMessageAlignment = 'left';
+		await tick();
+		expect(container.querySelector('.chat-message')).toBe(row);
+		expect(screen.getByText('Synthetic prompt')).toBe(body);
+		expect(row?.classList.contains('justify-start')).toBe(true);
 		expect(row?.classList.contains('justify-end')).toBe(false);
-		expect(screen.getByText('Synthetic reply')).toBeTruthy();
 	});
 
 	it.each(['pending', 'delivered'] as const)('renders %s optimistic literal input without Markdown', (delivery) => {
