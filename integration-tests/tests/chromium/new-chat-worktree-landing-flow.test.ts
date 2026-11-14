@@ -83,6 +83,12 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const worktreeRow = selectedWorktree.locator('..');
         expect((await worktreeRow.boundingBox())!.height).toBeLessThanOrEqual(44);
         await browserExpect(worktreeRow).toHaveAttribute('title', toExecutorPath(linked));
+        const compactPath = worktreeRow.getByText('…/design-preview', { exact: true });
+        await browserExpect(compactPath).toBeVisible();
+        const titleBounds = (await worktreeRow.getByText('feature/design-preview', { exact: true }).boundingBox())!;
+        const pathBounds = (await compactPath.boundingBox())!;
+        expect(pathBounds.x).toBeGreaterThanOrEqual(titleBounds.x + titleBounds.width);
+        expect(Math.abs(pathBounds.y - titleBounds.y)).toBeLessThanOrEqual(1);
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: join(artifacts, `worktree-landing-${executionBackend}-${width}.png`) });
         await cdp.detach();

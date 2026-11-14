@@ -5,6 +5,7 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import DirectoryBrowser from '$lib/components/project-paths/DirectoryBrowser.svelte';
 	import ProjectPinnedPathToggleButton from '$lib/components/project-paths/ProjectPinnedPathToggleButton.svelte';
+	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import * as m from '$lib/paraglide/messages.js';
@@ -150,6 +151,7 @@
 				class="max-h-48 space-y-0.5 overflow-y-auto overscroll-contain"
 			>
 				{#each worktrees as worktree (worktree.path)}
+					{@const pathParts = splitProjectPath(worktree.path)}
 					<label
 						title={worktree.path}
 						class="group flex min-h-11 min-w-0 items-center gap-2 rounded-md px-2 py-1 pointer-fine:min-h-8 {form.isSelectedWorktree(
@@ -177,6 +179,12 @@
 							{#if worktree.isPathMissing}<span class="sr-only"
 									>{m.chat_new_chat_worktree_missing()}</span
 								>{/if}
+						</span>
+						<span
+							aria-hidden="true"
+							class="min-w-0 max-w-[45%] truncate text-right text-xs text-muted-foreground"
+						>
+							{pathParts.parent ? '…/' + pathParts.name : pathParts.name}
 						</span>
 					</label>
 				{/each}

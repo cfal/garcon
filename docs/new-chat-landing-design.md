@@ -12,7 +12,8 @@ Windows paths with different slash styles appear once, retaining the pinned spel
 POSIX backslashes and exact whitespace remain significant. A selectable worktree
 list replaces the permanent directory text field. It lists worktrees for the selected
 project on its owning executor, including the primary checkout. Worktrees use smaller,
-flat title-only rows with full-path hover titles and accessible path labels.
+flat rows with titles on the left and muted, root-abbreviated paths such as
+`…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
 Selecting a row changes the new chat's target without clearing its prompt.
 A Choose folder button retains executor-owned folder browsing, and pinning remains available.
 Ordinary folders remain usable when they are not Git repositories.
