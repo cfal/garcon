@@ -108,6 +108,11 @@ export class ConversationSessionController {
 		this.#slashCommands = new ConversationSlashCommandService(
 			{
 				...deps,
+				settings: {
+					changeAgentSetting: (chatId, descriptor, value) =>
+						this.#settings.changeAgentSetting(chatId, descriptor, value),
+					settlePending: (chatId) => this.#settings.settlePending(chatId),
+				},
 				refetchTranscript: (chatId) => this.#loadChat(chatId),
 				confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
 			},

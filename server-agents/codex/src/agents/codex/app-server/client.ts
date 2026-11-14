@@ -335,6 +335,7 @@ export class CodexAppServerClient extends EventEmitter {
     args.push(
       '--config', 'features.goals=false',
       '--config', 'features.wake_on_agent_messages=false',
+      '--config', 'features.fast_mode=true',
       '--config', 'features.default_mode_request_user_input=true',
     );
     if (this.#modelCatalogPath) {

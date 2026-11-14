@@ -77,6 +77,7 @@ import {
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
+import { assertCodexFastModel } from '../service-tier.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
   rejectedCodexSteer,
@@ -200,6 +201,7 @@ export class CodexAppServerRuntime {
     request: CodexStartRequest | CodexResumeRequest,
     operation: CodexOperation,
   ): Promise<void> {
+    if (request.speed === 'fast') await assertCodexFastModel(client, request.model);
     const attachments = await writeAttachmentsToTempFiles(request.images);
     session.cleanupAttachments = attachments.cleanup;
     const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
@@ -218,6 +220,7 @@ export class CodexAppServerRuntime {
       projectPath: request.projectPath,
       permissionMode: request.permissionMode,
       thinkingMode: request.thinkingMode,
+      speed: request.speed,
       clientMessageId: request.clientMessageId,
       skills,
     }));
@@ -523,7 +526,8 @@ export class CodexAppServerRuntime {
 
   updateSessionSettings(
     agentSessionId: string,
-    configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>,
+    configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>
+      & Pick<CodexStartRequest, 'speed'>,
   ): Promise<void> {
     const session = this.#sourceForThread(agentSessionId);
     if (!session) return Promise.resolve();
@@ -552,6 +556,10 @@ export class CodexAppServerRuntime {
     if (threadSettingsMatch(session.confirmedThreadSettings, target)) {
       session.permissionMode = target.permissionMode;
       return;
+    }
+    if (target.serviceTier === 'priority') await assertCodexFastModel(session.client, target.model);
+    if (this.#sources.get(session.client) !== session) {
+      throw new Error('Codex session closed before its speed change was applied');
     }
 
     let resolveConfirmation!: () => void;
@@ -1057,7 +1065,7 @@ export class CodexAppServerRuntime {
   }
 
   #initialThreadSettings(
-    request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
+    request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode' | 'speed'>,
     response: ThreadStartResponse,
   ): CodexConfirmedThreadSettings {
     const requested = codexThreadSettingsTarget(request);

@@ -1,4 +1,12 @@
 {
+	"chat_notice_fast_usage": "Use /fast on, /fast off, or /fast status. /fast alone shows status.",
+	"chat_notice_fast_unsupported": "This agent does not support the /fast command.",
+	"chat_notice_fast_attachments": "The /fast command does not accept attachments.",
+	"chat_notice_fast_chat_changed": "The chat's agent or executor changed. Run the command again.",
+	"chat_notice_fast_unconfirmed": "The speed change was not confirmed. Check /fast status before retrying.",
+	"chat_notice_fast_on": "Fast mode is on for this chat. Subsequent model requests use Fast with higher usage. An in-flight request keeps its current speed.",
+	"chat_notice_fast_off": "Fast mode is off for this chat. Subsequent model requests use Standard. An in-flight request keeps its current speed.",
+	"chat_notice_fast_failed": "Could not confirm Fast mode: {detail}",
 	"tickets_title": "Tickets",
 	"tickets_source_address": "Recorded source: chat {chat}, view {view}, row {ordinal}",
 	"tickets_new": "New ticket",

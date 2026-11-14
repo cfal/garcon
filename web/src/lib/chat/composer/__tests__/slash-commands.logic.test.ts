@@ -7,6 +7,7 @@ import {
 	isControllerSlashCommand,
 	isLiteralAppCommand,
 	parseCompactCommand,
+	parseFastCommand,
 	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
@@ -16,6 +17,17 @@ import {
 } from '$lib/chat/composer/slash-commands.js';
 
 describe('slash command helpers', () => {
+	it.each(['', 'status', 'on', 'off'])('handles /fast %s as a local control', (argument) => {
+		const input = `/fast ${argument}`;
+		expect(parseFastCommand(input)).toEqual({ kind: 'valid', action: argument || 'status' });
+		expect(isControllerSlashCommand(input)).toBe(true);
+		expect(isControllerSlashCommand(input, 'literal')).toBe(false);
+	});
+
+	it('rejects extra arguments without swallowing other commands', () => {
+		expect(parseFastCommand('/fast on extra')).toEqual({ kind: 'invalid' });
+		expect(parseFastCommand('/fastest')).toEqual({ kind: 'not-command' });
+	});
 	it.each(['', ' ', '\t', '\r', '\n', '\v', '\f', '\r\n', '\u00a0', ' body'])(
 		'uses the standalone Clear whitespace rules for literal Clear and Fork: %j', suffix => {
 			const clear = `/clear${suffix}`;

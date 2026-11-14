@@ -36,6 +36,7 @@
 		query: string;
 		supportsFork: boolean;
 		supportsSteering: boolean;
+		supportsFast?: boolean;
 		canScheduleIn: boolean;
 		canClear?: boolean;
 		conversationInput?: boolean;
@@ -56,6 +57,7 @@
 		query,
 		supportsFork,
 		supportsSteering,
+		supportsFast = false,
 		canScheduleIn,
 		canClear = false,
 		conversationInput = true,
@@ -121,6 +123,7 @@
 	let mergedCommands = $derived.by(() => {
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'clear') return canClear;
+			if (command.name === 'fast') return conversationInput && supportsFast;
 			if (!conversationInput && !LITERAL_APP_COMMAND_NAMES.includes(command.name)) return false;
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
@@ -137,7 +140,11 @@
 			!loadFailed &&
 			fetchedKey === contextKey
 				? allCommands.filter(
-						(command) => command.name !== 'in' && command.name !== 'clear' && !builtinNames.has(command.name),
+						(command) =>
+							command.name !== 'in' &&
+							command.name !== 'clear' &&
+							command.name !== 'fast' &&
+							!builtinNames.has(command.name),
 					)
 				: [];
 		return [...builtins, ...discovered];

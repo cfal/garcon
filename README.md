@@ -379,6 +379,12 @@ cd garcon-skills
 
 The installer links the skills for Claude, Codex, Pi, and other compatible agents. Messages, delegated work, results, and lineage remain visible in Garcon.
 
+## Fast Mode
+
+Codex chats default to Standard. Use `/fast on` to select Fast for one chat,
+`/fast off` to return to Standard, and `/fast` or `/fast status` to check its
+saved setting. Fast uses more allowance. See [per-chat Fast mode](docs/fast-mode.md).
+
 ## Tickets
 
 Track workspace work without starting a chat: list and board views, comments, relationships, attributed history, and **New chat from ticket**. See the [tickets guide](docs/tickets.md) and [ticket CLI](docs/cli.md#tickets).

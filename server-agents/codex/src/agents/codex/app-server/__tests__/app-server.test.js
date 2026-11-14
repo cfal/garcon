@@ -436,8 +436,9 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         },
       },
     });
-    expect(args.slice(-6)).toEqual([
+    expect(args.slice(-8)).toEqual([
       '--config', 'features.goals=false', '--config', 'features.wake_on_agent_messages=false',
+      '--config', 'features.fast_mode=true',
       '--config', 'features.default_mode_request_user_input=true',
     ]);
     await client.shutdown();
@@ -869,6 +870,8 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       '--config',
       'features.wake_on_agent_messages=false',
       '--config',
+      'features.fast_mode=true',
+      '--config',
       'features.default_mode_request_user_input=true',
       '--config',
       'model_catalog_json="/opt/garcon/codex-models.json"',
@@ -1128,6 +1131,7 @@ describe('Codex app-server request builders', () => {
     });
 
     expect(buildThreadSettingsUpdateParams('thread-1', target)).toEqual({
+      serviceTier: 'default',
       threadId: 'thread-1',
       model: 'gpt-5.4-mini',
       effort: 'high',
@@ -1146,6 +1150,7 @@ describe('Codex app-server request builders', () => {
       permissionMode: 'bypassPermissions',
       thinkingMode: 'none',
     }))).toEqual({
+      serviceTier: 'default',
       threadId: 'thread-1',
       model: 'gpt-5.4-mini',
       approvalPolicy: 'never',
@@ -5993,6 +5998,7 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.updateThreadSettings).toHaveBeenCalledWith({
       threadId: 'thread-1',
+      serviceTier: 'default',
       model: 'gpt-5.4-mini',
       effort: 'high',
       approvalPolicy: 'on-request',
@@ -6036,6 +6042,37 @@ describe('CodexAppServerRuntime', () => {
       .toBe('continued with confirmed settings');
   });
 
+  it('confirms Fast only after the matching tier notification and explicitly switches it off', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    fake.request = mock(async () => ({ data: [{ model: 'gpt-5.4-codex', serviceTiers: [{ id: 'priority' }] }] }));
+    let settled = false;
+    const configuration = { model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'none' };
+    const pending = provider.updateSessionSettings(started.agentSessionId, { ...configuration, speed: 'fast' })
+      .then(() => { settled = true; });
+    await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
+    expect(fake.updateThreadSettings.mock.calls[0][0].serviceTier).toBe('priority');
+    emitThreadSettings(fake, { serviceTier: 'default' });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    emitThreadSettings(fake, { serviceTier: 'priority' });
+    await pending;
+    fake.updateThreadSettings.mockImplementation(async () => {
+      emitThreadSettings(fake, { serviceTier: 'default' });
+      return {};
+    });
+    await provider.updateSessionSettings(started.agentSessionId, { ...configuration, speed: 'standard' });
+    expect(fake.updateThreadSettings.mock.calls[1][0].serviceTier).toBe('default');
+  });
+
+  it('rejects unsupported Fast before changing the loaded session', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    fake.request = mock(async () => ({ data: [{ model: 'gpt-5.4-codex', serviceTiers: [] }] }));
+    await expect(provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'none', speed: 'fast',
+    })).rejects.toThrow('Fast mode is not advertised');
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+  });
+
   it('updates a retained idle source while preserving provider-default effort', async () => {
     const { fake, provider, started } = await startSettingsSession({}, {
       thinkingMode: 'none', modelEndpointId: 'endpoint-1',
@@ -6062,6 +6099,7 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.updateThreadSettings).toHaveBeenCalledWith({
       threadId: 'thread-1',
+      serviceTier: 'default',
       model: 'gpt-5.4-codex',
       approvalPolicy: 'on-request',
       approvalsReviewer: 'user',

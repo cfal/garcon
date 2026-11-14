@@ -1,4 +1,5 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
+import { agentSpeed } from '@garcon/common/agent-speed';
 import {
   AgentIntegrationError,
   type AgentEstablishedSession,
@@ -141,6 +142,7 @@ export class CodexExecution implements AgentRuntimeExecution {
       model: configuration.model,
       permissionMode: configuration.permissionMode,
       thinkingMode: configuration.thinkingMode,
+      speed: agentSpeed(configuration.settings),
     });
   }
 
@@ -202,6 +204,7 @@ function executionFields(
     modelEndpointId: request.endpoint?.endpointId ?? null,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
+    speed: agentSpeed(request.settings),
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
