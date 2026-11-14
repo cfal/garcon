@@ -119,6 +119,7 @@ test('serializes launchd and systemd arguments without expansion and keeps servi
 test('Windows uses a hidden normal-user task with a restart loop and refuses an unrelated task', () => {
   const service = tunnelService({ platform: 'win32', home: 'C:\\Users\\user', directory: "C:\\Users\\user's folder\\cloudflare", command: ['C:\\tools\\cloudflared.exe', 'tunnel', 'run', 'id'], windowsDirectory: 'C:\\Windows' });
   expect(service.files[0][1]).toContain('Start-Sleep -Seconds 10');
+  expect(service.files[0][1]).toContain("$ErrorActionPreference = 'Continue'");
   expect(service.files[0][1]).toContain("user''s folder");
   const registration = Buffer.from(service.commands[0].at(-1), 'base64').toString('utf16le');
   expect(registration).toContain('-RunLevel Limited');

@@ -30,7 +30,8 @@ export function tunnelService({ platform, home, directory, command, uid, windows
   // Windows command-line quoting keeps a path containing spaces within one -File argument.
   if (runner.includes('"')) throw new Error('The tunnel directory cannot contain a double quote.');
   const args = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${runner}"`;
-  const script = `$ErrorActionPreference = 'Stop'\n$exe = ${ps(command[0])}\n$argsForTunnel = @(${command.slice(1).map(ps).join(', ')})\nwhile ($true) {\n  & $exe @argsForTunnel *>> ${ps(paths.join(directory, 'tunnel.log'))}\n  Start-Sleep -Seconds 10\n}\n`;
+  // PowerShell 5 can turn native stderr into errors; connector logs must not terminate the runner.
+  const script = `$ErrorActionPreference = 'Continue'\n$exe = ${ps(command[0])}\n$argsForTunnel = @(${command.slice(1).map(ps).join(', ')})\nwhile ($true) {\n  & $exe @argsForTunnel *>> ${ps(paths.join(directory, 'tunnel.log'))}\n  Start-Sleep -Seconds 10\n}\n`;
   const registration = `$ErrorActionPreference = 'Stop'
 $exe = ${ps(powershell)}
 $arguments = ${ps(args)}
