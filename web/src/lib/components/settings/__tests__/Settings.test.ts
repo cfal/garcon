@@ -51,6 +51,30 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('persists user message alignment from Appearance across remounts', async () => {
+		localStorage.clear();
+		const appShell = createAppShellStore();
+		appShell.openSettings('appearance');
+		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
+		let rendered = render(SettingsTestHost, props);
+		try {
+			const alignment = screen.getByRole<HTMLSelectElement>('combobox', { name: 'User message alignment' });
+			expect(alignment.value).toBe('right');
+			expect(within(alignment).getAllByRole('option').map(option => option.textContent)).toEqual(['Left', 'Right']);
+			await fireEvent.change(alignment, { target: { value: 'left' } });
+			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+				userMessageAlignment: 'left',
+			});
+			rendered.unmount();
+			rendered = render(SettingsTestHost, props);
+			expect(
+				screen.getByRole<HTMLSelectElement>('combobox', { name: 'User message alignment' }).value,
+			).toBe('left');
+		} finally {
+			rendered.unmount();
+		}
+	});
+
 	it('persists the Appearance scrollbar setting across remounts', async () => {
 		localStorage.clear();
 		const appShell = createAppShellStore();

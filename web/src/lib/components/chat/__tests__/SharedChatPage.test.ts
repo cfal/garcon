@@ -1,11 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import SharedChatPageTestHost from './SharedChatPageTestHost.svelte';
 import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsible-body-layout-harness.js';
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
 import { UserMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
+import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 vi.mock('$lib/api/shares', () => ({
 	getSharedChat: vi.fn(),
@@ -62,6 +64,26 @@ describe('SharedChatPage', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+	});
+
+	it('aligns shared user messages from the local preference without remounting', async () => {
+		const snapshot = response([], 0, 1);
+		snapshot.snapshot.messages = [new UserMessage('2026-01-01T00:00:00.000Z', 'Synthetic prompt')];
+		snapshot.page.end = 1;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
+		const localSettings = createLocalSettingsStore();
+		localSettings.userMessageAlignment = 'right';
+		const { container } = render(SharedChatPageTestHost, { localSettings });
+		await screen.findByText('Synthetic prompt');
+		const bubble = container.querySelector('[data-slot="shared-user-message"]');
+		const row = bubble?.closest('.chat-message');
+		expect(row?.classList.contains('justify-end')).toBe(true);
+
+		localSettings.userMessageAlignment = 'left';
+		await tick();
+		expect(container.querySelector('[data-slot="shared-user-message"]')).toBe(bubble);
+		expect(row?.classList.contains('justify-start')).toBe(true);
+		expect(row?.classList.contains('justify-end')).toBe(false);
 	});
 
 	it('retains literal source, Markdown stdout, fenced stderr and command outcomes', async () => {

@@ -4,14 +4,17 @@
 	import {
 		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
 		INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
+		USER_MESSAGE_ALIGNMENT_VALUES,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX,
 		isChatMaxWidth,
+		isUserMessageAlignment,
 		isInlineImageThumbnailSize,
 		isInlineMermaidThumbnailSize,
 		type ChatMaxWidth,
 		type InlineImageThumbnailSize,
 		type InlineMermaidThumbnailSize,
+		type UserMessageAlignment,
 	} from '$lib/stores/local-settings.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ThemeSettingsCard from './ThemeSettingsCard.svelte';
@@ -27,6 +30,10 @@
 		{ value: 'medium', label: m.settings_chat_max_width_medium },
 		{ value: 'small', label: m.settings_chat_max_width_small },
 	];
+	const userMessageAlignmentLabels: Record<UserMessageAlignment, () => string> = {
+		left: m.settings_user_message_alignment_left,
+		right: m.settings_user_message_alignment_right,
+	};
 	const inlineImageThumbnailSizeLabels: Record<InlineImageThumbnailSize, () => string> = {
 		small: m.settings_inline_image_thumbnail_size_small,
 		medium: m.settings_inline_image_thumbnail_size_medium,
@@ -44,6 +51,10 @@
 		if (isChatMaxWidth(value)) {
 			ls.set('chatMaxWidth', value);
 		}
+	}
+
+	function setUserMessageAlignment(value: string): void {
+		if (isUserMessageAlignment(value)) ls.set('userMessageAlignment', value);
 	}
 
 	function setInlineImageThumbnailSize(value: string): void {
@@ -163,6 +174,21 @@
 		{@render settingRow(m.settings_auto_hide_chat_scrollbar(), ls.autoHideChatScrollbar, () =>
 			ls.toggle('autoHideChatScrollbar'),
 		)}
+		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+			<label class="min-w-0 text-sm font-medium text-foreground" for="local-user-message-alignment">
+				{m.settings_user_message_alignment()}
+			</label>
+			<select
+				id="local-user-message-alignment"
+				class="select-native w-full sm:w-auto sm:shrink-0"
+				value={ls.userMessageAlignment}
+				onchange={(event) => setUserMessageAlignment(event.currentTarget.value)}
+			>
+				{#each USER_MESSAGE_ALIGNMENT_VALUES as alignment (alignment)}
+					<option value={alignment}>{userMessageAlignmentLabels[alignment]()}</option>
+				{/each}
+			</select>
+		</div>
 		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
 			<label class="min-w-0 text-sm font-medium text-foreground" for="local-inline-image-size">
 				{m.settings_inline_image_thumbnail_size()}

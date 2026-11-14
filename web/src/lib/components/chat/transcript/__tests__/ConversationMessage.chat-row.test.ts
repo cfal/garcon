@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import {
 	CliRowMessage,
 	ErrorMessage,
@@ -10,6 +11,7 @@ import ConversationMessageHost from './ConversationMessageHost.svelte';
 import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
 import { mergeRowsWithOptimisticInputs } from '$lib/chat/transcript/transcript-row-projection.js';
+import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 const AT = '2026-08-18T12:00:00.000Z';
 const SOURCE_CHAT_ID = '1788090107980900';
@@ -36,6 +38,25 @@ describe('ConversationMessage chat rows', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+	});
+
+	it('updates user message alignment without remounting the message', async () => {
+		const localSettings = createLocalSettingsStore();
+		localSettings.userMessageAlignment = 'right';
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(AT, 'Synthetic prompt'),
+			localSettings,
+		});
+		const row = container.querySelector('.chat-message');
+		const body = screen.getByText('Synthetic prompt');
+		expect(row?.classList.contains('justify-end')).toBe(true);
+
+		localSettings.userMessageAlignment = 'left';
+		await tick();
+		expect(container.querySelector('.chat-message')).toBe(row);
+		expect(screen.getByText('Synthetic prompt')).toBe(body);
+		expect(row?.classList.contains('justify-start')).toBe(true);
+		expect(row?.classList.contains('justify-end')).toBe(false);
 	});
 
 	it.each(['pending', 'delivered'] as const)('renders %s optimistic literal input without Markdown', (delivery) => {

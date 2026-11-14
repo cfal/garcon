@@ -248,7 +248,12 @@
 		cn(
 			'chat-message',
 			cssType,
-			message instanceof UserMessage ? 'flex justify-start min-w-0' : 'flow-root',
+			asUser
+				? [
+						'flex min-w-0',
+						localSettings.userMessageAlignment === 'right' ? 'justify-end' : 'justify-start',
+					]
+				: 'flow-root',
 		),
 	);
 
@@ -581,7 +586,7 @@
 	>
 		{#if asUser}
 			<div
-				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
+				class="user-message-row group/message mt-1 flex min-w-0 max-w-[85%] items-stretch gap-1.5"
 				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
 				style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
 				style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
@@ -592,7 +597,7 @@
 						bind:ref={messageMenuTriggerRef}
 						oncontextmenucapture={captureMessageSelection}
 						class={cn(
-							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
+							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm min-w-0 max-w-full',
 							!userMessagePresentation?.style &&
 								'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
 							userMessageSurfaceClass,
