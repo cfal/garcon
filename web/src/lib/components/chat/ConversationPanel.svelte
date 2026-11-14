@@ -233,7 +233,7 @@
 		return cn(
 			'flex min-h-0 flex-col',
 			CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth],
-			capSpace.queue ? 'pb-14' : 'pb-2',
+			capSpace.queue && (!questionVisible || statusBarVisible) ? 'pb-14' : 'pb-2',
 		);
 	});
 	const dockFrameClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));

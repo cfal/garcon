@@ -43,6 +43,15 @@ for (const executionBackend of [
           agent: directAgents.openAi,
         });
         await client.waitForTurnTerminal(otherChatId, other.turnId);
+        await page.addInitScript(() => {
+			if (location.hostname !== '127.0.0.1') return;
+			const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+			localStorage.setItem('pref_local_settings', JSON.stringify({
+				composerStatusBarGitProjects: false,
+				composerStatusBarNonGitProjects: false,
+				...stored,
+			}));
+		});
         await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
         const composer = page.locator("[data-composer]");
         const editor = composer.locator("textarea");
@@ -78,6 +87,13 @@ for (const executionBackend of [
               noOverflow: document.documentElement.scrollWidth <= innerWidth,
             };
           })).toEqual({ above: true, contained: true, noOverflow: true });
+          await browserExpect.poll(() => page.evaluate(() => {
+            const panelBox = document.querySelector('[data-question-choices-panel]')?.getBoundingClientRect();
+            const inputBox = document.querySelector('[data-composer]')?.getBoundingClientRect();
+            if (!panelBox?.height || !inputBox?.height) return false;
+            const gap = inputBox.top - panelBox.bottom;
+            return gap >= 0 && gap <= 20;
+          })).toBe(true);
           await browserExpect.poll(() => dock.getByRole('button', { name: 'Inspect a detailed diagram', exact: true }).evaluate(element => {
             const style = getComputedStyle(element);
             return { equalPadding: style.paddingTop === style.paddingBottom, align: style.alignItems };
@@ -110,6 +126,12 @@ for (const executionBackend of [
         await fakeProviders.openAi.waitForRequest({ lastUserText: "/compact" });
         await browserExpect(editor).toHaveValue(draft);
         await browserExpect(dock).toHaveCount(0);
+        await page.evaluate(() => {
+          const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+          localStorage.setItem('pref_local_settings', JSON.stringify({
+            ...stored, composerStatusBarGitProjects: true, composerStatusBarNonGitProjects: true,
+          }));
+        });
         phase('multiple questions and multiple selections submit together');
         const multiSeed = 'Synthetic multiple choice questions';
         const multiHeld = fakeProviders.openAi.holdNext({ lastUserText: multiSeed });
@@ -124,10 +146,17 @@ for (const executionBackend of [
         await page.goto(`${integration.garcon.baseUrl}/chat/${multiChatId}`);
         await browserExpect(dock.getByText('1/2', { exact: true })).toBeVisible();
         await browserExpect(dock.getByText('Question - Select multiple answers', { exact: true })).toBeVisible();
+        await browserExpect(page.locator('[data-composer-status-bar]')).toBeVisible();
+        await browserExpect.poll(() => page.evaluate(() => {
+          const panelBox = document.querySelector('[data-question-choices-panel]')?.getBoundingClientRect();
+          const statusBox = document.querySelector('[data-composer-status-bar]')?.getBoundingClientRect();
+          return Boolean(panelBox?.height && statusBox?.height && panelBox.bottom <= statusBox.top + 1);
+        })).toBe(true);
         await dock.getByRole('button', { name: 'Outline', exact: true }).click();
         await dock.getByRole('button', { name: 'Diagram', exact: true }).click();
         await browserExpect(dock.getByRole('button', { name: 'Outline', exact: true })).toHaveAttribute('aria-pressed', 'true');
         await browserExpect(dock.getByRole('button', { name: 'Diagram', exact: true })).toHaveAttribute('aria-pressed', 'true');
+        await page.screenshot({ path: join(artifacts, `question-choices-${executionBackend}-multiple.png`) });
         await dock.getByRole('button', { name: 'Next question', exact: true }).click();
         await browserExpect(dock.getByText('2/2', { exact: true })).toBeVisible();
         await browserExpect(dock.getByText('Question - Select one answer', { exact: true })).toBeVisible();

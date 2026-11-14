@@ -286,6 +286,28 @@ describe('ConversationPanel', () => {
 		expect(screen.queryByRole('button', { name: 'Fast' })).toBeNull();
 	});
 
+	it.each([false, true])('reserves question dock space only for a visible status bar (visible=%s)', (visible) => {
+		runtime.composerStatusBarGitProjects = visible;
+		const { rendered } = choicePanel();
+		const questionDock = rendered.container.querySelector('[data-composer-question-dock]')!;
+		const statusAnchor = rendered.container.querySelector('[data-conversation-panel-status-anchor]')!;
+		expect(Boolean(questionDock.closest('.pb-14'))).toBe(visible);
+		expect(statusAnchor.children.length > 0).toBe(visible);
+	});
+
+	it('restores the stable queue slot when a compact question dock is dismissed', async () => {
+		runtime.composerStatusBarGitProjects = false;
+		runtime.queue = queue();
+		const { rendered } = choicePanel();
+		const spacer = rendered.container.querySelector('[data-conversation-panel-composer-spacer]');
+		const queued = screen.getByText('Queued input');
+		expect(queued.closest('.pb-14')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_async_dismiss_question() }));
+		expect(rendered.container.querySelector('[data-composer-question-dock]')).toBeNull();
+		expect(queued.closest('.pb-14')).toBeTruthy();
+		expect(rendered.container.querySelector('[data-conversation-panel-composer-spacer]')).toBe(spacer);
+	});
+
 	it('offers choices when the assistant closes with a separate reminder block', async () => {
 		const { panel, actions } = choicePanel();
 		panel.transcript.replaceGeneration(
