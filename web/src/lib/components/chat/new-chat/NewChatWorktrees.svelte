@@ -7,6 +7,8 @@
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import { NewChatFolderSelection } from './new-chat-folder-selection.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -18,6 +20,7 @@
 	const id = $props.id();
 	let chooseProjectButton = $state<HTMLButtonElement | null>(null);
 	let directoryBrowser = $state<DirectoryBrowser>();
+	const folderSelection = new NewChatFolderSelection(() => form);
 	const worktrees = $derived(form.listedWorktrees);
 	const canLoad = $derived(
 		form.worktreesAvailable && form.gitRepoStatus === 'git' && form.validationStatus === 'valid',
@@ -36,7 +39,15 @@
 			}
 		});
 	});
-	onDestroy(() => form.clearWorktrees());
+	$effect(() => {
+		form.worktreeContextKey;
+		form.nonblankPath;
+		return () => folderSelection.cancel();
+	});
+	onDestroy(() => {
+		folderSelection.cancel();
+		form.clearWorktrees();
+	});
 
 	async function toggleBrowser(): Promise<void> {
 		form.showBrowser = !form.showBrowser;
@@ -44,6 +55,11 @@
 			await tick();
 			directoryBrowser?.focusFirstRow();
 		}
+	}
+
+	async function chooseFolder(): Promise<void> {
+		if (form.showBrowser) await toggleBrowser();
+		else await folderSelection.choose(toggleBrowser);
 	}
 </script>
 
@@ -61,12 +77,14 @@
 			<button
 				bind:this={chooseProjectButton}
 				type="button"
-				disabled={!form.filesAvailable || form.isUpdatingPinnedPath}
-				onclick={() => void toggleBrowser()}
+				disabled={!form.filesAvailable || form.isUpdatingPinnedPath || folderSelection.pending}
+				onclick={() => void chooseFolder()}
+				aria-busy={folderSelection.pending}
 				aria-expanded={form.showBrowser}
 				class="inline-flex min-h-10 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 			>
-				<FolderOpen class="size-4" aria-hidden="true" />{m.chat_new_chat_choose_project()}
+				{#if folderSelection.pending}<Loader2 class="size-4 animate-spin" aria-hidden="true" />
+				{:else}<FolderOpen class="size-4" aria-hidden="true" />{/if}{m.chat_new_chat_choose_project()}
 			</button>
 			{@render children?.()}
 		</div>
@@ -87,6 +105,15 @@
 			/>
 		{/if}
 	</div>
+	{#if folderSelection.pending}
+		<p role="status" class="text-xs text-muted-foreground">{m.chat_new_chat_folder_dialog_pending()}</p>
+	{:else if folderSelection.failed}
+		<div role="alert" class="flex items-center gap-2 text-xs text-destructive">
+			<span>{m.chat_new_chat_folder_dialog_failed()}</span>
+			<button type="button" class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={() => { folderSelection.cancel(); void toggleBrowser(); }}>{m.chat_new_chat_folder_browse()}</button>
+		</div>
+	{/if}
 	<div class="flex items-center justify-between gap-2">
 		<h3 id={id + '-heading'} class="text-xs font-medium text-muted-foreground">
 			{m.chat_new_chat_worktrees()}

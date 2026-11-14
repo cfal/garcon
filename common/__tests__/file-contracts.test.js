@@ -5,12 +5,32 @@ import {
   directoryNameProblem,
   isFileRevision,
   parseCreateDirectoryRequest,
+  parseDirectorySelectionRequest,
+  parseDirectorySelectionResult,
   parseDirectoryEntry,
   parseFileRevisionResponse,
   parseReadTextResponse,
   parseSaveTextRequest,
   parseSaveTextResponse,
 } from '../file-contracts.js';
+
+describe('system directory selection contract', () => {
+  test('separates selection, cancellation and unavailable desktops', () => {
+    for (const value of [{ status: 'selected', path: 'D:/projects/fixture' }, { status: 'cancelled' }, { status: 'unsupported' }]) {
+      expect(parseDirectorySelectionResult(value)).toEqual(value);
+    }
+    for (const value of [{ status: 'selected', path: '' }, { status: 'selected', path: 'x\0y' }, { status: 'cancelled', path: '/stale' }, { status: 'other' }]) {
+      expect(parseDirectorySelectionResult(value)).toBeNull();
+    }
+  });
+  test('accepts only a bounded directory hint without target overrides', () => {
+    expect(parseDirectorySelectionRequest({})).toEqual({});
+    expect(parseDirectorySelectionRequest({ directoryPath: '/fixture' })).toEqual({ directoryPath: '/fixture' });
+    for (const value of [null, { executorId: 'local' }, { directoryPath: '' }, { directoryPath: 'x'.repeat(4097) }, { directoryPath: 'x\0y' }]) {
+      expect(parseDirectorySelectionRequest(value)).toBeNull();
+    }
+  });
+});
 
 describe('file revision metadata', () => {
   test.each([

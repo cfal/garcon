@@ -3,7 +3,7 @@ import type { ExecutionFilesService, ExecutorCallOptions } from '@garcon/server-
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
-import { FILE_REVISION_HEADER, parseCreateDirectoryRequest, parseSaveTextRequest, type ReadTextResponse } from '../../../common/file-contracts.js';
+import { FILE_REVISION_HEADER, parseCreateDirectoryRequest, parseDirectorySelectionRequest, parseSaveTextRequest, type ReadTextResponse } from '../../../common/file-contracts.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { withJsonBody } from '../lib/json-route.js';
@@ -66,6 +66,20 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
   };
 
   return {
+    '/api/v1/files/select-directory': { POST: guarded(async (request, url, server, context) => {
+      const executorId = executorIdFromUrl(url);
+      if (url.searchParams.has('chatId')) throw new ValidationDomainError('Directory selection requires an explicit executor target');
+      return withJsonBody(async (body: unknown) => {
+        const selection = parseDirectorySelectionRequest(body);
+        if (!selection) throw new ValidationDomainError('Invalid directory selection request');
+        context?.assertCurrent?.();
+        const service = await files(executorId);
+        context?.assertCurrent?.();
+        const result = await service.chooseDirectory(selection, { signal: request.signal, timeoutMs: 300_000 });
+        context?.assertCurrent?.();
+        return Response.json(result);
+      })(request, url, server, context);
+    }) },
     '/api/v1/files/tree': { GET: guarded(async (request, url) => {
       const service = await files(executorIdFromUrl(url, registry));
       try { return Response.json(await service.tree({ directoryPath: url.searchParams.get('path') || undefined }, callOptions(request))); }

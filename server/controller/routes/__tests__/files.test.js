@@ -76,6 +76,48 @@ afterEach(async () => {
 });
 
 describe('files route', () => {
+  it('captures the picker executor before reading its body and passes cancellation', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    let actualOwner;
+    let actualRequest;
+    let actualOptions;
+    const routes = createExecutorFilesRoutes({ getChat: () => null }, {
+      files: async (owner) => {
+        actualOwner = owner;
+        return { chooseDirectory: async (selection, options) => {
+          actualRequest = selection;
+          actualOptions = options;
+          return { status: 'selected', path: '/worker/chosen' };
+        } };
+      },
+      inspectProject: async () => { throw new Error('No chat project inspection needed'); },
+    });
+    const url = new URL(`http://localhost/api/v1/files/select-directory?executorId=${executorId}`);
+    const request = new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directoryPath: '/worker' }) });
+    const read = request.text.bind(request);
+    request.text = async () => { url.searchParams.set('executorId', 'local'); return read(); };
+    const response = await routes['/api/v1/files/select-directory'].POST(request, url);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: 'selected', path: '/worker/chosen' });
+    expect(actualOwner).toBe(executorId);
+    expect(actualRequest).toEqual({ directoryPath: '/worker' });
+    expect(actualOptions.signal).toBe(request.signal);
+    expect(actualOptions.timeoutMs).toBe(300_000);
+  });
+
+  it('rejects a picker target override in the body before accessing an executor', async () => {
+    let calls = 0;
+    const routes = createExecutorFilesRoutes({ getChat: () => null }, {
+      files: async () => { calls++; throw new Error('Must not dispatch'); },
+      inspectProject: async () => { throw new Error('Must not inspect'); },
+    });
+    const url = new URL('http://localhost/api/v1/files/select-directory?executorId=local');
+    const response = await routes['/api/v1/files/select-directory'].POST(new Request(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directoryPath: '/fixture', executorId: 'other' }),
+    }), url);
+    expect(response.status).toBe(400);
+    expect(calls).toBe(0);
+  });
   it('cancels project inspection before dispatching file operations', async () => {
     for (const [endpoint, method] of [
       ['list', 'GET'], ['identity', 'GET'], ['revision', 'GET'],

@@ -2,6 +2,12 @@ import { expect, test } from 'bun:test';
 import { CLI_OPERATIONS, cliPolicy, type CliOperation } from '../cli-protocol.js';
 import { rpcLane } from '../rpc-routing.js';
 import { parseBulkControl } from '../rpc-lane.js';
+import { rpcContinuity } from '../rpc-protocol.js';
+
+test('system directory dialogs belong to the bulk session and are never replayed', () => {
+  expect(rpcLane('files.chooseDirectory', {})).toBe('bulk');
+  expect(rpcContinuity('files.chooseDirectory')).toBe('session');
+});
 
 test('bulk routing preserves quick summaries and primary lifecycle', () => {
   for (const method of ['git.getQuickSummary', 'files.identity', 'files.revision', 'execution.abort', 'permissions.respond', 'credentials.resolve', 'forking.fork']) {

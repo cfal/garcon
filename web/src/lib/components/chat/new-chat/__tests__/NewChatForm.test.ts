@@ -45,6 +45,7 @@ vi.mock('$lib/api/git', () => ({
 }));
 
 vi.mock('$lib/api/files', () => ({
+	selectDirectory: vi.fn(async () => ({ status: 'unsupported' })),
 	browseDirectory: vi.fn(async () => []),
 	createDirectory: vi.fn(),
 }));
@@ -303,6 +304,7 @@ describe('NewChatForm', () => {
 		localStorage.clear();
 		vi.unstubAllGlobals();
 		vi.mocked(filesApi.browseDirectory).mockReset().mockResolvedValue([]);
+		vi.mocked(filesApi.selectDirectory).mockReset().mockResolvedValue({ status: 'unsupported' });
 		vi.mocked(filesApi.createDirectory).mockReset();
 		vi.mocked(gitApi.getGitWorktrees).mockReset();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();

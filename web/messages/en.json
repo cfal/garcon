@@ -1,5 +1,8 @@
 {
 	"chat_new_chat_choose_project": "Choose folder",
+	"chat_new_chat_folder_dialog_pending": "Choose a folder in the system dialog on the selected machine.",
+	"chat_new_chat_folder_dialog_failed": "Could not open the system folder dialog.",
+	"chat_new_chat_folder_browse": "Browse folders",
 	"chat_new_chat_worktrees": "Worktrees",
 	"chat_new_chat_worktrees_executor_unavailable": "Worktrees are unavailable while this executor is offline.",
 	"chat_new_chat_worktrees_choose_project": "Select a saved project or choose a project to see its worktrees.",

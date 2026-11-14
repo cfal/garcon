@@ -10,6 +10,7 @@ import {
 	saveText,
 	browseDirectory,
 	createDirectory,
+	selectDirectory,
 } from '../files';
 
 vi.stubGlobal('localStorage', {
@@ -59,6 +60,20 @@ describe('files API contract', () => {
 			headers: { 'Content-Type': 'application/json' },
 		});
 	}
+
+	it('system directory selection sends its captured executor and validates distinct outcomes', async () => {
+		const cancellation = new AbortController();
+		for (const result of [{ status: 'selected', path: '/worker/chosen' }, { status: 'cancelled' }, { status: 'unsupported' }]) {
+			fetchMock.mockResolvedValueOnce(jsonResponse(result));
+			await expect(selectDirectory('local', '/worker', cancellation.signal)).resolves.toEqual(result);
+		}
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/files/select-directory?executorId=local');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ directoryPath: '/worker' });
+		fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'selected' }));
+		await expect(selectDirectory('local', undefined, cancellation.signal)).rejects.toThrow('Invalid directory selection response');
+	});
 
 	beforeEach(() => {
 		fetchMock = vi.fn();

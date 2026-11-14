@@ -97,6 +97,7 @@ export function serveExecutionRuntime(
       validateFileRpcRequest(call.method, call.request);
     }
     switch (call.method) {
+      case 'files.chooseDirectory': return (await runtime.getFilesService()).chooseDirectory(call.request, { signal });
       case 'terminals.list': case 'terminals.create': case 'terminals.rename': case 'terminals.terminate':
       case 'terminals.attach': case 'terminals.input': case 'terminals.resize': case 'terminals.detach':
         if (call.integrationId !== '') throw new AgentCallError('rejected', 'Terminals are executor services');

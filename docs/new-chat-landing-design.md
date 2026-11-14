@@ -19,14 +19,21 @@ project on its owning executor, including the primary checkout. Worktrees use sm
 flat rows with titles on the left and muted, root-abbreviated paths such as
 `…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
 Selecting a row changes the new chat's target without clearing its prompt.
-A Choose folder button retains executor-owned folder browsing. Worktree selection
+A Choose folder button requests the selected executor's system folder dialog. Worktree selection
 uses the inline list without a separate picker button.
 Ordinary folders remain usable when they are not Git repositories.
-Native Explorer/Finder selection remains requested. Its integration must return a
-full path belonging to the selected executor; Garcon's folder browser remains the
-current implementation while the native path connection is being designed.
-This change does not introduce environment presets or change stored settings,
-execution admission, provider configuration, HTTP or WebSocket contracts.
+The executor owns the dialog and returns a full, validated directory path within
+its configured filesystem boundary. Windows uses its system folder dialog, macOS
+uses Finder selection, and Linux uses Zenity or KDialog when a desktop is available.
+Headless executors retain Garcon's folder browser. Cancellation keeps the current
+selection; dialog failures offer explicit browsing. No automatic retries reopen a
+dialog. The pending request is cancelled or fenced when its project, executor,
+connection generation or owning screen changes.
+This change adds a typed POST `/api/v1/files/select-directory` endpoint and the
+bulk, session-scoped `files.chooseDirectory` executor operation. Protocol revision
+44 prevents mixed builds. CLI forwarding does not allow this browser interaction.
+It does not introduce environment presets or change stored settings, execution
+admission or provider configuration.
 
 The existing NewChatDialog remains the owner of open/close, focus containment,
 ticket prefills, draft creation and navigation. Its presentation fills the

@@ -70,6 +70,7 @@ const METHOD_LANES = {
   'terminals.detach': 'primary',
   'controllerCli.describe': 'primary',
   'files.identity': 'primary',
+  'files.chooseDirectory': 'bulk',
   'files.revision': 'primary',
   'files.tree': 'bulk',
   'files.browse': 'bulk',

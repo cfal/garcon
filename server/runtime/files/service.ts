@@ -11,6 +11,8 @@ import { readVersionedFile, getFileRevisionOrMissing, getFileLockKey, writeVersi
 import { readDirectoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
 import { directoryCreationError, fileOperationError, fileRevisionConflict } from './errors.js';
 import { createChildDirectory, descriptorPathsDirectory, directoryCreationUnsupported } from './directory-creation.js';
+import { chooseNativeDirectory, type NativeDirectoryPicker } from './native-directory-picker.js';
+import type { DirectorySelectionRequest, DirectorySelectionResult } from '../../../common/file-contracts.js';
 
 export interface FilesServiceOptions {
   readonly executorId: string;
@@ -19,6 +21,7 @@ export interface FilesServiceOptions {
   readonly assertAvailable?: (options?: ExecutorCallOptions) => void;
   readonly resolveSaveTarget?: typeof resolveRealWithinBase;
   readonly readDirectory?: typeof readFileDirectory;
+  readonly nativeDirectoryPicker?: NativeDirectoryPicker;
   /**
    * Overrides the directory in which this system names open descriptors; null
    * stands for a system that has none. Only a descriptor directory is safe here.
@@ -75,6 +78,29 @@ export class FilesService implements ExecutionFilesService {
     return this.#run(options, async () => {
       const { root, directory } = await this.#directory(request.directoryPath);
       return readDirectoryCandidates(root, directory, options?.signal);
+    });
+  }
+
+  async chooseDirectory(request: DirectorySelectionRequest, options?: ExecutorCallOptions): Promise<DirectorySelectionResult> {
+    return this.#run(options, async () => {
+      if (request.directoryPath !== undefined && !isPathInput(request.directoryPath)) throw new ValidationDomainError('Invalid directory path');
+      let initial;
+      try {
+        initial = await this.#directory(request.directoryPath);
+      } catch (error) {
+        const failure = fileOperationError(error);
+        if (!(failure instanceof DomainError) || (failure.code !== 'FILE_NOT_FOUND' && failure.code !== 'FILE_DIRECTORY_REQUIRED')) throw failure;
+        this.#available(options);
+        initial = await this.#directory();
+      }
+      this.#available(options);
+      const result = await (this.options.nativeDirectoryPicker ?? chooseNativeDirectory)(initial.directory, options);
+      this.#available(options);
+      if (result.status !== 'selected') return result;
+      if (!isPathInput(result.path)) throw new ValidationDomainError('Invalid selected directory path');
+      const selected = await this.#directory(result.path);
+      this.#available(options);
+      return { status: 'selected', path: toExecutorPath(selected.directory) };
     });
   }
 

@@ -154,6 +154,15 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
     try {
       const executor = await connecting;
       const files = await executor.getFilesService();
+      const localFiles = await local.getFilesService();
+      const chooser = spyOn(localFiles, 'chooseDirectory').mockResolvedValue({ status: 'selected', path: directory });
+      try {
+        expect(await files.chooseDirectory({ directoryPath: directory })).toEqual({ status: 'selected', path: directory });
+        expect(chooser).toHaveBeenCalledTimes(1);
+        expect(chooser.mock.calls[0]?.[0]).toEqual({ directoryPath: directory });
+        chooser.mockResolvedValueOnce({ status: 'cancelled' });
+        expect(await files.chooseDirectory({})).toEqual({ status: 'cancelled' });
+      } finally { chooser.mockRestore(); }
       const target = { projectPath: directory, filePath: 'file.txt' };
       await fs.writeFile(path.join(directory, target.filePath), 'original');
       const { revision } = await files.read(target);

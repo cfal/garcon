@@ -48,6 +48,24 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(worktrees.getByRole('button', { name: 'Select a different worktree', exact: true })).toHaveCount(0);
       await browserExpect(dialog.getByText('No preambles will be applied', { exact: true })).toBeVisible();
       await browserExpect(dialog.getByRole('button', { name: 'Clear preambles', exact: true })).toHaveCount(0);
+      phase('selecting and cancelling a system folder without losing the prompt');
+      let chosenFolder: string | null = null;
+      await page.route('**/api/v1/files/select-directory?*', async (route) => {
+        expect(new URL(route.request().url()).searchParams.get('executorId')).toBe(client.executorId);
+        await route.fulfill({ json: chosenFolder ? { status: 'selected', path: chosenFolder } : { status: 'cancelled' } });
+      });
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await browserExpect(dialog.getByRole('button', { name: 'Choose folder', exact: true })).toBeEnabled();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(dialog.getByRole('dialog', { name: 'Select Directory', exact: true })).toHaveCount(0);
+      chosenFolder = otherProject;
+      await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      const chosenCard = projects.getByRole('button', { name: client.executorId === 'local' ? otherProject : `Integration worker: ${otherProject}`, exact: true });
+      await browserExpect(chosenCard).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      await projectCard.click();
+      await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
+      await page.unroute('**/api/v1/files/select-directory?*');
       phase('toggling a card pin without changing the selected project or prompt');
       const otherProjectSelect = projects.getByRole('button', { name: client.executorId === 'local' ? otherProject : `Integration worker: ${otherProject}`, exact: true });
       const pinCard = (client.executorId === 'local' ? otherProjectSelect : projectCard).locator('..');
@@ -125,7 +143,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       console.info(`Worktree landing assertions completed: ${executionBackend}`);
     }, undefined, {
       executionBackend,
-      serverEnvironment: windowsGitPath ? { PATH: windowsGitPath } : {},
+      serverEnvironment: { CI: '1', ...(windowsGitPath ? { PATH: windowsGitPath } : {}) },
     });
   }, 120_000);
 }
