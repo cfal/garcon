@@ -12,21 +12,22 @@ import type {
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationPanelActions } from '../conversation-panel-actions.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
-import type { ChatQueueState } from '$lib/types/chat.js';
+import type { ChatQueueState, PendingPermissionRequest } from '$lib/types/chat.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import type { GitRepositoryClassification } from '$lib/git/surface/git-quick-summary.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import { UserMessage } from '$shared/chat-types';
+import { AssistantMessage, AskUserQuestionToolUseMessage, UserMessage } from '$shared/chat-types';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { localExecutor } from '$lib/executors/__tests__/fixtures.js';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
+import { composerQuestion, composerQuestionKey } from '$lib/chat/composer/composer-question.js';
 
 const executors = new ExecutorsStore();
 const asyncQuestions = new AsyncQuestionController();
 
 vi.mock('$lib/chat/conversation/async-question-context.js', async (importOriginal) => ({
-	...await importOriginal<typeof import('$lib/chat/conversation/async-question-context.js')>(),
+	...(await importOriginal<typeof import('$lib/chat/conversation/async-question-context.js')>()),
 	getAsyncQuestionController: () => asyncQuestions,
 }));
 
@@ -42,6 +43,7 @@ const runtime = vi.hoisted(() => ({
 	classification: 'git' as GitRepositoryClassification,
 	pathUpdatesSupported: false,
 	queue: null as ChatQueueState | null,
+	permissions: [] as PendingPermissionRequest[],
 	summary: null as GitQuickSummaryReady | null,
 }));
 
@@ -51,7 +53,7 @@ vi.mock('$lib/context', () => ({
 	getChatSessions: () => ({ isChatProcessing: () => runtime.processing }),
 	getConversationUi: () => ({
 		getExecutionControl: () => (runtime.queue ? { queue: runtime.queue } : null),
-		pendingPermissionsFor: () => [],
+		pendingPermissionsFor: () => runtime.permissions,
 	}),
 	getGitBranchActions: () => ({
 		currentProjectPath: '/project',
@@ -78,6 +80,7 @@ vi.mock('$lib/context', () => ({
 		composerStatusBarCommit: runtime.composerStatusBarCommit,
 	}),
 	getModelCatalog: () => ({
+		isValidated: true,
 		forExecutor() {
 			return this;
 		},
@@ -203,6 +206,8 @@ function makePanel() {
 function makeActions(): ConversationPanelActions {
 	return {
 		reload: vi.fn(),
+		choiceStatus: vi.fn(),
+		answerChoice: vi.fn().mockResolvedValue(true),
 		decidePermission: vi.fn(),
 		exitPlanMode: vi.fn(),
 		fork: vi.fn(),
@@ -231,8 +236,187 @@ function makeActions(): ConversationPanelActions {
 }
 
 describe('ConversationPanel', () => {
+	function choicePanel(ownsComposer = true) {
+		runtime.processing = false;
+		executors.applySnapshot([localExecutor]);
+		const { panel } = makePanel();
+		panel.transcript.replaceGeneration(
+			'chat-1',
+			'view-choices',
+			[
+				{
+					ordinal: 1,
+					message: new AssistantMessage(
+						'2026-01-01T00:00:00Z',
+						'Which approach do you prefer?\n1. Fast\n2. Careful',
+					),
+				},
+			],
+			{ lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		const actions = makeActions();
+		const rendered = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer,
+			actions,
+		});
+		return { panel, actions, rendered };
+	}
+
+	it('places answer choices in the composer dock and dispatches the captured source', async () => {
+		const { panel, actions, rendered } = choicePanel();
+		expect(rendered.container.querySelector('[data-composer-question-dock]')).not.toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Careful' }));
+		const source = composerQuestion(panel.transcript.entries, [], { isProcessing: false, hasLaterMessages: false });
+		if (source?.kind !== 'plain') throw new Error('Expected choice source');
+		expect(actions.answerChoice).toHaveBeenCalledWith(
+			panel.surfaceId,
+			'chat-1',
+			'view-choices',
+			composerQuestionKey(source, 'chat-1', 'view-choices'),
+			[{ questionId: source.questions[0].id, selectedOptionIds: ['option-2'] }],
+		);
+	});
+
+	it('hides choices in a panel that does not own the composer', () => {
+		choicePanel(false);
+		expect(screen.queryByRole('button', { name: 'Fast' })).toBeNull();
+	});
+
+	it.each([false, true])('reserves question dock space only for a visible status bar (visible=%s)', (visible) => {
+		runtime.composerStatusBarGitProjects = visible;
+		const { rendered } = choicePanel();
+		const questionDock = rendered.container.querySelector('[data-composer-question-dock]')!;
+		const statusAnchor = rendered.container.querySelector('[data-conversation-panel-status-anchor]')!;
+		expect(Boolean(questionDock.closest('.pb-14'))).toBe(visible);
+		expect(statusAnchor.children.length > 0).toBe(visible);
+	});
+
+	it('restores the stable queue slot when a compact question dock is dismissed', async () => {
+		runtime.composerStatusBarGitProjects = false;
+		runtime.queue = queue();
+		const { rendered } = choicePanel();
+		const spacer = rendered.container.querySelector('[data-conversation-panel-composer-spacer]');
+		const queued = screen.getByText('Queued input');
+		expect(queued.closest('.pb-14')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_async_dismiss_question() }));
+		expect(rendered.container.querySelector('[data-composer-question-dock]')).toBeNull();
+		expect(queued.closest('.pb-14')).toBeTruthy();
+		expect(rendered.container.querySelector('[data-conversation-panel-composer-spacer]')).toBe(spacer);
+	});
+
+	it('offers choices when the assistant closes with a separate reminder block', async () => {
+		const { panel, actions } = choicePanel();
+		panel.transcript.replaceGeneration(
+			'chat-1',
+			'view-choices',
+			[
+				{
+					ordinal: 1,
+					message: new AssistantMessage('2026-01-01T00:00:00Z', 'Pick a sample review format.'),
+				},
+				{
+					ordinal: 2,
+					message: new AssistantMessage(
+						'2026-01-01T00:00:00Z',
+						'How would you most like to review a sample?\n- Outline\n- Diagram\n- Example',
+					),
+				},
+				{
+					ordinal: 3,
+					message: new AssistantMessage(
+						'2026-01-01T00:00:00Z',
+						'Choose an option above, or type your own answer.',
+					),
+				},
+			],
+			{ lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Diagram' })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: 'Diagram' }));
+		const source = composerQuestion(panel.transcript.entries, [], { isProcessing: false, hasLaterMessages: false });
+		if (source?.kind !== 'plain') throw new Error('Expected split choice source');
+		expect(actions.answerChoice).toHaveBeenCalledWith(
+			panel.surfaceId,
+			'chat-1',
+			'view-choices',
+			composerQuestionKey(source, 'chat-1', 'view-choices'),
+			[{ questionId: source.questions[0].id, selectedOptionIds: ['option-2'] }],
+		);
+	});
+
+	it('dismisses choices without changing the transcript', async () => {
+		const { panel, actions } = choicePanel();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_async_dismiss_question() }));
+		expect(screen.queryByRole('button', { name: 'Fast' })).toBeNull();
+		expect(panel.transcript.entries).toHaveLength(1);
+		expect(actions.answerChoice).not.toHaveBeenCalled();
+	});
+
+	it('keeps custom answers in the existing composer without an extra panel action', () => {
+		choicePanel();
+		expect(screen.queryByRole('button', { name: 'Write my own answer' })).toBeNull();
+		expect(screen.queryByRole('button', { name: m.chat_async_send_answer() })).toBeNull();
+	});
+
+	it('disables sending when the selected executor is offline', async () => {
+		const { actions } = choicePanel();
+		executors.applySnapshot([{ ...localExecutor, availability: 'offline' }]);
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Fast' }).closest('fieldset')).toHaveProperty(
+				'disabled',
+				true,
+			),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Fast' }));
+		expect(actions.answerChoice).not.toHaveBeenCalled();
+	});
+
+	it('renders pending structured questions in the dock and submits canonical responses', async () => {
+		runtime.permissions = [
+			{
+				permissionOccurrenceId: 'choice-permission',
+				requestedTool: new AskUserQuestionToolUseMessage(
+					'2026-01-01T00:00:00Z',
+					'question-tool',
+					undefined,
+					[
+						{
+							id: 'mode',
+							prompt: 'Which mode?',
+							options: [
+								{ id: 'fast', label: 'Fast' },
+								{ id: 'careful', label: 'Careful' },
+							],
+						},
+					],
+				),
+			},
+		];
+		const { actions, panel } = choicePanel();
+		await fireEvent.click(screen.getByRole('button', { name: 'Careful' }));
+		expect(actions.decidePermission).toHaveBeenCalledWith(
+			panel.surfaceId,
+			'chat-1',
+			'choice-permission',
+			{
+				allow: true,
+				response: {
+					type: 'ask-user-question-response',
+					outcome: 'answered',
+					answers: [{ questionId: 'mode', selectedOptionIds: ['careful'] }],
+				},
+			},
+		);
+	});
+
 	afterEach(() => {
 		cleanup();
+		runtime.permissions = [];
+		asyncQuestions.prune(new Set());
 		runtime.autoScrollToBottom = false;
 		runtime.processing = true;
 		runtime.reduceMotion = false;
@@ -394,15 +578,22 @@ describe('ConversationPanel', () => {
 
 	it('passes each simultaneous panel its own executor and project context', async () => {
 		const localChat = chat();
-		const remoteChat = { ...chat(), id: 'chat-remote', executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/remote/project' };
-		const panels = [localChat, remoteChat].map((entry) => render(ConversationPanel, {
-			surfaceId: `chat-view:window-${entry.id}`,
-			chat: entry,
-			panel: makePanel().panel,
-			isCommandOwner: entry === localChat,
-			ownsComposer: entry === localChat,
-			actions: makeActions(),
-		}));
+		const remoteChat = {
+			...chat(),
+			id: 'chat-remote',
+			executorId: '22222222-2222-4222-8222-222222222222',
+			projectPath: '/remote/project',
+		};
+		const panels = [localChat, remoteChat].map((entry) =>
+			render(ConversationPanel, {
+				surfaceId: `chat-view:window-${entry.id}`,
+				chat: entry,
+				panel: makePanel().panel,
+				isCommandOwner: entry === localChat,
+				ownsComposer: entry === localChat,
+				actions: makeActions(),
+			}),
+		);
 		for (const [index, entry] of [localChat, remoteChat].entries()) {
 			const feed = panels[index].container.querySelector('[data-conversation-feed-stub]');
 			expect(JSON.parse(feed?.getAttribute('data-chat-context') ?? 'null')).toEqual({
@@ -698,7 +889,9 @@ describe('ConversationPanel', () => {
 		expect(notice.classList.contains('pb-11')).toBe(false);
 		expect(notice.classList.contains('pb-14')).toBe(false);
 		expect(queued.closest('.pb-14')).toBeNull();
-		expect(rendered.container.querySelector('[data-conversation-panel-status-anchor]')?.children.length).toBe(0);
+		expect(
+			rendered.container.querySelector('[data-conversation-panel-status-anchor]')?.children.length,
+		).toBe(0);
 
 		await rendered.rerender({ ...props, composerNotice: null });
 		expect(queued.closest('.pb-14')).toBeTruthy();

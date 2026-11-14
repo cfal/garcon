@@ -3719,6 +3719,69 @@ describe('ConversationSessionController', () => {
 			return { deps, controller: new ConversationSessionController(deps) };
 		}
 
+		it('shares one in-flight decision across duplicate question controls', async () => {
+			const response = deferred<CommandAcceptedResponse>();
+			const { deps, controller } = pendingPermissionController();
+			mockSendPermissionDecision.mockReturnValue(response.promise);
+
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: false });
+			controller.handleExitPlanModeForChat('chat-1', 'permission-1', 'deny', 'Synthetic plan');
+
+			expect(mockSendPermissionDecision).toHaveBeenCalledOnce();
+			expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(1);
+			response.resolve(permissionDecisionAccepted('decision-1'));
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+		});
+
+		it('admits a different permission occurrence while the first answer is pending', async () => {
+			const firstResponse = deferred<CommandAcceptedResponse>();
+			const secondResponse = deferred<CommandAcceptedResponse>();
+			const { deps, controller } = pendingPermissionController();
+			deps.conversationUi.pendingPermissionRequests.push({
+				permissionOccurrenceId: 'permission-2',
+				requestedTool: new BashToolUseMessage('', 'tool-2', 'printf second'),
+				control: { ...control, permissionOccurrenceId: 'permission-2' },
+			});
+			mockSendPermissionDecision
+				.mockReturnValueOnce(firstResponse.promise)
+				.mockReturnValueOnce(secondResponse.promise);
+
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: false });
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-2', { allow: false });
+
+			expect(mockSendPermissionDecision).toHaveBeenCalledTimes(2);
+			expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ permissionOccurrenceId: 'permission-2', allow: false }),
+			);
+			firstResponse.resolve(permissionDecisionAccepted('decision-1'));
+			secondResponse.resolve(permissionDecisionAccepted('decision-2'));
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+		});
+
+		it('permits a deliberate retry after a definite delivery failure', async () => {
+			const { deps, controller } = pendingPermissionController();
+			mockSendPermissionDecision
+				.mockRejectedValueOnce(
+					new ApiError(503, 'not sent', 'PERMISSION_DECISION_NOT_DELIVERED', undefined, true),
+				)
+				.mockResolvedValueOnce(permissionDecisionAccepted('decision-2'));
+
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			await vi.waitFor(() =>
+				expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledOnce(),
+			);
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+
+			expect(mockSendPermissionDecision).toHaveBeenCalledTimes(2);
+			const [first, second] = mockSendPermissionDecision.mock.calls.map(([request]) => request);
+			expect(second.clientRequestId).not.toBe(first.clientRequestId);
+			expect(second.control).toBe(first.control);
+		});
+
 		it('retries a lost reply under the same request identity', async () => {
 			const { deps, controller } = pendingPermissionController();
 			mockSendPermissionDecision

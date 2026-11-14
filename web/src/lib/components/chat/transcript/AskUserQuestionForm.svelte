@@ -14,6 +14,8 @@
 		draft: PermissionQuestionDraft;
 		onDraftChange: (draft: PermissionQuestionDraft) => void;
 		onDecision: (decision: PermissionDecisionPayload) => void;
+		composer?: boolean;
+		onDismiss?: () => void;
 	}
 	let {
 		tool,
@@ -24,11 +26,17 @@
 		draft,
 		onDraftChange,
 		onDecision,
+		composer = false,
+		onDismiss,
 	}: Props = $props();
-	const displayedDraft = $derived(terminal ? {
-		selectedQuestionOptions: terminal.selectedQuestionOptions ?? {},
-		questionTextAnswers: terminal.questionTextAnswers ?? {},
-	} : draft);
+	const displayedDraft = $derived(
+		terminal
+			? {
+					selectedQuestionOptions: terminal.selectedQuestionOptions ?? {},
+					questionTextAnswers: terminal.questionTextAnswers ?? {},
+				}
+			: draft,
+	);
 </script>
 
 <QuestionForm
@@ -36,20 +44,24 @@
 	formId={permissionOccurrenceId}
 	{isPending}
 	{canAnswer}
+	{composer}
+	{onDismiss}
 	draft={displayedDraft}
 	reason={terminal?.reason}
 	submitClass="border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90"
 	onDraftChange={(next) => onDraftChange({ ...draft, ...next })}
-	onSubmit={(answers) => onDecision({
-		allow: true,
-		response: { type: 'ask-user-question-response', outcome: 'answered', answers },
-	})}
-	onSkip={() => onDecision({
-		allow: false,
-		response: {
-			type: 'ask-user-question-response',
-			outcome: 'skipped',
-			reason: 'User skipped question',
-		},
-	})}
+	onSubmit={(answers) =>
+		onDecision({
+			allow: true,
+			response: { type: 'ask-user-question-response', outcome: 'answered', answers },
+		})}
+	onSkip={() =>
+		onDecision({
+			allow: false,
+			response: {
+				type: 'ask-user-question-response',
+				outcome: 'skipped',
+				reason: 'User skipped question',
+			},
+		})}
 />
