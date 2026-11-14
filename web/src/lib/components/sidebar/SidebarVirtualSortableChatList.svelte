@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
@@ -78,6 +79,7 @@
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
+		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;
@@ -112,6 +114,7 @@
 		onOpenInNewWindow,
 		newWindowEdges,
 		onToggleProjectCollapsed,
+		onNewProjectChat,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		hasPinnedChats = false,
@@ -922,6 +925,7 @@
 				{:else if row.type === 'project-header'}
 					<SidebarProjectHeaderRow
 						{row}
+						{onNewProjectChat}
 						containsSelectedChat={Boolean(
 							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
 						)}

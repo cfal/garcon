@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
 	import { untrack } from 'svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
@@ -32,6 +33,7 @@
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
+		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
@@ -69,6 +71,7 @@
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		onToggleProjectCollapsed,
+		onNewProjectChat,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onChatSelect,
@@ -171,6 +174,7 @@
 		{isMultiSelected}
 		{displayOptions}
 		{onToggleProjectCollapsed}
+		{onNewProjectChat}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
 		{onChatSelect}

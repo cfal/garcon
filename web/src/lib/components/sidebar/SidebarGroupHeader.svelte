@@ -17,6 +17,7 @@
 		separated?: boolean;
 		icon?: Snippet;
 		label: Snippet;
+		actions?: Snippet;
 		onToggle: () => void;
 	}
 
@@ -29,6 +30,7 @@
 		separated = false,
 		icon,
 		label,
+		actions,
 		onToggle,
 		...rest
 	}: SidebarGroupHeaderProps = $props();
@@ -43,14 +45,14 @@
 </script>
 
 <div
-	class={cn('h-full bg-card', separated && 'border-t border-sidebar-border')}
+	class={cn('flex h-full items-center bg-card', separated && 'border-t border-sidebar-border')}
 	role="heading"
 	aria-level={level === 'executor' ? 2 : 3}
 >
 	<button
 		type="button"
 		class={cn(
-			'flex h-full w-full items-center pr-3 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
+			'flex h-full min-w-0 flex-1 items-center pr-3 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
 			levelClasses[level],
 			containsSelectedChat &&
 				'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -82,4 +84,5 @@
 			</span>
 		{/if}
 	</button>
+	{@render actions?.()}
 </div>

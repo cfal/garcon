@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-project-target';
 	import { typographyScale } from '$lib/theme/typography.js';
 	import { untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
@@ -201,6 +202,12 @@
 	function handlePrimaryAction() {
 		if (selection.isActive) selection.exit();
 		onNewChat();
+	}
+
+	function handleNewProjectChat(project: NewChatProjectTarget): void {
+		if (selection.isActive) selection.exit();
+		if (isMobile) appShell.setSidebarOpen(false);
+		appShell.openNewChatDialog({ project });
 	}
 
 	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
@@ -478,6 +485,7 @@
 			isMultiSelected={(id) => selection.isSelected(id)}
 			{displayOptions}
 			onToggleProjectCollapsed={(projectKey) => projectCollapse.toggle(projectKey)}
+			onNewProjectChat={handleNewProjectChat}
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}
 			onChatSelect={handleChatClick}
