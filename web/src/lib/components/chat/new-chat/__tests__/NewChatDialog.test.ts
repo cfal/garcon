@@ -318,39 +318,20 @@ describe('NewChatDialog', () => {
 		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(initialSeed ? 0 : 1);
 	});
 
-	it('keeps the small-screen dialog within the safe viewport', async () => {
+	it('presents a named landing screen with saved-project guidance', async () => {
 		render(NewChatDialogTestHost);
-
-		await waitFor(() => {
-			expect(document.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
-		});
-
-		const contentClass = document
-			.querySelector('[data-slot="dialog-content"]')
-			?.getAttribute('class');
-
-		expect(contentClass).toContain('top-[var(--app-viewport-center-y)]');
-		expect(contentClass).toContain('translate-y-[-50%]');
-		expect(contentClass).toContain('safe-viewport-dialog');
-		expect(contentClass).toContain('max-h-[calc(var(--app-height)-1rem)]');
-		expect(contentClass).toContain('sm:top-[50%]');
-		expect(contentClass).not.toContain('top-auto');
-		expect(contentClass).not.toContain('bottom-0');
-		expect(contentClass).not.toContain('translate-y-0');
+		const landing = await screen.findByRole('dialog', { name: 'New Chat' });
+		expect(within(landing).getByRole('heading', { name: 'What would you like to work on?' })).toBeTruthy();
+		expect(within(landing).getByText('Choose a saved project or enter a folder to start a new chat.')).toBeTruthy();
+		await within(landing).findByRole('region', { name: 'Saved and recent projects' });
 	});
 
-	it('places the close action in the project path controls', async () => {
+	it('closes the landing screen from its header', async () => {
 		render(NewChatDialogTestHost);
 
-		const projectPathInput = await screen.findByRole('textbox', { name: 'Project Path' });
+		await screen.findByRole('textbox', { name: 'Project Path' });
 		const closeButton = screen.getByRole('button', { name: 'Close' });
-		const controlsRow = projectPathInput.parentElement?.parentElement;
-
-		expect(screen.queryByText('Project Path')).toBeNull();
-		expect(closeButton.parentElement).toBe(controlsRow);
-		expect(closeButton.className).toContain('px-3');
-		expect(closeButton.className).toContain('py-2');
-		expect(closeButton.className).toContain('border border-border');
+		expect(closeButton.closest('header')).toBeTruthy();
 		expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
 
 		await fireEvent.click(closeButton);

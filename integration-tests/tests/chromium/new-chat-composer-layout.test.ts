@@ -81,22 +81,22 @@ describe("Chromium New Chat composer layout", () => {
         await waitForAnimations(dialog);
 
         markPhase("checking iPhone safe-area containment");
-        const dialogBoxAtPhoneWidth = await bounds(dialog);
+        const form = dialog.locator('[data-slot="new-chat-form-content"]');
+        const dialogBoxAtPhoneWidth = await bounds(form);
         expect(dialogBoxAtPhoneWidth.x).toBeGreaterThanOrEqual(16);
         expect(
           dialogBoxAtPhoneWidth.x + dialogBoxAtPhoneWidth.width,
         ).toBeLessThanOrEqual(362);
-        // The dialog clips horizontal overflow; the form must fit inside the
-        // dialog instead of relying on the clip to hide it.
+        // The landing content respects safe areas inside its full-width frame.
         expect(
           await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
         ).toBe(true);
 
         markPhase("checking content containment at 360px width");
         await fixture.page.setViewportSize({ width: 360, height: 844 });
-        const dialogBoxAt360 = await bounds(dialog);
+        const dialogBoxAt360 = await bounds(form);
         expect(dialogBoxAt360.x).toBeGreaterThanOrEqual(16);
-        expect(dialogBoxAt360.x + dialogBoxAt360.width).toBeLessThanOrEqual(344);
+        expect(dialogBoxAt360.x + dialogBoxAt360.width).toBeLessThanOrEqual(332);
         expect(
           await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
         ).toBe(true);
@@ -256,10 +256,10 @@ describe("Chromium New Chat composer layout", () => {
         );
         await modelPopover.waitFor({ state: "visible" });
         const [dialogBox, popoverBox] = await Promise.all([
-          bounds(dialog),
+          bounds(form),
           bounds(modelPopover),
         ]);
-        expect(dialogBox.width).toBeGreaterThanOrEqual(600);
+        expect(dialogBox.width).toBeGreaterThanOrEqual(592);
         expect(dialogBox.x).toBeGreaterThanOrEqual(8);
         expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(632);
         expect(popoverBox.x).toBeGreaterThanOrEqual(8);

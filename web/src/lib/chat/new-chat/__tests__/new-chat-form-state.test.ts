@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NewChatPinnedPathsController } from '../new-chat-pinned-paths-controller';
+import { NewChatProjectsController } from '../new-chat-projects-controller';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 import * as chatsApi from '$lib/api/chats';
@@ -318,7 +318,7 @@ describe('NewChatFormState', () => {
 				},
 			},
 		});
-		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		const pins = new NewChatProjectsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/same';
 		formState.firstMessage = 'Synthetic retained prompt';
 		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
@@ -341,7 +341,7 @@ describe('NewChatFormState', () => {
 				},
 			},
 		});
-		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		const pins = new NewChatProjectsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/local';
 		pins.select(remoteExecutor.id, '/removed-pin');
 		expect(formState.executorId).toBe('local');
@@ -452,7 +452,7 @@ describe('NewChatFormState', () => {
 		const pending = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
 		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(pending.promise);
 		formState.pinnedProjectPaths = ['/workspace/pinned'];
-		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		const pins = new NewChatProjectsController(() => formState, executors, mockRemoteSettings);
 		expect(pins.select('local', '/workspace/pinned')).toBe(true);
 		expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/pinned', {
 			executorId: 'local',

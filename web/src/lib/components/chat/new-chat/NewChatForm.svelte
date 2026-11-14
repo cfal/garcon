@@ -1,5 +1,5 @@
 <script lang="ts">
-	// New-chat form used inside the NewChatDialog. Delegates state management
+	// New-chat form used inside the landing screen. Delegates state management
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
@@ -58,7 +58,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
-	import NewChatPinnedPaths from './NewChatPinnedPaths.svelte';
+	import NewChatProjects from './NewChatProjects.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -642,7 +642,7 @@
 </script>
 
 <div
-	class="min-w-0 p-2 sm:p-4"
+	class="min-w-0"
 	{@attach snippetExpansion.pending && snippetExpansionLayer}
 	{@attach promptRefinement.pending && !composerEditor.open && promptRefinement.layerAttachment}
 >
@@ -655,6 +655,7 @@
 			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
+				<NewChatProjects {form} />
 				<ProjectPathField
 					id="project-path-input"
 					aria-label={m.chat_new_chat_project_path()}
@@ -728,20 +729,9 @@
 						active={form.chatTags.length > 0}
 						onToggle={() => form.toggleTagInput()}
 					/>
-					{#if onCancel}
-						<button
-							type="button"
-							onclick={cancelForm}
-							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
-							title={m.editor_actions_close()}
-							aria-label={m.editor_actions_close()}
-						>
-							<X class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
-						</button>
-					{/if}
+
 				</ProjectPathField>
 
-				<NewChatPinnedPaths {form} />
 
 				<ChatTagEditor
 					tags={form.chatTags}
