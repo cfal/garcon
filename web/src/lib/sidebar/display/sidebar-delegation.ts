@@ -15,6 +15,7 @@ export interface SidebarBranch {
 export interface SidebarDelegationForest {
 	branches: Map<string, SidebarBranch>;
 	roots: string[];
+	preorder: readonly string[];
 	ambiguousIds: Set<string>;
 	contains(rootId: string, chatId: string): boolean;
 }
@@ -91,6 +92,7 @@ export function buildSidebarDelegationForest(
 	return {
 		branches,
 		roots,
+		preorder: traversal,
 		ambiguousIds,
 		contains(rootId, chatId) {
 			const root = branches.get(rootId);

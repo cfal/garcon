@@ -9,6 +9,7 @@ import {
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { effectiveExecutorId } from '$shared/executors';
 import { sidebarProjectKey } from '../display/sidebar-row-model';
+import { SIDEBAR_GROUPING_FIELDS } from '../display/sidebar-preferences';
 
 export interface SidebarProjectCollapseSnapshot {
 	collapsedProjectKeys: string[];
@@ -110,18 +111,30 @@ export class SidebarProjectCollapseStore {
 				if (!Array.isArray(value) || value.length !== 2) return false;
 				const [parent, path] = value;
 				if (parent !== null && !ids.has(parent)) return false;
-				if (!Array.isArray(path) || path.length === 0 || path.length > 4) return false;
+				if (
+					!Array.isArray(path) ||
+					path.length === 0 ||
+					path.length > SIDEBAR_GROUPING_FIELDS.length
+				)
+					return false;
 				const fields = new Set<string>();
 				return path.every((pair) => {
 					if (!Array.isArray(pair) || pair.length !== 2) return false;
 					const [field, entry] = pair;
 					if (typeof field !== 'string' || fields.has(field)) return false;
 					fields.add(field);
-					if (field === 'executor') return executors.has(entry);
-					if (field === 'project') return projects.has(entry);
-					return field === 'activity'
-						? activitySections.has(entry)
-						: field === 'status' && statusSections.has(entry);
+					switch (field) {
+						case 'executor':
+							return executors.has(entry);
+						case 'project':
+							return projects.has(entry);
+						case 'activity':
+							return activitySections.has(entry);
+						case 'status':
+							return statusSections.has(entry);
+						default:
+							return false;
+					}
 				});
 			} catch {
 				return false;

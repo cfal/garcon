@@ -2,6 +2,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { SidebarInactivityDuration, SidebarSortMode } from '$lib/stores/local-settings.svelte';
 import type { PinnedInsertPosition } from '$shared/settings';
 import { chatOrderGroupFor } from '$shared/chat-filter-query';
+import { PERSISTED_CHAT_ORDER_GROUPS } from '$shared/chat-order-contracts';
 import { effectiveExecutorId } from '$shared/executors';
 import { normalizeProjectPath } from '$lib/utils/project-path';
 import { splitProjectPath } from '$lib/project-paths/compact-project-path';
@@ -20,7 +21,6 @@ import type {
 	SidebarVirtualChatRow,
 } from './sidebar-virtual-chat-list';
 
-const bands = ['pinned', 'normal', 'archived'] as const;
 const sections: SidebarChatSection[] = [
 	'active',
 	'inactive',
@@ -87,7 +87,7 @@ function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean): M
 	}
 	const groups = new Map<string, string>();
 	for (const chat of chats) {
-		const key = sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId);
+		const key = sidebarProjectKey(chat.projectPath, chat.executorId);
 		if (groups.has(key)) continue;
 		let path = normalizeProjectPath(chat.projectPath);
 		let group = known.get(key)!;
@@ -127,32 +127,24 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
 	const forest = buildSidebarDelegationForest(input.allChats, input.nestDelegatedChats);
 	const matches = input.matchingChatIds ?? new Set(byId.keys());
-	const included = new Set<string>();
-	for (const match of matches) {
-		let id: string | null = byId.has(match) ? match : null;
-		while (id !== null && !included.has(id)) {
-			included.add(id);
-			id = forest.branches.get(id)!.parentId;
-		}
-	}
 	const filtered = input.matchingChatIds !== undefined;
 	const matchCounts = new Map<string, number>();
-	const traversal = [...forest.branches.keys()].sort(
-		(a, b) => forest.branches.get(b)!.start - forest.branches.get(a)!.start,
-	);
-	for (const id of traversal) {
+	for (let index = forest.preorder.length - 1; index >= 0; index--) {
+		const id = forest.preorder[index];
 		const count = (matchCounts.get(id) ?? 0) + Number(matches.has(id));
 		matchCounts.set(id, count);
 		const parent = forest.branches.get(id)!.parentId;
 		if (parent !== null) matchCounts.set(parent, (matchCounts.get(parent) ?? 0) + count);
 	}
+	const hasMatches = (id: string) => (matchCounts.get(id) ?? 0) > 0;
 	const fields = enabledSidebarGroupingFields(input.groupingFields);
 	const projects = projectGroups(input.allChats, Boolean(input.groupNestedProjectPaths));
 	const projectFor = (chat: ChatSessionRecord) =>
-		projects.get(sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId)) ??
-		chat.projectPath;
+		projects.get(sidebarProjectKey(chat.projectPath, chat.executorId)) ?? chat.projectPath;
 	const rank = new Map(
-		bands.flatMap((band) => input.orders[band].map((id, index) => [id, index] as const)),
+		PERSISTED_CHAT_ORDER_GROUPS.flatMap((band) =>
+			input.orders[band].map((id, index) => [id, index] as const),
+		),
 	);
 	const executorRanks = new Map((input.executorOrder ?? []).map((id, index) => [id, index]));
 	const model: SidebarRowModel = {
@@ -195,14 +187,17 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		const left = byId.get(a)!;
 		const right = byId.get(b)!;
 		const band = chatOrderGroupFor(left);
-		const bandDifference = bands.indexOf(band) - bands.indexOf(chatOrderGroupFor(right));
+		const bandDifference =
+			PERSISTED_CHAT_ORDER_GROUPS.indexOf(band) -
+			PERSISTED_CHAT_ORDER_GROUPS.indexOf(chatOrderGroupFor(right));
 		if (bandDifference) return bandDifference;
-		const archiveDifference =
-			Number(input.isChatOptimisticallyArchived?.(b) ?? false) -
-			Number(input.isChatOptimisticallyArchived?.(a) ?? false);
-		if (band === 'archived' && archiveDifference) return archiveDifference;
-		if (band === 'archived' && input.isChatOptimisticallyArchived?.(a))
-			return (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity);
+		if (band === 'archived') {
+			const rightOptimistic = input.isChatOptimisticallyArchived?.(b) ?? false;
+			const leftOptimistic = input.isChatOptimisticallyArchived?.(a) ?? false;
+			const archiveDifference = Number(rightOptimistic) - Number(leftOptimistic);
+			if (archiveDifference) return archiveDifference;
+			if (leftOptimistic) return (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity);
+		}
 		if (input.sortMode === 'recent') {
 			const difference =
 				Number(right.status === 'draft') - Number(left.status === 'draft') ||
@@ -218,7 +213,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		{
 			kind: 'scope',
 			parentId: null,
-			ids: forest.roots.filter((id) => included.has(id)),
+			ids: forest.roots.filter(hasMatches),
 			depth: 0,
 			path: [],
 			inheritedFields: [],
@@ -246,7 +241,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				tasks.push({
 					kind: 'scope',
 					parentId: row.chat.id,
-					ids: children.filter((id) => included.has(id)),
+					ids: children.filter(hasMatches),
 					depth: row.depth + 1,
 					path: [],
 					inheritedFields,
