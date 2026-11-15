@@ -133,6 +133,18 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
           .getByRole('dialog', { name: 'Sidebar display', exact: true })
           .getByRole('button', { name: 'Cancel', exact: true })
           .click();
+        const menuTrigger = page.getByRole('button', { name: 'More actions', exact: true });
+        await browserExpect(menuTrigger).toBeFocused();
+        for (const action of ['Apply', 'Close', 'Escape']) {
+          await menuTrigger.click();
+          await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+          const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+          await dialog.getByRole('checkbox', { name: 'Project path', exact: true }).focus();
+          if (action === 'Escape') await page.keyboard.press('Escape');
+          else await dialog.getByRole('button', { name: action, exact: true }).click();
+          await browserExpect(dialog).toHaveCount(0);
+          await browserExpect(menuTrigger).toBeFocused();
+        }
       }
 
       phase('restoring persisted layout and path visibility');

@@ -16,6 +16,12 @@ it('previews drafts without writes and discards Cancel', async () => {
 	expect(preview.querySelectorAll('[data-typography-chat-list]')).toHaveLength(3);
 	expect(preview.querySelectorAll('[data-sidebar-project-header]')).toHaveLength(3);
 	expect(preview.querySelector('[inert]')).toBeTruthy();
+	await fireEvent.click(screen.getByRole('checkbox', { name: 'Executor' }));
+	expect(
+		[...preview.querySelectorAll('[data-sidebar-executor-header]')].map((header) =>
+			header.getAttribute('title'),
+		),
+	).toEqual(['Local', 'Remote']);
 	expect(settings.sidebarChatItemLayout).toBe('single-line');
 	expect(apply).not.toHaveBeenCalled();
 	await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

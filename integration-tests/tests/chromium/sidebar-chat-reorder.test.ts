@@ -357,6 +357,56 @@ async function withSidebarChromiumFixture<T>(
 }
 
 describe('Chromium sidebar chat reorder', () => {
+  test('keeps native dragging alive across filtered context rows', async () => {
+    await withSidebarChromiumFixture('sidebar-filtered-context-reorder', async (fixture) => {
+      const { page, integration } = fixture;
+      await page.addInitScript(seedLocalSettings, { sidebarSortMode: 'manual' });
+      const { a, b, b1 } = await createSidebarDelegationFixture(integration);
+      const c = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId: c, projectPath: integration.dirs.project,
+        content: 'Synthetic independent root', agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(c, started.turnId);
+      for (const [id, title] of [[a, 'matchedsidebar a'], [b, 'Context parent'], [b1, 'matchedsidebar child'], [c, 'matchedsidebar c']] as const) {
+        await integration.client.updateSessionName(id, title);
+      }
+      for (const id of [a, b, c]) {
+        await integration.client.reorderChat({ chatId: id, placement: { kind: 'boundary', boundary: 'bottom' } });
+      }
+      await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      const nesting = page.getByRole('menuitemcheckbox', { name: 'Nest delegated chats', exact: true });
+      expect(await nesting.getAttribute('aria-checked')).toBe('false');
+      await nesting.click();
+      await page.getByRole('button', { name: 'Search chats...', exact: true }).click();
+      const search = page.getByRole('dialog', { name: 'Search chats...', exact: true }).getByRole('textbox');
+      await search.fill('matchedsidebar');
+      await search.press('Enter');
+      await waitForSidebarOrder(page, [a, b, b1, c]);
+      const row = (id: string) => page.locator(`[data-sidebar-virtual-row="${id}"]`);
+      const source = (await row(c).boundingBox())!;
+      const blocked = (await row(b).boundingBox())!;
+      const target = (await row(a).boundingBox())!;
+      await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(blocked.x + blocked.width / 2, blocked.y + blocked.height / 2, { steps: 12 });
+      await page.waitForTimeout(300);
+      expect(await page.locator('[data-sidebar-branch-drop-indicator]').count()).toBe(0);
+      expect(await sidebarOrder(page)).toEqual([a, b, b1, c]);
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height * 0.2, { steps: 12 });
+      await page.waitForSelector('[data-sidebar-branch-drop-indicator]');
+      const response = page.waitForResponse(response => isReorderRequest(response.request()));
+      await page.mouse.up();
+      expect((await response).ok()).toBe(true);
+      await waitForSidebarOrder(page, [c, a, b, b1]);
+      expect(capturedReorderRequests(fixture)).toEqual([{
+        chatId: c, placement: { kind: 'relative', referenceChatId: a, position: 'before' },
+      }]);
+      expect(fixture.browserErrors).toEqual([]);
+    });
+  }, 120_000);
+
   test('moves whole delegated branches with one root request and retains nested priority after reload', async () => {
     await withSidebarChromiumFixture('sidebar-delegated-reorder', async (fixture) => {
       const { page, integration } = fixture;
