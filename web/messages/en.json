@@ -1508,7 +1508,6 @@
 	"notifications_reorder_chats_applied": "Chats reordered.",
 	"notifications_reorder_chats_failed": "Failed to reorder chats.",
 	"notifications_reorder_chats_unconfirmed": "Couldn't confirm the chat order change. Refresh to check the current order.",
-	"notifications_reorder_chats_refresh_failed": "Couldn't refresh chat order. Refresh to try again.",
 	"notifications_update_chat_tags_failed": "Failed to update chat tags.",
 	"notifications_reorder_saved_searches_failed": "Failed to reorder saved searches.",
 	"notifications_region": "Notifications",

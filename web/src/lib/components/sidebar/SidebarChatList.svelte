@@ -144,7 +144,7 @@
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{reorder}
-		onPersistReorder={(request) => reorder.enqueue(request)}
+		onPersistReorder={(request) => reorder.submit(request)}
 		{onChatSelect}
 		{onDeleteChat}
 		{onStartRenameChat}

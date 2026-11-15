@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { sidebarOrderErrorMessage } from '../sidebar-order-notifications';
 	import {
 		normalizeSidebarGroupingFields,
 		type SidebarGroupingSelection,
@@ -341,9 +342,9 @@
 			return true;
 		},
 		sort: (sortKey) => api.sortChatOrder({ sortKey }),
-		onError: () =>
+		onError: (_error, outcome) =>
 			(getNotificationsContext() as { error: (message: string) => void }).error(
-				'Failed to reorder chats.',
+				sidebarOrderErrorMessage(outcome),
 			),
 	});
 </script>

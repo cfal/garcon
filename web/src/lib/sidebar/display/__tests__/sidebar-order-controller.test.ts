@@ -6,11 +6,14 @@ import {
 } from '../sidebar-order-controller.svelte';
 import { buildSidebarChatOrderMap, buildSidebarRowModel } from '../sidebar-row-model';
 import { chat, delegated, projectionInput } from './sidebar-fixtures';
+import { SidebarOrderTestInput } from './sidebar-order-test-input.svelte';
 
 function fixture() {
-	let input = projectionInput(
-		['a', 'hidden', 'b', 'c'].map((id) => chat(id)),
-		{ matchingChatIds: new Set(['a', 'b', 'c']) },
+	const input = new SidebarOrderTestInput(
+		projectionInput(
+			['a', 'hidden', 'b', 'c'].map((id) => chat(id)),
+			{ matchingChatIds: new Set(['a', 'b', 'c']) },
+		),
 	);
 	const write = vi
 		.fn<(request: ReorderChatRequest) => Promise<unknown>>()
@@ -20,7 +23,7 @@ function fixture() {
 	const onError = vi.fn();
 	const controller = new SidebarOrderController({
 		get input() {
-			return input;
+			return input.current;
 		},
 		write,
 		refresh,
@@ -28,7 +31,7 @@ function fixture() {
 		onError,
 	});
 	const move = (source: string, target: string, edge: 'top' | 'bottom' = 'top') => {
-		const row = buildSidebarRowModel({ ...input, orders: controller.orders }).rows.find(
+		const row = buildSidebarRowModel({ ...input.current, orders: controller.orders }).rows.find(
 			(row) => row.type === 'chat' && row.chat.id === source,
 		);
 		if (row?.type !== 'chat') throw new Error('Missing source');
@@ -49,17 +52,147 @@ function fixture() {
 		sort,
 		onError,
 		get input() {
-			return input;
+			return input.current;
 		},
 		set input(next) {
-			input = next;
+			input.current = next;
 		},
 	};
 }
 
 describe('SidebarOrderController', () => {
+	it.each(['context', 'cycle'] as const)(
+		'persists visible moves across an ineligible %s branch',
+		async (kind) => {
+			for (const [source, target, edge, expected] of [
+				['a', 'c', 'top', ['x', 'y', 'a', 'c']],
+				['c', 'a', 'bottom', ['a', 'c', 'x', 'y']],
+			] as const) {
+				const f = fixture();
+				f.input = projectionInput(
+					[
+						chat('a'),
+						kind === 'context' ? chat('x') : delegated('x', 'y'),
+						delegated('y', 'x'),
+						chat('c'),
+					],
+					kind === 'context' ? { matchingChatIds: new Set(['a', 'y', 'c']) } : {},
+				);
+				expect(f.move(source, 'x')).toBeNull();
+				f.controller.begin('normal', source, { ids: ['a', 'c'] });
+				f.controller.preview({
+					list: 'normal',
+					sourceChatId: source,
+					targetChatId: target,
+					closestEdge: edge,
+				});
+				expect(f.controller.projection.rowModel.visibleChatIds).toEqual(expected);
+				const request = f.controller.finish('normal');
+				expect(request).not.toBeNull();
+				f.refresh.mockResolvedValue(false);
+				f.controller.submit(request!);
+				await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
+				expect(f.write).toHaveBeenCalledExactlyOnceWith({
+					chatId: source,
+					placement: {
+						kind: 'relative',
+						referenceChatId: target,
+						position: edge === 'top' ? 'before' : 'after',
+					},
+				});
+				expect(f.controller.projection.rowModel.visibleChatIds).toEqual(expected);
+			}
+		},
+	);
+	it('previews a newly matching peer instead of retaining the previous target', () => {
+		const f = fixture();
+		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
+		f.controller.preview({
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'a',
+			closestEdge: 'top',
+		});
+		f.input = { ...f.input, matchingChatIds: undefined };
+		f.controller.preview({
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'hidden',
+			closestEdge: 'top',
+		});
+		expect(f.controller.orders.normal).toEqual(['a', 'c', 'hidden', 'b']);
+		expect(f.controller.finish('normal')?.placement.referenceChatId).toBe('hidden');
+	});
+	it('drops stale previews when a peer leaves the scope and accepts another live peer', () => {
+		const f = fixture();
+		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
+		f.controller.preview({
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'a',
+			closestEdge: 'top',
+		});
+		f.input = { ...f.input, matchingChatIds: new Set(['b', 'c']) };
+		expect(f.controller.orders.normal).toEqual(f.input.orders.normal);
+		f.controller.preview({
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'a',
+			closestEdge: 'top',
+		});
+		expect(f.controller.finish('normal')).toBeNull();
+		const move = f.move('c', 'b');
+		expect(move?.placement.referenceChatId).toBe('b');
+	});
+	it.each(['filtered', 'delegated', 'grouped'] as const)(
+		'ignores visually unchanged moves across %s non-peers',
+		(mode) => {
+			const f = fixture();
+			f.input =
+				mode === 'filtered'
+					? projectionInput([chat('a'), chat('hidden'), chat('b')], {
+							matchingChatIds: new Set(['a', 'b']),
+						})
+					: mode === 'delegated'
+						? projectionInput([chat('a'), delegated('hidden', 'a'), chat('b')])
+						: projectionInput([chat('a'), chat('hidden', { projectPath: '/other' }), chat('b')], {
+								groupingFields: [{ field: 'project', enabled: true }],
+							});
+			expect(f.move('a', 'b', 'top')).toBeNull();
+			expect(f.move('b', 'a', 'bottom')).toBeNull();
+			expect(f.controller.orders.normal).toEqual(['a', 'hidden', 'b']);
+			expect(f.write).not.toHaveBeenCalled();
+		},
+	);
+	it('blocks other order bands while a move is unsettled', async () => {
+		const f = fixture();
+		f.input = projectionInput([
+			chat('a'),
+			chat('b'),
+			chat('p', { isPinned: true }),
+			chat('q', { isPinned: true }),
+		]);
+		const pinned = f.move('q', 'p')!;
+		f.refresh.mockResolvedValue(false);
+		f.controller.submit(f.move('b', 'a')!);
+		f.controller.submit(pinned);
+		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
+		expect(f.move('q', 'p')).toBeNull();
+		expect(f.write).toHaveBeenCalledOnce();
+		expect(f.controller.orders.pinned).toEqual(['p', 'q']);
+	});
+	it('keeps recovery explicit without duplicating session-owned refresh notifications', async () => {
+		const f = fixture();
+		f.refresh.mockRejectedValue(new Error('Offline'));
+		f.controller.submit(f.move('c', 'b')!);
+		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
+		await f.controller.recover();
+		expect(f.controller.recoveryRequired).toBe(true);
+		expect(f.onError).not.toHaveBeenCalled();
+		expect(f.write).toHaveBeenCalledOnce();
+	});
 	it.each(['move', 'sort'] as const)(
-		'classifies rejected, unknown and refresh errors for %s',
+		'classifies rejected and unknown errors for %s',
 		async (operation) => {
 			for (const rejected of [true, false]) {
 				const f = fixture();
@@ -68,7 +201,7 @@ describe('SidebarOrderController', () => {
 					: new TypeError('Connection lost');
 				if (operation === 'move') {
 					f.write.mockRejectedValue(error);
-					f.controller.enqueue(f.move('c', 'b')!);
+					f.controller.submit(f.move('c', 'b')!);
 					await vi.waitFor(() => expect(f.controller.busy).toBe(false));
 				} else {
 					f.sort.mockRejectedValue(error);
@@ -78,11 +211,6 @@ describe('SidebarOrderController', () => {
 					error,
 					rejected ? 'rejected' : 'unconfirmed',
 				);
-				f.onError.mockClear();
-				const refreshError = new Error('Snapshot unavailable');
-				f.refresh.mockRejectedValue(refreshError);
-				await f.controller.recover();
-				expect(f.onError).toHaveBeenCalledExactlyOnceWith(refreshError, 'refresh');
 			}
 		},
 	);
@@ -119,7 +247,7 @@ describe('SidebarOrderController', () => {
 		expect(f.controller.dragPresentationChanged).toBe(false);
 		expect(f.controller.finish('normal')).not.toBeNull();
 	});
-	it('keeps queued project moves after an acknowledged snapshot changes path spelling order', async () => {
+	it('allows the next project move after settlement changes path spelling order', async () => {
 		const f = fixture();
 		f.input = projectionInput(
 			[
@@ -136,12 +264,14 @@ describe('SidebarOrderController', () => {
 					release = resolve;
 				}),
 		);
-		f.controller.enqueue(f.move('b', 'a')!);
-		f.controller.enqueue(f.move('c', 'a')!);
+		f.controller.submit(f.move('b', 'a')!);
+		expect(f.move('c', 'a')).toBeNull();
 		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());
 		const [a, b, c] = f.input.allChats;
 		f.input = { ...f.input, allChats: [b, a, c] };
 		release(true);
+		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
+		f.controller.submit(f.move('c', 'a')!);
 		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
 		expect(f.write).toHaveBeenCalledTimes(2);
 	});
@@ -200,7 +330,7 @@ describe('SidebarOrderController', () => {
 	it('keeps an acknowledged move while refresh fails, including after filtering and collapse change', async () => {
 		const f = fixture();
 		f.refresh.mockResolvedValue(false);
-		f.controller.enqueue(f.move('c', 'b')!);
+		f.controller.submit(f.move('c', 'b')!);
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
 		f.input = {
 			...f.input,
@@ -214,7 +344,7 @@ describe('SidebarOrderController', () => {
 		expect(f.controller.orders.normal).toEqual(['b', 'a', 'hidden', 'c']);
 		expect(f.write).toHaveBeenCalledTimes(1);
 	});
-	it('serializes drops within a band and preserves newer intents through earlier completion', async () => {
+	it('blocks additional moves and bulk sort until the authoritative refresh settles', async () => {
 		const f = fixture();
 		let release!: () => void;
 		f.refresh.mockImplementationOnce(
@@ -223,56 +353,71 @@ describe('SidebarOrderController', () => {
 					release = () => resolve(true);
 				}),
 		);
-		f.controller.enqueue(f.move('c', 'b')!);
-		f.controller.enqueue(f.move('a', 'c', 'bottom')!);
+		const second = f.move('a', 'c', 'bottom')!;
+		f.controller.submit(f.move('c', 'b')!);
+		f.controller.submit(second);
+		expect(f.move('a', 'c', 'bottom')).toBeNull();
+		expect(await f.controller.sort('activity')).toBe(false);
 		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());
 		expect(f.write).toHaveBeenCalledOnce();
-		expect(f.controller.orders.normal).toEqual(['hidden', 'c', 'a', 'b']);
+		expect(f.controller.orders.normal).toEqual(['a', 'hidden', 'c', 'b']);
 		f.input = projectionInput([chat('a'), chat('hidden'), chat('c'), chat('b')]);
 		release();
-		await vi.waitFor(() => expect(f.write).toHaveBeenCalledTimes(2));
-		expect(f.write.mock.calls[1][0]).toMatchObject({
-			chatId: 'a',
-			placement: { referenceChatId: 'c', position: 'after' },
-		});
+		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
+		expect(f.write).toHaveBeenCalledOnce();
+		expect(f.sort).not.toHaveBeenCalled();
 	});
-	it('rebases remaining intents after a definite rejection without restoring an old snapshot', async () => {
+	it('removes a definitely rejected overlay even if refresh fails', async () => {
 		const f = fixture();
 		f.write.mockRejectedValueOnce({ errorCode: 'ORDER_CROSS_GROUP' });
-		f.controller.enqueue(f.move('c', 'b')!);
-		f.controller.enqueue(f.move('a', 'b', 'bottom')!);
-		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
-		expect(f.onError).toHaveBeenCalledOnce();
-		expect(f.write).toHaveBeenCalledTimes(2);
-	});
-	it('validates queued activity moves against their captured inactivity preference', async () => {
-		const f = fixture();
-		f.input = projectionInput(
-			['a', 'b', 'c'].map((id) => chat(id, { lastActivityAt: '2026-01-28T12:00:00.000Z' })),
-			{ groupingFields: [{ field: 'activity', enabled: true }] },
-		);
 		f.refresh.mockResolvedValue(false);
-		f.controller.enqueue(f.move('c', 'b')!);
+		f.controller.submit(f.move('c', 'b')!);
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
-		f.controller.enqueue(f.move('a', 'b', 'bottom')!);
-		f.input = { ...f.input, inactivityDuration: '1-week' };
-		f.refresh.mockResolvedValue(true);
+		expect(f.controller.orders.normal).toEqual(f.input.orders.normal);
+		expect(f.controller.busy).toBe(true);
+		expect(f.onError).toHaveBeenCalledOnce();
+		expect(f.write).toHaveBeenCalledOnce();
+	});
+	it('does not start concurrent recoveries or admit mutations during recovery', async () => {
+		const f = fixture();
+		f.refresh.mockResolvedValue(false);
+		f.controller.submit(f.move('c', 'b')!);
+		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
+		let release!: (value: boolean) => void;
+		f.refresh.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = resolve;
+				}),
+		);
+		const recovery = f.controller.recover();
 		await f.controller.recover();
-		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
-		expect(f.write).toHaveBeenCalledTimes(2);
+		expect(f.refresh).toHaveBeenCalledTimes(2);
+		expect(f.controller.recovering).toBe(true);
+		expect(f.move('a', 'b', 'bottom')).toBeNull();
+		expect(await f.controller.sort('activity')).toBe(false);
+		release(true);
+		await recovery;
+		expect(f.controller.busy).toBe(false);
+		expect(f.controller.recovering).toBe(false);
+		f.refresh.mockResolvedValue(false);
+		await f.controller.sort('activity');
+		expect(f.controller.recoveryRequired).toBe(true);
 	});
 	it('does not resend an unknown mutation and waits for authoritative recovery', async () => {
 		const f = fixture();
 		f.write.mockRejectedValueOnce(new TypeError('Connection lost'));
 		f.refresh.mockResolvedValue(false);
-		f.controller.enqueue(f.move('c', 'b')!);
+		f.controller.submit(f.move('c', 'b')!);
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
-		f.controller.enqueue(f.move('a', 'b', 'bottom')!);
+		expect(f.controller.orders.normal).toEqual(['a', 'hidden', 'c', 'b']);
+		expect(f.move('a', 'b', 'bottom')).toBeNull();
 		expect(f.write).toHaveBeenCalledOnce();
 		f.refresh.mockResolvedValue(true);
 		await f.controller.recover();
 		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
-		expect(f.write).toHaveBeenCalledTimes(2);
+		expect(f.controller.orders.normal).toEqual(f.input.orders.normal);
+		expect(f.write).toHaveBeenCalledOnce();
 		expect(f.write.mock.calls.filter(([request]) => request.chatId === 'c')).toHaveLength(1);
 	});
 	it('rejects stale parent scopes and cross-parent targets before dispatch', () => {
@@ -281,16 +426,16 @@ describe('SidebarOrderController', () => {
 		expect(f.move('a1', 'b')).toBeNull();
 		const request = f.move('a2', 'a1')!;
 		f.input = projectionInput(f.input.allChats.filter((chat) => chat.id !== 'a'));
-		f.controller.enqueue(request);
+		f.controller.submit(request);
 		expect(f.write).not.toHaveBeenCalled();
 	});
-	it('ignores deleted anchors and changed membership while rebasing queued moves', async () => {
+	it('ignores deleted anchors while rebasing the pending move', async () => {
 		const f = fixture();
 		f.refresh.mockResolvedValue(false);
-		f.controller.enqueue(f.move('c', 'b')!);
+		f.controller.submit(f.move('c', 'b')!);
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
-		f.controller.enqueue(f.move('a', 'b')!);
 		f.input = projectionInput(f.input.allChats.filter((chat) => chat.id !== 'b'));
+		expect(f.controller.orders.normal).toEqual(['a', 'hidden', 'c']);
 		f.refresh.mockResolvedValue(true);
 		await f.controller.recover();
 		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
@@ -313,7 +458,7 @@ describe('SidebarOrderController', () => {
 	it('does not let bulk sort overtake moves or admit moves while sorting', async () => {
 		const f = fixture();
 		f.refresh.mockResolvedValue(false);
-		f.controller.enqueue(f.move('c', 'b')!);
+		f.controller.submit(f.move('c', 'b')!);
 		await f.controller.sort('activity');
 		expect(f.sort).not.toHaveBeenCalled();
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
@@ -328,7 +473,7 @@ describe('SidebarOrderController', () => {
 		);
 		const request = f.move('c', 'b')!;
 		const sorting = f.controller.sort('activity');
-		f.controller.enqueue(request);
+		f.controller.submit(request);
 		expect(f.write).toHaveBeenCalledOnce();
 		release();
 		await sorting;
@@ -343,7 +488,7 @@ describe('SidebarOrderController', () => {
 					release = () => resolve(undefined);
 				}),
 		);
-		f.controller.enqueue(f.move('c', 'b')!);
+		f.controller.submit(f.move('c', 'b')!);
 		f.controller.destroy();
 		release();
 		await Promise.resolve();

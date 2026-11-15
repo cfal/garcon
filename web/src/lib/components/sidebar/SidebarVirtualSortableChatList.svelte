@@ -159,10 +159,7 @@
 	// Dragging a chat onto a workspace window stays available in every sort mode.
 	let dragEnabled = $derived(!isMultiSelectMode);
 	let reorderEnabled = $derived(
-		dragEnabled &&
-			displayOptions.sortMode === 'manual' &&
-			!reorder.sorting &&
-			!reorder.sortRecovery,
+		dragEnabled && displayOptions.sortMode === 'manual' && !reorder.busy,
 	);
 	const moveBoundaryLabels = $derived.by(() => {
 		if (isFiltered) {
@@ -185,20 +182,29 @@
 		return index;
 	});
 	$effect(() => {
-		if (!draggingChatId || !reorder.activeList) return;
+		if (!draggingChatId) return;
 		const source = rows.find((row) => row.type === 'chat' && row.chat.id === draggingChatId);
-		if (
-			!reorderEnabled ||
-			reorder.dragPresentationChanged ||
-			source?.type !== 'chat' ||
-			source.reorderScopeKey !== dragScopeKey ||
-			!source.reorderScopeIds.includes(source.chat.id)
-		) {
+		if (source?.type !== 'chat') {
 			untrack(() => {
 				workspaceChatDrag.endIfOwned(draggingChatId!);
 				reorder.cancel();
 				cancelTouchDrag();
 				clearDragPresentation();
+			});
+			return;
+		}
+		if (!reorder.activeList) return;
+		if (
+			!reorderEnabled ||
+			reorder.dragPresentationChanged ||
+			source.reorderScopeKey !== dragScopeKey ||
+			!source.reorderScopeIds.includes(source.chat.id)
+		) {
+			untrack(() => {
+				reorder.cancel();
+				cancelTouchDrag();
+				activeDrop = null;
+				lastValidDrop = null;
 			});
 		}
 	});

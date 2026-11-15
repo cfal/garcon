@@ -29,7 +29,6 @@
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
-		getExecutors,
 		getWorkbenchCommands,
 		getNavigation,
 		getChatSessions,
@@ -37,10 +36,8 @@
 		getWs,
 		getLocalSettings,
 		getRemoteSettings,
-		getMinuteClock,
 		getNotifications,
 		getSidebarSearch,
-		getSidebarProjectCollapse,
 		getWorkspaceCoordinator,
 		getSingletonSurfaces,
 		getTransientLayers,
@@ -73,8 +70,7 @@
 		SearchResultNavigationPort,
 		SearchResultSelection,
 	} from '$lib/sidebar/search/search-result-navigation-controller.js';
-	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
-	import { reorderChat, sortChatOrder } from '$lib/api/chats';
+	import { createAppShellSidebarOrder } from './app-shell-sidebar-order';
 	import SidebarDisplayDialog from '../sidebar/SidebarDisplayDialog.svelte';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -85,7 +81,6 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
-	const executors = getExecutors();
 	const commandRegistry = getWorkbenchCommands();
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -98,8 +93,6 @@
 	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
 	let handledTicketLink: string | null = null;
 	const sidebarSearch = getSidebarSearch();
-	const projectCollapse = getSidebarProjectCollapse();
-	const minuteClock = getMinuteClock();
 	const workspace = getWorkspaceCoordinator();
 	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
@@ -112,42 +105,7 @@
 	const chatActionDialogs = new ChatActionDialogsState();
 	let sidebarDisplayOpen = $state(false);
 	let sidebarDisplayReturnFocus = $state<(() => void) | undefined>();
-	const sidebarOrder = new SidebarOrderController({
-		get input() {
-			return {
-				allChats: sessions.orderedChats,
-				matchingChatIds: sidebarSearch.activeQuery.trim()
-					? new Set(sidebarSearch.filteredChats.map((chat) => chat.id))
-					: undefined,
-				executorOrder: executors.executors.map((executor) => executor.id),
-				groupingFields: localSettings.sidebarGroupingFields,
-				nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
-				currentTime: minuteClock.currentTime,
-				inactivityDuration: localSettings.sidebarInactivityDuration,
-				sortMode: localSettings.sidebarSortMode,
-				pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-				isChatOptimisticallyArchived: (chatId: string) =>
-					sessions.isChatOptimisticallyArchived(chatId),
-				groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-				collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
-			};
-		},
-		write: reorderChat,
-		refresh: () => sessions.refreshOrderSnapshot(),
-		sort: (sortKey) => sortChatOrder({ sortKey }),
-		onError: (_error, outcome) => {
-			switch (outcome) {
-				case 'rejected':
-					notifications.error(m.notifications_reorder_chats_failed());
-					break;
-				case 'unconfirmed':
-					notifications.error(m.notifications_reorder_chats_unconfirmed());
-					break;
-				case 'refresh':
-					notifications.error(m.notifications_reorder_chats_refresh_failed());
-			}
-		},
-	});
+	const sidebarOrder = createAppShellSidebarOrder();
 	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
 	const mobileSidebarLayer = transientLayerAttachment({

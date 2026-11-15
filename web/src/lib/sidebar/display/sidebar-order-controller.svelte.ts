@@ -31,25 +31,17 @@ export interface SidebarChatReorderRequest {
 	chatId: string;
 	placement: RelativeChatOrderPlacement;
 	scopeKey: string;
-	groupingFields: ProjectionInput['groupingFields'];
-	nestDelegatedChats: boolean;
-	groupNestedProjectPaths: boolean;
-	inactivityDuration: ProjectionInput['inactivityDuration'];
+	presentationKey: string;
 }
 
-interface PendingMove {
-	sequence: number;
-	request: SidebarChatReorderRequest;
-	recoveryRequired: boolean;
-	rejected: boolean;
-}
+export type SidebarOrderErrorOutcome = 'rejected' | 'unconfirmed';
 
 interface SidebarOrderDeps {
 	get input(): ProjectionInput;
 	write(request: ReorderChatRequest): Promise<unknown>;
 	refresh(): Promise<boolean>;
 	sort(sortKey: ChatOrderSortKey): Promise<{ changed: boolean }>;
-	onError(error: unknown, outcome: 'rejected' | 'unconfirmed' | 'refresh'): void;
+	onError(error: unknown, outcome: SidebarOrderErrorOutcome): void;
 }
 
 export function applySidebarRelativeMove(
@@ -78,21 +70,24 @@ function definitelyRejected(error: unknown): boolean {
 
 export class SidebarOrderController {
 	#deps: SidebarOrderDeps;
-	#pending = $state<PendingMove[]>([]);
+	#pending = $state<SidebarChatReorderRequest | null>(null);
+	#phase = $state<'idle' | 'writing' | 'refreshing' | 'recovery' | 'recovering'>('idle');
 	#drag = $state<{
 		chatId: string;
 		list: PersistedChatOrderGroup;
-		ids: string[];
 		scopeKey: string;
 		presentationKey: string;
-		input: ProjectionInput;
 		placement: RelativeChatOrderPlacement | null;
 	} | null>(null);
-	#nextSequence = 0;
-	#draining = new Set<PersistedChatOrderGroup>();
 	#disposed = false;
-	sorting = $state(false);
-	sortRecovery = $state(false);
+	// Validates gestures against live peers without feeding the preview back into validation.
+	#canonicalRows = $derived.by(
+		() =>
+			buildSidebarRowModel({
+				...this.#deps.input,
+				orders: buildSidebarChatOrderMap(this.#deps.input.allChats),
+			}).rows,
+	);
 	projection = $derived.by(() =>
 		buildSidebarChatListProjection({ ...this.#deps.input, orders: this.orders }),
 	);
@@ -110,22 +105,29 @@ export class SidebarOrderController {
 		return this.#drag !== null && this.#drag.presentationKey !== presentationKey(this.#deps.input);
 	}
 	get busy(): boolean {
-		return this.sorting || this.sortRecovery || this.#pending.length > 0;
+		return this.#phase !== 'idle';
 	}
 	get recoveryRequired(): boolean {
-		return this.sortRecovery || this.#pending.some((move) => move.recoveryRequired);
+		return this.#phase === 'recovery' || this.recovering;
+	}
+	get recovering(): boolean {
+		return this.#phase === 'recovering';
 	}
 	get orders(): SidebarChatOrderMap {
 		const orders = buildSidebarChatOrderMap(this.#deps.input.allChats);
-		for (const { request, rejected } of this.#pending) {
-			if (!rejected)
-				orders[request.list] = applySidebarRelativeMove(
-					orders[request.list],
-					request.chatId,
-					request.placement,
-				);
+		if (this.#pending) {
+			const request = this.#pending;
+			orders[request.list] = applySidebarRelativeMove(
+				orders[request.list],
+				request.chatId,
+				request.placement,
+			);
 		}
-		if (this.#drag?.placement)
+		if (
+			this.#drag?.placement &&
+			!this.dragPresentationChanged &&
+			this.#liveScope(this.#drag)?.includes(this.#drag.placement.referenceChatId)
+		)
 			orders[this.#drag.list] = applySidebarRelativeMove(
 				orders[this.#drag.list],
 				this.#drag.chatId,
@@ -135,19 +137,16 @@ export class SidebarOrderController {
 	}
 
 	begin(list: PersistedChatOrderGroup, chatId: string, scope: { ids: string[] }): void {
-		if (this.#disposed || this.sorting || this.sortRecovery || !scope.ids.includes(chatId)) return;
+		if (this.#disposed || this.busy || this.#drag || !scope.ids.includes(chatId)) return;
 		const input = this.#deps.input;
-		const row = buildSidebarRowModel({ ...input, orders: this.orders }).rows.find(
-			(row) => row.type === 'chat' && row.chat.id === chatId,
-		);
+		if (input.sortMode !== 'manual') return;
+		const row = this.#canonicalRows.find((row) => row.type === 'chat' && row.chat.id === chatId);
 		if (row?.type !== 'chat' || row.list !== list || !row.reorderScopeIds.includes(chatId)) return;
 		this.#drag = {
 			list,
 			chatId,
-			ids: [...scope.ids],
 			scopeKey: row.reorderScopeKey,
 			presentationKey: presentationKey(input),
-			input,
 			placement: null,
 		};
 	}
@@ -159,14 +158,15 @@ export class SidebarOrderController {
 		closestEdge: Edge | null;
 	}): void {
 		const drag = this.#drag;
+		if (!drag || drag.chatId !== input.sourceChatId || drag.list !== input.list) return;
 		if (
-			!drag ||
-			drag.chatId !== input.sourceChatId ||
-			drag.list !== input.list ||
-			!drag.ids.includes(input.targetChatId) ||
-			drag.chatId === input.targetChatId
-		)
+			this.dragPresentationChanged ||
+			drag.chatId === input.targetChatId ||
+			!this.#liveScope(drag)?.includes(input.targetChatId)
+		) {
+			drag.placement = null;
 			return;
+		}
 		const position = input.closestEdge === 'top' ? 'before' : 'after';
 		if (
 			drag.placement?.referenceChatId === input.targetChatId &&
@@ -187,29 +187,15 @@ export class SidebarOrderController {
 	finish(list: PersistedChatOrderGroup): SidebarChatReorderRequest | null {
 		const drag = this.#drag;
 		this.#drag = null;
-		if (
-			!drag?.placement ||
-			drag.list !== list ||
-			drag.presentationKey !== presentationKey(this.#deps.input)
-		)
-			return null;
-		const currentRows = buildSidebarRowModel({ ...this.#deps.input, orders: this.orders }).rows;
-		if (
-			![drag.chatId, drag.placement.referenceChatId].every((id) =>
-				currentRows.some(
-					(row) =>
-						row.type === 'chat' &&
-						row.chat.id === id &&
-						row.reorderScopeKey === drag.scopeKey &&
-						row.reorderScopeIds.includes(id),
-				),
-			)
-		)
-			return null;
-		const order = this.orders[list];
-		const moved = applySidebarRelativeMove(order, drag.chatId, drag.placement);
-		if (order.every((id, index) => id === moved[index])) return null;
-		return this.#request(drag.list, drag.chatId, drag.placement, drag.scopeKey, drag.input);
+		if (!drag?.placement || drag.list !== list) return null;
+		const request = {
+			list: drag.list,
+			chatId: drag.chatId,
+			placement: drag.placement,
+			scopeKey: drag.scopeKey,
+			presentationKey: drag.presentationKey,
+		};
+		return this.#valid(request) ? request : null;
 	}
 
 	cancel(): void {
@@ -222,6 +208,7 @@ export class SidebarOrderController {
 		boundary: 'start' | 'end';
 		scope: { ids: string[] };
 	}): SidebarChatReorderRequest | null {
+		if (this.busy || this.#drag) return null;
 		const ids = input.scope.ids;
 		const anchor = input.boundary === 'start' ? ids[0] : ids.at(-1);
 		if (!anchor || anchor === input.chatId) return null;
@@ -235,140 +222,90 @@ export class SidebarOrderController {
 		return this.finish(input.list);
 	}
 
-	#request(
-		list: PersistedChatOrderGroup,
-		chatId: string,
-		placement: RelativeChatOrderPlacement,
-		scopeKey: string,
-		input: ProjectionInput,
-	): SidebarChatReorderRequest {
-		return {
-			list,
-			chatId,
-			placement,
-			scopeKey,
-			groupingFields: input.groupingFields.map((field) => ({ ...field })),
-			nestDelegatedChats: input.nestDelegatedChats,
-			groupNestedProjectPaths: Boolean(input.groupNestedProjectPaths),
-			inactivityDuration: input.inactivityDuration,
-		};
+	#liveScope(
+		source: Pick<SidebarChatReorderRequest, 'chatId' | 'list' | 'scopeKey'>,
+	): readonly string[] | null {
+		const row = this.#canonicalRows.find(
+			(row) => row.type === 'chat' && row.chat.id === source.chatId,
+		);
+		return row?.type === 'chat' &&
+			row.list === source.list &&
+			row.reorderScopeKey === source.scopeKey &&
+			row.reorderScopeIds.includes(source.chatId)
+			? row.reorderScopeIds
+			: null;
 	}
 
 	#valid(request: SidebarChatReorderRequest): boolean {
-		const input = this.#deps.input;
-		const rows = buildSidebarRowModel({
-			...input,
-			groupingFields: request.groupingFields,
-			nestDelegatedChats: request.nestDelegatedChats,
-			groupNestedProjectPaths: request.groupNestedProjectPaths,
-			inactivityDuration: request.inactivityDuration,
-			matchingChatIds: undefined,
-			collapsedProjectKeys: undefined,
-			orders: buildSidebarChatOrderMap(input.allChats),
-		}).rows;
-		return [request.chatId, request.placement.referenceChatId].every((id) =>
-			rows.some(
-				(row) =>
-					row.type === 'chat' &&
-					row.chat.id === id &&
-					row.list === request.list &&
-					row.reorderScopeKey === request.scopeKey &&
-					row.reorderScopeIds.includes(id),
-			),
+		if (request.presentationKey !== presentationKey(this.#deps.input)) return false;
+		if (!this.#liveScope(request)?.includes(request.placement.referenceChatId)) return false;
+		// Visible context branches affect placement even though they cannot be anchors.
+		const ids = this.#canonicalRows.flatMap((row) =>
+			row.type === 'chat' && row.reorderScopeKey === request.scopeKey ? [row.chat.id] : [],
 		);
+		const source = ids.indexOf(request.chatId);
+		const target = ids.indexOf(request.placement.referenceChatId);
+		if (target < 0 || source === target) return false;
+		return source !== target + (request.placement.position === 'before' ? -1 : 1);
 	}
 
-	enqueue(request: SidebarChatReorderRequest): void {
-		if (this.#disposed || this.sorting || this.sortRecovery || !this.#valid(request)) return;
-		this.#pending = [
-			...this.#pending,
-			{ sequence: ++this.#nextSequence, request, recoveryRequired: false, rejected: false },
-		];
-		void this.#drain(request.list);
+	submit(request: SidebarChatReorderRequest): void {
+		if (this.#disposed || this.busy || this.#drag || !this.#valid(request)) return;
+		this.#pending = request;
+		void this.#mutate(async () => {
+			await this.#deps.write({ chatId: request.chatId, placement: request.placement });
+			return false;
+		});
 	}
 
 	async #refresh(): Promise<boolean> {
 		try {
 			return await this.#deps.refresh();
-		} catch (error) {
-			if (!this.#disposed) this.#deps.onError(error, 'refresh');
+		} catch {
+			// The session owner reports fetch errors; ordering retains explicit recovery.
 			return false;
 		}
 	}
 
-	async #drain(list: PersistedChatOrderGroup): Promise<void> {
-		if (this.#draining.has(list) || this.#disposed) return;
-		this.#draining.add(list);
+	async #mutate(write: () => Promise<boolean>): Promise<boolean> {
+		this.#phase = 'writing';
+		let changed = false;
 		try {
-			while (!this.#disposed) {
-				const move = this.#pending.find((entry) => entry.request.list === list);
-				if (!move || move.recoveryRequired) break;
-				if (!this.#valid(move.request)) {
-					this.#remove(move.sequence);
-					continue;
-				}
-				try {
-					await this.#deps.write({
-						chatId: move.request.chatId,
-						placement: move.request.placement,
-					});
-				} catch (error) {
-					if (this.#disposed) break;
-					move.rejected = definitelyRejected(error);
-					this.#deps.onError(error, move.rejected ? 'rejected' : 'unconfirmed');
-				}
-				if (this.#disposed) break;
-				const refreshed = await this.#refresh();
-				if (this.#disposed) break;
-				if (!refreshed) {
-					move.recoveryRequired = true;
-					break;
-				}
-				this.#remove(move.sequence);
-			}
-		} finally {
-			this.#draining.delete(list);
+			changed = await write();
+		} catch (error) {
+			if (this.#disposed) return false;
+			const rejected = definitelyRejected(error);
+			if (rejected) this.#pending = null;
+			this.#deps.onError(error, rejected ? 'rejected' : 'unconfirmed');
 		}
+		if (this.#disposed) return false;
+		this.#phase = 'refreshing';
+		return (await this.#settle()) && changed;
 	}
 
-	#remove(sequence: number): void {
-		this.#pending = this.#pending.filter((move) => move.sequence !== sequence);
+	async #settle(): Promise<boolean> {
+		const refreshed = await this.#refresh();
+		if (this.#disposed) return false;
+		if (refreshed) this.#pending = null;
+		this.#phase = refreshed ? 'idle' : 'recovery';
+		return refreshed;
 	}
 
 	async recover(): Promise<void> {
-		if (this.#disposed) return;
-		const recovering = this.#pending
-			.filter((move) => move.recoveryRequired)
-			.map((move) => move.sequence);
-		if (!(await this.#refresh()) || this.#disposed) return;
-		for (const sequence of recovering) this.#remove(sequence);
-		this.sortRecovery = false;
-		for (const list of ['pinned', 'normal', 'archived'] as const) void this.#drain(list);
+		if (this.#disposed || this.#phase !== 'recovery') return;
+		this.#phase = 'recovering';
+		await this.#settle();
 	}
 
 	async sort(sortKey: ChatOrderSortKey): Promise<boolean> {
 		if (this.#disposed || this.busy || this.#drag) return false;
-		this.sorting = true;
-		try {
-			let changed = false;
-			try {
-				changed = (await this.#deps.sort(sortKey)).changed;
-			} catch (error) {
-				if (!this.#disposed)
-					this.#deps.onError(error, definitelyRejected(error) ? 'rejected' : 'unconfirmed');
-			}
-			if (this.#disposed) return false;
-			const refreshed = await this.#refresh();
-			if (!this.#disposed) this.sortRecovery = !refreshed;
-			return !this.#disposed && changed && refreshed;
-		} finally {
-			this.sorting = false;
-		}
+		return this.#mutate(async () => (await this.#deps.sort(sortKey)).changed);
 	}
 
 	destroy(): void {
 		this.#disposed = true;
-		this.#pending = [];
+		this.#pending = null;
+		this.#phase = 'idle';
 		this.#drag = null;
 	}
 }

@@ -397,7 +397,7 @@
 			role="status"
 		>
 			<span>{m.sidebar_order_refresh_pending()}</span>
-			<Button variant="ghost" size="sm" onclick={() => void reorder.recover()}
+			<Button variant="ghost" size="sm" disabled={reorder.recovering} onclick={() => void reorder.recover()}
 				>{m.sidebar_order_refresh_retry()}</Button
 			>
 		</div>

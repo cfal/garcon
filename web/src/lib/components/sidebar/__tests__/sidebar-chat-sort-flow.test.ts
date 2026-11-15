@@ -142,7 +142,9 @@ describe('sidebar chat sort flow', () => {
 		await selectSortPreset('By creation time');
 
 		await waitFor(() => {
-			expect(notifications.error).toHaveBeenCalledWith('Failed to reorder chats.');
+			expect(notifications.error).toHaveBeenCalledWith(
+				"Couldn't confirm the chat order change. Refresh to check the current order.",
+			);
 		});
 		expect(onQuietRefresh).toHaveBeenCalledOnce();
 		expect(notifications.info).not.toHaveBeenCalled();

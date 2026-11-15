@@ -403,6 +403,21 @@ describe('Chromium sidebar chat reorder', () => {
       expect(capturedReorderRequests(fixture)).toEqual([{
         chatId: c, placement: { kind: 'relative', referenceChatId: a, position: 'before' },
       }]);
+      for (const edge of ['top', 'bottom'] as const) {
+        for (const id of [a, b, c]) {
+          await integration.client.reorderChat({ chatId: id, placement: { kind: 'boundary', boundary: 'bottom' } });
+        }
+        await waitForSidebarOrder(page, [a, b, b1, c]);
+        const sourceId = edge === 'top' ? a : c;
+        const targetId = edge === 'top' ? c : a;
+        await dragRelative(page, { sourceId, targetId, edge });
+        await waitForSidebarOrder(page, edge === 'top' ? [b, b1, a, c] : [a, c, b, b1]);
+        expect(capturedReorderRequests(fixture).at(-1)).toEqual({
+          chatId: sourceId,
+          placement: { kind: 'relative', referenceChatId: targetId, position: edge === 'top' ? 'before' : 'after' },
+        });
+      }
+      expect(capturedReorderRequests(fixture)).toHaveLength(3);
       expect(fixture.browserErrors).toEqual([]);
     });
   }, 120_000);

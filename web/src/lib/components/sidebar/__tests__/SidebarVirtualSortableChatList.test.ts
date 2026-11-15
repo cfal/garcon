@@ -16,7 +16,11 @@ import {
 	type SidebarVirtualRow,
 } from '../../../sidebar/display/sidebar-virtual-chat-list';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import { buildSidebarRowModel, sidebarGroupCollapseKey, sidebarProjectKey } from '$lib/sidebar/display/sidebar-row-model';
+import {
+	buildSidebarRowModel,
+	sidebarGroupCollapseKey,
+	sidebarProjectKey,
+} from '$lib/sidebar/display/sidebar-row-model';
 import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
 import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
@@ -247,31 +251,49 @@ beforeEach(() => {
 
 it('resumes a touch drag after blocked context and outside hits', async () => {
 	vi.useFakeTimers();
-	const rows = buildSidebarRowModel(projectionInput([
-		chat('context'), delegated('match', 'context'), chat('source'), chat('target'),
-	], { matchingChatIds: new Set(['match', 'source', 'target']) })).rows;
+	const rows = buildSidebarRowModel(
+		projectionInput(
+			[chat('context'), delegated('match', 'context'), chat('source'), chat('target')],
+			{ matchingChatIds: new Set(['match', 'source', 'target']) },
+		),
+	).rows;
 	const registered = { reorder: null as SidebarOrderController | null };
 	const persist = vi.fn();
 	render(SidebarVirtualSortableChatListHost, {
-		rows, isMobile: true, isFiltered: true, displayOptions: { nestDelegatedChats: true },
-		onRegisterReorder: (value) => (registered.reorder = value), onPersistReorder: persist,
+		rows,
+		isMobile: true,
+		isFiltered: true,
+		displayOptions: { nestDelegatedChats: true },
+		onRegisterReorder: (value) => (registered.reorder = value),
+		onPersistReorder: persist,
 	});
 	await tick();
 	const viewport = screen.getByTestId('virtual-sidebar-viewport');
-	vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ left: 0, top: 0, width: 320, height: 640 }));
-	const element = (id: string) => document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${id}"]`)!;
+	vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(
+		rect({ left: 0, top: 0, width: 320, height: 640 }),
+	);
+	const element = (id: string) =>
+		document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${id}"]`)!;
 	const source = element('source');
 	let hit = source;
 	vi.spyOn(document, 'elementFromPoint').mockImplementation(() => hit);
 	for (const id of ['source', 'target', 'context'])
-		vi.spyOn(element(id), 'getBoundingClientRect').mockReturnValue(rect({ left: 0, top: 0, width: 320, height: 88 }));
-	await fireEvent.touchStart(source, { touches: [touchAt(1, 20, 44)], changedTouches: [touchAt(1, 20, 44)] });
+		vi.spyOn(element(id), 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: 88 }),
+		);
+	await fireEvent.touchStart(source, {
+		touches: [touchAt(1, 20, 44)],
+		changedTouches: [touchAt(1, 20, 44)],
+	});
 	vi.advanceTimersByTime(370);
 	await tick();
 	expect(registered.reorder?.activeChatId).toBe('source');
 	const move = async (id: string, x = 20) => {
 		hit = element(id);
-		await fireEvent.touchMove(window, { touches: [touchAt(1, x, 80)], changedTouches: [touchAt(1, x, 80)] });
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, x, 80)],
+			changedTouches: [touchAt(1, x, 80)],
+		});
 		vi.advanceTimersByTime(17);
 		await tick();
 	};
@@ -288,34 +310,56 @@ it('resumes a touch drag after blocked context and outside hits', async () => {
 	await fireEvent.touchEnd(window, { touches: [], changedTouches: [touchAt(1, 20, 80)] });
 	vi.advanceTimersByTime(17);
 	await tick();
-	expect(persist).toHaveBeenCalledWith(expect.objectContaining({
-		chatId: 'source', placement: { kind: 'relative', referenceChatId: 'target', position: 'after' },
-	}));
+	expect(persist).toHaveBeenCalledWith(
+		expect.objectContaining({
+			chatId: 'source',
+			placement: { kind: 'relative', referenceChatId: 'target', position: 'after' },
+		}),
+	);
 });
 
-it('ends workspace ownership when a native reorder scope changes', async () => {
-	vi.useFakeTimers();
-	const input = projectionInput([chat('source'), chat('target')]);
-	const registered = { windowDnd: null as WorkspaceWindowDndController | null };
-	const ended = vi.fn();
-	const view = render(SidebarVirtualSortableChatListHost, {
-		rows: buildSidebarRowModel(input).rows,
-		displayOptions: { nestDelegatedChats: true },
-		onRegisterWindowDnd: (value) => (registered.windowDnd = value), onWorkspaceDragEnd: ended,
-	});
-	await tick();
-	const source = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="source"]')!;
-	await fireEvent.dragStart(source, { clientX: 20, clientY: 44, dataTransfer: new DataTransfer() });
-	vi.advanceTimersByTime(17);
-	await tick();
-	expect(registered.windowDnd?.payload?.kind).toBe('chat');
-	await view.rerender({ rows: buildSidebarRowModel(projectionInput([
-		chat('source', { isPinned: true }), chat('target'),
-	])).rows });
-	expect(registered.windowDnd?.payload).toBeNull();
-	expect(ended).toHaveBeenCalledWith('source');
-	await fireEvent.dragEnd(source, { dataTransfer: new DataTransfer() });
-});
+it.each([false, true])(
+	'retains native workspace ownership after scope change until end or removal=%s',
+	async (remove) => {
+		vi.useFakeTimers();
+		const input = projectionInput([chat('source'), chat('target')]);
+		const registered = { windowDnd: null as WorkspaceWindowDndController | null };
+		const ended = vi.fn();
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows: buildSidebarRowModel(input).rows,
+			displayOptions: { nestDelegatedChats: true },
+			onRegisterWindowDnd: (value) => (registered.windowDnd = value),
+			onWorkspaceDragEnd: ended,
+		});
+		await tick();
+		const source = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="source"]')!;
+		await fireEvent.dragStart(source, {
+			clientX: 20,
+			clientY: 44,
+			dataTransfer: new DataTransfer(),
+		});
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(registered.windowDnd?.payload?.kind).toBe('chat');
+		await view.rerender({
+			rows: buildSidebarRowModel(
+				projectionInput([chat('source', { isPinned: true }), chat('target')]),
+			).rows,
+		});
+		expect(registered.windowDnd?.payload?.kind).toBe('chat');
+		expect(ended).not.toHaveBeenCalled();
+		if (remove) {
+			await view.rerender({ rows: buildSidebarRowModel(projectionInput([chat('target')])).rows });
+			expect(registered.windowDnd?.payload).toBeNull();
+			expect(ended).toHaveBeenCalledWith('source');
+		}
+		await fireEvent.dragEnd(document.body, { dataTransfer: new DataTransfer() });
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(registered.windowDnd?.payload).toBeNull();
+		expect(ended).toHaveBeenCalledWith('source');
+	},
+);
 
 afterEach(() => {
 	vi.useRealTimers();
