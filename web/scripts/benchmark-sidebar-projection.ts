@@ -2,14 +2,8 @@ import type { ChatSessionRecord } from '../src/lib/chat/sessions/chat-session-ty
 import {
 	buildSidebarChatOrderMap,
 	buildSidebarChatListProjection,
-	buildSidebarProjectKeys,
 	buildSidebarRowModel,
-	partitionSidebarChats,
-} from '../src/lib/components/sidebar/sidebar-row-model.js';
-import {
-	sortChatsByRecencyDesc,
-	sortSidebarChatsByRecency,
-} from '../src/lib/components/sidebar/chat-recency-sort.js';
+} from '../src/lib/sidebar/display/sidebar-row-model.js';
 import { matchesChatFilter, parseChatSearch } from '../../common/chat-filter-query.js';
 
 const SIZES = [200, 500, 2_000];
@@ -105,60 +99,46 @@ function profile(operation: () => number, iterations: number): Metric {
 	};
 }
 
-function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) {
+function scenario(
+	size: number,
+	nestedProjects: boolean,
+	activeSearch: boolean,
+	shape: 'flat' | 'forest' | 'chain',
+) {
 	const chats = fixture(size, nestedProjects);
 	const displayedChats = activeSearch
 		? chats.filter((chat) => matchesChatFilter(chat, ACTIVE_SEARCH))
 		: chats;
-	const sortedChats = sortChatsByRecencyDesc(displayedChats);
-	const orders = buildSidebarChatOrderMap(sortedChats);
-	const iterations = Math.max(5, Math.floor(20_000 / size));
-	const ungroupedProjectCount = buildSidebarProjectKeys({
-		displayedChats,
-		groupNestedProjectPaths: false,
-	}).length;
-	const groupedProjectCount = buildSidebarProjectKeys({
-		displayedChats,
-		groupNestedProjectPaths: true,
-	}).length;
-	if (nestedProjects && groupedProjectCount >= ungroupedProjectCount) {
-		throw new Error(
-			`Nested fixture did not reduce project keys: ${ungroupedProjectCount} -> ${groupedProjectCount}`,
-		);
-	}
-	const rowInput = {
-		displayedChats: sortedChats,
-		orders,
-		grouping: 'project-and-activity' as const,
-		currentTime: CURRENT_TIME,
-		inactivityDuration: '3-days' as const,
-		groupNestedProjectPaths: nestedProjects,
-		collapsedProjectKeys: new Set<string>(),
-	};
 
+	if (shape !== 'flat') {
+		chats.forEach((chat, index) => {
+			if (index > 0 && (shape === 'chain' || index % 8 !== 0)) {
+				chat.parentChat = {
+					relation: 'delegation',
+					chatId: chats[shape === 'chain' ? index - 1 : index - (index % 8)].id,
+				};
+			}
+		});
+	}
+	const iterations = Math.max(3, Math.floor(10_000 / size));
 	const projectionInput = {
-		displayedChats,
-		optimisticArchiveOrder: chats,
-		grouping: 'project-and-activity' as const,
+		allChats: chats,
+		matchingChatIds: activeSearch ? new Set(displayedChats.map((chat) => chat.id)) : undefined,
+		groupingFields: (['executor', 'project', 'activity', 'status'] as const).map((field) => ({
+			field,
+			enabled: true,
+		})),
+		nestDelegatedChats: shape !== 'flat',
 		currentTime: CURRENT_TIME,
 		inactivityDuration: '3-days' as const,
 		sortMode: 'recent' as const,
 		pinnedInsertPosition: 'top' as const,
 		groupNestedProjectPaths: nestedProjects,
 	};
-	// Navigation and selection are lazy consumers; rendering alone builds one model.
-	const legacyRowModel = () => {
-		const sorted = sortSidebarChatsByRecency(displayedChats, 'top');
-		return buildSidebarRowModel({
-			...rowInput,
-			displayedChats: sorted,
-			orders: buildSidebarChatOrderMap(sorted),
-		});
-	};
-	const expectedIds = legacyRowModel().visibleChatIds;
+	const rowInput = { ...projectionInput, orders: buildSidebarChatOrderMap(chats) };
 	const shared = buildSidebarChatListProjection(projectionInput);
-	if (JSON.stringify(expectedIds) !== JSON.stringify(shared.rowModel.visibleChatIds)) {
-		throw new Error('Shared projection changed visible chat order.');
+	if (new Set(shared.rowModel.visibleChatIds).size !== shared.rowModel.visibleChatIds.length) {
+		throw new Error('Projection duplicated a chat.');
 	}
 
 	return {
@@ -166,8 +146,8 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 		nestedProjects,
 		activeSearch,
 		matchedChats: displayedChats.length,
-		ungroupedProjectCount,
-		groupedProjectCount,
+		shape,
+		rows: shared.rowModel.rows.length,
 		iterations,
 		filter: profile(
 			() =>
@@ -175,38 +155,31 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 					.length,
 			iterations,
 		),
-		sort: profile(() => sortChatsByRecencyDesc(displayedChats).length, iterations),
-		partition: profile(() => partitionSidebarChats(displayedChats).byId.normal.size, iterations),
-		projectKeys: profile(
-			() =>
-				buildSidebarProjectKeys({
-					displayedChats,
-					groupNestedProjectPaths: nestedProjects,
-				}).length,
-			iterations,
-		),
 		sharedProjection: profile(
 			() => buildSidebarChatListProjection(projectionInput).rowModel.rows.length,
 			iterations,
 		),
-		renderOnlyProjection: profile(
-			() => legacyRowModel().rows.length + Number(partitionSidebarChats(chats).hasPinned),
+		collapsedProjection: profile(
+			() =>
+				buildSidebarChatListProjection({
+					...projectionInput,
+					collapsedProjectKeys: new Set(
+						chats.filter((chat) => !chat.parentChat).map((chat) => 'delegation:' + chat.id),
+					),
+				}).rowModel.rows.length,
 			iterations,
 		),
-		allConsumerProjections: profile(() => {
-			const navigationIds = legacyRowModel().visibleChatIds;
-			const selectionIds = legacyRowModel().visibleChatIds;
-			const rows = legacyRowModel().rows;
-			const hasPinnedChats = partitionSidebarChats(chats).hasPinned;
-			return navigationIds.length + selectionIds.length + rows.length + Number(hasPinnedChats);
-		}, iterations),
 		rowModel: profile(() => buildSidebarRowModel(rowInput).rows.length, iterations),
 	};
 }
 
 const scenarios = SIZES.flatMap((size) =>
 	[false, true].flatMap((nestedProjects) =>
-		[false, true].map((activeSearch) => scenario(size, nestedProjects, activeSearch)),
+		[false, true].flatMap((activeSearch) =>
+			(['flat', 'forest', 'chain'] as const).map((shape) =>
+				scenario(size, nestedProjects, activeSearch, shape),
+			),
+		),
 	),
 );
 

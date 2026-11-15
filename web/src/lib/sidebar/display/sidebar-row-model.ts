@@ -1,0 +1,406 @@
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import type { SidebarInactivityDuration, SidebarSortMode } from '$lib/stores/local-settings.svelte';
+import type { PinnedInsertPosition } from '$shared/settings';
+import { chatOrderGroupFor } from '$shared/chat-filter-query';
+import { effectiveExecutorId } from '$shared/executors';
+import { normalizeProjectPath } from '$lib/utils/project-path';
+import { splitProjectPath } from '$lib/project-paths/compact-project-path';
+import { isSidebarChatInactive } from './chat-inactivity';
+import { buildSidebarDelegationForest } from './sidebar-delegation';
+import {
+	enabledSidebarGroupingFields,
+	type SidebarGroupingSelection,
+	type SidebarGroupingField,
+} from './sidebar-preferences';
+import type {
+	SidebarChatOrderMap,
+	SidebarChatSection,
+	SidebarRowModel,
+	SidebarVirtualRow,
+	SidebarVirtualChatRow,
+} from './sidebar-virtual-chat-list';
+
+const bands = ['pinned', 'normal', 'archived'] as const;
+const sections: SidebarChatSection[] = [
+	'active',
+	'inactive',
+	'archived',
+	'in-progress',
+	'ready-for-review',
+	'caught-up',
+];
+
+export interface SidebarRowModelInput {
+	allChats: readonly ChatSessionRecord[];
+	matchingChatIds?: ReadonlySet<string>;
+	orders: SidebarChatOrderMap;
+	groupingFields: readonly SidebarGroupingSelection[];
+	nestDelegatedChats: boolean;
+	currentTime: Date;
+	inactivityDuration: SidebarInactivityDuration;
+	sortMode: SidebarSortMode;
+	pinnedInsertPosition: PinnedInsertPosition;
+	groupNestedProjectPaths?: boolean;
+	collapsedProjectKeys?: ReadonlySet<string>;
+	executorOrder?: readonly string[];
+	isChatOptimisticallyArchived?: (chatId: string) => boolean;
+}
+
+export function buildSidebarChatOrderMap(chats: readonly ChatSessionRecord[]): SidebarChatOrderMap {
+	const orders: SidebarChatOrderMap = { pinned: [], normal: [], archived: [] };
+	for (const chat of chats) orders[chatOrderGroupFor(chat)].push(chat.id);
+	return orders;
+}
+
+export function sidebarActivitySection(
+	chat: Pick<
+		ChatSessionRecord,
+		'id' | 'status' | 'isPinned' | 'isArchived' | 'lastActivityAt' | 'createdAt'
+	>,
+	now: Date,
+	duration: SidebarInactivityDuration,
+): SidebarChatSection {
+	if (chat.isPinned) return 'active';
+	if (chat.isArchived) return 'archived';
+	if (chat.status === 'draft') return 'active';
+	return isSidebarChatInactive(chat, now, duration) ? 'inactive' : 'active';
+}
+
+export function sidebarStatusSection(
+	chat: Pick<ChatSessionRecord, 'isProcessing' | 'isUnread'>,
+): SidebarChatSection {
+	return chat.isProcessing ? 'in-progress' : chat.isUnread ? 'ready-for-review' : 'caught-up';
+}
+
+export function sidebarProjectKey(path: string, executorId?: string | null): string {
+	return JSON.stringify([effectiveExecutorId(executorId), path]);
+}
+
+function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean): Map<string, string> {
+	const known = new Map<string, string>();
+	for (const chat of chats)
+		known.set(
+			sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId),
+			chat.projectPath,
+		);
+	const groups = new Map<string, string>();
+	for (const chat of chats) {
+		const key = sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId);
+		if (groups.has(key)) continue;
+		let path = normalizeProjectPath(chat.projectPath);
+		let group = chat.projectPath;
+		while (combine && path) {
+			group = known.get(sidebarProjectKey(path, chat.executorId)) ?? group;
+			const separator = path.lastIndexOf('/');
+			if (separator < 0 || path === '/') break;
+			path = separator === 0 ? '/' : path.slice(0, separator);
+		}
+		groups.set(key, group);
+	}
+	return groups;
+}
+
+export type SidebarGroupPath = readonly (readonly [SidebarGroupingField, string])[];
+
+export function sidebarGroupCollapseKey(parentId: string | null, path: SidebarGroupPath): string {
+	return `group:${JSON.stringify([parentId, path])}`;
+}
+
+interface ScopeTask {
+	kind: 'scope';
+	parentId: string | null;
+	ids: string[];
+	fieldIndex: number;
+	depth: number;
+	path: SidebarGroupPath;
+	executorGrouped: boolean;
+}
+
+type ProjectionTask =
+	| ScopeTask
+	| { kind: 'header'; row: Exclude<SidebarVirtualRow, SidebarVirtualChatRow> }
+	| { kind: 'chat'; row: SidebarVirtualChatRow }
+	| { kind: 'end'; id: string };
+
+export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
+	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
+	const forest = buildSidebarDelegationForest(input.allChats, input.nestDelegatedChats);
+	const matches = input.matchingChatIds ?? new Set(byId.keys());
+	const included = new Set<string>();
+	for (const match of matches) {
+		let id: string | null = byId.has(match) ? match : null;
+		while (id !== null && !included.has(id)) {
+			included.add(id);
+			id = forest.branches.get(id)!.parentId;
+		}
+	}
+	const filtered = input.matchingChatIds !== undefined;
+	const matchCounts = new Map<string, number>();
+	const traversal = [...forest.branches.keys()].sort(
+		(a, b) => forest.branches.get(b)!.start - forest.branches.get(a)!.start,
+	);
+	for (const id of traversal) {
+		const count = (matchCounts.get(id) ?? 0) + Number(matches.has(id));
+		matchCounts.set(id, count);
+		const parent = forest.branches.get(id)!.parentId;
+		if (parent !== null) matchCounts.set(parent, (matchCounts.get(parent) ?? 0) + count);
+	}
+	const fields = enabledSidebarGroupingFields(input.groupingFields);
+	const projects = projectGroups(input.allChats, Boolean(input.groupNestedProjectPaths));
+	const projectFor = (chat: ChatSessionRecord) =>
+		projects.get(sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId)) ??
+		chat.projectPath;
+	const rank = new Map(
+		bands.flatMap((band) => input.orders[band].map((id, index) => [id, index] as const)),
+	);
+	const executorRanks = new Map((input.executorOrder ?? []).map((id, index) => [id, index]));
+	const model: SidebarRowModel = {
+		rows: [],
+		visibleOrders: { pinned: [], normal: [], archived: [] },
+		visibleChatIds: [],
+		reorderScopesByChatId: new Map(),
+		projectKeys: [],
+		matchingChatIds: [...matches].filter((id) => byId.has(id)),
+		actionableChatIds: [],
+		branchEndByChatId: new Map(),
+	};
+	const valueFor = (field: SidebarGroupingField, chat: ChatSessionRecord): string => {
+		switch (field) {
+			case 'executor':
+				return effectiveExecutorId(chat.executorId);
+			case 'project':
+				return sidebarProjectKey(projectFor(chat), chat.executorId);
+			case 'activity':
+				return sidebarActivitySection(chat, input.currentTime, input.inactivityDuration);
+			case 'status':
+				return sidebarStatusSection(chat);
+		}
+	};
+	const compareGroups = (field: SidebarGroupingField, a: string, b: string): number => {
+		if (field === 'executor') {
+			if (a === 'local') return -1;
+			if (b === 'local') return 1;
+			return (
+				(executorRanks.get(a) ?? Infinity) - (executorRanks.get(b) ?? Infinity) ||
+				a.localeCompare(b)
+			);
+		}
+		if (field === 'activity' || field === 'status')
+			return sections.indexOf(a as SidebarChatSection) - sections.indexOf(b as SidebarChatSection);
+		const [executorA, pathA] = JSON.parse(a) as [string, string];
+		const [executorB, pathB] = JSON.parse(b) as [string, string];
+		return (
+			(pathA || 'Unknown project').localeCompare(pathB || 'Unknown project') ||
+			executorA.localeCompare(executorB)
+		);
+	};
+	const compareChats = (a: string, b: string): number => {
+		const left = byId.get(a)!;
+		const right = byId.get(b)!;
+		const band = chatOrderGroupFor(left);
+		const bandDifference = bands.indexOf(band) - bands.indexOf(chatOrderGroupFor(right));
+		if (bandDifference) return bandDifference;
+		const archiveDifference =
+			Number(input.isChatOptimisticallyArchived?.(b) ?? false) -
+			Number(input.isChatOptimisticallyArchived?.(a) ?? false);
+		if (band === 'archived' && archiveDifference) return archiveDifference;
+		if (band === 'archived' && input.isChatOptimisticallyArchived?.(a))
+			return (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity);
+		if (input.sortMode === 'recent') {
+			const difference =
+				Number(right.status === 'draft') - Number(left.status === 'draft') ||
+				forest.branches.get(b)!.activity - forest.branches.get(a)!.activity;
+			if (difference)
+				return band === 'pinned' && input.pinnedInsertPosition === 'bottom'
+					? -difference
+					: difference;
+		}
+		return (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity) || a.localeCompare(b);
+	};
+	const tasks: ProjectionTask[] = [
+		{
+			kind: 'scope',
+			parentId: null,
+			ids: forest.roots.filter((id) => included.has(id)),
+			fieldIndex: 0,
+			depth: 0,
+			path: [],
+			executorGrouped: false,
+		},
+	];
+	while (tasks.length) {
+		const task = tasks.pop()!;
+		if (task.kind === 'end') {
+			model.branchEndByChatId.set(task.id, model.rows.length - 1);
+			continue;
+		}
+		if (task.kind === 'header') {
+			model.rows.push(task.row);
+			continue;
+		}
+		if (task.kind === 'chat') {
+			const row = task.row;
+			model.rows.push(row);
+			model.visibleOrders[row.list].push(row.chat.id);
+			model.visibleChatIds.push(row.chat.id);
+			if (!row.contextOnly) model.actionableChatIds.push(row.chat.id);
+			model.reorderScopesByChatId.set(row.chat.id, row.reorderScopeIds);
+			tasks.push({ kind: 'end', id: row.chat.id });
+			if (!row.branch?.isCollapsed) {
+				tasks.push({
+					kind: 'scope',
+					parentId: row.chat.id,
+					ids: forest.branches.get(row.chat.id)!.children.filter((id) => included.has(id)),
+					fieldIndex: 0,
+					depth: row.depth + 1,
+					path: [],
+					executorGrouped: false,
+				});
+			}
+			continue;
+		}
+		if (!task.ids.length) continue;
+		const field = fields[task.fieldIndex];
+		if (field !== undefined) {
+			const partitions = new Map<string, string[]>();
+			for (const id of task.ids) {
+				const value = valueFor(field, byId.get(id)!);
+				const ids = partitions.get(value) ?? [];
+				ids.push(id);
+				partitions.set(value, ids);
+			}
+			for (const value of [...partitions.keys()]
+				.sort((a, b) => compareGroups(field, a, b))
+				.reverse()) {
+				const ids = partitions.get(value)!;
+				const path = [...task.path, [field, value] as const];
+				const key = sidebarGroupCollapseKey(task.parentId, path);
+				model.projectKeys.push(key);
+				const isCollapsed = !filtered && Boolean(input.collapsedProjectKeys?.has(key));
+				const ranges = ids.map((id) => forest.branches.get(id)!).sort((a, b) => a.start - b.start);
+				const containsChat = (id: string): boolean => {
+					const target = forest.branches.get(id);
+					if (!target) return false;
+					let low = 0;
+					let high = ranges.length;
+					while (low < high) {
+						const mid = (low + high) >>> 1;
+						if (ranges[mid].start <= target.start) low = mid + 1;
+						else high = mid;
+					}
+					return low > 0 && target.start < ranges[low - 1].end;
+				};
+				const common = {
+					key,
+					depth: task.depth,
+					count: ids.reduce((sum, id) => sum + (matchCounts.get(id) ?? 0), 0),
+					chatIds: ids,
+					containsChat,
+					isCollapsed,
+				};
+				let row: Exclude<SidebarVirtualRow, SidebarVirtualChatRow>;
+				if (field === 'executor')
+					row = { ...common, type: 'executor-header', executorId: value, collapseKey: key };
+				else if (field === 'project') {
+					const chat = byId.get(ids[0])!;
+					row = {
+						...common,
+						type: 'project-header',
+						projectKey: value,
+						projectPath: projectFor(chat),
+						executorId: effectiveExecutorId(chat.executorId),
+						executorGrouped: task.executorGrouped,
+						collapseKey: key,
+					};
+				} else row = { ...common, type: 'section-header', section: value as SidebarChatSection };
+				if (!isCollapsed)
+					tasks.push({
+						...task,
+						ids,
+						fieldIndex: task.fieldIndex + 1,
+						path,
+						depth: task.depth + 1,
+						executorGrouped: task.executorGrouped || field === 'executor',
+					});
+				tasks.push({ kind: 'header', row });
+			}
+			continue;
+		}
+		const ordered = [...task.ids].sort(compareChats);
+		const scopes = buildSidebarChatOrderMap(
+			ordered
+				.filter((id) => matches.has(id) && !forest.ambiguousIds.has(id))
+				.map((id) => byId.get(id)!),
+		);
+		for (let index = ordered.length - 1; index >= 0; index--) {
+			const id = ordered[index];
+			const chat = byId.get(id)!;
+			const branch = forest.branches.get(id)!;
+			const list = chatOrderGroupFor(chat);
+			const collapseKey = `delegation:${id}`;
+			const contextOnly = !matches.has(id);
+			const row: SidebarVirtualChatRow = {
+				type: 'chat',
+				key: `chat:${id}`,
+				depth: task.depth,
+				chat,
+				list,
+				isPinned: list === 'pinned',
+				isArchived: list === 'archived',
+				projectPath: chat.projectPath,
+				groupProjectKey: sidebarProjectKey(projectFor(chat), chat.executorId),
+				groupProjectPath: projectFor(chat),
+				executorGrouped: task.executorGrouped,
+				reorderScopeKey: JSON.stringify([input.nestDelegatedChats, task.parentId, list, task.path]),
+				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
+				contextOnly,
+				section: task.path.find(([field]) => field === 'activity')?.[1] as
+					SidebarChatSection | undefined,
+				branch: branch.descendants
+					? {
+							collapseKey,
+							isCollapsed: !filtered && Boolean(input.collapsedProjectKeys?.has(collapseKey)),
+							descendants: branch.descendants,
+							unread: branch.unread - Number(chat.isUnread),
+							processing: branch.processing - Number(chat.isProcessing),
+							activity: branch.activity,
+							containsChat: (target) => forest.contains(id, target),
+						}
+					: undefined,
+			};
+			tasks.push({ kind: 'chat', row });
+		}
+	}
+	const pathsByName = new Map<string, Set<string>>();
+	for (const row of model.rows) {
+		if (row.type !== 'project-header') continue;
+		const name = splitProjectPath(row.projectPath).name;
+		const paths = pathsByName.get(name) ?? new Set();
+		paths.add(row.projectPath);
+		pathsByName.set(name, paths);
+	}
+	for (const row of model.rows)
+		if (row.type === 'project-header')
+			row.showParentPath = pathsByName.get(splitProjectPath(row.projectPath).name)!.size > 1;
+	return model;
+}
+
+export interface SidebarChatListProjection {
+	rowModelInput: SidebarRowModelInput;
+	rowModel: SidebarRowModel;
+	hasPinnedChats: boolean;
+}
+
+export function buildSidebarChatListProjection(
+	input: Omit<SidebarRowModelInput, 'orders'> & { orders?: SidebarChatOrderMap },
+): SidebarChatListProjection {
+	const rowModelInput = {
+		...input,
+		orders: input.orders ?? buildSidebarChatOrderMap(input.allChats),
+	};
+	return {
+		rowModelInput,
+		rowModel: buildSidebarRowModel(rowModelInput),
+		hasPinnedChats: input.allChats.some((chat) => chat.isPinned),
+	};
+}
