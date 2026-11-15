@@ -49,7 +49,8 @@
 	isCollapsed={row.isCollapsed}
 	{containsSelectedChat}
 	{separated}
-	title={`${executorLabel}${executor ? '' : ` · ${row.executorId}`}`}
+	title={preview || executor ? executorLabel : `${executorLabel} · ${row.executorId}`}
+	disabled={!onToggle}
 	onToggle={handleToggle}
 	data-sidebar-executor-header={row.executorId}
 	data-sidebar-executor-collapse-key={row.collapseKey}

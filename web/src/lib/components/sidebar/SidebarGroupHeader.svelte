@@ -54,7 +54,7 @@
 	data-sidebar-group-header
 >
 	<!-- Actions sit outside the heading so its accessible name stays the group label. -->
-	<div class="h-full min-w-0 flex-1" role="heading" aria-level={level === 'executor' ? 2 : 3}>
+	<div class="h-full min-w-0 flex-1" role="heading" aria-level={depth + 2}>
 		<button
 			type="button"
 			class={cn(

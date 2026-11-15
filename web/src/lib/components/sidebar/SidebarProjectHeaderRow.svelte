@@ -66,6 +66,7 @@
 	isCollapsed={row.isCollapsed}
 	{containsSelectedChat}
 	title={fullLabel}
+	disabled={!onToggle}
 	onToggle={handleToggle}
 	data-sidebar-project-header={row.projectPath || fullLabel}
 	data-sidebar-project-key={row.projectKey}

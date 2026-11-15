@@ -27,6 +27,7 @@
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { WORKSPACE_DRAG_MIME } from '$lib/workspace/window-dnd.svelte.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import { chatActivityTimeMs } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
 		branch?: SidebarVirtualChatRow['branch'];
@@ -115,6 +116,10 @@
 
 	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
+	const branchDescriptionId = $props.id();
+	const branchActivity = $derived(branch && branch.activity > chatActivityTimeMs(session)
+		? m.sidebar_branch_activity({ time: new Date(branch.activity).toLocaleString() })
+		: undefined);
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
@@ -327,6 +332,7 @@
 {/snippet}
 
 <div class="chat-item-root group relative flex h-full flex-col justify-center" bind:this={itemEl}>
+	{#if branchActivity}<span id={branchDescriptionId} class="sr-only">{branchActivity}</span>{/if}
 	{#if isMobile}
 		<div
 			class={cn(
@@ -348,6 +354,8 @@
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
 				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-describedby={branchActivity ? branchDescriptionId : undefined}
+				title={branchActivity}
 				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
@@ -387,6 +395,8 @@
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
 				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-describedby={branchActivity ? branchDescriptionId : undefined}
+				title={branchActivity}
 				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}

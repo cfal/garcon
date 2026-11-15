@@ -36,6 +36,7 @@
 	count={row.count}
 	isCollapsed={row.isCollapsed}
 	{containsSelectedChat}
+	disabled={!onToggle}
 	onToggle={handleToggle}
 	data-sidebar-section-header={row.section}
 	data-sidebar-section-key={row.key}

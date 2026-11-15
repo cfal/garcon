@@ -15,21 +15,14 @@
 		data-sidebar-parent-context>{m.sidebar_parent_context()}</span
 	>{/if}
 {#if branch}
+	{@const summary = m.sidebar_branch_summary({ count: branch.descendants, unread: branch.unread, processing: branch.processing })}
 	<span
 		class="inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums text-muted-foreground"
-		title={m.sidebar_branch_summary({
-			count: branch.descendants,
-			unread: branch.unread,
-			processing: branch.processing,
-		})}
-		aria-label={m.sidebar_branch_summary({
-			count: branch.descendants,
-			unread: branch.unread,
-			processing: branch.processing,
-		})}
+		title={summary}
 		data-sidebar-branch-summary
 	>
-		<GitBranch class="size-3" aria-hidden="true" />{branch.descendants}
+		<span class="sr-only">{summary}</span>
+		<GitBranch class="size-3" aria-hidden="true" /><span aria-hidden="true">{branch.descendants}</span>
 		{#if branch.processing}<span
 				class="ml-1 inline-flex items-center gap-0.5 text-status-processing"
 				aria-hidden="true"><CirclePlay class="size-3" />{branch.processing}</span

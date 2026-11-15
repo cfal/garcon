@@ -223,9 +223,10 @@
 				class="flex w-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
 				style={`margin-left:${sidebarChatInset(row.depth)}px`}
 				aria-expanded={!row.branch.isCollapsed}
+				disabled={!onToggleBranch}
 				aria-label={row.branch.isCollapsed
-					? m.sidebar_branch_expand({ name: row.chat.title })
-					: m.sidebar_branch_collapse({ name: row.chat.title })}
+					? m.sidebar_branch_expand({ name: row.chat.title || m.sidebar_chats_new_chat() })
+					: m.sidebar_branch_collapse({ name: row.chat.title || m.sidebar_chats_new_chat() })}
 				onclick={() => onToggleBranch?.(row.branch!.collapseKey)}
 			>
 				<ChevronRight class={cn('size-3', !row.branch.isCollapsed && 'rotate-90')} />
@@ -237,12 +238,7 @@
 				aria-hidden="true"
 			></span>
 		{/if}
-		<div
-			class="min-w-0 flex-1"
-			title={row.branch && Number.isFinite(row.branch.activity)
-				? m.sidebar_branch_activity({ time: new Date(row.branch.activity).toLocaleString() })
-				: undefined}
-		>
+		<div class="min-w-0 flex-1">
 			<svelte:boundary>
 				<SidebarChatItem
 					session={row.chat}
@@ -287,7 +283,7 @@
 				{#snippet failed()}
 					<div
 						class="flex h-full items-center pr-3 text-sm text-muted-foreground"
-						style={`padding-left:${sidebarChatInset(row.depth)}px;`}
+						style={`padding-left:${sidebarChatInset(displayOptions.nestDelegatedChats ? 0 : row.depth)}px;`}
 						data-sidebar-virtual-row-error={row.chat.id}
 					>
 						{row.chat.title || m.sidebar_chats_unnamed()}

@@ -906,20 +906,20 @@
 						{row}
 						separated={virtualItem.index > 0}
 						{containsSelectedChat}
-						onToggle={onToggleProjectCollapsed}
+						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
 				{:else if row.type === 'project-header'}
 					<SidebarProjectHeaderRow
 						{row}
 						{onNewProjectChat}
 						{containsSelectedChat}
-						onToggle={onToggleProjectCollapsed}
+						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
 				{:else if row.type === 'section-header'}
 					<SidebarSectionHeaderRow
 						{row}
 						{containsSelectedChat}
-						onToggle={onToggleProjectCollapsed}
+						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
 				{:else}
 					<SidebarVirtualSortableChatRow
@@ -934,7 +934,7 @@
 						{displayOptions}
 						{dragEnabled}
 						reorderEnabled={reorderEnabled && row.reorderScopeIds.length > 1}
-						onToggleBranch={onToggleProjectCollapsed}
+						onToggleBranch={isFiltered ? undefined : onToggleProjectCollapsed}
 						isDragging={draggingChatId === row.chat.id}
 						onDragStart={startSidebarDrag}
 						onDragSourceUnmount={cancelUnmountedDragSource}
