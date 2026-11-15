@@ -1,11 +1,18 @@
 <script lang="ts">
 	import { getExecutors, getRemoteSettings } from '$lib/context';
+	import { tick } from 'svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
 	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import { NewChatProjectsController } from '$lib/chat/new-chat/new-chat-projects-controller';
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 	import { savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings';
-	import ProjectPinnedPathToggleButton from '$lib/components/project-paths/ProjectPinnedPathToggleButton.svelte';
+	import { removeProjectPathFromListOptimistically } from '$lib/project-paths/project-list-preferences';
+	import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
+	import Ellipsis from '@lucide/svelte/icons/ellipsis';
+	import Pin from '@lucide/svelte/icons/pin';
+	import PinOff from '@lucide/svelte/icons/pin-off';
+	import ListMinus from '@lucide/svelte/icons/list-minus';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Folder from '@lucide/svelte/icons/folder';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -15,16 +22,31 @@
 	const remoteSettings = getRemoteSettings();
 	const projects = new NewChatProjectsController(() => form, executors, remoteSettings);
 	const groups = $derived(projects.groups);
+	let projectList = $state<HTMLElement | null>(null);
+	let heading = $state<HTMLElement | null>(null);
 
 	function togglePin(executorId: string, path: string): void {
 		void projects.togglePin(executorId, path, (paths, owner) =>
 			savePinnedProjectPathsOptimistically(remoteSettings, paths, { executorId: owner }),
 		);
 	}
+
+	async function removeFromList(executorId: string, path: string): Promise<void> {
+		const removed = await projects.removeFromList(executorId, path, (owner, target) =>
+			removeProjectPathFromListOptimistically(remoteSettings, target, { executorId: owner }),
+		);
+		if (!removed) return;
+		await tick();
+		if (document.activeElement !== document.body) return;
+		const nextProject = projectList?.querySelector<HTMLButtonElement>(
+			'[data-slot="new-chat-project-select"]:not(:disabled)',
+		);
+		(nextProject ?? heading)?.focus();
+	}
 </script>
 
-<section aria-labelledby={id + '-heading'} class="mb-3 min-w-0 space-y-2">
-	<h3 id={id + '-heading'} class="text-sm font-medium text-foreground">
+<section bind:this={projectList} aria-labelledby={id + '-heading'} class="mb-3 min-w-0 space-y-2">
+	<h3 bind:this={heading} tabindex="-1" id={id + '-heading'} class="text-sm font-medium text-foreground">
 		{m.chat_new_chat_saved_projects()}
 	</h3>
 	{#if groups.length > 0}
@@ -49,6 +71,8 @@
 					<div class="grid min-w-0 grid-cols-1 items-start gap-1.5">
 						{#each group.paths as path (path)}
 							{@const selected = projects.isSelected(group.executorId, path)}
+							{@const pinned = projects.isPinned(group.executorId, path)}
+							{@const projectLabel = group.executorId === 'local' ? path : label + ': ' + path}
 							<div
 								data-slot="new-chat-project-card"
 								class="flex min-w-0 items-stretch rounded-lg border transition-colors {selected
@@ -58,7 +82,7 @@
 								<button
 									data-slot="new-chat-project-select"
 									type="button"
-									aria-label={group.executorId === 'local' ? path : label + ': ' + path}
+									aria-label={projectLabel}
 									aria-pressed={selected}
 									aria-describedby={!ready ? id + '-' + group.executorId + '-status' : undefined}
 									disabled={!ready || form.isUpdatingPinnedPath}
@@ -74,14 +98,31 @@
 										>
 										<span class="block truncate text-xs text-muted-foreground">{path}</span>
 									</span>
+									{#if pinned}
+										<span data-slot="new-chat-project-pinned" role="img" aria-label={m.chat_new_chat_project_pinned()} title={m.chat_new_chat_project_pinned()} class="shrink-0 text-primary">
+											<Pin class="size-3.5 rotate-45" aria-hidden="true" />
+										</span>
+									{/if}
 								</button>
-								<ProjectPinnedPathToggleButton
-									isPinned={projects.isPinned(group.executorId, path)}
-									disabled={form.isUpdatingPinnedPath}
-									loading={projects.isPinPending(group.executorId, path)}
-									onToggle={() => togglePin(group.executorId, path)}
-									class="min-w-11 shrink-0 rounded-r-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								/>
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										disabled={form.isUpdatingPinnedPath}
+										aria-label={m.chat_new_chat_project_actions({ project: projectLabel })}
+										title={m.chat_new_chat_project_actions({ project: projectLabel })}
+										aria-busy={projects.isPending(group.executorId, path)}
+										class="inline-flex min-w-11 shrink-0 items-center justify-center rounded-r-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+									>
+										{#if projects.isPending(group.executorId, path)}<Loader2 class="size-4 animate-spin" aria-hidden="true" />{:else}<Ellipsis class="size-4" aria-hidden="true" />{/if}
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end" class="w-44">
+										<DropdownMenuItem disabled={form.isUpdatingPinnedPath} onSelect={() => togglePin(group.executorId, path)}>
+											{#if pinned}<PinOff class="size-4" aria-hidden="true" />{m.chat_new_chat_project_unpin()}{:else}<Pin class="size-4" aria-hidden="true" />{m.chat_new_chat_project_pin()}{/if}
+										</DropdownMenuItem>
+										<DropdownMenuItem disabled={form.isUpdatingPinnedPath} onSelect={() => void removeFromList(group.executorId, path)}>
+											<ListMinus class="size-4" aria-hidden="true" />{m.chat_new_chat_project_remove()}
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							</div>
 						{/each}
 					</div>

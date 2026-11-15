@@ -8,6 +8,13 @@ function fixture() {
 		executorId: 'local',
 		projectPath: 'D:/projects/atlas',
 		selectedProjectPath: 'D:/projects/atlas',
+		showProjectCard: true,
+		get projectCardPath(): string | null {
+			return form.showProjectCard ? form.selectedProjectPath : null;
+		},
+		dismissProjectCard: vi.fn((path: string) => {
+			if (path === form.selectedProjectPath) form.showProjectCard = false;
+		}),
 		pinnedProjectPaths: ['D:\\projects\\atlas'],
 		isUpdatingPinnedPath: false,
 		showBrowser: true,
@@ -19,6 +26,7 @@ function fixture() {
 		selectProjectPath: vi.fn((path: string) => {
 			form.projectPath = path;
 			form.selectedProjectPath = path;
+			form.showProjectCard = true;
 		}),
 	};
 	const settings = {
@@ -154,8 +162,8 @@ describe('new chat projects', () => {
 		const updating = projects.togglePin('local', 'D:/projects/atlas', persist);
 		expect(form.isUpdatingPinnedPath).toBe(true);
 		expect(form.pinnedProjectPaths).toEqual([]);
-		expect(projects.isPinPending('local', 'D:/projects/atlas')).toBe(true);
-		expect(projects.isPinPending(remoteExecutor.id, '/projects/recent')).toBe(false);
+		expect(projects.isPending('local', 'D:/projects/atlas')).toBe(true);
+		expect(projects.isPending(remoteExecutor.id, '/projects/recent')).toBe(false);
 		expect(await projects.togglePin(remoteExecutor.id, '/projects/recent', persist)).toBe(false);
 		expect(projects.select(remoteExecutor.id, '/projects/recent')).toBe(false);
 		rejectSave(new Error('Synthetic settings failure'));
@@ -163,7 +171,7 @@ describe('new chat projects', () => {
 		expect(form.error).toBe('Synthetic settings failure');
 		expect(form.pinnedProjectPaths).toEqual(['D:\\projects\\atlas', 'D:/projects/atlas']);
 		expect(form.isUpdatingPinnedPath).toBe(false);
-		expect(projects.isPinPending('local', 'D:/projects/atlas')).toBe(false);
+		expect(projects.isPending('local', 'D:/projects/atlas')).toBe(false);
 		expect(persist).toHaveBeenCalledExactlyOnceWith([], 'local');
 	});
 
@@ -181,5 +189,50 @@ describe('new chat projects', () => {
 		expect(persist).toHaveBeenCalledExactlyOnceWith(['/projects/offline'], 'removed');
 		expect(form.executorId).toBe('local');
 		expect(form.selectExecutor).not.toHaveBeenCalled();
+	});
+
+	it('removes a selected shortcut while preserving its project and selected worktree', async () => {
+		const { projects, form, settings } = fixture();
+		form.projectPath = 'D:/projects/atlas-worktree';
+		const persist = vi.fn(async () => {
+			settings.snapshot = makeRemoteSettingsSnapshot({ paths: { recentProjectPaths: ['/projects/recent'] } });
+			return settings.snapshot;
+		});
+		expect(await projects.removeFromList('local', 'D:/projects/atlas', persist)).toBe(true);
+		expect(persist).toHaveBeenCalledExactlyOnceWith('local', 'D:/projects/atlas');
+		expect(form.projectPath).toBe('D:/projects/atlas-worktree');
+		expect(form.selectedProjectPath).toBe('D:/projects/atlas');
+		expect(form.projectCardPath).toBeNull();
+		expect(projects.groups).toEqual([{ executorId: 'local', paths: ['/projects/recent'] }]);
+		expect(form.selectExecutor).not.toHaveBeenCalled();
+		expect(form.selectProjectPath).not.toHaveBeenCalled();
+	});
+
+	it('captures an unavailable owner for removal without changing Local selection', async () => {
+		const { projects, form, settings } = fixture();
+		const persist = vi.fn().mockResolvedValue(settings.snapshot);
+		expect(await projects.removeFromList('removed', '/projects/offline', persist)).toBe(true);
+		expect(persist).toHaveBeenCalledExactlyOnceWith('removed', '/projects/offline');
+		expect(form.executorId).toBe('local');
+		expect(form.dismissProjectCard).not.toHaveBeenCalled();
+	});
+
+	it('retains a shortcut and its selection after failed removal and rejects overlapping mutations', async () => {
+		const { projects, form } = fixture();
+		let rejectSave!: (error: Error) => void;
+		const persist = vi.fn(() => new Promise<ReturnType<typeof makeRemoteSettingsSnapshot>>((_resolve, reject) => {
+			rejectSave = reject;
+		}));
+		const pending = projects.removeFromList('local', 'D:/projects/atlas', persist);
+		expect(projects.isPending('local', 'D:/projects/atlas')).toBe(true);
+		expect(await projects.removeFromList('removed', '/projects/offline', persist)).toBe(false);
+		rejectSave(new Error('Synthetic removal failed'));
+		expect(await pending).toBe(false);
+		expect(form.error).toBe('Synthetic removal failed');
+		expect(form.pinnedProjectPaths).toEqual(['D:\\projects\\atlas']);
+		expect(form.dismissProjectCard).not.toHaveBeenCalled();
+		expect(form.isUpdatingPinnedPath).toBe(false);
+		expect(await projects.removeFromList('local', '/stale', persist)).toBe(false);
+		expect(persist).toHaveBeenCalledTimes(1);
 	});
 });

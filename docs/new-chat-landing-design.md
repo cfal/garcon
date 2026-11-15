@@ -11,10 +11,12 @@ existing composer. Compact project cards use one column within a narrow content
 area. Each card shows its folder name and a truncated path, with full paths on hover and
 executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
-Each card has its own pin toggle on the right. Selection uses highlighting without
-a checkmark, and pinning a card preserves the selected project and prompt.
-The pin uses the same icon in both states: faded when unpinned, fully visible and
-rotated 45 degrees when pinned. Action labels remain Pin and Unpin.
+Each card has a three-dot menu on the right with Pin or Unpin and Remove from list.
+Only pinned cards show a rotated pin indicator. Selection uses highlighting without
+a checkmark. Pinning and removal preserve the selected project, worktree and prompt.
+Removal deletes that executor's saved pin and recent entry, retaining other owners
+and the folder itself. A removed selected card stays absent on reopen; choosing
+the folder explicitly or starting a session there can make it available again.
 
 Project cards reuse the existing executor-qualified pinned and recent paths. Pinned
 folders appear first; recent folders retain their recorded order. Duplicate drive-letter
@@ -40,14 +42,18 @@ Mobile also offers Enter path directly, without opening the full-screen browser.
 Typing retains the existing debounced validation and shows path errors even when
 the executor cannot provide Git services.
 This replaces the unsuccessful native-dialog attempt; no OS dialog is requested.
-This change does not introduce environment presets or change stored settings,
-execution admission, provider configuration, HTTP or WebSocket contracts.
+Remove from list uses an executor-qualified settings operation that removes only
+the requested path under the settings mutation lock. Concurrent pin/recent updates
+remain intact. It adds no environment presets, executor RPC or WebSocket payloads.
+The forwarded CLI settings endpoint remains limited to transcript search enablement.
 
 The existing NewChatDialog remains the owner of open/close, focus containment,
 ticket prefills, draft creation and navigation. Its presentation fills the
 available viewport and returns to the previous workspace on Close or Escape.
 The form, prompt editor and model selector retain their owners. The preamble summary
 uses an add button to open selection and only shows Clear when a preamble will apply.
+The tag control sits below the complete Worktrees section and visibly reads
+Add tags to session; its editor and selected tags retain their existing behavior.
 The landing page scrolls within the keyboard-adjusted viewport on mobile.
 
 Worktree discovery uses the existing executor-qualified Git API. Loading, empty,

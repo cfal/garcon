@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
 	import { getExecutors } from '$lib/context';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
@@ -12,8 +12,7 @@
 	let {
 		form,
 		isMobile,
-		children,
-	}: { form: NewChatFormState; isMobile: boolean; children?: Snippet } = $props();
+	}: { form: NewChatFormState; isMobile: boolean } = $props();
 	const executors = getExecutors();
 	const id = $props.id();
 	let pathInput = $state<HTMLInputElement | null>(null);
@@ -97,7 +96,6 @@
 					class="inline-flex min-h-10 items-center rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 				>{m.chat_new_chat_enter_path()}</button>
 			{/if}
-			{@render children?.()}
 		</div>
 		{#if pathFieldOpen}
 			{#key browseContextKey}

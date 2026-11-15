@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SettingsStore } from '../store.js';
 import { GENERATION_UI_SETTING_KEYS, normalizeRemoteSettingsSnapshot, parseExecutorProjectPreferences } from '../../../../common/settings.js';
+import { writeJsonFileAtomic } from '../../../common/json-file-store.ts';
 import { resolveEffectiveGenerationConfig } from '../generation-effective.js';
 import { buildRemoteSettingsSnapshot } from '../remote-snapshot.js';
 import type { AgentRegistryServiceContract } from '../../agents/registry.js';
@@ -124,6 +125,8 @@ test('executor path patches preserve concurrent recents and other executors thro
   roots.push(root);
   const settings = new SettingsStore(root);
   await settings.init();
+  const localPaths = { pinnedProjectPaths: ['/local/pin'], recentProjectPaths: ['/local/recent'], browseStartPath: '/local/default' };
+  await settings.setPathSettings(localPaths);
   const otherExecutor = '33333333-3333-4333-8333-333333333333';
   await settings.recordChatStartup({ agentId: 'test', model: 'synthetic', executorId: EXECUTOR, projectPath: '/remote/old' });
   await settings.setPathSettings({ byExecutor: { [EXECUTOR]: { defaultPath: '/remote/default' } } });
@@ -141,4 +144,71 @@ test('executor path patches preserve concurrent recents and other executors thro
   const restarted = new SettingsStore(root);
   await restarted.init();
   expect(restarted.getPathSettings().byExecutor).toEqual(expected);
+  expect(restarted.getPathSettings()).toEqual(expect.objectContaining(localPaths));
+});
+
+test.each(['local', EXECUTOR])('project removal serializes with newer pins and recents for %s', async (executorId) => {
+  const root = await mkdtemp(join(homedir(), 'garcon-project-removal-'));
+  roots.push(root);
+  let holdNextWrite = false;
+  let entered!: () => void;
+  let release!: () => void;
+  const writeEntered = new Promise<void>(resolve => { entered = resolve; });
+  const writeReleased = new Promise<void>(resolve => { release = resolve; });
+  const settings = new SettingsStore(root, { writeFile: async (...args) => {
+    if (holdNextWrite) {
+      holdNextWrite = false;
+      entered();
+      await writeReleased;
+    }
+    await writeJsonFileAtomic(...args);
+  } });
+  await settings.init();
+  const selection = { agentId: 'test', model: 'synthetic', executorId };
+  const otherExecutor = '33333333-3333-4333-8333-333333333333';
+  const initialPins = ['D:\\projects\\atlas', '/keep'];
+  const newPins = [...initialPins, '/new-pin'];
+  await settings.setPathSettings({
+    pinnedProjectPaths: executorId === 'local' ? initialPins : ['/local/pin'],
+    recentProjectPaths: ['/local/recent'],
+    browseStartPath: '/local/default',
+    byExecutor: {
+      ...(executorId === 'local' ? {} : { [executorId]: { defaultPath: '/remote/default', pinnedPaths: initialPins } }),
+      [otherExecutor]: { defaultPath: '/other/default', pinnedPaths: ['D:/projects/atlas'] },
+    },
+  });
+  await settings.recordChatStartup({ ...selection, projectPath: 'D:/projects/atlas' });
+  holdNextWrite = true;
+  const pinning = settings.setPathSettings(executorId === 'local'
+    ? { pinnedProjectPaths: newPins }
+    : { byExecutor: { [executorId]: { pinnedPaths: newPins } } });
+  await writeEntered;
+  const recording = settings.recordChatStartup({ ...selection, projectPath: '/new-recent' });
+  const identity = { executorId, projectPath: 'D:/projects/atlas' };
+  const removing = settings.removeProjectPathFromList(identity);
+  identity.executorId = otherExecutor;
+  identity.projectPath = '/unrelated';
+  release();
+  await Promise.all([pinning, recording, removing]);
+  const paths = settings.getPathSettings();
+  const owner = executorId === 'local'
+    ? { pinnedPaths: paths.pinnedProjectPaths, recentPaths: paths.recentProjectPaths }
+    : parseExecutorProjectPreferences(paths.byExecutor)?.[executorId];
+  expect(owner?.pinnedPaths).toEqual(['/keep', '/new-pin']);
+  expect(owner?.recentPaths).toEqual(executorId === 'local' ? ['/new-recent', '/local/recent'] : ['/new-recent']);
+  expect(paths.browseStartPath).toBe('/local/default');
+  expect(parseExecutorProjectPreferences(paths.byExecutor)?.[otherExecutor]).toEqual({
+    defaultPath: '/other/default', pinnedPaths: ['D:/projects/atlas'], recentPaths: [],
+  });
+  if (executorId !== 'local') {
+    expect(paths.pinnedProjectPaths).toEqual(['/local/pin']);
+    expect(paths.recentProjectPaths).toEqual(['/local/recent']);
+    expect(parseExecutorProjectPreferences(paths.byExecutor)?.[executorId]?.defaultPath).toBe('/remote/default');
+  }
+  const version = settings.getRemoteSettingsVersion();
+  await settings.removeProjectPathFromList({ executorId, projectPath: 'D:\\projects\\atlas' });
+  expect(settings.getRemoteSettingsVersion()).toBe(version);
+  const restarted = new SettingsStore(root);
+  await restarted.init();
+  expect(restarted.getPathSettings()).toEqual(paths);
 });

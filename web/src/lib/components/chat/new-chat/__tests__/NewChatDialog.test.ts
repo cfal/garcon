@@ -154,7 +154,8 @@ describe('NewChatDialog', () => {
 		const textarea = document.querySelector('textarea')!;
 		await waitFor(() => expect(textarea.value).toBe(scheduledSeed.prefill));
 		expect(onCreateDraft).not.toHaveBeenCalled();
-		expect(await screen.findByText('/workspace/scheduled', { exact: true })).toBeTruthy();
+		expect((await screen.findByRole('button', { name: '/workspace/scheduled' })).getAttribute('aria-pressed')).toBe('true');
+		expect(screen.getByRole('button', { name: 'Project actions: /workspace/scheduled' })).toBeTruthy();
 		await fireEvent.input(textarea, { target: { value: 'Edited 1000000000000001' } });
 		const send = screen.getByRole('button', { name: 'Start session' });
 		await waitFor(() => expect(send).toHaveProperty('disabled', false));
@@ -174,7 +175,7 @@ describe('NewChatDialog', () => {
 		await waitFor(() => expect(document.querySelector('textarea')?.value).toBe(scheduledSeed.prefill));
 		shell.openNewChatDialog({ ...scheduledSeed, prefill: 'Replacement', startup: { ...scheduledSeed.startup!, projectPath: '/workspace/replacement' } });
 		await waitFor(() => expect(document.querySelector('textarea')?.value).toBe('Replacement'));
-		expect(await screen.findByText('/workspace/replacement', { exact: true })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: '/workspace/replacement' })).toBeTruthy();
 		shell.openNewChatDialog();
 		await waitFor(() => expect(screen.getByRole('button', { name: '/workspace' }).getAttribute('aria-pressed')).toBe('true'));
 		expect(document.querySelector('textarea')?.value).not.toBe('Replacement');

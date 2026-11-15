@@ -3,7 +3,7 @@
 // the config payload used to start a session.
 
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
-import { projectPathKey } from '$lib/project-paths/project-path-key';
+import { projectPathKey } from '$shared/project-path-preferences';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { NewChatPathValidationController } from './new-chat-path-validation-controller.js';
@@ -79,6 +79,7 @@ export class NewChatFormState {
 	// Path
 	projectPath = $state('');
 	#selectedProjectPath = $state<string | null>(null);
+	#showProjectCard = $state(false);
 	#pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
@@ -196,6 +197,7 @@ export class NewChatFormState {
 		this.#executorModelCandidate ??= this.resolvedModelSelection;
 		this.executorId = executorId;
 		this.#selectedProjectPath = null;
+		this.#showProjectCard = false;
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
@@ -227,6 +229,15 @@ export class NewChatFormState {
 
 	get selectedProjectPath(): string {
 		return this.#selectedProjectPath ?? this.nonblankPath;
+	}
+
+	get projectCardPath(): string | null {
+		return this.#showProjectCard ? this.selectedProjectPath : null;
+	}
+
+	dismissProjectCard(path: string): void {
+		if (projectPathKey(path) === projectPathKey(this.selectedProjectPath))
+			this.#showProjectCard = false;
 	}
 
 	get isPinnedPath(): boolean {
@@ -688,9 +699,11 @@ export class NewChatFormState {
 	selectWorktree(worktreePath: string): void {
 		if (!this.worktreesAvailable) return;
 		const projectPath = this.selectedProjectPath;
+		const showProjectCard = this.#showProjectCard;
 		this.#cancelWorktreeLoad();
 		this.selectProjectPath(worktreePath);
 		this.#selectedProjectPath = projectPath;
+		this.#showProjectCard = showProjectCard;
 		this.worktreeModalOpen = false;
 	}
 
@@ -747,6 +760,7 @@ export class NewChatFormState {
 	#updateProjectPath(path: string): void {
 		this.projectPath = path;
 		this.#selectedProjectPath = path;
+		this.#showProjectCard = true;
 		this.clearError();
 	}
 
@@ -894,6 +908,7 @@ export class NewChatFormState {
 		});
 		this.projectPath = seed.projectPath;
 		this.#selectedProjectPath = null;
+		this.#showProjectCard = true;
 		this.restoreExecutionModes(seed.permissionMode, seed.thinkingMode);
 		this.replaceAgentSettingsById(seed.agentSettingsById);
 		this.chatTags = [...seed.tags];
@@ -905,6 +920,7 @@ export class NewChatFormState {
 	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
 	reseed(prefill: string, prospectiveChatId?: ChatId): void {
 		this.#selectedProjectPath = null;
+		this.#showProjectCard = false;
 		this.#pathCompletion.reset();
 		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { loadComposerMarkdownEditor } from '../../composer/composer-markdown-editor-loader.js';
@@ -52,6 +52,7 @@ vi.mock('$lib/api/files', () => ({
 vi.mock('$lib/api/settings', () => ({
 	getRemoteSettings: vi.fn(),
 	updateRemoteSettings: vi.fn(),
+	removeProjectPathFromList: vi.fn(),
 }));
 
 vi.mock('$lib/api/snippets', async (importOriginal) => {
@@ -227,6 +228,30 @@ function previewResponse(
 }
 
 describe('NewChatForm', () => {
+	it.each([false, true])('places the labelled tag control below worktrees and retains tags on submit (mobile: %s)', async (isMobile) => {
+		stubMatchMedia(isMobile);
+		const onStartChat = vi.fn();
+		const prompt = await renderSubmittableForm(onStartChat);
+		const worktrees = screen.getByRole('region', { name: 'Worktrees' });
+		const addTags = screen.getByRole('button', { name: 'Add tags to session' });
+		expect(addTags.textContent).toContain('Add tags to session');
+		expect(worktrees.contains(addTags)).toBe(false);
+		expect(worktrees.compareDocumentPosition(addTags) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+		await fireEvent.click(addTags);
+		const tagInput = screen.getByPlaceholderText('Type a tag...');
+		await fireEvent.input(tagInput, { target: { value: 'review' } });
+		await fireEvent.keyDown(tagInput, { key: 'Enter' });
+		const removeTag = screen.getByRole('button', { name: 'Remove tag review' });
+		expect(removeTag).toBeTruthy();
+		await fireEvent.click(addTags);
+		expect(screen.queryByPlaceholderText('Type a tag...')).toBeNull();
+		expect(removeTag.isConnected).toBe(true);
+		expect(prompt.value).toBe('first line');
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onStartChat).toHaveBeenCalledWith(expect.objectContaining({ tags: ['review'] }), PROSPECTIVE_CHAT_ID);
+	});
+
 	it('explains why a copied direct agent cannot start when direct chats are disabled', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');
@@ -1058,9 +1083,10 @@ describe('NewChatForm', () => {
 			expect(startButton.disabled).toBe(false);
 		});
 
-		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+		const toggleButton = screen.getByRole('button', { name: 'Project actions: /workspace/project' });
 		expect(screen.getByRole('button', { name: '/workspace/project' })).toBeTruthy();
 		await fireEvent.click(toggleButton);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^Pin$/ }));
 
 		const projectPathInput = screen.getByRole('button', { name: 'Choose folder' }) as HTMLButtonElement;
 		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
@@ -2254,7 +2280,41 @@ describe('New Chat saved projects', () => {
 		settings.applySnapshot({ ...snapshot, paths: { ...snapshot.paths, pinnedProjectPaths: [] } });
 		await waitFor(() => expect(selected.getAttribute('aria-pressed')).toBe('true'));
 		expect(screen.getByRole('button', { name: '/local' })).toBe(selected);
-		expect(selected.parentElement?.querySelector('button[aria-label="Pin project path"]')).toBeTruthy();
+		expect(selected.parentElement?.querySelector('button[aria-label="Project actions: /local"]')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Choose folder' })).toBeTruthy();
+	});
+
+	it('shows pin status only for pinned cards and removes a selected shortcut without changing its draft or target', async () => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { pinnedProjectPaths: ['/workspace/project'], recentProjectPaths: ['/workspace/project', '/workspace/other'] },
+		}));
+		vi.mocked(settingsApi.removeProjectPathFromList).mockResolvedValueOnce({ success: true, settings: makeSnapshot({
+			version: 2, paths: { recentProjectPaths: ['/workspace/other'] },
+		}) });
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { props: { onStartChat } });
+		const selected = await screen.findByRole('button', { name: '/workspace/project' });
+		await fireEvent.click(selected);
+		const prompt = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Keep this draft' } });
+		const selectedCard = selected.closest('[data-slot="new-chat-project-card"]') as HTMLElement;
+		const otherCard = screen.getByRole('button', { name: '/workspace/other' }).closest('[data-slot="new-chat-project-card"]') as HTMLElement;
+		expect(within(selectedCard).getByRole('img', { name: 'Pinned' })).toBeTruthy();
+		expect(within(otherCard).queryByRole('img', { name: 'Pinned' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Unpin project path' })).toBeNull();
+		await fireEvent.click(within(selectedCard).getByRole('button', { name: 'Project actions: /workspace/project' }));
+		expect(await screen.findByRole('menuitem', { name: /^Unpin$/ })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
+		await waitFor(() => expect(screen.queryByRole('button', { name: '/workspace/project' })).toBeNull());
+		expect(screen.getByRole('button', { name: '/workspace/other' })).toBeTruthy();
+		expect(settingsApi.removeProjectPathFromList).toHaveBeenCalledWith({
+			executorId: 'local', projectPath: '/workspace/project',
+		});
+		expect((prompt as HTMLTextAreaElement).value).toBe('Keep this draft');
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onStartChat).toHaveBeenCalledWith(expect.objectContaining({ projectPath: '/workspace/project', firstMessage: 'Keep this draft' }), PROSPECTIVE_CHAT_ID);
 	});
 });

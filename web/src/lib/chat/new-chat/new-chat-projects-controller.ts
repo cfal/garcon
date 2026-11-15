@@ -2,7 +2,7 @@ import type { NewChatFormState } from './new-chat-form-state.svelte';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { executorPinnedPathGroups } from '$lib/project-paths/executor-pinned-paths';
-import { projectPathKey } from '$lib/project-paths/project-path-key';
+import { projectPathKey } from '$shared/project-path-preferences';
 import { nextPinnedProjectPaths } from '$lib/project-paths/project-pinned-paths';
 import { executorPinnedProjectPaths } from '$lib/project-paths/pinned-project-path-settings';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -12,6 +12,8 @@ type ProjectForm = Pick<
 	| 'executorId'
 	| 'projectPath'
 	| 'selectedProjectPath'
+	| 'projectCardPath'
+	| 'dismissProjectCard'
 	| 'pinnedProjectPaths'
 	| 'isUpdatingPinnedPath'
 	| 'selectExecutor'
@@ -21,9 +23,10 @@ type ProjectForm = Pick<
 >;
 
 type PersistPins = (paths: string[], executorId: string) => Promise<RemoteSettingsSnapshot>;
+type RemoveProject = (executorId: string, path: string) => Promise<RemoteSettingsSnapshot>;
 
 export class NewChatProjectsController {
-	#pendingPin: { executorId: string; path: string } | null = null;
+	#pendingProject: { executorId: string; path: string } | null = null;
 
 	constructor(
 		private readonly getForm: () => ProjectForm,
@@ -54,7 +57,8 @@ export class NewChatProjectsController {
 						? (paths?.recentProjectPaths ?? [])
 						: (paths?.byExecutor?.[executorId]?.recentPaths ?? []);
 				const unique = new Map<string, string>();
-				const selected = executorId === form.executorId ? [form.selectedProjectPath] : [];
+				const selected = executorId === form.executorId && form.projectCardPath
+					? [form.projectCardPath] : [];
 				for (const path of [...pinned, ...recent, ...selected]) {
 					if (path.trim() && !unique.has(projectPathKey(path)))
 						unique.set(projectPathKey(path), path);
@@ -85,26 +89,56 @@ export class NewChatProjectsController {
 
 	async togglePin(executorId: string, path: string, persist: PersistPins): Promise<boolean> {
 		const form = this.getForm();
-		if (form.isUpdatingPinnedPath) return false;
-		if (!this.groups.some((group) => group.executorId === executorId && group.paths.includes(path)))
-			return false;
-		const selectedExecutorId = form.executorId;
-		const previous = form.pinnedProjectPaths;
+		if (!this.#canChangeProject(executorId, path)) return false;
 		const current =
-			executorId === selectedExecutorId
-				? previous
+			executorId === form.executorId
+				? form.pinnedProjectPaths
 				: executorPinnedProjectPaths(this.settings.snapshot, executorId);
 		const targetKey = projectPathKey(path);
 		const alreadyPinned = current.some((candidate) => projectPathKey(candidate) === targetKey);
 		const next = alreadyPinned
 			? current.filter((candidate) => projectPathKey(candidate) !== targetKey)
 			: nextPinnedProjectPaths(current, path);
-		this.#pendingPin = { executorId, path };
+		return this.#saveProjectPreferences(executorId, path, next, () => persist(next, executorId));
+	}
+
+	async removeFromList(executorId: string, path: string, persist: RemoveProject): Promise<boolean> {
+		if (!this.#canChangeProject(executorId, path)) return false;
+		const form = this.getForm();
+		const current = executorId === form.executorId
+			? form.pinnedProjectPaths
+			: executorPinnedProjectPaths(this.settings.snapshot, executorId);
+		const next = current.filter((candidate) => projectPathKey(candidate) !== projectPathKey(path));
+		return this.#saveProjectPreferences(executorId, path, next, async () => {
+			const snapshot = await persist(executorId, path);
+			if (form.executorId === executorId) form.dismissProjectCard(path);
+			return snapshot;
+		});
+	}
+
+	#canChangeProject(executorId: string, path: string): boolean {
+		return !this.getForm().isUpdatingPinnedPath && this.groups.some(
+			(group) => group.executorId === executorId && group.paths.some(
+				(candidate) => projectPathKey(candidate) === projectPathKey(path),
+			),
+		);
+	}
+
+	async #saveProjectPreferences(
+		executorId: string,
+		path: string,
+		next: string[],
+		persist: () => Promise<RemoteSettingsSnapshot>,
+	): Promise<boolean> {
+		const form = this.getForm();
+		const selectedExecutorId = form.executorId;
+		const previous = form.pinnedProjectPaths;
+		this.#pendingProject = { executorId, path };
 		form.pinnedProjectPaths = executorId === selectedExecutorId ? next : previous;
 		form.isUpdatingPinnedPath = true;
 		form.error = null;
 		try {
-			const snapshot = await persist(next, executorId);
+			const snapshot = await persist();
 			if (executorId === form.executorId)
 				form.pinnedProjectPaths = executorPinnedProjectPaths(snapshot, executorId);
 			return true;
@@ -114,15 +148,15 @@ export class NewChatProjectsController {
 			return false;
 		} finally {
 			form.isUpdatingPinnedPath = false;
-			this.#pendingPin = null;
+			this.#pendingProject = null;
 		}
 	}
 
-	isPinPending(executorId: string, path: string): boolean {
+	isPending(executorId: string, path: string): boolean {
 		return (
 			this.getForm().isUpdatingPinnedPath &&
-			this.#pendingPin?.executorId === executorId &&
-			this.#pendingPin.path === path
+			this.#pendingProject?.executorId === executorId &&
+			this.#pendingProject.path === path
 		);
 	}
 

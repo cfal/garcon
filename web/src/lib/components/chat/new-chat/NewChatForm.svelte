@@ -660,12 +660,12 @@
 		>
 			<div class="space-y-2">
 				<NewChatProjects {form} />
-				<NewChatWorktrees {form} {isMobile}>
-					<ChatTagToggleButton
-						active={form.chatTags.length > 0}
-						onToggle={() => form.toggleTagInput()}
-					/>
-				</NewChatWorktrees>
+				<NewChatWorktrees {form} {isMobile} />
+				<ChatTagToggleButton
+					active={form.chatTags.length > 0}
+					label={m.chat_new_chat_tags_add_to_session()}
+					onToggle={() => form.toggleTagInput()}
+				/>
 
 				<ChatTagEditor
 					tags={form.chatTags}

@@ -1,4 +1,6 @@
 import { isRecord } from '../../../common/json.js';
+import { projectPathKey, type RemoveProjectPathRequest } from '../../../common/project-path-preferences.js';
+import { parseExecutorProjectPreferences } from '../../../common/settings.js';
 import { createLogger } from '../../common/log.js';
 import { bumpRemoteSettingsVersion } from './settings-shared.js';
 import {
@@ -34,6 +36,29 @@ export class StartupDefaultsStore {
     await this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       Object.assign(settings, withoutExecutorStartupPreferences(settings, executorId));
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+    });
+  }
+
+  async removeProjectPathFromList(input: RemoveProjectPathRequest): Promise<void> {
+    const { executorId, projectPath } = input;
+    const key = projectPathKey(projectPath);
+    await this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const paths = settings.paths;
+      const byExecutor = parseExecutorProjectPreferences(paths.byExecutor) ?? {};
+      const owner = executorId === 'local' ? {
+        pinnedPaths: Array.isArray(paths.pinnedProjectPaths) ? paths.pinnedProjectPaths.filter((path): path is string => typeof path === 'string') : [],
+        recentPaths: Array.isArray(paths.recentProjectPaths) ? paths.recentProjectPaths.filter((path): path is string => typeof path === 'string') : [],
+      } : byExecutor[executorId];
+      if (!owner) return;
+      const pinnedPaths = owner.pinnedPaths.filter(path => projectPathKey(path) !== key);
+      const recentPaths = owner.recentPaths.filter(path => projectPathKey(path) !== key);
+      if (pinnedPaths.length === owner.pinnedPaths.length && recentPaths.length === owner.recentPaths.length) return;
+      settings.paths = executorId === 'local'
+        ? { ...paths, pinnedProjectPaths: pinnedPaths, recentProjectPaths: recentPaths }
+        : { ...paths, byExecutor: { ...byExecutor, [executorId]: { ...owner, pinnedPaths, recentPaths } } };
       bumpRemoteSettingsVersion(settings);
       await this.#context.saveAndMaybeEmitRemote(settings, true);
     });

@@ -2125,4 +2125,25 @@ describe('NewChatFormState prompt draft', () => {
 
 		expect(localStorage.length).toBe(0);
 	});
+
+	it('keeps a removed project card out of the list without clearing its target', () => {
+		const formState = createFormState();
+		formState.projectPath = '/workspace/implicit';
+		expect(formState.projectCardPath).toBeNull();
+		formState.selectProjectPath('/workspace/selected');
+		formState.dismissProjectCard('/workspace/other');
+		expect(formState.projectCardPath).toBe('/workspace/selected');
+		formState.dismissProjectCard('/workspace/selected');
+		expect(formState.projectCardPath).toBeNull();
+		expect(formState.selectedProjectPath).toBe('/workspace/selected');
+		expect(formState.projectPath).toBe('/workspace/selected');
+		formState.selectWorktree('/workspace/worktree');
+		expect(formState.projectPath).toBe('/workspace/worktree');
+		expect(formState.selectedProjectPath).toBe('/workspace/selected');
+		expect(formState.projectCardPath).toBeNull();
+		formState.selectProjectPath('/workspace/selected');
+		expect(formState.projectCardPath).toBe('/workspace/selected');
+		formState.reseed('');
+		expect(formState.projectCardPath).toBeNull();
+	});
 });

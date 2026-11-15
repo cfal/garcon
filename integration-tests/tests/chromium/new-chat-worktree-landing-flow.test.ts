@@ -33,7 +33,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
       await browserExpect(dialog).toBeVisible();
       const projects = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true });
-      const projectCard = projects.getByRole('button', { name: /[\\/]web-project$/ });
+      const projectCard = projects.getByRole('button', { name: /[\\/]web-project$/ })
+        .and(projects.locator('[data-slot="new-chat-project-select"]'));
       await projectCard.click();
       await browserExpect(dialog.locator('#project-path-input')).toHaveCount(0);
       await dialog.locator('button[aria-label*=" / "]').first().click();
@@ -43,6 +44,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const prompt = dialog.getByPlaceholder('How can I help you today?');
       await prompt.fill('Review the selected worktree layout.');
       const worktrees = dialog.getByRole('region', { name: 'Worktrees', exact: true });
+      const tagButton = dialog.getByRole('button', { name: 'Add tags to session', exact: true });
+      await browserExpect(tagButton).toBeVisible();
+      await tagButton.click();
+      const tagInput = dialog.getByPlaceholder('Type a tag...');
+      await tagInput.fill('review');
+      await tagInput.press('Enter');
+      await tagButton.click();
+      await browserExpect(dialog.getByRole('button', { name: 'Remove tag review' })).toBeVisible();
       await browserExpect(worktrees.getByText('feature/design-preview', { exact: true })).toBeVisible();
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
       await browserExpect(worktrees.getByRole('button', { name: /Pin project path/ })).toHaveCount(0);
@@ -83,15 +92,25 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
       await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
+      phase('opening the project menu without changing selection');
+      await projectCard.locator('..').getByRole('button', { name: /^Project actions:/ }).click();
+      await browserExpect(page.getByRole('menuitem', { name: 'Unpin', exact: true })).toBeVisible();
+      await browserExpect(page.getByRole('menuitem', { name: 'Remove from list', exact: true })).toBeVisible();
+      await page.screenshot({ path: join(artifacts, `project-menu-${executionBackend}-1440.png`) });
+      await page.keyboard.press('Escape');
+      await browserExpect(dialog).toBeVisible();
       phase('toggling a card pin without changing the selected project or prompt');
-      const otherProjectSelect = projects.getByRole('button', { name: /[\\/]other-project$/ });
+      const otherProjectSelect = projects.getByRole('button', { name: /[\\/]other-project$/ })
+        .and(projects.locator('[data-slot="new-chat-project-select"]'));
       const pinCard = (client.executorId === 'local' ? otherProjectSelect : projectCard).locator('..');
-      await pinCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
-      await browserExpect(pinCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
+      await pinCard.getByRole('button', { name: /^Project actions:/ }).click();
+      await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
+      await browserExpect(pinCard.getByRole('img', { name: 'Pinned', exact: true })).toHaveCount(0);
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
-      await pinCard.getByRole('button', { name: 'Pin project path', exact: true }).click();
-      await browserExpect(pinCard.getByRole('button', { name: 'Unpin project path', exact: true })).toBeEnabled();
+      await pinCard.getByRole('button', { name: /^Project actions:/ }).click();
+      await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
+      await browserExpect(pinCard.getByRole('img', { name: 'Pinned', exact: true })).toBeVisible();
       phase('switching projects without losing the prompt');
       await otherProjectSelect.click();
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
@@ -113,8 +132,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       phase('unpinning the parent project while retaining its selected worktree');
       const parentCard = projectCard.locator('..');
-      await parentCard.getByRole('button', { name: 'Unpin project path', exact: true }).click();
-      await browserExpect(parentCard.getByRole('button', { name: 'Pin project path', exact: true })).toBeEnabled();
+      await parentCard.getByRole('button', { name: /^Project actions:/ }).click();
+      await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
+      await browserExpect(parentCard.getByRole('img', { name: 'Pinned', exact: true })).toHaveCount(0);
       await browserExpect(selectedWorktree).toBeChecked();
       for (const width of [1440, 390, 360]) {
         phase(`checking the worktree list at ${width}px`);
@@ -141,6 +161,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const pathBounds = (await compactPath.boundingBox())!;
         expect(pathBounds.x).toBeGreaterThanOrEqual(titleBounds.x + titleBounds.width);
         expect(Math.abs(pathBounds.y - titleBounds.y)).toBeLessThanOrEqual(1);
+        const tagBounds = (await tagButton.boundingBox())!;
+        const worktreeBounds = (await worktrees.boundingBox())!;
+        expect(tagBounds.y).toBeGreaterThanOrEqual(worktreeBounds.y + worktreeBounds.height);
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: join(artifacts, `worktree-landing-${executionBackend}-${width}.png`) });
         if (width === 390) {
@@ -166,15 +189,23 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       phase('submitting the captured executor and worktree');
       await page.setViewportSize({ width: 1440, height: 900 });
+      phase('removing another project shortcut without changing the selected worktree');
+      await otherProjectSelect.locator('..').getByRole('button', { name: /^Project actions:/ }).click();
+      await page.getByRole('menuitem', { name: 'Remove from list', exact: true }).click();
+      await browserExpect(otherProjectSelect).toHaveCount(0);
+      await browserExpect(selectedWorktree).toBeChecked();
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       const started = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/chats/start');
       await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
       const payload = (await started).postDataJSON();
       expect(payload.executorId ?? 'local').toBe(client.executorId);
       expect(payload.projectPath).toBe(toExecutorPath(linked));
+      expect(payload.tags).toEqual(['review']);
       await browserExpect(dialog).toHaveCount(0);
       await browserExpect.poll(async () => (await client.listChats()).sessions.some(chat => chat.projectPath === toExecutorPath(linked))).toBe(true);
       phase('closing the folder list and landing page with consecutive Escape presses');
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await browserExpect(projects.getByRole('button', { name: /[\\/]other-project$/ })).toHaveCount(0);
       await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
       await browserExpect(folderBrowser).toBeVisible();
       await page.keyboard.press('Escape');
