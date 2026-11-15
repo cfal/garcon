@@ -13,6 +13,7 @@
 	import Sidebar from '../Sidebar.svelte';
 	import SidebarDisplayDialog from '../SidebarDisplayDialog.svelte';
 	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+	import type { SidebarDisplayPreferences } from '$lib/sidebar/display/sidebar-display-options';
 	import * as api from '$lib/api/chats';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
@@ -36,7 +37,6 @@
 	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte';
 	import type {
-		LocalSettingsStore,
 		SidebarInactivityDuration,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
@@ -160,17 +160,7 @@
 		get sidebarNestDelegatedChats() {
 			return sidebarNestDelegatedChats;
 		},
-		setSidebarDisplay(
-			value: Pick<
-				import('$lib/stores/local-settings.svelte').LocalSettingsSnapshot,
-				| 'sidebarGroupingFields'
-				| 'sidebarNestDelegatedChats'
-				| 'sidebarInactivityDuration'
-				| 'sidebarGroupNestedProjectPaths'
-				| 'sidebarChatItemLayout'
-				| 'sidebarShowProjectPath'
-			>,
-		) {
+		setSidebarDisplay(value: SidebarDisplayPreferences) {
 			sidebarGroupingFields = value.sidebarGroupingFields;
 			sidebarNestDelegatedChats = value.sidebarNestDelegatedChats;
 			sidebarInactivityDuration = value.sidebarInactivityDuration;
@@ -208,39 +198,14 @@
 		get reduceMotion() {
 			return reduceMotion;
 		},
-		toggle: ((key) => {
-			switch (key) {
-				case 'sidebarNestDelegatedChats':
-					sidebarNestDelegatedChats = !sidebarNestDelegatedChats;
-					break;
-				case 'sidebarShowProjectPath':
-					sidebarShowProjectPath = !sidebarShowProjectPath;
-					break;
-				case 'sidebarGroupNestedProjectPaths':
-					sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-					break;
-				default:
-					throw new Error(`Unexpected setting toggle: ${key}`);
-			}
-		}) satisfies LocalSettingsStore['toggle'],
 		set(
 			key:
-				| 'sidebarGroupingFields'
-				| 'sidebarChatItemLayout'
 				| 'sidebarSortMode'
 				| 'sidebarSearchResultSort'
 				| 'chatListAutohide'
 				| 'chatListDock',
-			value: string | boolean | SidebarGroupingSelection[],
+			value: string | boolean,
 		) {
-			if (key === 'sidebarGroupingFields') {
-				sidebarGroupingFields = value as SidebarGroupingSelection[];
-				return;
-			}
-			if (key === 'sidebarChatItemLayout') {
-				sidebarChatItemLayout = value as ChatItemLayout;
-				return;
-			}
 			if (key === 'sidebarSortMode') {
 				sidebarSortMode = value as SidebarSortMode;
 				return;

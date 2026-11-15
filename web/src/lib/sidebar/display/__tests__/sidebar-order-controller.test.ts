@@ -17,7 +17,12 @@ function fixture() {
 	);
 	const write = vi
 		.fn<(request: ReorderChatRequest) => Promise<ReorderChatResponse>>()
-		.mockImplementation(async ({ chatId }) => ({ success: true, chatId, orderGroup: 'normal', changed: true }));
+		.mockImplementation(async ({ chatId }) => ({
+			success: true,
+			chatId,
+			orderGroup: 'normal',
+			changed: true,
+		}));
 	const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
 	const sort = vi.fn<() => Promise<{ changed: boolean }>>().mockResolvedValue({ changed: false });
 	const onError = vi.fn();
@@ -64,27 +69,46 @@ describe('SidebarOrderController', () => {
 	it('resolves adjacent actions from live peers without consuming a pointer drag', () => {
 		const f = fixture();
 		const request = () => f.controller.moveAdjacent({ list: 'normal', chatId: 'c', offset: -1 });
-		expect(request()?.placement).toEqual({ kind: 'relative', referenceChatId: 'b', position: 'before' });
-		f.input = { ...f.input, allChats: [...f.input.allChats.slice(0, -1), chat('new'), chat('c')], matchingChatIds: undefined };
+		expect(request()?.placement).toEqual({
+			kind: 'relative',
+			referenceChatId: 'b',
+			position: 'before',
+		});
+		f.input = {
+			...f.input,
+			allChats: [...f.input.allChats.slice(0, -1), chat('new'), chat('c')],
+			matchingChatIds: undefined,
+		};
 		expect(request()?.placement.referenceChatId).toBe('new');
 		f.controller.begin('normal', 'a', { ids: ['a'] });
 		expect(request()).toBeNull();
 		expect(f.controller.activeChatId).toBe('a');
 	});
-	it.each(['top', 'bottom'] as const)('keeps canonical %s commands independent of sidebar filters and sort mode', async (boundary) => {
-		const f = fixture();
-		f.input = { ...f.input, sortMode: 'recent', matchingChatIds: new Set(['a']) };
-		const response: ReorderChatResponse = { success: true, chatId: 'c', orderGroup: 'normal', changed: false };
-		f.write.mockResolvedValue(response);
-		expect(await f.controller.moveChatToBoundary('c', boundary)).toEqual(response);
-		expect(f.write).toHaveBeenCalledExactlyOnceWith({ chatId: 'c', placement: { kind: 'boundary', boundary } });
-		expect(f.refresh).toHaveBeenCalledOnce();
-	});
+	it.each(['top', 'bottom'] as const)(
+		'keeps canonical %s commands independent of sidebar filters and sort mode',
+		async (boundary) => {
+			const f = fixture();
+			f.input = { ...f.input, sortMode: 'recent', matchingChatIds: new Set(['a']) };
+			const response: ReorderChatResponse = {
+				success: true,
+				chatId: 'c',
+				orderGroup: 'normal',
+				changed: false,
+			};
+			f.write.mockResolvedValue(response);
+			expect(await f.controller.moveChatToBoundary('c', boundary)).toEqual(response);
+			expect(f.write).toHaveBeenCalledExactlyOnceWith({
+				chatId: 'c',
+				placement: { kind: 'boundary', boundary },
+			});
+			expect(f.refresh).toHaveBeenCalledOnce();
+		},
+	);
 	it('blocks sidebar and boundary writes until a boundary command refresh settles', async () => {
 		const f = fixture();
 		const sidebarMove = f.move('c', 'b')!;
-		let release!: (fresh: boolean) => void;
-		f.refresh.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+		const refresh = Promise.withResolvers<boolean>();
+		f.refresh.mockReturnValueOnce(refresh.promise);
 		const command = f.controller.moveChatToBoundary('a', 'bottom');
 		expect(await f.controller.moveChatToBoundary('c', 'top')).toBeNull();
 		f.controller.submit(sidebarMove);
@@ -92,7 +116,7 @@ describe('SidebarOrderController', () => {
 		expect(await f.controller.sort('activity')).toBe(false);
 		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());
 		expect(f.write).toHaveBeenCalledOnce();
-		release(false);
+		refresh.resolve(false);
 		expect(await command).toMatchObject({ chatId: 'a', changed: true });
 		expect(f.controller.recoveryRequired).toBe(true);
 		expect(await f.controller.moveChatToBoundary('c', 'top')).toBeNull();
@@ -309,19 +333,14 @@ describe('SidebarOrderController', () => {
 			],
 			{ groupingFields: [{ field: 'project', enabled: true }] },
 		);
-		let release!: (result: boolean) => void;
-		f.refresh.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					release = resolve;
-				}),
-		);
+		const refresh = Promise.withResolvers<boolean>();
+		f.refresh.mockReturnValueOnce(refresh.promise);
 		f.controller.submit(f.move('b', 'a')!);
 		expect(f.move('c', 'a')).toBeNull();
 		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());
 		const [a, b, c] = f.input.allChats;
 		f.input = { ...f.input, allChats: [b, a, c] };
-		release(true);
+		refresh.resolve(true);
 		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
 		f.controller.submit(f.move('c', 'a')!);
 		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
@@ -398,13 +417,8 @@ describe('SidebarOrderController', () => {
 	});
 	it('blocks additional moves and bulk sort until the authoritative refresh settles', async () => {
 		const f = fixture();
-		let release!: () => void;
-		f.refresh.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					release = () => resolve(true);
-				}),
-		);
+		const refresh = Promise.withResolvers<boolean>();
+		f.refresh.mockReturnValueOnce(refresh.promise);
 		const second = f.move('a', 'c', 'bottom')!;
 		f.controller.submit(f.move('c', 'b')!);
 		f.controller.submit(second);
@@ -414,7 +428,7 @@ describe('SidebarOrderController', () => {
 		expect(f.write).toHaveBeenCalledOnce();
 		expect(f.controller.orders.normal).toEqual(['a', 'hidden', 'c', 'b']);
 		f.input = projectionInput([chat('a'), chat('hidden'), chat('c'), chat('b')]);
-		release();
+		refresh.resolve(true);
 		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
 		expect(f.write).toHaveBeenCalledOnce();
 		expect(f.sort).not.toHaveBeenCalled();
@@ -435,20 +449,15 @@ describe('SidebarOrderController', () => {
 		f.refresh.mockResolvedValue(false);
 		f.controller.submit(f.move('c', 'b')!);
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
-		let release!: (value: boolean) => void;
-		f.refresh.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					release = resolve;
-				}),
-		);
+		const refresh = Promise.withResolvers<boolean>();
+		f.refresh.mockReturnValueOnce(refresh.promise);
 		const recovery = f.controller.recover();
 		await f.controller.recover();
 		expect(f.refresh).toHaveBeenCalledTimes(2);
 		expect(f.controller.recovering).toBe(true);
 		expect(f.move('a', 'b', 'bottom')).toBeNull();
 		expect(await f.controller.sort('activity')).toBe(false);
-		release(true);
+		refresh.resolve(true);
 		await recovery;
 		expect(f.controller.busy).toBe(false);
 		expect(f.controller.recovering).toBe(false);
@@ -507,19 +516,30 @@ describe('SidebarOrderController', () => {
 			position: 'before',
 		});
 	});
-	it.each(['start', 'end'] as const)('resolves the live %s boundary after peer arrival and departure', (boundary) => {
-		const f = fixture();
-		const chats = [chat('parent'), delegated('a', 'parent'), delegated('b', 'parent'), delegated('c', 'parent')];
-		f.input = projectionInput(chats);
-		const source = boundary === 'start' ? 'c' : 'a';
-		const request = () => f.controller.moveToBoundary({ list: 'normal', chatId: source, boundary });
-		expect(request()?.placement.referenceChatId).toBe(boundary === 'start' ? 'a' : 'c');
-		const arrival = delegated('new', 'parent');
-		f.input = projectionInput(boundary === 'start' ? [arrival, ...chats] : [...chats, arrival]);
-		expect(request()?.placement.referenceChatId).toBe('new');
-		f.input = projectionInput(chats.filter((chat) => chat.id !== (boundary === 'start' ? 'a' : 'c')));
-		expect(request()?.placement.referenceChatId).toBe('b');
-	});
+	it.each(['start', 'end'] as const)(
+		'resolves the live %s boundary after peer arrival and departure',
+		(boundary) => {
+			const f = fixture();
+			const chats = [
+				chat('parent'),
+				delegated('a', 'parent'),
+				delegated('b', 'parent'),
+				delegated('c', 'parent'),
+			];
+			f.input = projectionInput(chats);
+			const source = boundary === 'start' ? 'c' : 'a';
+			const request = () =>
+				f.controller.moveToBoundary({ list: 'normal', chatId: source, boundary });
+			expect(request()?.placement.referenceChatId).toBe(boundary === 'start' ? 'a' : 'c');
+			const arrival = delegated('new', 'parent');
+			f.input = projectionInput(boundary === 'start' ? [arrival, ...chats] : [...chats, arrival]);
+			expect(request()?.placement.referenceChatId).toBe('new');
+			f.input = projectionInput(
+				chats.filter((chat) => chat.id !== (boundary === 'start' ? 'a' : 'c')),
+			);
+			expect(request()?.placement.referenceChatId).toBe('b');
+		},
+	);
 	it('does not let bulk sort overtake moves or admit moves while sorting', async () => {
 		const f = fixture();
 		f.refresh.mockResolvedValue(false);
@@ -529,33 +549,23 @@ describe('SidebarOrderController', () => {
 		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
 		f.refresh.mockResolvedValue(true);
 		await f.controller.recover();
-		let release!: () => void;
-		f.sort.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					release = () => resolve({ changed: true });
-				}),
-		);
+		const sort = Promise.withResolvers<{ changed: boolean }>();
+		f.sort.mockReturnValueOnce(sort.promise);
 		const request = f.move('c', 'b')!;
 		const sorting = f.controller.sort('activity');
 		f.controller.submit(request);
 		expect(f.write).toHaveBeenCalledOnce();
-		release();
+		sort.resolve({ changed: true });
 		await sorting;
 		expect(f.controller.busy).toBe(false);
 	});
 	it('disposes pending state without replaying late work', async () => {
 		const f = fixture();
-		let release!: () => void;
-		f.write.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					release = () => resolve({ success: true, chatId: 'c', orderGroup: 'normal', changed: true });
-				}),
-		);
+		const write = Promise.withResolvers<ReorderChatResponse>();
+		f.write.mockReturnValueOnce(write.promise);
 		f.controller.submit(f.move('c', 'b')!);
 		f.controller.destroy();
-		release();
+		write.resolve({ success: true, chatId: 'c', orderGroup: 'normal', changed: true });
 		await Promise.resolve();
 		expect(f.controller.busy).toBe(false);
 		expect(f.refresh).not.toHaveBeenCalled();

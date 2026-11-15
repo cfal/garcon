@@ -27,6 +27,7 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ReorderChatRequest } from '$shared/chat-order-contracts';
+	import type { ChatSearchSort } from '$shared/chat-search';
 	import type {
 		LocalSettingsStore,
 		SidebarInactivityDuration,
@@ -94,7 +95,7 @@
 	let sidebarOpen = $state(initialSidebarOpen());
 	let displayOpen = $state(false);
 	let displayReturnFocus = $state<(() => void) | undefined>();
-	let sidebarSearchResultSort = $state<'relevance' | 'activity' | 'created'>('relevance');
+	let sidebarSearchResultSort = $state<ChatSearchSort>('relevance');
 
 	// Mirrors the AppShell drawer-close effect that resets the search
 	// dialog cluster whenever the mobile drawer is closed.
@@ -168,34 +169,8 @@
 		get sidebarSearchResultSort() {
 			return sidebarSearchResultSort;
 		},
-		toggle: ((key) => {
-			switch (key) {
-				case 'sidebarNestDelegatedChats':
-					sidebarNestDelegatedChats = !sidebarNestDelegatedChats;
-					break;
-				case 'sidebarShowProjectPath':
-					sidebarShowProjectPath = !sidebarShowProjectPath;
-					break;
-				case 'sidebarGroupNestedProjectPaths':
-					sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-					break;
-				default:
-					throw new Error(`Unexpected setting toggle: ${key}`);
-			}
-		}) satisfies LocalSettingsStore['toggle'],
-		set(
-			key: 'sidebarGroupingFields' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',
-			value: string | SidebarGroupingSelection[],
-		) {
-			if (key === 'sidebarGroupingFields') {
-				sidebarGroupingFields = value as SidebarGroupingSelection[];
-				return;
-			}
-			if (key === 'sidebarChatItemLayout') {
-				sidebarChatItemLayout = value as ChatItemLayout;
-				return;
-			}
-			sidebarSearchResultSort = value as typeof sidebarSearchResultSort;
+		set(key: 'sidebarSearchResultSort', value: ChatSearchSort) {
+			if (key === 'sidebarSearchResultSort') sidebarSearchResultSort = value;
 		},
 	} as never);
 	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
