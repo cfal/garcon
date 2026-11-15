@@ -16,6 +16,14 @@ describe('SidebarProjectCollapseStore', () => {
 
 		store.destroy();
 	});
+	it('retains a project collapse when only an equivalent path spelling remains', () => {
+		const store = createSidebarProjectCollapseStore();
+		const key = sidebarGroupCollapseKey(null, [['project', sidebarProjectKey('/repo/')]]);
+		store.setCollapsed(key, true);
+		store.pruneToRoster([chat('remaining', { projectPath: '/repo' })]);
+		expect(store.isCollapsed(key)).toBe(true);
+		store.destroy();
+	});
 
 	it('retains hidden branch scopes against the full roster and retires deleted identities and old keys', () => {
 		const store = createSidebarProjectCollapseStore();

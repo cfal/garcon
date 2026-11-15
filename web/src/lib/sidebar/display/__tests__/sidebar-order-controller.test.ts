@@ -58,6 +58,24 @@ function fixture() {
 }
 
 describe('SidebarOrderController', () => {
+	it('keeps queued project moves after an acknowledged snapshot changes path spelling order', async () => {
+		const f = fixture();
+		f.input = projectionInput([
+			chat('a', { projectPath: '/repo/' }),
+			chat('b', { projectPath: '/repo' }),
+			chat('c', { projectPath: '/repo' }),
+		], { groupingFields: [{ field: 'project', enabled: true }] });
+		let release!: (result: boolean) => void;
+		f.refresh.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+		f.controller.enqueue(f.move('b', 'a')!);
+		f.controller.enqueue(f.move('c', 'a')!);
+		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());
+		const [a, b, c] = f.input.allChats;
+		f.input = { ...f.input, allChats: [b, a, c] };
+		release(true);
+		await vi.waitFor(() => expect(f.controller.busy).toBe(false));
+		expect(f.write).toHaveBeenCalledTimes(2);
+	});
 	it('cancels a transient drag when presentation changes even if its leaf key is unchanged', () => {
 		const f = fixture();
 		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });

@@ -63,6 +63,37 @@ describe('sidebar display preferences', () => {
 });
 
 describe('recursive sidebar projection', () => {
+	it.each([false, true])('keeps equivalent project identities stable (combine: %s)', (combine) => {
+		const chats = [chat('a', { projectPath: '/repo/' }), chat('b', { projectPath: '/repo' })];
+		const input = projectionInput(chats, {
+			groupingFields: selections(['project']),
+			groupNestedProjectPaths: combine,
+		});
+		const first = buildSidebarRowModel(input);
+		const reversed = buildSidebarRowModel({ ...input, allChats: [...chats].reverse() });
+		expect(reversed.rows).toMatchObject(first.rows.map(({ key }) => ({ key })));
+		expect(first.rows[0]).toMatchObject({ projectPath: '/repo', showParentPath: false });
+		const collapsed = buildSidebarRowModel({
+			...input,
+			allChats: [chats[1]],
+			groupNestedProjectPaths: !combine,
+			collapsedProjectKeys: new Set([first.rows[0].key]),
+		});
+		expect(collapsed.visibleChatIds).toEqual([]);
+	});
+	it.each([['project'], ['executor', 'project']] as const)(
+		'disambiguates folder names only within an executor: %j',
+		(...fields) => {
+			const model = buildSidebarRowModel(projectionInput([
+				chat('a', { projectPath: '/clients/app' }),
+				chat('b', { projectPath: '/forks/app' }),
+				chat('c', { projectPath: '/remote/app', executorId: 'remote' }),
+			], { groupingFields: selections(fields) }));
+			expect(model.rows.filter((row) => row.type === 'project-header').map((row) =>
+				[row.projectPath, row.showParentPath],
+			)).toEqual([['/clients/app', true], ['/forks/app', true], ['/remote/app', false]]);
+		},
+	);
 	it.each([false, true])(
 		'preserves timestamp fallbacks and canonical ties (nested: %s)',
 		(nestDelegatedChats) => {

@@ -75,22 +75,22 @@ export function sidebarStatusSection(
 }
 
 export function sidebarProjectKey(path: string, executorId?: string | null): string {
-	return JSON.stringify([effectiveExecutorId(executorId), path]);
+	return JSON.stringify([effectiveExecutorId(executorId), normalizeProjectPath(path)]);
 }
 
 function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean): Map<string, string> {
 	const known = new Map<string, string>();
-	for (const chat of chats)
-		known.set(
-			sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId),
-			chat.projectPath,
-		);
+	for (const chat of chats) {
+		const key = sidebarProjectKey(chat.projectPath, chat.executorId);
+		const previous = known.get(key);
+		if (previous === undefined || chat.projectPath < previous) known.set(key, chat.projectPath);
+	}
 	const groups = new Map<string, string>();
 	for (const chat of chats) {
 		const key = sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId);
 		if (groups.has(key)) continue;
 		let path = normalizeProjectPath(chat.projectPath);
-		let group = chat.projectPath;
+		let group = known.get(key)!;
 		while (combine && path) {
 			group = known.get(sidebarProjectKey(path, chat.executorId)) ?? group;
 			const separator = path.lastIndexOf('/');
@@ -353,16 +353,18 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		}
 	}
 	const pathsByName = new Map<string, Set<string>>();
+	const projectNameKey = (row: Extract<SidebarVirtualRow, { type: 'project-header' }>) =>
+		JSON.stringify([effectiveExecutorId(row.executorId), splitProjectPath(row.projectPath).name]);
 	for (const row of model.rows) {
 		if (row.type !== 'project-header') continue;
-		const name = splitProjectPath(row.projectPath).name;
+		const name = projectNameKey(row);
 		const paths = pathsByName.get(name) ?? new Set();
-		paths.add(row.projectPath);
+		paths.add(normalizeProjectPath(row.projectPath));
 		pathsByName.set(name, paths);
 	}
 	for (const row of model.rows)
 		if (row.type === 'project-header')
-			row.showParentPath = pathsByName.get(splitProjectPath(row.projectPath).name)!.size > 1;
+			row.showParentPath = pathsByName.get(projectNameKey(row))!.size > 1;
 	return model;
 }
 
