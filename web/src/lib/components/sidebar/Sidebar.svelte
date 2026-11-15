@@ -35,7 +35,7 @@
 
 	interface SidebarProps {
 		reorder: SidebarOrderController;
-		onShowDisplay: () => void;
+		onShowDisplay: (returnFocus: () => void) => void;
 		chats: ChatSessionRecord[];
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;

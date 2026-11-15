@@ -101,6 +101,7 @@
 		onNewProjectChat = () => {},
 	}: SidebarHostProps = $props();
 	let displayOpen = $state(false);
+	let displayReturnFocus = $state<(() => void) | undefined>();
 	let displayedChats = $derived(chatSessions?.orderedChats ?? chats);
 	untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
 
@@ -334,7 +335,10 @@
 
 <Sidebar
 	{reorder}
-	onShowDisplay={() => (displayOpen = true)}
+	onShowDisplay={(returnFocus) => {
+		displayReturnFocus = returnFocus;
+		displayOpen = true;
+	}}
 	projection={reorder.projection}
 	chats={displayedChats}
 	{selectedChatId}
@@ -377,4 +381,7 @@
 	onSelectResult={({ chatId }) => onChatSelect(chatId)}
 />
 
-{#if displayOpen}<SidebarDisplayDialog onClose={() => (displayOpen = false)} />{/if}
+{#if displayOpen}<SidebarDisplayDialog
+		returnFocus={displayReturnFocus}
+		onClose={() => (displayOpen = false)}
+	/>{/if}

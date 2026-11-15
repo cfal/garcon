@@ -258,6 +258,21 @@ describe('sidebar search dialog flow', () => {
 		);
 	});
 
+	it.each([false, true])('restores display dialog focus (mobile=%s)', async (isMobile) => {
+		render(SidebarHost, { isMobile, autoLoadSavedSearches: false });
+		const trigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		for (const action of ['Apply', 'Cancel', 'Close', 'Escape']) {
+			trigger.focus();
+			await openDisplay();
+			const checkbox = screen.getByRole('checkbox', { name: 'Project path' });
+			checkbox.focus();
+			if (action === 'Escape') await fireEvent.keyDown(checkbox, { key: 'Escape' });
+			else await fireEvent.click(screen.getByRole('button', { name: action, exact: true }));
+			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+			await waitFor(() => expect(document.activeElement).toBe(trigger));
+		}
+	});
+
 	it('composes activity and project fields without the retired preset', async () => {
 		render(SidebarHost, {
 			chats: [

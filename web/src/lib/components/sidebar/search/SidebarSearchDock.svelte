@@ -9,7 +9,7 @@
 		visibleUnreadCount: number;
 		nestDelegatedChats?: boolean;
 		onToggleNesting?: () => void;
-		onShowDisplay?: () => void;
+		onShowDisplay?: (returnFocus: () => void) => void;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;

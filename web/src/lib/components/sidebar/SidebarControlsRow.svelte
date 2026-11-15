@@ -34,7 +34,7 @@
 		visibleUnreadCount?: number;
 		nestDelegatedChats?: boolean;
 		onToggleNesting?: () => void;
-		onShowDisplay?: () => void;
+		onShowDisplay?: (returnFocus: () => void) => void;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -86,6 +86,17 @@
 	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
 	let showDockDivider = $derived(!hasAdjacentSearchContext);
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
+	let menuTrigger = $state<HTMLButtonElement | null>(null);
+	function showDisplay(): void {
+		const target = menuTrigger;
+		onShowDisplay?.(() => {
+			if (
+				target?.isConnected &&
+				(!document.activeElement || document.activeElement === document.body)
+			)
+				target.focus();
+		});
+	}
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
 
@@ -133,6 +144,7 @@
 
 		<DropdownMenu>
 			<DropdownMenuTrigger
+				bind:ref={menuTrigger}
 				class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
 				aria-label={m.sidebar_actions_more()}
 				title={m.sidebar_actions_more()}
@@ -178,7 +190,7 @@
 				>
 					{m.sidebar_nest_delegated_chats()}
 				</DropdownMenuCheckboxItem>
-				<DropdownMenuItem onclick={onShowDisplay}>
+				<DropdownMenuItem onclick={showDisplay}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.sidebar_display_title()}
 				</DropdownMenuItem>

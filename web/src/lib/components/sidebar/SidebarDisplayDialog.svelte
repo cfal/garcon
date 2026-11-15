@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { getLocalSettings, getRemoteSettings } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -8,7 +9,11 @@
 	import { sidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
 	import { typographyScale } from '$lib/theme/typography';
 	import * as m from '$lib/paraglide/messages.js';
-	let { onClose }: { onClose: () => void } = $props();
+	let { onClose, returnFocus }: { onClose: () => void; returnFocus?: () => void } = $props();
+	function close(): void {
+		onClose();
+		void tick().then(() => returnFocus?.());
+	}
 	const settings = getLocalSettings();
 	const remote = getRemoteSettings();
 	let draft = $state({
@@ -31,7 +36,7 @@
 <Dialog.Root
 	open
 	onOpenChange={(open) => {
-		if (!open) onClose();
+		if (!open) close();
 	}}
 >
 	<Dialog.Content class="flex max-h-[90dvh] flex-col sm:max-w-3xl" aria-describedby={undefined}>
@@ -53,11 +58,11 @@
 						sidebarShowProjectPath: false,
 					})}>{m.sidebar_display_reset()}</Button
 			>
-			<Button variant="outline" onclick={onClose}>{m.sidebar_actions_cancel()}</Button>
+			<Button variant="outline" onclick={close}>{m.sidebar_actions_cancel()}</Button>
 			<Button
 				onclick={() => {
 					settings.setSidebarDisplay(draft);
-					onClose();
+					close();
 				}}>{m.sidebar_display_apply()}</Button
 			>
 		</Dialog.Footer>

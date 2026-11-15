@@ -111,6 +111,7 @@
 	});
 	const chatActionDialogs = new ChatActionDialogsState();
 	let sidebarDisplayOpen = $state(false);
+	let sidebarDisplayReturnFocus = $state<(() => void) | undefined>();
 	const sidebarOrder = new SidebarOrderController({
 		get input() {
 			return {
@@ -125,7 +126,8 @@
 				inactivityDuration: localSettings.sidebarInactivityDuration,
 				sortMode: localSettings.sidebarSortMode,
 				pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-				isChatOptimisticallyArchived: (chatId: string) => sessions.isChatOptimisticallyArchived(chatId),
+				isChatOptimisticallyArchived: (chatId: string) =>
+					sessions.isChatOptimisticallyArchived(chatId),
 				groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 				collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 			};
@@ -734,7 +736,10 @@
 	<Sidebar
 		projection={sidebarOrder.projection}
 		reorder={sidebarOrder}
-		onShowDisplay={() => (sidebarDisplayOpen = true)}
+		onShowDisplay={(returnFocus) => {
+			sidebarDisplayReturnFocus = returnFocus;
+			sidebarDisplayOpen = true;
+		}}
 		chats={sessions.orderedChats}
 		selectedChatId={sessions.selectedChatId}
 		isLoading={sessions.isLoadingChats}
@@ -767,7 +772,10 @@
 	/>
 {/snippet}
 {#if sidebarDisplayOpen}
-	<SidebarDisplayDialog onClose={() => (sidebarDisplayOpen = false)} />
+	<SidebarDisplayDialog
+		returnFocus={sidebarDisplayReturnFocus}
+		onClose={() => (sidebarDisplayOpen = false)}
+	/>
 {/if}
 
 {#snippet desktopChatList(dock: ChatListDock)}
