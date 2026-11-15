@@ -135,7 +135,18 @@
 		write: reorderChat,
 		refresh: () => sessions.refreshOrderSnapshot(),
 		sort: (sortKey) => sortChatOrder({ sortKey }),
-		onError: () => notifications.error(m.notifications_reorder_chats_failed()),
+		onError: (_error, outcome) => {
+			switch (outcome) {
+				case 'rejected':
+					notifications.error(m.notifications_reorder_chats_failed());
+					break;
+				case 'unconfirmed':
+					notifications.error(m.notifications_reorder_chats_unconfirmed());
+					break;
+				case 'refresh':
+					notifications.error(m.notifications_reorder_chats_refresh_failed());
+			}
+		},
 	});
 	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
@@ -489,6 +500,7 @@
 		const targetId = resolveAdjacentChatId({
 			selectedChatId: sessions.selectedChatId,
 			displayedChatIds: sidebarMounted ? displayedSidebarChatIds : null,
+			displayedRows: sidebarMounted ? sidebarOrder.projection.rowModel.rows : undefined,
 			fallbackOrder: sessions.order,
 			offset,
 		});

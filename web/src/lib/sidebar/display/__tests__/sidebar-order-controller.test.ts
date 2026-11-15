@@ -58,10 +58,43 @@ function fixture() {
 }
 
 describe('SidebarOrderController', () => {
+	it.each(['move', 'sort'] as const)(
+		'classifies rejected, unknown and refresh errors for %s',
+		async (operation) => {
+			for (const rejected of [true, false]) {
+				const f = fixture();
+				const error = rejected
+					? { errorCode: 'VALIDATION_FAILED' }
+					: new TypeError('Connection lost');
+				if (operation === 'move') {
+					f.write.mockRejectedValue(error);
+					f.controller.enqueue(f.move('c', 'b')!);
+					await vi.waitFor(() => expect(f.controller.busy).toBe(false));
+				} else {
+					f.sort.mockRejectedValue(error);
+					await f.controller.sort('activity');
+				}
+				expect(f.onError).toHaveBeenCalledExactlyOnceWith(
+					error,
+					rejected ? 'rejected' : 'unconfirmed',
+				);
+				f.onError.mockClear();
+				const refreshError = new Error('Snapshot unavailable');
+				f.refresh.mockRejectedValue(refreshError);
+				await f.controller.recover();
+				expect(f.onError).toHaveBeenCalledExactlyOnceWith(refreshError, 'refresh');
+			}
+		},
+	);
 	it('retains the projection for identical previews and clears only the placement', () => {
 		const f = fixture();
 		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
-		const preview = { list: 'normal', sourceChatId: 'c', targetChatId: 'b', closestEdge: 'top' } as const;
+		const preview = {
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'b',
+			closestEdge: 'top',
+		} as const;
 		f.controller.preview(preview);
 		const projected = f.controller.projection;
 		f.controller.preview(preview);
@@ -76,20 +109,33 @@ describe('SidebarOrderController', () => {
 		const f = fixture();
 		f.input = { ...f.input, groupingFields: [], groupNestedProjectPaths: undefined };
 		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
-		f.controller.preview({ list: 'normal', sourceChatId: 'c', targetChatId: 'b', closestEdge: 'top' });
+		f.controller.preview({
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'b',
+			closestEdge: 'top',
+		});
 		f.input = { ...f.input, groupNestedProjectPaths: false };
 		expect(f.controller.dragPresentationChanged).toBe(false);
 		expect(f.controller.finish('normal')).not.toBeNull();
 	});
 	it('keeps queued project moves after an acknowledged snapshot changes path spelling order', async () => {
 		const f = fixture();
-		f.input = projectionInput([
-			chat('a', { projectPath: '/repo/' }),
-			chat('b', { projectPath: '/repo' }),
-			chat('c', { projectPath: '/repo' }),
-		], { groupingFields: [{ field: 'project', enabled: true }] });
+		f.input = projectionInput(
+			[
+				chat('a', { projectPath: '/repo/' }),
+				chat('b', { projectPath: '/repo' }),
+				chat('c', { projectPath: '/repo' }),
+			],
+			{ groupingFields: [{ field: 'project', enabled: true }] },
+		);
 		let release!: (result: boolean) => void;
-		f.refresh.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+		f.refresh.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = resolve;
+				}),
+		);
 		f.controller.enqueue(f.move('b', 'a')!);
 		f.controller.enqueue(f.move('c', 'a')!);
 		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());

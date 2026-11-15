@@ -49,7 +49,7 @@ interface SidebarOrderDeps {
 	write(request: ReorderChatRequest): Promise<unknown>;
 	refresh(): Promise<boolean>;
 	sort(sortKey: ChatOrderSortKey): Promise<{ changed: boolean }>;
-	onError(error: unknown): void;
+	onError(error: unknown, outcome: 'rejected' | 'unconfirmed' | 'refresh'): void;
 }
 
 export function applySidebarRelativeMove(
@@ -171,7 +171,8 @@ export class SidebarOrderController {
 		if (
 			drag.placement?.referenceChatId === input.targetChatId &&
 			drag.placement.position === position
-		) return;
+		)
+			return;
 		drag.placement = {
 			kind: 'relative',
 			referenceChatId: input.targetChatId,
@@ -290,7 +291,7 @@ export class SidebarOrderController {
 		try {
 			return await this.#deps.refresh();
 		} catch (error) {
-			if (!this.#disposed) this.#deps.onError(error);
+			if (!this.#disposed) this.#deps.onError(error, 'refresh');
 			return false;
 		}
 	}
@@ -313,8 +314,8 @@ export class SidebarOrderController {
 					});
 				} catch (error) {
 					if (this.#disposed) break;
-					this.#deps.onError(error);
 					move.rejected = definitelyRejected(error);
+					this.#deps.onError(error, move.rejected ? 'rejected' : 'unconfirmed');
 				}
 				if (this.#disposed) break;
 				const refreshed = await this.#refresh();
@@ -353,7 +354,8 @@ export class SidebarOrderController {
 			try {
 				changed = (await this.#deps.sort(sortKey)).changed;
 			} catch (error) {
-				if (!this.#disposed) this.#deps.onError(error);
+				if (!this.#disposed)
+					this.#deps.onError(error, definitelyRejected(error) ? 'rejected' : 'unconfirmed');
 			}
 			if (this.#disposed) return false;
 			const refreshed = await this.#refresh();

@@ -37,6 +37,46 @@ function chat(
 }
 
 describe('resolveAdjacentChatId', () => {
+	it('anchors a hidden selected descendant on its visible collapsed parent', () => {
+		const chats = [
+			chat('before'),
+			chat('parent'),
+			{ ...chat('child'), parentChat: { chatId: 'parent', relation: 'delegation' as const } },
+			chat('after'),
+		];
+		const { rowModel } = buildSidebarChatListProjection({
+			allChats: chats,
+			groupingFields: [],
+			nestDelegatedChats: true,
+			collapsedProjectKeys: new Set(['delegation:parent']),
+			currentTime: new Date('2026-01-01'),
+			inactivityDuration: '3-days',
+			sortMode: 'manual',
+			pinnedInsertPosition: 'top',
+		});
+		expect(rowModel.visibleChatIds).toEqual(['before', 'parent', 'after']);
+		for (const offset of [-1, 1] as const) {
+			expect(
+				resolveAdjacentChatId({
+					selectedChatId: 'child',
+					displayedChatIds: rowModel.visibleChatIds,
+					displayedRows: rowModel.rows,
+					fallbackOrder: [],
+					offset,
+				}),
+			).toBe(offset === -1 ? 'before' : 'after');
+		}
+		expect(
+			resolveAdjacentChatId({
+				selectedChatId: 'missing',
+				displayedChatIds: rowModel.visibleChatIds,
+				displayedRows: rowModel.rows,
+				fallbackOrder: ['missing', 'after'],
+				offset: 1,
+			}),
+		).toBeNull();
+	});
+
 	it.each([false, true])(
 		'follows configured executor order with a collapsed executor=%s',
 		(collapsed) => {

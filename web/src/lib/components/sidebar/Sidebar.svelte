@@ -243,7 +243,7 @@
 		const operation = controller.startBulkOperation(action, {
 			selectedChats,
 			allChats: chats,
-			displayedChatIds: actionableChatIds,
+			displayedChatIds: projection.rowModel.visibleChatIds,
 			selectedChatId,
 		});
 		if (operation.nextSelectedChatId) {
