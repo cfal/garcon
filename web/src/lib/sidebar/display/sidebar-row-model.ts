@@ -112,7 +112,6 @@ interface ScopeTask {
 	kind: 'scope';
 	parentId: string | null;
 	ids: string[];
-	fieldIndex: number;
 	depth: number;
 	path: SidebarGroupPath;
 	executorGrouped: boolean;
@@ -219,7 +218,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			kind: 'scope',
 			parentId: null,
 			ids: forest.roots.filter((id) => included.has(id)),
-			fieldIndex: 0,
 			depth: 0,
 			path: [],
 			executorGrouped: false,
@@ -241,7 +239,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					kind: 'scope',
 					parentId: row.chat.id,
 					ids: forest.branches.get(row.chat.id)!.children.filter((id) => included.has(id)),
-					fieldIndex: 0,
 					depth: row.depth + 1,
 					path: [],
 					executorGrouped: false,
@@ -250,7 +247,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			continue;
 		}
 		if (!task.ids.length) continue;
-		const field = fields[task.fieldIndex];
+		const field = fields[task.path.length];
 		if (field !== undefined) {
 			const partitions = new Map<string, string[]>();
 			for (const id of task.ids) {
@@ -283,7 +280,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					key,
 					depth: task.depth,
 					count: ids.reduce((sum, id) => sum + (matchCounts.get(id) ?? 0), 0),
-					chatIds: ids,
 					containsChat,
 					isCollapsed,
 				};
@@ -306,7 +302,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					tasks.push({
 						...task,
 						ids,
-						fieldIndex: task.fieldIndex + 1,
 						path,
 						depth: task.depth + 1,
 						executorGrouped: task.executorGrouped || field === 'executor',
@@ -373,7 +368,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 
 export interface SidebarChatListProjection {
 	rowModel: SidebarRowModel;
-	hasPinnedChats: boolean;
 }
 
 export function buildSidebarChatListProjection(
@@ -384,6 +378,5 @@ export function buildSidebarChatListProjection(
 			...input,
 			orders: input.orders ?? buildSidebarChatOrderMap(input.allChats),
 		}),
-		hasPinnedChats: input.allChats.some((chat) => chat.isPinned),
 	};
 }

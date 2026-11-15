@@ -6,10 +6,35 @@ import {
 import {
 	sidebarProjectKey,
 	sidebarGroupCollapseKey,
+	buildSidebarRowModel,
 } from '../../../sidebar/display/sidebar-row-model';
 import { type SidebarVirtualRow } from '../../../sidebar/display/sidebar-virtual-chat-list';
+import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 
 describe('sidebar chat scroll targets', () => {
+	it.each([
+		['executor', 'executorCollapseKey'],
+		['project', 'projectCollapseKey'],
+		['activity', 'sectionKey'],
+		['status', 'sectionKey'],
+	] as const)('anchors a delegated descendant in a collapsed %s group', (field, targetKey) => {
+		const input = projectionInput(
+			[chat('root'), delegated('child', 'root'), delegated('grandchild', 'child')],
+			{ groupingFields: [{ field, enabled: true }] },
+		);
+		const header = buildSidebarRowModel(input).rows[0];
+		const { rows } = buildSidebarRowModel({
+			...input,
+			collapsedProjectKeys: new Set([header.key]),
+		});
+		expect(rows).toHaveLength(1);
+		expect(sidebarScrollTargetForChat(rows, 'grandchild')).toEqual({
+			index: 0,
+			[targetKey]: header.key,
+		});
+		expect(sidebarScrollTargetForChat(rows, 'missing')).toBeNull();
+	});
+
 	it.each([false, true])(
 		'anchors the closest visible collapsed ancestor with executor collapsed=%s',
 		(isCollapsed) => {
@@ -21,7 +46,7 @@ describe('sidebar chat scroll targets', () => {
 					collapseKey: 'executor:worker',
 					executorId: 'worker',
 					count: 1,
-					chatIds: ['hidden'],
+					containsChat: (chatId) => chatId === 'hidden',
 					isCollapsed,
 				},
 			];
@@ -35,9 +60,8 @@ describe('sidebar chat scroll targets', () => {
 					key: sectionKey,
 					depth: 1,
 					section: 'inactive',
-					executorId: 'worker',
 					count: 1,
-					chatIds: ['hidden'],
+					containsChat: (chatId) => chatId === 'hidden',
 					isCollapsed: true,
 				});
 			const target = sidebarScrollTargetForChat(rows, 'hidden');
@@ -73,7 +97,7 @@ describe('sidebar chat scroll targets', () => {
 				collapseKey: projectKey,
 				projectPath: '/tmp/shared-project',
 				count: 1,
-				chatIds: ['active-chat'],
+				containsChat: (chatId) => chatId === 'active-chat',
 				isCollapsed: false,
 			},
 			{
@@ -82,7 +106,7 @@ describe('sidebar chat scroll targets', () => {
 				depth: 0,
 				section: 'inactive',
 				count: 1,
-				chatIds: ['inactive-chat'],
+				containsChat: (chatId) => chatId === 'inactive-chat',
 				isCollapsed: false,
 			},
 			{
@@ -93,7 +117,7 @@ describe('sidebar chat scroll targets', () => {
 				collapseKey: inactiveProjectCollapseKey,
 				projectPath: '/tmp/shared-project',
 				count: 1,
-				chatIds: ['inactive-chat'],
+				containsChat: (chatId) => chatId === 'inactive-chat',
 				isCollapsed: true,
 			},
 		];

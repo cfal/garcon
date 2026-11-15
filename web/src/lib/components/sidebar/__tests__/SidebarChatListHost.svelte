@@ -6,7 +6,6 @@
 	import SidebarChatList from '../SidebarChatList.svelte';
 	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import { chatOrderGroupFor } from '$shared/chat-filter-query';
-	import { buildSidebarChatListProjection } from '../../../sidebar/display/sidebar-row-model';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import {
@@ -142,9 +141,6 @@
 		},
 		onError: () => {},
 	});
-	const projection = $derived(
-		buildSidebarChatListProjection({ ...projectionInput, orders: reorder.orders }),
-	);
 </script>
 
 <div
@@ -154,7 +150,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
-		{projection}
+		projection={reorder.projection}
 		{selectedChatId}
 		isLoading={false}
 		{isMobile}

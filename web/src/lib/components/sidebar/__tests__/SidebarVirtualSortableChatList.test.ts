@@ -134,7 +134,7 @@ function makeProjectHeader(
 		collapseKey: sidebarProjectKey(projectPath),
 		projectPath,
 		count,
-		chatIds,
+		containsChat: (chatId) => chatIds.includes(chatId),
 		isCollapsed,
 	};
 }
@@ -385,7 +385,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					executorId: remoteExecutor.id,
 					collapseKey: 'executor:removed',
 					count: 1,
-					chatIds: ['hidden-chat'],
+					containsChat: (chatId) => chatId === 'hidden-chat',
 					isCollapsed: true,
 				},
 			],
@@ -441,7 +441,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					executorId: 'local',
 					collapseKey: 'executor:local',
 					count: 2,
-					chatIds: ['chat-0', 'chat-1'],
+					containsChat: (chatId) => ['chat-0', 'chat-1'].includes(chatId),
 					isCollapsed: false,
 				},
 			],
@@ -462,7 +462,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			depth: 0,
 			section: 'inactive',
 			count: 3,
-			chatIds: ['chat-1', 'chat-2', 'chat-3'],
+			containsChat: (chatId) => ['chat-1', 'chat-2', 'chat-3'].includes(chatId),
 			isCollapsed: true,
 		};
 
@@ -500,7 +500,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					executorId: 'local',
 					collapseKey: 'executor:local',
 					count: 1,
-					chatIds: ['chat-0'],
+					containsChat: (chatId) => chatId === 'chat-0',
 					isCollapsed: false,
 				},
 				{ ...makeProjectHeader(projectPath, 1, ['chat-0']), depth: 1, executorGrouped: true },

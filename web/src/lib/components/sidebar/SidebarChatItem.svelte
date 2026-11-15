@@ -62,7 +62,6 @@
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		hasPinnedChats?: boolean;
 		onMoveUp?: () => void;
 		onMoveDown?: () => void;
 		moveBoundaryLabels?: { first: string; last: string };

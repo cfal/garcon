@@ -82,7 +82,6 @@
 		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		hasPinnedChats?: boolean;
 	}
 
 	let {
@@ -117,7 +116,6 @@
 		onNewProjectChat,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
-		hasPinnedChats = false,
 	}: SidebarVirtualSortableChatListProps = $props();
 
 	const appShell = getAppShell();
@@ -912,7 +910,7 @@
 				row.type !== 'chat' &&
 				row.isCollapsed &&
 				selectedChatId &&
-				(row.containsChat?.(selectedChatId) ?? row.chatIds.includes(selectedChatId)),
+				row.containsChat(selectedChatId),
 			)}
 			<div
 				data-sidebar-virtual-item={row.type}
@@ -981,7 +979,6 @@
 						onSortChatOrder={displayOptions.sortMode === 'manual' && !reorder.busy
 							? onSortChatOrder
 							: undefined}
-						{hasPinnedChats}
 					/>
 				{/if}
 				{#if virtualItem.index === indicatorIndex}

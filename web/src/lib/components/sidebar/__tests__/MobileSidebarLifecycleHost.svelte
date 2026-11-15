@@ -6,7 +6,6 @@
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
-	import { buildSidebarChatListProjection } from '../../../sidebar/display/sidebar-row-model';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
@@ -236,9 +235,6 @@
 		sort: async () => ({ changed: false }),
 		onError: () => {},
 	});
-	const projection = $derived(
-		buildSidebarChatListProjection({ ...projectionInput, orders: reorder.orders }),
-	);
 </script>
 
 <button type="button" onclick={() => (sidebarOpen = true)}>Open sidebar</button>
@@ -250,7 +246,7 @@
 	<Sidebar
 		{reorder}
 		onShowDisplay={() => {}}
-		{projection}
+		projection={reorder.projection}
 		{chats}
 		{selectedChatId}
 		isLoading={false}

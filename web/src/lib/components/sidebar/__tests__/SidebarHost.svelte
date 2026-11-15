@@ -1,6 +1,6 @@
 <script lang="ts">
 	import {
-		normalizeSidebarGroupingFields as migrateSidebarGroupingFields,
+		normalizeSidebarGroupingFields,
 		type SidebarGroupingSelection,
 	} from '$lib/sidebar/display/sidebar-preferences';
 
@@ -13,7 +13,6 @@
 	import SidebarDisplayDialog from '../SidebarDisplayDialog.svelte';
 	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import * as api from '$lib/api/chats';
-	import { buildSidebarChatListProjection } from '../../../sidebar/display/sidebar-row-model';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
@@ -172,7 +171,7 @@
 			sidebarShowProjectPath = value.sidebarShowProjectPath;
 		},
 		get sidebarGroupingFields() {
-			return migrateSidebarGroupingFields(sidebarGroupingFields);
+			return normalizeSidebarGroupingFields(sidebarGroupingFields);
 		},
 		get sidebarInactivityDuration() {
 			return sidebarInactivityDuration;
@@ -331,15 +330,12 @@
 				'Failed to reorder chats.',
 			),
 	});
-	const projection = $derived(
-		buildSidebarChatListProjection({ ...projectionInput, orders: reorder.orders }),
-	);
 </script>
 
 <Sidebar
 	{reorder}
 	onShowDisplay={() => (displayOpen = true)}
-	{projection}
+	projection={reorder.projection}
 	chats={displayedChats}
 	{selectedChatId}
 	isLoading={false}

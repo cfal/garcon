@@ -37,8 +37,7 @@ export interface SidebarVirtualProjectHeaderRow {
 	collapseKey: string;
 	projectPath: string;
 	count: number;
-	chatIds: string[];
-	containsChat?: (chatId: string) => boolean;
+	containsChat: (chatId: string) => boolean;
 	isCollapsed: boolean;
 	/** True when an executor header already identifies this project's executor. */
 	executorGrouped?: boolean;
@@ -53,8 +52,7 @@ export interface SidebarVirtualExecutorHeaderRow {
 	executorId: string;
 	collapseKey: string;
 	count: number;
-	chatIds: string[];
-	containsChat?: (chatId: string) => boolean;
+	containsChat: (chatId: string) => boolean;
 	isCollapsed: boolean;
 }
 
@@ -63,13 +61,11 @@ export type SidebarChatSection =
 
 export interface SidebarVirtualSectionHeaderRow {
 	type: 'section-header';
-	executorId?: string;
 	key: string;
 	depth: number;
 	section: SidebarChatSection;
 	count: number;
-	chatIds: string[];
-	containsChat?: (chatId: string) => boolean;
+	containsChat: (chatId: string) => boolean;
 	isCollapsed: boolean;
 }
 

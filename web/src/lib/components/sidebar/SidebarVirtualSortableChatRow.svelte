@@ -59,7 +59,6 @@
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		hasPinnedChats?: boolean;
 		onMoveUp?: () => void;
 		onMoveDown?: () => void;
 		moveBoundaryLabels?: { first: string; last: string };
@@ -111,7 +110,6 @@
 		newWindowEdges,
 		onDragUpdate,
 		onDropOnRow,
-		hasPinnedChats = false,
 	}: SidebarVirtualSortableChatRowProps = $props();
 
 	let rowEl = $state<HTMLElement | null>(null);
@@ -285,7 +283,6 @@
 					{onSortChatOrder}
 					{onOpenInNewWindow}
 					{newWindowEdges}
-					{hasPinnedChats}
 				/>
 				{#snippet failed()}
 					<div

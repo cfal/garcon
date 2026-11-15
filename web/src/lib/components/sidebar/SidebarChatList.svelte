@@ -161,6 +161,5 @@
 		{onSortChatOrder}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
-		hasPinnedChats={projection.hasPinnedChats}
 	/>
 {/if}
