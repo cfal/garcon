@@ -422,8 +422,6 @@
 	"chat_new_chat_standard": "None",
 	"chat_new_chat_star_bookmark": "Pin a project path to bookmark it here",
 	"chat_new_chat_pinned_paths": "Pinned paths",
-	"chat_new_chat_landing_heading": "What would you like to work on?",
-	"chat_new_chat_landing_description": "Choose a project, then select a worktree to start a new chat.",
 	"chat_new_chat_saved_projects": "Saved and recent projects",
 	"chat_new_chat_project_actions": "Project actions: {project}",
 	"chat_new_chat_project_pin": "Pin",

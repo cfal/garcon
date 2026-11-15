@@ -26,7 +26,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await page.goto(integration.garcon.baseUrl);
       await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
       const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
-      await browserExpect(dialog.getByRole('heading', { name: 'What would you like to work on?' })).toBeVisible();
+      await browserExpect(dialog.getByRole('heading', { name: 'What would you like to work on?' })).toHaveCount(0);
       const prompt = dialog.getByPlaceholder('How can I help you today?');
       await prompt.fill('Synthetic retained draft');
       const pins = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true });

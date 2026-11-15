@@ -135,6 +135,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await parentCard.getByRole('button', { name: /^Project actions:/ }).click();
       await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
       await browserExpect(parentCard.getByRole('img', { name: 'Pinned', exact: true })).toHaveCount(0);
+      await browserExpect(parentCard.getByRole('button', { name: /^Project actions:/ })).toBeEnabled();
       await browserExpect(selectedWorktree).toBeChecked();
       for (const width of [1440, 390, 360]) {
         phase(`checking the worktree list at ${width}px`);
@@ -166,6 +167,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(tagBounds.y).toBeGreaterThanOrEqual(worktreeBounds.y + worktreeBounds.height);
         const composerBounds = (await dialog.locator('[data-slot="new-chat-composer"]').boundingBox())!;
         const pickerBounds = (await dialog.locator('[data-slot="new-chat-project-picker"]').boundingBox())!;
+        expect(tagBounds.y - (pickerBounds.y + pickerBounds.height)).toBeGreaterThanOrEqual(width >= 640 ? 40 : 32);
         const preambleBounds = (await dialog.locator('[data-slot="new-chat-preambles-row"]').boundingBox())!;
         expect(tagBounds.width).toBeCloseTo(preambleBounds.width, 0);
         expect(tagBounds.height).toBeCloseTo(preambleBounds.height, 0);

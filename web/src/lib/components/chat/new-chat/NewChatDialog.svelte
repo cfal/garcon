@@ -53,6 +53,7 @@
 	<Dialog.Content
 		class="top-(--app-viewport-offset-top) left-0 flex h-(--app-height) max-h-(--app-height) max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-background p-0 shadow-none sm:max-w-none"
 		data-new-chat-landing
+		aria-describedby={undefined}
 		showCloseButton={false}
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),
@@ -76,12 +77,6 @@
 			class="landing-insets min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,var(--safe-area-inset-bottom,0px))]"
 		>
 			<div class="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center py-4 sm:py-6">
-				<div class="mb-4 space-y-1">
-					<h2 class="text-xl font-semibold tracking-tight sm:text-2xl">
-						{m.chat_new_chat_landing_heading()}
-					</h2>
-					<Dialog.Description>{m.chat_new_chat_landing_description()}</Dialog.Description>
-				</div>
 				{#key appShell.newChatDialogRequestId}
 					<NewChatForm
 						seed={appShell.newChatDialogSeed}

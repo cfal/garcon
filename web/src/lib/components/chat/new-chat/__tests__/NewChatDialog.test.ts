@@ -319,11 +319,11 @@ describe('NewChatDialog', () => {
 		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(initialSeed ? 0 : 1);
 	});
 
-	it('presents a named landing screen with saved-project guidance', async () => {
+	it('presents a named landing screen without the introductory heading and subtitle', async () => {
 		render(NewChatDialogTestHost);
 		const landing = await screen.findByRole('dialog', { name: 'New Chat' });
-		expect(within(landing).getByRole('heading', { name: 'What would you like to work on?' })).toBeTruthy();
-		expect(within(landing).getByText('Choose a project, then select a worktree to start a new chat.')).toBeTruthy();
+		expect(within(landing).queryByRole('heading', { name: 'What would you like to work on?' })).toBeNull();
+		expect(within(landing).queryByText('Choose a project, then select a worktree to start a new chat.')).toBeNull();
 		await within(landing).findByRole('region', { name: 'Saved and recent projects' });
 	});
 

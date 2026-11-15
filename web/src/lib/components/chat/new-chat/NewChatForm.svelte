@@ -658,7 +658,9 @@
 			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
-				<NewChatProjectPicker {form} {isMobile} />
+				<div class="pb-6 sm:pb-8">
+					<NewChatProjectPicker {form} {isMobile} />
+				</div>
 				<ChatTagToggleButton
 					active={form.chatTags.length > 0}
 					label={m.chat_new_chat_tags_add_to_session()}
