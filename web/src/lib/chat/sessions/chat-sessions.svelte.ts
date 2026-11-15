@@ -31,10 +31,7 @@ import type {
 	ReplaceChatTagsRequest,
 	TransitionChatTagsRequest,
 } from '$shared/chat-tag-mutations';
-import type {
-	ChatOrderBoundary,
-	ReorderChatResponse,
-} from '$shared/chat-order-contracts';
+import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
 	ChatArchiveProjectionState,
 	type ArchiveMutationSettlement,
@@ -70,7 +67,6 @@ import {
 	toDraftRecord,
 	toRecord,
 } from './chat-session-records.js';
-
 
 export class ChatSessionsStore implements ChatSessionsPort {
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
@@ -235,6 +231,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	/** Refreshes the chat list without changing sidebar loading state. */
 	async quietRefreshChats(): Promise<void> {
 		return this.#refresh(false);
+	}
+
+	async refreshOrderSnapshot(): Promise<boolean> {
+		const startedBefore = this.#nextFetchGeneration;
+		await this.#refresh(false);
+		return this.#latestSuccessfulFetchGeneration > startedBefore;
 	}
 
 	isArchiveMutationPending(chatId: string): boolean {

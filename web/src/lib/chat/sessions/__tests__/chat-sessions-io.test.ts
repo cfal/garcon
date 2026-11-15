@@ -124,6 +124,53 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.isLoadingChats).toBe(false);
 	});
 
+	it.each([false, true])(
+		'requires an applied post-request order snapshot (follow-up succeeds: %s)',
+		async (succeeds) => {
+			const oldFetch = deferred<Awaited<ReturnType<typeof listChats>>>();
+			const freshFetch = deferred<Awaited<ReturnType<typeof listChats>>>();
+			const fetchChats = vi
+				.fn<typeof listChats>()
+				.mockReturnValueOnce(oldFetch.promise)
+				.mockReturnValueOnce(freshFetch.promise);
+			const store = new ChatSessionsStore({ listChats: fetchChats });
+			const oldRefresh = store.quietRefreshChats();
+			const confirmation = store.refreshOrderSnapshot();
+			oldFetch.resolve({
+				sessions: [makeServerSession({ id: 'old' })],
+				total: 1,
+				lastSelectedChatId: null,
+			});
+			await flushMicrotasks();
+			expect(fetchChats).toHaveBeenCalledTimes(2);
+			if (succeeds)
+				freshFetch.resolve({
+					sessions: [makeServerSession({ id: 'new' })],
+					total: 1,
+					lastSelectedChatId: null,
+				});
+			else freshFetch.reject(new Error('Offline'));
+			expect(await confirmation).toBe(succeeds);
+			await oldRefresh;
+			expect(store.order).toEqual([succeeds ? 'new' : 'old']);
+		},
+	);
+
+	it('does not confirm order using a superseded fetch whose replacement fails', async () => {
+		const discarded = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const fetchChats = vi
+			.fn<typeof listChats>()
+			.mockReturnValueOnce(discarded.promise)
+			.mockRejectedValueOnce(new Error('Offline'));
+		const store = new ChatSessionsStore({ listChats: fetchChats });
+		const confirmation = store.refreshOrderSnapshot();
+		store.applyStartEntry(makeServerSession({ id: 'created' }));
+		discarded.resolve({ sessions: [], total: 0, lastSelectedChatId: null });
+		expect(await confirmation).toBe(false);
+		expect(store.byId.created).toBeDefined();
+		expect(fetchChats).toHaveBeenCalledTimes(2);
+	});
+
 	it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
 		const store = new ChatSessionsStore();
 		const first = deferred<{
