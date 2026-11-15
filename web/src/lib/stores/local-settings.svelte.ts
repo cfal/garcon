@@ -740,6 +740,9 @@ export class LocalSettingsStore {
 		const next = { ...this.snapshot(), [key]: value };
 		if (key === 'snippetTrigger') next.snippetTrigger = normalizeSnippetTrigger(value);
 		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
+		if (key === 'sidebarGroupingFields') {
+			next.sidebarGroupingFields = normalizeSidebarGroupingFields(value);
+		}
 		if (key === 'chatListDock') {
 			next.chatListDock = normalizeChatListDock(value);
 		}

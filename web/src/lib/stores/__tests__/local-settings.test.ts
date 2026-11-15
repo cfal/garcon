@@ -57,6 +57,26 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('normalizes grouping fields immediately and before persistence through set', () => {
+		const store = createLocalSettingsStore();
+		expect(store.sidebarNestDelegatedChats).toBe(false);
+		store.set('sidebarGroupingFields', [
+			{ field: 'project', enabled: true },
+			{ field: 'project', enabled: false },
+		]);
+		const expected = [
+			{ field: 'project', enabled: true },
+			{ field: 'executor', enabled: false },
+			{ field: 'activity', enabled: false },
+			{ field: 'status', enabled: false },
+		];
+		expect(store.sidebarGroupingFields).toEqual(expected);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!).sidebarGroupingFields,
+		).toEqual(expected);
+		store.destroy();
+	});
+
 	it.each([false, true])(
 		'keeps the active combination mode until a new app store is created (%s)',
 		(combined) => {
