@@ -29,6 +29,17 @@ export type SidebarDisplayPreferences = Pick<
 	| 'sidebarShowProjectPath'
 >;
 
+export function defaultSidebarDisplayPreferences(): SidebarDisplayPreferences {
+	return {
+		sidebarGroupingFields: defaultSidebarGroupingFields(),
+		sidebarNestDelegatedChats: false,
+		sidebarInactivityDuration: '3-days',
+		sidebarGroupNestedProjectPaths: false,
+		sidebarChatItemLayout: 'single-line',
+		sidebarShowProjectPath: false,
+	};
+}
+
 export function sidebarDisplayOptions(
 	preferences: SidebarDisplayPreferences,
 	ambient: Pick<SidebarDisplayOptions, 'sortMode' | 'pinnedInsertPosition' | 'chatFontScale'>,
@@ -44,14 +55,7 @@ export function sidebarDisplayOptions(
 	};
 }
 
-export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
-	groupingFields: defaultSidebarGroupingFields(),
-	nestDelegatedChats: false,
-	inactivityDuration: '3-days',
-	groupNestedProjectPaths: false,
-	chatItemLayout: 'single-line',
-	showProjectPath: false,
-	chatFontScale: 1,
-	sortMode: 'recent',
-	pinnedInsertPosition: 'top',
-};
+export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS = sidebarDisplayOptions(
+	defaultSidebarDisplayPreferences(),
+	{ chatFontScale: 1, sortMode: 'recent', pinnedInsertPosition: 'top' },
+);

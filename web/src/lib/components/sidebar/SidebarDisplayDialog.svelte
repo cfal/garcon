@@ -5,8 +5,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import SidebarDisplayFields from './SidebarDisplayFields.svelte';
 	import SidebarDisplayPreview from './SidebarDisplayPreview.svelte';
-	import { defaultSidebarGroupingFields } from '$lib/sidebar/display/sidebar-preferences';
-	import { sidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
+	import {
+		defaultSidebarDisplayPreferences,
+		sidebarDisplayOptions,
+	} from '$lib/sidebar/display/sidebar-display-options';
 	import { typographyScale } from '$lib/theme/typography';
 	import * as m from '$lib/paraglide/messages.js';
 	let { onClose, returnFocus }: { onClose: () => void; returnFocus?: () => void } = $props();
@@ -49,15 +51,8 @@
 			<Button
 				variant="ghost"
 				class="sm:mr-auto"
-				onclick={() =>
-					(draft = {
-						sidebarGroupingFields: defaultSidebarGroupingFields(),
-						sidebarNestDelegatedChats: false,
-						sidebarInactivityDuration: '3-days',
-						sidebarGroupNestedProjectPaths: false,
-						sidebarChatItemLayout: 'single-line',
-						sidebarShowProjectPath: false,
-					})}>{m.sidebar_display_reset()}</Button
+				onclick={() => (draft = defaultSidebarDisplayPreferences())}
+				>{m.sidebar_display_reset()}</Button
 			>
 			<Button variant="outline" onclick={close}>{m.sidebar_actions_cancel()}</Button>
 			<Button

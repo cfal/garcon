@@ -2,7 +2,10 @@
 // browser-only preferences to persisted storage.
 
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
-import type { SidebarDisplayPreferences } from '$lib/sidebar/display/sidebar-display-options';
+import {
+	defaultSidebarDisplayPreferences,
+	type SidebarDisplayPreferences,
+} from '$lib/sidebar/display/sidebar-display-options';
 import {
 	defaultSidebarGroupingFields,
 	migrateSidebarGrouping,
@@ -277,12 +280,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGroupingFields: defaultSidebarGroupingFields(),
-	sidebarNestDelegatedChats: false,
-	sidebarInactivityDuration: '3-days',
-	sidebarGroupNestedProjectPaths: false,
-	sidebarChatItemLayout: 'single-line',
-	sidebarShowProjectPath: false,
+	...defaultSidebarDisplayPreferences(),
 	selectedChatBoardId: null,
 	chatBoardItemLayout: null,
 	chatBoardActiveColumnByBoardId: {},
