@@ -12,6 +12,7 @@ describe('settings search', () => {
 		});
 	});
 	it.each([
+		'User message alignment',
 		'Auto-hide chat scrollbar',
 		'Composer status bar',
 		'Show for Git projects',
