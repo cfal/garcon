@@ -1,11 +1,11 @@
 import { isRecord } from '../../../common/json.js';
 import { projectPathKey, type RemoveProjectPathRequest } from '../../../common/project-path-preferences.js';
-import { parseExecutorProjectPreferences } from '../../../common/settings.js';
 import { createLogger } from '../../common/log.js';
 import { bumpRemoteSettingsVersion } from './settings-shared.js';
 import {
   dedupeRecentAgentSettings,
   recordRecentProjectPath,
+  readExecutorProjectPreferences,
   sanitizeExecutionDefaults,
   sanitizeExecutionDefaultsSettings,
   sanitizeRecentAgentSetting,
@@ -47,11 +47,11 @@ export class StartupDefaultsStore {
     await this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       const paths = settings.paths;
-      const byExecutor = parseExecutorProjectPreferences(paths.byExecutor) ?? {};
+      const byExecutor = isRecord(paths.byExecutor) ? paths.byExecutor : {};
       const owner = executorId === 'local' ? {
         pinnedPaths: Array.isArray(paths.pinnedProjectPaths) ? paths.pinnedProjectPaths.filter((path): path is string => typeof path === 'string') : [],
         recentPaths: Array.isArray(paths.recentProjectPaths) ? paths.recentProjectPaths.filter((path): path is string => typeof path === 'string') : [],
-      } : byExecutor[executorId];
+      } : readExecutorProjectPreferences(byExecutor)[executorId];
       if (!owner) return;
       const pinnedPaths = owner.pinnedPaths.filter(path => projectPathKey(path) !== key);
       const recentPaths = owner.recentPaths.filter(path => projectPathKey(path) !== key);

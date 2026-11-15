@@ -4,7 +4,6 @@ import {
 } from '../../../common/handoff-sizing.js';
 import {
   DEFAULT_REMOTE_FEATURE_SETTINGS,
-  parseExecutorProjectPreferences,
   type RemoteSettingsSnapshot,
   type RemoteUiEffectiveSettings,
 } from '../../../common/settings.js';
@@ -13,7 +12,8 @@ import type { TelegramPublicStatus, TelegramSettingsStore } from '../notificatio
 import { resolveGenerationContextsForSelections } from './generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig, resolveGenerationUiSnapshot } from './generation-effective.js';
 import { normalizeUiSettings } from './settings-shared.js';
-import { sortedPinnedProjectPaths } from './startup-recents.js';
+import { normalizePathSettings, readExecutorProjectPreferences } from './startup-recents.js';
+import { orderedProjectPaths } from '../../../common/project-pins.js';
 import type { SettingsStore } from './store.js';
 
 function asPlainObject(value: unknown): Record<string, unknown> {
@@ -58,7 +58,7 @@ export async function buildRemoteSettingsSnapshot({
   const version = settingsSource.version;
   const features = settingsSource.features ?? structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS);
   const ui = normalizeUiSettings(settingsSource.ui);
-  const paths = settingsSource.paths;
+  const paths = normalizePathSettings(settingsSource.paths ?? {});
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
   const executionDefaults = settingsSource.executionDefaults;
@@ -101,12 +101,12 @@ export async function buildRemoteSettingsSnapshot({
     ui: asPlainObject(ui),
     uiEffective,
     paths: {
-      pinnedProjectPaths: sortedPinnedProjectPaths(paths?.pinnedProjectPaths),
+      pinnedProjectPaths: orderedProjectPaths(paths.pinnedProjectPaths),
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
       recentProjectPaths: Array.isArray(paths?.recentProjectPaths)
         ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')
         : [],
-      ...(paths?.byExecutor === undefined ? {} : { byExecutor: parseExecutorProjectPreferences(paths.byExecutor) ?? {} }),
+      ...(paths?.byExecutor === undefined ? {} : { byExecutor: readExecutorProjectPreferences(paths.byExecutor) }),
     },
     pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
     recentAgentSettings,

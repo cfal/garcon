@@ -46,9 +46,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(localPin).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(worktrees.getByText(sharedPath, { exact: true })).toBeVisible();
       const offlinePin = pins.getByRole('button', { name: 'Offline worker: /projects/archive', exact: true });
-      await browserExpect(offlinePin).toBeDisabled();
-      await browserExpect(offlinePin).toHaveAccessibleDescription('Waiting for connection');
-      await browserExpect(pins.getByRole('button', { name: `Offline worker: ${longPath}`, exact: true })).toContainText(longPath);
+      await browserExpect(offlinePin).toHaveCount(0);
+      await browserExpect(pins.getByRole('button', { name: `Offline worker: ${longPath}`, exact: true })).toHaveCount(0);
 
       if (client.executorId !== 'local') {
         phase('selecting the identical path on the real worker with Enter');
@@ -93,7 +92,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await client.put('/api/v1/app/settings', { paths: {
         byExecutor: { [offline.id]: { pinnedPaths: ['/projects/replacement'] } },
       } });
-      await browserExpect(pins.getByRole('button', { name: 'Offline worker: /projects/replacement', exact: true })).toBeDisabled();
+      await browserExpect(pins.getByRole('button', { name: 'Offline worker: /projects/replacement', exact: true })).toHaveCount(0);
       await browserExpect(offlinePin).toHaveCount(0);
       await browserExpect(prompt).toHaveValue('Synthetic retained draft');
       phase('retaining the selected project when saved projects are removed');
@@ -104,6 +103,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           [offline.id]: { pinnedPaths: [] },
         },
       } });
+      for (const [executorId, paths] of [
+        ['local', ['/projects/atlas', sharedPath]],
+        ...(client.executorId === 'local' ? [] : [[client.executorId, [sharedPath, '/projects/garcon']]]),
+      ] as [string, string[]][]) {
+        for (const projectPath of paths) {
+          await client.delete('/api/v1/app/settings/project-path', { executorId, projectPath });
+        }
+      }
       await browserExpect(pins.locator('[data-slot="new-chat-project-card"]')).toHaveCount(1);
       await browserExpect(pins.getByRole('button', { pressed: true })).toHaveCount(1);
       expect((await client.listChats()).sessions).toEqual([]);

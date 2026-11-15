@@ -19,7 +19,13 @@ Compact project cards use one column. Each card shows
 its folder name and a truncated path, with full paths on hover and
 executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
-Each card has a three-dot menu on the right with Pin or Unpin and Remove from list.
+The main list shows at most five cards total without an internal scrollbar.
+Overflow stays saved in a floating More menu, shown only when needed as a compact
+bar matching the cards with a downward chevron. The menu opens below and closes
+on outside click or Escape, before the landing screen closes. Its compact cards
+only select projects. Selection closes More and moves the highlighted project
+to the top of the main list, preserving the remaining order. Main-list cards
+have a three-dot menu on the right with Pin or Unpin and Remove from list.
 Only pinned cards show a rotated pin indicator. Selection uses highlighting without
 a checkmark. Pinning and removal preserve the selected project, worktree and prompt.
 Removal deletes that executor's saved pin and recent entry, retaining other owners
@@ -27,7 +33,10 @@ and the folder itself. A removed selected card stays absent on reopen; choosing
 the folder explicitly or starting a session there can make it available again.
 
 Project cards reuse the existing executor-qualified pinned and recent paths. Pinned
-folders appear first; recent folders retain their recorded order. Duplicate drive-letter
+folders appear first; recent folders retain their recorded order. Each machine can
+have five pins, stored oldest first. A sixth pin unpins the oldest while retaining
+it in saved recents. Existing excess pins are likewise unpinned, never removed.
+Saved project recents are retained until explicitly removed. Duplicate drive-letter
 Windows paths with different slash styles appear once, retaining the pinned spelling.
 POSIX backslashes and exact whitespace remain significant. A selectable worktree
 list replaces the permanent directory text field. It lists worktrees for the selected
@@ -74,8 +83,8 @@ and fence old requests; results from a different project, executor or connection
 generation cannot populate or select the current list. Worktree selection reuses
 the same path validation and admission gates as every other submit path.
 
-Project cards remain visible when their executor is offline or removed, show the
-existing availability status, and cannot select unavailable targets. Card identity
+Project cards are hidden while their executor is offline or removed, without
+deleting its saved preferences or changing an unavailable selected target. Card identity
 includes the executor and path; identical paths on different machines remain
 distinct. The New Chat projects controller owns selection and readiness checks for both lists.
 

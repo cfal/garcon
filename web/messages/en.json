@@ -423,6 +423,8 @@
 	"chat_new_chat_star_bookmark": "Pin a project path to bookmark it here",
 	"chat_new_chat_pinned_paths": "Pinned paths",
 	"chat_new_chat_saved_projects": "Saved and recent projects",
+	"chat_new_chat_more": "More",
+	"chat_new_chat_more_projects": "More projects",
 	"chat_new_chat_project_actions": "Project actions: {project}",
 	"chat_new_chat_project_pin": "Pin",
 	"chat_new_chat_project_unpin": "Unpin",

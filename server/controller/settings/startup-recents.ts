@@ -7,8 +7,9 @@ import {
 } from '../../../common/chat-modes.js';
 import { parseAgentSettingsById } from '../../../common/agent-integration.js';
 import { isRecord } from '../../../common/json.js';
+import { orderedProjectPaths, reconcileProjectPins } from '../../../common/project-pins.js';
 import { effectiveExecutorId, parseExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
-import { parseExecutorProjectPreferences } from '../../../common/settings.js';
+import { parseExecutorProjectPreferences, type ExecutorProjectPreferences } from '../../../common/settings.js';
 import type {
   ExecutionDefaults,
   ExecutionDefaultsSettings,
@@ -18,7 +19,6 @@ import type {
 } from './types.js';
 
 export const RECENT_AGENT_SETTINGS_PER_EXECUTOR_LIMIT = 20;
-export const RECENT_PROJECT_PATHS_LIMIT = 10;
 const EXECUTION_DEFAULT_KEYS = [
   'permissionMode',
   'thinkingMode',
@@ -39,30 +39,8 @@ function optionalPath(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function dedupePaths(entries: unknown, limit: number): string[] {
-  if (!Array.isArray(entries)) return [];
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of entries) {
-    const value = optionalPath(entry);
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-    if (result.length >= limit) break;
-  }
-  return result;
-}
-
-function compareStringsAlphabetically(left: string, right: string): number {
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
-}
-
-export function sortedPinnedProjectPaths(entries: unknown): string[] {
-  return dedupePaths(entries, Number.MAX_SAFE_INTEGER).sort(compareStringsAlphabetically);
-}
-
-function sameStringArray(left: unknown[], right: string[]): boolean {
+function sameStringArray(left: unknown, right: string[]): boolean {
+  if (!Array.isArray(left)) return false;
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) return false;
@@ -70,21 +48,41 @@ function sameStringArray(left: unknown[], right: string[]): boolean {
   return true;
 }
 
+/** Reads valid owners independently while leaving malformed stored entries recoverable. */
+export function readExecutorProjectPreferences(value: unknown): Record<string, ExecutorProjectPreferences> {
+  if (!isRecord(value)) return {};
+  const preferences: Record<string, ExecutorProjectPreferences> = {};
+  for (const [id, entry] of Object.entries(value)) {
+    const parsed = parseExecutorProjectPreferences({ [id]: entry });
+    if (parsed?.[id]) preferences[id] = parsed[id];
+  }
+  return preferences;
+}
+
 export function normalizePathSettings(paths: PathSettings): PathSettings {
-  const byExecutor = paths.byExecutor === undefined ? undefined : parseExecutorProjectPreferences(paths.byExecutor);
-  if (byExecutor === null) throw new Error('Invalid executor project preferences');
-  return {
-    ...paths,
-    ...(Array.isArray(paths.pinnedProjectPaths) ? { pinnedProjectPaths: sortedPinnedProjectPaths(paths.pinnedProjectPaths) } : {}),
-    ...(byExecutor ? { byExecutor } : {}),
-  };
+  const normalized = { ...paths };
+  if (Array.isArray(paths.pinnedProjectPaths)) {
+    const pins = reconcileProjectPins([], paths.pinnedProjectPaths, paths.recentProjectPaths);
+    normalized.pinnedProjectPaths = pins.pinnedPaths;
+    normalized.recentProjectPaths = pins.recentPaths;
+  }
+  if (isRecord(paths.byExecutor)) {
+    const byExecutor = { ...paths.byExecutor };
+    for (const [id, preferences] of Object.entries(readExecutorProjectPreferences(byExecutor))) {
+      const rawPreferences = byExecutor[id];
+      byExecutor[id] = { ...(isRecord(rawPreferences) ? rawPreferences : {}),
+        ...reconcileProjectPins([], preferences.pinnedPaths, preferences.recentPaths) };
+    }
+    normalized.byExecutor = byExecutor;
+  }
+  return normalized;
 }
 
 export function withoutExecutorStartupPreferences(
   settings: Pick<ProjectSettings, 'paths' | 'recentAgentSettings'>,
   executorId: string,
 ): Pick<ProjectSettings, 'paths' | 'recentAgentSettings'> {
-  const byExecutor = parseExecutorProjectPreferences(settings.paths.byExecutor);
+  const byExecutor = isRecord(settings.paths.byExecutor) ? { ...settings.paths.byExecutor } : null;
   if (byExecutor) delete byExecutor[executorId];
   return {
     paths: byExecutor ? { ...settings.paths, byExecutor } : settings.paths,
@@ -269,26 +267,24 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
 } {
   const rawPaths = isRecord(raw.paths) ? raw.paths : {};
   const legacyProjectPath = optionalPath(raw.lastProjectPath);
-  const pinnedProjectPaths = sortedPinnedProjectPaths(rawPaths.pinnedProjectPaths);
-  const current = dedupePaths(rawPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
-  const recentProjectPaths = dedupePaths(
+  const normalizedPaths = normalizePathSettings(rawPaths);
+  const pinnedProjectPaths = orderedProjectPaths(normalizedPaths.pinnedProjectPaths);
+  const current = orderedProjectPaths(normalizedPaths.recentProjectPaths);
+  const recentProjectPaths = orderedProjectPaths(
     [...current, ...(legacyProjectPath ? [legacyProjectPath] : [])],
-    RECENT_PROJECT_PATHS_LIMIT,
   );
   const paths = {
-    ...rawPaths,
+    ...normalizedPaths,
     ...(Array.isArray(rawPaths.pinnedProjectPaths) ? { pinnedProjectPaths } : {}),
     recentProjectPaths,
   };
-  const rawRecentCount = Array.isArray(rawPaths.recentProjectPaths)
-    ? rawPaths.recentProjectPaths.length
-    : 0;
   const migrated =
     Boolean(legacyProjectPath) ||
     (Array.isArray(rawPaths.pinnedProjectPaths) &&
       !sameStringArray(rawPaths.pinnedProjectPaths, pinnedProjectPaths)) ||
+    JSON.stringify(rawPaths.byExecutor) !== JSON.stringify(normalizedPaths.byExecutor) ||
     !Array.isArray(rawPaths.recentProjectPaths) ||
-    rawRecentCount !== recentProjectPaths.length;
+    !sameStringArray(rawPaths.recentProjectPaths, recentProjectPaths);
   return { paths, migrated };
 }
 
@@ -299,15 +295,22 @@ export function recordRecentProjectPath(paths: PathSettings, projectPath: unknow
   const executorId = parseExecutorId(targetExecutor);
   if (!executorId) throw new Error('Invalid executor ID');
   if (executorId !== LOCAL_EXECUTOR_ID) {
-    const byExecutor = parseExecutorProjectPreferences(normalizedPaths.byExecutor ?? {})!;
-    const previous = byExecutor[executorId] ?? { recentPaths: [], pinnedPaths: [] };
+    if (normalizedPaths.byExecutor !== undefined && !isRecord(normalizedPaths.byExecutor)) {
+      throw new Error('Invalid executor project preferences');
+    }
+    const byExecutor = isRecord(normalizedPaths.byExecutor) ? normalizedPaths.byExecutor : {};
+    const validPreferences = readExecutorProjectPreferences(byExecutor);
+    if (executorId in byExecutor && !validPreferences[executorId]) {
+      throw new Error('Invalid executor project preferences');
+    }
+    const previous = validPreferences[executorId] ?? { recentPaths: [], pinnedPaths: [] };
     return { ...normalizedPaths, byExecutor: { ...byExecutor, [executorId]: {
-      ...previous, recentPaths: dedupePaths([value, ...previous.recentPaths], RECENT_PROJECT_PATHS_LIMIT),
+      ...previous, recentPaths: orderedProjectPaths([value, ...previous.recentPaths]),
     } } };
   }
-  const current = dedupePaths(normalizedPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
+  const current = orderedProjectPaths(normalizedPaths.recentProjectPaths);
   return {
     ...normalizedPaths,
-    recentProjectPaths: dedupePaths([value, ...current], RECENT_PROJECT_PATHS_LIMIT),
+    recentProjectPaths: orderedProjectPaths([value, ...current]),
   };
 }
