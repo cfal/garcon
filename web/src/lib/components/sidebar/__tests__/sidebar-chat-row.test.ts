@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -559,6 +559,19 @@ describe('shared sidebar chat row', () => {
 		expect(forkItem.hasAttribute('data-disabled')).toBe(false);
 		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
+	});
+
+	it('closes the archive menu when its action immediately becomes pending', async () => {
+		const onToggleArchive = vi.fn(() => {
+			void view.rerender({ isArchiveMutationPending: true });
+		});
+		const view = render(SidebarChatItemHost, { session: createChat(), onToggleArchive });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Archive' }));
+
+		expect(onToggleArchive).toHaveBeenCalledExactlyOnceWith('chat-1');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 	});
 
 	it('disables pin and archive toggles while an archive mutation is pending', async () => {

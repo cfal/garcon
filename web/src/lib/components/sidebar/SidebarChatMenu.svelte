@@ -217,7 +217,7 @@
 
 <DropdownMenuItem
 	disabled={isArchiveMutationPending}
-	onclick={() => {
+	onSelect={() => {
 		if (!isArchiveMutationPending) onTogglePinned(session.id);
 	}}
 >
@@ -226,7 +226,7 @@
 </DropdownMenuItem>
 <DropdownMenuItem
 	disabled={isArchiveMutationPending}
-	onclick={() => {
+	onSelect={() => {
 		if (!isArchiveMutationPending) onToggleArchive(session.id);
 	}}
 >
