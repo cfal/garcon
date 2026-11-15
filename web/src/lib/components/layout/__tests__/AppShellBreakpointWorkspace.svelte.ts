@@ -13,10 +13,27 @@ import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-po
 import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
 import { collectWindowNodes, windowNodeById } from '$lib/workspace/window-tree';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
-import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
+import type {
+	LocalSettingsStore,
+	SidebarInactivityDuration,
+	SidebarSortMode,
+} from '$lib/stores/local-settings.svelte';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 
-export class AppShellLocalSettingsState {
+export class AppShellLocalSettingsState implements Pick<
+	LocalSettingsStore,
+	| 'fullscreenCoversSidebar'
+	| 'chatListAutohide'
+	| 'chatListDock'
+	| 'sidebarWidth'
+	| 'reduceMotion'
+	| 'sidebarGroupingFields'
+	| 'sidebarInactivityDuration'
+	| 'sidebarGroupNestedProjectPaths'
+	| 'sidebarNestDelegatedChats'
+	| 'sidebarSortMode'
+	| 'set'
+> {
 	fullscreenCoversSidebar = $state(true);
 	chatListAutohide = $state(false);
 	chatListDock = $state<ChatListDock>('left');
@@ -25,6 +42,8 @@ export class AppShellLocalSettingsState {
 	sidebarGroupingFields = $state<SidebarGroupingSelection[]>([]);
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>('3-days');
 	sidebarGroupNestedProjectPaths = $state(false);
+	sidebarNestDelegatedChats = $state(false);
+	sidebarSortMode = $state<SidebarSortMode>('manual');
 
 	set(): void {}
 }

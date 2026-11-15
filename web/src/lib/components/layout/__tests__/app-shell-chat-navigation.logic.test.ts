@@ -5,6 +5,7 @@ import {
 	sidebarGroupCollapseKey,
 } from '../../../sidebar/display/sidebar-row-model';
 import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from '../app-shell-chat-navigation';
+import { projectionInput, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 
 function chat(
 	id: string,
@@ -37,6 +38,43 @@ function chat(
 }
 
 describe('resolveAdjacentChatId', () => {
+	it.each([false, true])(
+		'anchors hidden selections on collapsed group headers (child scope=%s)',
+		(nested) => {
+			const chats = nested
+				? [
+						chat('parent'),
+						delegated('before', 'parent', { executorId: 'a' }),
+						delegated('selected', 'parent', { executorId: 'b' }),
+						delegated('after', 'parent', { executorId: 'c' }),
+					]
+				: ['before', 'selected', 'after'].map((id, index) => ({
+						...chat(id),
+						executorId: ['a', 'b', 'c'][index],
+					}));
+			const { rowModel } = buildSidebarChatListProjection(
+				projectionInput(chats, {
+					groupingFields: [{ field: 'executor', enabled: true }],
+					executorOrder: ['local', 'a', 'b', 'c'],
+					collapsedProjectKeys: new Set([
+						sidebarGroupCollapseKey(nested ? 'parent' : null, [['executor', 'b']]),
+					]),
+				}),
+			);
+			expect(rowModel.visibleChatIds).not.toContain('selected');
+			for (const offset of [-1, 1] as const) {
+				expect(
+					resolveAdjacentChatId({
+						selectedChatId: 'selected',
+						displayedChatIds: rowModel.visibleChatIds,
+						displayedRows: rowModel.rows,
+						fallbackOrder: [],
+						offset,
+					}),
+				).toBe(offset === -1 ? 'before' : 'after');
+			}
+		},
+	);
 	it('anchors a hidden selected descendant on its visible collapsed parent', () => {
 		const chats = [
 			chat('before'),

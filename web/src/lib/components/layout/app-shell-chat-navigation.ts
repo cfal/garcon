@@ -10,11 +10,18 @@ export function resolveAdjacentChatId(input: {
 }): string | null {
 	const { selectedChatId, displayedChatIds, fallbackOrder, offset } = input;
 	if (!selectedChatId) return null;
+	if (input.displayedRows) {
+		const rows = input.displayedRows;
+		const target = sidebarScrollTargetForChat(rows, selectedChatId);
+		if (!target) return null;
+		for (let index = target.index + offset; index >= 0 && index < rows.length; index += offset) {
+			const row = rows[index];
+			if (row.type === 'chat') return row.chat.id;
+		}
+		return null;
+	}
 	const order = displayedChatIds ?? fallbackOrder;
-	const anchor = input.displayedRows
-		? sidebarScrollTargetForChat(input.displayedRows, selectedChatId)?.chatId ?? selectedChatId
-		: selectedChatId;
-	const index = order.indexOf(anchor);
+	const index = order.indexOf(selectedChatId);
 	if (index < 0) return null;
 	return order[index + offset] ?? null;
 }
