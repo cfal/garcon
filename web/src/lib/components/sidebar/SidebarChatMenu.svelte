@@ -19,6 +19,7 @@
 	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import History from '@lucide/svelte/icons/history';
+	import ListTree from '@lucide/svelte/icons/list-tree';
 	import {
 		DropdownMenuItem,
 		DropdownMenuSeparator,
@@ -36,6 +37,8 @@
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatMenuProps {
+		delegatedChatsCollapsed?: boolean;
+		onToggleDelegatedChats?: () => void;
 		session: ChatSessionRecord;
 		isPinned: boolean;
 		isArchived: boolean;
@@ -63,6 +66,8 @@
 	}
 
 	let {
+		delegatedChatsCollapsed,
+		onToggleDelegatedChats,
 		session,
 		isPinned,
 		isArchived,
@@ -126,6 +131,14 @@
 		}
 	}
 </script>
+
+{#if delegatedChatsCollapsed !== undefined}
+	<DropdownMenuItem disabled={!onToggleDelegatedChats} onSelect={onToggleDelegatedChats}>
+		<ListTree />
+		{delegatedChatsCollapsed ? m.sidebar_branch_expand() : m.sidebar_branch_collapse()}
+	</DropdownMenuItem>
+	<DropdownMenuSeparator />
+{/if}
 
 {#if hasSidebarActions}
 	{#if onEnterMultiSelect}

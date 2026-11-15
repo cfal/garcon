@@ -595,8 +595,7 @@ describe('sidebar search interactions', () => {
 		expect(items[3]?.textContent).toContain('Manual');
 		expect(screen.getByRole('menuitemradio', { name: 'Recent activity' })).toBeTruthy();
 		expect(items[4]?.textContent).toContain('Recent activity');
-		expect(items[5]?.textContent).toContain('Nest delegated chats');
-		expect(items[6]?.textContent).toContain('Sidebar display');
+		expect(items[5]?.textContent).toContain('Sidebar display');
 		expect(screen.queryByRole('menuitemradio', { name: 'Project' })).toBeNull();
 		expect(screen.queryByRole('menuitemradio', { name: 'Detailed' })).toBeNull();
 
@@ -612,14 +611,11 @@ describe('sidebar search interactions', () => {
 		expect(onShowUsage).toHaveBeenCalledOnce();
 	});
 
-	it('keeps sorting and nesting in the popup and delegates display preferences', async () => {
-		const onToggleNesting = vi.fn();
+	it('keeps sorting in the popup and delegates display preferences including nesting', async () => {
 		const onShowDisplay = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
-			nestDelegatedChats: true,
 			sortMode: 'manual',
-			onToggleNesting,
 			onShowDisplay,
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
@@ -630,15 +626,11 @@ describe('sidebar search interactions', () => {
 			onShowSettings: vi.fn(),
 		});
 		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
-		const nesting = await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' });
-		expect(nesting.getAttribute('aria-checked')).toBe('true');
+		expect(screen.queryByRole('menuitemcheckbox', { name: 'Nest delegated chats' })).toBeNull();
 		expect(screen.getByRole('menuitemradio', { name: 'Manual' }).getAttribute('aria-checked')).toBe(
 			'true',
 		);
 		expect(screen.queryByRole('menuitemcheckbox', { name: 'Show project path' })).toBeNull();
-		await fireEvent.click(nesting);
-		expect(onToggleNesting).toHaveBeenCalledOnce();
-		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Sidebar display' }));
 		expect(onShowDisplay).toHaveBeenCalledOnce();
 	});

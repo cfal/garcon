@@ -63,6 +63,25 @@ describe('sidebar display preferences', () => {
 });
 
 describe('recursive sidebar projection', () => {
+	it.each(permutations(SIDEBAR_GROUPING_FIELDS))(
+		'indents every grouping level in order %j',
+		(...fields) => {
+			const chats = [chat('parent'), delegated('child', 'parent')];
+			const depth = fields.length;
+			for (const nestDelegatedChats of [false, true]) {
+				const model = buildSidebarRowModel(
+					projectionInput(chats, {
+						groupingFields: selections(fields),
+						nestDelegatedChats,
+					}),
+				);
+				expect(model.rows.filter((row) => row.type === 'chat').map((row) => row.depth)).toEqual(
+					nestDelegatedChats ? [depth, depth * 2 + 1] : [depth, depth],
+				);
+			}
+		},
+	);
+
 	it.each([false, true])('keeps equivalent project identities stable (combine: %s)', (combine) => {
 		const chats = [chat('a', { projectPath: '/repo/' }), chat('b', { projectPath: '/repo' })];
 		const input = projectionInput(chats, {

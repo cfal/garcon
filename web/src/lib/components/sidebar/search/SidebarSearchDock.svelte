@@ -7,8 +7,6 @@
 	interface SidebarSearchDockProps {
 		isLoading: boolean;
 		visibleUnreadCount: number;
-		nestDelegatedChats?: boolean;
-		onToggleNesting?: () => void;
 		onShowDisplay?: (returnFocus: () => void) => void;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
@@ -36,8 +34,6 @@
 	let {
 		isLoading,
 		visibleUnreadCount,
-		nestDelegatedChats = false,
-		onToggleNesting,
 		onShowDisplay,
 		sortMode = 'recent',
 		chatListAutohide = false,
@@ -72,8 +68,6 @@
 	<SidebarControlsRow
 		{isLoading}
 		{visibleUnreadCount}
-		{nestDelegatedChats}
-		{onToggleNesting}
 		{onShowDisplay}
 		{sortMode}
 		{chatListAutohide}

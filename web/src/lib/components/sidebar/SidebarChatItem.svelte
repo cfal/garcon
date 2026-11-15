@@ -31,6 +31,7 @@
 
 	interface SidebarChatItemProps {
 		branch?: SidebarVirtualChatRow['branch'];
+		onToggleDelegatedChats?: () => void;
 		contextOnly?: boolean;
 		containsSelectedChat?: boolean;
 		session: ChatSessionRecord;
@@ -75,6 +76,7 @@
 
 	let {
 		branch,
+		onToggleDelegatedChats,
 		contextOnly = false,
 		containsSelectedChat = false,
 		session,
@@ -433,6 +435,8 @@
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
 					<SidebarChatMenu
+						delegatedChatsCollapsed={branch?.isCollapsed}
+						{onToggleDelegatedChats}
 						{session}
 						{isPinned}
 						{isArchived}

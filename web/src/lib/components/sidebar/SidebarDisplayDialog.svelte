@@ -18,6 +18,7 @@
 	const remote = getRemoteSettings();
 	let draft = $state({
 		sidebarGroupingFields: settings.sidebarGroupingFields.map((field) => ({ ...field })),
+		sidebarNestDelegatedChats: settings.sidebarNestDelegatedChats,
 		sidebarInactivityDuration: settings.sidebarInactivityDuration,
 		sidebarGroupNestedProjectPaths: settings.sidebarGroupNestedProjectPaths,
 		sidebarChatItemLayout: settings.sidebarChatItemLayout,
@@ -25,7 +26,6 @@
 	});
 	const preview = $derived(
 		sidebarDisplayOptions(draft, {
-			nestDelegatedChats: settings.sidebarNestDelegatedChats,
 			sortMode: settings.sidebarSortMode,
 			pinnedInsertPosition: remote.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 			chatFontScale: typographyScale('chat-list', settings.chatListFontSize),
@@ -52,6 +52,7 @@
 				onclick={() =>
 					(draft = {
 						sidebarGroupingFields: defaultSidebarGroupingFields(),
+						sidebarNestDelegatedChats: false,
 						sidebarInactivityDuration: '3-days',
 						sidebarGroupNestedProjectPaths: false,
 						sidebarChatItemLayout: 'single-line',

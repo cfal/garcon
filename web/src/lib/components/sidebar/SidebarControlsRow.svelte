@@ -32,8 +32,6 @@
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
 		visibleUnreadCount?: number;
-		nestDelegatedChats?: boolean;
-		onToggleNesting?: () => void;
 		onShowDisplay?: (returnFocus: () => void) => void;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
@@ -58,8 +56,6 @@
 	let {
 		isLoading,
 		visibleUnreadCount = 0,
-		nestDelegatedChats = false,
-		onToggleNesting,
 		onShowDisplay,
 		sortMode = 'recent',
 		chatListAutohide = false,
@@ -184,12 +180,6 @@
 					</DropdownMenuRadioGroup>
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
-				<DropdownMenuCheckboxItem
-					checked={nestDelegatedChats}
-					onCheckedChange={() => onToggleNesting?.()}
-				>
-					{m.sidebar_nest_delegated_chats()}
-				</DropdownMenuCheckboxItem>
 				<DropdownMenuItem onclick={showDisplay}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.sidebar_display_title()}

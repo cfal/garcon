@@ -5,6 +5,7 @@
 	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import SidebarDisplayDialog from '../SidebarDisplayDialog.svelte';
 	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
@@ -91,6 +92,8 @@
 	const sidebarSearchContext = createSidebarSearchContext();
 
 	let sidebarOpen = $state(initialSidebarOpen());
+	let displayOpen = $state(false);
+	let displayReturnFocus = $state<(() => void) | undefined>();
 	let sidebarSearchResultSort = $state<'relevance' | 'activity' | 'created'>('relevance');
 
 	// Mirrors the AppShell drawer-close effect that resets the search
@@ -134,6 +137,15 @@
 	} as never);
 	setLocalSettings({
 		...TYPOGRAPHY_DEFAULTS,
+		sidebarWidth: 320,
+		setSidebarDisplay: ((value) => {
+			sidebarGroupingFields = value.sidebarGroupingFields;
+			sidebarNestDelegatedChats = value.sidebarNestDelegatedChats;
+			sidebarInactivityDuration = value.sidebarInactivityDuration;
+			sidebarGroupNestedProjectPaths = value.sidebarGroupNestedProjectPaths;
+			sidebarChatItemLayout = value.sidebarChatItemLayout;
+			sidebarShowProjectPath = value.sidebarShowProjectPath;
+		}) satisfies LocalSettingsStore['setSidebarDisplay'],
 		sidebarSortMode: 'manual',
 		get sidebarNestDelegatedChats() {
 			return sidebarNestDelegatedChats;
@@ -260,10 +272,17 @@
 
 <SidebarSearchDialogs {chats} onSelectResult={() => {}} />
 
+{#if displayOpen}
+	<SidebarDisplayDialog onClose={() => (displayOpen = false)} returnFocus={displayReturnFocus} />
+{/if}
+
 {#if sidebarOpen}
 	<Sidebar
 		{reorder}
-		onShowDisplay={() => {}}
+		onShowDisplay={(returnFocus) => {
+			displayReturnFocus = returnFocus;
+			displayOpen = true;
+		}}
 		projection={reorder.projection}
 		{chats}
 		{selectedChatId}

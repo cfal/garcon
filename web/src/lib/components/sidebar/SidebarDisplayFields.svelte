@@ -56,6 +56,16 @@
 </script>
 
 <div class="min-w-0 space-y-5">
+	<label class="flex min-h-11 items-center gap-3 text-sm">
+		<input
+			type="checkbox"
+			class="size-4"
+			checked={value.sidebarNestDelegatedChats}
+			onchange={(event) =>
+				onChange({ ...value, sidebarNestDelegatedChats: event.currentTarget.checked })}
+		/>
+		{m.sidebar_nest_delegated_chats()}
+	</label>
 	<fieldset>
 		<legend class="mb-2 text-sm font-medium">{m.sidebar_group_heading()}</legend>
 		{#each value.sidebarGroupingFields as entry, index (entry.field)}

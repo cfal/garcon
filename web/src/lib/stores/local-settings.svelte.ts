@@ -777,6 +777,7 @@ export class LocalSettingsStore {
 		const next = {
 			...this.snapshot(),
 			sidebarGroupingFields: normalizeSidebarGroupingFields(preferences.sidebarGroupingFields),
+			sidebarNestDelegatedChats: Boolean(preferences.sidebarNestDelegatedChats),
 			sidebarInactivityDuration: preferences.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: preferences.sidebarChatItemLayout,

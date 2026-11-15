@@ -139,7 +139,6 @@
 	let isMarkingAllRead = $state(false);
 	let displayOptions = $derived(
 		sidebarDisplayOptions(localSettings, {
-			nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
 			chatFontScale: typographyScale('chat-list', localSettings.chatListFontSize),
 			sortMode: localSettings.sidebarSortMode,
 			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
@@ -363,9 +362,7 @@
 		<SidebarSearchDock
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
-			nestDelegatedChats={displayOptions.nestDelegatedChats}
 			{onShowDisplay}
-			onToggleNesting={() => localSettings.toggle('sidebarNestDelegatedChats')}
 			sortMode={displayOptions.sortMode}
 			chatListAutohide={localSettings.chatListAutohide}
 			{chatListAutohideAvailable}

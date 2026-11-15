@@ -22,6 +22,7 @@ export interface SidebarDisplayOptions {
 export type SidebarDisplayPreferences = Pick<
 	LocalSettingsSnapshot,
 	| 'sidebarGroupingFields'
+	| 'sidebarNestDelegatedChats'
 	| 'sidebarInactivityDuration'
 	| 'sidebarGroupNestedProjectPaths'
 	| 'sidebarChatItemLayout'
@@ -30,13 +31,11 @@ export type SidebarDisplayPreferences = Pick<
 
 export function sidebarDisplayOptions(
 	preferences: SidebarDisplayPreferences,
-	ambient: Pick<
-		SidebarDisplayOptions,
-		'nestDelegatedChats' | 'sortMode' | 'pinnedInsertPosition' | 'chatFontScale'
-	>,
+	ambient: Pick<SidebarDisplayOptions, 'sortMode' | 'pinnedInsertPosition' | 'chatFontScale'>,
 ): SidebarDisplayOptions {
 	return {
 		groupingFields: preferences.sidebarGroupingFields,
+		nestDelegatedChats: preferences.sidebarNestDelegatedChats,
 		inactivityDuration: preferences.sidebarInactivityDuration,
 		groupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
 		chatItemLayout: preferences.sidebarChatItemLayout,

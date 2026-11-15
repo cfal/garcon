@@ -10,6 +10,8 @@ it('previews drafts without writes and discards Cancel', async () => {
 	const settings = createLocalSettingsStore();
 	const apply = vi.spyOn(settings, 'setSidebarDisplay');
 	render(SidebarDisplayDialogHost, { settings });
+	await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+	expect(settings.sidebarNestDelegatedChats).toBe(false);
 	await fireEvent.click(screen.getByRole('checkbox', { name: 'Project path' }));
 	await fireEvent.click(screen.getByRole('radio', { name: 'Detailed' }));
 	const preview = document.querySelector('[data-sidebar-display-preview]')!;
@@ -21,22 +23,23 @@ it('previews drafts without writes and discards Cancel', async () => {
 		[...preview.querySelectorAll('[data-sidebar-executor-header]')].map((header) =>
 			header.getAttribute('title'),
 		),
-	).toEqual(['Local', 'Remote']);
+	).toEqual(['Local', 'Local', 'Remote']);
 	expect(settings.sidebarChatItemLayout).toBe('single-line');
 	expect(apply).not.toHaveBeenCalled();
 	await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 	expect(apply).not.toHaveBeenCalled();
 	expect(screen.queryByRole('dialog')).toBeNull();
+	expect(settings.sidebarNestDelegatedChats).toBe(false);
 	settings.destroy();
 });
 
-it('retains moved-field focus, applies together, and preserves popup preferences', async () => {
+it('retains moved-field focus, applies nesting with display fields, and preserves sort mode', async () => {
 	const settings = createLocalSettingsStore();
-	settings.toggle('sidebarNestDelegatedChats');
 	settings.set('sidebarSortMode', 'manual');
 	const apply = vi.spyOn(settings, 'setSidebarDisplay');
 	render(SidebarDisplayDialogHost, { settings });
 	const up = screen.getByRole('button', { name: 'Move Project path up' });
+	await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
 	up.focus();
 	await fireEvent.click(up);
 	expect(
@@ -62,9 +65,15 @@ it('retains moved-field focus, applies together, and preserves popup preferences
 it('resets only the draft and keeps inactive options disabled', async () => {
 	const settings = createLocalSettingsStore();
 	settings.set('sidebarChatItemLayout', 'detailed');
+	settings.toggle('sidebarNestDelegatedChats');
 	render(SidebarDisplayDialogHost, { settings });
 	await fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
 	expect(settings.sidebarChatItemLayout).toBe('detailed');
+	expect(settings.sidebarNestDelegatedChats).toBe(true);
+	expect(screen.getByRole('checkbox', { name: 'Nest delegated chats' })).toHaveProperty(
+		'checked',
+		false,
+	);
 	expect(screen.getByRole('radio', { name: 'Single-line' })).toHaveProperty('checked', true);
 	expect(screen.getByRole('checkbox', { name: 'Combine nested paths' })).toHaveProperty(
 		'disabled',

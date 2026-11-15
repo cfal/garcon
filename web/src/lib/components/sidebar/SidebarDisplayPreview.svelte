@@ -1,5 +1,4 @@
 <script lang="ts">
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChatSummary from '../chat/ChatSummary.svelte';
 	import SidebarExecutorHeaderRow from './SidebarExecutorHeaderRow.svelte';
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
@@ -43,17 +42,7 @@
 						style={`padding-left:${sidebarChatInset(row.depth)}px`}
 						data-typography-chat-list
 					>
-						{#if options.nestDelegatedChats}
-							<span class="flex w-6 shrink-0 items-center justify-center"
-								>{#if row.branch}<ChevronRight class="size-3 rotate-90" />{/if}</span
-							>
-						{/if}
-						<div
-							class="min-w-0 flex-1"
-							style:padding-left={options.nestDelegatedChats
-								? `${sidebarChatInset(0)}px`
-								: undefined}
-						>
+						<div class="min-w-0 flex-1">
 							<ChatSummary
 								session={row.chat}
 								variant="sidebar"

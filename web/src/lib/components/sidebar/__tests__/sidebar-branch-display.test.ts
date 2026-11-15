@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import { chat, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
@@ -22,11 +22,14 @@ it.each([false, true])(
 			collapsedProjectKeys: keys,
 			onToggleProjectCollapsed: toggle,
 		});
-		const disclosure = screen.getByRole('button', {
-			name: 'Collapse delegated chats under parent',
-		});
-		expect(disclosure).toHaveProperty('disabled', true);
-		await fireEvent.click(disclosure);
+		const parent = within(
+			view.container.querySelector<HTMLElement>('[data-sidebar-virtual-row="parent"]')!,
+		);
+		await fireEvent.click(parent.getByRole('button', { name: 'Chat actions' }));
+		const collapse = await screen.findByRole('menuitem', { name: 'Collapse delegated chats' });
+		expect(collapse.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(collapse);
+		await fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 		for (const header of view.container.querySelectorAll<HTMLButtonElement>(
 			'[data-sidebar-project-header]',
 		)) {
@@ -41,7 +44,7 @@ it.each([false, true])(
 	},
 );
 
-it('names untitled disclosures and exposes descendant summaries and newer activity', async () => {
+it('exposes descendant summaries and newer activity without a disclosure gutter', async () => {
 	const chats = [
 		chat('parent', { title: '' }),
 		delegated('child', 'parent', {
@@ -51,19 +54,13 @@ it('names untitled disclosures and exposes descendant summaries and newer activi
 		}),
 	];
 	const view = render(SidebarChatListHost, { chats, displayOptions: { nestDelegatedChats: true } });
-	const disclosure = screen.getByRole('button', {
-		name: 'Collapse delegated chats under New Chat',
-	});
 	const parent = within(
 		view.container.querySelector<HTMLElement>('[data-sidebar-virtual-row="parent"]')!,
 	);
 	const navigation = parent.getByRole('button', { name: /1 delegated chats, 1 running, 1 unread/ });
 	expect(navigation.getAttribute('aria-describedby')).toBeTruthy();
 	expect(navigation.title).toContain('Latest branch activity');
-	await fireEvent.click(disclosure);
-	expect(
-		screen.getByRole('button', { name: 'Expand delegated chats under New Chat' }),
-	).toBeTruthy();
+	expect(view.container.querySelector('[data-sidebar-virtual-row-content] > button')).toBeNull();
 	await view.rerender({
 		chats: [chats[0], { ...chats[1], lastActivityAt: chats[0].lastActivityAt }],
 	});
@@ -101,6 +98,69 @@ it('aligns a failed delegated row with successful nested content', async () => {
 	});
 	const fallback = await screen.findByText('child');
 	expect(fallback.getAttribute('data-sidebar-virtual-row-error')).toBe('child');
-	expect(fallback.style.paddingLeft).toBe('12px');
+	expect(fallback.style.paddingLeft).toBe('24px');
 	expect(view.container.querySelector('[data-sidebar-virtual-row="parent"]')).toBeTruthy();
 });
+
+it.each([false, true])(
+	'collapses and expands from the parent menu (mobile: %s)',
+	async (isMobile) => {
+		const view = render(SidebarChatListHost, {
+			chats: [chat('parent'), delegated('child', 'parent'), chat('peer')],
+			selectedChatId: 'child',
+			isMobile,
+			displayOptions: { nestDelegatedChats: true },
+		});
+		const parentRow = view.container.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-row="parent"]',
+		)!;
+		const openParentMenu = async () => {
+			if (isMobile)
+				await fireEvent.click(within(parentRow).getByRole('button', { name: 'Chat actions' }));
+			else await fireEvent.contextMenu(within(parentRow).getByRole('button', { name: /^parent / }));
+		};
+		await openParentMenu();
+		await fireEvent.click(
+			await screen.findByRole('menuitem', { name: 'Collapse delegated chats' }),
+		);
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(view.container.querySelector('[data-sidebar-virtual-row="child"]')).toBeNull();
+		expect(parentRow.className).toContain('bg-sidebar-chat-item-selected-bg');
+		await openParentMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Expand delegated chats' }));
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(view.container.querySelector('[data-sidebar-virtual-row="child"]')).toBeTruthy();
+		const childRow = view.container.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-row="child"]',
+		)!;
+		await fireEvent.click(within(childRow).getByRole('button', { name: 'Chat actions' }));
+		expect(screen.queryByRole('menuitem', { name: /delegated chats/ })).toBeNull();
+	},
+);
+
+it.each(['single-line', 'compact', 'detailed'] as const)(
+	'keeps %s chat indentation inside the full-width item',
+	async (chatItemLayout) => {
+		const view = render(SidebarChatListHost, {
+			chats: [chat('parent'), delegated('child', 'parent'), chat('peer')],
+			displayOptions: { nestDelegatedChats: true, chatItemLayout },
+		});
+		for (const isMobile of [false, true]) {
+			await view.rerender({ isMobile });
+			for (const [id, padding] of [
+				['parent', '12px'],
+				['child', '24px'],
+				['peer', '12px'],
+			]) {
+				const row = view.container.querySelector<HTMLElement>(
+					`[data-sidebar-virtual-row="${id}"]`,
+				)!;
+				const navigation = row.querySelector<HTMLButtonElement>('button')!;
+				expect(navigation.style.paddingLeft).toBe(padding);
+				expect(navigation.className).toContain('hover:bg-sidebar-chat-item-hover-bg');
+				expect(navigation.className).toContain('pr-2');
+				expect(row.querySelector('[data-sidebar-virtual-row-content]')?.children).toHaveLength(1);
+			}
+		}
+	},
+);

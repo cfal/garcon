@@ -10,7 +10,6 @@
 	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
 	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
 	import SidebarChatItem from './SidebarChatItem.svelte';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import {
 		getSidebarChatDragData,
 		getSidebarChatDropTargetData,
@@ -216,28 +215,6 @@
 		};`}
 		data-sidebar-virtual-row-content
 	>
-		{#if row.branch}
-			<button
-				type="button"
-				data-sidebar-touch-drag-ignore
-				class="flex w-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-				style={`margin-left:${sidebarChatInset(row.depth)}px`}
-				aria-expanded={!row.branch.isCollapsed}
-				disabled={!onToggleBranch}
-				aria-label={row.branch.isCollapsed
-					? m.sidebar_branch_expand({ name: row.chat.title || m.sidebar_chats_new_chat() })
-					: m.sidebar_branch_collapse({ name: row.chat.title || m.sidebar_chats_new_chat() })}
-				onclick={() => onToggleBranch?.(row.branch!.collapseKey)}
-			>
-				<ChevronRight class={cn('size-3', !row.branch.isCollapsed && 'rotate-90')} />
-			</button>
-		{:else if displayOptions.nestDelegatedChats}
-			<span
-				class="w-6 shrink-0"
-				style={`margin-left:${sidebarChatInset(row.depth)}px`}
-				aria-hidden="true"
-			></span>
-		{/if}
 		<div class="min-w-0 flex-1">
 			<svelte:boundary>
 				<SidebarChatItem
@@ -249,8 +226,11 @@
 					isPinned={row.isPinned}
 					isArchived={row.isArchived}
 					{displayOptions}
-					depth={displayOptions.nestDelegatedChats ? 0 : row.depth}
+					depth={row.depth}
 					branch={row.branch}
+					onToggleDelegatedChats={row.branch && onToggleBranch
+						? () => onToggleBranch?.(row.branch!.collapseKey)
+						: undefined}
 					contextOnly={row.contextOnly}
 					executorGrouped={row.executorGrouped}
 					inArchivedSection={row.section === 'archived'}
@@ -283,7 +263,7 @@
 				{#snippet failed()}
 					<div
 						class="flex h-full items-center pr-3 text-sm text-muted-foreground"
-						style={`padding-left:${sidebarChatInset(displayOptions.nestDelegatedChats ? 0 : row.depth)}px;`}
+						style={`padding-left:${sidebarChatInset(row.depth)}px;`}
 						data-sidebar-virtual-row-error={row.chat.id}
 					>
 						{row.chat.title || m.sidebar_chats_unnamed()}

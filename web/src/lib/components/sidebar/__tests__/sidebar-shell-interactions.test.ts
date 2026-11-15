@@ -367,28 +367,24 @@ describe('sidebar search dialog flow', () => {
 				row.getAttribute('data-sidebar-virtual-row'),
 			);
 		expect(order()).toEqual(['child', 'parent']);
-		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
-		await fireEvent.click(
-			await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' }),
-		);
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+		expect(order()).toEqual(['child', 'parent']);
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 		await waitFor(() => expect(order()).toEqual(['parent', 'child']));
-		expect(
-			screen.getByRole('button', { name: 'Collapse delegated chats under parent' }),
-		).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-virtual-row-content] > button')).toBeNull();
 		await openDisplay();
 		expect(screen.getByRole('checkbox', { name: 'Combine nested paths' })).toHaveProperty(
 			'checked',
 			false,
 		);
-		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
-		await fireEvent.click(
-			await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' }),
+		expect(screen.getByRole('checkbox', { name: 'Nest delegated chats' })).toHaveProperty(
+			'checked',
+			true,
 		);
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 		await waitFor(() => expect(order()).toEqual(['child', 'parent']));
-		expect(
-			screen.queryByRole('button', { name: 'Collapse delegated chats under parent' }),
-		).toBeNull();
 	});
 
 	it('combines known project ancestors through the display dialog', async () => {

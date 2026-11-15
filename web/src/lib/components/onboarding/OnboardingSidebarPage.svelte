@@ -9,6 +9,7 @@
 	const remote = getRemoteSettings();
 	const preferences = $derived({
 		sidebarGroupingFields: settings.sidebarGroupingFields,
+		sidebarNestDelegatedChats: settings.sidebarNestDelegatedChats,
 		sidebarInactivityDuration: settings.sidebarInactivityDuration,
 		sidebarGroupNestedProjectPaths: settings.sidebarGroupNestedProjectPaths,
 		sidebarChatItemLayout: settings.sidebarChatItemLayout,
@@ -16,7 +17,6 @@
 	});
 	const options = $derived(
 		sidebarDisplayOptions(preferences, {
-			nestDelegatedChats: settings.sidebarNestDelegatedChats,
 			sortMode: settings.sidebarSortMode,
 			pinnedInsertPosition: remote.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 			chatFontScale: typographyScale('chat-list', settings.chatListFontSize),

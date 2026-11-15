@@ -59,7 +59,7 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 }
 
 describe('mobile sidebar lifecycle', () => {
-	it('retains popup nesting across drawer remounts without combining project paths', async () => {
+	it('retains display nesting across drawer remounts without combining project paths', async () => {
 		render(MobileSidebarLifecycleHost, {
 			chats: [
 				delegated('child', 'parent'),
@@ -69,13 +69,15 @@ describe('mobile sidebar lifecycle', () => {
 			autoLoadSavedSearches: false,
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-		await fireEvent.click(
-			await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' }),
-		);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Sidebar display' }));
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 		const assertNested = () => {
-			expect(
-				screen.getByRole('button', { name: 'Collapse delegated chats under parent' }),
-			).toBeTruthy();
+			const ids = Array.from(document.querySelectorAll('[data-sidebar-virtual-row]'), (row) =>
+				row.getAttribute('data-sidebar-virtual-row'),
+			);
+			expect(ids.indexOf('child')).toBe(ids.indexOf('parent') + 1);
+			expect(document.querySelector('[data-sidebar-virtual-row-content] > button')).toBeNull();
 			expect(
 				document.querySelector('[data-sidebar-project-header="/workspace/app/packages/api"]'),
 			).toBeTruthy();
@@ -85,11 +87,11 @@ describe('mobile sidebar lifecycle', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
 		assertNested();
 		await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-		expect(
-			(await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' })).getAttribute(
-				'aria-checked',
-			),
-		).toBe('true');
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Sidebar display' }));
+		expect(screen.getByRole('checkbox', { name: 'Nest delegated chats' })).toHaveProperty(
+			'checked',
+			true,
+		);
 	});
 
 	it('retains an in-flight relative move across drawer remounts', async () => {

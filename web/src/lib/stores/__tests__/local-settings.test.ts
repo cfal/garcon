@@ -40,7 +40,7 @@ describe('LocalSettingsStore', () => {
 		const restored = createLocalSettingsStore();
 		expect(restored.snapshot()).toMatchObject({
 			sidebarSortMode: 'manual',
-			sidebarNestDelegatedChats: true,
+			sidebarNestDelegatedChats: false,
 			chatListDock: 'right',
 			sidebarInactivityDuration: '1-week',
 			sidebarGroupNestedProjectPaths: true,

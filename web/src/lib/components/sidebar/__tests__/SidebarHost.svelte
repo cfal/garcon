@@ -164,6 +164,7 @@
 			value: Pick<
 				import('$lib/stores/local-settings.svelte').LocalSettingsSnapshot,
 				| 'sidebarGroupingFields'
+				| 'sidebarNestDelegatedChats'
 				| 'sidebarInactivityDuration'
 				| 'sidebarGroupNestedProjectPaths'
 				| 'sidebarChatItemLayout'
@@ -171,6 +172,7 @@
 			>,
 		) {
 			sidebarGroupingFields = value.sidebarGroupingFields;
+			sidebarNestDelegatedChats = value.sidebarNestDelegatedChats;
 			sidebarInactivityDuration = value.sidebarInactivityDuration;
 			sidebarGroupNestedProjectPaths = value.sidebarGroupNestedProjectPaths;
 			sidebarChatItemLayout = value.sidebarChatItemLayout;
