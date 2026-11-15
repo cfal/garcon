@@ -113,7 +113,7 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
     await mkdir(artifacts, { recursive: true });
 
     phase('render desktop hierarchy');
-    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.setViewportSize({ width: 1440, height: 1500 });
     await page.goto(`${integration.garcon.baseUrl}/chat/${selectedId}`);
     await collapseCanonicalFilesWindow(page);
     const list = page.locator('[data-workspace-chat-list]');
@@ -123,7 +123,7 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
     const executorHeader = page.locator(`[data-sidebar-executor-header="${studio}"]`);
     await expect(executorHeader).toHaveAttribute('data-sidebar-row-depth', '0');
     const projectHeader = page.locator(`[data-sidebar-project-header="${gatewayPath}"]`).first();
-    await expect(projectHeader).toHaveAttribute('data-sidebar-row-depth', '1');
+    await expect(projectHeader).toHaveAttribute('data-sidebar-row-depth', '2');
     await expect(projectHeader.locator('[data-sidebar-group-header-label]')).toHaveText('atlas-service-gateway');
     await expect(projectHeader.locator('[data-sidebar-project-header-parent]')).toHaveCount(0);
     await expect(projectHeader.locator('[data-sidebar-group-header-count]')).toHaveCount(0);
@@ -133,9 +133,9 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
     await expect(page.locator('[data-sidebar-project-header="/home/demo/projects/ledger/unified-deposit"] [data-sidebar-project-header-parent]'))
       .toHaveText('/home/demo/projects/ledger');
     await expect(projectHeader).toHaveAttribute('title', `Studio server: ${gatewayPath}`);
-    const sectionHeader = page.locator(`[data-sidebar-section-key="executor:${studio}:section:inactive"]`);
+    const sectionHeader = page.locator('[data-sidebar-section-header="inactive"]');
     await expect(sectionHeader).toHaveAttribute('data-sidebar-row-depth', '1');
-    await expect(page.locator(`[data-sidebar-virtual-row="${selectedId}"]`)).toHaveAttribute('data-sidebar-row-depth', '2');
+    await expect(page.locator(`[data-sidebar-virtual-row="${selectedId}"]`)).toHaveAttribute('data-sidebar-row-depth', '3');
 
     // Children start to the right of their parent header so ownership reads left to right.
     const [executorInset] = await rowInsets(page, `[data-sidebar-executor-header="${studio}"]`);

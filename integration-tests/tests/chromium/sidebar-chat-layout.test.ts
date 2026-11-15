@@ -18,17 +18,29 @@ async function openSidebar(page: Page): Promise<void> {
 
 async function chooseMenuOption(page: Page, name: string): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitemradio', { name, exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+  if (name === 'No grouping' || name === 'Project') {
+    for (const field of ['Executor', 'Project path', 'Activity', 'Status']) {
+      await dialog
+        .getByRole('checkbox', { name: field, exact: true })
+        .setChecked(name === 'Project' && ['Executor', 'Project path'].includes(field));
+    }
+  } else {
+    await dialog.getByRole('radio', { name, exact: true }).check();
+    await browserExpect(dialog.locator('[data-slot="sidebar-chat-summary"]')).toHaveCount(3);
+  }
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 }
 
 async function setProjectPathVisibility(page: Page, enabled: boolean): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  const toggle = page.getByRole('menuitemcheckbox', { name: 'Show project path', exact: true });
-  if ((await toggle.getAttribute('aria-checked')) !== String(enabled)) {
-    await toggle.click();
-  } else {
-    await page.keyboard.press('Escape');
-  }
+  await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+  await dialog
+    .getByRole('checkbox', { name: 'Show project path', exact: true })
+    .setChecked(enabled);
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 }
 
 async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promise<void> {
@@ -108,7 +120,19 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
         }
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
         await mkdir(artifacts, { recursive: true });
-        await page.screenshot({ path: join(artifacts, `shared-sidebar-${executionBackend}-${width}.png`) });
+        await page.screenshot({
+          path: join(artifacts, `shared-sidebar-${executionBackend}-${width}.png`),
+        });
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+        await browserExpect(page.locator('[data-sidebar-display-preview]')).toBeVisible();
+        await page.screenshot({
+          path: join(artifacts, `sidebar-display-${executionBackend}-${width}.png`),
+        });
+        await page
+          .getByRole('dialog', { name: 'Sidebar display', exact: true })
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .click();
       }
 
       phase('restoring persisted layout and path visibility');

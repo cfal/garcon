@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Page, Request } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   parseReorderChatRequest,
   parseReorderChatResponse,
@@ -20,6 +22,7 @@ import {
   type ChromiumFixture as BaseChromiumFixture,
 } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { createSidebarDelegationFixture } from '../../support/sidebar-delegation-fixture.js';
 
 const CHAT_ROW_SELECTOR = '[data-sidebar-virtual-row][data-sidebar-virtual-list-row="normal"]';
 
@@ -116,7 +119,7 @@ async function sortFromChatMenu(
   const row = fixture.page.locator(`[data-sidebar-virtual-row="${chatId}"]`);
   await row.hover();
   await row.locator('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]').click();
-  const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true });
+  const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder all chats', exact: true });
   await reorderChats.click();
   const preset = fixture.page.getByRole('menuitem', { name: label, exact: true });
   await preset.waitFor();
@@ -354,6 +357,96 @@ async function withSidebarChromiumFixture<T>(
 }
 
 describe('Chromium sidebar chat reorder', () => {
+  test('moves whole delegated branches with one root request and retains nested priority after reload', async () => {
+    await withSidebarChromiumFixture('sidebar-delegated-reorder', async (fixture) => {
+      const { page, integration } = fixture;
+      await page.addInitScript(seedLocalSettings, {
+        sidebarSortMode: 'manual',
+        sidebarNestDelegatedChats: true,
+      });
+      const { a, b, a1, a2, b1, canonical } = await createSidebarDelegationFixture(integration);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+      await waitForSidebarOrder(page, [b, b1, a, a1, a2]);
+      const parentBounds = await page
+        .locator(`[data-sidebar-virtual-row="${a}"] [data-slot="chat-summary-header"]`)
+        .boundingBox();
+      const childBounds = await page
+        .locator(`[data-sidebar-virtual-row="${a1}"] [data-slot="chat-summary-header"]`)
+        .boundingBox();
+      expect(childBounds!.x).toBeGreaterThan(parentBounds!.x);
+      await dragRelative(page, { sourceId: b, targetId: a, edge: 'bottom' });
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      expect(await normalOrder(integration)).toEqual([a1, a, b, b1, a2]);
+      expect(capturedReorderRequests(fixture)).toEqual([
+        {
+          chatId: b,
+          placement: {
+            kind: 'relative',
+            referenceChatId: a,
+            position: 'after',
+          },
+        },
+      ]);
+      expect((await normalOrder(integration)).filter((id) => id !== b)).toEqual(
+        canonical.filter((id) => id !== b),
+      );
+
+      await dragRelative(page, { sourceId: a2, targetId: a1, edge: 'top' });
+      await waitForSidebarOrder(page, [a, a2, a1, b, b1]);
+      await page.reload();
+      await waitForSidebarOrder(page, [a, a2, a1, b, b1]);
+
+      const aRow = page.locator(`[data-sidebar-virtual-row="${a}"]`);
+      await page
+        .locator(`[data-sidebar-virtual-row="${a1}"] [data-slot="chat-summary-header"]`)
+        .click();
+      await aRow.getByRole('button', { name: /Collapse delegated chats/ }).click();
+      await waitForSidebarOrder(page, [a, b, b1]);
+      expect(await aRow.locator('.chat-item-root .bg-sidebar-chat-item-selected-bg').count()).toBe(
+        1,
+      );
+      expect(await aRow.locator('[aria-current="page"]').count()).toBe(0);
+      await dragRelative(page, { sourceId: a, targetId: b, edge: 'bottom' });
+      await waitForSidebarOrder(page, [b, b1, a]);
+      await aRow.getByRole('button', { name: /Expand delegated chats/ }).click();
+      await waitForSidebarOrder(page, [b, b1, a, a2, a1]);
+      expect(capturedReorderRequests(fixture).map((request) => request.chatId)).toEqual([b, a2, a]);
+      const beforeInvalid = await normalOrder(integration);
+      await page
+        .locator(`[data-sidebar-virtual-row="${a1}"]`)
+        .dragTo(page.locator(`[data-sidebar-virtual-row="${b1}"]`));
+      expect(await normalOrder(integration)).toEqual(beforeInvalid);
+      expect(capturedReorderRequests(fixture)).toHaveLength(3);
+
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('menuitemradio', { name: 'Recent activity', exact: true }).click();
+      const cursor = integration.client.markEvents();
+      const turn = await integration.client.runDirectChat({
+        chatId: a1,
+        content: 'Synthetic recent branch update',
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(a1, turn.turnId, {
+        afterIndex: cursor,
+      });
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      expect(await normalOrder(integration)).toEqual(beforeInvalid);
+      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      await page.screenshot({
+        path: join(artifacts, 'sidebar-branches-desktop.png'),
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForSelector('.mobile-shell');
+      await page.getByRole('button', { name: 'Menu', exact: true }).click();
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      await page.screenshot({
+        path: join(artifacts, 'sidebar-branches-mobile.png'),
+      });
+      expect(fixture.browserErrors).toEqual([]);
+    });
+  }, 120_000);
+
   test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
     await withSidebarChromiumFixture('sidebar-chat-reorder', async (fixture) => {
       // Drag reorder is only enabled under manual sidebar sort.
@@ -499,7 +592,7 @@ describe('Chromium sidebar chat reorder', () => {
         .click();
       await fixture.page.getByRole('menuitem', { name: 'Select', exact: true }).waitFor();
       expect(
-        await fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true }).count(),
+        await fixture.page.getByRole('menuitem', { name: 'Reorder all chats', exact: true }).count(),
       ).toBe(0);
       expect(fixture.browserErrors).toEqual([]);
     });
