@@ -30,7 +30,7 @@
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import { cn } from '$lib/utils/cn';
-	import { getAppTitle } from '$lib/context';
+	import { getAppTitle, getLocalSettings } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
@@ -43,6 +43,7 @@
 	}>();
 
 	const appTitle = getAppTitle();
+	const localSettings = getLocalSettings();
 
 	interface SharedMessageEntry {
 		index: number;
@@ -286,10 +287,16 @@
 							<MessageRenderFallback {error} />
 						{/snippet}
 						<div
-							class="chat-message {message instanceof UserMessage ? 'flex justify-start' : ''} mt-3"
+							class={cn(
+								'chat-message mt-3',
+								message instanceof UserMessage && [
+									'flex min-w-0',
+									localSettings.userMessageAlignment === 'right' ? 'justify-end' : 'justify-start',
+								],
+							)}
 						>
 							{#if message instanceof UserMessage}
-								<div class="sm:max-w-[85%] min-w-0">
+								<div class="max-w-[85%] min-w-0">
 									<div
 										data-slot="shared-user-message"
 										class={cn(
