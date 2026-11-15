@@ -83,8 +83,6 @@
 	}: SidebarChatListProps = $props();
 	let isFiltered = $derived(searchFilter.trim().length > 0);
 	let showChats = $derived(!isLoading && projection.rowModel.matchingChatIds.length > 0);
-	let hasPinnedChats = $derived(projection.hasPinnedChats);
-	let virtualRowModel = $derived(projection.rowModel);
 </script>
 
 {#if isLoading}
@@ -134,7 +132,7 @@
 	</div>
 {:else}
 	<SidebarVirtualSortableChatList
-		rows={virtualRowModel.rows}
+		rows={projection.rowModel.rows}
 		{viewportRef}
 		{selectedChatId}
 		{currentTime}
@@ -163,6 +161,6 @@
 		{onSortChatOrder}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
-		{hasPinnedChats}
+		hasPinnedChats={projection.hasPinnedChats}
 	/>
 {/if}

@@ -28,13 +28,6 @@ export function mountedVirtualItemAtPoint(clientX: number, clientY: number): HTM
 	return target.closest<HTMLElement>('[data-sidebar-virtual-item]');
 }
 
-export function mountedChatRowIds(container: HTMLElement | null): string[] {
-	if (!container) return [];
-	return Array.from(container.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'))
-		.map((element) => element.dataset.sidebarVirtualRow)
-		.filter((id): id is string => Boolean(id));
-}
-
 export function closestEdgeForRow(rowEl: HTMLElement, clientY: number): Edge {
 	const rect = rowEl.getBoundingClientRect();
 	return clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';

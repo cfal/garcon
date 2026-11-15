@@ -9,7 +9,6 @@
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
 	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
-	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import SidebarChatItem from './SidebarChatItem.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import {
@@ -45,7 +44,6 @@
 		dragEnabled?: boolean;
 		reorderEnabled?: boolean;
 		isDragging?: boolean;
-		dropIndicatorEdge?: Edge | null;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
 		onDragSourceUnmount: (chatId: string) => void;
 		onChatSelect: (chatId: string) => void;
@@ -88,7 +86,6 @@
 		dragEnabled = true,
 		reorderEnabled = true,
 		isDragging = false,
-		dropIndicatorEdge = null,
 		onDragStart,
 		onDragSourceUnmount,
 		onChatSelect,
@@ -209,18 +206,6 @@
 	data-sidebar-virtual-reorder-scope={row.reorderScopeKey}
 	data-sidebar-drag-disabled={!dragEnabled ? 'true' : undefined}
 >
-	{#if dropIndicatorEdge === 'top'}
-		<div
-			class="pointer-events-none absolute right-2 top-0 z-20 h-0.5 rounded-full bg-primary"
-			style={`left:${sidebarChatInset(row.depth)}px;`}
-		></div>
-	{:else if dropIndicatorEdge === 'bottom'}
-		<div
-			class="pointer-events-none absolute bottom-0 right-2 z-20 h-0.5 rounded-full bg-primary"
-			style={`left:${sidebarChatInset(row.depth)}px;`}
-		></div>
-	{/if}
-
 	<div
 		class={cn(
 			'flex items-stretch overflow-hidden',

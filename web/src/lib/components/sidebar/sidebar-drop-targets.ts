@@ -1,4 +1,5 @@
 import type { SidebarVirtualRow } from '$lib/sidebar/display/sidebar-virtual-chat-list';
+import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 import {
 	closestEdgeForRow,
 	mountedRowAtPoint,
@@ -41,6 +42,14 @@ export function sidebarPointDropContext(
 		(list !== 'pinned' && list !== 'normal' && list !== 'archived')
 	)
 		return { kind: 'blocked-row' };
+	let target = getSidebarChatDropTargetData({
+		chatId,
+		list,
+		reorderScopeKey,
+		instanceId,
+		index: -1,
+	});
+	let closestEdge: Edge | null;
 	if (reorderScopeKey !== source.reorderScopeKey) {
 		const peer = rows.find(
 			(candidate) =>
@@ -51,29 +60,21 @@ export function sidebarPointDropContext(
 		);
 		if (peer?.type !== 'chat') return { kind: 'blocked-row' };
 		if (peer.chat.id === source.chatId) return { kind: 'source-row' };
-		const instruction = resolveSidebarDropInstructionForTarget({
-			source,
-			target: getSidebarChatDropTargetData({
-				chatId: peer.chat.id,
-				list: peer.list,
-				reorderScopeKey: peer.reorderScopeKey,
-				instanceId,
-				index: -1,
-			}),
-			closestEdge: 'bottom',
-		});
-		return instruction ? { kind: 'compatible-row', instruction } : { kind: 'blocked-row' };
+		target = {
+			...target,
+			chatId: peer.chat.id,
+			list: peer.list,
+			reorderScopeKey: peer.reorderScopeKey,
+		};
+		closestEdge = 'bottom';
+	} else {
+		if (chatId === source.chatId && list === source.list) return { kind: 'source-row' };
+		closestEdge = closestEdgeForRow(row, clientY);
 	}
-	if (
-		chatId === source.chatId &&
-		list === source.list &&
-		reorderScopeKey === source.reorderScopeKey
-	)
-		return { kind: 'source-row' };
 	const instruction = resolveSidebarDropInstructionForTarget({
 		source,
-		target: getSidebarChatDropTargetData({ chatId, list, reorderScopeKey, instanceId, index: -1 }),
-		closestEdge: closestEdgeForRow(row, clientY),
+		target,
+		closestEdge,
 	});
 	return instruction ? { kind: 'compatible-row', instruction } : { kind: 'blocked-row' };
 }
@@ -101,11 +102,12 @@ export function sidebarFallbackDropInstruction(
 	const sourceIndex = peers.indexOf(source.chatId);
 	const targetIndex = peers.indexOf(fallback.targetChatId);
 	if (sourceIndex < 0 || targetIndex < 0) return null;
-	const adjacent =
-		fallback.closestEdge === 'top'
-			? sourceIndex === targetIndex - 1
-			: fallback.closestEdge === 'bottom'
-				? sourceIndex === targetIndex + 1
-				: Math.abs(sourceIndex - targetIndex) === 1;
-	return adjacent ? fallback : null;
+	switch (fallback.closestEdge) {
+		case 'top':
+			return sourceIndex === targetIndex - 1 ? fallback : null;
+		case 'bottom':
+			return sourceIndex === targetIndex + 1 ? fallback : null;
+		default:
+			return Math.abs(sourceIndex - targetIndex) === 1 ? fallback : null;
+	}
 }

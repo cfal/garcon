@@ -39,7 +39,7 @@ export interface SidebarChatReorderRequest {
 interface PendingMove {
 	sequence: number;
 	request: SidebarChatReorderRequest;
-	phase: 'queued' | 'writing' | 'refreshing' | 'recovery';
+	recoveryRequired: boolean;
 	rejected: boolean;
 }
 
@@ -112,7 +112,7 @@ export class SidebarOrderController {
 		return this.sorting || this.sortRecovery || this.#pending.length > 0;
 	}
 	get recoveryRequired(): boolean {
-		return this.sortRecovery || this.#pending.some((move) => move.phase === 'recovery');
+		return this.sortRecovery || this.#pending.some((move) => move.recoveryRequired);
 	}
 	get orders(): SidebarChatOrderMap {
 		const orders = buildSidebarChatOrderMap(this.#deps.input.allChats);
@@ -201,7 +201,7 @@ export class SidebarOrderController {
 		return this.#request(drag.list, drag.chatId, drag.placement, drag.scopeKey, drag.input);
 	}
 
-	cancel(_list?: PersistedChatOrderGroup): void {
+	cancel(): void {
 		this.#drag = null;
 	}
 
@@ -271,7 +271,7 @@ export class SidebarOrderController {
 		if (this.#disposed || this.sorting || this.sortRecovery || !this.#valid(request)) return;
 		this.#pending = [
 			...this.#pending,
-			{ sequence: ++this.#nextSequence, request, phase: 'queued', rejected: false },
+			{ sequence: ++this.#nextSequence, request, recoveryRequired: false, rejected: false },
 		];
 		void this.#drain(request.list);
 	}
@@ -291,12 +291,11 @@ export class SidebarOrderController {
 		try {
 			while (!this.#disposed) {
 				const move = this.#pending.find((entry) => entry.request.list === list);
-				if (!move || move.phase === 'recovery') break;
+				if (!move || move.recoveryRequired) break;
 				if (!this.#valid(move.request)) {
 					this.#remove(move.sequence);
 					continue;
 				}
-				move.phase = 'writing';
 				try {
 					await this.#deps.write({
 						chatId: move.request.chatId,
@@ -308,11 +307,10 @@ export class SidebarOrderController {
 					move.rejected = definitelyRejected(error);
 				}
 				if (this.#disposed) break;
-				move.phase = 'refreshing';
 				const refreshed = await this.#refresh();
 				if (this.#disposed) break;
 				if (!refreshed) {
-					move.phase = 'recovery';
+					move.recoveryRequired = true;
 					break;
 				}
 				this.#remove(move.sequence);
@@ -329,7 +327,7 @@ export class SidebarOrderController {
 	async recover(): Promise<void> {
 		if (this.#disposed) return;
 		const recovering = this.#pending
-			.filter((move) => move.phase === 'recovery')
+			.filter((move) => move.recoveryRequired)
 			.map((move) => move.sequence);
 		if (!(await this.#refresh()) || this.#disposed) return;
 		for (const sequence of recovering) this.#remove(sequence);

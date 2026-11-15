@@ -25,13 +25,10 @@
 		preview = false,
 	}: SidebarProjectHeaderRowProps = $props();
 	const executors = untrack(() => preview) ? null : getExecutors();
-	const executorLabel = $derived(
-		(row.executorId ?? 'local') === 'local'
-			? ''
-			: preview
-				? 'Remote'
-				: executors?.label(row.executorId),
-	);
+	const executorLabel = $derived.by(() => {
+		if ((row.executorId ?? 'local') === 'local') return '';
+		return preview ? 'Remote' : executors?.label(row.executorId);
+	});
 	const pathParts = $derived(
 		row.projectPath
 			? splitProjectPath(row.projectPath)

@@ -25,25 +25,17 @@
 	}: SidebarExecutorHeaderRowProps = $props();
 	const executors = untrack(() => preview) ? null : getExecutors();
 	const executor = $derived(executors?.get(row.executorId));
-	const executorLabel = $derived(
-		preview
-			? row.executorId === 'local'
-				? 'Local'
-				: 'Remote'
-			: (executor?.label ??
-					`${m.workspace_executor_unavailable()} (${row.executorId.slice(0, 8)})`),
-	);
-	const Icon = $derived(
-		preview
-			? row.executorId === 'local'
-				? Monitor
-				: Server
-			: !executor
-				? ServerOff
-				: executor.kind === 'local'
-					? Monitor
-					: Server,
-	);
+	const executorLabel = $derived.by(() => {
+		if (preview) return row.executorId === 'local' ? 'Local' : 'Remote';
+		return (
+			executor?.label ?? `${m.workspace_executor_unavailable()} (${row.executorId.slice(0, 8)})`
+		);
+	});
+	const Icon = $derived.by(() => {
+		if (preview) return row.executorId === 'local' ? Monitor : Server;
+		if (!executor) return ServerOff;
+		return executor.kind === 'local' ? Monitor : Server;
+	});
 
 	function handleToggle(): void {
 		onToggle?.(row.collapseKey);

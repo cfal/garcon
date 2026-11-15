@@ -23,11 +23,10 @@
 
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
-	let sectionKey = $derived(row.key);
 	let sectionLabel = $derived(sectionLabels[row.section]());
 
 	function handleToggle(): void {
-		onToggle?.(sectionKey);
+		onToggle?.(row.key);
 	}
 </script>
 
@@ -39,7 +38,7 @@
 	{containsSelectedChat}
 	onToggle={handleToggle}
 	data-sidebar-section-header={row.section}
-	data-sidebar-section-key={sectionKey}
+	data-sidebar-section-key={row.key}
 	data-sidebar-section-collapsed={row.isCollapsed ? 'true' : 'false'}
 	data-sidebar-row-depth={row.depth}
 >

@@ -61,11 +61,9 @@
 								showTimestamp
 								showProjectPath={options.showProjectPath}
 								chatItemLayout={options.chatItemLayout}
-								executorLabel={row.executorGrouped
-									? undefined
-									: row.chat.executorId === 'preview-remote'
-										? 'Remote'
-										: undefined}
+								executorLabel={!row.executorGrouped && row.chat.executorId === 'preview-remote'
+									? 'Remote'
+									: undefined}
 							>
 								{#snippet titleBadge()}<SidebarBranchBadge branch={row.branch} />{/snippet}
 							</ChatSummary>

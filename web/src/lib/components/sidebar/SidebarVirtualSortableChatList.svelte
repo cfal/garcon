@@ -166,14 +166,18 @@
 			!reorder.sorting &&
 			!reorder.sortRecovery,
 	);
-	const moveBoundaryLabels = $derived(
-		isFiltered
-			? { first: m.sidebar_move_first_filtered(), last: m.sidebar_move_last_filtered() }
-			: displayOptions.nestDelegatedChats ||
-				  displayOptions.groupingFields.some((field) => field.enabled)
-				? { first: m.sidebar_move_first_group(), last: m.sidebar_move_last_group() }
-				: undefined,
-	);
+	const moveBoundaryLabels = $derived.by(() => {
+		if (isFiltered) {
+			return { first: m.sidebar_move_first_filtered(), last: m.sidebar_move_last_filtered() };
+		}
+		if (
+			displayOptions.nestDelegatedChats ||
+			displayOptions.groupingFields.some((field) => field.enabled)
+		) {
+			return { first: m.sidebar_move_first_group(), last: m.sidebar_move_last_group() };
+		}
+		return undefined;
+	});
 	const indicatorIndex = $derived.by(() => {
 		if (!activeDrop) return -1;
 		let index = rows.findIndex((row) => row.type === 'chat' && row.chat.id === activeDrop!.chatId);
@@ -341,7 +345,7 @@
 		// and a cancelled drag is recovered by pragmatic's broken-drag detection.
 		// Reorder drags cancel only when the source leaves the projection.
 		if (!reorderEnabled) return;
-		if (reorder.activeList) reorder.cancel(reorder.activeList);
+		if (reorder.activeList) reorder.cancel();
 		clearDragPresentation();
 		workspaceChatDrag.endIfOwned(chatId);
 	}
@@ -452,7 +456,7 @@
 				applySidebarDropInstruction(instruction);
 				persistReorderRequest(reorder.finish(sourceData.list));
 			} else {
-				reorder.cancel(sourceData.list);
+				reorder.cancel();
 			}
 		}
 
@@ -638,7 +642,7 @@
 	function cancelTouchDrag(): void {
 		const current = touchDrag;
 		if (current?.activated) {
-			reorder.cancel(current.sourceList);
+			reorder.cancel();
 			workspaceChatDrag.endIfOwned(current.sourceChatId);
 			clearDragPresentation();
 		}
@@ -739,7 +743,7 @@
 			applySidebarDropInstruction(instruction);
 			persistReorderRequest(reorder.finish(current.sourceList));
 		} else {
-			reorder.cancel(current.sourceList);
+			reorder.cancel();
 		}
 
 		workspaceChatDrag.endIfOwned(current.sourceChatId);
@@ -904,6 +908,12 @@
 			></div>
 		{/each}
 		{#each renderedItems as { row, virtualItem } (row.key)}
+			{@const containsSelectedChat = Boolean(
+				row.type !== 'chat' &&
+				row.isCollapsed &&
+				selectedChatId &&
+				(row.containsChat?.(selectedChatId) ?? row.chatIds.includes(selectedChatId)),
+			)}
 			<div
 				data-sidebar-virtual-item={row.type}
 				class="absolute left-0 right-0 top-0"
@@ -913,32 +923,20 @@
 					<SidebarExecutorHeaderRow
 						{row}
 						separated={virtualItem.index > 0}
-						containsSelectedChat={Boolean(
-							row.isCollapsed &&
-							selectedChatId &&
-							(row.containsChat?.(selectedChatId) ?? row.chatIds.includes(selectedChatId)),
-						)}
+						{containsSelectedChat}
 						onToggle={onToggleProjectCollapsed}
 					/>
 				{:else if row.type === 'project-header'}
 					<SidebarProjectHeaderRow
 						{row}
 						{onNewProjectChat}
-						containsSelectedChat={Boolean(
-							row.isCollapsed &&
-							selectedChatId &&
-							(row.containsChat?.(selectedChatId) ?? row.chatIds.includes(selectedChatId)),
-						)}
+						{containsSelectedChat}
 						onToggle={onToggleProjectCollapsed}
 					/>
 				{:else if row.type === 'section-header'}
 					<SidebarSectionHeaderRow
 						{row}
-						containsSelectedChat={Boolean(
-							row.isCollapsed &&
-							selectedChatId &&
-							(row.containsChat?.(selectedChatId) ?? row.chatIds.includes(selectedChatId)),
-						)}
+						{containsSelectedChat}
 						onToggle={onToggleProjectCollapsed}
 					/>
 				{:else}
