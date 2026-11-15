@@ -57,8 +57,7 @@
 		getOptionalWorkspaceShortcuts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import NewChatWorktrees from './NewChatWorktrees.svelte';
-	import NewChatProjects from './NewChatProjects.svelte';
+	import NewChatProjectPicker from './NewChatProjectPicker.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import FileVideo from '@lucide/svelte/icons/file-video';
@@ -659,11 +658,12 @@
 			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
-				<NewChatProjects {form} />
-				<NewChatWorktrees {form} {isMobile} />
+				<NewChatProjectPicker {form} {isMobile} />
 				<ChatTagToggleButton
 					active={form.chatTags.length > 0}
 					label={m.chat_new_chat_tags_add_to_session()}
+					presentation="session-row"
+					open={form.showTagInput}
 					onToggle={() => form.toggleTagInput()}
 				/>
 
@@ -681,6 +681,8 @@
 						selection={form.preambles}
 						nonblankPath={form.nonblankPath}
 						validationStatus={form.validationStatus}
+						summaryReadyLabel={m.chat_new_chat_preambles_add_to_session()}
+						summaryEmptyLabel={m.chat_new_chat_preambles_add_to_session()}
 						onClear={() => form.preambles.setExplicit([])}
 					/>
 				{/if}

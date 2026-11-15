@@ -56,7 +56,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(worktrees.getByRole('radio', { name: /^main/ })).toBeChecked();
       await browserExpect(worktrees.getByRole('button', { name: /Pin project path/ })).toHaveCount(0);
       await browserExpect(worktrees.getByRole('button', { name: 'Select a different worktree', exact: true })).toHaveCount(0);
-      await browserExpect(dialog.getByText('No preambles will be applied', { exact: true })).toBeVisible();
+      await browserExpect(dialog.getByText('Add preambles to session', { exact: true })).toBeVisible();
       await browserExpect(dialog.getByRole('button', { name: 'Clear preambles', exact: true })).toHaveCount(0);
       phase('browsing root subfolders and entering a full path without losing the prompt');
       await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
@@ -164,6 +164,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const tagBounds = (await tagButton.boundingBox())!;
         const worktreeBounds = (await worktrees.boundingBox())!;
         expect(tagBounds.y).toBeGreaterThanOrEqual(worktreeBounds.y + worktreeBounds.height);
+        const composerBounds = (await dialog.locator('[data-slot="new-chat-composer"]').boundingBox())!;
+        const pickerBounds = (await dialog.locator('[data-slot="new-chat-project-picker"]').boundingBox())!;
+        const preambleBounds = (await dialog.locator('[data-slot="new-chat-preambles-row"]').boundingBox())!;
+        expect(tagBounds.width).toBeCloseTo(preambleBounds.width, 0);
+        expect(tagBounds.height).toBeCloseTo(preambleBounds.height, 0);
+        expect(tagBounds.width).toBeCloseTo(composerBounds.width, 0);
+        if (width >= 640) {
+          expect(pickerBounds.width).toBeLessThanOrEqual(composerBounds.width - 64);
+          expect(pickerBounds.x + pickerBounds.width / 2).toBeCloseTo(composerBounds.x + composerBounds.width / 2, 0);
+        }
+        const projectsHeadingBounds = (await projects.getByRole('heading', { name: 'Saved and recent projects', exact: true }).boundingBox())!;
+        const chooseFolderBounds = (await projects.getByRole('button', { name: 'Choose folder', exact: true }).boundingBox())!;
+        expect(chooseFolderBounds.x).toBeGreaterThanOrEqual(projectsHeadingBounds.x + projectsHeadingBounds.width);
+        expect(chooseFolderBounds.y + chooseFolderBounds.height / 2).toBeCloseTo(projectsHeadingBounds.y + projectsHeadingBounds.height / 2, 0);
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: join(artifacts, `worktree-landing-${executionBackend}-${width}.png`) });
         if (width === 390) {

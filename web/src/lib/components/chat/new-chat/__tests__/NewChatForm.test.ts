@@ -395,7 +395,7 @@ describe('NewChatForm', () => {
 			orderedPreambleIds: [],
 			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
 		});
-		expect(await screen.findByText('No preambles will be applied')).toBeTruthy();
+		expect(await screen.findByText('Add preambles to session')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Clear preambles' })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
@@ -404,7 +404,7 @@ describe('NewChatForm', () => {
 		catalog.resolve({ revision: 1, preambles: [] });
 		await waitFor(() => expect(screen.queryByText('Loading preambles...')).toBeNull());
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce();
-		expect(screen.getByText('No preambles will be applied')).toBeTruthy();
+		expect(screen.getByText('Add preambles to session')).toBeTruthy();
 	});
 
 	it('refreshes previews when the catalog is newer and after later revisions', async () => {
@@ -798,7 +798,7 @@ describe('NewChatForm', () => {
 		const wideOverflow = document.querySelector<HTMLElement>(
 			'[data-slot="new-chat-preambles-overflow-wide"]',
 		);
-		expect(label?.textContent?.trim()).toBe('Preambles');
+		expect(label?.textContent?.trim()).toBe('Add preambles to session');
 		expect(pills).toHaveLength(2);
 		expect(narrowOverflow?.textContent?.trim()).toBe('and 4 more');
 		expect(wideOverflow?.textContent?.trim()).toBe('and 3 more');
@@ -849,7 +849,7 @@ describe('NewChatForm', () => {
 			orderedPreambleIds: [],
 			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
 		});
-		expect(await screen.findByText('No preambles will be applied')).toBeTruthy();
+		expect(await screen.findByText('Add preambles to session')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Clear preambles' })).toBeNull();
 	});
 

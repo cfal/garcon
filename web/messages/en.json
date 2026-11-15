@@ -436,6 +436,7 @@
 	"chat_new_chat_start_session": "Start session",
 	"chat_new_chat_tags_add": "Add tags",
 	"chat_new_chat_tags_add_to_session": "Add tags to session",
+	"chat_new_chat_preambles_add_to_session": "Add preambles to session",
 	"chat_new_chat_tags_placeholder": "Type a tag...",
 	"chat_new_chat_switch_provider": "Click to switch provider (Tab in message box)",
 	"chat_new_chat_think": "Brief",

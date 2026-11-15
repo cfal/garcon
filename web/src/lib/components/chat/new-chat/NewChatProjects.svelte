@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getExecutors, getRemoteSettings } from '$lib/context';
-	import { tick } from 'svelte';
+	import { tick, type Snippet } from 'svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
 	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import { NewChatProjectsController } from '$lib/chat/new-chat/new-chat-projects-controller';
@@ -16,7 +16,7 @@
 	import Folder from '@lucide/svelte/icons/folder';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { form }: { form: NewChatFormState } = $props();
+	let { form, actions }: { form: NewChatFormState; actions?: Snippet } = $props();
 	const id = $props.id();
 	const executors = getExecutors();
 	const remoteSettings = getRemoteSettings();
@@ -45,10 +45,13 @@
 	}
 </script>
 
-<section bind:this={projectList} aria-labelledby={id + '-heading'} class="mb-3 min-w-0 space-y-2">
-	<h3 bind:this={heading} tabindex="-1" id={id + '-heading'} class="text-sm font-medium text-foreground">
-		{m.chat_new_chat_saved_projects()}
-	</h3>
+<section bind:this={projectList} aria-labelledby={id + '-heading'} class="min-w-0 space-y-2">
+	<div class="flex min-w-0 items-center justify-between gap-2">
+		<h3 bind:this={heading} tabindex="-1" id={id + '-heading'} class="text-sm font-medium text-foreground">
+			{m.chat_new_chat_saved_projects()}
+		</h3>
+		{@render actions?.()}
+	</div>
 	{#if groups.length > 0}
 		<div class="max-h-[min(18rem,32dvh)] space-y-3 overflow-y-auto overscroll-contain p-1">
 			{#each groups as group (group.executorId)}

@@ -7,8 +7,10 @@ when the last chat is later removed. Explicit chat and ticket destinations and
 other active dialogs retain priority. Loading and failed lists do not trigger it.
 
 New Chat opens a full-page start screen with pinned and recent project folders above the
-existing composer. Compact project cards use one column within a narrow content
-area. Each card shows its folder name and a truncated path, with full paths on hover and
+existing composer. Projects and worktrees share a centered column capped at 28rem,
+narrower than the 36rem prompt and session-option rows on desktop. Narrow screens
+use the available width. Compact project cards use one column. Each card shows
+its folder name and a truncated path, with full paths on hover and
 executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
 Each card has a three-dot menu on the right with Pin or Unpin and Remove from list.
@@ -27,7 +29,8 @@ project on its owning executor, including the primary checkout. Worktrees use sm
 flat rows with titles on the left and muted, root-abbreviated paths such as
 `…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
 Selecting a row changes the new chat's target without clearing its prompt.
-A Choose folder button reveals a manual path field and Garcon's executor-owned
+A muted Choose folder action sits at the top right of the saved-projects heading,
+at the same visual level. It reveals a manual path field and Garcon's executor-owned
 folder browser. Each opening lists the configured project root's subfolders;
 opening the browser alone does not change the selected project. Users can navigate
 folders or paste a full directory path. The existing field validation applies to
@@ -50,10 +53,13 @@ The forwarded CLI settings endpoint remains limited to transcript search enablem
 The existing NewChatDialog remains the owner of open/close, focus containment,
 ticket prefills, draft creation and navigation. Its presentation fills the
 available viewport and returns to the previous workspace on Close or Escape.
-The form, prompt editor and model selector retain their owners. The preamble summary
-uses an add button to open selection and only shows Clear when a preamble will apply.
-The tag control sits below the complete Worktrees section and visibly reads
-Add tags to session; its editor and selected tags retain their existing behavior.
+The form, prompt editor and model selector retain their owners. A focused project
+picker owns folder browsing and executor selection; the worktree list retains
+discovery and selection. The tag and preamble options sit below Worktrees as
+matching full-width, 44px outlined rows with muted icons and labels and add actions.
+Their labels read Add tags to session and Add preambles to session. The preamble
+summary retains selected titles, loading, error/retry and conditional Clear states.
+The tag editor and selected tags retain their existing behavior.
 The landing page scrolls within the keyboard-adjusted viewport on mobile.
 
 Worktree discovery uses the existing executor-qualified Git API. Loading, empty,
