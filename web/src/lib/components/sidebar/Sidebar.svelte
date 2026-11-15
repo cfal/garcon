@@ -24,7 +24,7 @@
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$shared/chat-filter-query';
 	import type { SidebarChatListProjection } from '../../sidebar/display/sidebar-row-model';
-	import type { SidebarDisplayOptions } from '../../sidebar/display/sidebar-display-options';
+	import { sidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
 	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -135,24 +135,21 @@
 	let isBulkOperating = $state(false);
 	let currentTime = $derived(minuteClock.currentTime);
 	let isMarkingAllRead = $state(false);
-	let displayOptions = $derived<SidebarDisplayOptions>({
-		groupingFields: localSettings.sidebarGroupingFields,
-		nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
-		inactivityDuration: localSettings.sidebarInactivityDuration,
-		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-		chatItemLayout: localSettings.sidebarChatItemLayout,
-		chatFontScale: typographyScale('chat-list', localSettings.chatListFontSize),
-		showProjectPath: localSettings.sidebarShowProjectPath,
-		sortMode: localSettings.sidebarSortMode,
-		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-	});
+	let displayOptions = $derived(
+		sidebarDisplayOptions(localSettings, {
+			nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
+			chatFontScale: typographyScale('chat-list', localSettings.chatListFontSize),
+			sortMode: localSettings.sidebarSortMode,
+			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
+		}),
+	);
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
 	);
-	let displayedChatIds = $derived(projection.rowModel.actionableChatIds);
-	let displayedChatIdSet = $derived(new Set(displayedChatIds));
+	let actionableChatIds = $derived(projection.rowModel.actionableChatIds);
+	let actionableChatIdSet = $derived(new Set(actionableChatIds));
 
 	function handleChatClick(chatId: string) {
 		onChatSelect(chatId);
@@ -187,21 +184,21 @@
 	// Multi-select mode handlers.
 
 	function enterMultiSelect(chatId: string) {
-		if (!displayedChatIdSet.has(chatId)) return;
+		if (!actionableChatIdSet.has(chatId)) return;
 		selection.enter(chatId);
 	}
 
 	function handleMultiSelectToggle(chatId: string, shiftKey: boolean) {
-		if (!displayedChatIdSet.has(chatId)) return;
+		if (!actionableChatIdSet.has(chatId)) return;
 		if (shiftKey) {
-			selection.selectRange(displayedChatIds, chatId);
+			selection.selectRange(actionableChatIds, chatId);
 		} else {
 			selection.toggle(chatId);
 		}
 	}
 
 	function handleSelectAll() {
-		selection.selectAll(displayedChatIds);
+		selection.selectAll(actionableChatIds);
 	}
 
 	function handleDeselectAll() {
@@ -216,14 +213,14 @@
 	// external delete, filter change).
 	$effect(() => {
 		if (!selection.isActive) return;
-		selection.pruneToVisible(displayedChatIdSet);
+		selection.pruneToVisible(actionableChatIdSet);
 	});
 
 	// Authoritative list of selected chats that still exist in the current
 	// chat list. All display counts and actions derive from this.
 	let selectedChats = $derived.by(() => {
 		if (!selection.isActive) return [];
-		return chats.filter((c) => displayedChatIdSet.has(c.id) && selection.isSelected(c.id));
+		return chats.filter((c) => actionableChatIdSet.has(c.id) && selection.isSelected(c.id));
 	});
 
 	$effect(() => {
@@ -246,7 +243,7 @@
 		const operation = controller.startBulkOperation(action, {
 			selectedChats,
 			allChats: chats,
-			displayedChatIds,
+			displayedChatIds: actionableChatIds,
 			selectedChatId,
 		});
 		if (operation.nextSelectedChatId) {
@@ -447,7 +444,7 @@
 	{#if selection.isActive}
 		<SidebarSelectionBar
 			count={selectedChats.length}
-			totalVisible={displayedChatIds.length}
+			totalVisible={actionableChatIds.length}
 			showPin={bulkShowPin}
 			showUnpin={bulkShowUnpin}
 			showArchive={bulkShowArchive}

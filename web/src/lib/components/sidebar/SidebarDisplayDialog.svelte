@@ -5,6 +5,7 @@
 	import SidebarDisplayFields from './SidebarDisplayFields.svelte';
 	import SidebarDisplayPreview from './SidebarDisplayPreview.svelte';
 	import { defaultSidebarGroupingFields } from '$lib/sidebar/display/sidebar-preferences';
+	import { sidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
 	import { typographyScale } from '$lib/theme/typography';
 	import * as m from '$lib/paraglide/messages.js';
 	let { onClose }: { onClose: () => void } = $props();
@@ -17,17 +18,14 @@
 		sidebarChatItemLayout: settings.sidebarChatItemLayout,
 		sidebarShowProjectPath: settings.sidebarShowProjectPath,
 	});
-	const preview = $derived({
-		groupingFields: draft.sidebarGroupingFields,
-		inactivityDuration: draft.sidebarInactivityDuration,
-		groupNestedProjectPaths: draft.sidebarGroupNestedProjectPaths,
-		chatItemLayout: draft.sidebarChatItemLayout,
-		showProjectPath: draft.sidebarShowProjectPath,
-		nestDelegatedChats: settings.sidebarNestDelegatedChats,
-		sortMode: settings.sidebarSortMode,
-		pinnedInsertPosition: remote.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-		chatFontScale: typographyScale('chat-list', settings.chatListFontSize),
-	});
+	const preview = $derived(
+		sidebarDisplayOptions(draft, {
+			nestDelegatedChats: settings.sidebarNestDelegatedChats,
+			sortMode: settings.sidebarSortMode,
+			pinnedInsertPosition: remote.snapshot?.ui?.pinnedInsertPosition ?? 'top',
+			chatFontScale: typographyScale('chat-list', settings.chatListFontSize),
+		}),
+	);
 </script>
 
 <Dialog.Root

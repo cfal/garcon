@@ -2,6 +2,7 @@
 	import { getLocalSettings, getRemoteSettings } from '$lib/context';
 	import SidebarDisplayFields from '../sidebar/SidebarDisplayFields.svelte';
 	import SidebarDisplayPreview from '../sidebar/SidebarDisplayPreview.svelte';
+	import { sidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
 	import { typographyScale } from '$lib/theme/typography';
 	import * as m from '$lib/paraglide/messages.js';
 	const settings = getLocalSettings();
@@ -13,17 +14,14 @@
 		sidebarChatItemLayout: settings.sidebarChatItemLayout,
 		sidebarShowProjectPath: settings.sidebarShowProjectPath,
 	});
-	const options = $derived({
-		groupingFields: preferences.sidebarGroupingFields,
-		inactivityDuration: preferences.sidebarInactivityDuration,
-		groupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
-		chatItemLayout: preferences.sidebarChatItemLayout,
-		showProjectPath: preferences.sidebarShowProjectPath,
-		nestDelegatedChats: settings.sidebarNestDelegatedChats,
-		sortMode: settings.sidebarSortMode,
-		pinnedInsertPosition: remote.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-		chatFontScale: typographyScale('chat-list', settings.chatListFontSize),
-	});
+	const options = $derived(
+		sidebarDisplayOptions(preferences, {
+			nestDelegatedChats: settings.sidebarNestDelegatedChats,
+			sortMode: settings.sidebarSortMode,
+			pinnedInsertPosition: remote.snapshot?.ui?.pinnedInsertPosition ?? 'top',
+			chatFontScale: typographyScale('chat-list', settings.chatListFontSize),
+		}),
+	);
 </script>
 
 <div class="grid min-w-0 gap-5 sm:grid-cols-2">

@@ -2,6 +2,7 @@
 // browser-only preferences to persisted storage.
 
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
+import type { SidebarDisplayPreferences } from '$lib/sidebar/display/sidebar-display-options';
 import {
 	defaultSidebarGroupingFields,
 	migrateSidebarGrouping,
@@ -769,16 +770,7 @@ export class LocalSettingsStore {
 		persistLocalSettings(next);
 	}
 
-	setSidebarDisplay(
-		preferences: Pick<
-			LocalSettingsSnapshot,
-			| 'sidebarGroupingFields'
-			| 'sidebarInactivityDuration'
-			| 'sidebarGroupNestedProjectPaths'
-			| 'sidebarChatItemLayout'
-			| 'sidebarShowProjectPath'
-		>,
-	): void {
+	setSidebarDisplay(preferences: SidebarDisplayPreferences): void {
 		const next = {
 			...this.snapshot(),
 			sidebarGroupingFields: normalizeSidebarGroupingFields(preferences.sidebarGroupingFields),

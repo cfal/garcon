@@ -1,4 +1,8 @@
-import type { SidebarInactivityDuration, SidebarSortMode } from '$lib/stores/local-settings.svelte';
+import type {
+	LocalSettingsSnapshot,
+	SidebarInactivityDuration,
+	SidebarSortMode,
+} from '$lib/stores/local-settings.svelte';
 import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import type { PinnedInsertPosition } from '$shared/settings';
 import { defaultSidebarGroupingFields, type SidebarGroupingSelection } from './sidebar-preferences';
@@ -13,6 +17,32 @@ export interface SidebarDisplayOptions {
 	chatFontScale: number;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
+}
+
+export type SidebarDisplayPreferences = Pick<
+	LocalSettingsSnapshot,
+	| 'sidebarGroupingFields'
+	| 'sidebarInactivityDuration'
+	| 'sidebarGroupNestedProjectPaths'
+	| 'sidebarChatItemLayout'
+	| 'sidebarShowProjectPath'
+>;
+
+export function sidebarDisplayOptions(
+	preferences: SidebarDisplayPreferences,
+	ambient: Pick<
+		SidebarDisplayOptions,
+		'nestDelegatedChats' | 'sortMode' | 'pinnedInsertPosition' | 'chatFontScale'
+	>,
+): SidebarDisplayOptions {
+	return {
+		groupingFields: preferences.sidebarGroupingFields,
+		inactivityDuration: preferences.sidebarInactivityDuration,
+		groupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
+		chatItemLayout: preferences.sidebarChatItemLayout,
+		showProjectPath: preferences.sidebarShowProjectPath,
+		...ambient,
+	};
 }
 
 export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {

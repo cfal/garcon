@@ -3,23 +3,18 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import { Button } from '$lib/components/ui/button';
-	import {
-		SIDEBAR_INACTIVITY_DURATION_VALUES,
-		type LocalSettingsSnapshot,
-	} from '$lib/stores/local-settings.svelte';
+	import { SIDEBAR_INACTIVITY_DURATION_VALUES } from '$lib/stores/local-settings.svelte';
 	import type { SidebarGroupingField } from '$lib/sidebar/display/sidebar-preferences';
+	import type { SidebarDisplayPreferences } from '$lib/sidebar/display/sidebar-display-options';
 	import * as m from '$lib/paraglide/messages.js';
 
-	type Preferences = Pick<
-		LocalSettingsSnapshot,
-		| 'sidebarGroupingFields'
-		| 'sidebarInactivityDuration'
-		| 'sidebarGroupNestedProjectPaths'
-		| 'sidebarChatItemLayout'
-		| 'sidebarShowProjectPath'
-	>;
-	let { value, onChange }: { value: Preferences; onChange: (value: Preferences) => void } =
-		$props();
+	let {
+		value,
+		onChange,
+	}: {
+		value: SidebarDisplayPreferences;
+		onChange: (value: SidebarDisplayPreferences) => void;
+	} = $props();
 	let announcement = $state('');
 	const labels: Record<SidebarGroupingField, () => string> = {
 		executor: m.sidebar_group_executor,
