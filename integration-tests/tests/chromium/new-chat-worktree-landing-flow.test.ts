@@ -167,7 +167,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(tagBounds.y).toBeGreaterThanOrEqual(worktreeBounds.y + worktreeBounds.height);
         const composerBounds = (await dialog.locator('[data-slot="new-chat-composer"]').boundingBox())!;
         const pickerBounds = (await dialog.locator('[data-slot="new-chat-project-picker"]').boundingBox())!;
-        expect(tagBounds.y - (pickerBounds.y + pickerBounds.height)).toBeGreaterThanOrEqual(width >= 640 ? 40 : 32);
+        expect(tagBounds.y - (pickerBounds.y + pickerBounds.height)).toBeGreaterThanOrEqual(width >= 640 ? 64 : 48);
         const preambleBounds = (await dialog.locator('[data-slot="new-chat-preambles-row"]').boundingBox())!;
         expect(tagBounds.width).toBeCloseTo(preambleBounds.width, 0);
         expect(tagBounds.height).toBeCloseTo(preambleBounds.height, 0);

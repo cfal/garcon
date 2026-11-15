@@ -658,7 +658,7 @@
 			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
-				<div class="pb-6 sm:pb-8">
+				<div class="pb-10 sm:pb-14">
 					<NewChatProjectPicker {form} {isMobile} />
 				</div>
 				<ChatTagToggleButton
