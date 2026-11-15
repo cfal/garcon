@@ -129,7 +129,6 @@ function findMountedElement(
 	selector: string,
 	datasetKey:
 		| 'sidebarVirtualRow'
-		| 'sidebarProjectKey'
 		| 'sidebarProjectCollapseKey'
 		| 'sidebarExecutorCollapseKey'
 		| 'sidebarSectionKey',

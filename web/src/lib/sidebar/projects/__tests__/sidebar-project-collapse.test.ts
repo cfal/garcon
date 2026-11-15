@@ -34,8 +34,14 @@ describe('SidebarProjectCollapseStore', () => {
 			store.setCollapsed(key, true);
 		store.pruneToRoster(roster);
 		expect(store.collapsedProjectKeys).toEqual(new Set(['delegation:parent', group]));
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.sidebarProjectCollapse) ?? '{}'),
+		).toEqual({ collapsedProjectKeys: ['delegation:parent', group] });
 		store.pruneToRoster([roster[1]]);
 		expect(store.collapsedProjectKeys.size).toBe(0);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.sidebarProjectCollapse) ?? '{}'),
+		).toEqual({ collapsedProjectKeys: [] });
 		store.destroy();
 	});
 
@@ -51,18 +57,6 @@ describe('SidebarProjectCollapseStore', () => {
 		).toEqual({
 			collapsedProjectKeys: ['path:/workspace/b'],
 		});
-
-		store.destroy();
-	});
-
-	it('prunes stale project keys', () => {
-		const store = createSidebarProjectCollapseStore();
-
-		store.setCollapsed('path:/workspace/a', true);
-		store.setCollapsed('path:/workspace/b', true);
-		store.pruneToProjectKeys(['path:/workspace/b']);
-
-		expect(store.snapshot()).toEqual({ collapsedProjectKeys: ['path:/workspace/b'] });
 
 		store.destroy();
 	});

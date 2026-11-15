@@ -94,15 +94,6 @@ export class SidebarProjectCollapseStore {
 		this.setCollapsed(projectKey, !this.isCollapsed(projectKey));
 	}
 
-	pruneToProjectKeys(projectKeys: Iterable<string>): void {
-		const allowed = new Set(projectKeys);
-		const next = new Set<string>();
-		for (const projectKey of this.collapsedProjectKeys) {
-			if (allowed.has(projectKey)) next.add(projectKey);
-		}
-		this.#replaceAndPersist(next);
-	}
-
 	pruneToRoster(chats: readonly ChatSessionRecord[]): void {
 		const ids = new Set(chats.map((chat) => chat.id));
 		const executors = new Set(chats.map((chat) => effectiveExecutorId(chat.executorId)));
