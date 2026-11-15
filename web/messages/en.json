@@ -2424,6 +2424,7 @@
 	"sidebar_project_path_unchanged": "Choose a different path.",
 	"sidebar_project_path_update_button": "Update path",
 	"sidebar_project_unknown": "Unknown project",
+	"sidebar_project_new_chat": "New chat in {project}",
 	"sidebar_folders_confirm_delete": "Delete \"{name}\"?",
 	"sidebar_folders_confirm_delete_description": "This saved view will be permanently removed.",
 	"sidebar_folders_create_saved_view": "Create saved view",

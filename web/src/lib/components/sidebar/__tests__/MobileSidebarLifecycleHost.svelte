@@ -240,6 +240,7 @@
 		isMobile={true}
 		onChatSelect={() => {}}
 		onNewChat={() => {}}
+		onNewProjectChat={() => {}}
 		onQuietRefresh={() => Promise.resolve()}
 		onRequestDeleteChat={() => {}}
 		onRequestRenameChat={() => {}}
