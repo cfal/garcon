@@ -130,7 +130,7 @@
 					chatOrderGroupFor(chat),
 					request.chatId,
 					request.placement,
-					() => resolve(undefined),
+					() => resolve({ success: true, chatId: request.chatId, orderGroup: chatOrderGroupFor(chat), changed: true }),
 					reject,
 				);
 			}),

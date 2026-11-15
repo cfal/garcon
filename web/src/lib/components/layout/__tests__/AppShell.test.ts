@@ -37,6 +37,7 @@ vi.mock('$lib/chat/actions/chat-navigation.js', () => ({
 }));
 
 vi.mock('$lib/context', () => ({
+	setSidebarOrder: vi.fn(),
 	getExecutors: () => ({ executors: [] }) satisfies Pick<ExecutorsStore, 'executors'>,
 	getAppShell: () => testContext.current?.appShell,
 	getChatSessions: () => testContext.current?.sessions,

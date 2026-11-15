@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ReorderChatRequest } from '$shared/chat-order-contracts';
+import type { ReorderChatRequest, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
 	SidebarOrderController,
 	applySidebarRelativeMove,
@@ -16,8 +16,8 @@ function fixture() {
 		),
 	);
 	const write = vi
-		.fn<(request: ReorderChatRequest) => Promise<unknown>>()
-		.mockResolvedValue(undefined);
+		.fn<(request: ReorderChatRequest) => Promise<ReorderChatResponse>>()
+		.mockImplementation(async ({ chatId }) => ({ success: true, chatId, orderGroup: 'normal', changed: true }));
 	const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
 	const sort = vi.fn<() => Promise<{ changed: boolean }>>().mockResolvedValue({ changed: false });
 	const onError = vi.fn();
@@ -61,6 +61,58 @@ function fixture() {
 }
 
 describe('SidebarOrderController', () => {
+	it('resolves adjacent actions from live peers without consuming a pointer drag', () => {
+		const f = fixture();
+		const request = () => f.controller.moveAdjacent({ list: 'normal', chatId: 'c', offset: -1 });
+		expect(request()?.placement).toEqual({ kind: 'relative', referenceChatId: 'b', position: 'before' });
+		f.input = { ...f.input, allChats: [...f.input.allChats.slice(0, -1), chat('new'), chat('c')], matchingChatIds: undefined };
+		expect(request()?.placement.referenceChatId).toBe('new');
+		f.controller.begin('normal', 'a', { ids: ['a'] });
+		expect(request()).toBeNull();
+		expect(f.controller.activeChatId).toBe('a');
+	});
+	it.each(['top', 'bottom'] as const)('keeps canonical %s commands independent of sidebar filters and sort mode', async (boundary) => {
+		const f = fixture();
+		f.input = { ...f.input, sortMode: 'recent', matchingChatIds: new Set(['a']) };
+		const response: ReorderChatResponse = { success: true, chatId: 'c', orderGroup: 'normal', changed: false };
+		f.write.mockResolvedValue(response);
+		expect(await f.controller.moveChatToBoundary('c', boundary)).toEqual(response);
+		expect(f.write).toHaveBeenCalledExactlyOnceWith({ chatId: 'c', placement: { kind: 'boundary', boundary } });
+		expect(f.refresh).toHaveBeenCalledOnce();
+	});
+	it('blocks sidebar and boundary writes until a boundary command refresh settles', async () => {
+		const f = fixture();
+		const sidebarMove = f.move('c', 'b')!;
+		let release!: (fresh: boolean) => void;
+		f.refresh.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+		const command = f.controller.moveChatToBoundary('a', 'bottom');
+		expect(await f.controller.moveChatToBoundary('c', 'top')).toBeNull();
+		f.controller.submit(sidebarMove);
+		expect(f.move('c', 'b')).toBeNull();
+		expect(await f.controller.sort('activity')).toBe(false);
+		await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledOnce());
+		expect(f.write).toHaveBeenCalledOnce();
+		release(false);
+		expect(await command).toMatchObject({ chatId: 'a', changed: true });
+		expect(f.controller.recoveryRequired).toBe(true);
+		expect(await f.controller.moveChatToBoundary('c', 'top')).toBeNull();
+		f.refresh.mockResolvedValue(true);
+		await f.controller.recover();
+		expect(await f.controller.moveChatToBoundary('c', 'top')).toMatchObject({ chatId: 'c' });
+		expect(f.write).toHaveBeenCalledTimes(2);
+	});
+	it('reports a failed boundary write and guards recovery without resending', async () => {
+		const f = fixture();
+		const error = new TypeError('Connection lost');
+		f.write.mockRejectedValueOnce(error);
+		f.refresh.mockResolvedValue(false);
+		expect(await f.controller.moveChatToBoundary('a', 'bottom')).toBeNull();
+		expect(f.onError).toHaveBeenCalledWith(error, 'unconfirmed');
+		expect(f.controller.recoveryRequired).toBe(true);
+		f.refresh.mockResolvedValue(true);
+		await f.controller.recover();
+		expect(f.write).toHaveBeenCalledOnce();
+	});
 	it.each(['context', 'cycle'] as const)(
 		'persists visible moves across an ineligible %s branch',
 		async (kind) => {
@@ -443,17 +495,30 @@ describe('SidebarOrderController', () => {
 	});
 	it('keeps menu boundaries inside visible sibling scope', () => {
 		const f = fixture();
+		f.input = projectionInput([chat('a'), delegated('b', 'a'), delegated('c', 'a')]);
 		const request = f.controller.moveToBoundary({
 			list: 'normal',
 			chatId: 'c',
 			boundary: 'start',
-			scope: { ids: ['b', 'c'] },
 		});
 		expect(request?.placement).toEqual({
 			kind: 'relative',
 			referenceChatId: 'b',
 			position: 'before',
 		});
+	});
+	it.each(['start', 'end'] as const)('resolves the live %s boundary after peer arrival and departure', (boundary) => {
+		const f = fixture();
+		const chats = [chat('parent'), delegated('a', 'parent'), delegated('b', 'parent'), delegated('c', 'parent')];
+		f.input = projectionInput(chats);
+		const source = boundary === 'start' ? 'c' : 'a';
+		const request = () => f.controller.moveToBoundary({ list: 'normal', chatId: source, boundary });
+		expect(request()?.placement.referenceChatId).toBe(boundary === 'start' ? 'a' : 'c');
+		const arrival = delegated('new', 'parent');
+		f.input = projectionInput(boundary === 'start' ? [arrival, ...chats] : [...chats, arrival]);
+		expect(request()?.placement.referenceChatId).toBe('new');
+		f.input = projectionInput(chats.filter((chat) => chat.id !== (boundary === 'start' ? 'a' : 'c')));
+		expect(request()?.placement.referenceChatId).toBe('b');
 	});
 	it('does not let bulk sort overtake moves or admit moves while sorting', async () => {
 		const f = fixture();
@@ -485,7 +550,7 @@ describe('SidebarOrderController', () => {
 		f.write.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
-					release = () => resolve(undefined);
+					release = () => resolve({ success: true, chatId: 'c', orderGroup: 'normal', changed: true });
 				}),
 		);
 		f.controller.submit(f.move('c', 'b')!);

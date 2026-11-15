@@ -1507,6 +1507,7 @@
 	"notifications_generate_chat_title_failed": "Failed to generate chat title.",
 	"notifications_reorder_chats_applied": "Chats reordered.",
 	"notifications_reorder_chats_failed": "Failed to reorder chats.",
+	"notifications_reorder_chats_busy": "Another chat order change is pending. Wait for it to finish or refresh the sidebar.",
 	"notifications_reorder_chats_unconfirmed": "Couldn't confirm the chat order change. Refresh to check the current order.",
 	"notifications_update_chat_tags_failed": "Failed to update chat tags.",
 	"notifications_reorder_saved_searches_failed": "Failed to reorder saved searches.",

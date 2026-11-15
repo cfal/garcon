@@ -1,7 +1,9 @@
 import type {
+	ChatOrderBoundary,
 	PersistedChatOrderGroup,
 	RelativeChatOrderPlacement,
 	ReorderChatRequest,
+	ReorderChatResponse,
 } from '$shared/chat-order-contracts';
 import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
@@ -34,11 +36,11 @@ export interface SidebarChatReorderRequest {
 	presentationKey: string;
 }
 
-export type SidebarOrderErrorOutcome = 'rejected' | 'unconfirmed';
+export type SidebarOrderErrorOutcome = 'rejected' | 'unconfirmed' | 'blocked';
 
 interface SidebarOrderDeps {
 	get input(): ProjectionInput;
-	write(request: ReorderChatRequest): Promise<unknown>;
+	write(request: ReorderChatRequest): Promise<ReorderChatResponse>;
 	refresh(): Promise<boolean>;
 	sort(sortKey: ChatOrderSortKey): Promise<{ changed: boolean }>;
 	onError(error: unknown, outcome: SidebarOrderErrorOutcome): void;
@@ -206,18 +208,49 @@ export class SidebarOrderController {
 		list: PersistedChatOrderGroup;
 		chatId: string;
 		boundary: 'start' | 'end';
-		scope: { ids: string[] };
 	}): SidebarChatReorderRequest | null {
 		if (this.busy || this.#drag) return null;
-		const ids = input.scope.ids;
+		const row = this.#canonicalRows.find(
+			(row) => row.type === 'chat' && row.chat.id === input.chatId,
+		);
+		if (row?.type !== 'chat' || row.list !== input.list) return null;
+		const ids = row.reorderScopeIds;
 		const anchor = input.boundary === 'start' ? ids[0] : ids.at(-1);
 		if (!anchor || anchor === input.chatId) return null;
-		this.begin(input.list, input.chatId, input.scope);
+		this.begin(input.list, input.chatId, { ids });
 		this.preview({
 			list: input.list,
 			sourceChatId: input.chatId,
 			targetChatId: anchor,
 			closestEdge: input.boundary === 'start' ? 'top' : 'bottom',
+		});
+		return this.finish(input.list);
+	}
+
+	moveAdjacent(input: {
+		list: PersistedChatOrderGroup;
+		chatId: string;
+		offset: -1 | 1;
+	}): SidebarChatReorderRequest | null {
+		if (this.busy || this.#drag) return null;
+		const row = this.#canonicalRows.find(
+			(row) => row.type === 'chat' && row.chat.id === input.chatId,
+		);
+		if (row?.type !== 'chat' || row.list !== input.list) return null;
+		const ids = row.reorderScopeIds;
+		const index = ids.indexOf(input.chatId);
+		const target = index >= 0 ? ids[index + input.offset] : undefined;
+		if (!target) return null;
+		const visible = this.#visibleScopeIds(row.reorderScopeKey);
+		// Crosses intervening context/cycle branches without also jumping over the eligible peer.
+		const adjacent = visible[visible.indexOf(input.chatId) + input.offset] === target;
+		this.begin(input.list, input.chatId, { ids });
+		this.preview({
+			list: input.list,
+			sourceChatId: input.chatId,
+			targetChatId: target,
+			closestEdge:
+				input.offset === -1 ? (adjacent ? 'top' : 'bottom') : adjacent ? 'bottom' : 'top',
 		});
 		return this.finish(input.list);
 	}
@@ -236,13 +269,17 @@ export class SidebarOrderController {
 			: null;
 	}
 
+	#visibleScopeIds(scopeKey: string): string[] {
+		return this.#canonicalRows.flatMap((row) =>
+			row.type === 'chat' && row.reorderScopeKey === scopeKey ? [row.chat.id] : [],
+		);
+	}
+
 	#valid(request: SidebarChatReorderRequest): boolean {
 		if (request.presentationKey !== presentationKey(this.#deps.input)) return false;
 		if (!this.#liveScope(request)?.includes(request.placement.referenceChatId)) return false;
 		// Visible context branches affect placement even though they cannot be anchors.
-		const ids = this.#canonicalRows.flatMap((row) =>
-			row.type === 'chat' && row.reorderScopeKey === request.scopeKey ? [row.chat.id] : [],
-		);
+		const ids = this.#visibleScopeIds(request.scopeKey);
 		const source = ids.indexOf(request.chatId);
 		const target = ids.indexOf(request.placement.referenceChatId);
 		if (target < 0 || source === target) return false;
@@ -256,6 +293,24 @@ export class SidebarOrderController {
 			await this.#deps.write({ chatId: request.chatId, placement: request.placement });
 			return false;
 		});
+	}
+
+	async moveChatToBoundary(
+		chatId: string,
+		boundary: ChatOrderBoundary,
+	): Promise<ReorderChatResponse | null> {
+		if (this.#disposed) return null;
+		if (this.busy || this.#drag) {
+			this.#deps.onError(new Error('Chat ordering is busy'), 'blocked');
+			return null;
+		}
+		let result: ReorderChatResponse | null = null;
+		await this.#mutate(async () => {
+			result = await this.#deps.write({ chatId, placement: { kind: 'boundary', boundary } });
+			return false;
+		});
+		// Acknowledged commands stay consumed even when refreshing requires recovery.
+		return this.#disposed ? null : result;
 	}
 
 	async #refresh(): Promise<boolean> {

@@ -11,7 +11,6 @@ import {
 	listChats,
 	recoverChatTags as recoverChatTagsApi,
 	replaceChatTags as replaceChatTagsApi,
-	reorderChat as reorderChatApi,
 	setLastSelectedChat,
 	transitionChatTags as transitionChatTagsApi,
 	setChatArchived as setChatArchivedApi,
@@ -31,7 +30,6 @@ import type {
 	ReplaceChatTagsRequest,
 	TransitionChatTagsRequest,
 } from '$shared/chat-tag-mutations';
-import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
 	ChatArchiveProjectionState,
 	type ArchiveMutationSettlement,
@@ -370,25 +368,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	renameChat(chatId: string, newTitle: string): Promise<boolean> {
 		return this.#titles.renameChat(chatId, newTitle);
-	}
-
-	async moveChatToBoundary(
-		chatId: string,
-		boundary: ChatOrderBoundary,
-	): Promise<ReorderChatResponse | null> {
-		try {
-			const reorderRemoteChat = this.#deps.reorderChat ?? reorderChatApi;
-			const result = await reorderRemoteChat({
-				chatId,
-				placement: { kind: 'boundary', boundary },
-			});
-			await this.quietRefreshChats();
-			return result;
-		} catch (err) {
-			console.error('[ChatSessionsStore] Reorder failed:', err);
-			this.#deps.notifyError?.(m.notifications_reorder_chats_failed());
-			return null;
-		}
 	}
 
 	async replaceChatTags(request: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse> {

@@ -7,6 +7,7 @@ import {
 	getRemoteSettings,
 	getSidebarProjectCollapse,
 	getSidebarSearch,
+	setSidebarOrder,
 } from '$lib/context';
 import { reorderChat, sortChatOrder } from '$lib/api/chats';
 import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
@@ -21,7 +22,7 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 	const remoteSettings = getRemoteSettings();
 	const projectCollapse = getSidebarProjectCollapse();
 	const sidebarSearch = getSidebarSearch();
-	return new SidebarOrderController({
+	const controller = new SidebarOrderController({
 		get input() {
 			return {
 				allChats: sessions.orderedChats,
@@ -46,4 +47,6 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 		sort: (sortKey) => sortChatOrder({ sortKey }),
 		onError: (_error, outcome) => notifications.error(sidebarOrderErrorMessage(outcome)),
 	});
+	setSidebarOrder(controller);
+	return controller;
 }

@@ -13,6 +13,7 @@ import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { ProjectTarget } from '$shared/project-resolution';
 import type { ConversationExecutionSelection } from './conversation-execution-selection.js';
+import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte.js';
 
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
@@ -122,6 +123,7 @@ type SessionConversationUiState = Pick<
 type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
 export interface SessionControllerDeps {
 	sessions: ConversationSessionsPort;
+	moveChatToBoundary: SidebarOrderController['moveChatToBoundary'];
 	chatState: SessionTranscriptState;
 	composerState: SessionComposerState;
 	agentState: SessionAgentState;

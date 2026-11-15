@@ -56,7 +56,7 @@ import type { ForkChatResponse } from '$shared/chat-command-contracts';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { ReorderChatResponse } from '$shared/chat-order-contracts';
+import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte.js';
 import type {
 	ApplyChatTagDeltaRequest,
 	ChatTagsMutationResponse,
@@ -68,10 +68,6 @@ interface SlashCommandSessions {
 	selectedChatId: string | null;
 	byId: Record<string, ChatSessionRecord>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
-	moveChatToBoundary(
-		chatId: string,
-		boundary: 'top' | 'bottom',
-	): Promise<ReorderChatResponse | null>;
 	tagReconciliationKind(chatId: string): ChatTagReconciliationKind;
 	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse>;
 	upsertServerChat(entry: ChatListEntry): void;
@@ -132,6 +128,7 @@ interface SlashCommandModelCatalog {
 
 export interface ConversationSlashCommandDeps {
 	sessions: SlashCommandSessions;
+	moveChatToBoundary: SidebarOrderController['moveChatToBoundary'];
 	chatState: SlashCommandChatState;
 	composerState: SlashCommandComposerState;
 	agentState: SlashCommandAgentState;
@@ -399,7 +396,7 @@ export class ConversationSlashCommandService {
 		const clearedContentRevision = ownsComposer
 			? deps.composerState.clearAfterSubmit(chatId)
 			: null;
-		const result = await deps.sessions.moveChatToBoundary(chatId, command.boundary);
+		const result = await deps.moveChatToBoundary(chatId, command.boundary);
 		if (!result) {
 			this.#restoreComposerIfUntouched({
 				chatId,

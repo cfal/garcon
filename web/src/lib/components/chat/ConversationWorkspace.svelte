@@ -53,6 +53,7 @@
 	import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 	import {
 		getChatSessions,
+		getSidebarOrder,
 		getLocalSettings,
 		getAppShell,
 		getWs,
@@ -274,8 +275,10 @@
 		void currentPanel()?.scroll.scrollToLatestAndFill();
 	}
 
+	const sidebarOrder = getSidebarOrder();
 	const controller = new ConversationSessionController({
 		sessions,
+		moveChatToBoundary: (chatId, boundary) => sidebarOrder.moveChatToBoundary(chatId, boundary),
 		chatState,
 		composerState,
 		agentState,

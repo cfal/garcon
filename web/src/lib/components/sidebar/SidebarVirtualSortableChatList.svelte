@@ -778,7 +778,6 @@
 				list: row.list,
 				chatId: row.chat.id,
 				boundary,
-				scope: { ids: row.reorderScopeIds },
 			}),
 		);
 	}
@@ -796,16 +795,8 @@
 		const index = row.reorderScopeIds.indexOf(row.chat.id);
 		const target = index >= 0 ? row.reorderScopeIds[index + offset] : undefined;
 		if (!target) return undefined;
-		return () => {
-			reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
-			reorder.preview({
-				list: row.list,
-				sourceChatId: row.chat.id,
-				targetChatId: target,
-				closestEdge: offset < 0 ? 'top' : 'bottom',
-			});
-			persistReorderRequest(reorder.finish(row.list));
-		};
+		return () =>
+			persistReorderRequest(reorder.moveAdjacent({ list: row.list, chatId: row.chat.id, offset }));
 	}
 
 	function getMoveToBottom(row: SidebarVirtualChatRow): (() => void) | undefined {

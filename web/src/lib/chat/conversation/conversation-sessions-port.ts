@@ -19,7 +19,6 @@ export type ConversationSessionsPort = Pick<
 	| 'observeCommandTagMutation'
 	| 'setSelectedChatId'
 	| 'renameChat'
-	| 'moveChatToBoundary'
 	| 'tagReconciliationKind'
 	| 'applyChatTagDelta'
 >;

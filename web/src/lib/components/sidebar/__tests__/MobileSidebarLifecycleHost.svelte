@@ -260,7 +260,10 @@
 		get input() {
 			return projectionInput;
 		},
-		write: (request) => writeOrder(request),
+		write: async (request) => {
+			await writeOrder(request);
+			return { success: true, chatId: request.chatId, orderGroup: 'normal', changed: true };
+		},
 		refresh: async () => true,
 		sort: async () => ({ changed: false }),
 		onError: () => {},

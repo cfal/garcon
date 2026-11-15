@@ -9,6 +9,9 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
+import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+import { projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
+import type { ReorderChatRequest, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -160,12 +163,6 @@ function createDeps(chat = createChat()) {
 		selectedChatId: chat.id,
 		byId: { [chat.id]: chat },
 		renameChat: vi.fn().mockResolvedValue(true),
-		moveChatToBoundary: vi.fn().mockResolvedValue({
-			success: true,
-			chatId: chat.id,
-			orderGroup: 'normal',
-			changed: true,
-		}),
 		tagReconciliationKind: vi.fn((_chatId: string): ChatTagReconciliationKind => null),
 		applyChatTagDelta: vi.fn(
 			async (request: {
@@ -209,6 +206,12 @@ function createDeps(chat = createChat()) {
 		supportsSteering: vi.fn(() => false),
 	};
 	const deps = {
+		moveChatToBoundary: vi.fn<ConversationSlashCommandDeps['moveChatToBoundary']>().mockResolvedValue({
+			success: true,
+			chatId: chat.id,
+			orderGroup: 'normal',
+			changed: true,
+		}),
 		sessions,
 		chatState: {
 			activeChatId: chat.id,
@@ -248,6 +251,31 @@ function createDeps(chat = createChat()) {
 }
 
 describe('ConversationSlashCommandService', () => {
+	it('does not let /move bypass pending sidebar recovery', async () => {
+		const chat = createChat();
+		const peer = createChat({ id: 'peer' });
+		const { deps, composerState } = createDeps(chat);
+		const write = vi.fn<(request: ReorderChatRequest) => Promise<ReorderChatResponse>>()
+			.mockResolvedValue({ success: true, chatId: chat.id, orderGroup: 'normal', changed: true });
+		const order = new SidebarOrderController({
+			input: projectionInput([chat, peer]), write, refresh: async () => false,
+			sort: async () => ({ changed: false }), onError: vi.fn(),
+		});
+		order.begin('normal', chat.id, { ids: [chat.id, peer.id] });
+		order.preview({ list: 'normal', sourceChatId: chat.id, targetChatId: peer.id, closestEdge: 'bottom' });
+		order.submit(order.finish('normal')!);
+		await vi.waitFor(() => expect(order.recoveryRequired).toBe(true));
+		deps.moveChatToBoundary.mockImplementation((id, boundary) => order.moveChatToBoundary(id, boundary));
+		composerState.inputText = '/move bottom';
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text: '/move bottom', images: [], ownsComposer: true,
+		});
+		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+		expect(await dispatch.outcome).toBe('rejected');
+		expect(write).toHaveBeenCalledOnce();
+		expect(order.orders.normal).toEqual([peer.id, chat.id]);
+		expect(composerState.inputText).toBe('/move bottom');
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -399,8 +427,8 @@ describe('ConversationSlashCommandService', () => {
 		const chat = createChat({ isProcessing: true, processingPhase: 'running' });
 		const { deps, composerState, appendLocalNotice } = createDeps(chat);
 		composerState.inputText = '/move top';
-		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const pending = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		deps.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 
 		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
 			chatId: chat.id,
@@ -413,7 +441,7 @@ describe('ConversationSlashCommandService', () => {
 		expect(dispatch.kind).toBe('handled');
 		expect(composerState.clearAfterSubmit).toHaveBeenCalledWith(chat.id);
 		expect(composerState.inputText).toBe('');
-		expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith(chat.id, 'top');
+		expect(deps.moveChatToBoundary).toHaveBeenCalledWith(chat.id, 'top');
 		pending.resolve({ success: true, chatId: chat.id, orderGroup: 'normal', changed: true });
 		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
 		await expect(dispatch.outcome).resolves.toBe('accepted');
@@ -429,7 +457,7 @@ describe('ConversationSlashCommandService', () => {
 
 	it('reports an unchanged bottom boundary without sending the command onward', async () => {
 		const { deps, appendLocalNotice } = createDeps();
-		deps.sessions.moveChatToBoundary.mockResolvedValueOnce({
+		deps.moveChatToBoundary.mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
 			orderGroup: 'archived',
@@ -476,14 +504,14 @@ describe('ConversationSlashCommandService', () => {
 			if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
 			await expect(dispatch.outcome).resolves.toBe('rejected');
 			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
-			expect(deps.sessions.moveChatToBoundary).not.toHaveBeenCalled();
+			expect(deps.moveChatToBoundary).not.toHaveBeenCalled();
 		}
 	});
 
 	it('restores a failed move only while the source composer remains untouched', async () => {
 		const { deps, composerState } = createDeps();
 		composerState.inputText = '/move top';
-		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+		deps.moveChatToBoundary.mockResolvedValueOnce(null);
 
 		const result = await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
 			'chat-1',
@@ -502,7 +530,7 @@ describe('ConversationSlashCommandService', () => {
 		const { deps, composerState } = createDeps();
 		composerState.inputText = '/move top';
 		const pending = deferred<null>();
-		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		deps.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 		const submission = new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
 			'chat-1',
 			deps.sessions.byId['chat-1'],
@@ -521,9 +549,9 @@ describe('ConversationSlashCommandService', () => {
 
 	it('does not restore an older failed command after a newer submission clears the composer', async () => {
 		const { deps, composerState } = createDeps();
-		const first = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		const second = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		deps.sessions.moveChatToBoundary
+		const first = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		const second = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		deps.moveChatToBoundary
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
 		const service = new ConversationSlashCommandService(deps);
@@ -558,8 +586,8 @@ describe('ConversationSlashCommandService', () => {
 	it('does not restore or append a notice after switching away from the source chat', async () => {
 		const { deps, composerState, appendLocalNotice } = createDeps();
 		composerState.inputText = '/move bottom';
-		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const pending = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		deps.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 		const service = new ConversationSlashCommandService(deps);
 		const submission = service.submitMoveChatBoundaryCommand(
 			'chat-1',
@@ -582,7 +610,7 @@ describe('ConversationSlashCommandService', () => {
 	it('does not clear or restore a composer the source submission does not own', async () => {
 		const { deps, composerState } = createDeps();
 		composerState.inputText = 'other chat draft';
-		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+		deps.moveChatToBoundary.mockResolvedValueOnce(null);
 
 		await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
 			'chat-1',

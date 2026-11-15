@@ -81,7 +81,7 @@
 				currentTime: new Date('2025-01-01T03:00:00.000Z'),
 			};
 		},
-		write: async () => {},
+		write: async ({ chatId }) => ({ success: true, chatId, orderGroup: 'normal', changed: true }),
 		refresh: async () => true,
 		sort: async () => ({ changed: false }),
 		onError: () => {},
