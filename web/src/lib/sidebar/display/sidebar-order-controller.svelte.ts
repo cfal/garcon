@@ -13,7 +13,7 @@ import {
 	buildSidebarRowModel,
 	type SidebarRowModelInput,
 } from './sidebar-row-model';
-import type { SidebarChatOrderMap } from './sidebar-virtual-chat-list';
+import type { SidebarChatOrderMap, SidebarVirtualChatRow } from './sidebar-virtual-chat-list';
 import { normalizeSidebarGroupingFields } from './sidebar-preferences';
 
 type ProjectionInput = Omit<SidebarRowModelInput, 'orders'>;
@@ -142,8 +142,8 @@ export class SidebarOrderController {
 		if (this.#disposed || this.busy || this.#drag || !scope.ids.includes(chatId)) return;
 		const input = this.#deps.input;
 		if (input.sortMode !== 'manual') return;
-		const row = this.#canonicalRows.find((row) => row.type === 'chat' && row.chat.id === chatId);
-		if (row?.type !== 'chat' || row.list !== list || !row.reorderScopeIds.includes(chatId)) return;
+		const row = this.#canonicalChatRow(list, chatId);
+		if (!row?.reorderScopeIds.includes(chatId)) return;
 		this.#drag = {
 			list,
 			chatId,
@@ -210,10 +210,8 @@ export class SidebarOrderController {
 		boundary: 'start' | 'end';
 	}): SidebarChatReorderRequest | null {
 		if (this.busy || this.#drag) return null;
-		const row = this.#canonicalRows.find(
-			(row) => row.type === 'chat' && row.chat.id === input.chatId,
-		);
-		if (row?.type !== 'chat' || row.list !== input.list) return null;
+		const row = this.#canonicalChatRow(input.list, input.chatId);
+		if (!row) return null;
 		const ids = row.reorderScopeIds;
 		const anchor = input.boundary === 'start' ? ids[0] : ids.at(-1);
 		if (!anchor || anchor === input.chatId) return null;
@@ -233,10 +231,8 @@ export class SidebarOrderController {
 		offset: -1 | 1;
 	}): SidebarChatReorderRequest | null {
 		if (this.busy || this.#drag) return null;
-		const row = this.#canonicalRows.find(
-			(row) => row.type === 'chat' && row.chat.id === input.chatId,
-		);
-		if (row?.type !== 'chat' || row.list !== input.list) return null;
+		const row = this.#canonicalChatRow(input.list, input.chatId);
+		if (!row) return null;
 		const ids = row.reorderScopeIds;
 		const index = ids.indexOf(input.chatId);
 		const target = index >= 0 ? ids[index + input.offset] : undefined;
@@ -244,29 +240,38 @@ export class SidebarOrderController {
 		const visible = this.#visibleScopeIds(row.reorderScopeKey);
 		// Crosses intervening context/cycle branches without also jumping over the eligible peer.
 		const adjacent = visible[visible.indexOf(input.chatId) + input.offset] === target;
+		let closestEdge: 'top' | 'bottom';
+		if (input.offset === -1) {
+			closestEdge = adjacent ? 'top' : 'bottom';
+		} else {
+			closestEdge = adjacent ? 'bottom' : 'top';
+		}
 		this.begin(input.list, input.chatId, { ids });
 		this.preview({
 			list: input.list,
 			sourceChatId: input.chatId,
 			targetChatId: target,
-			closestEdge:
-				input.offset === -1 ? (adjacent ? 'top' : 'bottom') : adjacent ? 'bottom' : 'top',
+			closestEdge,
 		});
 		return this.finish(input.list);
+	}
+
+	#canonicalChatRow(list: PersistedChatOrderGroup, chatId: string): SidebarVirtualChatRow | null {
+		const row = this.#canonicalRows.find((row) => row.type === 'chat' && row.chat.id === chatId);
+		return row?.type === 'chat' && row.list === list ? row : null;
 	}
 
 	#liveScope(
 		source: Pick<SidebarChatReorderRequest, 'chatId' | 'list' | 'scopeKey'>,
 	): readonly string[] | null {
-		const row = this.#canonicalRows.find(
-			(row) => row.type === 'chat' && row.chat.id === source.chatId,
-		);
-		return row?.type === 'chat' &&
-			row.list === source.list &&
-			row.reorderScopeKey === source.scopeKey &&
-			row.reorderScopeIds.includes(source.chatId)
-			? row.reorderScopeIds
-			: null;
+		const row = this.#canonicalChatRow(source.list, source.chatId);
+		if (
+			!row ||
+			row.reorderScopeKey !== source.scopeKey ||
+			!row.reorderScopeIds.includes(source.chatId)
+		)
+			return null;
+		return row.reorderScopeIds;
 	}
 
 	#visibleScopeIds(scopeKey: string): string[] {

@@ -355,12 +355,10 @@
 		workspaceChatDrag.endIfOwned(chatId);
 	}
 
-	function pointIsInsideViewport(clientX: number, clientY: number): boolean {
-		return Boolean(viewportRef && domPointIsInsideViewport(viewportRef, clientX, clientY));
-	}
-
 	function inputIsInsideViewport(input: Input): boolean {
-		return pointIsInsideViewport(input.clientX, input.clientY);
+		return Boolean(
+			viewportRef && domPointIsInsideViewport(viewportRef, input.clientX, input.clientY),
+		);
 	}
 
 	function pointDropContext(
@@ -411,6 +409,23 @@
 		onPersistReorder(request);
 	}
 
+	function previewPointDrop(
+		sourceData: SidebarChatDragData,
+		clientX: number,
+		clientY: number,
+	): void {
+		const context = pointDropContext(sourceData, clientX, clientY);
+		const instruction = fallbackInstructionForPointContext(sourceData, context);
+		if (!instruction) {
+			clearDropPreview();
+			return;
+		}
+		if (context.kind === 'compatible-row') {
+			lastValidDrop = instruction;
+			applySidebarDropInstruction(instruction);
+		}
+	}
+
 	function previewSidebarDrop(
 		sourceData: unknown,
 		dropTargets: DropTargetRecord[],
@@ -425,17 +440,7 @@
 		}
 		const instruction = resolveSidebarDropInstruction(sourceData, dropTargets);
 		if (!instruction) {
-			const context = pointDropContext(sourceData, input.clientX, input.clientY);
-			const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-			if (fallbackInstruction) {
-				if (context.kind === 'compatible-row') {
-					lastValidDrop = fallbackInstruction;
-					applySidebarDropInstruction(fallbackInstruction);
-				}
-				return;
-			}
-
-			clearDropPreview();
+			previewPointDrop(sourceData, input.clientX, input.clientY);
 			return;
 		}
 
@@ -522,17 +527,7 @@
 	function previewTouchDrop(clientX: number, clientY: number): void {
 		const current = touchDrag;
 		if (!current) return;
-		const sourceData = touchSourceDragData(current);
-		const context = pointDropContext(sourceData, clientX, clientY);
-		const instruction = fallbackInstructionForPointContext(sourceData, context);
-		if (!instruction) {
-			clearDropPreview();
-			return;
-		}
-		if (context.kind === 'compatible-row') {
-			lastValidDrop = instruction;
-			applySidebarDropInstruction(instruction);
-		}
+		previewPointDrop(touchSourceDragData(current), clientX, clientY);
 	}
 
 	function stopTouchAutoScroll(): void {
@@ -772,22 +767,19 @@
 		}
 		return untrack(() => virtual.scrollToIndex(target.index)).kind === 'scheduled';
 	}
-	function moveToBoundary(row: SidebarVirtualChatRow, boundary: 'start' | 'end'): void {
-		persistReorderRequest(
-			reorder.moveToBoundary({
-				list: row.list,
-				chatId: row.chat.id,
-				boundary,
-			}),
-		);
-	}
-
-	function getMoveToTop(row: SidebarVirtualChatRow): (() => void) | undefined {
+	function getMoveToBoundary(
+		row: SidebarVirtualChatRow,
+		boundary: 'start' | 'end',
+	): (() => void) | undefined {
 		if (!reorderEnabled) return undefined;
 		const order = row.reorderScopeIds;
 		const index = order.indexOf(row.chat.id);
-		if (index <= 0) return undefined;
-		return () => moveToBoundary(row, 'start');
+		const boundaryIndex = boundary === 'start' ? 0 : order.length - 1;
+		if (index < 0 || index === boundaryIndex) return undefined;
+		return () =>
+			persistReorderRequest(
+				reorder.moveToBoundary({ list: row.list, chatId: row.chat.id, boundary }),
+			);
 	}
 
 	function getMoveAdjacent(row: SidebarVirtualChatRow, offset: -1 | 1): (() => void) | undefined {
@@ -797,14 +789,6 @@
 		if (!target) return undefined;
 		return () =>
 			persistReorderRequest(reorder.moveAdjacent({ list: row.list, chatId: row.chat.id, offset }));
-	}
-
-	function getMoveToBottom(row: SidebarVirtualChatRow): (() => void) | undefined {
-		if (!reorderEnabled) return undefined;
-		const order = row.reorderScopeIds;
-		const index = order.indexOf(row.chat.id);
-		if (index < 0 || index >= order.length - 1) return undefined;
-		return () => moveToBoundary(row, 'end');
 	}
 
 	onMount(() =>
@@ -952,11 +936,11 @@
 						{newWindowEdges}
 						onEnterMultiSelect={row.contextOnly ? undefined : onEnterMultiSelect}
 						onMultiSelectToggle={row.contextOnly ? undefined : onMultiSelectToggle}
-						onMoveToTop={getMoveToTop(row)}
+						onMoveToTop={getMoveToBoundary(row, 'start')}
 						onMoveUp={getMoveAdjacent(row, -1)}
 						onMoveDown={getMoveAdjacent(row, 1)}
 						{moveBoundaryLabels}
-						onMoveToBottom={getMoveToBottom(row)}
+						onMoveToBottom={getMoveToBoundary(row, 'end')}
 						onSortChatOrder={displayOptions.sortMode === 'manual' && !reorder.busy
 							? onSortChatOrder
 							: undefined}
