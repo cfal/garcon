@@ -72,9 +72,14 @@ The form, prompt editor and model selector retain their owners. A focused projec
 picker owns folder browsing and executor selection; the worktree list retains
 discovery and selection. The tag and preamble options sit below Worktrees as
 matching full-width, 44px outlined rows with muted icons and labels and add actions.
-Their labels read Add tags to session and Add preambles to session. The preamble
-summary retains selected titles, loading, error/retry and conditional Clear states.
-The tag editor and selected tags retain their existing behavior.
+Their empty labels read Add tags to session and Add preambles to session. Selected
+tags and the tag input appear inside the tag field; its label disappears once
+tags are selected. Selected preamble titles likewise replace the preamble label.
+The fields retain their icons and add controls. Tags wrap within their field when
+needed; preambles retain compact titles and overflow counts. Loading, error/retry,
+conditional Clear, tag editing and removal retain their existing behavior.
+Escape closes a nested picker, then tag editing, before the landing screen,
+restoring focus to the corresponding control at each level.
 The landing page scrolls within the keyboard-adjusted viewport on mobile.
 
 Worktree discovery uses the existing executor-qualified Git API. Loading, empty,

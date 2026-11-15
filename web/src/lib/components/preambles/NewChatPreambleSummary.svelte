@@ -81,15 +81,17 @@
 					{emptyLabel ?? m.preamble_selection_none_will_apply()}
 				</span>
 			{:else}
-				<span
-					class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
-					data-slot="new-chat-preambles-label"
-				>
-					{readyLabel ?? m.preambles_title()}
-				</span>
-				<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
-					>·</span
-				>
+				{#if readyLabel}
+					<span
+						class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
+						data-slot="new-chat-preambles-label"
+					>
+						{readyLabel}
+					</span>
+					<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
+						>·</span
+					>
+				{/if}
 				<span class="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
 					{#each visiblePreambles as preamble, index (preamble.id)}
 						<svelte:boundary>

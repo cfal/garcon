@@ -39,8 +39,7 @@
 	import ComposerSnippetPalette from '../composer/ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from '../composer/AgentSettingsControls.svelte';
 	import NewChatPreambleControls from '../../preambles/NewChatPreambleControls.svelte';
-	import ChatTagEditor from '../ChatTagEditor.svelte';
-	import ChatTagToggleButton from '../ChatTagToggleButton.svelte';
+	import NewChatTags from './NewChatTags.svelte';
 	import {
 		getLocalSettings,
 		getAppShell,
@@ -287,13 +286,14 @@
 	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
+	// Modal ownership changes preserve the closing dialog's focus restoration.
 	$effect(() => {
 		if (
 			initialContentReady &&
 			form.validationStatus === 'valid' &&
 			!form.showBrowser &&
 			!document.activeElement?.closest('[data-slot="new-chat-worktrees"]') &&
-			canFocusTextarea()
+			untrack(canFocusTextarea)
 		) {
 			untrack(returnTextareaFocus);
 		}
@@ -665,18 +665,11 @@
 				<NewChatProjectPicker {form} {isMobile} />
 			</div>
 			<div data-slot="new-chat-session-options" class="space-y-2">
-				<ChatTagToggleButton
-					active={form.chatTags.length > 0}
-					label={m.chat_new_chat_tags_add_to_session()}
-					presentation="session-row"
-					open={form.showTagInput}
-					onToggle={() => form.toggleTagInput()}
-				/>
-
-				<ChatTagEditor
+				<NewChatTags
 					tags={form.chatTags}
 					knownTags={allKnownTags}
 					open={form.showTagInput}
+					onToggle={() => form.toggleTagInput()}
 					onAdd={(raw) => form.addTag(raw)}
 					onRemove={(tag) => form.removeTag(tag)}
 					onClose={() => (form.showTagInput = false)}
@@ -687,7 +680,6 @@
 						selection={form.preambles}
 						nonblankPath={form.nonblankPath}
 						validationStatus={form.validationStatus}
-						summaryReadyLabel={m.chat_new_chat_preambles_add_to_session()}
 						summaryEmptyLabel={m.chat_new_chat_preambles_add_to_session()}
 						onClear={() => form.preambles.setExplicit([])}
 					/>

@@ -143,6 +143,55 @@ describe('TransientLayerRegistry', () => {
 		menu.remove();
 	});
 
+	it('closes a newer dialog before its inline editor and keeps their parent dialog open', async () => {
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+		const dialog = document.createElement('div');
+		const editor = document.createElement('div');
+		const picker = document.createElement('div');
+		const editPreambles = document.createElement('button');
+		const addTags = document.createElement('button');
+		dialog.append(editor, editPreambles, addTags);
+		document.body.append(dialog, picker);
+		let editorOpen = true;
+		let pickerOpen = true;
+		const closeDialog = vi.fn(() => true);
+		const closeEditor = vi.fn(() => { editorOpen = false; return true; });
+		const closePicker = vi.fn(() => { pickerOpen = false; return true; });
+		layers.register({
+			id: 'new-chat', kind: 'application-dialog', modality: 'main-inert',
+			isOpen: () => true, element: () => dialog, onEscape: closeDialog,
+			restoreFocus: () => undefined,
+		});
+		layers.register({
+			id: 'tags', kind: 'inline-editor', modality: 'nonmodal',
+			isOpen: () => editorOpen, element: () => editor, onEscape: closeEditor,
+			restoreFocus: () => addTags.focus(),
+		});
+		layers.register({
+			id: 'preambles', kind: 'application-dialog', modality: 'main-inert',
+			isOpen: () => pickerOpen, element: () => picker, onEscape: closePicker,
+			restoreFocus: () => editPreambles.focus(),
+		});
+
+		expect(layers.topVisibleKind()).toBe('application-dialog');
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(closePicker).toHaveBeenCalledOnce();
+		expect(closeEditor).not.toHaveBeenCalled();
+		expect(closeDialog).not.toHaveBeenCalled();
+		await Promise.resolve();
+		expect(document.activeElement).toBe(editPreambles);
+		expect(layers.topVisibleKind()).toBe('inline-editor');
+
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(closeEditor).toHaveBeenCalledOnce();
+		expect(closeDialog).not.toHaveBeenCalled();
+		await Promise.resolve();
+		expect(document.activeElement).toBe(addTags);
+		expect(layers.topVisibleKind()).toBe('application-dialog');
+		dialog.remove();
+		picker.remove();
+	});
+
 	it('leaves composing Escape to the active input method', () => {
 		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');

@@ -10,7 +10,7 @@ const emptyPreview: PreambleSelectionProjection = {
 };
 
 describe('NewChatPreambleSummary', () => {
-	it('uses session wording for empty and selected previews while preserving selection and clear actions', async () => {
+	it('replaces the empty session label with selected pills and restores it when cleared', async () => {
 		const onEdit = vi.fn();
 		const onClear = vi.fn();
 		const view = render(NewChatPreambleSummary, {
@@ -18,7 +18,6 @@ describe('NewChatPreambleSummary', () => {
 			loading: false,
 			configurable: true,
 			retryable: true,
-			readyLabel: 'Add preambles to session',
 			emptyLabel: 'Add preambles to session',
 			onEdit,
 			onClear,
@@ -33,10 +32,13 @@ describe('NewChatPreambleSummary', () => {
 			...emptyPreview,
 			eligiblePreambles: [{ id: 'generic-preamble', title: 'Project conventions' }],
 		} });
-		expect(screen.getByText('Add preambles to session')).toBeTruthy();
+		expect(screen.queryByText('Add preambles to session')).toBeNull();
 		expect(screen.getByText('Project conventions')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Clear preambles' }));
 		expect(onClear).toHaveBeenCalledOnce();
+		await view.rerender({ preview: emptyPreview });
+		expect(screen.getByText('Add preambles to session')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Clear preambles' })).toBeNull();
 	});
 
 	it('retains default, scheduled, loading and unavailable copy instead of replacing status with session wording', async () => {
@@ -51,6 +53,11 @@ describe('NewChatPreambleSummary', () => {
 		expect(screen.getByText('No preambles will be applied')).toBeTruthy();
 		await view.rerender({ emptyLabel: 'Scheduled preview' });
 		expect(screen.getByText('Scheduled preview')).toBeTruthy();
+		await view.rerender({ readyLabel: 'Preamble preview', preview: {
+			...emptyPreview, eligiblePreambles: [{ id: 'scheduled-preamble', title: 'Scheduled conventions' }],
+		} });
+		expect(screen.getByText('Preamble preview')).toBeTruthy();
+		expect(screen.getByText('Scheduled conventions')).toBeTruthy();
 		await view.rerender({ emptyLabel: 'Add preambles to session', loading: true });
 		expect(screen.queryByText('Add preambles to session')).toBeNull();
 		expect(screen.getByRole('status').textContent).toContain('Fetching');

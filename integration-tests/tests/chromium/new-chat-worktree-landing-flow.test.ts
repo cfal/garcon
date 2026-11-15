@@ -162,7 +162,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const pathBounds = (await compactPath.boundingBox())!;
         expect(pathBounds.x).toBeGreaterThanOrEqual(titleBounds.x + titleBounds.width);
         expect(Math.abs(pathBounds.y - titleBounds.y)).toBeLessThanOrEqual(1);
-        const tagBounds = (await tagButton.boundingBox())!;
+        const tagBounds = (await dialog.locator('[data-slot="new-chat-tags-row"]').boundingBox())!;
         const worktreeBounds = (await worktrees.boundingBox())!;
         expect(tagBounds.y).toBeGreaterThanOrEqual(worktreeBounds.y + worktreeBounds.height);
         const composerBounds = (await dialog.locator('[data-slot="new-chat-composer"]').boundingBox())!;

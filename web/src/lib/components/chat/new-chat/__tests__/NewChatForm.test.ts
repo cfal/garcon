@@ -228,7 +228,7 @@ function previewResponse(
 }
 
 describe('NewChatForm', () => {
-	it.each([false, true])('places the labelled tag control below worktrees and retains tags on submit (mobile: %s)', async (isMobile) => {
+	it.each([false, true])('keeps selected tags inside the session field and retains tags on submit (mobile: %s)', async (isMobile) => {
 		stubMatchMedia(isMobile);
 		const onStartChat = vi.fn();
 		const prompt = await renderSubmittableForm(onStartChat);
@@ -243,13 +243,32 @@ describe('NewChatForm', () => {
 		await fireEvent.input(tagInput, { target: { value: 'review' } });
 		await fireEvent.keyDown(tagInput, { key: 'Enter' });
 		const removeTag = screen.getByRole('button', { name: 'Remove tag review' });
-		expect(removeTag).toBeTruthy();
-		await fireEvent.click(addTags);
+		const tagRow = document.querySelector('[data-slot="new-chat-tags-row"]');
+		expect(tagRow?.contains(removeTag)).toBe(true);
+		expect(tagRow?.contains(tagInput)).toBe(true);
+		expect(screen.queryByText('Add tags to session')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Add tags to session' }));
 		expect(screen.queryByPlaceholderText('Type a tag...')).toBeNull();
 		expect(removeTag.isConnected).toBe(true);
 		expect(prompt.value).toBe('first line');
 		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
 		expect(onStartChat).toHaveBeenCalledWith(expect.objectContaining({ tags: ['review'] }), PROSPECTIVE_CHAT_ID);
+	});
+
+	it('restores the empty tag label after removing the last tag without changing the prompt', async () => {
+		const prompt = await renderSubmittableForm(vi.fn());
+		await fireEvent.click(screen.getByRole('button', { name: 'Add tags to session' }));
+		const tagInput = screen.getByPlaceholderText('Type a tag...');
+		await fireEvent.input(tagInput, { target: { value: 'review' } });
+		await fireEvent.keyDown(tagInput, { key: 'Enter' });
+		expect(screen.queryByText('Add tags to session')).toBeNull();
+		await fireEvent.keyDown(tagInput, { key: 'Backspace' });
+		expect(screen.getByText('Add tags to session')).toBeTruthy();
+		expect(screen.getByPlaceholderText('Type a tag...')).toBe(tagInput);
+		await fireEvent.keyDown(tagInput, { key: 'Escape' });
+		expect(screen.queryByPlaceholderText('Type a tag...')).toBeNull();
+		expect(screen.getByText('Add tags to session')).toBeTruthy();
+		expect(prompt.value).toBe('first line');
 	});
 
 	it('explains why a copied direct agent cannot start when direct chats are disabled', async () => {
@@ -798,7 +817,8 @@ describe('NewChatForm', () => {
 		const wideOverflow = document.querySelector<HTMLElement>(
 			'[data-slot="new-chat-preambles-overflow-wide"]',
 		);
-		expect(label?.textContent?.trim()).toBe('Add preambles to session');
+		expect(label).toBeNull();
+		expect(screen.queryByText('Add preambles to session')).toBeNull();
 		expect(pills).toHaveLength(2);
 		expect(narrowOverflow?.textContent?.trim()).toBe('and 4 more');
 		expect(wideOverflow?.textContent?.trim()).toBe('and 3 more');
@@ -852,6 +872,31 @@ describe('NewChatForm', () => {
 		expect(await screen.findByText('Add preambles to session')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Clear preambles' })).toBeNull();
 	});
+
+	it.each(['Escape', 'Cancel', 'Apply'] as const)(
+		'returns focus to the preamble control after closing with %s while tags remain open',
+		async (closeAction) => {
+			stubMatchMedia(false);
+			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+				makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+			);
+			const chatsApi = await import('$lib/api/chats');
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			render(NewChatFormTestHost);
+			await screen.findByText('Add preambles to session');
+			await fireEvent.click(screen.getByRole('button', { name: 'Add tags to session' }));
+			const tagInput = screen.getByPlaceholderText('Type a tag...');
+			const edit = screen.getByRole('button', { name: 'Edit preambles' });
+			edit.focus();
+			await fireEvent.click(edit);
+			const picker = await screen.findByRole('dialog');
+			if (closeAction === 'Escape') await fireEvent.keyDown(picker, { key: 'Escape' });
+			else await fireEvent.click(within(picker).getByRole('button', { name: closeAction }));
+			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+			await waitFor(() => expect(document.activeElement).toBe(edit));
+			expect(screen.getByPlaceholderText('Type a tag...')).toBe(tagInput);
+		},
+	);
 
 	it('retries a failed automatic preamble preview without opening the picker', async () => {
 		stubMatchMedia(false);
