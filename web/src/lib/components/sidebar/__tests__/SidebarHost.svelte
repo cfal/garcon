@@ -34,6 +34,7 @@
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import type {
+		LocalSettingsStore,
 		SidebarInactivityDuration,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
@@ -201,10 +202,21 @@
 		get reduceMotion() {
 			return reduceMotion;
 		},
-		toggle(key: 'sidebarGroupNestedProjectPaths' | 'sidebarShowProjectPath') {
-			if (key === 'sidebarShowProjectPath') sidebarShowProjectPath = !sidebarShowProjectPath;
-			else sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-		},
+		toggle: ((key) => {
+			switch (key) {
+				case 'sidebarNestDelegatedChats':
+					sidebarNestDelegatedChats = !sidebarNestDelegatedChats;
+					break;
+				case 'sidebarShowProjectPath':
+					sidebarShowProjectPath = !sidebarShowProjectPath;
+					break;
+				case 'sidebarGroupNestedProjectPaths':
+					sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
+					break;
+				default:
+					throw new Error(`Unexpected setting toggle: ${key}`);
+			}
+		}) satisfies LocalSettingsStore['toggle'],
 		set(
 			key:
 				| 'sidebarGroupingFields'

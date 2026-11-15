@@ -2,6 +2,7 @@ import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
+import { chat, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 import { getSavedSearches } from '$lib/api/settings';
@@ -74,8 +75,10 @@ describe('sidebar search dialog flow', () => {
 			onNewProjectChat,
 			autoLoadSavedSearches: false,
 			chats: [createChat('chat-1', 'First chat')],
-			collapsedProjectKeys: new Set(['path:/tmp/project']),
 		});
+		const header = container.querySelector<HTMLElement>('[data-sidebar-project-collapsed]');
+		if (!header) throw new Error('Expected the project header');
+		await fireEvent.click(header);
 		await fireEvent.click(await screen.findByRole('button', { name: 'New chat in /tmp/project' }));
 		expect(onNewProjectChat).toHaveBeenCalledExactlyOnceWith({
 			executorId: 'local',
@@ -117,7 +120,7 @@ describe('sidebar search dialog flow', () => {
 		(sidebarGrouping) => {
 			render(SidebarHost, {
 				chats: [createChat('chat-1', 'First chat')],
-				sidebarGrouping,
+				sidebarGroupingFields: migrateSidebarGrouping(sidebarGrouping),
 				autoLoadSavedSearches: false,
 			});
 			expect(screen.queryByRole('button', { name: /^New chat in / })).toBeNull();
@@ -267,7 +270,7 @@ describe('sidebar search dialog flow', () => {
 			const checkbox = screen.getByRole('checkbox', { name: 'Project path' });
 			checkbox.focus();
 			if (action === 'Escape') await fireEvent.keyDown(checkbox, { key: 'Escape' });
-			else await fireEvent.click(screen.getByRole('button', { name: action, exact: true }));
+			else await fireEvent.click(screen.getByRole('button', { name: action }));
 			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 			await waitFor(() => expect(document.activeElement).toBe(trigger));
 		}
@@ -352,6 +355,40 @@ describe('sidebar search dialog flow', () => {
 			expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeTruthy();
 		});
 		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
+	});
+
+	it('toggles delegation nesting without changing project combination', async () => {
+		render(SidebarHost, {
+			chats: [delegated('child', 'parent'), chat('parent')],
+			autoLoadSavedSearches: false,
+		});
+		const order = () =>
+			Array.from(document.querySelectorAll('[data-sidebar-virtual-row]'), (row) =>
+				row.getAttribute('data-sidebar-virtual-row'),
+			);
+		expect(order()).toEqual(['child', 'parent']);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' }),
+		);
+		await waitFor(() => expect(order()).toEqual(['parent', 'child']));
+		expect(
+			screen.getByRole('button', { name: 'Collapse delegated chats under parent' }),
+		).toBeTruthy();
+		await openDisplay();
+		expect(screen.getByRole('checkbox', { name: 'Combine nested paths' })).toHaveProperty(
+			'checked',
+			false,
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' }),
+		);
+		await waitFor(() => expect(order()).toEqual(['child', 'parent']));
+		expect(
+			screen.queryByRole('button', { name: 'Collapse delegated chats under parent' }),
+		).toBeNull();
 	});
 
 	it('combines known project ancestors through the display dialog', async () => {

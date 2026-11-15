@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MobileSidebarLifecycleHost from './MobileSidebarLifecycleHost.svelte';
+import { chat, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 
 import { getSavedSearches, type SavedChatSearch } from '$lib/api/settings';
 import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
@@ -58,6 +59,39 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 }
 
 describe('mobile sidebar lifecycle', () => {
+	it('retains popup nesting across drawer remounts without combining project paths', async () => {
+		render(MobileSidebarLifecycleHost, {
+			chats: [
+				delegated('child', 'parent'),
+				chat('parent'),
+				chat('nested-project', { projectPath: '/workspace/app/packages/api' }),
+			],
+			autoLoadSavedSearches: false,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' }),
+		);
+		const assertNested = () => {
+			expect(
+				screen.getByRole('button', { name: 'Collapse delegated chats under parent' }),
+			).toBeTruthy();
+			expect(
+				document.querySelector('[data-sidebar-project-header="/workspace/app/packages/api"]'),
+			).toBeTruthy();
+		};
+		await waitFor(assertNested);
+		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+		assertNested();
+		await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+		expect(
+			(await screen.findByRole('menuitemcheckbox', { name: 'Nest delegated chats' })).getAttribute(
+				'aria-checked',
+			),
+		).toBe('true');
+	});
+
 	it('retains an in-flight relative move across drawer remounts', async () => {
 		let release!: () => void;
 		const writeOrder = vi.fn(

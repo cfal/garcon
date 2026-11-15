@@ -26,7 +26,10 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ReorderChatRequest } from '$shared/chat-order-contracts';
-	import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
+	import type {
+		LocalSettingsStore,
+		SidebarInactivityDuration,
+	} from '$lib/stores/local-settings.svelte';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
@@ -38,6 +41,7 @@
 		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
 		sidebarGroupingFields?: SidebarGroupingSelection[];
+		sidebarNestDelegatedChats?: boolean;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
@@ -53,6 +57,7 @@
 		initialOpen = true,
 		autoLoadSavedSearches = true,
 		sidebarGroupingFields = [{ field: 'project', enabled: true }],
+		sidebarNestDelegatedChats = false,
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
@@ -130,7 +135,9 @@
 	setLocalSettings({
 		...TYPOGRAPHY_DEFAULTS,
 		sidebarSortMode: 'manual',
-		sidebarNestDelegatedChats: false,
+		get sidebarNestDelegatedChats() {
+			return sidebarNestDelegatedChats;
+		},
 		get sidebarGroupingFields() {
 			return sidebarGroupingFields;
 		},
@@ -149,10 +156,21 @@
 		get sidebarSearchResultSort() {
 			return sidebarSearchResultSort;
 		},
-		toggle(key: 'sidebarGroupNestedProjectPaths' | 'sidebarShowProjectPath') {
-			if (key === 'sidebarShowProjectPath') sidebarShowProjectPath = !sidebarShowProjectPath;
-			else sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-		},
+		toggle: ((key) => {
+			switch (key) {
+				case 'sidebarNestDelegatedChats':
+					sidebarNestDelegatedChats = !sidebarNestDelegatedChats;
+					break;
+				case 'sidebarShowProjectPath':
+					sidebarShowProjectPath = !sidebarShowProjectPath;
+					break;
+				case 'sidebarGroupNestedProjectPaths':
+					sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
+					break;
+				default:
+					throw new Error(`Unexpected setting toggle: ${key}`);
+			}
+		}) satisfies LocalSettingsStore['toggle'],
 		set(
 			key: 'sidebarGroupingFields' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',
 			value: string | SidebarGroupingSelection[],
@@ -218,7 +236,7 @@
 			? new Set(sidebarSearchContext.filteredChats.map((chat) => chat.id))
 			: undefined,
 		groupingFields: sidebarGroupingFields,
-		nestDelegatedChats: false,
+		nestDelegatedChats: sidebarNestDelegatedChats,
 		currentTime: new Date('2025-01-02T00:00:00.000Z'),
 		inactivityDuration: sidebarInactivityDuration,
 		sortMode: 'manual' as const,
