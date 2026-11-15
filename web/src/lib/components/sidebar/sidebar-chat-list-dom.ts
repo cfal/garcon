@@ -3,7 +3,7 @@
 // owning geometry details.
 
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
-import { sidebarSectionKey, type SidebarVirtualRow } from './sidebar-virtual-chat-list';
+import { type SidebarVirtualRow } from '../../sidebar/display/sidebar-virtual-chat-list';
 
 export function pointIsInsideViewport(
 	viewport: HTMLElement,
@@ -56,9 +56,17 @@ export function sidebarScrollTargetForChat(
 ): SidebarScrollTarget | null {
 	const chatIndex = rows.findIndex((row) => row.type === 'chat' && row.chat.id === chatId);
 	if (chatIndex >= 0) return { index: chatIndex, chatId };
+	const branchIndex = rows.findIndex(
+		(row) => row.type === 'chat' && row.branch?.isCollapsed && row.branch.containsChat(chatId),
+	);
+	const branchRow = rows[branchIndex];
+	if (branchRow?.type === 'chat') return { index: branchIndex, chatId: branchRow.chat.id };
 
 	const projectHeaderIndex = rows.findIndex(
-		(row) => row.type === 'project-header' && row.chatIds.includes(chatId),
+		(row) =>
+			row.type === 'project-header' &&
+			row.isCollapsed &&
+			(row.containsChat?.(chatId) ?? row.chatIds.includes(chatId)),
 	);
 	const projectHeader = projectHeaderIndex >= 0 ? rows[projectHeaderIndex] : null;
 	if (projectHeader?.type === 'project-header') {
@@ -66,7 +74,10 @@ export function sidebarScrollTargetForChat(
 	}
 
 	const executorHeaderIndex = rows.findIndex(
-		(row) => row.type === 'executor-header' && row.isCollapsed && row.chatIds.includes(chatId),
+		(row) =>
+			row.type === 'executor-header' &&
+			row.isCollapsed &&
+			(row.containsChat?.(chatId) ?? row.chatIds.includes(chatId)),
 	);
 	const executorHeader = executorHeaderIndex >= 0 ? rows[executorHeaderIndex] : null;
 	if (executorHeader?.type === 'executor-header') {
@@ -74,13 +85,16 @@ export function sidebarScrollTargetForChat(
 	}
 
 	const sectionHeaderIndex = rows.findIndex(
-		(row) => row.type === 'section-header' && row.chatIds.includes(chatId),
+		(row) =>
+			row.type === 'section-header' &&
+			row.isCollapsed &&
+			(row.containsChat?.(chatId) ?? row.chatIds.includes(chatId)),
 	);
 	const sectionHeader = sectionHeaderIndex >= 0 ? rows[sectionHeaderIndex] : null;
 	if (sectionHeader?.type === 'section-header') {
 		return {
 			index: sectionHeaderIndex,
-			sectionKey: sidebarSectionKey(sectionHeader.section, sectionHeader.executorId),
+			sectionKey: sectionHeader.key,
 		};
 	}
 	return null;

@@ -73,7 +73,9 @@
 		SearchResultNavigationPort,
 		SearchResultSelection,
 	} from '$lib/sidebar/search/search-result-navigation-controller.js';
-	import { buildSidebarChatListProjection } from '$lib/components/sidebar/sidebar-row-model';
+	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+	import { reorderChat, sortChatOrder } from '$lib/api/chats';
+	import SidebarDisplayDialog from '../sidebar/SidebarDisplayDialog.svelte';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
@@ -108,22 +110,32 @@
 		notifications,
 	});
 	const chatActionDialogs = new ChatActionDialogsState();
-	const sidebarProjection = $derived.by(() =>
-		buildSidebarChatListProjection({
-			displayedChats: sidebarSearch.filteredChats,
-			executorOrder: executors.executors.map((executor) => executor.id),
-			grouping: localSettings.sidebarGrouping,
-			currentTime: minuteClock.currentTime,
-			inactivityDuration: localSettings.sidebarInactivityDuration,
-			sortMode: localSettings.sidebarSortMode,
-			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-			isChatOptimisticallyArchived: (chatId) => sessions.isChatOptimisticallyArchived(chatId),
-			optimisticArchiveOrder: sessions.orderedChats,
-			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
-		}),
-	);
-	const displayedSidebarChatIds = $derived(sidebarProjection.rowModel.visibleChatIds);
+	let sidebarDisplayOpen = $state(false);
+	const sidebarOrder = new SidebarOrderController({
+		get input() {
+			return {
+				allChats: sessions.orderedChats,
+				matchingChatIds: sidebarSearch.activeQuery.trim()
+					? new Set(sidebarSearch.filteredChats.map((chat) => chat.id))
+					: undefined,
+				executorOrder: executors.executors.map((executor) => executor.id),
+				groupingFields: localSettings.sidebarGroupingFields,
+				nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
+				currentTime: minuteClock.currentTime,
+				inactivityDuration: localSettings.sidebarInactivityDuration,
+				sortMode: localSettings.sidebarSortMode,
+				pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
+				isChatOptimisticallyArchived: (chatId: string) => sessions.isChatOptimisticallyArchived(chatId),
+				groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
+				collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+			};
+		},
+		write: reorderChat,
+		refresh: () => sessions.refreshOrderSnapshot(),
+		sort: (sortKey) => sortChatOrder({ sortKey }),
+		onError: () => notifications.error(m.notifications_reorder_chats_failed()),
+	});
+	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
 	const mobileSidebarLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -667,6 +679,7 @@
 	);
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => {
+		sidebarOrder.destroy();
 		archiveUndo.destroy();
 		chatNavigation.destroy();
 		chatDrafts.destroy();
@@ -719,7 +732,9 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
-		projection={sidebarProjection}
+		projection={sidebarOrder.projection}
+		reorder={sidebarOrder}
+		onShowDisplay={() => (sidebarDisplayOpen = true)}
 		chats={sessions.orderedChats}
 		selectedChatId={sessions.selectedChatId}
 		isLoading={sessions.isLoadingChats}
@@ -751,6 +766,9 @@
 		{newWindowEdges}
 	/>
 {/snippet}
+{#if sidebarDisplayOpen}
+	<SidebarDisplayDialog onClose={() => (sidebarDisplayOpen = false)} />
+{/if}
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import {
 	buildSidebarChatListProjection,
-	sidebarExecutorKey,
-} from '$lib/components/sidebar/sidebar-row-model';
+	sidebarGroupCollapseKey,
+} from '../../../sidebar/display/sidebar-row-model';
 import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from '../app-shell-chat-navigation';
 
 function chat(
@@ -46,10 +46,16 @@ describe('resolveAdjacentChatId', () => {
 				{ ...chat('remote-b'), executorId: 'worker-b' },
 			];
 			const { rowModel } = buildSidebarChatListProjection({
-				displayedChats: chats,
+				allChats: chats,
 				executorOrder: ['local', 'worker-b', 'worker-a'],
-				collapsedProjectKeys: new Set(collapsed ? [sidebarExecutorKey('worker-b')] : []),
-				grouping: 'project',
+				collapsedProjectKeys: new Set(
+					collapsed ? [sidebarGroupCollapseKey(null, [['executor', 'worker-b']])] : [],
+				),
+				groupingFields: [
+					{ field: 'executor', enabled: true },
+					{ field: 'project', enabled: true },
+				],
+				nestDelegatedChats: false,
 				currentTime: new Date('2025-06-01T12:00:00.000Z'),
 				inactivityDuration: '3-days',
 				sortMode: 'manual',
@@ -72,8 +78,9 @@ describe('resolveAdjacentChatId', () => {
 	it('follows displayed sidebar order when pinned chats are hoisted', () => {
 		const chats = [chat('normal-a'), chat('normal-b'), chat('pinned-c', { isPinned: true })];
 		const displayedChatIds = buildSidebarChatListProjection({
-			displayedChats: chats,
-			grouping: 'none',
+			allChats: chats,
+			groupingFields: [],
+			nestDelegatedChats: false,
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'manual',
@@ -99,8 +106,9 @@ describe('resolveAdjacentChatId', () => {
 			chat('archived-d', { isArchived: true }),
 		];
 		const input = {
-			displayedChats: chats,
-			grouping: 'activity',
+			allChats: chats,
+			groupingFields: [{ field: 'activity' as const, enabled: true }],
+			nestDelegatedChats: false,
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			sortMode: 'manual',
 			pinnedInsertPosition: 'top',
@@ -118,11 +126,12 @@ describe('resolveAdjacentChatId', () => {
 
 	it('follows recent activity order within an activity section', () => {
 		const displayedChatIds = buildSidebarChatListProjection({
-			displayedChats: [
+			allChats: [
 				chat('older', { lastActivityAt: '2025-05-30T12:00:00.000Z' }),
 				chat('newer', { lastActivityAt: '2025-05-31T12:00:00.000Z' }),
 			],
-			grouping: 'activity',
+			groupingFields: [{ field: 'activity' as const, enabled: true }],
+			nestDelegatedChats: false,
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'recent',
@@ -142,7 +151,7 @@ describe('resolveAdjacentChatId', () => {
 
 	it('follows oldest-first pinned activity when pins are added at the bottom', () => {
 		const displayedChatIds = buildSidebarChatListProjection({
-			displayedChats: [
+			allChats: [
 				chat('pinned-newer', {
 					isPinned: true,
 					lastActivityAt: '2025-05-31T12:00:00.000Z',
@@ -154,7 +163,8 @@ describe('resolveAdjacentChatId', () => {
 				}),
 				chat('normal-older', { lastActivityAt: '2025-05-30T12:00:00.000Z' }),
 			],
-			grouping: 'none',
+			groupingFields: [],
+			nestDelegatedChats: false,
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'recent',

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import { chat, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
+import { sidebarGroupCollapseKey, sidebarProjectKey } from '$lib/sidebar/display/sidebar-row-model';
 
 describe('SidebarProjectCollapseStore', () => {
 	beforeEach(() => {
@@ -12,6 +14,28 @@ describe('SidebarProjectCollapseStore', () => {
 
 		expect(store.snapshot()).toEqual({ collapsedProjectKeys: [] });
 
+		store.destroy();
+	});
+
+	it('retains hidden branch scopes against the full roster and retires deleted identities and old keys', () => {
+		const store = createSidebarProjectCollapseStore();
+		const roster = [chat('parent'), delegated('child', 'parent')];
+		const group = sidebarGroupCollapseKey('parent', [
+			['project', sidebarProjectKey(roster[1].projectPath)],
+		]);
+		for (const key of [
+			'delegation:parent',
+			group,
+			'delegation:deleted',
+			'path:/old',
+			'group:invalid',
+			sidebarGroupCollapseKey(null, [['status', 'active']]),
+		])
+			store.setCollapsed(key, true);
+		store.pruneToRoster(roster);
+		expect(store.collapsedProjectKeys).toEqual(new Set(['delegation:parent', group]));
+		store.pruneToRoster([roster[1]]);
+		expect(store.collapsedProjectKeys.size).toBe(0);
 		store.destroy();
 	});
 

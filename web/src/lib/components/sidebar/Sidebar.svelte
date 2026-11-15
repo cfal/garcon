@@ -17,31 +17,15 @@
 	} from '$lib/context';
 	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import type {
-		PersistedChatOrderGroup,
-		RelativeChatOrderPlacement,
-	} from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
-	import { createPerListWriteQueue } from './reorder-write-queue';
+	import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$shared/chat-filter-query';
-	import {
-		type SidebarChatListProjection,
-		buildSidebarExecutorCollapseKeys,
-		buildSidebarProjectKeys,
-	} from './sidebar-row-model';
-	import {
-		SIDEBAR_SECTION_COLLAPSE_KEYS,
-		sidebarSectionProjectKey,
-	} from './sidebar-virtual-chat-list';
-	import {
-		sidebarGroupingUsesProjects,
-		type SidebarDisplayOptions,
-	} from './sidebar-display-options';
-	import type { SidebarChatGrouping, SidebarSortMode } from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
+	import type { SidebarChatListProjection } from '../../sidebar/display/sidebar-row-model';
+	import type { SidebarDisplayOptions } from '../../sidebar/display/sidebar-display-options';
+	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -49,15 +33,9 @@
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
-	interface QuickMoveWrite {
-		list: PersistedChatOrderGroup;
-		chatId: string;
-		placement: RelativeChatOrderPlacement;
-		onSuccess?: () => void;
-		onFailure?: () => void;
-	}
-
 	interface SidebarProps {
+		reorder: SidebarOrderController;
+		onShowDisplay: () => void;
 		chats: ChatSessionRecord[];
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
@@ -94,6 +72,8 @@
 	}
 
 	let {
+		reorder,
+		onShowDisplay,
 		chats,
 		projection,
 		selectedChatId,
@@ -156,7 +136,8 @@
 	let currentTime = $derived(minuteClock.currentTime);
 	let isMarkingAllRead = $state(false);
 	let displayOptions = $derived<SidebarDisplayOptions>({
-		grouping: localSettings.sidebarGrouping,
+		groupingFields: localSettings.sidebarGroupingFields,
+		nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
 		inactivityDuration: localSettings.sidebarInactivityDuration,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
@@ -170,23 +151,8 @@
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
 	);
-	let displayedChatIds = $derived(projection.rowModel.visibleChatIds);
+	let displayedChatIds = $derived(projection.rowModel.actionableChatIds);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));
-	let allProjectKeys = $derived.by(() => {
-		const projectKeys = buildSidebarProjectKeys({
-			displayedChats: chats,
-			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-		});
-		projectKeys.push(
-			...projectKeys.map((projectKey) => sidebarSectionProjectKey('inactive', projectKey)),
-		);
-		projectKeys.push(...buildSidebarExecutorCollapseKeys({ displayedChats: chats }));
-		// Cross-project sections collapse through the same store; their keys stay in
-		// the pruning allowlist regardless of mode so section collapse
-		// preferences survive grouping-mode switches, like project keys do.
-		projectKeys.push(...SIDEBAR_SECTION_COLLAPSE_KEYS);
-		return projectKeys;
-	});
 
 	function handleChatClick(chatId: string) {
 		onChatSelect(chatId);
@@ -211,51 +177,22 @@
 		onNewProjectChat(project);
 	}
 
-	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
-		async ({ chatId, placement }) => {
-			await controller.reorderChat(chatId, placement);
-		},
-		(error, task) => {
-			reportActionFailure(
-				`Failed to quick reorder ${task.list} chat order:`,
-				m.notifications_reorder_chats_failed(),
-				error,
-			);
-		},
-	);
-
-	function handleQuickMove(
-		list: PersistedChatOrderGroup,
-		chatId: string,
-		placement: RelativeChatOrderPlacement,
-		onSuccess?: () => void,
-		onFailure?: () => void,
-	) {
-		quickMoveQueue.enqueue({ list, chatId, placement, onSuccess, onFailure });
-	}
-
 	async function handleSortChatOrder(sortKey: ChatOrderSortKey): Promise<void> {
-		try {
-			const response = await controller.sortChatOrder(sortKey);
-			if (!response.changed) return;
+		if (await reorder.sort(sortKey)) {
 			notifications.info(m.notifications_reorder_chats_applied());
 			appShell.requestSidebarRecenterToSelected();
-		} catch (error) {
-			reportActionFailure(
-				'Failed to sort manual chat order:',
-				m.notifications_reorder_chats_failed(),
-				error,
-			);
 		}
 	}
 
 	// Multi-select mode handlers.
 
 	function enterMultiSelect(chatId: string) {
+		if (!displayedChatIdSet.has(chatId)) return;
 		selection.enter(chatId);
 	}
 
 	function handleMultiSelectToggle(chatId: string, shiftKey: boolean) {
+		if (!displayedChatIdSet.has(chatId)) return;
 		if (shiftKey) {
 			selection.selectRange(displayedChatIds, chatId);
 		} else {
@@ -291,7 +228,8 @@
 
 	$effect(() => {
 		if (isLoading) return;
-		untrack(() => projectCollapse.pruneToProjectKeys(allProjectKeys));
+		const roster = chats;
+		untrack(() => projectCollapse.pruneToRoster(roster));
 	});
 
 	let bulkShowPin = $derived(selectedChats.some((c) => !c.isPinned));
@@ -384,19 +322,6 @@
 		}
 	}
 
-	function handleSetChatGrouping(grouping: SidebarChatGrouping): void {
-		localSettings.set('sidebarGrouping', grouping);
-	}
-
-	function handleToggleGroupNestedProjectPaths(): void {
-		if (!sidebarGroupingUsesProjects(localSettings.sidebarGrouping)) return;
-		localSettings.toggle('sidebarGroupNestedProjectPaths');
-	}
-
-	function handleSetChatItemLayout(layout: ChatItemLayout): void {
-		localSettings.set('sidebarChatItemLayout', layout);
-	}
-
 	function handleSetSortMode(sortMode: SidebarSortMode): void {
 		localSettings.set('sidebarSortMode', sortMode);
 	}
@@ -439,10 +364,9 @@
 		<SidebarSearchDock
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
-			chatGrouping={displayOptions.grouping}
-			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
-			chatItemLayout={displayOptions.chatItemLayout}
-			showProjectPath={displayOptions.showProjectPath}
+			nestDelegatedChats={displayOptions.nestDelegatedChats}
+			{onShowDisplay}
+			onToggleNesting={() => localSettings.toggle('sidebarNestDelegatedChats')}
 			sortMode={displayOptions.sortMode}
 			chatListAutohide={localSettings.chatListAutohide}
 			{chatListAutohideAvailable}
@@ -455,10 +379,6 @@
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
-			onSetChatGrouping={handleSetChatGrouping}
-			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
-			onSetChatItemLayout={handleSetChatItemLayout}
-			onToggleShowProjectPath={() => localSettings.toggle('sidebarShowProjectPath')}
 			onSetSortMode={handleSetSortMode}
 			onToggleChatListAutohide={handleToggleChatListAutohide}
 			onSetDockOnRight={handleSetDockOnRight}
@@ -472,10 +392,22 @@
 			{onShowSettings}
 		/>
 	</div>
+	{#if reorder.recoveryRequired}
+		<div
+			class="order-1 flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-sm"
+			role="status"
+		>
+			<span>{m.sidebar_order_refresh_pending()}</span>
+			<Button variant="ghost" size="sm" onclick={() => void reorder.recover()}
+				>{m.sidebar_order_refresh_retry()}</Button
+			>
+		</div>
+	{/if}
 
 	<div class="order-2 flex min-h-0 flex-1">
 		<SidebarContent
 			{projection}
+			{reorder}
 			{selectedChatId}
 			{isLoading}
 			{isMobile}
@@ -508,7 +440,6 @@
 			{onManageTags}
 			onOpenInNewWindow={onOpenChatInNewWindow}
 			{newWindowEdges}
-			onQuickMove={handleQuickMove}
 			onSortChatOrder={handleSortChatOrder}
 		/>
 	</div>

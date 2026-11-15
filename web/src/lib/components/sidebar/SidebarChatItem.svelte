@@ -14,12 +14,14 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import ChatSummary from '../chat/ChatSummary.svelte';
+	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import type { SidebarVirtualChatRow } from '$lib/sidebar/display/sidebar-virtual-chat-list';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from './sidebar-display-options';
+	} from '../../sidebar/display/sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
-	import { sidebarChatInset } from './sidebar-virtual-chat-list';
+	import { sidebarChatInset } from '../../sidebar/display/sidebar-virtual-chat-list';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -27,6 +29,9 @@
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
+		branch?: SidebarVirtualChatRow['branch'];
+		contextOnly?: boolean;
+		containsSelectedChat?: boolean;
 		session: ChatSessionRecord;
 		selectedChatId: string | null;
 		currentTime: Date;
@@ -58,6 +63,9 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
+		moveBoundaryLabels?: { first: string; last: string };
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
@@ -66,6 +74,9 @@
 	}
 
 	let {
+		branch,
+		contextOnly = false,
+		containsSelectedChat = false,
 		session,
 		selectedChatId,
 		currentTime,
@@ -93,6 +104,9 @@
 		onManageTags,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
+		onMoveUp,
+		onMoveDown,
+		moveBoundaryLabels,
 		onMoveToTop,
 		onMoveToBottom,
 		onSortChatOrder,
@@ -231,6 +245,7 @@
 </script>
 
 {#snippet stateBadge()}
+	<SidebarBranchBadge {branch} {contextOnly} />
 	<!-- Virtualized section headers may be unmounted, so rows keep their archived
 	     state for assistive technology. -->
 	{#if !isMultiSelectMode && isArchived && !isPinned && inArchivedSection}
@@ -312,16 +327,13 @@
 	</div>
 {/snippet}
 
-<div
-	class="chat-item-root group relative flex h-full flex-col justify-center"
-	bind:this={itemEl}
->
+<div class="chat-item-root group relative flex h-full flex-col justify-center" bind:this={itemEl}>
 	{#if isMobile}
 		<div
 			class={cn(
 				'flex flex-1 min-h-0 items-stretch bg-sidebar-chat-item-bg',
 				!isMultiSelectMode &&
-					isSelected &&
+					(isSelected || containsSelectedChat) &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 			)}
@@ -367,7 +379,7 @@
 					isMultiSelectMode && 'border-l-0',
 					isSingleLineLayout ? 'py-[2px]' : 'py-[5px]',
 					!isMultiSelectMode &&
-						isSelected &&
+						(isSelected || containsSelectedChat) &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
@@ -418,6 +430,9 @@
 						{canFork}
 						{canForkNow}
 						{onEnterMultiSelect}
+						{onMoveUp}
+						{onMoveDown}
+						{moveBoundaryLabels}
 						{onMoveToTop}
 						{onMoveToBottom}
 						{onSortChatOrder}

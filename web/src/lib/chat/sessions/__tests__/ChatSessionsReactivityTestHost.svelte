@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
-	import { buildSidebarChatListProjection } from '$lib/components/sidebar/sidebar-row-model.js';
+	import { buildSidebarChatListProjection } from '../../../sidebar/display/sidebar-row-model.js';
 	import { ChatSessionsStore } from '../chat-sessions.svelte.js';
 
 	function chat(id: string, title: string): ChatSessionRecord {
@@ -39,8 +39,9 @@
 
 	let sidebarIds = $derived(
 		buildSidebarChatListProjection({
-			displayedChats: sessions.orderedChats,
-			grouping: 'none',
+			allChats: sessions.orderedChats,
+			groupingFields: [],
+			nestDelegatedChats: false,
 			currentTime: new Date('2026-09-06T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'manual',

@@ -1,20 +1,15 @@
 <script lang="ts">
 	import SidebarControlsRow from '../SidebarControlsRow.svelte';
-	import type {
-		SidebarChatGrouping,
-		SidebarSortMode,
-	} from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
+	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarSearchDockProps {
 		isLoading: boolean;
 		visibleUnreadCount: number;
-		chatGrouping?: SidebarChatGrouping;
-		groupNestedProjectPaths?: boolean;
-		chatItemLayout?: ChatItemLayout;
-		showProjectPath?: boolean;
+		nestDelegatedChats?: boolean;
+		onToggleNesting?: () => void;
+		onShowDisplay?: () => void;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -25,10 +20,6 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
-		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
-		onToggleGroupNestedProjectPaths?: () => void;
-		onSetChatItemLayout?: (layout: ChatItemLayout) => void;
-		onToggleShowProjectPath?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -45,10 +36,9 @@
 	let {
 		isLoading,
 		visibleUnreadCount,
-		chatGrouping = 'none',
-		groupNestedProjectPaths = false,
-		chatItemLayout = 'single-line',
-		showProjectPath = false,
+		nestDelegatedChats = false,
+		onToggleNesting,
+		onShowDisplay,
 		sortMode = 'recent',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
@@ -59,10 +49,6 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
-		onSetChatGrouping,
-		onToggleGroupNestedProjectPaths,
-		onSetChatItemLayout,
-		onToggleShowProjectPath,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -86,10 +72,9 @@
 	<SidebarControlsRow
 		{isLoading}
 		{visibleUnreadCount}
-		{chatGrouping}
-		{groupNestedProjectPaths}
-		{chatItemLayout}
-		{showProjectPath}
+		{nestDelegatedChats}
+		{onToggleNesting}
+		{onShowDisplay}
 		{sortMode}
 		{chatListAutohide}
 		{chatListAutohideAvailable}
@@ -99,10 +84,6 @@
 		{onOpenSearchDialog}
 		{onCreateChat}
 		{onMarkAllRead}
-		{onSetChatGrouping}
-		{onToggleGroupNestedProjectPaths}
-		{onSetChatItemLayout}
-		{onToggleShowProjectPath}
 		{onSetSortMode}
 		{onToggleChatListAutohide}
 		{onSetDockOnRight}

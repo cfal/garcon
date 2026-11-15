@@ -3,12 +3,11 @@ import {
 	mountedElementForScrollTarget,
 	sidebarScrollTargetForChat,
 } from '../sidebar-chat-list-dom';
-import { sidebarProjectKey } from '../sidebar-row-model';
 import {
-	sidebarSectionKey,
-	sidebarSectionProjectKey,
-	type SidebarVirtualRow,
-} from '../sidebar-virtual-chat-list';
+	sidebarProjectKey,
+	sidebarGroupCollapseKey,
+} from '../../../sidebar/display/sidebar-row-model';
+import { type SidebarVirtualRow } from '../../../sidebar/display/sidebar-virtual-chat-list';
 
 describe('sidebar chat scroll targets', () => {
 	it.each([false, true])(
@@ -26,7 +25,10 @@ describe('sidebar chat scroll targets', () => {
 					isCollapsed,
 				},
 			];
-			const sectionKey = sidebarSectionKey('inactive', 'worker');
+			const sectionKey = sidebarGroupCollapseKey(null, [
+				['executor', 'worker'],
+				['activity', 'inactive'],
+			]);
 			if (!isCollapsed)
 				rows.push({
 					type: 'section-header',
@@ -40,7 +42,9 @@ describe('sidebar chat scroll targets', () => {
 				});
 			const target = sidebarScrollTargetForChat(rows, 'hidden');
 			expect(target).toEqual(
-				isCollapsed ? { index: 0, executorCollapseKey: 'executor:worker' } : { index: 1, sectionKey },
+				isCollapsed
+					? { index: 0, executorCollapseKey: 'executor:worker' }
+					: { index: 1, sectionKey },
 			);
 			const viewport = document.createElement('div');
 			const executor = document.createElement('button');
@@ -56,7 +60,10 @@ describe('sidebar chat scroll targets', () => {
 
 	it('anchors a collapsed inactive project instead of its duplicate active or section header', () => {
 		const projectKey = sidebarProjectKey('/tmp/shared-project');
-		const inactiveProjectCollapseKey = sidebarSectionProjectKey('inactive', projectKey);
+		const inactiveProjectCollapseKey = sidebarGroupCollapseKey(null, [
+			['activity', 'inactive'],
+			['project', projectKey],
+		]);
 		const rows: SidebarVirtualRow[] = [
 			{
 				type: 'project-header',
@@ -71,7 +78,7 @@ describe('sidebar chat scroll targets', () => {
 			},
 			{
 				type: 'section-header',
-				key: sidebarSectionKey('inactive'),
+				key: sidebarGroupCollapseKey(null, [['activity', 'inactive']]),
 				depth: 0,
 				section: 'inactive',
 				count: 1,

@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { type SidebarGroupingSelection } from '$lib/sidebar/display/sidebar-preferences';
+
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
-	import { buildSidebarChatListProjection } from '../sidebar-row-model';
+	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+	import { buildSidebarChatListProjection } from '../../../sidebar/display/sidebar-row-model';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
@@ -23,10 +26,8 @@
 		type SidebarSearchStore,
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import type {
-		SidebarChatGrouping,
-		SidebarInactivityDuration,
-	} from '$lib/stores/local-settings.svelte';
+	import type { ReorderChatRequest } from '$shared/chat-order-contracts';
+	import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
@@ -37,12 +38,13 @@
 		sidebarSearch?: SidebarSearchStore;
 		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
-		sidebarGrouping?: SidebarChatGrouping;
+		sidebarGroupingFields?: SidebarGroupingSelection[];
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
 		sidebarShowProjectPath?: boolean;
 		collapsedProjectKeys?: Set<string>;
+		writeOrder?: (request: ReorderChatRequest) => Promise<unknown>;
 	}
 
 	let {
@@ -51,12 +53,13 @@
 		sidebarSearch,
 		initialOpen = true,
 		autoLoadSavedSearches = true,
-		sidebarGrouping = 'project',
+		sidebarGroupingFields = [{ field: 'project', enabled: true }],
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
 		sidebarShowProjectPath = false,
 		collapsedProjectKeys = new Set<string>(),
+		writeOrder = async () => {},
 	}: MobileSidebarLifecycleHostProps = $props();
 
 	const notifications = {
@@ -127,8 +130,10 @@
 	} as never);
 	setLocalSettings({
 		...TYPOGRAPHY_DEFAULTS,
-		get sidebarGrouping() {
-			return sidebarGrouping;
+		sidebarSortMode: 'manual',
+		sidebarNestDelegatedChats: false,
+		get sidebarGroupingFields() {
+			return sidebarGroupingFields;
 		},
 		get sidebarInactivityDuration() {
 			return sidebarInactivityDuration;
@@ -150,11 +155,11 @@
 			else sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
 		set(
-			key: 'sidebarGrouping' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',
-			value: string,
+			key: 'sidebarGroupingFields' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',
+			value: string | SidebarGroupingSelection[],
 		) {
-			if (key === 'sidebarGrouping') {
-				sidebarGrouping = value as SidebarChatGrouping;
+			if (key === 'sidebarGroupingFields') {
+				sidebarGroupingFields = value as SidebarGroupingSelection[];
 				return;
 			}
 			if (key === 'sidebarChatItemLayout') {
@@ -175,17 +180,14 @@
 			else next.add(projectKey);
 			collapsedProjectKeys = next;
 		},
-		pruneToProjectKeys(projectKeys: Iterable<string>) {
-			const allowed = new Set(projectKeys);
-			collapsedProjectKeys = new Set(
-				Array.from(collapsedProjectKeys).filter((projectKey) => allowed.has(projectKey)),
-			);
-		},
+		pruneToRoster() {},
 	} as never);
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		supportsFork() {
 			return true;
 		},
@@ -211,18 +213,31 @@
 			void sidebarSearchContext.loadSavedSearches();
 		});
 	});
+	const projectionInput = $derived({
+		allChats: chats,
+		matchingChatIds: sidebarSearchContext.isFiltered
+			? new Set(sidebarSearchContext.filteredChats.map((chat) => chat.id))
+			: undefined,
+		groupingFields: sidebarGroupingFields,
+		nestDelegatedChats: false,
+		currentTime: new Date('2025-01-02T00:00:00.000Z'),
+		inactivityDuration: sidebarInactivityDuration,
+		sortMode: 'manual' as const,
+		pinnedInsertPosition: 'top' as const,
+		groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
+		collapsedProjectKeys,
+	});
+	const reorder = new SidebarOrderController({
+		get input() {
+			return projectionInput;
+		},
+		write: (request) => writeOrder(request),
+		refresh: async () => true,
+		sort: async () => ({ changed: false }),
+		onError: () => {},
+	});
 	const projection = $derived(
-		buildSidebarChatListProjection({
-			displayedChats: sidebarSearchContext.filteredChats,
-			optimisticArchiveOrder: chats,
-			grouping: sidebarGrouping,
-			currentTime: new Date('2025-01-02T00:00:00.000Z'),
-			inactivityDuration: sidebarInactivityDuration,
-			sortMode: 'manual',
-			pinnedInsertPosition: 'top',
-			groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
-			collapsedProjectKeys,
-		}),
+		buildSidebarChatListProjection({ ...projectionInput, orders: reorder.orders }),
 	);
 </script>
 
@@ -233,6 +248,8 @@
 
 {#if sidebarOpen}
 	<Sidebar
+		{reorder}
+		onShowDisplay={() => {}}
 		{projection}
 		{chats}
 		{selectedChatId}

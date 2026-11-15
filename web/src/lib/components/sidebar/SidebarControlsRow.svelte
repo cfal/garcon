@@ -21,28 +21,20 @@
 	import ChartSpline from '@lucide/svelte/icons/chart-spline';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import FolderTree from '@lucide/svelte/icons/folder-tree';
-	import History from '@lucide/svelte/icons/history';
-	import Activity from '@lucide/svelte/icons/activity';
-	import CircleDot from '@lucide/svelte/icons/circle-dot';
-	import List from '@lucide/svelte/icons/list';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
-	import type { SidebarChatGrouping, SidebarSortMode } from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
+	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import { sidebarGroupingUsesProjects } from './sidebar-display-options';
 	import NativeServerChooserItem from './NativeServerChooserItem.svelte';
 	import NativeTitlebarItem from './NativeTitlebarItem.svelte';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
 		visibleUnreadCount?: number;
-		chatGrouping?: SidebarChatGrouping;
-		groupNestedProjectPaths?: boolean;
-		chatItemLayout?: ChatItemLayout;
-		showProjectPath?: boolean;
+		nestDelegatedChats?: boolean;
+		onToggleNesting?: () => void;
+		onShowDisplay?: () => void;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -52,10 +44,6 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
-		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
-		onToggleGroupNestedProjectPaths?: () => void;
-		onSetChatItemLayout?: (layout: ChatItemLayout) => void;
-		onToggleShowProjectPath?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -70,10 +58,9 @@
 	let {
 		isLoading,
 		visibleUnreadCount = 0,
-		chatGrouping = 'none',
-		groupNestedProjectPaths = false,
-		chatItemLayout = 'single-line',
-		showProjectPath = false,
+		nestDelegatedChats = false,
+		onToggleNesting,
+		onShowDisplay,
 		sortMode = 'recent',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
@@ -83,10 +70,6 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
-		onSetChatGrouping,
-		onToggleGroupNestedProjectPaths,
-		onSetChatItemLayout,
-		onToggleShowProjectPath,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -102,15 +85,9 @@
 	let showMarkAllRead = $derived(visibleUnreadCount > 0);
 	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
 	let showDockDivider = $derived(!hasAdjacentSearchContext);
-	let groupsByProject = $derived(sidebarGroupingUsesProjects(chatGrouping));
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
-
-	function handleToggleGroupNestedProjectPaths() {
-		if (!groupsByProject) return;
-		onToggleGroupNestedProjectPaths?.();
-	}
 
 	$effect(() => {
 		if (!primaryButtonRef || typeof ResizeObserver === 'undefined') return;
@@ -195,70 +172,16 @@
 					</DropdownMenuRadioGroup>
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
-				<DropdownMenuGroup>
-					<DropdownMenuGroupHeading>
-						{m.settings_sidebar_chat_grouping_heading()}
-					</DropdownMenuGroupHeading>
-					<DropdownMenuRadioGroup
-						value={chatGrouping}
-						onValueChange={(grouping) => onSetChatGrouping?.(grouping as SidebarChatGrouping)}
-					>
-						<DropdownMenuRadioItem value="none">
-							<List class="h-3.5 w-3.5" />
-							{m.settings_sidebar_grouping_none()}
-						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="project">
-							<FolderTree class="h-3.5 w-3.5" />
-							{m.settings_sidebar_group_by_project()}
-						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="project-and-activity">
-							<History class="h-3.5 w-3.5" />
-							{m.settings_sidebar_group_by_project_activity()}
-						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="activity">
-							<Activity class="h-3.5 w-3.5" />
-							{m.settings_sidebar_group_by_activity()}
-						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="status">
-							<CircleDot class="h-3.5 w-3.5" />
-							{m.settings_sidebar_group_by_status()}
-						</DropdownMenuRadioItem>
-					</DropdownMenuRadioGroup>
-				</DropdownMenuGroup>
 				<DropdownMenuCheckboxItem
-					checked={groupNestedProjectPaths}
-					disabled={!groupsByProject}
-					onCheckedChange={handleToggleGroupNestedProjectPaths}
+					checked={nestDelegatedChats}
+					onCheckedChange={() => onToggleNesting?.()}
 				>
-					<FolderTree class="h-3.5 w-3.5" />
-					{m.settings_sidebar_group_nested_project_paths()}
+					{m.sidebar_nest_delegated_chats()}
 				</DropdownMenuCheckboxItem>
-				<DropdownMenuSeparator />
-				<DropdownMenuGroup>
-					<DropdownMenuGroupHeading>
-						{m.settings_sidebar_chat_item_layout_heading()}
-					</DropdownMenuGroupHeading>
-					<DropdownMenuRadioGroup
-						value={chatItemLayout}
-						onValueChange={(layout) => onSetChatItemLayout?.(layout as ChatItemLayout)}
-					>
-						<DropdownMenuRadioItem value="single-line">
-							{m.settings_sidebar_chat_item_layout_single_line()}
-						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="compact">
-							{m.settings_sidebar_compact_chat_items()}
-						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="detailed">
-							{m.settings_sidebar_chat_item_layout_detailed()}
-						</DropdownMenuRadioItem>
-					</DropdownMenuRadioGroup>
-					<DropdownMenuCheckboxItem
-						checked={showProjectPath}
-						onCheckedChange={() => onToggleShowProjectPath?.()}
-					>
-						{m.settings_sidebar_show_project_path()}
-					</DropdownMenuCheckboxItem>
-				</DropdownMenuGroup>
+				<DropdownMenuItem onclick={onShowDisplay}>
+					<Settings class="h-3.5 w-3.5" />
+					{m.sidebar_display_title()}
+				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuCheckboxItem
 					checked={chatListAutohide}

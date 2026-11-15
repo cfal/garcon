@@ -2,17 +2,17 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onMount, untrack } from 'svelte';
 	import SidebarVirtualSortableChatList from '../SidebarVirtualSortableChatList.svelte';
-	import {
-		SidebarChatReorderState,
-		type SidebarChatOrderMap,
-	} from '../sidebar-chat-reorder-state.svelte';
+	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import { setAppShell, setModelCatalog, setWorkspaceWindowDnd } from '$lib/context';
-	import type { SidebarVirtualChatRow, SidebarVirtualRow } from '../sidebar-virtual-chat-list';
+	import type {
+		SidebarVirtualChatRow,
+		SidebarVirtualRow,
+	} from '../../../sidebar/display/sidebar-virtual-chat-list';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from '../sidebar-display-options';
-	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
+	} from '../../../sidebar/display/sidebar-display-options';
+	import type { SidebarChatReorderRequest } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import {
 		resolveUnmeasuredWorkspaceSplit,
@@ -33,7 +33,7 @@
 		rowHeight?: number;
 		viewportAttached?: boolean;
 		onRegisterRecenter?: (callback: () => void) => void;
-		onRegisterReorder?: (reorder: SidebarChatReorderState) => void;
+		onRegisterReorder?: (reorder: SidebarOrderController) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
 		onWorkspaceDragEnd?: (chatId: string) => void;
 		onRegisterWindowDnd?: (windowDnd: WorkspaceWindowDndController) => void;
@@ -64,7 +64,8 @@
 	let viewportRef = $state<HTMLElement | null>(null);
 	let displayOptions = $derived({
 		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
-		grouping: 'none' as const,
+		groupingFields: [],
+		nestDelegatedChats: false,
 		sortMode: 'manual' as const,
 		...displayOptionsInput,
 	});
@@ -72,25 +73,18 @@
 		return row.type === 'chat';
 	}
 
-	let visibleOrders = $derived.by<SidebarChatOrderMap>(() => ({
-		pinned: rows
-			.filter(isChatRow)
-			.filter((row) => row.list === 'pinned')
-			.map((row) => row.chat.id),
-		normal: rows
-			.filter(isChatRow)
-			.filter((row) => row.list === 'normal')
-			.map((row) => row.chat.id),
-		archived: rows
-			.filter(isChatRow)
-			.filter((row) => row.list === 'archived')
-			.map((row) => row.chat.id),
-	}));
-
-	const reorder = new SidebarChatReorderState({
-		get visibleOrders() {
-			return visibleOrders;
+	const reorder = new SidebarOrderController({
+		get input() {
+			return {
+				allChats: rows.filter(isChatRow).map((row) => row.chat),
+				...displayOptions,
+				currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			};
 		},
+		write: async () => {},
+		refresh: async () => true,
+		sort: async () => ({ changed: false }),
+		onError: () => {},
 	});
 	onMount(() => onRegisterReorder?.(reorder));
 

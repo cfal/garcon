@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MobileSidebarLifecycleHost from './MobileSidebarLifecycleHost.svelte';
 
@@ -58,6 +58,39 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 }
 
 describe('mobile sidebar lifecycle', () => {
+	it('retains an in-flight relative move across drawer remounts', async () => {
+		let release!: () => void;
+		const writeOrder = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve;
+				}),
+		);
+		render(MobileSidebarLifecycleHost, {
+			chats: [
+				createChat({ id: 'first', title: 'First' }),
+				createChat({ id: 'second', title: 'Second' }),
+			],
+			autoLoadSavedSearches: false,
+			writeOrder,
+		});
+		const order = () =>
+			Array.from(document.querySelectorAll('[data-sidebar-virtual-row]'), (row) =>
+				row.getAttribute('data-sidebar-virtual-row'),
+			);
+		const first = within(
+			document.querySelector('[data-sidebar-virtual-row="first"]') as HTMLElement,
+		);
+		await fireEvent.click(first.getByRole('button', { name: 'Chat actions' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Last in this group' }));
+		await waitFor(() => expect(writeOrder).toHaveBeenCalledOnce());
+		expect(order()).toEqual(['second', 'first']);
+		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+		expect(order()).toEqual(['second', 'first']);
+		expect(writeOrder).toHaveBeenCalledOnce();
+		release();
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(getSavedSearches).mockResolvedValue({

@@ -559,26 +559,7 @@ describe('Settings', () => {
 				expect((mermaidSize as HTMLSelectElement).value).toBe(value);
 			}
 			await fireEvent.click(screen.getByRole('tab', { name: 'Behavior' }));
-			const inactivityDuration = screen.getByRole('combobox', {
-				name: 'Inactivity duration',
-			});
-			expect((inactivityDuration as HTMLSelectElement).value).toBe('3-days');
-			expect(screen.getByText('Used when grouping chat items by activity.')).toBeTruthy();
-			for (const label of [
-				'2 days',
-				'3 days',
-				'4 days',
-				'5 days',
-				'1 week',
-				'2 weeks',
-				'1 month',
-				'2 months',
-				'3 months',
-			]) {
-				expect(screen.getByRole('option', { name: label })).toBeTruthy();
-			}
-			await fireEvent.change(inactivityDuration, { target: { value: '2-weeks' } });
-			expect(onLocalSet).toHaveBeenCalledWith('sidebarInactivityDuration', '2-weeks');
+			expect(screen.queryByRole('combobox', { name: 'Inactivity duration' })).toBeNull();
 			const alwaysExpandCliMessages = screen.getByRole('switch', {
 				name: 'Always expand CLI messages',
 			});
