@@ -58,6 +58,29 @@ function fixture() {
 }
 
 describe('SidebarOrderController', () => {
+	it('retains the projection for identical previews and clears only the placement', () => {
+		const f = fixture();
+		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
+		const preview = { list: 'normal', sourceChatId: 'c', targetChatId: 'b', closestEdge: 'top' } as const;
+		f.controller.preview(preview);
+		const projected = f.controller.projection;
+		f.controller.preview(preview);
+		expect(f.controller.projection).toBe(projected);
+		f.controller.clearPreview();
+		expect(f.controller.orders.normal).toEqual(f.input.orders.normal);
+		expect(f.controller.activeChatId).toBe('c');
+		f.controller.preview(preview);
+		expect(f.controller.finish('normal')?.placement.referenceChatId).toBe('b');
+	});
+	it('does not cancel a drag when optional presentation values are normalized', () => {
+		const f = fixture();
+		f.input = { ...f.input, groupingFields: [], groupNestedProjectPaths: undefined };
+		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
+		f.controller.preview({ list: 'normal', sourceChatId: 'c', targetChatId: 'b', closestEdge: 'top' });
+		f.input = { ...f.input, groupNestedProjectPaths: false };
+		expect(f.controller.dragPresentationChanged).toBe(false);
+		expect(f.controller.finish('normal')).not.toBeNull();
+	});
 	it('keeps queued project moves after an acknowledged snapshot changes path spelling order', async () => {
 		const f = fixture();
 		f.input = projectionInput([

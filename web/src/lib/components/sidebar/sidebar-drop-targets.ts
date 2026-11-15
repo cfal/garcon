@@ -69,6 +69,9 @@ export function sidebarPointDropContext(
 		closestEdge = 'bottom';
 	} else {
 		if (chatId === source.chatId && list === source.list) return { kind: 'source-row' };
+		const targetRow = rows.find((candidate) => candidate.type === 'chat' && candidate.chat.id === chatId);
+		if (targetRow?.type !== 'chat' || !targetRow.reorderScopeIds.includes(chatId))
+			return { kind: 'blocked-row' };
 		closestEdge = closestEdgeForRow(row, clientY);
 	}
 	const instruction = resolveSidebarDropInstructionForTarget({

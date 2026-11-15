@@ -26,8 +26,8 @@ describe('branch drop fallback', () => {
 		targetList: 'normal',
 		closestEdge: 'bottom',
 	};
-	function pointAt(chatId: string, drag = source) {
-		const target = rows.find((row) => row.type === 'chat' && row.chat.id === chatId);
+	function pointAt(chatId: string, drag = source, projectedRows = rows) {
+		const target = projectedRows.find((row) => row.type === 'chat' && row.chat.id === chatId);
 		if (target?.type !== 'chat') throw new Error('Missing target');
 		const viewport = document.createElement('div');
 		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 640));
@@ -36,8 +36,18 @@ describe('branch drop fallback', () => {
 		element.dataset.sidebarVirtualListRow = target.list;
 		element.dataset.sidebarVirtualReorderScope = target.reorderScopeKey;
 		vi.spyOn(document, 'elementFromPoint').mockReturnValue(element);
-		return sidebarPointDropContext(viewport, drag.instanceId, drag, 20, 20, rows);
+		return sidebarPointDropContext(viewport, drag.instanceId, drag, 20, 20, projectedRows);
 	}
+	it.each(['context', 'cycle'])('blocks ineligible same-scope %s rows', (kind) => {
+		const chats = [
+			kind === 'cycle' ? delegated('a', 'a') : chat('a'),
+			delegated('a1', 'a'), chat('b'), chat('c'),
+		];
+		const projected = buildSidebarRowModel(projectionInput(chats, {
+			matchingChatIds: kind === 'context' ? new Set(['a1', 'b', 'c']) : undefined,
+		})).rows;
+		expect(pointAt('a', source, projected)).toEqual({ kind: 'blocked-row' });
+	});
 	it('resolves a descendant under the pointer to the end of its peer branch', () => {
 		expect(pointAt('a1')).toEqual({ kind: 'compatible-row', instruction: previous });
 	});

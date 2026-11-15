@@ -12,14 +12,15 @@ import {
 	type SidebarRowModelInput,
 } from './sidebar-row-model';
 import type { SidebarChatOrderMap } from './sidebar-virtual-chat-list';
+import { normalizeSidebarGroupingFields } from './sidebar-preferences';
 
 type ProjectionInput = Omit<SidebarRowModelInput, 'orders'>;
 
 function presentationKey(input: ProjectionInput): string {
 	return JSON.stringify([
-		input.groupingFields,
+		normalizeSidebarGroupingFields(input.groupingFields),
 		input.nestDelegatedChats,
-		input.groupNestedProjectPaths,
+		Boolean(input.groupNestedProjectPaths),
 		input.inactivityDuration,
 		input.sortMode,
 	]);
@@ -166,11 +167,20 @@ export class SidebarOrderController {
 			drag.chatId === input.targetChatId
 		)
 			return;
+		const position = input.closestEdge === 'top' ? 'before' : 'after';
+		if (
+			drag.placement?.referenceChatId === input.targetChatId &&
+			drag.placement.position === position
+		) return;
 		drag.placement = {
 			kind: 'relative',
 			referenceChatId: input.targetChatId,
-			position: input.closestEdge === 'top' ? 'before' : 'after',
+			position,
 		};
+	}
+
+	clearPreview(): void {
+		if (this.#drag) this.#drag.placement = null;
 	}
 
 	finish(list: PersistedChatOrderGroup): SidebarChatReorderRequest | null {

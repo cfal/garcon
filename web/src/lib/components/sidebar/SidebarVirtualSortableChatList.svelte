@@ -195,6 +195,7 @@
 			!source.reorderScopeIds.includes(source.chat.id)
 		) {
 			untrack(() => {
+				workspaceChatDrag.endIfOwned(draggingChatId!);
 				reorder.cancel();
 				cancelTouchDrag();
 				clearDragPresentation();
@@ -381,8 +382,7 @@
 			target.reorderScopeKey !== instruction.sourceScopeKey ||
 			!source.reorderScopeIds.includes(target.chat.id)
 		) {
-			reorder.cancel();
-			activeDrop = null;
+			clearDropPreview();
 			return;
 		}
 		activeDrop = { chatId: instruction.targetChatId, edge: instruction.closestEdge };
@@ -392,6 +392,12 @@
 			targetChatId: instruction.targetChatId,
 			closestEdge: instruction.closestEdge,
 		});
+	}
+
+	function clearDropPreview(): void {
+		reorder.clearPreview();
+		activeDrop = null;
+		lastValidDrop = null;
 	}
 
 	function persistReorderRequest(request: SidebarChatReorderRequest | null): void {
@@ -406,10 +412,9 @@
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
-		if (!reorderEnabled) return;
+		if (!reorderEnabled || reorder.activeChatId !== sourceData.chatId) return;
 		if (!inputIsInsideViewport(input)) {
-			activeDrop = null;
-			lastValidDrop = null;
+			clearDropPreview();
 			return;
 		}
 		const instruction = resolveSidebarDropInstruction(sourceData, dropTargets);
@@ -424,8 +429,7 @@
 				return;
 			}
 
-			activeDrop = null;
-			lastValidDrop = null;
+			clearDropPreview();
 			return;
 		}
 
@@ -440,7 +444,7 @@
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
-		if (reorderEnabled) {
+		if (reorderEnabled && reorder.activeChatId === sourceData.chatId) {
 			const isInsideViewport = inputIsInsideViewport(input);
 			const currentInstruction = isInsideViewport
 				? resolveSidebarDropInstruction(sourceData, dropTargets)
@@ -495,16 +499,6 @@
 		return null;
 	}
 
-	function resolveTouchInstruction(
-		clientX: number,
-		clientY: number,
-	): SidebarDropInstruction | null {
-		const current = touchDrag;
-		if (!current) return null;
-		const context = pointDropContext(touchSourceDragData(current), clientX, clientY);
-		return context.kind === 'compatible-row' ? context.instruction : null;
-	}
-
 	function touchSourceDragData(current: {
 		sourceChatId: string;
 		sourceList: PersistedChatOrderGroup;
@@ -520,27 +514,19 @@
 	}
 
 	function previewTouchDrop(clientX: number, clientY: number): void {
-		const instruction = resolveTouchInstruction(clientX, clientY);
+		const current = touchDrag;
+		if (!current) return;
+		const sourceData = touchSourceDragData(current);
+		const context = pointDropContext(sourceData, clientX, clientY);
+		const instruction = fallbackInstructionForPointContext(sourceData, context);
 		if (!instruction) {
-			const current = touchDrag;
-			if (current) {
-				const sourceData = touchSourceDragData(current);
-				const context = pointDropContext(sourceData, clientX, clientY);
-				const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-				if (fallbackInstruction) {
-					if (context.kind === 'compatible-row') {
-						lastValidDrop = fallbackInstruction;
-						applySidebarDropInstruction(fallbackInstruction);
-					}
-					return;
-				}
-			}
-			activeDrop = null;
-			lastValidDrop = null;
+			clearDropPreview();
 			return;
 		}
-		lastValidDrop = instruction;
-		applySidebarDropInstruction(instruction);
+		if (context.kind === 'compatible-row') {
+			lastValidDrop = instruction;
+			applySidebarDropInstruction(instruction);
+		}
 	}
 
 	function stopTouchAutoScroll(): void {
@@ -733,9 +719,7 @@
 		suppressTouchClickUntil = performance.now() + 500;
 		const sourceData = touchSourceDragData(current);
 		const context = pointDropContext(sourceData, clientX, clientY);
-		const instruction =
-			resolveTouchInstruction(clientX, clientY) ??
-			fallbackInstructionForPointContext(sourceData, context);
+		const instruction = fallbackInstructionForPointContext(sourceData, context);
 
 		if (instruction) {
 			applySidebarDropInstruction(instruction);
@@ -948,7 +932,7 @@
 						isMultiSelectMode={isMultiSelectMode && !row.contextOnly}
 						isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
 						{displayOptions}
-						dragEnabled={dragEnabled && !row.contextOnly}
+						{dragEnabled}
 						reorderEnabled={reorderEnabled && row.reorderScopeIds.length > 1}
 						onToggleBranch={onToggleProjectCollapsed}
 						isDragging={draggingChatId === row.chat.id}
