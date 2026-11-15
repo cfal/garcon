@@ -2544,6 +2544,69 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.queryByText('Chat 119')).toBeNull();
 	});
 
+	it.each(['plain', 'context', 'cycle'] as const)('moves to the nearest reachable menu position across %s siblings', async (kind) => {
+		for (const direction of ['up', 'down'] as const) {
+			const chats = kind === 'plain' ? [chat('a'), chat('b')] : [
+				chat('a'), kind === 'context' ? chat('x') : delegated('x', 'y'),
+				delegated('y', 'x'), chat('b'),
+			];
+			const onQuickMove = vi.fn();
+			const view = render(SidebarChatListHost, {
+				chats,
+				filteredChats: kind === 'context' ? chats.filter((chat) => chat.id !== 'x') : chats,
+				searchFilter: kind === 'context' ? 'matching' : '',
+				displayOptions: { nestDelegatedChats: true },
+				onQuickMove,
+			});
+			const source = direction === 'up' ? 'b' : 'a';
+			const target = direction === 'up' ? 'a' : 'b';
+			const row = document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${source}"]`)!;
+			await fireEvent.click(row.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')!);
+			await fireEvent.click(await screen.findByRole('menuitem', { name: `Move ${direction}` }));
+			const position = direction === 'up'
+				? (kind === 'plain' ? 'before' : 'after')
+				: (kind === 'plain' ? 'after' : 'before');
+			expect(onQuickMove).toHaveBeenCalledExactlyOnceWith('normal', source,
+				{ kind: 'relative', referenceChatId: target, position }, expect.any(Function), expect.any(Function));
+			const expected = kind === 'plain' ? ['b', 'a']
+				: direction === 'up' ? ['a', 'b', 'x', 'y'] : ['x', 'y', 'a', 'b'];
+			await waitFor(() => expect([...document.querySelectorAll('[data-sidebar-virtual-row]')]
+				.map((row) => row.getAttribute('data-sidebar-virtual-row'))).toEqual(expected));
+			view.unmount();
+		}
+	});
+
+	it('keeps inherited delegated rows virtualized', () => {
+		const chats = [chat('parent'), ...Array.from({ length: 500 }, (_, index) => delegated(`child-${index}`, 'parent'))];
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				nestDelegatedChats: true,
+				groupingFields: (['executor', 'project', 'activity', 'status'] as const).map((field) => ({ field, enabled: true })),
+			},
+		});
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(screen.getByText('child-0')).toBeTruthy();
+		expect(screen.queryByText('child-499')).toBeNull();
+	});
+
+	it('keeps every non-inherited group inset inside deeply nested chat buttons', () => {
+		const chats = [chat('parent', { createdAt: '2024-01-01', lastActivityAt: '2024-01-01' }), delegated('child', 'parent', {
+			executorId: 'remote', projectPath: '/other', isUnread: true, isPinned: true,
+		})];
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				nestDelegatedChats: true,
+				groupingFields: (['executor', 'project', 'activity', 'status'] as const).map((field) => ({ field, enabled: true })),
+			},
+		});
+		const parent = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="parent"] .chat-item-root button');
+		const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"] .chat-item-root button');
+		expect(parent?.style.paddingLeft).toBe('60px');
+		expect(child?.style.paddingLeft).toBe('120px');
+	});
+
 	it('uses virtual rendering for filtered chat lists', () => {
 		const chats = Array.from({ length: 160 }, (_, index) => makeChat(index));
 		render(SidebarChatListHost, {
