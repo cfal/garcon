@@ -76,7 +76,7 @@ describe('recursive sidebar projection', () => {
 					}),
 				);
 				expect(model.rows.filter((row) => row.type === 'chat').map((row) => row.depth)).toEqual(
-					nestDelegatedChats ? [depth, depth * 2 + 1] : [depth, depth],
+					nestDelegatedChats ? [depth, depth + 1] : [depth, depth],
 				);
 			}
 		},
@@ -232,6 +232,7 @@ describe('recursive sidebar projection', () => {
 					executorId: 'remote',
 					projectPath: '/remote',
 					isUnread: true,
+					lastActivityAt: '2026-02-01T11:00:00Z',
 				}),
 				chat('other', { projectPath: '/workspace/notes' }),
 			];
@@ -405,7 +406,10 @@ describe('recursive sidebar projection', () => {
 		]);
 	});
 	it('keeps grouped collapse identity scoped to structural parent and complete path', () => {
-		const chats = [chat('a'), delegated('a1', 'a'), chat('b'), delegated('b1', 'b')];
+		const chats = [
+			chat('a'), delegated('a1', 'a', { projectPath: '/other' }),
+			chat('b'), delegated('b1', 'b', { projectPath: '/other' }),
+		];
 		const input = projectionInput(chats, { groupingFields: selections(['project']) });
 		const expanded = buildSidebarRowModel(input);
 		const childHeader = expanded.rows[2];

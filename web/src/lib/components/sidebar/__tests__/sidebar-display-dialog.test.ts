@@ -23,7 +23,7 @@ it('previews drafts without writes and discards Cancel', async () => {
 		[...preview.querySelectorAll('[data-sidebar-executor-header]')].map((header) =>
 			header.getAttribute('title'),
 		),
-	).toEqual(['Local', 'Local', 'Remote']);
+	).toEqual(['Local', 'Remote']);
 	expect(settings.sidebarChatItemLayout).toBe('single-line');
 	expect(apply).not.toHaveBeenCalled();
 	await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

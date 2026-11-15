@@ -114,6 +114,7 @@ interface ScopeTask {
 	ids: string[];
 	depth: number;
 	path: SidebarGroupPath;
+	inheritedFields: readonly SidebarGroupingField[];
 	executorGrouped: boolean;
 }
 
@@ -220,6 +221,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			ids: forest.roots.filter((id) => included.has(id)),
 			depth: 0,
 			path: [],
+			inheritedFields: [],
 			executorGrouped: false,
 		},
 	];
@@ -234,13 +236,20 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			model.rows.push(row);
 			model.visibleChatIds.push(row.chat.id);
 			if (!row.contextOnly) model.actionableChatIds.push(row.chat.id);
-			if (!row.branch?.isCollapsed) {
+			const children = forest.branches.get(row.chat.id)!.children;
+			if (children.length && !row.branch?.isCollapsed) {
+				// Full-roster siblings keep inherited headers stable while searching.
+				const inheritedFields = fields.filter((field) => {
+					const value = valueFor(field, row.chat);
+					return children.every((id) => valueFor(field, byId.get(id)!) === value);
+				});
 				tasks.push({
 					kind: 'scope',
 					parentId: row.chat.id,
-					ids: forest.branches.get(row.chat.id)!.children.filter((id) => included.has(id)),
+					ids: children.filter((id) => included.has(id)),
 					depth: row.depth + 1,
 					path: [],
+					inheritedFields,
 					executorGrouped: false,
 				});
 			}
@@ -249,6 +258,15 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		if (!task.ids.length) continue;
 		const field = fields[task.path.length];
 		if (field !== undefined) {
+			if (task.inheritedFields.includes(field)) {
+				// Retains structural scope keys without an invisible collapse gate or extra indent.
+				tasks.push({
+					...task,
+					path: [...task.path, [field, valueFor(field, byId.get(task.ids[0])!)]],
+					executorGrouped: task.executorGrouped || field === 'executor',
+				});
+				continue;
+			}
 			const partitions = new Map<string, string[]>();
 			for (const id of task.ids) {
 				const value = valueFor(field, byId.get(id)!);

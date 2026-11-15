@@ -21,11 +21,11 @@ const SIDEBAR_CHAT_BASE_INSET = 12;
 const SIDEBAR_NESTING_STEP = 12;
 
 export function sidebarHeaderInset(depth: number): number {
-	return SIDEBAR_HEADER_BASE_INSET + Math.min(depth, 6) * SIDEBAR_NESTING_STEP;
+	return SIDEBAR_HEADER_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
 }
 
 export function sidebarChatInset(depth: number): number {
-	return SIDEBAR_CHAT_BASE_INSET + Math.min(depth, 6) * SIDEBAR_NESTING_STEP;
+	return SIDEBAR_CHAT_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
 }
 
 export interface SidebarVirtualProjectHeaderRow {

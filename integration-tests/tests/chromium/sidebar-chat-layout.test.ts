@@ -4,6 +4,9 @@ import type { Locator, Page } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { createSidebarDelegationFixture } from '../../support/sidebar-delegation-fixture.js';
+import { parseChatListResponse } from '../../../common/chat-list.js';
 
 async function openSidebar(page: Page): Promise<void> {
   const mobile = page.viewportSize()!.width <= 768;
@@ -72,6 +75,52 @@ async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promis
     matchingPillHeight: true,
   });
 }
+
+test('inherited groups omit headers while differing groups retain full internal indentation', async () => {
+  await withChromiumFixture('sidebar-inherited-groups', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1 } = await createSidebarDelegationFixture(integration);
+    const snapshot = await integration.client.listChats();
+    let differing = false;
+    await page.route(url => url.pathname === '/api/v1/chats', async route => {
+      const sessions = snapshot.sessions.filter(chat => chat.id === a || chat.id === a1).map(chat => ({
+        ...chat,
+        executorId: differing && chat.id === a1 ? '00000000-0000-4000-8000-000000000001' : 'local',
+        projectPath: differing && chat.id === a1 ? '/synthetic/other' : chat.projectPath,
+        isPinned: false,
+        isArchived: differing && chat.id === a1,
+        orderGroup: differing && chat.id === a1 ? 'archived' : 'normal',
+        isUnread: differing && chat.id === a1,
+      }));
+      await route.fulfill({ json: parseChatListResponse({ ...snapshot, sessions, total: sessions.length }) });
+    });
+    await page.addInitScript(seedLocalSettings, {
+      sidebarSortMode: 'manual', sidebarNestDelegatedChats: true,
+      sidebarGroupingFields: ['executor', 'project', 'activity', 'status'].map(field => ({ field, enabled: true })),
+    });
+    for (const mixed of [false, true]) {
+      differing = mixed;
+      await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await openSidebar(page);
+        const parent = page.locator(`[data-sidebar-virtual-row="${a}"] .chat-item-root button`).first();
+        const child = page.locator(`[data-sidebar-virtual-row="${a1}"] .chat-item-root button`).first();
+        await browserExpect(parent).toHaveCSS('padding-left', '60px');
+        await browserExpect(child).toHaveCSS('padding-left', mixed ? '120px' : '72px');
+        await browserExpect(child).toHaveCSS('padding-right', '8px');
+        const bounds = await child.boundingBox();
+        const parentBounds = await parent.boundingBox();
+        expect(bounds!.x).toBe(parentBounds!.x);
+        expect(bounds!.width).toBe(parentBounds!.width);
+        await expectRowGeometry(page.locator(`[data-sidebar-virtual-row="${a1}"]`), false);
+        const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+        await mkdir(artifacts, { recursive: true });
+        await page.screenshot({ path: join(artifacts, `sidebar-inherited-${mixed ? 'mixed' : 'same'}-${width}.png`) });
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 120_000);
 
 for (const executionBackend of ['in-process', 'remote-controller-dials'] as const) {
   test(`sidebar layouts extend the single-line header (${executionBackend})`, async () => {
