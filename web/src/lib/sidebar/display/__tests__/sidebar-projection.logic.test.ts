@@ -49,20 +49,17 @@ describe('sidebar display preferences', () => {
 			{ field: 'activity', enabled: false },
 		]);
 	});
-	it.each(['none', 'project', 'activity', 'status', 'project-and-activity'])(
-		'migrates %s exactly once',
-		(preset) => {
-			const migrated = migrateSidebarGrouping(preset);
-			expect(normalizeSidebarGroupingFields(migrated)).toEqual(migrated);
-			expect(migrated.filter((field) => field.enabled).map((field) => field.field)).toEqual(
-				preset === 'none'
-					? []
-					: preset === 'project-and-activity'
-						? ['executor', 'activity', 'project']
-						: ['executor', preset],
-			);
-		},
-	);
+	it.each([
+		['none', []],
+		['project', ['executor', 'project']],
+		['activity', ['executor', 'activity']],
+		['status', ['executor', 'status']],
+		['project-and-activity', ['executor', 'activity', 'project']],
+	])('migrates %s exactly once', (preset, expected) => {
+		const migrated = migrateSidebarGrouping(preset);
+		expect(normalizeSidebarGroupingFields(migrated)).toEqual(migrated);
+		expect(migrated.filter((field) => field.enabled).map((field) => field.field)).toEqual(expected);
+	});
 });
 
 describe('recursive sidebar projection', () => {
@@ -195,14 +192,14 @@ describe('recursive sidebar projection', () => {
 			expect(model.visibleChatIds).toEqual(['parent', 'child', 'other']);
 			const parent = model.rows.findIndex((row) => row.type === 'chat' && row.chat.id === 'parent');
 			const childHeaders = model.rows.slice(parent + 1, parent + 1 + fields.length);
+			const headerTypes = {
+				executor: 'executor-header',
+				project: 'project-header',
+				activity: 'section-header',
+				status: 'section-header',
+			};
 			expect(childHeaders.map((row) => row.type)).toEqual(
-				fields.map((field) =>
-					field === 'project'
-						? 'project-header'
-						: field === 'executor'
-							? 'executor-header'
-							: 'section-header',
-				),
+				fields.map((field) => headerTypes[field]),
 			);
 		},
 	);
@@ -240,7 +237,9 @@ describe('recursive sidebar projection', () => {
 		];
 		const model = buildSidebarRowModel(projectionInput(chats));
 		expect(model.visibleChatIds).toEqual(['fork', 'handoff', 'root', 'pinned', 'normal']);
-		expect(model.reorderScopesByChatId.get('pinned')).toEqual(['pinned']);
+		expect(model.rows.find((row) => row.key === 'chat:pinned')).toMatchObject({
+			reorderScopeIds: ['pinned'],
+		});
 	});
 	it('includes minimum ancestor context and keeps action matches separate', () => {
 		const chats = [
@@ -258,7 +257,9 @@ describe('recursive sidebar projection', () => {
 		expect(model.visibleChatIds).toEqual(['root', 'child', 'match']);
 		expect(model.matchingChatIds).toEqual(['match']);
 		expect(model.actionableChatIds).toEqual(['match']);
-		expect(model.reorderScopesByChatId.get('root')).toEqual([]);
+		expect(model.rows.find((row) => row.key === 'chat:root')).toMatchObject({
+			reorderScopeIds: [],
+		});
 		expect(
 			buildSidebarRowModel(projectionInput(chats, { matchingChatIds: new Set(['root']) }))
 				.visibleChatIds,
@@ -375,7 +376,7 @@ describe('recursive sidebar projection', () => {
 		const model = buildSidebarRowModel(projectionInput(chats));
 		expect(model.rows).toHaveLength(chats.length);
 		expect(model.rows[0]).toMatchObject({ branch: { descendants: chats.length - 1 } });
-		expect(model.branchEndByChatId.get('0')).toBe(chats.length - 1);
+		expect(model.visibleChatIds).toEqual(chats.map((chat) => chat.id));
 	});
 	it('retains own-chat activity and status priority, timestamp fallback, and drafts', () => {
 		const now = new Date('2026-02-01T00:00:00Z');

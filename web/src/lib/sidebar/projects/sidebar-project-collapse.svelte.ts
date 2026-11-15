@@ -111,33 +111,32 @@ export class SidebarProjectCollapseStore {
 		);
 		const activitySections = new Set(['active', 'inactive', 'archived']);
 		const statusSections = new Set(['in-progress', 'ready-for-review', 'caught-up']);
-		this.pruneToProjectKeys(
-			[...this.collapsedProjectKeys].filter((key) => {
-				if (key.startsWith('delegation:')) return ids.has(key.slice('delegation:'.length));
-				if (!key.startsWith('group:')) return false;
-				try {
-					const value: unknown = JSON.parse(key.slice('group:'.length));
-					if (!Array.isArray(value) || value.length !== 2) return false;
-					const [parent, path] = value;
-					if (parent !== null && !ids.has(parent)) return false;
-					if (!Array.isArray(path) || path.length === 0 || path.length > 4) return false;
-					const fields = new Set<string>();
-					return path.every((pair) => {
-						if (!Array.isArray(pair) || pair.length !== 2) return false;
-						const [field, entry] = pair;
-						if (typeof field !== 'string' || fields.has(field)) return false;
-						fields.add(field);
-						if (field === 'executor') return executors.has(entry);
-						if (field === 'project') return projects.has(entry);
-						return field === 'activity'
-							? activitySections.has(entry)
-							: field === 'status' && statusSections.has(entry);
-					});
-				} catch {
-					return false;
-				}
-			}),
-		);
+		const retainedKeys = [...this.collapsedProjectKeys].filter((key) => {
+			if (key.startsWith('delegation:')) return ids.has(key.slice('delegation:'.length));
+			if (!key.startsWith('group:')) return false;
+			try {
+				const value: unknown = JSON.parse(key.slice('group:'.length));
+				if (!Array.isArray(value) || value.length !== 2) return false;
+				const [parent, path] = value;
+				if (parent !== null && !ids.has(parent)) return false;
+				if (!Array.isArray(path) || path.length === 0 || path.length > 4) return false;
+				const fields = new Set<string>();
+				return path.every((pair) => {
+					if (!Array.isArray(pair) || pair.length !== 2) return false;
+					const [field, entry] = pair;
+					if (typeof field !== 'string' || fields.has(field)) return false;
+					fields.add(field);
+					if (field === 'executor') return executors.has(entry);
+					if (field === 'project') return projects.has(entry);
+					return field === 'activity'
+						? activitySections.has(entry)
+						: field === 'status' && statusSections.has(entry);
+				});
+			} catch {
+				return false;
+			}
+		});
+		this.#replaceAndPersist(new Set(retainedKeys));
 	}
 
 	snapshot(): SidebarProjectCollapseSnapshot {

@@ -95,9 +95,6 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 			list: 'normal' as const,
 			isPinned: false,
 			isArchived: false,
-			projectPath: chat.projectPath,
-			groupProjectKey: sidebarProjectKey(chat.projectPath),
-			groupProjectPath: chat.projectPath,
 			reorderScopeKey: 'normal:all',
 			reorderScopeIds,
 		};
@@ -118,9 +115,6 @@ function makeScopedRow(
 		list: 'normal',
 		isPinned: false,
 		isArchived: false,
-		projectPath: chat.projectPath,
-		groupProjectKey: sidebarProjectKey(projectPath),
-		groupProjectPath: projectPath,
 		reorderScopeKey: `normal:project:${projectPath}`,
 		reorderScopeIds: scopeIds,
 	};

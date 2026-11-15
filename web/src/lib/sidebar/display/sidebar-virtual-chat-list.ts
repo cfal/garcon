@@ -32,7 +32,6 @@ export interface SidebarVirtualProjectHeaderRow {
 	executorId?: string;
 	type: 'project-header';
 	key: string;
-	/** Nesting level beneath executor and project headers; section labels do not nest. */
 	depth: number;
 	projectKey: string;
 	collapseKey: string;
@@ -43,7 +42,7 @@ export interface SidebarVirtualProjectHeaderRow {
 	isCollapsed: boolean;
 	/** True when an executor header already identifies this project's executor. */
 	executorGrouped?: boolean;
-	/** True when another project under the same executor shares this folder name. */
+	/** True when another displayed project shares this folder name. */
 	showParentPath?: boolean;
 }
 
@@ -82,9 +81,6 @@ export interface SidebarVirtualChatRow {
 	list: PersistedChatOrderGroup;
 	isPinned: boolean;
 	isArchived: boolean;
-	projectPath: string;
-	groupProjectKey: string;
-	groupProjectPath: string;
 	reorderScopeKey: string;
 	reorderScopeIds: string[];
 	contextOnly?: boolean;
@@ -99,7 +95,7 @@ export interface SidebarVirtualChatRow {
 	};
 	/** True when an executor header already identifies this chat's executor. */
 	executorGrouped?: boolean;
-	/** Section header the chat renders directly beneath, when it is not within a project. */
+	/** Activity bucket in this chat's grouping path. */
 	section?: SidebarChatSection;
 }
 
@@ -113,13 +109,9 @@ export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 
 export interface SidebarRowModel {
 	rows: SidebarVirtualRow[];
-	visibleOrders: SidebarChatOrderMap;
 	visibleChatIds: string[];
-	reorderScopesByChatId: Map<string, string[]>;
-	projectKeys: string[];
 	matchingChatIds: string[];
 	actionableChatIds: string[];
-	branchEndByChatId: Map<string, number>;
 }
 
 export function estimateSidebarVirtualRowSize(

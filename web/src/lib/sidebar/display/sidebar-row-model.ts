@@ -69,7 +69,9 @@ export function sidebarActivitySection(
 export function sidebarStatusSection(
 	chat: Pick<ChatSessionRecord, 'isProcessing' | 'isUnread'>,
 ): SidebarChatSection {
-	return chat.isProcessing ? 'in-progress' : chat.isUnread ? 'ready-for-review' : 'caught-up';
+	if (chat.isProcessing) return 'in-progress';
+	if (chat.isUnread) return 'ready-for-review';
+	return 'caught-up';
 }
 
 export function sidebarProjectKey(path: string, executorId?: string | null): string {
@@ -119,8 +121,7 @@ interface ScopeTask {
 type ProjectionTask =
 	| ScopeTask
 	| { kind: 'header'; row: Exclude<SidebarVirtualRow, SidebarVirtualChatRow> }
-	| { kind: 'chat'; row: SidebarVirtualChatRow }
-	| { kind: 'end'; id: string };
+	| { kind: 'chat'; row: SidebarVirtualChatRow };
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
@@ -156,13 +157,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const executorRanks = new Map((input.executorOrder ?? []).map((id, index) => [id, index]));
 	const model: SidebarRowModel = {
 		rows: [],
-		visibleOrders: { pinned: [], normal: [], archived: [] },
 		visibleChatIds: [],
-		reorderScopesByChatId: new Map(),
-		projectKeys: [],
 		matchingChatIds: [...matches].filter((id) => byId.has(id)),
 		actionableChatIds: [],
-		branchEndByChatId: new Map(),
 	};
 	const valueFor = (field: SidebarGroupingField, chat: ChatSessionRecord): string => {
 		switch (field) {
@@ -230,10 +227,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	];
 	while (tasks.length) {
 		const task = tasks.pop()!;
-		if (task.kind === 'end') {
-			model.branchEndByChatId.set(task.id, model.rows.length - 1);
-			continue;
-		}
 		if (task.kind === 'header') {
 			model.rows.push(task.row);
 			continue;
@@ -241,11 +234,8 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		if (task.kind === 'chat') {
 			const row = task.row;
 			model.rows.push(row);
-			model.visibleOrders[row.list].push(row.chat.id);
 			model.visibleChatIds.push(row.chat.id);
 			if (!row.contextOnly) model.actionableChatIds.push(row.chat.id);
-			model.reorderScopesByChatId.set(row.chat.id, row.reorderScopeIds);
-			tasks.push({ kind: 'end', id: row.chat.id });
 			if (!row.branch?.isCollapsed) {
 				tasks.push({
 					kind: 'scope',
@@ -275,7 +265,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				const ids = partitions.get(value)!;
 				const path = [...task.path, [field, value] as const];
 				const key = sidebarGroupCollapseKey(task.parentId, path);
-				model.projectKeys.push(key);
 				const isCollapsed = !filtered && Boolean(input.collapsedProjectKeys?.has(key));
 				const ranges = ids.map((id) => forest.branches.get(id)!).sort((a, b) => a.start - b.start);
 				const containsChat = (id: string): boolean => {
@@ -347,9 +336,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				list,
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
-				projectPath: chat.projectPath,
-				groupProjectKey: sidebarProjectKey(projectFor(chat), chat.executorId),
-				groupProjectPath: projectFor(chat),
 				executorGrouped: task.executorGrouped,
 				reorderScopeKey: JSON.stringify([input.nestDelegatedChats, task.parentId, list, task.path]),
 				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
@@ -386,7 +372,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 }
 
 export interface SidebarChatListProjection {
-	rowModelInput: SidebarRowModelInput;
 	rowModel: SidebarRowModel;
 	hasPinnedChats: boolean;
 }
@@ -394,13 +379,11 @@ export interface SidebarChatListProjection {
 export function buildSidebarChatListProjection(
 	input: Omit<SidebarRowModelInput, 'orders'> & { orders?: SidebarChatOrderMap },
 ): SidebarChatListProjection {
-	const rowModelInput = {
-		...input,
-		orders: input.orders ?? buildSidebarChatOrderMap(input.allChats),
-	};
 	return {
-		rowModelInput,
-		rowModel: buildSidebarRowModel(rowModelInput),
+		rowModel: buildSidebarRowModel({
+			...input,
+			orders: input.orders ?? buildSidebarChatOrderMap(input.allChats),
+		}),
 		hasPinnedChats: input.allChats.some((chat) => chat.isPinned),
 	};
 }
