@@ -33,6 +33,7 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte';
 	import type {
 		LocalSettingsStore,
 		SidebarInactivityDuration,
@@ -48,6 +49,7 @@
 		executors?: readonly ExecutorSnapshot[];
 		chats?: ChatSessionRecord[];
 		chatSessions?: ChatSessionsStore;
+		projectCollapse?: SidebarProjectCollapseStore;
 		isMobile?: boolean;
 		notifications?: unknown;
 		selectedChatId?: string | null;
@@ -77,6 +79,7 @@
 		executors,
 		chats = [],
 		chatSessions,
+		projectCollapse,
 		isMobile = false,
 		notifications,
 		selectedChatId = null,
@@ -250,7 +253,7 @@
 
 	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
 
-	setSidebarProjectCollapse({
+	setSidebarProjectCollapse(untrack(() => projectCollapse) ?? {
 		get collapsedProjectKeys() {
 			return collapsedProjectKeys;
 		},
@@ -354,7 +357,8 @@
 	projection={reorder.projection}
 	chats={displayedChats}
 	{selectedChatId}
-	isLoading={false}
+	isLoading={chatSessions?.isLoadingChats ?? false}
+	rosterReady={chatSessions ? chatSessions.chatListStatus === 'ready' : true}
 	{isMobile}
 	{onChatSelect}
 	{onNewChat}

@@ -40,6 +40,7 @@
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
+		rosterReady: boolean;
 		isMobile?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onNewChat: () => void;
@@ -78,6 +79,7 @@
 		projection,
 		selectedChatId,
 		isLoading,
+		rosterReady,
 		isMobile = false,
 		onChatSelect,
 		onNewChat,
@@ -224,7 +226,7 @@
 	});
 
 	$effect(() => {
-		if (isLoading) return;
+		if (isLoading || !rosterReady) return;
 		const roster = chats;
 		untrack(() => projectCollapse.pruneToRoster(roster));
 	});

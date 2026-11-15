@@ -755,6 +755,7 @@
 		chats={sessions.orderedChats}
 		selectedChatId={sessions.selectedChatId}
 		isLoading={sessions.isLoadingChats}
+		rosterReady={sessions.chatListStatus === 'ready'}
 		{isMobile}
 		{onChatSelect}
 		onNewChat={handleNewChat}

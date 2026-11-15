@@ -268,6 +268,7 @@
 		{chats}
 		{selectedChatId}
 		isLoading={false}
+		rosterReady={true}
 		isMobile={true}
 		onChatSelect={() => {}}
 		onNewChat={() => {}}

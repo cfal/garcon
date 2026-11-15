@@ -70,7 +70,7 @@ describe('sidebar bulk archive flow', () => {
 			setChatArchived: chatsApi.setChatArchived,
 			listChats: async () => ({ sessions: entries, total: 2, lastSelectedChatId: 'parent' }),
 		});
-		chatSessions.upsertFromServer(entries);
+		await chatSessions.refreshChats();
 		vi.mocked(chatsApi.setChatArchived).mockResolvedValue({
 			success: true,
 			chatId: 'child',
@@ -128,12 +128,19 @@ describe('sidebar bulk archive flow', () => {
 			setChatArchived: chatsApi.setChatArchived,
 			listChats,
 		});
-		chatSessions.upsertFromServer([
+		const initialEntries = [
 			makeServerChat('selected', false, '2026-02-01T00:00:00.000Z'),
 			makeServerChat('manual-order-neighbor', false, '2026-03-01T00:00:00.000Z'),
 			makeServerChat('recent-order-neighbor', false, '2026-01-01T00:00:00.000Z'),
 			makeServerChat('archived', true, '2026-03-01T00:00:00.000Z'),
-		]);
+		];
+		listChats.mockResolvedValueOnce({
+			sessions: initialEntries,
+			total: initialEntries.length,
+			lastSelectedChatId: 'selected',
+		});
+		await chatSessions.refreshChats();
+		listChats.mockClear();
 		const onChatSelect = vi.fn();
 		const { container } = render(SidebarHost, {
 			chatSessions,
