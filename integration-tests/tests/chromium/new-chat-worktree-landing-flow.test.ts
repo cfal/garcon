@@ -166,6 +166,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const worktreeBounds = (await worktrees.boundingBox())!;
         expect(tagBounds.y).toBeGreaterThanOrEqual(worktreeBounds.y + worktreeBounds.height);
         const composerBounds = (await dialog.locator('[data-slot="new-chat-composer"]').boundingBox())!;
+        expect(900 - (composerBounds.y + composerBounds.height)).toBeCloseTo(width >= 640 ? 24 : 16, 0);
         const pickerBounds = (await dialog.locator('[data-slot="new-chat-project-picker"]').boundingBox())!;
         expect(tagBounds.y - (pickerBounds.y + pickerBounds.height)).toBeGreaterThanOrEqual(width >= 640 ? 64 : 48);
         const preambleBounds = (await dialog.locator('[data-slot="new-chat-preambles-row"]').boundingBox())!;
@@ -203,6 +204,19 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         }
         await cdp.detach();
       }
+      phase('reaching both sections in a short viewport');
+      await page.setViewportSize({ width: 390, height: 420 });
+      await browserExpect(dialog).toHaveCSS('height', '420px');
+      const shortComposer = dialog.locator('[data-slot="new-chat-composer"]');
+      await shortComposer.scrollIntoViewIfNeeded();
+      const shortComposerBounds = (await shortComposer.boundingBox())!;
+      expect(shortComposerBounds.y).toBeGreaterThanOrEqual(0);
+      expect(shortComposerBounds.y + shortComposerBounds.height).toBeLessThanOrEqual(420);
+      await browserExpect(dialog.getByRole('button', { name: 'Start session', exact: true })).toBeInViewport();
+      await projects.scrollIntoViewIfNeeded();
+      await browserExpect(projectCard).toBeInViewport();
+      await browserExpect(selectedWorktree).toBeChecked();
+      await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       phase('submitting the captured executor and worktree');
       await page.setViewportSize({ width: 1440, height: 900 });
       phase('removing another project shortcut without changing the selected worktree');

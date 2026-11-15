@@ -74,9 +74,10 @@
 			</button>
 		</header>
 		<div
-			class="landing-insets min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,var(--safe-area-inset-bottom,0px))]"
+			data-slot="new-chat-landing-scroll"
+			class="landing-insets flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-[max(1rem,var(--safe-area-inset-bottom,0px))] sm:pb-[max(1.5rem,var(--safe-area-inset-bottom,0px))]"
 		>
-			<div class="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center py-4 sm:py-6">
+			<div class="mx-auto flex w-full max-w-xl flex-1 flex-col pt-4 sm:pt-6">
 				{#key appShell.newChatDialogRequestId}
 					<NewChatForm
 						seed={appShell.newChatDialogSeed}

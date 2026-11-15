@@ -645,22 +645,26 @@
 </script>
 
 <div
-	class="min-w-0"
+	class="flex min-w-0 flex-1 flex-col"
 	{@attach snippetExpansion.pending && snippetExpansionLayer}
 	{@attach promptRefinement.pending && !composerEditor.open && promptRefinement.layerAttachment}
 >
-	<div class="relative">
+	<div class="relative flex flex-1 flex-col">
 		<div
 			data-slot="new-chat-form-content"
+			class="flex flex-1 flex-col"
 			class:invisible={!initialContentReady}
 			class:pointer-events-none={!initialContentReady}
 			inert={!initialContentReady}
 			aria-hidden={!initialContentReady}
 		>
-			<div class="space-y-2">
-				<div class="pb-10 sm:pb-14">
-					<NewChatProjectPicker {form} {isMobile} />
-				</div>
+			<div
+				data-slot="new-chat-project-region"
+				class="flex flex-1 flex-col justify-center pb-12 sm:pb-16"
+			>
+				<NewChatProjectPicker {form} {isMobile} />
+			</div>
+			<div data-slot="new-chat-session-options" class="space-y-2">
 				<ChatTagToggleButton
 					active={form.chatTags.length > 0}
 					label={m.chat_new_chat_tags_add_to_session()}

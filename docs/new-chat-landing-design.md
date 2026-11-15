@@ -10,9 +10,12 @@ New Chat opens a full-page start screen with pinned and recent project folders a
 existing composer. Projects and worktrees share a centered column capped at 28rem,
 narrower than the 36rem prompt and session-option rows on desktop. Narrow screens
 use the available width. The screen omits the introductory heading and subtitle;
-the visible New Chat title retains the dialog's accessible name. A 48px gap on
-mobile and 64px gap on desktop separates project/worktree selection from the
-session options and prompt. Compact project cards use one column. Each card shows
+the visible New Chat title retains the dialog's accessible name. The session options
+and prompt sit at the bottom of the available screen, above its safe-area inset.
+Project/worktree selection sits above them, centered in the remaining space, with
+at least 48px separation on mobile and 64px on desktop. Short screens, expanded
+options and long project lists scroll naturally without hiding either section.
+Compact project cards use one column. Each card shows
 its folder name and a truncated path, with full paths on hover and
 executor labels when multiple machines are represented. Selecting a card selects
 both its executor and path without clearing the prompt or starting a chat.
