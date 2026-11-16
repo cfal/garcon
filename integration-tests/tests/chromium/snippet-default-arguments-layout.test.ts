@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import type { CDPSession, Locator, Page } from 'playwright';
 import type { SnippetsMutationResponse, SnippetsSnapshot } from '../../../common/snippets.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { saveNewChatProject } from '../../support/new-chat-project.js';
+import type { GarconTestClient } from '../../support/garcon-client.js';
 
 interface ViewportScenario {
   name: string;
@@ -29,16 +32,16 @@ async function setViewport(page: Page, cdp: CDPSession, scenario: ViewportScenar
   expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(!scenario.touch);
 }
 
-async function openNewChat(page: Page, projectPath: string): Promise<Locator> {
-  await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+async function openNewChat(page: Page, client: GarconTestClient, projectPath: string): Promise<Locator> {
+  await saveNewChatProject(client, projectPath);
+  await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
   const composer = page.getByPlaceholder('How can I help you today?');
   const dialog = page.locator('[role="dialog"]').filter({ has: composer });
   await dialog.waitFor();
-  await dialog.getByRole('textbox', { name: 'Project Path' }).fill(projectPath);
-  const pathOverlay = page.locator('[data-slot="directory-browser-dismiss"]');
-  if (await pathOverlay.isVisible()) {
-    await pathOverlay.click({ position: { x: 4, y: 4 } });
-  }
+  const projectCard = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true })
+    .getByRole('button', { name: projectPath, exact: true });
+  await projectCard.click();
+  await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
   return dialog;
 }
 
@@ -55,7 +58,7 @@ async function openSnippetPalette(page: Page, newChat: Locator): Promise<Locator
   }
   await newChat
     .getByRole('button', { name: 'Add to prompt' })
-    .evaluate((element) => (element as HTMLButtonElement).click());
+    .click();
   await page.getByRole('menuitem', { name: /Snippets/ }).click();
   const palette = page.getByRole('dialog', { name: 'Insert Snippet' });
   await palette.waitFor();
@@ -144,7 +147,7 @@ describe('snippet default argument layouts', () => {
         if (!response?.ok())
           throw new Error(`SPA navigation failed with ${String(response?.status())}.`);
         await fixture.page.getByRole('button', { name: 'New Chat', exact: true }).first().waitFor();
-        const newChat = await openNewChat(fixture.page, fixture.integration.dirs.project);
+        const newChat = await openNewChat(fixture.page, fixture.integration.client, fixture.integration.dirs.project);
 
         const palette = await openSnippetPalette(fixture.page, newChat);
         await palette.getByRole('button', { name: 'Edit snippets' }).click();

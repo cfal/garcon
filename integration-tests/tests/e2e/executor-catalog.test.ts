@@ -91,6 +91,7 @@ test('editing a remote schedule preserves its saved endpoint across failed disco
     }, client.executorId);
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Scheduled prompts');
@@ -146,6 +147,7 @@ test('late remote catalog discovery preserves a schedule retargeted to Local', a
     }, client.executorId);
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Scheduled prompts');
@@ -190,6 +192,7 @@ test('new and scheduled chats retain input and require Retry after cached remote
     }, client.executorId);
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
 
     for (const kind of ['new', 'scheduled'] as const) {
@@ -209,6 +212,7 @@ test('new and scheduled chats retain input and require Retry after cached remote
       await app.waitForButton('Integration Echo');
       await app.clickButton('Integration Echo');
       const pathSelector = kind === 'new' ? '[role="dialog"] input[aria-label="Project Path"]' : '#scheduled-project-path';
+      if (kind === 'new') await app.revealNewChatProjectPath();
       const promptSelector = kind === 'new' ? '[role="dialog"] textarea[placeholder="How can I help you today?"]' : '[data-slot="scheduled-prompt-field"] textarea';
       const submitLabel = kind === 'new' ? 'Start session' : 'Save Prompt';
       const prompt = `Synthetic ${kind} prompt held across catalog failure`;

@@ -24,6 +24,8 @@ test("mobile terminal keys fit without shifting when modifiers activate or lock"
     "theme terminal controls",
     async ({ page, integration, assertNoBrowserErrors }) => {
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await clickWorkspaceWindowAddAction(page, "New Terminal");
       await browserExpect(page.locator(".xterm")).toBeVisible();
 

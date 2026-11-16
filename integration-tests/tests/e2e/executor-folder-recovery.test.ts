@@ -17,15 +17,17 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const app = new SpaDriver(fixture.page, fixture.integration);
         await app.setViewport(1_600, 900);
         await app.open();
+        await app.dismissEmptyWorkspaceLanding();
         await fixture.waitForSpaWebSocket();
         await app.clickButton('New Chat');
+        await app.revealNewChatProjectPath();
         await fixture.page.waitForSelector('[role="dialog"] input[aria-label="Project Path"]');
         await fixture.page.waitForFunction(() => !document.querySelector('[role="dialog"] [role="status"][aria-label="Loading chat defaults..."]'));
         if (executionBackend !== 'in-process') {
           await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Integration worker');
         }
         await app.ensureDirectModelSelected({ selectedAgentLabel: 'Direct (Chat Completions)', optionAgentLabel: 'Chat Completions', modelLabel: 'Integration Echo' });
-        await app.fill('[role="dialog"] input[aria-label="Project Path"]', missing);
+        await app.enterNewChatProjectPath(missing);
         const prompt = 'Synthetic unstarted prompt';
         await app.fill('[role="dialog"] textarea', prompt);
         await fixture.page.$eval('[role="dialog"] input[type="file"]', element => {

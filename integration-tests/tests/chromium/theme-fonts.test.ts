@@ -156,6 +156,8 @@ test("terminal fonts update without clearing output or replacing the shell", asy
     "retained terminal typography",
     async ({ page, integration, assertNoBrowserErrors }) => {
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await clickWorkspaceWindowAddAction(page, "New Terminal");
       const terminal = page.locator(".xterm");
       const input = terminal.locator(".xterm-helper-textarea");

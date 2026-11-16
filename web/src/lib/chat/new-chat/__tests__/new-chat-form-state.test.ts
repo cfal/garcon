@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NewChatPinnedPathsController } from '../new-chat-pinned-paths-controller';
+import { NewChatProjectsController } from '../new-chat-projects-controller';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 import * as chatsApi from '$lib/api/chats';
@@ -357,7 +357,7 @@ describe('NewChatFormState', () => {
 				},
 			},
 		});
-		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		const pins = new NewChatProjectsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/same';
 		formState.firstMessage = 'Synthetic retained prompt';
 		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
@@ -380,7 +380,7 @@ describe('NewChatFormState', () => {
 				},
 			},
 		});
-		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		const pins = new NewChatProjectsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/local';
 		pins.select(remoteExecutor.id, '/removed-pin');
 		expect(formState.executorId).toBe('local');
@@ -491,7 +491,7 @@ describe('NewChatFormState', () => {
 		const pending = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
 		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(pending.promise);
 		formState.pinnedProjectPaths = ['/workspace/pinned'];
-		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		const pins = new NewChatProjectsController(() => formState, executors, mockRemoteSettings);
 		expect(pins.select('local', '/workspace/pinned')).toBe(true);
 		expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/pinned', {
 			executorId: 'local',
@@ -502,6 +502,25 @@ describe('NewChatFormState', () => {
 		pending.resolve({ valid: true });
 		await vi.advanceTimersByTimeAsync(0);
 		expect(formState.validationStatus).toBe('valid');
+	});
+
+	it('invalidates prior path confidence immediately while debouncing manual validation', async () => {
+		formState.error = 'Previous error';
+		formState.validationStatus = 'valid';
+		formState.gitRepoStatus = 'git';
+		formState.editProjectPath('/workspace/manual');
+		expect(formState.projectPath).toBe('/workspace/manual');
+		expect(formState.selectedProjectPath).toBe('/workspace/manual');
+		expect(formState.error).toBeNull();
+		expect(formState.validationStatus).toBe('checking');
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
+		formState.validateChangedPath();
+		await vi.advanceTimersByTimeAsync(299);
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/manual', {
+			executorId: 'local',
+		});
 	});
 
 	it('cancels typed-path debounce when a directory is explicitly selected and rechecks the same directory', async () => {
@@ -583,10 +602,10 @@ describe('NewChatFormState', () => {
 		expect(formState.firstMessage).toBe('Keep this draft');
 		formState.handlePathFocus();
 		await formState.handleTabCompletion();
-		formState.openWorktreeModal();
-		await formState.loadWorktrees();
+		formState.worktrees.openModal();
+		await formState.worktrees.load();
 		expect(formState.showBrowser).toBe(false);
-		expect(formState.worktreeModalOpen).toBe(false);
+		expect(formState.worktrees.modalOpen).toBe(false);
 		expect(browseDirectory).not.toHaveBeenCalled();
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
@@ -652,9 +671,9 @@ describe('NewChatFormState', () => {
 		await formState.handleTabCompletion();
 		expect(browseDirectory).toHaveBeenLastCalledWith('/same', undefined, executorId);
 		expect(formState.projectPath).toBe('/same/remote/');
-		formState.openWorktreeModal();
-		await formState.loadWorktrees();
-		expect(formState.worktreeModalOpen).toBe(false);
+		formState.worktrees.openModal();
+		await formState.worktrees.load();
+		expect(formState.worktrees.modalOpen).toBe(false);
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
 	});
@@ -669,7 +688,7 @@ describe('NewChatFormState', () => {
 		formState.projectPath = '/worker/project';
 		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
-		const loading = formState.loadWorktrees();
+		const loading = formState.worktrees.load();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
 			expect.any(Object),
@@ -689,11 +708,11 @@ describe('NewChatFormState', () => {
 			],
 		});
 		await loading;
-		expect(formState.worktreeItems).toEqual([]);
+		expect(formState.worktrees.items).toEqual([]);
 
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = formState.createWorktree('/worker/feature', 'feature');
+		const creating = formState.worktrees.create('/worker/feature', 'feature');
 		formState.selectExecutor('local');
 		formState.projectPath = '/local/draft';
 		creation.resolve({ success: true, worktreePath: '/worker/feature' });
@@ -706,7 +725,7 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/local/draft');
 	});
 
-	it('ignores a worktree load superseded after the modal closes', async () => {
+	it('cancels a pending modal without a background reload and ignores superseded results', async () => {
 		const first = deferred<{ worktrees: GitWorktreeItem[] }>();
 		const second = deferred<{ worktrees: GitWorktreeItem[] }>();
 		let firstSignal: AbortSignal | null | undefined;
@@ -718,13 +737,16 @@ describe('NewChatFormState', () => {
 			.mockImplementationOnce(() => second.promise);
 
 		formState.projectPath = '/workspace/repo-a';
-		const firstLoad = formState.loadWorktrees();
-		formState.closeWorktreeModal();
+		formState.worktrees.modalOpen = true;
+		const firstLoad = formState.worktrees.load();
+		formState.worktrees.closeModal();
+		expect(formState.worktrees.modalOpen).toBe(false);
 		expect(firstSignal?.aborted).toBe(true);
-		expect(formState.isLoadingWorktrees).toBe(false);
+		expect(formState.worktrees.isLoading).toBe(false);
+		expect(gitApi.getGitWorktrees).toHaveBeenCalledOnce();
 
 		formState.projectPath = '/workspace/repo-b';
-		const secondLoad = formState.loadWorktrees();
+		const secondLoad = formState.worktrees.load();
 		second.resolve({
 			worktrees: [
 				{
@@ -755,8 +777,96 @@ describe('NewChatFormState', () => {
 		});
 		await firstLoad;
 
-		expect(formState.worktreeItems.map((worktree) => worktree.path)).toEqual(['/workspace/repo-b']);
-		expect(formState.isLoadingWorktrees).toBe(false);
+		expect(formState.worktrees.items.map((worktree) => worktree.path)).toEqual([
+			'/workspace/repo-b',
+		]);
+		expect(formState.worktrees.isLoading).toBe(false);
+	});
+
+	it('retains the known project inventory and draft when selecting an existing worktree', async () => {
+		const item = {
+			name: 'feature',
+			path: '/workspace/feature',
+			branch: 'feature',
+			isCurrent: false,
+			isMain: false,
+			isPathMissing: false,
+			lastModifiedAt: null,
+		} satisfies GitWorktreeItem;
+		formState.projectPath = '/workspace/main';
+		formState.firstMessage = 'Keep this unsent draft';
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({ worktrees: [item] });
+		await formState.worktrees.load();
+		formState.worktrees.selectListed(item.path);
+		expect(formState.projectPath).toBe(item.path);
+		expect(formState.selectedProjectPath).toBe('/workspace/main');
+		expect(formState.firstMessage).toBe('Keep this unsent draft');
+		expect(formState.worktrees.listed).toEqual([item]);
+		expect(formState.validationStatus).toBe('checking');
+		expect(gitApi.getGitWorktrees).toHaveBeenCalledOnce();
+	});
+
+	it('rejects missing and unlisted rows, and inventories from another project or executor generation', async () => {
+		const item = {
+			name: 'feature',
+			path: '/workspace/feature',
+			branch: 'feature',
+			isCurrent: false,
+			isMain: false,
+			isPathMissing: false,
+			lastModifiedAt: null,
+		} satisfies GitWorktreeItem;
+		formState.projectPath = '/workspace/main';
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			worktrees: [item, { ...item, path: '/workspace/missing', isPathMissing: true }],
+		});
+		await formState.worktrees.load();
+		formState.worktrees.selectListed('/workspace/missing');
+		formState.worktrees.selectListed('/workspace/not-listed');
+		expect(formState.projectPath).toBe('/workspace/main');
+		formState.projectPath = '/workspace/other';
+		expect(formState.worktrees.listed).toEqual([]);
+		formState.worktrees.selectListed(item.path);
+		expect(formState.projectPath).toBe('/workspace/other');
+		formState.projectPath = '/workspace/main';
+		executors.applySnapshot([{ ...localExecutor, instanceId: 'replacement' }]);
+		expect(formState.worktrees.listed).toEqual([]);
+		formState.worktrees.selectListed(item.path);
+		expect(formState.projectPath).toBe('/workspace/main');
+	});
+
+	it('does not publish a late worktree list after the selected project changes', async () => {
+		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		formState.projectPath = '/workspace/main';
+		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
+		const loading = formState.worktrees.load();
+		formState.projectPath = '/workspace/other';
+		listing.resolve({
+			worktrees: [
+				{
+					name: 'old',
+					path: '/workspace/old',
+					branch: 'old',
+					isCurrent: false,
+					isMain: false,
+					isPathMissing: false,
+					lastModifiedAt: null,
+				},
+			],
+		});
+		await loading;
+		expect(formState.worktrees.listed).toEqual([]);
+		formState.worktrees.selectListed('/workspace/old');
+		expect(formState.projectPath).toBe('/workspace/other');
+	});
+
+	it.each([
+		['C:\\repo\\feature ', 'C:/repo/feature ', true],
+		['C:\\repo\\feature ', 'C:/repo/feature', false],
+		['/repo/feature\\name', '/repo/feature/name', false],
+	])('matches only drive-letter slash aliases: %s and %s', (selected, listed, matches) => {
+		formState.projectPath = selected;
+		expect(formState.worktrees.isSelected(listed)).toBe(matches);
 	});
 
 	it('loads startup defaults from server settings', async () => {
@@ -2056,5 +2166,26 @@ describe('NewChatFormState prompt draft', () => {
 		formState.dispose();
 
 		expect(localStorage.length).toBe(0);
+	});
+
+	it('keeps a removed project card out of the list without clearing its target', () => {
+		const formState = createFormState();
+		formState.projectPath = '/workspace/implicit';
+		expect(formState.projectCardPath).toBeNull();
+		formState.selectProjectPath('/workspace/selected');
+		formState.dismissProjectCard('/workspace/other');
+		expect(formState.projectCardPath).toBe('/workspace/selected');
+		formState.dismissProjectCard('/workspace/selected');
+		expect(formState.projectCardPath).toBeNull();
+		expect(formState.selectedProjectPath).toBe('/workspace/selected');
+		expect(formState.projectPath).toBe('/workspace/selected');
+		formState.worktrees.select('/workspace/worktree');
+		expect(formState.projectPath).toBe('/workspace/worktree');
+		expect(formState.selectedProjectPath).toBe('/workspace/selected');
+		expect(formState.projectCardPath).toBeNull();
+		formState.selectProjectPath('/workspace/selected');
+		expect(formState.projectCardPath).toBe('/workspace/selected');
+		formState.reseed('');
+		expect(formState.projectCardPath).toBeNull();
 	});
 });

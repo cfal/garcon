@@ -23,7 +23,7 @@ for (const failure of ['attachment', 'rejection', 'unknown'] as const) {
         return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
       });
       await app.ensureDirectModelSelected({ selectedAgentLabel: 'Direct (Chat Completions)', optionAgentLabel: 'Chat Completions', modelLabel: 'Integration Echo' });
-      await app.fill('[role="dialog"] input[aria-label="Project Path"]', dirs.project);
+      await app.enterNewChatProjectPath(dirs.project);
       await app.fill('[role="dialog"] textarea', 'Synthetic initial prompt');
       await fixture.page.$eval('[role="dialog"] input[type="file"]', element => {
         Object.defineProperty(element, 'files', { configurable: true, value: [new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' })] });

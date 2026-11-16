@@ -10,6 +10,7 @@ describe("Lightpanda Chat Board", () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1_440, 900);
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
 
       await app.selectWorkspaceWindowSurface("Open Chat Board");

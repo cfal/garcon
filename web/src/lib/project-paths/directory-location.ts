@@ -1,4 +1,5 @@
 import { isWithinExecutorPath } from '$shared/executor-path';
+import { projectPathKey } from '$shared/project-path-preferences';
 
 export interface TypedDirectoryPath {
 	/** Directory whose children complete the typed path. */
@@ -14,7 +15,7 @@ export interface DirectoryBreadcrumb {
 
 /** Drops trailing separators so one directory has one spelling. */
 export function normalizeDirectoryPath(path: string): string {
-	return path.replace(/\/+$/, '') || '/';
+	return projectPathKey(path).replace(/\/+$/, '') || '/';
 }
 
 export function isWithinBasePath(path: string, basePath: string): boolean {
@@ -23,6 +24,7 @@ export function isWithinBasePath(path: string, basePath: string): boolean {
 
 /** Splits a path under edit into its listed directory and the partial child name. */
 export function splitTypedDirectoryPath(typed: string): TypedDirectoryPath {
+	typed = projectPathKey(typed);
 	const lastSlash = typed.lastIndexOf('/');
 	if (lastSlash < 0) return { directory: '/', partial: '' };
 	return { directory: typed.slice(0, lastSlash) || '/', partial: typed.slice(lastSlash + 1) };

@@ -46,7 +46,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
-	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
+	import { isBareChatRoute, restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
 	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
@@ -77,6 +77,7 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
+	import { bindEmptyWorkspaceLanding } from './empty-workspace-landing-binding.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -255,6 +256,17 @@
 				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
 			);
 		},
+	});
+	bindEmptyWorkspaceLanding({
+		openNewChat: handleNewChat,
+		sessions, transientLayers,
+		shell: appShell,
+		getNavigation: () => ({
+			isBareRoute: isBareChatRoute(appPathname(page.url.pathname)),
+			hasNavigationTarget: Boolean(
+				page.params.id || routeTicketId || sessions.selectedChatId || chatNavigation.pendingChatTarget,
+			),
+		}),
 	});
 
 	$effect(() => {

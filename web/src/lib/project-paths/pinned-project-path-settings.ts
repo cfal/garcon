@@ -1,10 +1,8 @@
 import type { RemoteSettingsSnapshot, RemotePathSettings, RemotePathSettingsPatch } from '$shared/settings';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import { effectiveExecutorId } from '$shared/executors';
-import {
-	nextPinnedProjectPaths,
-	sortedPinnedProjectPaths,
-} from '$lib/project-paths/project-pinned-paths.js';
+import { orderedProjectPaths, reconcileProjectPins } from '$shared/project-pins';
+import { nextPinnedProjectPaths } from '$lib/project-paths/project-pinned-paths.js';
 
 interface PinnedProjectPathUpdateOptions {
 	executorId?: string;
@@ -25,7 +23,7 @@ function buildPathsPatch(
 	options: PinnedProjectPathUpdateOptions = {},
 ): Partial<RemotePathSettings> {
 	const patch: Partial<RemotePathSettings> = {
-		pinnedProjectPaths: sortedPinnedProjectPaths(pinnedProjectPaths),
+		pinnedProjectPaths: orderedProjectPaths(pinnedProjectPaths),
 	};
 	if (options.browseStartPath !== undefined) {
 		patch.browseStartPath = options.browseStartPath;
@@ -40,16 +38,21 @@ async function persistPinnedProjectPathsOptimistically(
 	options?: PinnedProjectPathUpdateOptions,
 ): Promise<RemoteSettingsSnapshot> {
 	const executorId = effectiveExecutorId(options?.executorId);
-	const pinnedPaths = sortedPinnedProjectPaths(pinnedProjectPaths);
+	const currentRecents = executorId === 'local'
+		? snap.paths.recentProjectPaths
+		: snap.paths.byExecutor?.[executorId]?.recentPaths;
+	const { pinnedPaths, recentPaths } = reconcileProjectPins(
+		executorPinnedProjectPaths(snap, executorId), pinnedProjectPaths, currentRecents,
+	);
 	const pathsPatch: RemotePathSettingsPatch = executorId === 'local'
 		? buildPathsPatch(pinnedPaths, options)
 		: { byExecutor: { [executorId]: { pinnedPaths } } };
 	const rollback = remoteSettings.applyOptimisticSnapshot({
 		...snap,
-		paths: executorId === 'local' ? { ...snap.paths, ...buildPathsPatch(pinnedPaths, options) } : {
+		paths: executorId === 'local' ? { ...snap.paths, ...buildPathsPatch(pinnedPaths, options), recentProjectPaths: recentPaths } : {
 			...snap.paths,
 			byExecutor: { ...snap.paths.byExecutor, [executorId]: {
-				recentPaths: [], ...snap.paths.byExecutor?.[executorId], pinnedPaths,
+				...snap.paths.byExecutor?.[executorId], recentPaths, pinnedPaths,
 			} },
 		},
 	});

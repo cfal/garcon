@@ -3,6 +3,7 @@
 // the config payload used to start a session.
 
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
+import { projectPathKey } from '$shared/project-path-preferences';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { NewChatPathValidationController } from './new-chat-path-validation-controller.js';
@@ -11,8 +12,7 @@ import {
 	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
-import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
-import type { GitWorktreeItem } from '$lib/api/git.js';
+import { NewChatWorktreeState } from './new-chat-worktree-state.svelte';
 import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
@@ -53,7 +53,6 @@ import {
 	savePinnedProjectPathsOptimistically,
 } from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
-import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface NewChatFormStateOptions {
@@ -77,6 +76,8 @@ export class NewChatFormState {
 
 	// Path
 	projectPath = $state('');
+	#selectedProjectPath = $state<string | null>(null);
+	#showProjectCard = $state(false);
 	#pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
@@ -85,8 +86,6 @@ export class NewChatFormState {
 	validationStatus = $state<PathValidationStatus>('idle');
 	validationError = $state<string | null>(null);
 	readonly #pathValidation = new NewChatPathValidationController(this);
-	#worktreeRequestVersion = 0;
-	#worktreeAbort: AbortController | null = null;
 
 	// Modes
 	permissionMode = $state<PermissionMode>('default');
@@ -117,21 +116,35 @@ export class NewChatFormState {
 	// Git repo status from validate-start endpoint.
 	gitRepoStatus = $state<'unknown' | 'git' | 'non-git'>('unknown');
 
-	// Worktree modal
-	worktreeModalOpen = $state(false);
-	worktreeItems = $state<GitWorktreeItem[]>([]);
-	isLoadingWorktrees = $state(false);
-	isCreatingWorktree = $state(false);
-	worktreeError = $state<string | null>(null);
+	readonly worktrees: NewChatWorktreeState;
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();
 
 	// Injected dependencies
 	readonly #options: NewChatFormStateOptions;
-	readonly #pathCompletion = new ProjectPathCompletionController(this);
+	readonly #pathCompletion: ProjectPathCompletionController;
 
 	constructor(options: NewChatFormStateOptions) {
 		this.#options = options;
+		const getForm = () => this;
+		// Publishes completion through the same identity and validation update as manual edits.
+		this.#pathCompletion = new ProjectPathCompletionController({
+			get executorId() { return getForm().executorId; },
+			get filesAvailable() { return getForm().filesAvailable; },
+			get pathContextKey() { return getForm().pathContextKey; },
+			get projectPath() { return getForm().projectPath; },
+			set projectPath(path) { getForm().editProjectPath(path); },
+			get showBrowser() { return getForm().showBrowser; },
+			set showBrowser(open) { getForm().showBrowser = open; },
+		});
+		this.worktrees = new NewChatWorktreeState({
+			getExecutorId: () => this.executorId,
+			getProjectPath: () => this.nonblankPath,
+			getContextKey: () => this.#worktreeContextKey,
+			isAvailable: () => this.#worktreesAvailable,
+			isSelectionDisabled: () => this.isUpdatingPinnedPath,
+			selectPath: (path) => this.#selectWorktreePath(path),
+		});
 		this.preambles = new NewChatPreambleSelectionState(this);
 	}
 
@@ -168,6 +181,17 @@ export class NewChatFormState {
 	get gitAvailable(): boolean {
 		return this.#options.executors?.gitAvailable(this.executorId) ?? this.isLocalExecutor;
 	}
+	get #worktreesAvailable(): boolean {
+		const bulk = this.#options.executors?.get(this.executorId)?.bulk;
+		return this.gitAvailable && (!bulk || bulk.availability === 'ready');
+	}
+	get #worktreeContextKey(): string {
+		return JSON.stringify([
+			this.pathContextKey,
+			this.gitAvailable,
+			this.#options.executors?.get(this.executorId)?.bulk?.availability,
+		]);
+	}
 	get executorReady(): boolean {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
@@ -181,11 +205,13 @@ export class NewChatFormState {
 		if (executorId === this.executorId) return;
 		this.#executorModelCandidate ??= this.resolvedModelSelection;
 		this.executorId = executorId;
+		this.#selectedProjectPath = null;
+		this.#showProjectCard = false;
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
-		this.#cancelWorktreeLoad();
-		this.worktreeModalOpen = false;
+		this.worktrees.cancelLoad();
+		this.worktrees.modalOpen = false;
 		this.showBrowser = false;
 		this.resetTabCompletions();
 		this.selectedModelsByAgent = {};
@@ -208,6 +234,19 @@ export class NewChatFormState {
 
 	get nonblankPath(): string {
 		return this.projectPath.trim() ? this.projectPath : '';
+	}
+
+	get selectedProjectPath(): string {
+		return this.#selectedProjectPath ?? this.nonblankPath;
+	}
+
+	get projectCardPath(): string | null {
+		return this.#showProjectCard ? this.selectedProjectPath : null;
+	}
+
+	dismissProjectCard(path: string): void {
+		if (projectPathKey(path) === projectPathKey(this.selectedProjectPath))
+			this.#showProjectCard = false;
 	}
 
 	get isPinnedPath(): boolean {
@@ -275,7 +314,10 @@ export class NewChatFormState {
 
 	get resolvedModelSelection(): ResolvedModelSelection | null {
 		return resolveNewChatModelSelection(
-			this.#modelCatalog, this.agentId, this.modelValue, this.modelSelectionTarget,
+			this.#modelCatalog,
+			this.agentId,
+			this.modelValue,
+			this.modelSelectionTarget,
 		);
 	}
 
@@ -300,14 +342,19 @@ export class NewChatFormState {
 	}
 
 	get agentSelectionError(): string | null {
-		return this.settingsLoaded && this.modelCatalogValidated && !this.#selectableAgentIds.includes(this.agentId)
-			? m.chat_new_chat_errors_agent_unavailable() : null;
+		return this.settingsLoaded &&
+			this.modelCatalogValidated &&
+			!this.#selectableAgentIds.includes(this.agentId)
+			? m.chat_new_chat_errors_agent_unavailable()
+			: null;
 	}
 
 	get executionModeError(): string | null {
 		if (!this.modelCatalogValidated) return null;
-		if (!isPermissionModeSupported(this.permissionMode, this.permissionModes) ||
-			!isThinkingModeSupported(this.thinkingMode, this.thinkingModes)) {
+		if (
+			!isPermissionModeSupported(this.permissionMode, this.permissionModes) ||
+			!isThinkingModeSupported(this.thinkingMode, this.thinkingModes)
+		) {
 			return m.chat_new_chat_errors_execution_modes_unavailable();
 		}
 		return null;
@@ -556,120 +603,32 @@ export class NewChatFormState {
 		this.#images.revokeAll();
 	}
 
-	// Worktree modal
-
-	openWorktreeModal(): void {
-		if (!this.gitAvailable) return;
-		this.worktreeModalOpen = true;
-		this.worktreeError = null;
-		this.worktreeItems = [];
-		void this.loadWorktrees();
-	}
-
-	closeWorktreeModal(): void {
-		this.worktreeModalOpen = false;
-		this.worktreeError = null;
-		this.#cancelWorktreeLoad();
-	}
-
-	async loadWorktrees(): Promise<void> {
-		if (!this.gitAvailable) return;
-		const projectPath = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.pathContextKey;
-		if (!projectPath) return;
-
-		this.#worktreeAbort?.abort();
-		const abort = new AbortController();
-		this.#worktreeAbort = abort;
-		const requestVersion = ++this.#worktreeRequestVersion;
-		const current = () =>
-			this.#isCurrentWorktreeLoad(requestVersion, abort.signal) &&
-			executorId === this.executorId &&
-			projectPath === this.nonblankPath &&
-			contextKey === this.pathContextKey;
-		this.isLoadingWorktrees = true;
-		this.worktreeError = null;
-
-		try {
-			const result = await getGitWorktrees({ executorId, projectPath }, { signal: abort.signal });
-			if (!current()) return;
-			this.worktreeItems = result.worktrees;
-		} catch (error) {
-			if (isAbortError(error) || !current()) return;
-			this.worktreeError = m.git_target_load_worktrees_failed();
-			this.worktreeItems = [];
-		} finally {
-			if (this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) {
-				this.#worktreeAbort = null;
-				this.isLoadingWorktrees = false;
-			}
-		}
-	}
-
-	#cancelWorktreeLoad(): void {
-		this.#worktreeAbort?.abort();
-		this.#worktreeAbort = null;
-		this.#worktreeRequestVersion += 1;
-		this.isLoadingWorktrees = false;
-		this.isCreatingWorktree = false;
-	}
-
-	#isCurrentWorktreeLoad(requestVersion: number, signal: AbortSignal): boolean {
-		return !signal.aborted && requestVersion === this.#worktreeRequestVersion;
-	}
-
-	selectWorktree(worktreePath: string): void {
-		if (!this.gitAvailable) return;
-		this.#cancelWorktreeLoad();
+	#selectWorktreePath(worktreePath: string): void {
+		const projectPath = this.selectedProjectPath;
+		const showProjectCard = this.#showProjectCard;
 		this.selectProjectPath(worktreePath);
-		this.worktreeModalOpen = false;
-	}
-
-	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
-		if (!this.gitAvailable || this.isCreatingWorktree) return false;
-		const projectPath = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.pathContextKey;
-		if (!projectPath) return false;
-		const generation = this.#worktreeRequestVersion;
-		const current = () =>
-			generation === this.#worktreeRequestVersion &&
-			executorId === this.executorId &&
-			projectPath === this.nonblankPath &&
-			contextKey === this.pathContextKey;
-		this.isCreatingWorktree = true;
-		this.worktreeError = null;
-
-		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
-				branch,
-				baseRef,
-			});
-			if (!current()) return false;
-			if (!result.success) {
-				this.worktreeError =
-					result.error || result.message || m.chat_new_chat_create_worktree_failed();
-				return false;
-			}
-			this.selectWorktree(result.worktreePath || worktreePath);
-			return true;
-		} catch (err) {
-			if (!current()) return false;
-			this.worktreeError =
-				err instanceof Error ? err.message : m.chat_new_chat_create_worktree_failed();
-			return false;
-		} finally {
-			if (generation === this.#worktreeRequestVersion) this.isCreatingWorktree = false;
-		}
+		this.#selectedProjectPath = projectPath;
+		this.#showProjectCard = showProjectCard;
 	}
 
 	// Path validation
 
 	selectProjectPath(path: string): void {
-		this.projectPath = path;
-		this.clearError();
+		this.resetTabCompletions();
+		this.#updateProjectPath(path);
 		this.#pathValidation.validateSelectedPath();
+	}
+
+	editProjectPath(path: string): void {
+		this.#updateProjectPath(path);
+		this.#pathValidation.validateChangedPath();
+	}
+
+	#updateProjectPath(path: string): void {
+		this.projectPath = path;
+		this.#selectedProjectPath = path;
+		this.#showProjectCard = true;
+		this.clearError();
 	}
 
 	validateChangedPath(): void {
@@ -733,6 +692,7 @@ export class NewChatFormState {
 	}
 
 	dispose(): void {
+		this.worktrees.cancelLoad();
 		this.#pathCompletion.reset();
 		this.#pathValidation.dispose();
 	}
@@ -757,7 +717,13 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
-		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.executionModeError || this.attachmentError)
+		if (
+			!this.modelCatalogValidated ||
+			this.modelSelectionPending ||
+			this.modelSelectionError ||
+			this.executionModeError ||
+			this.attachmentError
+		)
 			return null;
 		if (!this.nonblankPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
@@ -816,6 +782,8 @@ export class NewChatFormState {
 			modelProtocol: seed.modelProtocol,
 		});
 		this.projectPath = seed.projectPath;
+		this.#selectedProjectPath = null;
+		this.#showProjectCard = true;
 		this.restoreExecutionModes(seed.permissionMode, seed.thinkingMode);
 		this.replaceAgentSettingsById(seed.agentSettingsById);
 		this.chatTags = [...seed.tags];
@@ -826,6 +794,8 @@ export class NewChatFormState {
 
 	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
 	reseed(prefill: string, prospectiveChatId?: ChatId): void {
+		this.#selectedProjectPath = null;
+		this.#showProjectCard = false;
 		this.#pathCompletion.reset();
 		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
@@ -835,9 +805,8 @@ export class NewChatFormState {
 		this.showBrowser = false;
 		this.hasAutoOpened = false;
 		this.gitRepoStatus = 'unknown';
-		this.worktreeModalOpen = false;
-		this.worktreeItems = [];
-		this.worktreeError = null;
+		this.worktrees.modalOpen = false;
+		this.worktrees.clear();
 		this.chatTags = [];
 		this.showTagInput = false;
 		this.#permissionModeTouched = false;

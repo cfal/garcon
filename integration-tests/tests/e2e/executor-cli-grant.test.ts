@@ -15,6 +15,7 @@ test('executor editor grants and revokes workspace CLI access without replacing 
     expect(await throwingRejectionOf(discover())).toThrow('HTTP 403');
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Settings');

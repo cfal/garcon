@@ -28,6 +28,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const header = page.locator('[data-sidebar-project-header]').filter({ has: page.locator('[data-sidebar-group-header-label]') }).first();
       const plus = header.locator('xpath=ancestor::*[@data-sidebar-group-header][1]').getByRole('button', { name: /^New chat in / });
       const dialog = page.getByRole('dialog').filter({ has: page.getByPlaceholder('How can I help you today?') });
+      const projectCard = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true })
+        .getByRole('button', { name: client.executorId === 'local' ? projectPath : `Integration worker: ${projectPath}`, exact: true });
       const prompt = dialog.getByPlaceholder('How can I help you today?');
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
       await prompt.fill('Synthetic retained project prompt');
@@ -50,7 +52,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await plus.focus();
       await page.keyboard.press('Enter');
       await validated;
-      await expect(dialog.getByRole('textbox', { name: 'Project Path' })).toHaveValue(projectPath);
+      await expect(projectCard).toHaveAttribute('aria-pressed', 'true');
       await expect(prompt).toHaveValue('Synthetic retained project prompt');
       await expect(prompt).toBeFocused();
       expect((await client.listChats()).sessions).toHaveLength(1);
@@ -68,7 +70,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await plus.click();
       await expect(dialog).toBeVisible();
       await expect(sidebar).toHaveCount(0);
-      await expect(dialog.getByRole('textbox', { name: 'Project Path' })).toHaveValue(projectPath);
+      await expect(projectCard).toHaveAttribute('aria-pressed', 'true');
       await expect(prompt).toHaveValue('Synthetic retained project prompt');
       await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
 

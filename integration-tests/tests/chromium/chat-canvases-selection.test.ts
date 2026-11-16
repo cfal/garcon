@@ -34,6 +34,8 @@ test('commits a grouped selection drag as one ordered, undoable edit', async () 
     await page.goto(integration.garcon.baseUrl, {
       waitUntil: 'domcontentloaded',
     });
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await collapseCanonicalFilesWindow(page);
     await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     await page

@@ -72,7 +72,7 @@ describe('pinned project path settings', () => {
 		vi.clearAllMocks();
 	});
 
-	it('applies sorted optimistic pinned paths before persistence resolves', async () => {
+	it('preserves optimistic pin age before persistence resolves', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeSnapshot({
@@ -90,12 +90,12 @@ describe('pinned project path settings', () => {
 		await Promise.resolve();
 
 		expect(store.snapshot?.paths.pinnedProjectPaths).toEqual([
-			'/workspace/alpha',
 			'/workspace/zeta',
+			'/workspace/alpha',
 		]);
 		expect(mockedSettingsApi.updateRemoteSettings).toHaveBeenCalledWith({
 			paths: {
-				pinnedProjectPaths: ['/workspace/alpha', '/workspace/zeta'],
+				pinnedProjectPaths: ['/workspace/zeta', '/workspace/alpha'],
 			},
 		});
 
@@ -104,7 +104,7 @@ describe('pinned project path settings', () => {
 			settings: makeSnapshot({
 				version: 2,
 				paths: {
-					pinnedProjectPaths: ['/workspace/alpha', '/workspace/zeta'],
+					pinnedProjectPaths: ['/workspace/zeta', '/workspace/alpha'],
 					browseStartPath: '',
 					recentProjectPaths: [],
 				},
@@ -114,6 +114,39 @@ describe('pinned project path settings', () => {
 
 		expect(store.snapshot?.version).toBe(2);
 	});
+
+	it.each(['local', '22222222-2222-4222-8222-222222222222'])(
+		'optimistically replaces the oldest pin only on %s and rolls back pins and saved paths on failure',
+		async (executorId) => {
+			const store = new RemoteSettingsStore();
+			const pins = ['/z', '/b', '/c', '/d', '/a'];
+			const previous = makeSnapshot({ paths: {
+				pinnedProjectPaths: pins,
+				browseStartPath: '',
+				recentProjectPaths: ['/recent'],
+				byExecutor: { '22222222-2222-4222-8222-222222222222': { pinnedPaths: pins, recentPaths: ['/recent'] } },
+			} });
+			store.applySnapshot(previous);
+			const pending = deferred<Awaited<ReturnType<typeof settingsApi.updateRemoteSettings>>>();
+			mockedSettingsApi.updateRemoteSettings.mockReturnValueOnce(pending.promise);
+			const updating = togglePinnedProjectPathOptimistically(store, '/new', { executorId });
+			await Promise.resolve();
+			const updated = store.snapshot!.paths;
+			const expected = { pinnedPaths: ['/b', '/c', '/d', '/a', '/new'], recentPaths: ['/z', '/recent'] };
+			if (executorId === 'local') {
+				expect(updated.pinnedProjectPaths).toEqual(expected.pinnedPaths);
+				expect(updated.recentProjectPaths).toEqual(expected.recentPaths);
+				expect(updated.byExecutor).toEqual(previous.paths.byExecutor);
+			} else {
+				expect(updated.byExecutor?.[executorId]).toEqual(expected);
+				expect(updated.pinnedProjectPaths).toEqual(pins);
+				expect(updated.recentProjectPaths).toEqual(['/recent']);
+			}
+			pending.reject(new Error('save failed'));
+			await expect(updating).rejects.toThrow('save failed');
+			expect(store.snapshot?.paths).toEqual(previous.paths);
+		},
+	);
 
 	it('rolls back the optimistic snapshot when persistence fails', async () => {
 		const store = new RemoteSettingsStore();

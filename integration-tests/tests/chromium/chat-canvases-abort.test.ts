@@ -60,6 +60,8 @@ async function openBoard({ page, integration }: ChromiumFixture) {
     },
   });
   await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('dialog', { name: 'New Chat', exact: true })
+    .getByRole('button', { name: 'Close', exact: true }).click();
   await collapseCanonicalFilesWindow(page);
   await clickWorkspaceWindowAddAction(page, 'Open Canvas');
   await page.locator('.svelte-flow__node[data-id="c"]').waitFor({ state: 'visible' });
@@ -105,7 +107,11 @@ for (const gesture of ['connection', 'node'] as const) {
         expect(await page.evaluate(() => window.canvasGestureListeners())).toEqual(baseline.listeners);
         expect(await page.evaluate(() => window.canvasGestureFrames())).toBeLessThanOrEqual(baseline.frames);
         expect(await page.locator('.svelte-flow__connection').count()).toBe(0);
-        if (interruption === 'hide') await page.getByRole('tab', { name: 'Canvas', exact: true }).dispatchEvent('click');
+        if (interruption === 'hide') {
+          await page.getByRole('tab', { name: 'Canvas', exact: true }).dispatchEvent('click');
+          await page.locator('[data-canvas-panel]').waitFor({ state: 'visible' });
+          await settle(page);
+        }
         const next = await point(handle(page, 'b'));
         const target = await point(handle(page, 'c'));
         await page.mouse.move(next.x, next.y);

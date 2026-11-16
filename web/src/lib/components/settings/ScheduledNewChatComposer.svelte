@@ -155,7 +155,10 @@
 				error: startup.validationStatus === 'invalid' ? startup.validationError : null,
 				worktree:
 					startup.gitAvailable && startup.gitRepoStatus === 'git'
-						? { disabled: startup.isUpdatingPinnedPath, onOpen: () => startup.openWorktreeModal() }
+						? {
+								disabled: startup.isUpdatingPinnedPath,
+								onOpen: () => startup.worktrees.openModal(),
+							}
 						: undefined,
 			}}
 		>
@@ -211,23 +214,22 @@
 	</div>
 
 	{#if conversationInput}
-	<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
-		<NewChatPreambleControls
-			selection={startup.preambles}
-			nonblankPath={startup.nonblankPath}
-			validationStatus={startup.validationStatus}
-			pickerDescription={m.scheduled_prompts_preamble_selection_description()}
-			summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}
-			summaryEmptyLabel={m.scheduled_prompts_preamble_none_current()}
-			onOpenCatalog={(returnFocus) => appShell.openPreamblesOverScheduledPrompts(returnFocus)}
-		/>
-		<p class="px-1 text-xs text-muted-foreground" data-slot="scheduled-new-chat-preamble-hint">
-			{startup.preambles.choice.mode === 'defaults'
-				? m.scheduled_prompts_preamble_defaults_hint()
-				: m.scheduled_prompts_preamble_explicit_hint()}
-		</p>
-	</div>
-
+		<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
+			<NewChatPreambleControls
+				selection={startup.preambles}
+				nonblankPath={startup.nonblankPath}
+				validationStatus={startup.validationStatus}
+				pickerDescription={m.scheduled_prompts_preamble_selection_description()}
+				summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}
+				summaryEmptyLabel={m.scheduled_prompts_preamble_none_current()}
+				onOpenCatalog={(returnFocus) => appShell.openPreamblesOverScheduledPrompts(returnFocus)}
+			/>
+			<p class="px-1 text-xs text-muted-foreground" data-slot="scheduled-new-chat-preamble-hint">
+				{startup.preambles.choice.mode === 'defaults'
+					? m.scheduled_prompts_preamble_defaults_hint()
+					: m.scheduled_prompts_preamble_explicit_hint()}
+			</p>
+		</div>
 	{/if}
 	<ScheduledPromptField
 		bind:ref={textarea}
@@ -288,19 +290,19 @@
 	</ScheduledPromptField>
 </div>
 
-{#if startup.gitAvailable && startup.worktreeModalOpen}
+{#if startup.gitAvailable && startup.worktrees.modalOpen}
 	<GitWorktreePickerModal
-		worktrees={startup.worktreeItems}
-		isLoading={startup.isLoadingWorktrees}
-		isCreating={startup.isCreatingWorktree}
-		errorMessage={startup.worktreeError}
-		onSelect={(path) => startup.selectWorktree(path)}
+		worktrees={startup.worktrees.items}
+		isLoading={startup.worktrees.isLoading}
+		isCreating={startup.worktrees.isCreating}
+		errorMessage={startup.worktrees.error}
+		onSelect={(path) => startup.worktrees.select(path)}
 		onCreate={async (path, branch, baseRef) => {
-			await startup.createWorktree(path, branch, baseRef);
+			await startup.worktrees.create(path, branch, baseRef);
 		}}
 		onRefresh={() => {
-			void startup.loadWorktrees();
+			void startup.worktrees.load();
 		}}
-		onClose={() => startup.closeWorktreeModal()}
+		onClose={() => startup.worktrees.closeModal()}
 	/>
 {/if}

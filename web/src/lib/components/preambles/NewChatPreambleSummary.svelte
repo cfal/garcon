@@ -1,7 +1,7 @@
 <script lang="ts">
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import Pencil from '@lucide/svelte/icons/pencil';
+	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
@@ -81,15 +81,17 @@
 					{emptyLabel ?? m.preamble_selection_none_will_apply()}
 				</span>
 			{:else}
-				<span
-					class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
-					data-slot="new-chat-preambles-label"
-				>
-					{readyLabel ?? m.preambles_title()}
-				</span>
-				<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
-					>·</span
-				>
+				{#if readyLabel}
+					<span
+						class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
+						data-slot="new-chat-preambles-label"
+					>
+						{readyLabel}
+					</span>
+					<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
+						>·</span
+					>
+				{/if}
 				<span class="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
 					{#each visiblePreambles as preamble, index (preamble.id)}
 						<svelte:boundary>
@@ -164,9 +166,9 @@
 		title={m.preamble_selection_edit()}
 		onclick={onEdit}
 	>
-		<Pencil class="h-4 w-4" aria-hidden="true" />
+		<Plus class="h-4 w-4" aria-hidden="true" />
 	</Button>
-	{#if onClear}
+	{#if onClear && selectedCount > 0}
 		<Button
 			type="button"
 			variant="ghost"

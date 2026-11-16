@@ -69,6 +69,8 @@ describe("Chromium Tickets interaction", () => {
       await page.goto(integration.garcon.baseUrl, {
         waitUntil: "domcontentloaded",
       });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       for (const width of [1440, 390]) {
@@ -131,6 +133,8 @@ describe("Chromium Tickets interaction", () => {
       await page.goto(integration.garcon.baseUrl, {
         waitUntil: "domcontentloaded",
       });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       await page
@@ -229,6 +233,8 @@ describe("Chromium Tickets interaction", () => {
         await page.goto(integration.garcon.baseUrl, {
           waitUntil: "domcontentloaded",
         });
+        await page.getByRole('dialog', { name: 'New Chat', exact: true })
+          .getByRole('button', { name: 'Close', exact: true }).click();
         await collapseCanonicalFilesWindow(page);
         await clickWorkspaceWindowAddAction(page, "Open Tickets");
         const row = page.locator('[data-ticket-id="G-35"]');
@@ -562,6 +568,8 @@ describe("Chromium Tickets interaction", () => {
       await page.goto(integration.garcon.baseUrl, {
         waitUntil: "domcontentloaded",
       });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       await page

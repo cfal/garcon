@@ -31,7 +31,7 @@ test('New Chat formats pasted Markdown, retains its source and draft, and submit
   await withChromiumFixture('new-chat-markdown', async ({ page, context, integration, assertNoBrowserErrors }, markPhase) => {
     await page.goto(integration.garcon.baseUrl);
     const open = page.getByRole('button', { name: 'New Chat', exact: true }).first();
-    await open.click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
     await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
     const composer = page.locator('[data-slot="new-chat-composer"]');
     const editor = composer.getByRole('textbox', { name: 'Formatted message' });
@@ -65,7 +65,7 @@ test('New Chat formats pasted Markdown, retains its source and draft, and submit
     await browserExpect(source).toBeVisible();
     await browserExpect(source).toHaveValue(markdown);
     if (await page.locator('[data-slot="directory-browser-dismiss"]').isVisible()) await page.keyboard.press('Escape');
-    await page.locator('[data-slot="new-chat-form-content"] button[title="Close"]').click();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
     await browserExpect(composer).toHaveCount(0);
     await open.click();
     await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
@@ -74,10 +74,10 @@ test('New Chat formats pasted Markdown, retains its source and draft, and submit
     await setFormat(page, 'formatted');
     await browserExpect(editor.locator('h1')).toHaveText('Review plan');
     if (await page.locator('[data-slot="directory-browser-dismiss"]').isVisible()) await page.keyboard.press('Escape');
-    await page.locator('[data-slot="new-chat-form-content"] button[title="Close"]').click();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
     await browserExpect(composer).toHaveCount(0);
     await page.reload();
-    await open.click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
     await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
     await browserExpect(editor.locator('strong')).toHaveText('important details');
     await browserExpect(source).toHaveValue(markdown);
@@ -111,7 +111,7 @@ test('New Chat formats pasted Markdown, retains its source and draft, and submit
 test('New Chat keeps its 300px input cap in Source and formatted modes on desktop and mobile', async () => {
   await withChromiumFixture('new-chat-markdown-sizing', async ({ page, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
-    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+    await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toBeVisible();
     await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
     const composer = page.locator('[data-slot="new-chat-composer"]');
     const source = composer.locator('textarea');

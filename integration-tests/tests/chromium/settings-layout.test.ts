@@ -10,6 +10,8 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -51,13 +53,17 @@ test('new-chat executor and project fields have matching heights', async () => {
     const label = 'Production build and review execution host';
     await integration.client.patch(`/api/v1/executors/${integration.client.executorId}`, { label });
     await page.goto(integration.garcon.baseUrl);
-    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
+    await browserExpect(dialog).toBeVisible();
     const picker = dialog.locator('[data-executor-picker]');
-    const project = dialog.getByLabel('Project Path', { exact: true });
+    const project = dialog.getByRole('button', { name: 'Choose folder', exact: true });
     await picker.click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
-    await browserExpect(project).toHaveValue(integration.executionDirs.project);
+    await integration.client.put('/api/v1/app/settings', { paths: { byExecutor: { [integration.client.executorId]: { pinnedPaths: [integration.executionDirs.project] } } } });
+    const projectCard = dialog.getByRole('region', { name: 'Saved and recent projects', exact: true })
+      .getByRole('button', { name: `${label}: ${integration.executionDirs.project}`, exact: true });
+    await projectCard.click();
+    await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     for (const width of [1440, 768, 390, 320]) {
@@ -65,7 +71,8 @@ test('new-chat executor and project fields have matching heights', async () => {
       const pickerRect = (await picker.boundingBox())!;
       const projectRect = (await project.boundingBox())!;
       expect(pickerRect.height).toBe(projectRect.height);
-      expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
+      expect(pickerRect.x + pickerRect.width <= projectRect.x || projectRect.x + projectRect.width <= pickerRect.x
+        || pickerRect.y + pickerRect.height <= projectRect.y || projectRect.y + projectRect.height <= pickerRect.y).toBe(true);
       expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: join(artifacts, `new-chat-fields-${width}.png`) });
     }
@@ -77,6 +84,8 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
   await withChromiumFixture('scheduled-chat-field-alignment', async ({ page, context, integration, assertNoBrowserErrors }) => {
     await initializeFixtureRepository(integration.dirs.project);
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();

@@ -47,6 +47,7 @@ import type { DerivedChatNameInput } from '../chats/chat-title.js';
 import { isRecord } from '../../../common/json.js';
 import type { ReorderChatRequest } from '../../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../../common/chat-order-sort.js';
+import type { RemoveProjectPathRequest } from '../../../common/project-path-preferences.js';
 
 import type {
   ChatFolder,
@@ -567,6 +568,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   forgetExecutor(executorId: string): Promise<void> {
     return this.#startupDefaults.forgetExecutor(executorId);
+  }
+
+  removeProjectPathFromList(input: RemoveProjectPathRequest): Promise<void> {
+    return this.#startupDefaults.removeProjectPathFromList(input);
   }
 
   getRecentProjectPaths(): string[] {

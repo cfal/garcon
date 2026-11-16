@@ -10,6 +10,8 @@ test('bundled fonts preview real faces, persist, and fit desktop and mobile pick
       if (request.resourceType() === 'font') fontRequests.push(request.url());
     });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await browserExpect(page.getByRole('button', { name: 'New Chat', exact: true }).first()).toBeVisible();
     expect(fontRequests).toEqual([]);
     expect(await page.locator('link[as="font"]').count()).toBe(0);
@@ -47,6 +49,8 @@ test('bundled fonts preview real faces, persist, and fit desktop and mobile pick
       expect(await preloads.getAttribute('href')).not.toMatch(/Italic|Bold|extended/);
     }
     await page.reload();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await browserExpect(page.locator('html')).toHaveAttribute('data-expanded-editor-font', 'roboto');
     await browserExpect(page.getByRole('button', { name: 'New Chat', exact: true }).first()).toBeVisible();
     await page.keyboard.press('Control+,');

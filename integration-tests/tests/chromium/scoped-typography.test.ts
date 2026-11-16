@@ -44,6 +44,8 @@ test("conflict diffs preserve their default and apply independent sizes with a t
     "conflict-typography",
     async ({ page, context, integration }) => {
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page.evaluate(() => {
         const host = document.createElement("div");
         host.id = "conflict-typography-fixture";
@@ -389,6 +391,8 @@ test("all typography controls fit at maximum size on desktop and touch screens",
     "typography-settings-fit",
     async ({ page, context, integration, assertNoBrowserErrors }) => {
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page
         .getByRole("button", { name: "More actions", exact: true })
         .click();

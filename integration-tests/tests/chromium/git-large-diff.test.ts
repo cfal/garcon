@@ -43,6 +43,8 @@ test('retains a large highlighted threaded review through inbox refresh, failure
     const workerUrls: string[] = [];
     page.on('worker', worker => workerUrls.push(worker.url()));
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await collapseCanonicalFilesWindow(page);
     await clickWorkspaceWindowAddAction(page, 'Open Pull Requests');
     const panel = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');

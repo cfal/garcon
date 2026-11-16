@@ -14,6 +14,7 @@ test('scheduled chat and preamble directory pickers browse the selected worker',
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.setViewport(1440, 1100);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.clickMenuItem('Scheduled prompts');

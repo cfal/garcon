@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import type { ChatCanvas, CanvasContent } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
@@ -138,7 +139,7 @@ test('keeps stale rename, selected-chat, and full-connection drafts reviewable',
         waitUntil: 'domcontentloaded',
       });
       await clickWorkspaceWindowAddAction(page, 'Open Canvas');
-      const dialog = page.getByRole('dialog');
+      let dialog = page.getByRole('dialog', { name: 'Rename box', exact: true });
       markPhase('renaming a box removed remotely');
       await page.locator('.svelte-flow__node[data-id="source"]').click();
       await page
@@ -164,9 +165,11 @@ test('keeps stale rename, selected-chat, and full-connection drafts reviewable',
       await page
         .getByRole('button', { name: 'Add chats', exact: true })
         .click();
+      dialog = page.getByRole('dialog', { name: 'Add chats', exact: true });
       await dialog.getByRole('checkbox').first().check();
       await integration.client.deleteChat(chatId);
       await dialog.getByRole('checkbox').waitFor({ state: 'detached' });
+      await browserExpect(page.getByRole('dialog', { name: 'New Chat', exact: true })).toHaveCount(0);
       expect(
         await dialog
           .getByRole('button', { name: 'Add selected chats', exact: true })
@@ -175,6 +178,9 @@ test('keeps stale rename, selected-chat, and full-connection drafts reviewable',
       await dialog.getByRole('searchbox').press('Enter');
       expect(await dialog.isVisible()).toBe(true);
       await page.keyboard.press('Escape');
+      await dialog.waitFor({ state: 'hidden' });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       markPhase('reaching the connection limit while a label is pending');
       await integration.client.put(endpoint, {
         id: 'diagram',
@@ -186,6 +192,7 @@ test('keeps stale rename, selected-chat, and full-connection drafts reviewable',
         .locator('.svelte-flow__node[data-id="source"]')
         .waitFor({ state: 'visible' });
       await page.getByRole('button', { name: 'Connect', exact: true }).click();
+      dialog = page.getByRole('dialog', { name: 'Connect', exact: true });
       await dialog.getByLabel(/^From/).selectOption('source');
       await dialog.getByLabel(/^To/).selectOption('target');
       await dialog

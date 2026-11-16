@@ -505,17 +505,17 @@ describe('settings store', () => {
       expect(paths.recentDirs).toEqual(['/a']);
     });
 
-    it('sorts pinned project paths alphabetically when path settings change', async () => {
+    it('preserves pinned project age when path settings change', async () => {
       await store.setPathSettings({
         pinnedProjectPaths: ['/workspace/zeta', ' /workspace/alpha ', '/workspace/beta', '/workspace/alpha'],
       });
 
       const paths = await store.getPathSettings();
       expect(paths.pinnedProjectPaths).toEqual([
-        ' /workspace/alpha ',
-        '/workspace/alpha',
-        '/workspace/beta',
         '/workspace/zeta',
+        ' /workspace/alpha ',
+        '/workspace/beta',
+        '/workspace/alpha',
       ]);
 
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -533,10 +533,10 @@ describe('settings store', () => {
 
       const paths = await store.getPathSettings();
       expect(paths.pinnedProjectPaths).toEqual([
-        ' /workspace/alpha ',
-        '/workspace/alpha',
-        '/workspace/beta',
         '/workspace/zeta',
+        ' /workspace/alpha ',
+        '/workspace/beta',
+        '/workspace/alpha',
       ]);
     });
 
@@ -1438,7 +1438,7 @@ describe('settings store', () => {
       expect(store.getRecentAgentSettings()).toEqual([]);
     });
 
-    it('moves duplicate recent targets to the front and caps the list', async () => {
+    it('caps agent recents while retaining all saved project paths', async () => {
       for (let index = 0; index < 21; index += 1) {
         await store.recordChatStartup({
           agentId: 'codex',
@@ -1457,7 +1457,7 @@ describe('settings store', () => {
       expect(recents).toHaveLength(20);
       expect(recents[0].model).toBe('gpt-5.5');
       expect(recents.filter((entry) => entry.model === 'gpt-5.5')).toHaveLength(1);
-      expect(store.getRecentProjectPaths()).toHaveLength(10);
+      expect(store.getRecentProjectPaths()).toHaveLength(21);
       expect(store.getRecentProjectPaths()[0]).toBe('/workspace/project-5');
     });
 

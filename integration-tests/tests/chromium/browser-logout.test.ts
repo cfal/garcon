@@ -131,6 +131,8 @@ test('confirmed logout clears browser data and sibling tabs but not another devi
 test('offline logout still abandons the browser and reports unconfirmed server revocation', async () => {
   await withChromiumFixture('browser-logout-offline', async ({ page, integration, consumeExpectedBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     let aborted = 0;
     await page.route('**/api/v1/auth/logout', route => { aborted++; return route.abort('failed'); });
     const settings = await authenticationSettings(page);

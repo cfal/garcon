@@ -46,6 +46,8 @@ test('pauses and resumes saved scheduled prompts with keyboard and touch layouts
       await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     };
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await open();
     const dialog = page.getByRole('dialog', { name: 'Scheduled Prompts', exact: true });
     const row = dialog.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Daily project review', exact: true }) });
@@ -63,6 +65,8 @@ test('pauses and resumes saved scheduled prompts with keyboard and touch layouts
       expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
       if (screenshots) await page.screenshot({ animations: 'disabled', path: join(screenshots, 'scheduled-prompts-' + viewport.width + '.png') });
       await page.reload();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await open();
       await browserExpect(toggle).not.toBeChecked();
       await toggle.click();

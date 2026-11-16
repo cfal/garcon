@@ -51,6 +51,7 @@ export function createWorkspaceFixture() {
       })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
+      removeProjectPathFromList: mock(() => Promise.resolve()),
       getPinnedChatIds: mock(() => []),
       getFolders: mock(() => []),
       addFolder: mock(() => Promise.resolve(undefined)),

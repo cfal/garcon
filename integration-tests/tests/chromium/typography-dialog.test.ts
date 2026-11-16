@@ -43,6 +43,8 @@ test("typography readiness does not imply authenticated settings are mounted", a
       await browserExpect(
         page.getByRole("dialog", { name: "Settings", exact: true }),
       ).toHaveCount(0);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page.keyboard.press("Control+,");
       await browserExpect(
         page.getByRole("dialog", { name: "Settings", exact: true }),
@@ -274,6 +276,8 @@ test("font dialog titles clear the close button at the narrowest supported width
     "font-dialog-heading-fit",
     async ({ page, integration }) => {
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await browserExpect(
         page.getByRole("button", { name: "New Chat", exact: true }).first(),
       ).toBeVisible();
@@ -416,6 +420,8 @@ test("font dialog isolates drafts, restores focus, and persists the selected bun
     "typography-dialog",
     async ({ page, integration, assertNoBrowserErrors }) => {
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page
         .getByRole("button", { name: "More actions", exact: true })
         .click();
@@ -531,10 +537,7 @@ test("expanded editor keeps its document and undo while its typography changes i
         chatOutputFont: "default",
         chatOutputFontSize: "default",
       });
-      await page
-        .getByRole("button", { name: "New Chat", exact: true })
-        .first()
-        .click();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
       const input = page.getByPlaceholder("How can I help you today?");
       await input.fill("Synthetic expanded text");
       const inlineFamily = await input.evaluate(

@@ -106,6 +106,7 @@ describe('Lightpanda preambles', () => {
       ]);
       await fixture.page.setViewport({ width: 1_280, height: 2_000 });
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       const bundledPreambleIds = new Set(
         (await fixture.integration.client.get<PreamblesSnapshot>('/api/v1/preambles'))

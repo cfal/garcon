@@ -25,6 +25,8 @@ test("a WebSocket search update retires the root reconnect status request", asyn
         socket.resolve(route);
       });
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       const request = await withTimeout(
         held.promise,
         20_000,

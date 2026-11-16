@@ -7,6 +7,7 @@ import {
   type UpdateChatTitleResponse,
 } from '../../../common/chat-title-contracts.js';
 import { parseExecutorId } from '../../../common/executors.js';
+import { parseRemoveProjectPathRequest, type RemoveProjectPathResponse } from '../../../common/project-path-preferences.js';
 import {
   GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
   PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
@@ -368,6 +369,19 @@ export default function createWorkspaceRoutes(
     }
   }
 
+  async function deleteProjectPath(body: unknown): Promise<Response> {
+    const input = parseRemoveProjectPathRequest(body);
+    if (!input) return jsonError('Invalid project path removal.', 400, 'INVALID_PROJECT_PATH_REMOVAL', false);
+    try {
+      await settings.removeProjectPathFromList(input);
+      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
+      const response: RemoveProjectPathResponse = { success: true, settings: snapshot };
+      return Response.json(response);
+    } catch (error) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postGenerationModelTest(body: JsonBody, request: Request): Promise<Response> {
     const input = asJsonBody(body);
     if (!isGenerationTestTarget(input.target)) {
@@ -404,6 +418,7 @@ export default function createWorkspaceRoutes(
     {
       '/api/v1/app/session-name': { PUT: withJsonBody(putSessionNameHandler) },
       '/api/v1/app/settings': { GET: getAppSettings, PUT: withJsonBody(putAppSettings) },
+      '/api/v1/app/settings/project-path': { DELETE: withJsonBody(deleteProjectPath) },
       '/api/v1/app/generation/test': { POST: withJsonBody(postGenerationModelTest) },
     },
     createTelegramRoutes(settings, agents, telegramNotifier, telegramSettings, projectBasePath),
