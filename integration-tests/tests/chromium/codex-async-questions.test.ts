@@ -81,6 +81,15 @@ for (const width of [1440, 390]) {
           await page.waitForURL(`**/chat/${id}`);
           await browserExpect(page.locator('[data-conversation-panel-composer-anchor="true"]')).toHaveAttribute('data-conversation-panel-chat-id', id);
           if (width === 390) await browserExpect(page.getByRole('dialog', { name: 'Chats', exact: true })).toBeHidden();
+          if (id === chatId) {
+            await browserExpect.poll(async () =>
+              await dock.isVisible() || await page.getByRole('textbox', { name: 'Deadline?', exact: true }).isVisible(),
+            ).toBe(true);
+            if (await dock.isVisible()) {
+              await dock.getByRole('button', { name: 'Dismiss question', exact: true }).click();
+              await browserExpect(dock).toHaveCount(0);
+            }
+          }
           expect(await editor.evaluate((element, original) => element === original, originalEditor)).toBe(true);
           expect((await composer.boundingBox())!.y).toBe(composerTop);
         }
