@@ -100,6 +100,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         await browserExpect.poll(() => wizard.evaluate(element => element.scrollTop)).toBe(0);
 
         if (title === 'Arrange your sidebar') {
+          await browserExpect(wizard.getByRole('checkbox', { name: 'Nest delegated chats', exact: true })).toBeChecked();
           const grouping = wizard.getByRole('checkbox', { name: 'Project path', exact: true });
           await browserExpect(grouping).not.toBeChecked();
           await grouping.check();
@@ -201,7 +202,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
           { field: 'status', enabled: false },
         ],
         sidebarSortMode: 'recent',
-        sidebarNestDelegatedChats: false,
+        sidebarNestDelegatedChats: true,
         sidebarShowProjectPath: true,
         chatListDock: 'right',
         combineToolUseMessages: false,
