@@ -6,22 +6,20 @@
 	import SidebarBackToTop from './SidebarBackToTop.svelte';
 	import { shouldShowSidebarBackToTop } from './sidebar-back-to-top';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SidebarChatListProjection } from './sidebar-row-model';
+	import type { SidebarChatListProjection } from '../../sidebar/display/sidebar-row-model';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import type {
-		PersistedChatOrderGroup,
-		RelativeChatOrderPlacement,
-	} from '$shared/chat-order-contracts';
+	import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from './sidebar-display-options';
+	} from '../../sidebar/display/sidebar-display-options';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarContentProps {
+		reorder: SidebarOrderController;
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
@@ -49,17 +47,11 @@
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		isArchiveMutationPending?: (chatId: string) => boolean;
-		onQuickMove: (
-			list: PersistedChatOrderGroup,
-			chatId: string,
-			placement: RelativeChatOrderPlacement,
-			onSuccess?: () => void,
-			onFailure?: () => void,
-		) => void;
 		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
+		reorder,
 		projection,
 		selectedChatId,
 		isLoading,
@@ -87,7 +79,6 @@
 		onTogglePinned,
 		onToggleArchive,
 		isArchiveMutationPending = () => false,
-		onQuickMove,
 		onSortChatOrder,
 	}: SidebarContentProps = $props();
 
@@ -190,7 +181,7 @@
 		{onTogglePinned}
 		{onToggleArchive}
 		{isArchiveMutationPending}
-		{onQuickMove}
+		{reorder}
 		{onSortChatOrder}
 	/>
 </ScrollArea>

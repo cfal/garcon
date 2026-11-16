@@ -25,7 +25,7 @@ const expectedConcerns = {
 		'tree',
 	],
 	terminal: ['runtime', 'sessions'],
-	sidebar: ['projects', 'search'],
+	sidebar: ['display', 'projects', 'search'],
 } as const;
 
 const componentConcerns = [

@@ -8,14 +8,11 @@
 		FORK_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
 		IMAGE_CACHE_SIZE_MIB_VALUES,
-		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		isFileOpenPlacement,
 		isForkOpenPlacement,
 		isImageCacheSizeMiB,
-		isSidebarInactivityDuration,
 		type FileOpenPlacementPreference,
 		type ForkOpenPlacementPreference,
-		type SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte.js';
 	import {
 		SNIPPET_TRIGGER_MAX_LENGTH,
@@ -52,17 +49,6 @@
 		'split-below': m.settings_fork_open_placement_split_below,
 		replace: m.settings_fork_open_placement_replace,
 	};
-	const sidebarInactivityDurationLabels: Record<SidebarInactivityDuration, () => string> = {
-		'2-days': m.settings_sidebar_inactivity_duration_2_days,
-		'3-days': m.settings_sidebar_inactivity_duration_3_days,
-		'4-days': m.settings_sidebar_inactivity_duration_4_days,
-		'5-days': m.settings_sidebar_inactivity_duration_5_days,
-		'1-week': m.settings_sidebar_inactivity_duration_1_week,
-		'2-weeks': m.settings_sidebar_inactivity_duration_2_weeks,
-		'1-month': m.settings_sidebar_inactivity_duration_1_month,
-		'2-months': m.settings_sidebar_inactivity_duration_2_months,
-		'3-months': m.settings_sidebar_inactivity_duration_3_months,
-	};
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
@@ -75,12 +61,6 @@
 	function setImageCacheSize(value: string): void {
 		const size = Number(value);
 		if (isImageCacheSizeMiB(size)) ls.set('imageCacheSizeMiB', size);
-	}
-
-	function setSidebarInactivityDuration(value: string): void {
-		if (isSidebarInactivityDuration(value)) {
-			ls.set('sidebarInactivityDuration', value);
-		}
 	}
 
 	let snippetTriggerDraft = $state(ls.snippetTrigger);
@@ -127,12 +107,7 @@
 	}
 </script>
 
-{#snippet settingRow(
-	label: string,
-	checked: boolean,
-	onToggle: () => void,
-	description?: string,
-)}
+{#snippet settingRow(label: string, checked: boolean, onToggle: () => void, description?: string)}
 	<div class="flex items-center justify-between gap-4 py-2">
 		<div class="min-w-0">
 			<div class="text-sm font-medium text-foreground">{label}</div>
@@ -182,32 +157,6 @@
 				>
 					{#each IMAGE_CACHE_SIZE_MIB_VALUES as size (size)}
 						<option value={size}>{size} MiB</option>
-					{/each}
-				</select>
-			</div>
-			<div
-				class="flex flex-col gap-2 py-2 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-4"
-			>
-				<div class="min-w-0">
-					<label
-						class="text-sm font-medium text-foreground"
-						for="local-sidebar-inactivity-duration"
-					>
-						{m.settings_sidebar_inactivity_duration()}
-					</label>
-					<p class="mt-0.5 text-xs text-muted-foreground">
-						{m.settings_sidebar_inactivity_duration_description()}
-					</p>
-				</div>
-				<select
-					id="local-sidebar-inactivity-duration"
-					class="select-native w-full min-w-0 @xl:w-auto @xl:shrink-0"
-					value={ls.sidebarInactivityDuration}
-					onchange={(event) =>
-						setSidebarInactivityDuration((event.currentTarget as HTMLSelectElement).value)}
-				>
-					{#each SIDEBAR_INACTIVITY_DURATION_VALUES as duration (duration)}
-						<option value={duration}>{sidebarInactivityDurationLabels[duration]()}</option>
 					{/each}
 				</select>
 			</div>

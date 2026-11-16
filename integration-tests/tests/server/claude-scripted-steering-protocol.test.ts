@@ -157,6 +157,66 @@ describe('pinned Claude steering protocol', () => {
     harness.model.assertSettled();
   }, 30_000);
 
+  test('correlates guidance consumed inside a task continuation without changing its origin', async () => {
+    const harness = await createHarness();
+    const inputId = '00000000-0000-4000-8000-000000000001';
+    const steerId = '00000000-0000-4000-8000-000000000002';
+    const prompt = 'Synthetic background guidance input';
+    const guidance = 'Synthetic continuation guidance';
+    const reply = 'Synthetic guided continuation reply';
+    harness.model.scriptTurn([claudeToolUse('toolu_guided_background', 'Bash', {
+      command: 'while [ ! -f background-release ]; do sleep 0.05; done; printf synthetic-background-output',
+      run_in_background: true,
+    })]);
+    harness.model.scriptTurn([claudeText('Synthetic background launched')]);
+    const held = harness.model.scriptHeldTurn([
+      claudeToolUse('toolu_guided_continuation', 'Bash', { command: 'printf synthetic-continuation-output' }),
+    ]);
+    harness.model.scriptTurn([claudeText(reply)]);
+
+    await harness.send(userFrame(harness.sessionId, inputId, prompt));
+    const initial = await harness.waitFor((message) => message.type === 'result'
+      && message.user_message_uuid === inputId, 'initial background result');
+    await writeFile(join(harness.project, 'background-release'), 'release', 'utf8');
+    await held.requested;
+    await harness.send(userFrame(harness.sessionId, steerId, `${STEERING_PREFIX}${guidance}`, 'next'));
+    await harness.waitFor(commandLifecycle(steerId, 'queued'), 'continuation guidance queued');
+    held.release();
+    const continuation = await harness.waitFor((message) => message.type === 'result'
+      && message.result === reply, 'guided task continuation result');
+    const continuationAt = harness.messages.indexOf(continuation);
+    await harness.waitFor((message, index) => index > continuationAt
+      && providerState('idle')(message), 'guided task continuation idle');
+
+    expect(initial.origin).toBeUndefined();
+    expect(continuation).toMatchObject({
+      session_id: harness.sessionId,
+      origin: { kind: 'task-notification' },
+      user_message_uuid: steerId,
+      user_message_uuids: [steerId],
+      is_error: false,
+    });
+    expect(harness.results()).toEqual([initial, continuation]);
+    expect(harness.messages.filter(commandLifecycle(steerId, 'completed'))).toHaveLength(1);
+    const queuedAt = harness.messages.findIndex(commandLifecycle(steerId, 'queued'));
+    const replayAt = harness.messages.findIndex(userReplay(steerId));
+    const startedAt = harness.messages.findIndex(commandLifecycle(steerId, 'started'));
+    const completedAt = harness.messages.findIndex(commandLifecycle(steerId, 'completed'));
+    expect([replayAt, startedAt].some((index) => index > queuedAt && index < completedAt)).toBe(true);
+    expect(completedAt).toBeLessThan(continuationAt);
+    expect(claudeModelInputText(harness.model.requests().at(-1)!).split(`${STEERING_PREFIX}${guidance}`))
+      .toHaveLength(2);
+
+    const entries = await harness.waitForNativeEntries((native) => JSON.stringify(native).includes(reply),
+      'guided task continuation native history');
+    const reloaded = convertClaudeEntries(entries);
+    expect(reloaded.flatMap((message) => message.type === 'user-message' ? [message.content] : []))
+      .toEqual([prompt, guidance]);
+    expect(reloaded.flatMap((message) => message.type === 'assistant-message' ? [message.content] : []))
+      .toEqual(['Synthetic background launched', reply]);
+    harness.model.assertSettled();
+  }, 30_000);
+
   test('keeps a peer prompt folded at a tool boundary out of reloaded user input', async () => {
     const harness = await createHarness();
     const inputId = '00000000-0000-4000-8000-000000000001';

@@ -180,6 +180,7 @@ describe('Codex history modes', () => {
         excludeTurns: true,
         path: sourceNativePath,
         lastTurnId: 'turn-1',
+        modelProvider: 'openai',
       }]);
       expect(await readFile(sourceNativePath, 'utf8')).toBe(sourceBefore);
     }, {

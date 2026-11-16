@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import type { Page, Request } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   parseReorderChatRequest,
   parseReorderChatResponse,
@@ -22,6 +24,7 @@ import {
 } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { saveNewChatProject } from '../../support/new-chat-project.js';
+import { createSidebarDelegationFixture } from '../../support/sidebar-delegation-fixture.js';
 
 const CHAT_ROW_SELECTOR = '[data-sidebar-virtual-row][data-sidebar-virtual-list-row="normal"]';
 
@@ -118,7 +121,7 @@ async function sortFromChatMenu(
   const row = fixture.page.locator(`[data-sidebar-virtual-row="${chatId}"]`);
   await row.hover();
   await row.locator('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]').click();
-  const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true });
+  const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder all chats', exact: true });
   await reorderChats.click();
   const preset = fixture.page.getByRole('menuitem', { name: label, exact: true });
   await preset.waitFor();
@@ -357,10 +360,215 @@ async function withSidebarChromiumFixture<T>(
 }
 
 describe('Chromium sidebar chat reorder', () => {
+  test('keeps native dragging alive across filtered context rows', async () => {
+    await withSidebarChromiumFixture('sidebar-filtered-context-reorder', async (fixture) => {
+      const { page, integration } = fixture;
+      await page.addInitScript(seedLocalSettings, {
+        sidebarSortMode: 'manual',
+        sidebarNestDelegatedChats: false,
+      });
+      const { a, b, b1 } = await createSidebarDelegationFixture(integration);
+      const c = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId: c, projectPath: integration.dirs.project,
+        content: 'Synthetic independent root', agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(c, started.turnId);
+      for (const [id, title] of [[a, 'matchedsidebar a'], [b, 'Context parent'], [b1, 'matchedsidebar child'], [c, 'matchedsidebar c']] as const) {
+        await integration.client.updateSessionName(id, title);
+      }
+      for (const id of [a, b, c]) {
+        await integration.client.reorderChat({ chatId: id, placement: { kind: 'boundary', boundary: 'bottom' } });
+      }
+      await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+      const nesting = page.getByRole('checkbox', { name: 'Nest delegated chats', exact: true });
+      expect(await nesting.isChecked()).toBe(false);
+      await nesting.click();
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await page.getByRole('button', { name: 'Search chats...', exact: true }).click();
+      const search = page.getByRole('dialog', { name: 'Search chats...', exact: true }).getByRole('textbox');
+      await search.fill('matchedsidebar');
+      await search.press('Enter');
+      await waitForSidebarOrder(page, [a, b, b1, c]);
+      const row = (id: string) => page.locator(`[data-sidebar-virtual-row="${id}"]`);
+      const source = (await row(c).boundingBox())!;
+      const blocked = (await row(b).boundingBox())!;
+      const target = (await row(a).boundingBox())!;
+      await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(blocked.x + blocked.width / 2, blocked.y + blocked.height / 2, { steps: 12 });
+      await page.waitForTimeout(300);
+      expect(await page.locator('[data-sidebar-branch-drop-indicator]').count()).toBe(0);
+      expect(await sidebarOrder(page)).toEqual([a, b, b1, c]);
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height * 0.2, { steps: 12 });
+      await page.waitForSelector('[data-sidebar-branch-drop-indicator]');
+      const response = page.waitForResponse(response => isReorderRequest(response.request()));
+      await page.mouse.up();
+      expect((await response).ok()).toBe(true);
+      await waitForSidebarOrder(page, [c, a, b, b1]);
+      expect(capturedReorderRequests(fixture)).toEqual([{
+        chatId: c, placement: { kind: 'relative', referenceChatId: a, position: 'before' },
+      }]);
+      for (const edge of ['top', 'bottom'] as const) {
+        for (const id of [a, b, c]) {
+          await integration.client.reorderChat({ chatId: id, placement: { kind: 'boundary', boundary: 'bottom' } });
+        }
+        await waitForSidebarOrder(page, [a, b, b1, c]);
+        const sourceId = edge === 'top' ? a : c;
+        const targetId = edge === 'top' ? c : a;
+        await dragRelative(page, { sourceId, targetId, edge });
+        await waitForSidebarOrder(page, edge === 'top' ? [b, b1, a, c] : [a, c, b, b1]);
+        expect(capturedReorderRequests(fixture).at(-1)).toEqual({
+          chatId: sourceId,
+          placement: { kind: 'relative', referenceChatId: targetId, position: edge === 'top' ? 'before' : 'after' },
+        });
+      }
+      expect(capturedReorderRequests(fixture)).toHaveLength(3);
+      expect(fixture.browserErrors).toEqual([]);
+    });
+  }, 120_000);
+
+  test('moves whole delegated branches with one root request and retains nested priority after reload', async () => {
+    await withSidebarChromiumFixture('sidebar-delegated-reorder', async (fixture) => {
+      const { page, integration } = fixture;
+      await page.addInitScript(seedLocalSettings, {
+        sidebarSortMode: 'manual',
+        sidebarNestDelegatedChats: true,
+      });
+      const { a, b, a1, a2, b1, canonical } = await createSidebarDelegationFixture(integration);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+      await waitForSidebarOrder(page, [b, b1, a, a1, a2]);
+      const parentBounds = await page
+        .locator(`[data-sidebar-virtual-row="${a}"] [data-slot="chat-summary-header"]`)
+        .boundingBox();
+      const childBounds = await page
+        .locator(`[data-sidebar-virtual-row="${a1}"] [data-slot="chat-summary-header"]`)
+        .boundingBox();
+      expect(childBounds!.x).toBeGreaterThan(parentBounds!.x);
+      await dragRelative(page, { sourceId: b, targetId: a, edge: 'bottom' });
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      expect(await normalOrder(integration)).toEqual([a1, a, b, b1, a2]);
+      expect(capturedReorderRequests(fixture)).toEqual([
+        {
+          chatId: b,
+          placement: {
+            kind: 'relative',
+            referenceChatId: a,
+            position: 'after',
+          },
+        },
+      ]);
+      expect((await normalOrder(integration)).filter((id) => id !== b)).toEqual(
+        canonical.filter((id) => id !== b),
+      );
+
+      await dragRelative(page, { sourceId: a2, targetId: a1, edge: 'top' });
+      await waitForSidebarOrder(page, [a, a2, a1, b, b1]);
+      await page.reload();
+      await waitForSidebarOrder(page, [a, a2, a1, b, b1]);
+
+      const aRow = page.locator(`[data-sidebar-virtual-row="${a}"]`);
+      await page
+        .locator(`[data-sidebar-virtual-row="${a1}"] [data-slot="chat-summary-header"]`)
+        .click();
+      await aRow.locator('[data-slot="chat-summary-header"]').click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Collapse delegated chats', exact: true }).click();
+      await waitForSidebarOrder(page, [a, b, b1]);
+      expect(await aRow.locator('.chat-item-root .bg-sidebar-chat-item-selected-bg').count()).toBe(
+        1,
+      );
+      expect(await aRow.locator('[aria-current="page"]').count()).toBe(0);
+      await dragRelative(page, { sourceId: a, targetId: b, edge: 'bottom' });
+      await waitForSidebarOrder(page, [b, b1, a]);
+      await aRow.getByRole('button', { name: 'Chat actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Expand delegated chats', exact: true }).click();
+      await waitForSidebarOrder(page, [b, b1, a, a2, a1]);
+      expect(capturedReorderRequests(fixture).map((request) => request.chatId)).toEqual([b, a2, a]);
+      const beforeInvalid = await normalOrder(integration);
+      await page
+        .locator(`[data-sidebar-virtual-row="${a1}"]`)
+        .dragTo(page.locator(`[data-sidebar-virtual-row="${b1}"]`));
+      expect(await normalOrder(integration)).toEqual(beforeInvalid);
+      expect(capturedReorderRequests(fixture)).toHaveLength(3);
+
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('menuitemradio', { name: 'Recent activity', exact: true }).click();
+      const cursor = integration.client.markEvents();
+      const turn = await integration.client.runDirectChat({
+        chatId: a1,
+        content: 'Synthetic recent branch update',
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(a1, turn.turnId, {
+        afterIndex: cursor,
+      });
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      expect(await normalOrder(integration)).toEqual(beforeInvalid);
+      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      const assertInternalIndentation = async () => {
+        const geometry = await page.locator(CHAT_ROW_SELECTOR).evaluateAll((rows) => rows.map(row => {
+          const button = row.querySelector<HTMLButtonElement>('.chat-item-root button')!;
+          const bounds = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          return {
+            id: row.getAttribute('data-sidebar-virtual-row'),
+            leftInset: bounds.left - row.getBoundingClientRect().left,
+            width: bounds.width,
+            leftPadding: style.paddingLeft,
+            rightPadding: style.paddingRight,
+          };
+        }));
+        const parent = geometry.find(row => row.id === a)!;
+        const child = geometry.find(row => row.id === a2)!;
+        expect(parent.leftPadding).toBe('12px');
+        expect(child.leftPadding).toBe('24px');
+        expect(parent.rightPadding).toBe('8px');
+        expect(child.rightPadding).toBe('8px');
+        expect(parent.leftInset).toBe(0);
+        expect(child.leftInset).toBe(0);
+        expect(child.width).toBe(parent.width);
+        expect(await page.locator(`${CHAT_ROW_SELECTOR} > [data-sidebar-virtual-row-content] > button`).count()).toBe(0);
+        const button = page.locator(`[data-sidebar-virtual-row="${a2}"] .chat-item-root button`).first();
+        await page.mouse.move(385, 5);
+        const beforeHover = await button.evaluate(el => getComputedStyle(el).backgroundColor);
+        await button.hover({ position: { x: 4, y: 10 } });
+        await page.waitForFunction(({ id, before }) => {
+          const el = document.querySelector(`[data-sidebar-virtual-row="${id}"] .chat-item-root button`)!;
+          return el.matches(':hover') && getComputedStyle(el).backgroundColor !== before;
+        }, { id: a2, before: beforeHover });
+      };
+      await assertInternalIndentation();
+      await page.screenshot({
+        path: join(artifacts, 'sidebar-branches-desktop.png'),
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForSelector('.mobile-shell');
+      await page.getByRole('button', { name: 'Menu', exact: true }).click();
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      await assertInternalIndentation();
+      await aRow.getByRole('button', { name: 'Chat actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Collapse delegated chats', exact: true }).click();
+      await waitForSidebarOrder(page, [a, b, b1]);
+      await aRow.getByRole('button', { name: 'Chat actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Expand delegated chats', exact: true }).click();
+      await waitForSidebarOrder(page, [a, a1, a2, b, b1]);
+      await page.screenshot({
+        path: join(artifacts, 'sidebar-branches-mobile.png'),
+      });
+      expect(fixture.browserErrors).toEqual([]);
+    });
+  }, 120_000);
+
   test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
     await withSidebarChromiumFixture('sidebar-chat-reorder', async (fixture) => {
       // Drag reorder is only enabled under manual sidebar sort.
-      await fixture.page.addInitScript(seedLocalSettings, { sidebarSortMode: 'manual' });
+      await fixture.page.addInitScript(seedLocalSettings, {
+        sidebarSortMode: 'manual',
+        sidebarNestDelegatedChats: false,
+      });
       const chatIds = await createChats(fixture.integration, 4);
       const original = await normalOrder(fixture.integration);
       expect(original).toHaveLength(chatIds.length);
@@ -502,7 +710,7 @@ describe('Chromium sidebar chat reorder', () => {
         .click();
       await fixture.page.getByRole('menuitem', { name: 'Select', exact: true }).waitFor();
       expect(
-        await fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true }).count(),
+        await fixture.page.getByRole('menuitem', { name: 'Reorder all chats', exact: true }).count(),
       ).toBe(0);
       expect(fixture.browserErrors).toEqual([]);
     });

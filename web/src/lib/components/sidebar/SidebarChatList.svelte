@@ -5,26 +5,19 @@
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import { Button } from '$lib/components/ui/button';
 	import SidebarVirtualSortableChatList from './SidebarVirtualSortableChatList.svelte';
-	import {
-		SidebarChatReorderState,
-		type SidebarChatReorderRequest,
-	} from './sidebar-chat-reorder-state.svelte.ts';
-	import { buildSidebarRowModel } from './sidebar-row-model';
+	import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from './sidebar-display-options';
-	import type { SidebarChatListProjection } from './sidebar-row-model';
+	} from '../../sidebar/display/sidebar-display-options';
+	import type { SidebarChatListProjection } from '../../sidebar/display/sidebar-row-model';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
-	import type {
-		PersistedChatOrderGroup,
-		RelativeChatOrderPlacement,
-	} from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatListProps {
+		reorder: SidebarOrderController;
 		viewportRef?: HTMLElement | null;
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
@@ -53,17 +46,11 @@
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
-		onQuickMove: (
-			list: PersistedChatOrderGroup,
-			chatId: string,
-			placement: RelativeChatOrderPlacement,
-			onSuccess?: () => void,
-			onFailure?: () => void,
-		) => void;
 		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
+		reorder,
 		viewportRef = null,
 		projection,
 		selectedChatId,
@@ -92,46 +79,10 @@
 		onManageTags,
 		onOpenInNewWindow,
 		newWindowEdges,
-		onQuickMove,
 		onSortChatOrder,
 	}: SidebarChatListProps = $props();
 	let isFiltered = $derived(searchFilter.trim().length > 0);
-	let displayedChats = $derived(projection.rowModelInput.displayedChats);
-	let showChats = $derived(!isLoading && displayedChats.length > 0);
-	let hasPinnedChats = $derived(projection.hasPinnedChats);
-	let baseRowModel = $derived(projection.rowModel);
-
-	const reorder = new SidebarChatReorderState({
-		get visibleOrders() {
-			return baseRowModel.visibleOrders;
-		},
-	});
-
-	let virtualRowModel = $derived.by(() => {
-		if (!reorder.hasOverrides) return baseRowModel;
-		return buildSidebarRowModel({
-			...projection.rowModelInput,
-			orders: {
-				pinned: reorder.orderFor('pinned'),
-				normal: reorder.orderFor('normal'),
-				archived: reorder.orderFor('archived'),
-			},
-		});
-	});
-
-	$effect(() => {
-		reorder.reconcile();
-	});
-
-	function persistReorderRequest(request: SidebarChatReorderRequest): void {
-		onQuickMove(
-			request.list,
-			request.chatId,
-			request.placement,
-			() => reorder.completeIfCurrent(request.list, request.sequence),
-			() => reorder.rollbackIfCurrent(request.list, request.sequence, request.visibleOrder),
-		);
-	}
+	let showChats = $derived(!isLoading && projection.rowModel.matchingChatIds.length > 0);
 </script>
 
 {#if isLoading}
@@ -181,7 +132,7 @@
 	</div>
 {:else}
 	<SidebarVirtualSortableChatList
-		rows={virtualRowModel.rows}
+		rows={projection.rowModel.rows}
 		{viewportRef}
 		{selectedChatId}
 		{currentTime}
@@ -193,7 +144,7 @@
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{reorder}
-		onPersistReorder={persistReorderRequest}
+		onPersistReorder={(request) => reorder.submit(request)}
 		{onChatSelect}
 		{onDeleteChat}
 		{onStartRenameChat}
@@ -210,6 +161,5 @@
 		{onSortChatOrder}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
-		{hasPinnedChats}
 	/>
 {/if}

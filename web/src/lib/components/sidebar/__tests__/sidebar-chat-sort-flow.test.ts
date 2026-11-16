@@ -45,7 +45,7 @@ function createChat(): ChatSessionRecord {
 
 async function selectSortPreset(label: 'By creation time' | 'By recent activity'): Promise<void> {
 	await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-	const reorderSubmenu = screen.getByRole('menuitem', { name: 'Reorder chats' });
+	const reorderSubmenu = screen.getByRole('menuitem', { name: 'Reorder all chats' });
 	reorderSubmenu.focus();
 	await fireEvent.keyDown(reorderSubmenu, { key: 'ArrowRight' });
 	await fireEvent.click(await screen.findByRole('menuitem', { name: label }));
@@ -124,7 +124,7 @@ describe('sidebar chat sort flow', () => {
 		expect(onRequestRecenter).not.toHaveBeenCalled();
 	});
 
-	it('reports an API failure without refreshing or reporting success', async () => {
+	it('reconciles an unknown API failure without reporting success', async () => {
 		const notifications = { error: vi.fn(), info: vi.fn() };
 		const onQuietRefresh = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 		const onRequestRecenter = vi.fn();
@@ -142,9 +142,11 @@ describe('sidebar chat sort flow', () => {
 		await selectSortPreset('By creation time');
 
 		await waitFor(() => {
-			expect(notifications.error).toHaveBeenCalledWith('Failed to reorder chats.');
+			expect(notifications.error).toHaveBeenCalledWith(
+				"Couldn't confirm the chat order change. Refresh to check the current order.",
+			);
 		});
-		expect(onQuietRefresh).not.toHaveBeenCalled();
+		expect(onQuietRefresh).toHaveBeenCalledOnce();
 		expect(notifications.info).not.toHaveBeenCalled();
 		expect(onRequestRecenter).not.toHaveBeenCalled();
 	});

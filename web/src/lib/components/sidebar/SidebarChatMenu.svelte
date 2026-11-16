@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import Pin from '@lucide/svelte/icons/pin';
@@ -17,6 +19,7 @@
 	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import History from '@lucide/svelte/icons/history';
+	import ListTree from '@lucide/svelte/icons/list-tree';
 	import {
 		DropdownMenuItem,
 		DropdownMenuSeparator,
@@ -34,12 +37,17 @@
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatMenuProps {
+		delegatedChatsCollapsed?: boolean;
+		onToggleDelegatedChats?: () => void;
 		session: ChatSessionRecord;
 		isPinned: boolean;
 		isArchived: boolean;
 		canFork: boolean;
 		canForkNow: boolean;
 		onEnterMultiSelect?: (chatId: string) => void;
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
+		moveBoundaryLabels?: { first: string; last: string };
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
@@ -58,12 +66,17 @@
 	}
 
 	let {
+		delegatedChatsCollapsed,
+		onToggleDelegatedChats,
 		session,
 		isPinned,
 		isArchived,
 		canFork,
 		canForkNow,
 		onEnterMultiSelect,
+		onMoveUp,
+		onMoveDown,
+		moveBoundaryLabels,
 		onMoveToTop,
 		onMoveToBottom,
 		onSortChatOrder,
@@ -82,7 +95,14 @@
 	}: SidebarChatMenuProps = $props();
 
 	const hasSidebarActions = $derived(
-		Boolean(onEnterMultiSelect || onMoveToTop || onMoveToBottom || onSortChatOrder),
+		Boolean(
+			onEnterMultiSelect ||
+			onMoveUp ||
+			onMoveDown ||
+			onMoveToTop ||
+			onMoveToBottom ||
+			onSortChatOrder,
+		),
 	);
 	const canOpenInNewWindow = $derived(
 		WORKSPACE_WINDOW_EDGES.some((edge) => newWindowEdges[edge]?.allowed === true),
@@ -112,6 +132,14 @@
 	}
 </script>
 
+{#if delegatedChatsCollapsed !== undefined}
+	<DropdownMenuItem disabled={!onToggleDelegatedChats} onSelect={onToggleDelegatedChats}>
+		<ListTree />
+		{delegatedChatsCollapsed ? m.sidebar_branch_expand() : m.sidebar_branch_collapse()}
+	</DropdownMenuItem>
+	<DropdownMenuSeparator />
+{/if}
+
 {#if hasSidebarActions}
 	{#if onEnterMultiSelect}
 		<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
@@ -119,16 +147,22 @@
 			{m.sidebar_select_enter()}
 		</DropdownMenuItem>
 	{/if}
+	{#if onMoveUp}<DropdownMenuItem onclick={onMoveUp}
+			><ArrowUp class="size-4" />{m.sidebar_move_up()}</DropdownMenuItem
+		>{/if}
+	{#if onMoveDown}<DropdownMenuItem onclick={onMoveDown}
+			><ArrowDown class="size-4" />{m.sidebar_move_down()}</DropdownMenuItem
+		>{/if}
 	{#if onMoveToTop}
 		<DropdownMenuItem onclick={onMoveToTop}>
 			<ArrowUpToLine />
-			{m.sidebar_chats_move_to_top()}
+			{moveBoundaryLabels?.first ?? m.sidebar_chats_move_to_top()}
 		</DropdownMenuItem>
 	{/if}
 	{#if onMoveToBottom}
 		<DropdownMenuItem onclick={onMoveToBottom}>
 			<ArrowDownToLine />
-			{m.sidebar_chats_move_to_bottom()}
+			{moveBoundaryLabels?.last ?? m.sidebar_chats_move_to_bottom()}
 		</DropdownMenuItem>
 	{/if}
 	{#if onSortChatOrder}
@@ -196,7 +230,7 @@
 
 <DropdownMenuItem
 	disabled={isArchiveMutationPending}
-	onclick={() => {
+	onSelect={() => {
 		if (!isArchiveMutationPending) onTogglePinned(session.id);
 	}}
 >
@@ -205,7 +239,7 @@
 </DropdownMenuItem>
 <DropdownMenuItem
 	disabled={isArchiveMutationPending}
-	onclick={() => {
+	onSelect={() => {
 		if (!isArchiveMutationPending) onToggleArchive(session.id);
 	}}
 >

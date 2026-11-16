@@ -2,7 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { inspectCodexHistoryProfile, inspectCodexSessionIdentity } from '../history-profile.ts';
+import {
+  inspectCodexHistoryProfile,
+  inspectCodexSessionIdentity,
+  inspectCodexSessionModelProvider,
+} from '../history-profile.ts';
 
 async function withProfile(payload, run, timestamp = '2026-07-20T00:00:00.000Z') {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-history-profile-'));
@@ -16,6 +20,30 @@ async function withProfile(payload, run, timestamp = '2026-07-20T00:00:00.000Z')
 }
 
 describe('inspectCodexHistoryProfile', () => {
+  it.each([undefined, null, 'synthetic-provider'])('reads the saved model provider without guessing an absent provider (%j)', async (model_provider) => {
+    await withProfile({ id: 'thread-1', model_provider }, async (nativePath) => {
+      await expect(inspectCodexSessionModelProvider({
+        nativePath, expectedThreadId: 'thread-1', signal: new AbortController().signal,
+      })).resolves.toBe(model_provider ?? null);
+    });
+  });
+
+  it.each([[''], [' '], [3], [{}], [[]]])('rejects malformed saved model providers (%j)', async (model_provider) => {
+    await withProfile({ id: 'thread-1', model_provider }, async (nativePath) => {
+      await expect(inspectCodexSessionModelProvider({
+        nativePath, expectedThreadId: 'thread-1', signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', details: { reason: 'invalid-metadata' } });
+    });
+  });
+
+  it('checks thread identity before returning the saved provider', async () => {
+    await withProfile({ id: 'thread-1', model_provider: 'synthetic-provider' }, async (nativePath) => {
+      await expect(inspectCodexSessionModelProvider({
+        nativePath, expectedThreadId: 'thread-2', signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', details: { reason: 'thread-mismatch' } });
+    });
+  });
+
   it.each([['', 'empty-source'], [' \n', 'invalid-metadata'], ['{', 'invalid-metadata']])(
     'distinguishes zero-byte history from malformed or incomplete metadata (%j)', async (content, reason) => {
       await withProfile({ id: 'thread-1' }, async (nativePath) => {

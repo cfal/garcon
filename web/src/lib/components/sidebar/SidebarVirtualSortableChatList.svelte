@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { onDestroy, onMount, untrack } from 'svelte';
+	import * as m from '$lib/paraglide/messages.js';
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
@@ -15,33 +16,32 @@
 		DEFAULT_CHAT_ROW_OVERSCAN,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
-	} from './sidebar-virtual-chat-list';
+	} from '../../sidebar/display/sidebar-virtual-chat-list';
 	import {
-		closestEdgeForRow,
-		mountedChatRowIds as domMountedChatRowIds,
 		mountedElementForScrollTarget as domMountedElementForScrollTarget,
-		mountedRowAtPoint,
-		mountedVirtualItemAtPoint,
 		pointIsInsideViewport as domPointIsInsideViewport,
 		sidebarScrollTargetForChat,
 	} from './sidebar-chat-list-dom';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from './sidebar-display-options';
+	} from '../../sidebar/display/sidebar-display-options';
 	import {
-		SidebarChatReorderState,
+		SidebarOrderController,
 		type SidebarChatReorderRequest,
-	} from './sidebar-chat-reorder-state.svelte.ts';
+	} from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import {
 		getSidebarChatDragData,
-		getSidebarChatDropTargetData,
 		isSidebarChatDragData,
 		resolveSidebarDropInstruction,
-		resolveSidebarDropInstructionForTarget,
 		type SidebarChatDragData,
 		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
+	import {
+		sidebarPointDropContext,
+		sidebarFallbackDropInstruction,
+		type SidebarPointDropContext,
+	} from './sidebar-drop-targets';
 	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -62,7 +62,7 @@
 		displayOptions?: SidebarDisplayOptions;
 		rowHeight?: number;
 		overscan?: number;
-		reorder: SidebarChatReorderState;
+		reorder: SidebarOrderController;
 		onPersistReorder: (request: SidebarChatReorderRequest) => void;
 		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 		onChatSelect: (chatId: string) => void;
@@ -82,7 +82,6 @@
 		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		hasPinnedChats?: boolean;
 	}
 
 	let {
@@ -117,7 +116,6 @@
 		onNewProjectChat,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
-		hasPinnedChats = false,
 	}: SidebarVirtualSortableChatListProps = $props();
 
 	const appShell = getAppShell();
@@ -132,6 +130,7 @@
 
 	let activeDrop = $state<{ chatId: string; edge: Edge | null } | null>(null);
 	let draggingChatId = $state<string | null>(null);
+	let dragScopeKey: string | null = null;
 	let listEl = $state<HTMLElement | null>(null);
 	let lastValidDrop: SidebarDropInstruction | null = null;
 	let touchDrag: {
@@ -159,15 +158,57 @@
 	// recent-activity sort is derived, so reordering is disabled there.
 	// Dragging a chat onto a workspace window stays available in every sort mode.
 	let dragEnabled = $derived(!isMultiSelectMode);
-	let reorderEnabled = $derived(dragEnabled && displayOptions.sortMode === 'manual');
+	let reorderEnabled = $derived(
+		dragEnabled && displayOptions.sortMode === 'manual' && !reorder.busy,
+	);
+	const moveBoundaryLabels = $derived.by(() => {
+		if (isFiltered) {
+			return { first: m.sidebar_move_first_filtered(), last: m.sidebar_move_last_filtered() };
+		}
+		if (
+			displayOptions.nestDelegatedChats ||
+			displayOptions.groupingFields.some((field) => field.enabled)
+		) {
+			return { first: m.sidebar_move_first_group(), last: m.sidebar_move_last_group() };
+		}
+		return undefined;
+	});
+	const indicatorIndex = $derived.by(() => {
+		if (!activeDrop) return -1;
+		let index = rows.findIndex((row) => row.type === 'chat' && row.chat.id === activeDrop!.chatId);
+		if (index < 0 || activeDrop.edge !== 'bottom') return index;
+		const depth = rows[index].depth;
+		while (index + 1 < rows.length && rows[index + 1].depth > depth) index++;
+		return index;
+	});
+	$effect(() => {
+		if (!draggingChatId) return;
+		const source = rows.find((row) => row.type === 'chat' && row.chat.id === draggingChatId);
+		if (source?.type !== 'chat') {
+			untrack(() => {
+				workspaceChatDrag.endIfOwned(draggingChatId!);
+				reorder.cancel();
+				cancelTouchDrag();
+				clearDragPresentation();
+			});
+			return;
+		}
+		if (!reorder.activeList) return;
+		if (
+			!reorderEnabled ||
+			reorder.dragPresentationChanged ||
+			source.reorderScopeKey !== dragScopeKey ||
+			!source.reorderScopeIds.includes(source.chat.id)
+		) {
+			untrack(() => {
+				reorder.cancel();
+				cancelTouchDrag();
+				activeDrop = null;
+				lastValidDrop = null;
+			});
+		}
+	});
 	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
-	type SidebarPointDropContext =
-		| { kind: 'outside' }
-		| { kind: 'empty' }
-		| { kind: 'source-row' }
-		| { kind: 'compatible-row'; instruction: SidebarDropInstruction }
-		| { kind: 'blocked-row' }
-		| { kind: 'blocked-item' };
 
 	function syncSeparatorPixelRatio(): void {
 		separatorPixelRatio = window.devicePixelRatio || 1;
@@ -278,6 +319,7 @@
 	function clearDragPresentation(): void {
 		activeDrop = null;
 		draggingChatId = null;
+		dragScopeKey = null;
 		lastValidDrop = null;
 	}
 
@@ -286,6 +328,7 @@
 		if (touchDrag) cancelTouchDrag();
 		clearDragPresentation();
 		draggingChatId = row.chat.id;
+		dragScopeKey = row.reorderScopeKey;
 		if (reorderEnabled) {
 			reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
 		}
@@ -295,45 +338,27 @@
 	function cancelUnmountedDragSource(chatId: string): void {
 		const ownsTouchDrag = touchDrag?.sourceChatId === chatId;
 		const ownsNativeDrag = draggingChatId === chatId && !(ownsTouchDrag && touchDrag?.activated);
+		if (!ownsTouchDrag && !ownsNativeDrag) return;
+		if (rows.some((row) => row.type === 'chat' && row.chat.id === chatId)) {
+			if (touchDrag?.sourceChatId === chatId && !touchDrag.activated) cancelTouchDrag();
+			return;
+		}
 		if (ownsTouchDrag) cancelTouchDrag();
 		if (!ownsNativeDrag) return;
 		// Window-only drags (derived sort modes) survive a source row unmount: a
 		// real drop still reaches the list-level monitor and ends the drag there,
 		// and a cancelled drag is recovered by pragmatic's broken-drag detection.
-		// Reorder drags need eager cleanup because their preview state is tied to
-		// the mounted rows.
+		// Reorder drags cancel only when the source leaves the projection.
 		if (!reorderEnabled) return;
-		if (reorder.activeList) reorder.cancel(reorder.activeList);
+		if (reorder.activeList) reorder.cancel();
 		clearDragPresentation();
 		workspaceChatDrag.endIfOwned(chatId);
 	}
 
-	function pointIsInsideViewport(clientX: number, clientY: number): boolean {
-		return Boolean(viewportRef && domPointIsInsideViewport(viewportRef, clientX, clientY));
-	}
-
 	function inputIsInsideViewport(input: Input): boolean {
-		return pointIsInsideViewport(input.clientX, input.clientY);
-	}
-
-	function lastValidDropMatches(sourceData: SidebarChatDragData): boolean {
-		return (
-			lastValidDrop?.sourceChatId === sourceData.chatId &&
-			lastValidDrop.sourceList === sourceData.list &&
-			lastValidDrop.sourceScopeKey === sourceData.reorderScopeKey
+		return Boolean(
+			viewportRef && domPointIsInsideViewport(viewportRef, input.clientX, input.clientY),
 		);
-	}
-
-	function lastValidDropMatchesPreviewedSourcePlacement(sourceData: SidebarChatDragData): boolean {
-		if (!lastValidDropMatches(sourceData) || !lastValidDrop) return false;
-		const mountedOrder = domMountedChatRowIds(viewportRef ?? listEl);
-		const sourceIndex = mountedOrder.indexOf(sourceData.chatId);
-		const targetIndex = mountedOrder.indexOf(lastValidDrop.targetChatId);
-		if (sourceIndex < 0 || targetIndex < 0) return false;
-
-		if (lastValidDrop.closestEdge === 'top') return sourceIndex === targetIndex - 1;
-		if (lastValidDrop.closestEdge === 'bottom') return sourceIndex === targetIndex + 1;
-		return Math.abs(sourceIndex - targetIndex) === 1;
 	}
 
 	function pointDropContext(
@@ -341,54 +366,29 @@
 		clientX: number,
 		clientY: number,
 	): SidebarPointDropContext {
-		if (!pointIsInsideViewport(clientX, clientY)) return { kind: 'outside' };
-
-		const virtualItem = mountedVirtualItemAtPoint(clientX, clientY);
-		const rowEl = mountedRowAtPoint(clientX, clientY);
-		if (!rowEl) return virtualItem ? { kind: 'blocked-item' } : { kind: 'empty' };
-
-		const targetChatId = rowEl.dataset.sidebarVirtualRow;
-		const targetList = rowListFromElement(rowEl);
-		const targetScopeKey = rowScopeFromElement(rowEl);
-		if (!targetChatId || !targetList || !targetScopeKey) return { kind: 'blocked-row' };
-
-		if (
-			targetChatId === sourceData.chatId &&
-			targetList === sourceData.list &&
-			targetScopeKey === sourceData.reorderScopeKey
-		) {
-			return { kind: 'source-row' };
-		}
-
-		const instruction = resolveSidebarDropInstructionForTarget({
-			source: sourceData,
-			target: getSidebarChatDropTargetData({
-				chatId: targetChatId,
-				list: targetList,
-				index: -1,
-				instanceId,
-				reorderScopeKey: targetScopeKey,
-			}),
-			closestEdge: closestEdgeForRow(rowEl, clientY),
-		});
-		return instruction ? { kind: 'compatible-row', instruction } : { kind: 'blocked-row' };
+		return sidebarPointDropContext(viewportRef, instanceId, sourceData, clientX, clientY, rows);
 	}
 
 	function fallbackInstructionForPointContext(
 		sourceData: SidebarChatDragData,
 		context: SidebarPointDropContext,
 	): SidebarDropInstruction | null {
-		if (context.kind === 'compatible-row') return context.instruction;
-		const fallback = lastValidDrop;
-		if (!fallback || !lastValidDropMatches(sourceData)) return null;
-		if (context.kind === 'empty') return fallback;
-		if (context.kind === 'source-row' && lastValidDropMatchesPreviewedSourcePlacement(sourceData)) {
-			return fallback;
-		}
-		return null;
+		return sidebarFallbackDropInstruction(sourceData, context, lastValidDrop, rows);
 	}
 
 	function applySidebarDropInstruction(instruction: SidebarDropInstruction): void {
+		const source = chatRowForId(instruction.sourceChatId);
+		const target = chatRowForId(instruction.targetChatId);
+		if (
+			!source ||
+			!target ||
+			source.reorderScopeKey !== instruction.sourceScopeKey ||
+			target.reorderScopeKey !== instruction.sourceScopeKey ||
+			!source.reorderScopeIds.includes(target.chat.id)
+		) {
+			clearDropPreview();
+			return;
+		}
 		activeDrop = { chatId: instruction.targetChatId, edge: instruction.closestEdge };
 		reorder.preview({
 			list: instruction.sourceList,
@@ -398,9 +398,32 @@
 		});
 	}
 
+	function clearDropPreview(): void {
+		reorder.clearPreview();
+		activeDrop = null;
+		lastValidDrop = null;
+	}
+
 	function persistReorderRequest(request: SidebarChatReorderRequest | null): void {
 		if (!request) return;
 		onPersistReorder(request);
+	}
+
+	function previewPointDrop(
+		sourceData: SidebarChatDragData,
+		clientX: number,
+		clientY: number,
+	): void {
+		const context = pointDropContext(sourceData, clientX, clientY);
+		const instruction = fallbackInstructionForPointContext(sourceData, context);
+		if (!instruction) {
+			clearDropPreview();
+			return;
+		}
+		if (context.kind === 'compatible-row') {
+			lastValidDrop = instruction;
+			applySidebarDropInstruction(instruction);
+		}
 	}
 
 	function previewSidebarDrop(
@@ -410,26 +433,14 @@
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
-		if (!reorderEnabled) return;
+		if (!reorderEnabled || reorder.activeChatId !== sourceData.chatId) return;
 		if (!inputIsInsideViewport(input)) {
-			activeDrop = null;
-			lastValidDrop = null;
+			clearDropPreview();
 			return;
 		}
 		const instruction = resolveSidebarDropInstruction(sourceData, dropTargets);
 		if (!instruction) {
-			const context = pointDropContext(sourceData, input.clientX, input.clientY);
-			const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-			if (fallbackInstruction) {
-				if (context.kind === 'compatible-row') {
-					lastValidDrop = fallbackInstruction;
-					applySidebarDropInstruction(fallbackInstruction);
-				}
-				return;
-			}
-
-			activeDrop = null;
-			lastValidDrop = null;
+			previewPointDrop(sourceData, input.clientX, input.clientY);
 			return;
 		}
 
@@ -444,7 +455,7 @@
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
-		if (reorderEnabled) {
+		if (reorderEnabled && reorder.activeChatId === sourceData.chatId) {
 			const isInsideViewport = inputIsInsideViewport(input);
 			const currentInstruction = isInsideViewport
 				? resolveSidebarDropInstruction(sourceData, dropTargets)
@@ -458,7 +469,7 @@
 				applySidebarDropInstruction(instruction);
 				persistReorderRequest(reorder.finish(sourceData.list));
 			} else {
-				reorder.cancel(sourceData.list);
+				reorder.cancel();
 			}
 		}
 
@@ -499,34 +510,6 @@
 		return null;
 	}
 
-	function resolveTouchInstruction(
-		clientX: number,
-		clientY: number,
-	): SidebarDropInstruction | null {
-		const current = touchDrag;
-		if (!current || !pointIsInsideViewport(clientX, clientY)) return null;
-		const rowEl = mountedRowAtPoint(clientX, clientY);
-		if (!rowEl) return null;
-		const targetChatId = rowEl.dataset.sidebarVirtualRow;
-		const targetList = rowListFromElement(rowEl);
-		const targetScopeKey = rowScopeFromElement(rowEl);
-		if (!targetChatId || !targetList || !targetScopeKey || targetList !== current.sourceList)
-			return null;
-		if (targetScopeKey !== current.sourceScopeKey) return null;
-		if (targetChatId === current.sourceChatId) return null;
-
-		const rect = rowEl.getBoundingClientRect();
-		const closestEdge: Edge = clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
-		return {
-			sourceChatId: current.sourceChatId,
-			sourceList: current.sourceList,
-			sourceScopeKey: current.sourceScopeKey,
-			targetChatId,
-			targetList,
-			closestEdge,
-		};
-	}
-
 	function touchSourceDragData(current: {
 		sourceChatId: string;
 		sourceList: PersistedChatOrderGroup;
@@ -542,27 +525,9 @@
 	}
 
 	function previewTouchDrop(clientX: number, clientY: number): void {
-		const instruction = resolveTouchInstruction(clientX, clientY);
-		if (!instruction) {
-			const current = touchDrag;
-			if (current) {
-				const sourceData = touchSourceDragData(current);
-				const context = pointDropContext(sourceData, clientX, clientY);
-				const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-				if (fallbackInstruction) {
-					if (context.kind === 'compatible-row') {
-						lastValidDrop = fallbackInstruction;
-						applySidebarDropInstruction(fallbackInstruction);
-					}
-					return;
-				}
-			}
-			activeDrop = null;
-			lastValidDrop = null;
-			return;
-		}
-		lastValidDrop = instruction;
-		applySidebarDropInstruction(instruction);
+		const current = touchDrag;
+		if (!current) return;
+		previewPointDrop(touchSourceDragData(current), clientX, clientY);
 	}
 
 	function stopTouchAutoScroll(): void {
@@ -662,7 +627,7 @@
 	function cancelTouchDrag(): void {
 		const current = touchDrag;
 		if (current?.activated) {
-			reorder.cancel(current.sourceList);
+			reorder.cancel();
 			workspaceChatDrag.endIfOwned(current.sourceChatId);
 			clearDragPresentation();
 		}
@@ -676,6 +641,7 @@
 		clearDocumentSelection();
 		clearDragPresentation();
 		draggingChatId = current.sourceChatId;
+		dragScopeKey = current.sourceScopeKey;
 		reorder.begin(current.sourceList, current.sourceChatId, {
 			ids: chatRowForId(current.sourceChatId)?.reorderScopeIds ?? [current.sourceChatId],
 		});
@@ -693,6 +659,7 @@
 		const sourceScopeKey = rowScopeFromElement(rowEl);
 		const touch = event.changedTouches[0];
 		if (!sourceChatId || !sourceList || !sourceScopeKey || !touch) return;
+		if (!chatRowForId(sourceChatId)?.reorderScopeIds.includes(sourceChatId)) return;
 
 		clearTouchDrag();
 		enableTouchSelectionGuard();
@@ -753,15 +720,13 @@
 		suppressTouchClickUntil = performance.now() + 500;
 		const sourceData = touchSourceDragData(current);
 		const context = pointDropContext(sourceData, clientX, clientY);
-		const instruction =
-			resolveTouchInstruction(clientX, clientY) ??
-			fallbackInstructionForPointContext(sourceData, context);
+		const instruction = fallbackInstructionForPointContext(sourceData, context);
 
 		if (instruction) {
 			applySidebarDropInstruction(instruction);
 			persistReorderRequest(reorder.finish(current.sourceList));
 		} else {
-			reorder.cancel(current.sourceList);
+			reorder.cancel();
 		}
 
 		workspaceChatDrag.endIfOwned(current.sourceChatId);
@@ -802,31 +767,28 @@
 		}
 		return untrack(() => virtual.scrollToIndex(target.index)).kind === 'scheduled';
 	}
-	function moveToBoundary(row: SidebarVirtualChatRow, boundary: 'start' | 'end'): void {
-		persistReorderRequest(
-			reorder.moveToBoundary({
-				list: row.list,
-				chatId: row.chat.id,
-				boundary,
-				scope: { ids: row.reorderScopeIds },
-			}),
-		);
-	}
-
-	function getMoveToTop(row: SidebarVirtualChatRow): (() => void) | undefined {
+	function getMoveToBoundary(
+		row: SidebarVirtualChatRow,
+		boundary: 'start' | 'end',
+	): (() => void) | undefined {
 		if (!reorderEnabled) return undefined;
 		const order = row.reorderScopeIds;
 		const index = order.indexOf(row.chat.id);
-		if (index <= 0) return undefined;
-		return () => moveToBoundary(row, 'start');
+		const boundaryIndex = boundary === 'start' ? 0 : order.length - 1;
+		if (index < 0 || index === boundaryIndex) return undefined;
+		return () =>
+			persistReorderRequest(
+				reorder.moveToBoundary({ list: row.list, chatId: row.chat.id, boundary }),
+			);
 	}
 
-	function getMoveToBottom(row: SidebarVirtualChatRow): (() => void) | undefined {
+	function getMoveAdjacent(row: SidebarVirtualChatRow, offset: -1 | 1): (() => void) | undefined {
 		if (!reorderEnabled) return undefined;
-		const order = row.reorderScopeIds;
-		const index = order.indexOf(row.chat.id);
-		if (index < 0 || index >= order.length - 1) return undefined;
-		return () => moveToBoundary(row, 'end');
+		const index = row.reorderScopeIds.indexOf(row.chat.id);
+		const target = index >= 0 ? row.reorderScopeIds[index + offset] : undefined;
+		if (!target) return undefined;
+		return () =>
+			persistReorderRequest(reorder.moveAdjacent({ list: row.list, chatId: row.chat.id, offset }));
 	}
 
 	onMount(() =>
@@ -871,6 +833,7 @@
 	});
 
 	onDestroy(() => {
+		reorder.cancel();
 		// The drag monitor is torn down with the list, so a drag the list still
 		// owns (its source row may already be unmounted) would leak otherwise.
 		workspaceChatDrag.endIfOwned(draggingChatId);
@@ -908,6 +871,12 @@
 			></div>
 		{/each}
 		{#each renderedItems as { row, virtualItem } (row.key)}
+			{@const containsSelectedChat = Boolean(
+				row.type !== 'chat' &&
+				row.isCollapsed &&
+				selectedChatId &&
+				row.containsChat(selectedChatId),
+			)}
 			<div
 				data-sidebar-virtual-item={row.type}
 				class="absolute left-0 right-0 top-0"
@@ -917,27 +886,21 @@
 					<SidebarExecutorHeaderRow
 						{row}
 						separated={virtualItem.index > 0}
-						containsSelectedChat={Boolean(
-							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
-						)}
-						onToggle={onToggleProjectCollapsed}
+						{containsSelectedChat}
+						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
 				{:else if row.type === 'project-header'}
 					<SidebarProjectHeaderRow
 						{row}
 						{onNewProjectChat}
-						containsSelectedChat={Boolean(
-							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
-						)}
-						onToggle={onToggleProjectCollapsed}
+						{containsSelectedChat}
+						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
 				{:else if row.type === 'section-header'}
 					<SidebarSectionHeaderRow
 						{row}
-						containsSelectedChat={Boolean(
-							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
-						)}
-						onToggle={onToggleProjectCollapsed}
+						{containsSelectedChat}
+						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
 				{:else}
 					<SidebarVirtualSortableChatRow
@@ -947,13 +910,13 @@
 						{selectedChatId}
 						{currentTime}
 						{isMobile}
-						{isMultiSelectMode}
+						isMultiSelectMode={isMultiSelectMode && !row.contextOnly}
 						isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
 						{displayOptions}
 						{dragEnabled}
-						{reorderEnabled}
+						reorderEnabled={reorderEnabled && row.reorderScopeIds.length > 1}
+						onToggleBranch={isFiltered ? undefined : onToggleProjectCollapsed}
 						isDragging={draggingChatId === row.chat.id}
-						dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
 						onDragStart={startSidebarDrag}
 						onDragSourceUnmount={cancelUnmountedDragSource}
 						onDragUpdate={previewSidebarDrop}
@@ -971,13 +934,25 @@
 						{onManageTags}
 						{onOpenInNewWindow}
 						{newWindowEdges}
-						{onEnterMultiSelect}
-						{onMultiSelectToggle}
-						onMoveToTop={getMoveToTop(row)}
-						onMoveToBottom={getMoveToBottom(row)}
-						onSortChatOrder={displayOptions.sortMode === 'manual' ? onSortChatOrder : undefined}
-						{hasPinnedChats}
+						onEnterMultiSelect={row.contextOnly ? undefined : onEnterMultiSelect}
+						onMultiSelectToggle={row.contextOnly ? undefined : onMultiSelectToggle}
+						onMoveToTop={getMoveToBoundary(row, 'start')}
+						onMoveUp={getMoveAdjacent(row, -1)}
+						onMoveDown={getMoveAdjacent(row, 1)}
+						{moveBoundaryLabels}
+						onMoveToBottom={getMoveToBoundary(row, 'end')}
+						onSortChatOrder={displayOptions.sortMode === 'manual' && !reorder.busy
+							? onSortChatOrder
+							: undefined}
 					/>
+				{/if}
+				{#if virtualItem.index === indicatorIndex}
+					<div
+						class="pointer-events-none absolute inset-x-2 z-20 h-0.5 bg-primary"
+						class:top-0={activeDrop?.edge === 'top'}
+						class:bottom-0={activeDrop?.edge !== 'top'}
+						data-sidebar-branch-drop-indicator
+					></div>
 				{/if}
 			</div>
 		{/each}
