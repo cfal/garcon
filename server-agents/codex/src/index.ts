@@ -44,7 +44,7 @@ import {
   isCodexThreadNotFound,
 } from './agents/codex/codex-forking.js';
 import { createCodexForkTargetPath } from './agents/codex/fork-target-path.js';
-import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
+import { inspectCodexHistoryProfile, inspectCodexSessionModelProvider } from './agents/codex/history-profile.js';
 import { createCodexNativeEvidence } from './agents/codex/transcript.js';
 import {
   buildCodexAppServerEndpointRuntime,
@@ -360,6 +360,16 @@ async function forkCodexNativeSession(
     );
   }
   if (source.path && !await codexRolloutHasContent(source.path)) return null;
+  // Native forks use new-thread configuration rather than inheriting the saved provider.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server/src/request_processors/thread_processor.rs#L5663-L5673
+  const modelProvider = !endpointRuntime && source.path
+    ? await inspectCodexSessionModelProvider({
+      nativePath: source.path,
+      expectedThreadId: request.source.agentSessionId ?? source.agentSessionId,
+      signal: request.signal,
+    })
+    : null;
+  request.signal.throwIfAborted();
   let result;
   try {
     result = await runtime.forkSession({
@@ -373,6 +383,7 @@ async function forkCodexNativeSession(
       codexConfig: endpointRuntime?.codexConfig
         ?? buildCodexHostProviderConfig(await resolveAuthStatus(request.signal)),
       lastTurnId: lastTurnId ?? null,
+      modelProvider,
     });
   } catch (error) {
     // A never-persisted thread cannot fork natively; the JSONL path resolves it

@@ -46,6 +46,16 @@ export async function inspectCodexSessionIdentity(
   return { threadId, createdAt };
 }
 
+export async function inspectCodexSessionModelProvider(
+  input: CodexSessionIdentityInput,
+): Promise<string | null> {
+  const { payload } = await inspectCodexSessionMetadata(input);
+  if (payload.model_provider === undefined || payload.model_provider === null) return null;
+  const provider = nonEmptyString(payload.model_provider);
+  if (provider) return provider;
+  throw transcriptUnavailable('Codex session metadata has an invalid model provider', undefined, 'invalid-metadata');
+}
+
 export async function inspectCodexHistoryProfile(
   input: CodexSessionIdentityInput,
 ): Promise<CodexHistoryProfile> {
