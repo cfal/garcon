@@ -87,7 +87,7 @@ function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean): M
 	}
 	const groups = new Map<string, string>();
 	for (const chat of chats) {
-		const key = sidebarProjectKey(chat.projectPath, chat.executorId);
+		const key = sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId);
 		if (groups.has(key)) continue;
 		let path = normalizeProjectPath(chat.projectPath);
 		let group = known.get(key)!;
@@ -140,7 +140,8 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const fields = enabledSidebarGroupingFields(input.groupingFields);
 	const projects = projectGroups(input.allChats, Boolean(input.groupNestedProjectPaths));
 	const projectFor = (chat: ChatSessionRecord) =>
-		projects.get(sidebarProjectKey(chat.projectPath, chat.executorId)) ?? chat.projectPath;
+		projects.get(sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId)) ??
+		chat.projectPath;
 	const rank = new Map(
 		PERSISTED_CHAT_ORDER_GROUPS.flatMap((band) =>
 			input.orders[band].map((id, index) => [id, index] as const),

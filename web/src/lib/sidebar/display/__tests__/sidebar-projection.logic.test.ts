@@ -100,6 +100,22 @@ describe('recursive sidebar projection', () => {
 		});
 		expect(collapsed.visibleChatIds).toEqual([]);
 	});
+	it('preserves project grouping when removing a trailing slash exposes whitespace', () => {
+		const input = projectionInput(
+			[chat('a', { projectPath: '/repo' }), chat('b', { projectPath: '/repo /' })],
+			{ groupingFields: selections(['project']), groupNestedProjectPaths: false },
+		);
+		const model = buildSidebarRowModel(input);
+		expect(model.rows).toMatchObject([
+			{ type: 'project-header', projectPath: '/repo', count: 2 },
+			{ type: 'chat', chat: { id: 'a' }, reorderScopeIds: ['a', 'b'] },
+			{ type: 'chat', chat: { id: 'b' }, reorderScopeIds: ['a', 'b'] },
+		]);
+		expect(
+			buildSidebarRowModel({ ...input, collapsedProjectKeys: new Set([model.rows[0].key]) })
+				.visibleChatIds,
+		).toEqual([]);
+	});
 	it.each([['project'], ['executor', 'project']] as const)(
 		'disambiguates folder names only within an executor: %j',
 		(...fields) => {
