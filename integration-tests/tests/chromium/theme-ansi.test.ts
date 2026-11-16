@@ -260,9 +260,11 @@ test.each([1440, 390])(
           await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
           await page.clock.resume();
           const newChat = page
+            .getByRole('region', { name: 'Workspace', exact: true })
             .getByRole('button', { name: 'New Chat', exact: true })
             .first();
           if (width === 390) {
+            await newChat.click({ trial: true });
             const bounds = (await newChat.boundingBox())!;
             await protocol.send('Input.dispatchTouchEvent', {
               type: 'touchStart',
@@ -473,17 +475,19 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       .fill('Synthetic multiline prompt\n'.repeat(20));
     await page.setViewportSize({ width: 390, height: 420 });
     await browserExpect(newChat).toHaveCSS('border-top-style', 'double');
+    const landingScroll = newChat.locator('[data-slot="new-chat-landing-scroll"]');
     await browserExpect
-      .poll(() => newChat.evaluate((element) => element.scrollHeight > element.clientHeight))
+      .poll(() => landingScroll.evaluate((element) => element.scrollHeight > element.clientHeight))
       .toBe(true);
     const scroll = await newChat.evaluate((element) => {
+      const content = element.querySelector<HTMLElement>('[data-slot="new-chat-landing-scroll"]')!;
       const before = element.getBoundingClientRect().toJSON();
-      element.scrollTop = element.scrollHeight;
+      content.scrollTop = content.scrollHeight;
       return {
         before,
         after: element.getBoundingClientRect().toJSON(),
-        top: element.scrollTop,
-        fits: element.scrollWidth <= element.clientWidth,
+        top: content.scrollTop,
+        fits: element.scrollWidth <= element.clientWidth && content.scrollWidth <= content.clientWidth,
       };
     });
     expect(scroll.top).toBeGreaterThan(0);
