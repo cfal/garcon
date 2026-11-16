@@ -15,6 +15,7 @@
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import {
 		chatListDividerEdge,
 		HOVER_CAPABLE_MEDIA_QUERY,
@@ -458,10 +459,14 @@
 	}
 
 	function handleNewChat() {
+		openNewChatDialog();
+	}
+
+	function openNewChatDialog(seed?: NewChatDialogSeed): void {
 		if (isMobile) {
 			appShell.setSidebarOpen(false);
 		}
-		appShell.openNewChatDialog();
+		appShell.openNewChatDialog(seed);
 	}
 
 	// Navigates to the chat above or below the currently selected one.
@@ -721,6 +726,7 @@
 		{isMobile}
 		{onChatSelect}
 		onNewChat={handleNewChat}
+		onNewProjectChat={(project) => openNewChatDialog({ project })}
 		onLocallyDeleteChat={locallyDeleteChat}
 		onQuietRefresh={quietRefresh}
 		onRequestDeleteChat={requestDeleteChat}
