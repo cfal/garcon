@@ -1,6 +1,6 @@
 import type { ChatListLoadStatus } from '$lib/chat/sessions/chat-sessions-contract';
 
-interface EmptyWorkspaceLandingSnapshot {
+export interface EmptyWorkspaceLandingSnapshot {
 	chatListStatus: ChatListLoadStatus;
 	chatListError: string | null;
 	chatCount: number;

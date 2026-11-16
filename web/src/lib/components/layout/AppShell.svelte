@@ -15,6 +15,7 @@
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import {
 		chatListDividerEdge,
 		HOVER_CAPABLE_MEDIA_QUERY,
@@ -78,7 +79,7 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
-	import { EmptyWorkspaceLandingController } from './empty-workspace-landing-controller.js';
+	import { bindEmptyWorkspaceLanding } from './empty-workspace-landing-binding.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -273,22 +274,16 @@
 			);
 		},
 	});
-	const emptyWorkspaceLanding = new EmptyWorkspaceLandingController(handleNewChat);
-	$effect(() => {
-		const snapshot = {
-			chatListStatus: sessions.chatListStatus,
-			chatListError: sessions.chatListError,
-			chatCount: sessions.orderedChats.length,
+	bindEmptyWorkspaceLanding({
+		openNewChat: handleNewChat,
+		sessions,
+		shell: appShell,
+		getNavigation: () => ({
 			isBareRoute: isBareChatRoute(appPathname(page.url.pathname)),
 			hasNavigationTarget: Boolean(
 				page.params.id || routeTicketId || sessions.selectedChatId || chatNavigation.pendingChatTarget,
 			),
-			newChatDialogOpen: appShell.newChatDialogOpen,
-			anotherDialogOpen: Boolean(appShell.showSettings || appShell.showOnboardingWizard ||
-				appShell.showPreambles || appShell.showSnippets || appShell.showScheduledPrompts ||
-				appShell.chatPreambleSelectionTarget),
-		};
-		untrack(() => emptyWorkspaceLanding.observe(snapshot));
+		}),
 	});
 
 	$effect(() => {
@@ -476,10 +471,14 @@
 	}
 
 	function handleNewChat() {
+		openNewChatDialog();
+	}
+
+	function openNewChatDialog(seed?: NewChatDialogSeed): void {
 		if (isMobile) {
 			appShell.setSidebarOpen(false);
 		}
-		appShell.openNewChatDialog();
+		appShell.openNewChatDialog(seed);
 	}
 
 	// Navigates to the chat above or below the currently selected one.
@@ -739,6 +738,7 @@
 		{isMobile}
 		{onChatSelect}
 		onNewChat={handleNewChat}
+		onNewProjectChat={(project) => openNewChatDialog({ project })}
 		onLocallyDeleteChat={locallyDeleteChat}
 		onQuietRefresh={quietRefresh}
 		onRequestDeleteChat={requestDeleteChat}

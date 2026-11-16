@@ -30,7 +30,7 @@ import {
 	newChatExecutorPreferences,
 } from './new-chat-executor-preferences';
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
-import type { NewChatStartupSeed } from './new-chat-seed';
+import type { NewChatProjectTarget, NewChatStartupSeed } from './new-chat-seed';
 import { resolveNewChatModelSelection } from './new-chat-model-selection';
 import type { ChatId } from '$shared/chat-id';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
@@ -752,6 +752,14 @@ export class NewChatFormState {
 	}
 
 	// Reseed / reset
+
+	/** Seeds a fresh form with a project while keeping the target executor's startup defaults. */
+	seedProject(project: NewChatProjectTarget): void {
+		this.selectExecutor(project.executorId);
+		this.#executorModelCandidate = null;
+		this.#startupSelectionAutomatic = true;
+		this.selectProjectPath(project.projectPath);
+	}
 
 	restoreStartup(seed: NewChatStartupSeed): void {
 		this.selectExecutor(seed.executorId);

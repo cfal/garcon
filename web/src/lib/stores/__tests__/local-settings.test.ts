@@ -5,6 +5,7 @@ import {
 	INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
 	IMAGE_CACHE_SIZE_MIB_VALUES,
 	INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
+	USER_MESSAGE_ALIGNMENT_VALUES,
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte.ts';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -238,6 +239,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
+		expect(store.userMessageAlignment).toBe('right');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.imageCacheSizeMiB).toBe(64);
 		expect(store.inlineMermaidThumbnailSize).toBe('medium');
@@ -271,6 +273,32 @@ describe('LocalSettingsStore', () => {
 
 		store.destroy();
 	});
+
+	it.each(USER_MESSAGE_ALIGNMENT_VALUES)('persists and restores %s user messages', (alignment) => {
+		const store = createLocalSettingsStore();
+		store.set('userMessageAlignment', alignment);
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+			userMessageAlignment: alignment,
+		});
+		const restored = createLocalSettingsStore();
+		expect(restored.userMessageAlignment).toBe(alignment);
+		expect(restored.snapshot().userMessageAlignment).toBe(alignment);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each(['center', 'RIGHT', '', null, 1, {}])(
+		'defaults malformed user message alignment %j to right',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ userMessageAlignment: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.userMessageAlignment).toBe('right');
+			store.destroy();
+		},
+	);
 
 	it.each(IMAGE_CACHE_SIZE_MIB_VALUES)('persists the %i MiB image cache budget', (size) => {
 		const store = createLocalSettingsStore();
