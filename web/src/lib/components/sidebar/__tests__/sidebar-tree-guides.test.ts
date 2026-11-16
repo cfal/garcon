@@ -8,8 +8,9 @@ import {
 	type SidebarTreeContinuation,
 } from '$lib/sidebar/display/sidebar-virtual-chat-list';
 
-const row = buildSidebarRowModel(projectionInput([chat('root'), delegated('child', 'root')]))
-	.rows[1];
+const row = buildSidebarRowModel(
+	projectionInput([chat('root'), delegated('child', 'root')]),
+).rows.find((item) => item.key === 'chat:child')!;
 
 describe('sidebar tree guide geometry', () => {
 	it.each([

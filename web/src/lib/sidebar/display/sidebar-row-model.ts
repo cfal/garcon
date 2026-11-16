@@ -8,7 +8,6 @@ import { normalizeProjectPath } from '$lib/utils/project-path';
 import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import { isSidebarChatInactive } from './chat-inactivity';
 import { buildSidebarDelegationForest } from './sidebar-delegation';
-import { sidebarChildTreeScope } from './sidebar-virtual-chat-list';
 import {
 	enabledSidebarGroupingFields,
 	type SidebarGroupingSelection,
@@ -20,6 +19,7 @@ import type {
 	SidebarRowModel,
 	SidebarVirtualRow,
 	SidebarVirtualChatRow,
+	SidebarTreeGuide,
 	SidebarTreeScope,
 } from './sidebar-virtual-chat-list';
 
@@ -125,6 +125,15 @@ type ProjectionTask =
 	| ScopeTask
 	| { kind: 'header'; row: Exclude<SidebarVirtualRow, SidebarVirtualChatRow> }
 	| { kind: 'chat'; row: SidebarVirtualChatRow };
+
+function childTreeScope(parentDepth: number, parent?: SidebarTreeGuide): SidebarTreeScope {
+	let continuations = parent?.continuations ?? null;
+	// Shared tails keep deep projections linear; terminal ancestors need no rail.
+	if (parent && !parent.isLastChild) {
+		continuations = { depth: parent.parentDepth, outer: continuations };
+	}
+	return { parentDepth, continuations };
+}
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
@@ -247,7 +256,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					parentId: row.chat.id,
 					ids: children.filter(hasMatches),
 					depth: row.depth + 1,
-					tree: sidebarChildTreeScope(row.depth, row.tree),
+					tree: childTreeScope(row.depth, row.tree),
 					path: [],
 					inheritedFields,
 					executorGrouped: false,
@@ -323,7 +332,8 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 						ids,
 						path,
 						depth: task.depth + 1,
-						tree: row.tree ? sidebarChildTreeScope(row.depth, row.tree) : undefined,
+						// Root grouping headers do not start delegated tree guides.
+						tree: row.tree ? childTreeScope(row.depth, row.tree) : undefined,
 						executorGrouped: task.executorGrouped || field === 'executor',
 					});
 				tasks.push({ kind: 'header', row });

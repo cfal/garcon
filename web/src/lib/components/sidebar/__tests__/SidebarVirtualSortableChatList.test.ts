@@ -214,17 +214,17 @@ function isSidebarViewport(element: HTMLElement): boolean {
 
 beforeEach(() => {
 	originalElementsFromPoint = document.elementsFromPoint;
-	vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
-		this: HTMLElement,
-	) {
-		return this.hasAttribute('data-sidebar-virtual-list') || isSidebarViewport(this) ? 320 : 0;
-	});
 	if (!originalElementsFromPoint) {
 		Object.defineProperty(document, 'elementsFromPoint', {
 			configurable: true,
 			value: () => [],
 		});
 	}
+	vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		return this.hasAttribute('data-sidebar-virtual-list') || isSidebarViewport(this) ? 320 : 0;
+	});
 	vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
 		this: HTMLElement,
 	) {

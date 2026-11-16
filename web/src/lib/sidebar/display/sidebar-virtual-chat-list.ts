@@ -42,20 +42,6 @@ export interface SidebarTreeGuide extends SidebarTreeScope {
 	isLastChild: boolean;
 }
 
-export function sidebarChildTreeScope(
-	parentDepth: number,
-	guide?: SidebarTreeGuide,
-): SidebarTreeScope {
-	return {
-		parentDepth,
-		// Shared tails keep deep projections linear; terminal ancestors need no rail.
-		continuations:
-			guide && !guide.isLastChild
-				? { depth: guide.parentDepth, outer: guide.continuations }
-				: (guide?.continuations ?? null),
-	};
-}
-
 export interface SidebarVirtualProjectHeaderRow {
 	executorId?: string;
 	type: 'project-header';

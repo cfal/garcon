@@ -121,9 +121,7 @@ describe('delegated sidebar tree guides', () => {
 			matchingChatIds: new Set(['b']),
 		});
 		expect(filtered.visibleChatIds).toEqual(['root', 'b']);
-		expect(filtered.rows.filter((row) => row.tree).every((row) => row.tree!.isLastChild)).toBe(
-			true,
-		);
+		expect(filtered.rows.every((row) => !row.tree || row.tree.isLastChild)).toBe(true);
 	});
 
 	it('updates terminal siblings after filtering, collapse, and optimistic order changes', () => {
