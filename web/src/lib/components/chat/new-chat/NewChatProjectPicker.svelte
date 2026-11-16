@@ -19,7 +19,7 @@
 	$effect(() => {
 		browseContextKey;
 		untrack(() => {
-			browserPath = form.projectPath || form.projectBasePath;
+			browserPath = form.projectBasePath;
 		});
 	});
 
@@ -30,7 +30,7 @@
 			return;
 		}
 		pathFieldOpen = true;
-		browserPath = form.projectPath || form.projectBasePath;
+		browserPath = form.projectBasePath;
 		form.showBrowser = true;
 		if (form.showBrowser && !isMobile) {
 			await tick();
@@ -107,7 +107,7 @@
 						executorId: form.executorId,
 						executorContextKey: form.pathContextKey,
 						currentPath: browserPath,
-						initialDirectory: form.projectPath || form.projectBasePath,
+						initialDirectory: form.projectBasePath,
 						basePath: form.projectBasePath,
 						isMobile,
 						onSelect: (path) => {

@@ -75,7 +75,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
 
       phase('Escape cancels creation before closing the browser');
       await choose.click();
-      await control('Parent directory').click();
+      await browserExpect(control('alpha')).toBeVisible();
+      await control('alpha').click();
       await control('New directory').click();
       await name.fill('ghost');
       await page.keyboard.press('Escape');

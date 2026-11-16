@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
@@ -72,7 +72,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       phase('nested folder browser Escape leaves the new-chat form open');
       await landing.getByRole('button', { name: 'Choose folder', exact: true }).click();
       const picker = landing.getByRole('dialog', { name: 'Select Directory', exact: true });
-      await browserExpect(picker.getByRole('button', { name: 'feature', exact: true })).toBeVisible();
+      await browserExpect(picker.locator('[aria-current="location"]')).toHaveText(basename(integration.executionDirs.project));
+      await browserExpect(picker.getByRole('button', { name: 'feature', exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
       await browserExpect(picker).toHaveCount(0);
       await browserExpect(landing).toBeVisible();

@@ -572,8 +572,8 @@ describe('NewChatForm', () => {
 		let replaced = false;
 		vi.mocked(filesApi.browseDirectory).mockImplementation((path) => {
 			if (replaced) return newListing.promise;
-			return path === '/worker/project'
-				? Promise.resolve([{ name: 'root-child', path: '/worker/project/root-child', type: 'directory' }])
+			return path === '/worker'
+				? Promise.resolve([{ name: 'root-child', path: '/worker/root-child', type: 'directory' }])
 				: oldListing.promise;
 		});
 		let executors!: ExecutorsStore;
@@ -594,7 +594,7 @@ describe('NewChatForm', () => {
 			...(change === 'instance' ? { instanceId: 'replacement-instance' } : { projectBasePath: nextRoot }),
 		}]);
 		await tick();
-		await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(change === 'base' ? nextRoot : '/worker/project', expect.any(AbortSignal), remote.id));
+		await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(nextRoot, expect.any(AbortSignal), remote.id));
 		expect(screen.getByRole('dialog', { name: 'Select Directory' })).not.toBe(oldDialog);
 		const confirm = screen.getByRole<HTMLButtonElement>('button', { name: 'Select this directory' });
 		expect(confirm.disabled).toBe(true);
@@ -602,7 +602,7 @@ describe('NewChatForm', () => {
 		oldListing.resolve([]);
 		await tick();
 		expect(confirm.disabled).toBe(true);
-		expect(screen.queryByRole('button', { name: 'Worker: /worker/project/root-child' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Worker: /worker/root-child' })).toBeNull();
 		newListing.resolve([]);
 		await waitFor(() => expect(confirm.disabled).toBe(false));
 	});
@@ -666,15 +666,15 @@ describe('NewChatForm', () => {
 	});
 
 	it.each([false, true].flatMap(isMobile => [localExecutor, remoteExecutor].map(executor => ({ executor, isMobile }))))(
-		'browses the selected folder and accepts a manual path ($executor.kind, mobile: $isMobile)', async ({ executor, isMobile }) => {
+		'browses the executor root on every open and accepts a manual path ($executor.kind, mobile: $isMobile)', async ({ executor, isMobile }) => {
 		stubMatchMedia(isMobile);
 		const rootPath = executor.projectBasePath;
 		const projectPath = `${rootPath}/project`;
 		const pastedPath = `${rootPath}/manual folder`;
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
-		vi.mocked(filesApi.browseDirectory).mockImplementation(async (path) => path === projectPath
-			? [{ name: 'selected-child', path: `${projectPath}/selected-child`, type: 'directory' }]
+		vi.mocked(filesApi.browseDirectory).mockImplementation(async (path) => path === rootPath
+			? [{ name: 'root-child', path: `${rootPath}/root-child`, type: 'directory' }]
 			: []);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
 			paths: { recentProjectPaths: [projectPath], byExecutor: { [executor.id]: {
@@ -692,15 +692,31 @@ describe('NewChatForm', () => {
 		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
 		expect(screen.queryByRole('textbox', { name: 'Project Path' })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
-		await screen.findByRole('button', { name: 'selected-child' });
-		expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(projectPath, expect.any(AbortSignal), executor.id);
+		await screen.findByRole('button', { name: 'root-child' });
+		expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(rootPath, expect.any(AbortSignal), executor.id);
+		expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' }).value).toBe(projectPath);
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith(projectPath, { executorId: executor.id });
+		expect(prompt.value).toBe('Retained manual-path draft');
+		await fireEvent.click(screen.getByRole('button', { name: 'root-child' }));
+		await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(`${rootPath}/root-child`, expect.any(AbortSignal), executor.id));
 		if (isMobile) {
 			await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-			expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-expanded')).toBe('false');
+		} else {
+			await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 		}
+		expect(screen.getByRole('button', { name: 'Choose folder' }).getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await screen.findByRole('button', { name: 'root-child' });
+		expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(rootPath, expect.any(AbortSignal), executor.id);
 		const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
-		expect(field.value).toBe(projectPath);
+		expect(field.value).toBe(isMobile ? projectPath : `${rootPath}/root-child`);
+		expect(prompt.value).toBe('Retained manual-path draft');
+		if (isMobile) await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		await fireEvent.input(field, { target: { value: pastedPath } });
+		if (!isMobile) {
+			await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(rootPath, expect.any(AbortSignal), executor.id));
+			expect(screen.queryByRole('button', { name: 'root-child' })).toBeNull();
+		}
 		await fireEvent.keyDown(field, { key: 'Enter' });
 		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith(pastedPath, { executorId: executor.id }));
 		expect(onStartChat).not.toHaveBeenCalled();
