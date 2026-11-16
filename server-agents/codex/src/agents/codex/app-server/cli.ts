@@ -19,8 +19,8 @@ const CODEX_CLI_ENV = 'GARCON_CODEX_CLI';
 // without the Node shim or a package-manager `.bin` wrapper that differs on Windows. Codex
 // locates its bundled resources from its own executable path; the launcher's
 // CODEX_MANAGED_BY_* variables only select update instructions.
-// https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-cli/bin/codex.js#L17-L24
-// https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/install-context/src/lib.rs#L99-L137
+// https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-cli/bin/codex.js#L17-L24
+// https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/install-context/src/lib.rs#L99-L137
 const CODEX_NATIVE_TARGETS: Partial<Record<string, { packageName: string; targetTriple: string }>> = {
   'linux-x64': { packageName: '@openai/codex-linux-x64', targetTriple: 'x86_64-unknown-linux-musl' },
   'linux-arm64': { packageName: '@openai/codex-linux-arm64', targetTriple: 'aarch64-unknown-linux-musl' },
