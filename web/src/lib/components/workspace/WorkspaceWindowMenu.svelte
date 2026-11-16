@@ -3,6 +3,7 @@
 	import { DropdownMenu, DropdownMenuTrigger } from '$lib/components/ui/dropdown-menu';
 	import type { WorkspaceWindowId, WorkspaceWindowTabState } from '$lib/workspace/surface-types.js';
 	import { dropdownMenuPrimitives } from '$lib/components/ui/menu-primitives.js';
+	import { getWorkspaceCoordinator } from '$lib/context';
 	import WorkspaceWindowTabMenu from './WorkspaceWindowTabMenu.svelte';
 	import {
 		DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
@@ -28,9 +29,25 @@
 		titlebarMetrics?: WorkspaceWindowTitlebarMetrics;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
+
+	const workspace = getWorkspaceCoordinator();
+	let open = $state(false);
+	let previousSurfaceId: string | null = null;
+	let previousChatId: string | null = null;
+
+	$effect(() => {
+		const surfaceId = tabs.activeId;
+		const surface = workspace.layout.surface(surfaceId);
+		const chatId = surface?.type === 'chat' ? surface.chatId : null;
+		if (surfaceId !== previousSurfaceId || chatId !== previousChatId) {
+			previousSurfaceId = surfaceId;
+			previousChatId = chatId;
+			open = false;
+		}
+	});
 </script>
 
-<DropdownMenu>
+<DropdownMenu bind:open>
 	<DropdownMenuTrigger
 		class="flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		style={`height: ${titlebarMetrics.controlSizePx}px; width: ${titlebarMetrics.controlSizePx}px;`}

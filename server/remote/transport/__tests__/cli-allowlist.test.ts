@@ -26,6 +26,7 @@ test('the reverse CLI allowlist accounts for every client HTTP operation and not
     steerChat: [{ chatId }], stopChat: [{ chatId }], decidePermission: [{ chatId }],
     getChatRowTarget: [chatId], addChatRow: [{ chatId }], updateChatTitle: [{ chatId }],
     setChatPinned: [{ chatId }], setChatArchived: [{ chatId }], setChatTags: [{ chatId, tags: [] }],
+    setChatParent: [{ chatId, parentChatId: null }],
     getTurnReceipt: [chatId, 'synthetic'], getTicketBootstrap: [], getTicketProjectDefault: ['/synthetic'],
     listTickets: [{}], readTicket: [{ ticketId: 'synthetic' }], getTicketHistory: [{ ticketId: 'synthetic' }],
     mutateTicket: [{}],

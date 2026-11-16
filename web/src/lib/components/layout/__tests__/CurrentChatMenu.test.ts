@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import * as m from '$lib/paraglide/messages.js';
@@ -44,6 +44,7 @@ function props(onOpenUserMessageNavigator?: () => void) {
 		onReload: vi.fn(),
 		onShare: vi.fn(),
 		onProjectPath: vi.fn(),
+		onSetParent: vi.fn(),
 		onFork: vi.fn(),
 		onDelete: vi.fn(),
 		onOpenUserMessageNavigator,
@@ -51,6 +52,39 @@ function props(onOpenUserMessageNavigator?: () => void) {
 }
 
 describe('CurrentChatMenu', () => {
+	it('closes the open menu when the selected chat changes, not when its metadata refreshes', async () => {
+		const callbacks = props();
+		const selectedChat = { ...chat(), status: 'running' as const };
+		const { rerender } = render(CurrentChatMenu, { ...callbacks, selectedChat });
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		await rerender({ selectedChat: { ...selectedChat, title: 'Updated title' } });
+		expect(screen.getByRole('menuitem', { name: m.chat_parent_title() })).toBeTruthy();
+
+		await rerender({ selectedChat: { ...selectedChat, id: 'chat-2' } });
+		await waitFor(() =>
+			expect(screen.queryByRole('menuitem', { name: m.chat_parent_title() })).toBeNull(),
+		);
+		expect(callbacks.onSetParent).not.toHaveBeenCalled();
+	});
+
+	it.each([true, false])('offers parent editing before Reload, independently of reload support (%s)', async (canReload) => {
+		const callbacks = props();
+		render(CurrentChatMenu, { ...callbacks, canReload, selectedChat: { ...chat(), status: 'running', isProcessing: true } });
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		const parent = screen.getByRole('menuitem', { name: m.chat_parent_title() });
+		if (canReload) {
+			const items = screen.getAllByRole('menuitem');
+			expect(items.indexOf(parent) + 1).toBe(items.indexOf(screen.getByRole('menuitem', { name: m.sidebar_chats_reload() })));
+		}
+		await fireEvent.click(parent);
+		expect(callbacks.onSetParent).toHaveBeenCalledOnce();
+	});
+
+	it('does not offer parent editing for drafts', async () => {
+		render(CurrentChatMenu, props());
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		expect(screen.queryByRole('menuitem', { name: m.chat_parent_title() })).toBeNull();
+	});
 	afterEach(() => {
 		cleanup();
 		document.body.innerHTML = '';

@@ -213,6 +213,7 @@ describe('event router integration', () => {
 	it.each([
 		['archive-toggled', 'chat-b'],
 		['execution-settings-updated', 'chat-b'],
+		['parent-updated', 'chat-b'],
 		['metadata-repaired', null],
 	])(
 		'routes %s globally through normalize + filter + handler', (reason, chatId) => {

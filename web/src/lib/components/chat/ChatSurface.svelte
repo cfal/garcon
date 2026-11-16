@@ -31,6 +31,7 @@
 		requestDetails() {},
 		requestShare() {},
 		requestProjectPath() {},
+		requestParent() {},
 		configurePreambles() {},
 		fork() {},
 		reload() {},
@@ -171,6 +172,7 @@
 								chatActions.configurePreambles(selectedChat, selectedTranscriptViewId)
 						: undefined}
 					onProjectPath={() => selectedChat && chatActions.requestProjectPath(selectedChat)}
+					onSetParent={() => selectedChat && chatActions.requestParent(selectedChat)}
 					onFork={() => selectedChat && chatActions.fork(selectedChat)}
 					onDelete={() => selectedChat && chatActions.requestDelete(selectedChat)}
 				/>

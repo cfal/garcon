@@ -211,6 +211,7 @@ function createFixture(overrides = {}) {
     onChatReadUpdated: mock((callback) => { chats.read = callback; }),
     onChatProjectPathUpdated: mock((callback) => { chats.path = callback; }),
     onChatTagsUpdated: mock((callback) => { chats.tags = callback; }),
+    onChatParentUpdated: mock((callback) => { chats.parent = callback; }),
     ...overrides.chatRegistry,
   };
   const settingsStore = {
@@ -1462,6 +1463,21 @@ describe('server event wiring', () => {
       chatId: 'chat-1',
     }]);
     expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('orders parent invalidation after pending transcript publication and skips deleted chats', async () => {
+    const fixture = createFixture();
+    fixture.agent.transcript(providerCommit());
+    fixture.chats.parent('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published.map((event) => event.type)).toEqual([
+      'chat-messages', 'chat-list-refresh-requested',
+    ]);
+    expect(fixture.published.at(-1)).toMatchObject({ reason: 'parent-updated', chatId: 'chat-1' });
+    fixture.removeChat();
+    fixture.chats.parent('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published).toHaveLength(2);
   });
 
   it('orders settings invalidation after pending transcript publication and skips deleted chats', async () => {

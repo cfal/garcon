@@ -571,6 +571,7 @@
 				? () => chatActions.configurePreambles(chat, panel.transcript.transcriptViewId)
 				: undefined}
 			onProjectPath={() => chatActions.requestProjectPath(chat)}
+			onSetParent={() => chatActions.requestParent(chat)}
 			onFork={() => chatActions.fork(chat)}
 			onDelete={() => chatActions.requestDelete(chat)}
 		/>

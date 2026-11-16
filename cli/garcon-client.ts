@@ -1,4 +1,5 @@
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import { parseSetChatParentResponse, type SetChatParentRequest, type SetChatParentResponse } from '@garcon/common/chat-parent-contracts';
 import type {
   CreateScheduledPromptRequest,
   CreateScheduledPromptResponse,
@@ -995,6 +996,21 @@ export class GarconClient {
       const response = parseSetChatOrderStateResponse(value);
       if (!response || response.chatId !== request.chatId || response.isArchived !== request.isArchived) {
         throw new CliError('submission', 'server returned an invalid archived-state response', 3);
+      }
+      return response;
+    }, signal);
+  }
+
+  async setChatParent(
+    request: SetChatParentRequest,
+    signal?: AbortSignal,
+  ): Promise<SetChatParentResponse> {
+    return oneShotMutation('submission', async () => {
+      const value = await this.#request('submission', 'PUT', '/api/v1/chats/parent', request, signal);
+      const response = parseSetChatParentResponse(value);
+      if (!response || response.chatId !== request.chatId
+        || (response.parentChat?.chatId ?? null) !== request.parentChatId) {
+        throw new CliError('submission', 'server returned an invalid parent-state response', 3);
       }
       return response;
     }, signal);
