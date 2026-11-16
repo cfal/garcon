@@ -24,13 +24,25 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     await clickWorkspaceWindowAddAction(second, 'Open Chat Map');
     const childRow = page.locator(`[data-sidebar-virtual-row="${child}"]`);
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '0');
+    const menuTrigger = page.locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]');
+
+    phase('switching tabs closes the menu instead of retargeting its actions');
+    await clickWorkspaceWindowAddAction(page, 'Open Chat Map');
+    await page.getByRole('tab', { name: 'Child task', exact: true }).click();
+    await menuTrigger.click();
+    await browserExpect(page.getByRole('menuitem', { name: 'Set parent chat ID', exact: true })).toBeVisible();
+    await page.keyboard.press('Control+Shift+L');
+    await browserExpect(page.locator('[data-workspace-window-current="true"]')).toHaveAttribute(
+      'data-workspace-window-active-surface', 'singleton:chat-map');
+    await browserExpect(page.getByRole('menu')).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Child task', exact: true }).click();
+
     const composer = page.locator('[data-composer]:visible');
     await browserExpect(composer).toBeVisible();
     await composer.evaluate((element) => { element.dataset.parentTestIdentity = 'retained'; });
     const viewport = page.locator('[data-chat-scroll-viewport]:visible');
     const scrollBefore = await viewport.evaluate((element) => element.scrollTop);
     const boxBefore = await composer.boundingBox();
-    const menuTrigger = page.locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]');
 
     phase('editing via the desktop feed menu');
     await menuTrigger.click();
@@ -104,9 +116,14 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     await browserExpect(input).toHaveValue('Parent');
     await input.dispatchEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true });
     await browserExpect(dialog.getByRole('listbox')).toBeVisible();
+    await input.dispatchEvent('keydown', { key: 'Escape', isComposing: false, keyCode: 229, bubbles: true });
+    await browserExpect(dialog.getByRole('listbox')).toBeVisible();
     await input.press('Escape');
     await browserExpect(dialog).toBeVisible();
     await browserExpect(dialog.getByRole('listbox')).toHaveCount(0);
+    await input.dispatchEvent('keydown', { key: 'Escape', isComposing: false, keyCode: 229, bubbles: true });
+    await browserExpect(dialog).toBeVisible();
+    await browserExpect(input).toHaveValue('Parent');
     expect(await input.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: join(artifacts, 'chat-parent-mobile.png') });

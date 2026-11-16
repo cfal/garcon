@@ -70,9 +70,19 @@
 		isMobileLayout ? m.sidebar_actions_settings() : m.sidebar_chat_more_actions(),
 	);
 	const railClass = $derived(cn(FLOATING_TOOLBAR_RAIL_CLASS, !shadow && 'shadow-none'));
+	let open = $state(false);
+	let previousChatId: string | null = null;
+
+	$effect(() => {
+		const chatId = selectedChat?.id ?? null;
+		if (chatId !== previousChatId) {
+			previousChatId = chatId;
+			open = false;
+		}
+	});
 </script>
 
-<DropdownMenu>
+<DropdownMenu bind:open>
 	<div class={railClass}>
 		<DropdownMenuTrigger class={FLOATING_ICON_TRIGGER_CLASS} aria-label={triggerLabel}>
 			<EllipsisVertical class="h-3.5 w-3.5" />
