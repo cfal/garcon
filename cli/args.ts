@@ -243,7 +243,7 @@ Options:
   --run <run-id>               Exact permission request run fence
   --server-instance <id>       Exact permission request server-instance fence
   --answers <json>             Structured question answers as typed JSON rows
-  --clear                      Replace the complete tag set with no tags
+  --clear                      Clear all tags (set-tags) or the delegation parent (set-parent)
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom

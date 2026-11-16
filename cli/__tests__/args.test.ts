@@ -692,6 +692,7 @@ describe('parseCliArgs', () => {
   });
 
   test('parses setting and explicitly clearing a delegation parent', () => {
+    expect(CLI_HELP).toContain('Clear all tags (set-tags) or the delegation parent (set-parent)');
     const parent = '1785337200123457';
     expect(parseCliArgs(['set-parent', CHAT_ID, parent, '--json'], ENV)).toMatchObject({
       kind: 'set-parent', chatId: CHAT_ID, parentChatId: parent, json: true,
