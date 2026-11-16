@@ -58,7 +58,7 @@ async function openSnippetPalette(page: Page, newChat: Locator): Promise<Locator
   }
   await newChat
     .getByRole('button', { name: 'Add to prompt' })
-    .evaluate((element) => (element as HTMLButtonElement).click());
+    .click();
   await page.getByRole('menuitem', { name: /Snippets/ }).click();
   const palette = page.getByRole('dialog', { name: 'Insert Snippet' });
   await palette.waitFor();

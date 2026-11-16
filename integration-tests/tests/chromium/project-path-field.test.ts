@@ -96,7 +96,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await page.setViewportSize({ width, height: 900 });
         await browserExpect.poll(() => field.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         for (const radio of await field.getByRole('radio').all()) {
-          expect((await radio.locator('..').boundingBox())!.height).toBe(touch ? 44 : 32);
+          await browserExpect.poll(async () => (await radio.locator('..').boundingBox())!.height).toBe(44);
         }
         await page.screenshot({ path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
       }
