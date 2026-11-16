@@ -25,7 +25,10 @@
 	const projects = new NewChatProjectsController(() => form, executors, remoteSettings);
 	const groups = $derived(projects.groups.filter(group => executors.isReady(group.executorId)));
 	let promotedProject = $state<NewChatProject | undefined>();
-	const partition = $derived(splitNewChatProjects(groups, promotedProject));
+	const partition = $derived(splitNewChatProjects(groups, {
+		promoted: promotedProject,
+		selected: { executorId: form.executorId, path: form.selectedProjectPath },
+	}));
 	let moreOpen = $state(false);
 	let selectionClosedMore = false;
 	let projectList = $state<HTMLElement | null>(null);

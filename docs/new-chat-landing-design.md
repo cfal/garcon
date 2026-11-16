@@ -24,7 +24,10 @@ Overflow stays saved in a floating More menu, shown only when needed as a compac
 bar matching the cards with a downward chevron. The menu opens below and closes
 on outside click or Escape, before the landing screen closes. Its compact cards
 only select projects. Selection closes More and moves the highlighted project
-to the top of the main list, preserving the remaining order. Main-list cards
+to the top of the main list, preserving the remaining order. A selected project
+from a seed, folder browser or another executor is likewise brought into the
+main list when it would otherwise overflow. Selecting an already visible card
+preserves the primary order. Main-list cards
 have a three-dot menu on the right with Pin or Unpin and Remove from list.
 Only pinned cards show a rotated pin indicator. Selection uses highlighting without
 a checkmark. Pinning and removal preserve the selected project, worktree and prompt.
@@ -44,6 +47,8 @@ project on its owning executor, including the primary checkout. Worktrees use sm
 flat rows with titles on the left and muted, root-abbreviated paths such as
 `…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
 Selecting a row changes the new chat's target without clearing its prompt.
+The worktree header offers creation through the existing worktree modal;
+successful creation selects the new worktree on the current executor.
 A muted Choose folder action sits at the top right of the saved-projects heading,
 at the same visual level. It reveals a manual path field and Garcon's executor-owned
 folder browser. Each opening lists the configured project root's subfolders;
@@ -57,6 +62,10 @@ The desktop dropdown includes a bottom check button that closes browsing without
 changing the current path, including while its listing loads or reports an error.
 Clicking outside also closes it. Mobile retains explicit directory confirmation.
 Mobile also offers Enter path directly, without opening the full-screen browser.
+An executor without Files exposes Enter path on every screen size and keeps the
+manual field editable. Only browsing and Tab completion require Files. Tab
+completes typed directories on the selected executor, updates selection and
+validation together, and resets its completion cycle when the user types.
 Typing retains the existing debounced validation and shows path errors even when
 the executor cannot provide Git services.
 This replaces the unsuccessful native-dialog attempt; no OS dialog is requested.

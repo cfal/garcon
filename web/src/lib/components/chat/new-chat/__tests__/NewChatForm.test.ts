@@ -666,6 +666,179 @@ describe('NewChatForm', () => {
 	});
 
 	it.each([false, true].flatMap(isMobile => [localExecutor, remoteExecutor].map(executor => ({ executor, isMobile }))))(
+		'keeps manual entry available without Files and retains unavailable drafts ($executor.kind, mobile: $isMobile)', async ({ executor, isMobile }) => {
+		stubMatchMedia(isMobile);
+		const rootPath = executor.projectBasePath;
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockImplementation(async (path) => path.endsWith('/missing')
+			? { valid: false, errorCode: 'path_not_found' }
+			: { valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: executor.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
+		}));
+		const services = { ...localExecutor.executorServices, files: false, git: false };
+		const snapshots = [
+			{ ...localExecutor, executorServices: services },
+			{ ...remoteExecutor, executorServices: services },
+		];
+		let executors!: ExecutorsStore;
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { onStartChat, executorSnapshots: snapshots,
+			onExecutors: store => { executors = store; },
+		});
+		const prompt = await screen.findByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Retained manual-only draft' } });
+		await screen.findByText('Git unavailable');
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Choose folder' }).disabled).toBe(true);
+		const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Enter path' });
+		expect(reveal.disabled).toBe(false);
+		await fireEvent.click(reveal);
+		const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+		expect(field.disabled).toBe(false);
+		expect(document.activeElement).toBe(field);
+		const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+		field.dispatchEvent(tab);
+		expect(tab.defaultPrevented).toBe(false);
+		expect(filesApi.browseDirectory).not.toHaveBeenCalled();
+		await fireEvent.input(field, { target: { value: `${rootPath}/missing` } });
+		await waitFor(() => expect(field.title).toBe('Path does not exist.'));
+		const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		expect(submit.disabled).toBe(true);
+		await fireEvent.click(submit);
+		await fireEvent.keyDown(prompt, { key: 'Enter' });
+		expect(onStartChat).not.toHaveBeenCalled();
+		const chosenPath = `${rootPath}/manual`;
+		await fireEvent.input(field, { target: { value: chosenPath } });
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		await waitFor(() => expect(submit.disabled).toBe(false));
+		expect(onStartChat).not.toHaveBeenCalled();
+		executors.applySnapshot(snapshots.map(snapshot => snapshot.id === executor.id
+			? { ...snapshot, availability: 'offline' } : snapshot));
+		await waitFor(() => expect(submit.disabled).toBe(true));
+		expect(field.value).toBe(chosenPath);
+		expect(field.disabled).toBe(false);
+		expect(prompt.value).toBe('Retained manual-only draft');
+		await fireEvent.keyDown(prompt, { key: 'Enter' });
+		expect(onStartChat).not.toHaveBeenCalled();
+		executors.applySnapshot(snapshots);
+		await waitFor(() => expect(submit.disabled).toBe(false));
+		await fireEvent.click(submit);
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: executor.id, projectPath: chosenPath, firstMessage: 'Retained manual-only draft',
+		}), PROSPECTIVE_CHAT_ID);
+		expect(filesApi.browseDirectory).not.toHaveBeenCalled();
+	});
+
+	it.each([localExecutor, remoteExecutor])('completes and cycles manual paths with synchronized selection and validation ($kind)', async (executor) => {
+		stubMatchMedia(false);
+		const rootPath = executor.projectBasePath;
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: [`${rootPath}/project`], byExecutor: { [executor.id]: {
+				defaultPath: `${rootPath}/project`, pinnedPaths: [], recentPaths: [],
+			} } },
+			recentAgentSettings: [{ agentId: 'claude', model: 'opus', executorId: executor.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null }],
+		}));
+		vi.mocked(filesApi.browseDirectory).mockImplementation(async (directory) => directory === '/'
+			? [{ name: rootPath.slice(1), path: rootPath, type: 'directory' }]
+			: [
+			{ name: 'src', path: `${rootPath}/src`, type: 'directory' },
+			{ name: 'scripts', path: `${rootPath}/scripts`, type: 'directory' },
+			{ name: 'other', path: `${rootPath}/other`, type: 'directory' },
+		]);
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { onStartChat, executorSnapshots: [localExecutor,
+			{ ...remoteExecutor, executorServices: localExecutor.executorServices }],
+		});
+		const prompt = await screen.findByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Retained completed-path draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+		await fireEvent.input(field, { target: { value: `${rootPath}/s` } });
+		const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+		field.dispatchEvent(tab);
+		expect(tab.defaultPrevented).toBe(true);
+		await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenCalledWith(rootPath, undefined, executor.id));
+		await tick();
+		await fireEvent.keyDown(field, { key: 'Tab' });
+		await waitFor(() => expect(field.value).toBe(`${rootPath}/scripts`));
+		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith(`${rootPath}/scripts`, { executorId: executor.id }));
+		const label = executor.id === 'local' ? `${rootPath}/scripts` : `Worker: ${rootPath}/scripts`;
+		expect(screen.getByRole('button', { name: label }).getAttribute('aria-pressed')).toBe('true');
+		const backwardsTab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+		field.dispatchEvent(backwardsTab);
+		expect(backwardsTab.defaultPrevented).toBe(false);
+		await fireEvent.keyDown(field, { key: 'Escape' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		expect(field.value).toBe(rootPath);
+		await fireEvent.keyDown(field, { key: 'Tab' });
+		await waitFor(() => expect(field.value).toBe(`${rootPath}/`));
+		expect(filesApi.browseDirectory).toHaveBeenCalledWith('/', undefined, executor.id);
+		await fireEvent.input(field, { target: { value: `${rootPath}/o` } });
+		await fireEvent.keyDown(field, { key: 'Tab' });
+		await waitFor(() => expect(field.value).toBe(`${rootPath}/other/`));
+		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith(`${rootPath}/other/`, { executorId: executor.id }));
+		const completedLabel = executor.id === 'local' ? `${rootPath}/other/` : `Worker: ${rootPath}/other/`;
+		expect(screen.getByRole('button', { name: completedLabel }).getAttribute('aria-pressed')).toBe('true');
+		expect(prompt.value).toBe('Retained completed-path draft');
+		expect(onStartChat).not.toHaveBeenCalled();
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		expect(onStartChat).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: executor.id, projectPath: `${rootPath}/other/`, firstMessage: 'Retained completed-path draft',
+		}), PROSPECTIVE_CHAT_ID);
+	});
+
+	it.each(['offline', 'files'] as const)('retains an open chooser draft across %s loss on Local and remote', async (loss) => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValue(makeSnapshot());
+		for (const executor of [localExecutor, remoteExecutor]) {
+			const rootPath = executor.projectBasePath;
+			const chosenPath = `${rootPath}/edited-offline`;
+			const snapshots = [localExecutor, {
+				...remoteExecutor,
+				executorServices: { ...remoteExecutor.executorServices, files: true },
+			}];
+			let executors!: ExecutorsStore;
+			const onStartChat = vi.fn();
+			const view = render(NewChatFormTestHost, {
+				seed: { project: { executorId: executor.id, projectPath: `${rootPath}/selected` }, prefill: 'Retain the chooser draft' },
+				executorSnapshots: snapshots,
+				onExecutors: store => { executors = store; }, onStartChat,
+			});
+			await screen.findByPlaceholderText('How can I help you today?');
+			await fireEvent.click(await screen.findByRole('button', { name: 'Choose folder' }));
+			const input = () => screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+			expect(input().value).toBe(rootPath);
+			executors.applySnapshot(snapshots.map(snapshot => snapshot.id !== executor.id ? snapshot
+				: loss === 'offline' ? { ...snapshot, availability: 'offline' }
+				: { ...snapshot, executorServices: { ...snapshot.executorServices, files: false } }));
+			await waitFor(() => expect(input().value).toBe(`${rootPath}/selected`));
+			expect(screen.queryByRole('dialog', { name: 'Select Directory' })).toBeNull();
+			await fireEvent.input(input(), { target: { value: chosenPath } });
+			await fireEvent.keyDown(input(), { key: 'Enter' });
+			expect(onStartChat).not.toHaveBeenCalled();
+			executors.applySnapshot(snapshots);
+			await waitFor(() => expect(input().value).toBe(chosenPath));
+			expect(screen.queryByRole('dialog', { name: 'Select Directory' })).toBeNull();
+			expect(screen.getByDisplayValue('Retain the chooser draft')).toBeTruthy();
+			const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+			await waitFor(() => expect(submit.disabled).toBe(false));
+			await fireEvent.click(submit);
+			expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+				executorId: executor.id, projectPath: chosenPath, firstMessage: 'Retain the chooser draft',
+			}), PROSPECTIVE_CHAT_ID);
+			view.unmount();
+		}
+	});
+
+	it.each([false, true].flatMap(isMobile => [localExecutor, remoteExecutor].map(executor => ({ executor, isMobile }))))(
 		'browses the executor root on every open and accepts a manual path ($executor.kind, mobile: $isMobile)', async ({ executor, isMobile }) => {
 		stubMatchMedia(isMobile);
 		const rootPath = executor.projectBasePath;

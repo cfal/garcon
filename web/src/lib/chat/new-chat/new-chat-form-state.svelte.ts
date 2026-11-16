@@ -122,10 +122,21 @@ export class NewChatFormState {
 
 	// Injected dependencies
 	readonly #options: NewChatFormStateOptions;
-	readonly #pathCompletion = new ProjectPathCompletionController(this);
+	readonly #pathCompletion: ProjectPathCompletionController;
 
 	constructor(options: NewChatFormStateOptions) {
 		this.#options = options;
+		const getForm = () => this;
+		// Publishes completion through the same identity and validation update as manual edits.
+		this.#pathCompletion = new ProjectPathCompletionController({
+			get executorId() { return getForm().executorId; },
+			get filesAvailable() { return getForm().filesAvailable; },
+			get pathContextKey() { return getForm().pathContextKey; },
+			get projectPath() { return getForm().projectPath; },
+			set projectPath(path) { getForm().editProjectPath(path); },
+			get showBrowser() { return getForm().showBrowser; },
+			set showBrowser(open) { getForm().showBrowser = open; },
+		});
 		this.worktrees = new NewChatWorktreeState({
 			getExecutorId: () => this.executorId,
 			getProjectPath: () => this.nonblankPath,
@@ -603,6 +614,7 @@ export class NewChatFormState {
 	// Path validation
 
 	selectProjectPath(path: string): void {
+		this.resetTabCompletions();
 		this.#updateProjectPath(path);
 		this.#pathValidation.validateSelectedPath();
 	}

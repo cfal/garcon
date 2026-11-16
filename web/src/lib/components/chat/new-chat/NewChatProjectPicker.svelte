@@ -20,8 +20,10 @@
 
 	$effect(() => {
 		browseContextKey;
+		const filesAvailable = form.filesAvailable;
 		untrack(() => {
 			browserPath = form.projectBasePath;
+			if (!filesAvailable) form.showBrowser = false;
 		});
 	});
 
@@ -32,6 +34,7 @@
 			return;
 		}
 		pathFieldOpen = true;
+		form.resetTabCompletions();
 		browserPath = form.projectBasePath;
 		form.showBrowser = true;
 		if (form.showBrowser && !isMobile) {
@@ -42,9 +45,17 @@
 
 	async function enterPath(): Promise<void> {
 		pathFieldOpen = true;
+		form.resetTabCompletions();
 		form.showBrowser = false;
 		await tick();
 		pathInput?.focus();
+	}
+
+	async function completePath(): Promise<void> {
+		const contextKey = form.pathContextKey;
+		if (displayedPath !== form.projectPath) form.editProjectPath(displayedPath);
+		await form.handleTabCompletion();
+		if (contextKey === form.pathContextKey) browserPath = form.projectPath;
 	}
 </script>
 
@@ -72,10 +83,10 @@
 				class="h-[42px] max-w-full sm:pointer-fine:h-[38px]"
 				onSelect={(executorId) => form.selectExecutor(executorId)}
 			/>
-			{#if isMobile}
+			{#if isMobile || !form.filesAvailable}
 				<button
 					type="button"
-					disabled={!form.filesAvailable || form.isUpdatingPinnedPath}
+					disabled={form.isUpdatingPinnedPath}
 					onclick={() => void enterPath()}
 					class="inline-flex min-h-10 items-center rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 				>{m.chat_new_chat_enter_path()}</button>
@@ -88,15 +99,21 @@
 					value={displayedPath}
 					aria-label={m.chat_new_chat_project_path()}
 					placeholder={form.projectBasePath}
-					disabled={!form.filesAvailable || form.isUpdatingPinnedPath}
+					disabled={form.isUpdatingPinnedPath}
 					validationStatus={displaysSelectedPath ? form.validationStatus : 'idle'}
 					validationError={displaysSelectedPath ? form.validationError : null}
 					class="relative z-30 mt-2"
 					oninput={(event) => {
 						browserPath = event.currentTarget.value;
+						form.resetTabCompletions();
 						form.editProjectPath(browserPath);
 					}}
 					onkeydown={(event) => {
+						if (event.key === 'Tab' && !event.shiftKey && form.filesAvailable) {
+							event.preventDefault();
+							void completePath();
+							return;
+						}
 						if (event.key !== 'Enter' && event.key !== 'Escape') return;
 						if (event.key === 'Escape' && !form.showBrowser) return;
 						event.preventDefault();
