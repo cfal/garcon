@@ -15,6 +15,7 @@
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import ChatSummary from '../chat/ChatSummary.svelte';
 	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import SidebarDelegationArrow from './SidebarDelegationArrow.svelte';
 	import type { SidebarVirtualChatRow } from '$lib/sidebar/display/sidebar-virtual-chat-list';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -30,6 +31,7 @@
 	import { chatActivityTimeMs } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
+		delegationDepth?: number;
 		branch?: SidebarVirtualChatRow['branch'];
 		onToggleDelegatedChats?: () => void;
 		contextOnly?: boolean;
@@ -75,6 +77,7 @@
 	}
 
 	let {
+		delegationDepth = 0,
 		branch,
 		onToggleDelegatedChats,
 		contextOnly = false,
@@ -126,6 +129,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
+	let showDelegationArrow = $derived(delegationDepth > 0 && !isSingleLineLayout);
 	let contentInset = $derived(sidebarChatInset(depth));
 	let hasAdditionalLines = $derived(
 		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
@@ -324,7 +328,11 @@
 			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
-		/>
+		>
+			{#snippet titlePrefix()}
+				{#if showDelegationArrow}<SidebarDelegationArrow depth={delegationDepth} />{/if}
+			{/snippet}
+		</ChatSummary>
 		<!-- The executor header names the executor visually; the row keeps it in its
 		     accessible name. -->
 		{#if executorGrouped && executorLabel}
