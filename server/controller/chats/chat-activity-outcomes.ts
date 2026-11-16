@@ -21,8 +21,8 @@ export class ChatActivityOutcomes {
   constructor(private readonly currentView: (chatId: string) => string | null) {}
 
   get(chatId: string): ChatRunOutcome | null {
-    const current = this.#byChat.get(chatId);
-    return current?.viewId === this.currentView(chatId) ? current.outcome : null;
+    // View replacement invalidates the cache synchronously; list reads never reopen storage.
+    return this.#byChat.get(chatId)?.outcome ?? null;
   }
 
   clear(chatId: string, runId?: string): void {

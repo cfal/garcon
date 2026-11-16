@@ -76,6 +76,26 @@ describe('metadata-store', () => {
   });
 
   describe('extractPreviewText uses full message content', () => {
+    it('serves run outcomes from memory through transcript unavailability', () => {
+      let available = true;
+      const viewId = mock(() => {
+        if (!available) throw new Error('Synthetic corrupt ledger');
+        return 'view-1';
+      });
+      const index = new MetadataIndex(mockRegistry, {
+        ...mockAgents, getExistingTranscriptViewId: viewId,
+      }, mockCarryOver);
+      expect(index.getRunOutcome(chatId)).toBeNull();
+      expect(viewId).not.toHaveBeenCalled();
+      index.updateRunOutcome(chatId, 'view-1', 'finished');
+      expect(viewId).toHaveBeenCalledTimes(1);
+      available = false;
+      expect(index.getRunOutcome(chatId)).toBe('finished');
+      index.invalidateTranscriptView(chatId);
+      expect(index.getRunOutcome(chatId)).toBeNull();
+      expect(viewId).toHaveBeenCalledTimes(1);
+    });
+
     it('retains a pre-run failure before startup repair validates a cold preview', async () => {
       const metadataPath = path.join(tmpDir, 'cold-activity.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({ cold: { firstMessage: 'Synthetic input' } })));
