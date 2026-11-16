@@ -360,7 +360,10 @@ describe('Chromium sidebar chat reorder', () => {
   test('keeps native dragging alive across filtered context rows', async () => {
     await withSidebarChromiumFixture('sidebar-filtered-context-reorder', async (fixture) => {
       const { page, integration } = fixture;
-      await page.addInitScript(seedLocalSettings, { sidebarSortMode: 'manual' });
+      await page.addInitScript(seedLocalSettings, {
+        sidebarSortMode: 'manual',
+        sidebarNestDelegatedChats: false,
+      });
       const { a, b, b1 } = await createSidebarDelegationFixture(integration);
       const c = integration.newChatId();
       const started = await integration.client.startDirectChat({
@@ -559,7 +562,10 @@ describe('Chromium sidebar chat reorder', () => {
   test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
     await withSidebarChromiumFixture('sidebar-chat-reorder', async (fixture) => {
       // Drag reorder is only enabled under manual sidebar sort.
-      await fixture.page.addInitScript(seedLocalSettings, { sidebarSortMode: 'manual' });
+      await fixture.page.addInitScript(seedLocalSettings, {
+        sidebarSortMode: 'manual',
+        sidebarNestDelegatedChats: false,
+      });
       const chatIds = await createChats(fixture.integration, 4);
       const original = await normalOrder(fixture.integration);
       expect(original).toHaveLength(chatIds.length);
