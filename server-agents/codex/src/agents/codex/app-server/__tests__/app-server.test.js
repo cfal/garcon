@@ -5054,6 +5054,7 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
     });
+    fake.emit('notification', { method: 'thread/closed', params: { threadId: 'thread-1' } });
     fake.emit('notification', {
       method: 'item/completed',
       params: {
