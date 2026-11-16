@@ -2625,6 +2625,9 @@ describe('SidebarVirtualSortableChatList', () => {
 			expect(plain.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
 			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
 			expect(child.parentElement!.style.height).toBe(height);
+			expect(child.querySelector<HTMLElement>('.chat-item-root button')!.style.paddingLeft).toBe(
+				layout === 'single-line' ? '24px' : '12px',
+			);
 			if (layout === 'single-line') {
 				const overlay = child.parentElement!.querySelector('[data-sidebar-tree-guides]')!;
 				expect(overlay.getAttribute('aria-hidden')).toBe('true');
@@ -2642,6 +2645,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				expect(arrow.getAttribute('aria-hidden')).toBe('true');
 				expect(arrow.classList.contains('pointer-events-none')).toBe(true);
 				expect(arrow.closest('[data-slot="chat-summary-header"]')).not.toBeNull();
+				expect(arrow.parentElement!.firstElementChild).toBe(arrow);
 			}
 			await view.rerender({
 				chats,

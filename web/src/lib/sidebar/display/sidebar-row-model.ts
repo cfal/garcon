@@ -126,13 +126,17 @@ type ProjectionTask =
 	| { kind: 'header'; row: Exclude<SidebarVirtualRow, SidebarVirtualChatRow> }
 	| { kind: 'chat'; row: SidebarVirtualChatRow };
 
-function childTreeScope(parentDepth: number, parent?: SidebarTreeGuide): SidebarTreeScope {
+function childTreeScope(
+	parentDepth: number,
+	delegationDepth: number,
+	parent?: SidebarTreeGuide,
+): SidebarTreeScope {
 	let continuations = parent?.continuations ?? null;
 	// Shared tails keep deep projections linear; terminal ancestors need no rail.
 	if (parent && !parent.isLastChild) {
 		continuations = { depth: parent.parentDepth, outer: continuations };
 	}
-	return { parentDepth, continuations };
+	return { parentDepth, delegationDepth, continuations };
 }
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
@@ -256,7 +260,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					parentId: row.chat.id,
 					ids: children.filter(hasMatches),
 					depth: row.depth + 1,
-					tree: childTreeScope(row.depth, row.tree),
+					tree: childTreeScope(row.depth, (row.tree?.delegationDepth ?? 0) + 1, row.tree),
 					path: [],
 					inheritedFields,
 					executorGrouped: false,
@@ -333,7 +337,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 						path,
 						depth: task.depth + 1,
 						// Root grouping headers do not start delegated tree guides.
-						tree: row.tree ? childTreeScope(row.depth, row.tree) : undefined,
+						tree: row.tree
+							? childTreeScope(row.depth, row.tree.delegationDepth, row.tree)
+							: undefined,
 						executorGrouped: task.executorGrouped || field === 'executor',
 					});
 				tasks.push({ kind: 'header', row });

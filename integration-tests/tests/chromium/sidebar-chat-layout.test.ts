@@ -139,33 +139,46 @@ test('multi-line delegation arrows align with titles while single-line keeps tre
     await page.addInitScript(seedLocalSettings, {
       sidebarNestDelegatedChats: true,
       sidebarGroupingFields: [],
-      chatListFontSize: 16,
+      chatListFontSize: '16',
     });
     await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
     const child = page.locator(`[data-sidebar-virtual-row="${a1}"]`);
     const wrapper = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]');
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      await openSidebar(page);
       for (const label of ['Compact', 'Detailed', 'Single-line']) {
+        await openSidebar(page);
         await chooseMenuOption(page, label);
         const singleLine = label === 'Single-line';
         await browserExpect(wrapper.locator('[data-sidebar-tree-guides]')).toHaveCount(singleLine ? 1 : 0);
         const arrow = child.locator('[data-sidebar-delegation-arrow]');
         await browserExpect(arrow).toHaveCount(singleLine ? 0 : 1);
+        await browserExpect(child.locator('[data-slot="chat-summary-header"]')).toHaveCSS('font-size', '16px');
+        await browserExpect(child.locator('.chat-item-root button').first()).toHaveCSS('padding-left', singleLine ? '24px' : '12px');
         if (singleLine) continue;
         await browserExpect(arrow).toHaveAttribute('aria-hidden', 'true');
         await browserExpect(arrow).toHaveCSS('pointer-events', 'none');
         await browserExpect.poll(() => arrow.evaluate(element => {
           const bounds = element.getBoundingClientRect();
           const header = element.closest('[data-slot="chat-summary-header"]')!.getBoundingClientRect();
+          const title = element.nextElementSibling!.getBoundingClientRect();
           const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
           return {
-            beforeTitle: bounds.right <= header.left,
+            beforeTitle: bounds.right <= title.left,
             centered: Math.abs(bounds.y + bounds.height / 2 - header.y - header.height / 2) < 0.51,
-            hitsRow: hit?.closest('[data-sidebar-virtual-row]') === element.closest('[data-sidebar-virtual-row]'),
+            hitsRow: !element.contains(hit) && hit?.closest('[data-sidebar-virtual-row]') === element.closest('[data-sidebar-virtual-row]'),
           };
         })).toEqual({ beforeTitle: true, centered: true, hitsRow: true });
+        if (width === 390 && label === 'Compact') {
+          await child.locator('[data-slot="chat-summary-header"]').click({ modifiers: ['Control'] });
+          const selection = child.getByRole('checkbox');
+          await browserExpect(selection).toBeVisible();
+          const checkboxBounds = await selection.locator(':scope > div').first().boundingBox();
+          const arrowBounds = await arrow.boundingBox();
+          expect(arrowBounds!.x).toBeGreaterThanOrEqual(checkboxBounds!.x + checkboxBounds!.width);
+          await page.keyboard.press('Escape');
+          await browserExpect(selection).toHaveCount(0);
+        }
       }
     }
     assertNoBrowserErrors();

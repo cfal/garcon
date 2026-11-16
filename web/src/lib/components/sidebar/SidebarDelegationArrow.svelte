@@ -2,10 +2,8 @@
 	import CornerDownRight from '@lucide/svelte/icons/corner-down-right';
 </script>
 
-<span
-	class="pointer-events-none absolute top-0 right-full mr-0.5 flex h-[1.3em] w-3 items-center text-muted-foreground"
+<CornerDownRight
+	class="pointer-events-none size-3 shrink-0 text-muted-foreground"
 	aria-hidden="true"
 	data-sidebar-delegation-arrow
->
-	<CornerDownRight class="size-3" />
-</span>
+/>

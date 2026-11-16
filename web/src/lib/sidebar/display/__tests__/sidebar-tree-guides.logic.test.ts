@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSidebarRowModel } from '../sidebar-row-model';
 import type { SidebarTreeContinuation, SidebarVirtualRow } from '../sidebar-virtual-chat-list';
+import { sidebarDisplayRows } from '../sidebar-virtual-chat-list';
 import { chat, delegated, projectionInput } from './sidebar-fixtures';
 
 function guides(rows: SidebarVirtualRow[]) {
@@ -12,6 +13,33 @@ function guides(rows: SidebarVirtualRow[]) {
 }
 
 describe('delegated sidebar tree guides', () => {
+	it.each(['compact', 'detailed'] as const)(
+		'removes only delegation indentation in %s rows',
+		(layout) => {
+			const chats = [
+				chat('root'),
+				delegated('child', 'root', { projectPath: '/other' }),
+				delegated('grandchild', 'child', { projectPath: '/other' }),
+			];
+			const rows = buildSidebarRowModel(
+				projectionInput(chats, {
+					groupingFields: [{ field: 'project', enabled: true }],
+				}),
+			).rows;
+			expect(rows.map((row) => row.depth)).toEqual([0, 1, 2, 3, 4]);
+			expect(rows.map((row) => row.tree?.delegationDepth)).toEqual([undefined, undefined, 1, 1, 2]);
+			const displayed = sidebarDisplayRows(rows, layout);
+			expect(displayed.map((row) => row.depth)).toEqual([0, 1, 1, 2, 2]);
+			expect(displayed[0]).toBe(rows[0]);
+			expect(displayed[1]).toBe(rows[1]);
+			expect(displayed[4].tree).toBe(rows[4].tree);
+			expect(rows.map((row) => row.depth)).toEqual([0, 1, 2, 3, 4]);
+			expect(sidebarDisplayRows(rows, 'single-line')).toBe(rows);
+			const ungrouped = buildSidebarRowModel(projectionInput(chats)).rows;
+			expect(sidebarDisplayRows(ungrouped, layout).map((row) => row.depth)).toEqual([0, 0, 0]);
+		},
+	);
+
 	it('continues ancestor rails only through siblings that follow in display order', () => {
 		const chats = [
 			chat('root'),

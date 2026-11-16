@@ -64,6 +64,7 @@ describe('sidebar tree guide geometry', () => {
 			const arrows = container.querySelectorAll('[data-sidebar-delegation-arrow]');
 			expect(arrows).toHaveLength(1);
 			expect(arrows[0].closest('[data-slot="chat-summary-header"]')).not.toBeNull();
+			expect(arrows[0].parentElement!.firstElementChild).toBe(arrows[0]);
 			expect(arrows[0].getAttribute('aria-hidden')).toBe('true');
 		},
 	);
@@ -103,6 +104,7 @@ describe('sidebar tree guide geometry', () => {
 			row: { ...row, depth: 2 },
 			guide: {
 				parentDepth: 1,
+				delegationDepth: 2,
 				isLastChild: false,
 				continuations: { depth: 0, outer: null },
 			},
@@ -119,7 +121,7 @@ describe('sidebar tree guide geometry', () => {
 	it('keeps continuation markup bounded by the current width, including after resizing', async () => {
 		let continuations: SidebarTreeContinuation | null = null;
 		for (let depth = 0; depth < 2000; depth++) continuations = { depth, outer: continuations };
-		const guide = { parentDepth: 2000, isLastChild: false, continuations };
+		const guide = { parentDepth: 2000, delegationDepth: 2001, isLastChild: false, continuations };
 		const props = { row, guide, contentHeight: 74, width: 320 };
 		const view = render(SidebarTreeGuides, props);
 		expect(view.container.querySelectorAll('[data-sidebar-tree-continuation]')).toHaveLength(26);

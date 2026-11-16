@@ -20,6 +20,7 @@
 		showProjectPath?: boolean;
 		executorLabel?: string;
 		chatItemLayout?: ChatItemLayout;
+		titlePrefix?: Snippet;
 		titleBadge?: Snippet;
 		hasDesktopOverlayMenu?: boolean;
 		onTagClick?: (tag: string) => void;
@@ -36,6 +37,7 @@
 		showProjectPath = true,
 		executorLabel,
 		chatItemLayout = 'detailed',
+		titlePrefix,
 		titleBadge,
 		hasDesktopOverlayMenu = false,
 		onTagClick,
@@ -107,6 +109,7 @@
 		)}
 		data-slot="chat-summary-header"
 	>
+		{@render titlePrefix?.()}
 		<span
 			class={cn(titleClass, isUnread ? 'font-bold' : isSidebar ? 'font-normal' : 'font-medium')}
 			title={chatName}

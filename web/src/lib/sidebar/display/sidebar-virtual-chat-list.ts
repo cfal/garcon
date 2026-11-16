@@ -35,6 +35,7 @@ export interface SidebarTreeContinuation {
 
 export interface SidebarTreeScope {
 	parentDepth: number;
+	delegationDepth: number;
 	continuations: SidebarTreeContinuation | null;
 }
 
@@ -126,6 +127,16 @@ export interface SidebarRowModel {
 	visibleChatIds: string[];
 	matchingChatIds: string[];
 	actionableChatIds: string[];
+}
+
+export function sidebarDisplayRows(
+	rows: SidebarVirtualRow[],
+	layout: ChatItemLayout,
+): SidebarVirtualRow[] {
+	if (layout === 'single-line') return rows;
+	return rows.map((row) =>
+		row.tree ? { ...row, depth: row.depth - row.tree.delegationDepth } : row,
+	);
 }
 
 export function estimateSidebarVirtualRowSize(

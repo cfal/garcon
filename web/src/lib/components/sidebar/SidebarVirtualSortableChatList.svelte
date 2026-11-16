@@ -14,6 +14,7 @@
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		computeSidebarSeparatorItems,
+		sidebarDisplayRows,
 		DEFAULT_CHAT_ROW_OVERSCAN,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
@@ -219,8 +220,9 @@
 	const virtual = new SidebarVirtualChatListController();
 	let virtualSnapshot = $derived(virtual.snapshot);
 	let virtualItems = $derived(virtual.items(virtualSnapshot, rows));
+	const displayRows = $derived(sidebarDisplayRows(rows, displayOptions.chatItemLayout));
 	// Matches rows by identity while the geometry effect catches up with regrouping.
-	const rowsByKey = $derived(new Map(rows.map((row, index) => [row.key, { row, index }])));
+	const rowsByKey = $derived(new Map(displayRows.map((row, index) => [row.key, { row, index }])));
 	const renderedItems = $derived.by(() => {
 		return virtualItems.flatMap((virtualItem) => {
 			const match = rowsByKey.get(virtualItem.key);
@@ -235,7 +237,7 @@
 			? []
 			: computeSidebarSeparatorItems(
 					renderedItems.map(({ virtualItem }) => virtualItem),
-					rows,
+					displayRows,
 					separatorLineHeight,
 					separatorPixelRatio,
 				),

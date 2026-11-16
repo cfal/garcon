@@ -255,7 +255,6 @@
 </script>
 
 {#snippet stateBadge()}
-	{#if showDelegationArrow}<SidebarDelegationArrow />{/if}
 	<SidebarBranchBadge {branch} {contextOnly} />
 	<!-- Virtualized section headers may be unmounted, so rows keep their archived
 	     state for assistive technology. -->
@@ -315,10 +314,7 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div
-		class={cn('relative flex-1 min-w-0', showDelegationArrow && isMultiSelectMode && 'ml-3')}
-		data-typography-chat-list
-	>
+	<div class="relative flex-1 min-w-0" data-typography-chat-list>
 		<ChatSummary
 			{session}
 			variant="sidebar"
@@ -332,7 +328,11 @@
 			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
-		/>
+		>
+			{#snippet titlePrefix()}
+				{#if showDelegationArrow}<SidebarDelegationArrow />{/if}
+			{/snippet}
+		</ChatSummary>
 		<!-- The executor header names the executor visually; the row keeps it in its
 		     accessible name. -->
 		{#if executorGrouped && executorLabel}

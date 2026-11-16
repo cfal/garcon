@@ -10,6 +10,7 @@
 	import {
 		estimateSidebarVirtualRowSize,
 		sidebarChatInset,
+		sidebarDisplayRows,
 	} from '$lib/sidebar/display/sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
 	import { SIDEBAR_PREVIEW_CHATS, SIDEBAR_PREVIEW_NOW } from './sidebar-preview-chats';
@@ -22,6 +23,7 @@
 			currentTime: SIDEBAR_PREVIEW_NOW,
 		}),
 	);
+	const displayRows = $derived(sidebarDisplayRows(projection.rowModel.rows, options.chatItemLayout));
 </script>
 
 <div class="min-w-0" data-sidebar-display-preview>
@@ -31,7 +33,7 @@
 		style={`width:${width}px`}
 		inert
 	>
-		{#each projection.rowModel.rows as row (row.key)}
+		{#each displayRows as row (row.key)}
 			{@const height = estimateSidebarVirtualRowSize(
 				row,
 				options.chatItemLayout,
@@ -60,10 +62,12 @@
 									? 'Remote'
 									: undefined}
 							>
-								{#snippet titleBadge()}
+								{#snippet titlePrefix()}
 									{#if row.tree && options.chatItemLayout !== 'single-line'}
 										<SidebarDelegationArrow />
 									{/if}
+								{/snippet}
+								{#snippet titleBadge()}
 									<SidebarBranchBadge branch={row.branch} />
 								{/snippet}
 							</ChatSummary>
