@@ -67,7 +67,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(folderBrowser.locator('[aria-current="location"]')).toHaveText(basename(executionDirs.project));
       await browserExpect(folderBrowser.getByRole('button', { name: 'nested-folder', exact: true })).toHaveCount(0);
       await browserExpect(folderBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
-      await browserExpect(pathField).toHaveValue(project);
+      await browserExpect(pathField).toHaveValue(toExecutorPath(executionDirs.project));
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
@@ -79,6 +79,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(pathField).toHaveValue(project);
       await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
       await browserExpect(folderBrowser).toBeVisible();
+      await browserExpect(pathField).toHaveValue(toExecutorPath(executionDirs.project));
       await dialog.locator('[data-slot="directory-browser-dismiss"]').click({ position: { x: 8, y: 8 } });
       await browserExpect(folderBrowser).toHaveCount(0);
       await browserExpect(pathField).toHaveValue(project);
@@ -198,7 +199,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           await browserExpect(mobileBrowser.locator('[aria-current="location"]')).toHaveText(basename(executionDirs.project));
           await browserExpect(mobileBrowser.getByRole('button', { name: 'nested-folder', exact: true })).toHaveCount(0);
           await browserExpect(mobileBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
-          await browserExpect(pathField).toHaveValue(toExecutorPath(linked));
+          await browserExpect(pathField).toHaveValue(toExecutorPath(executionDirs.project));
           await browserExpect(selectedWorktree).toBeChecked();
           await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
           await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-390.png`) });

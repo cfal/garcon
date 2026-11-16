@@ -15,6 +15,8 @@
 	let pathFieldOpen = $state(false);
 	let browserPath = $state('');
 	const browseContextKey = $derived(form.pathContextKey);
+	const displayedPath = $derived(form.showBrowser ? browserPath : form.projectPath);
+	const displaysSelectedPath = $derived(displayedPath === form.projectPath);
 
 	$effect(() => {
 		browseContextKey;
@@ -83,12 +85,12 @@
 			{#key browseContextKey}
 				<ProjectPathField
 					bind:ref={pathInput}
-					value={form.projectPath}
+					value={displayedPath}
 					aria-label={m.chat_new_chat_project_path()}
 					placeholder={form.projectBasePath}
 					disabled={!form.filesAvailable || form.isUpdatingPinnedPath}
-					validationStatus={form.validationStatus}
-					validationError={form.validationError}
+					validationStatus={displaysSelectedPath ? form.validationStatus : 'idle'}
+					validationError={displaysSelectedPath ? form.validationError : null}
 					class="relative z-30 mt-2"
 					oninput={(event) => {
 						browserPath = event.currentTarget.value;
@@ -99,8 +101,12 @@
 						if (event.key === 'Escape' && !form.showBrowser) return;
 						event.preventDefault();
 						event.stopPropagation();
+						const enteredPath = displayedPath;
 						form.showBrowser = false;
-						if (event.key === 'Enter') form.validatePath();
+						if (event.key === 'Enter') {
+							if (enteredPath !== form.projectPath) form.selectProjectPath(enteredPath);
+							else form.validatePath();
+						}
 					}}
 					browser={{
 						open: form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath,

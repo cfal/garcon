@@ -690,13 +690,21 @@ describe('NewChatForm', () => {
 		const prompt = await screen.findByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
 		await fireEvent.input(prompt, { target: { value: 'Retained manual-path draft' } });
 		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		const validationsBeforeOpen = vi.mocked(chatsApi.validateStart).mock.calls.length;
 		expect(screen.queryByRole('textbox', { name: 'Project Path' })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 		await screen.findByRole('button', { name: 'root-child' });
 		expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(rootPath, expect.any(AbortSignal), executor.id);
-		expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' }).value).toBe(projectPath);
+		const rootField = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+		expect(rootField.value).toBe(rootPath);
+		expect(rootField.closest('[data-slot="project-path-field"]')?.querySelector('.text-status-success-foreground')).toBeNull();
 		expect(chatsApi.validateStart).toHaveBeenLastCalledWith(projectPath, { executorId: executor.id });
 		expect(prompt.value).toBe('Retained manual-path draft');
+		await fireEvent.keyDown(rootField, { key: 'Escape' });
+		expect(rootField.value).toBe(projectPath);
+		expect(chatsApi.validateStart).toHaveBeenCalledTimes(validationsBeforeOpen);
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await screen.findByRole('button', { name: 'root-child' });
 		await fireEvent.click(screen.getByRole('button', { name: 'root-child' }));
 		await waitFor(() => expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(`${rootPath}/root-child`, expect.any(AbortSignal), executor.id));
 		if (isMobile) {
@@ -709,8 +717,19 @@ describe('NewChatForm', () => {
 		await screen.findByRole('button', { name: 'root-child' });
 		expect(filesApi.browseDirectory).toHaveBeenLastCalledWith(rootPath, expect.any(AbortSignal), executor.id);
 		const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
-		expect(field.value).toBe(isMobile ? projectPath : `${rootPath}/root-child`);
+		expect(field.value).toBe(rootPath);
 		expect(prompt.value).toBe('Retained manual-path draft');
+		await fireEvent.keyDown(field, { key: 'Escape' });
+		expect(field.value).toBe(isMobile ? projectPath : `${rootPath}/root-child`);
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await screen.findByRole('button', { name: 'root-child' });
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith(rootPath, { executorId: executor.id }));
+		expect(field.value).toBe(rootPath);
+		expect(screen.queryByRole('dialog', { name: 'Select Directory' })).toBeNull();
+		expect(onStartChat).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await screen.findByRole('button', { name: 'root-child' });
 		if (isMobile) await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		await fireEvent.input(field, { target: { value: pastedPath } });
 		if (!isMobile) {
@@ -775,6 +794,11 @@ describe('NewChatForm', () => {
 		const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
 		expect(submit.disabled).toBe(true);
 		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		const browseField = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+		expect(browseField.value).toBe(executor.projectBasePath);
+		expect(browseField.title).toBe('');
+		expect(browseField.closest('[data-slot="project-path-field"]')?.querySelector('.text-destructive')).toBeNull();
+		expect(submit.disabled).toBe(true);
 		await fireEvent.click(await screen.findByRole('button', { name: 'New directory' }));
 		await fireEvent.input(screen.getByRole('textbox', { name: 'Directory name' }), { target: { value: 'fresh' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
