@@ -28,11 +28,40 @@ export function sidebarChatInset(depth: number): number {
 	return SIDEBAR_CHAT_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
 }
 
+export interface SidebarTreeContinuation {
+	readonly depth: number;
+	readonly outer: SidebarTreeContinuation | null;
+}
+
+export interface SidebarTreeScope {
+	parentDepth: number;
+	continuations: SidebarTreeContinuation | null;
+}
+
+export interface SidebarTreeGuide extends SidebarTreeScope {
+	isLastChild: boolean;
+}
+
+export function sidebarChildTreeScope(
+	parentDepth: number,
+	guide?: SidebarTreeGuide,
+): SidebarTreeScope {
+	return {
+		parentDepth,
+		// Shared tails keep deep projections linear; terminal ancestors need no rail.
+		continuations:
+			guide && !guide.isLastChild
+				? { depth: guide.parentDepth, outer: guide.continuations }
+				: (guide?.continuations ?? null),
+	};
+}
+
 export interface SidebarVirtualProjectHeaderRow {
 	executorId?: string;
 	type: 'project-header';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	projectKey: string;
 	collapseKey: string;
 	projectPath: string;
@@ -49,6 +78,7 @@ export interface SidebarVirtualExecutorHeaderRow {
 	type: 'executor-header';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	executorId: string;
 	collapseKey: string;
 	count: number;
@@ -63,6 +93,7 @@ export interface SidebarVirtualSectionHeaderRow {
 	type: 'section-header';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	section: SidebarChatSection;
 	count: number;
 	containsChat: (chatId: string) => boolean;
@@ -73,6 +104,7 @@ export interface SidebarVirtualChatRow {
 	type: 'chat';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	chat: ChatSessionRecord;
 	list: PersistedChatOrderGroup;
 	isPinned: boolean;

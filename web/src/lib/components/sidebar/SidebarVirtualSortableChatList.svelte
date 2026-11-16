@@ -10,6 +10,7 @@
 	import SidebarExecutorHeaderRow from './SidebarExecutorHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
+	import SidebarTreeGuides from './SidebarTreeGuides.svelte';
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		computeSidebarSeparatorItems,
@@ -132,6 +133,7 @@
 	let draggingChatId = $state<string | null>(null);
 	let dragScopeKey: string | null = null;
 	let listEl = $state<HTMLElement | null>(null);
+	let listWidth = $state(0);
 	let lastValidDrop: SidebarDropInstruction | null = null;
 	let touchDrag: {
 		identifier: number;
@@ -843,6 +845,7 @@
 
 <div
 	bind:this={listEl}
+	bind:clientWidth={listWidth}
 	class="relative min-h-full"
 	style={`height:${totalHeight}px;`}
 	data-sidebar-virtual-list
@@ -944,6 +947,15 @@
 						onSortChatOrder={displayOptions.sortMode === 'manual' && !reorder.busy
 							? onSortChatOrder
 							: undefined}
+					/>
+				{/if}
+				{#if row.tree}
+					<SidebarTreeGuides
+						{row}
+						guide={row.tree}
+						height={virtualItem.size}
+						width={listWidth}
+						layout={displayOptions.chatItemLayout}
 					/>
 				{/if}
 				{#if virtualItem.index === indicatorIndex}

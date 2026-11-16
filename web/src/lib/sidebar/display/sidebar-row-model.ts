@@ -8,6 +8,7 @@ import { normalizeProjectPath } from '$lib/utils/project-path';
 import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import { isSidebarChatInactive } from './chat-inactivity';
 import { buildSidebarDelegationForest } from './sidebar-delegation';
+import { sidebarChildTreeScope } from './sidebar-virtual-chat-list';
 import {
 	enabledSidebarGroupingFields,
 	type SidebarGroupingSelection,
@@ -19,6 +20,7 @@ import type {
 	SidebarRowModel,
 	SidebarVirtualRow,
 	SidebarVirtualChatRow,
+	SidebarTreeScope,
 } from './sidebar-virtual-chat-list';
 
 const sections: SidebarChatSection[] = [
@@ -113,6 +115,7 @@ interface ScopeTask {
 	parentId: string | null;
 	ids: string[];
 	depth: number;
+	tree?: SidebarTreeScope;
 	path: SidebarGroupPath;
 	inheritedFields: readonly SidebarGroupingField[];
 	executorGrouped: boolean;
@@ -244,6 +247,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					parentId: row.chat.id,
 					ids: children.filter(hasMatches),
 					depth: row.depth + 1,
+					tree: sidebarChildTreeScope(row.depth, row.tree),
 					path: [],
 					inheritedFields,
 					executorGrouped: false,
@@ -270,9 +274,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				ids.push(id);
 				partitions.set(value, ids);
 			}
-			for (const value of [...partitions.keys()]
-				.sort((a, b) => compareGroups(field, a, b))
-				.reverse()) {
+			const values = [...partitions.keys()].sort((a, b) => compareGroups(field, a, b));
+			for (let index = values.length - 1; index >= 0; index--) {
+				const value = values[index];
 				const ids = partitions.get(value)!;
 				const path = [...task.path, [field, value] as const];
 				const key = sidebarGroupCollapseKey(task.parentId, path);
@@ -293,6 +297,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				const common = {
 					key,
 					depth: task.depth,
+					tree: task.tree ? { ...task.tree, isLastChild: index === values.length - 1 } : undefined,
 					count: ids.reduce((sum, id) => sum + (matchCounts.get(id) ?? 0), 0),
 					containsChat,
 					isCollapsed,
@@ -318,6 +323,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 						ids,
 						path,
 						depth: task.depth + 1,
+						tree: row.tree ? sidebarChildTreeScope(row.depth, row.tree) : undefined,
 						executorGrouped: task.executorGrouped || field === 'executor',
 					});
 				tasks.push({ kind: 'header', row });
@@ -341,6 +347,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				type: 'chat',
 				key: `chat:${id}`,
 				depth: task.depth,
+				tree: task.tree ? { ...task.tree, isLastChild: index === ordered.length - 1 } : undefined,
 				chat,
 				list,
 				isPinned: list === 'pinned',

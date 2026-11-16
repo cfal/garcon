@@ -113,6 +113,16 @@ test('inherited groups omit headers while differing groups retain full internal 
         expect(bounds!.x).toBe(parentBounds!.x);
         expect(bounds!.width).toBe(parentBounds!.width);
         await expectRowGeometry(page.locator(`[data-sidebar-virtual-row="${a1}"]`), false);
+        const guide = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]').locator('[data-sidebar-tree-guides]');
+        await browserExpect(guide).toHaveCount(1);
+        await browserExpect(guide).toHaveCSS('pointer-events', 'none');
+        await browserExpect(guide).toHaveAttribute('aria-hidden', 'true');
+        await browserExpect(guide.locator('[data-sidebar-tree-incoming]')).toHaveAttribute('data-sidebar-tree-incoming', 'end');
+        const guideBounds = await guide.boundingBox();
+        const incomingBounds = await guide.locator('[data-sidebar-tree-incoming]').boundingBox();
+        expect(incomingBounds!.y).toBe(guideBounds!.y);
+        expect(incomingBounds!.x).toBeGreaterThanOrEqual(guideBounds!.x);
+        expect(incomingBounds!.x).toBeLessThan(bounds!.x + (mixed ? 120 : 72));
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
         await mkdir(artifacts, { recursive: true });
         await page.screenshot({ path: join(artifacts, `sidebar-inherited-${mixed ? 'mixed' : 'same'}-${width}.png`) });
@@ -156,6 +166,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
           for (const showPath of [false, true]) {
             await setProjectPathVisibility(page, showPath);
             await expectRowGeometry(row, showPath);
+            await browserExpect(row.locator('xpath=ancestor::*[@data-sidebar-virtual-item]').locator('[data-sidebar-tree-guides]')).toHaveCount(0);
             const header = row.locator('[data-slot="chat-summary-header"]');
             await browserExpect(header.locator('[data-slot="sidebar-chat-timestamp-badge"]')).toHaveCount(1);
             // Project grouping places remote chats beneath an executor header, which replaces the pill.
