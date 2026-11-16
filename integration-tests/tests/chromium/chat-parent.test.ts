@@ -26,9 +26,24 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '0');
     const menuTrigger = page.locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]');
 
+    async function verifyContextMenuClosesOnHistoryNavigation() {
+      await page.locator(`[data-sidebar-virtual-row="${parent}"] button`).first().click();
+      await childRow.locator('button').first().click();
+      await page.getByRole('tab', { name: 'Child task', exact: true }).click({ button: 'right' });
+      await browserExpect(page.getByRole('menuitem', { name: 'Set parent chat ID', exact: true })).toBeVisible();
+      await page.goBack();
+      await browserExpect(page).toHaveURL(`${integration.garcon.baseUrl}/chat/${parent}`);
+      await browserExpect(page.getByRole('menu')).toHaveCount(0);
+      await childRow.locator('button').first().click();
+    }
+
+    phase('single-tab context menu closes when history replaces the chat');
+    await verifyContextMenuClosesOnHistoryNavigation();
+
     phase('switching tabs closes the menu instead of retargeting its actions');
     await clickWorkspaceWindowAddAction(page, 'Open Chat Map');
     await page.getByRole('tab', { name: 'Child task', exact: true }).click();
+    await verifyContextMenuClosesOnHistoryNavigation();
     await menuTrigger.click();
     await browserExpect(page.getByRole('menuitem', { name: 'Set parent chat ID', exact: true })).toBeVisible();
     await page.keyboard.press('Control+Shift+L');

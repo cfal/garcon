@@ -755,6 +755,29 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByRole('menuitem', { name: m.sidebar_tooltips_delete_chat() })).toBeTruthy();
 	});
 
+	it.each([false, true])('closes a tab context menu when its chat changes (multiple tabs: %s)', async (multipleTabs) => {
+		const { layout } = installContext();
+		if (multipleTabs) {
+			layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('chat-map'),
+				windowId: 'window-main',
+			}]));
+		}
+		renderRoot();
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		expect(await screen.findByRole('menuitem', { name: m.chat_parent_title() })).toBeTruthy();
+		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-b' },
+		]));
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(chatActions.requestParent).not.toHaveBeenCalled();
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
+		expect(chatActions.requestParent).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-b' }));
+	});
+
 	it.each(['chat', 'surface'] as const)(
 		'closes the window menu when its %s identity changes',
 		async (target) => {
