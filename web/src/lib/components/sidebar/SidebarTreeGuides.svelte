@@ -1,7 +1,5 @@
 <script lang="ts">
-	import type { ChatItemLayout } from '$lib/layout/chat-item-layout';
 	import {
-		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		sidebarChatInset,
 		sidebarHeaderInset,
 		type SidebarTreeGuide,
@@ -11,15 +9,13 @@
 	let {
 		row,
 		guide,
-		height,
+		contentHeight,
 		width,
-		layout,
 	}: {
 		row: SidebarVirtualRow;
 		guide: SidebarTreeGuide;
-		height: number;
+		contentHeight: number;
 		width: number;
-		layout: ChatItemLayout;
 	} = $props();
 	// Clipping hides overflow; filtering also bounds the number of mounted rails.
 	const continuationDepths = $derived.by(() => {
@@ -29,10 +25,7 @@
 		}
 		return depths;
 	});
-	const separatorSlot = $derived(
-		row.type === 'chat' && layout !== 'single-line' ? CHAT_ROW_SEPARATOR_SLOT_HEIGHT : 0,
-	);
-	const junction = $derived(Math.round((height - separatorSlot) / 2));
+	const junction = $derived(Math.round((contentHeight - 1) / 2));
 	const parentRail = $derived(sidebarChatInset(guide.parentDepth));
 	// Arms leave a gap before chat content or the header chevron.
 	const armEnd = $derived(

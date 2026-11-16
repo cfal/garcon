@@ -227,6 +227,7 @@
 					isArchived={row.isArchived}
 					{displayOptions}
 					depth={row.depth}
+					isDelegatedChild={Boolean(row.tree)}
 					branch={row.branch}
 					onToggleDelegatedChats={row.branch && onToggleBranch
 						? () => onToggleBranch?.(row.branch!.collapseKey)

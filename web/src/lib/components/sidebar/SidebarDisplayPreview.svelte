@@ -4,6 +4,7 @@
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import SidebarDelegationArrow from './SidebarDelegationArrow.svelte';
 	import SidebarTreeGuides from './SidebarTreeGuides.svelte';
 	import { buildSidebarChatListProjection } from '$lib/sidebar/display/sidebar-row-model';
 	import {
@@ -59,18 +60,22 @@
 									? 'Remote'
 									: undefined}
 							>
-								{#snippet titleBadge()}<SidebarBranchBadge branch={row.branch} />{/snippet}
+								{#snippet titleBadge()}
+									{#if row.tree && options.chatItemLayout !== 'single-line'}
+										<SidebarDelegationArrow />
+									{/if}
+									<SidebarBranchBadge branch={row.branch} />
+								{/snippet}
 							</ChatSummary>
 						</div>
 					</div>
 				{/if}
-				{#if row.tree}
+				{#if row.tree && options.chatItemLayout === 'single-line'}
 					<SidebarTreeGuides
 						{row}
 						guide={row.tree}
-						{height}
+						contentHeight={row.type === 'chat' ? height - 1 : height}
 						{width}
-						layout={options.chatItemLayout}
 					/>
 				{/if}
 			</div>

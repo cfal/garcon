@@ -15,6 +15,7 @@
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import ChatSummary from '../chat/ChatSummary.svelte';
 	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import SidebarDelegationArrow from './SidebarDelegationArrow.svelte';
 	import type { SidebarVirtualChatRow } from '$lib/sidebar/display/sidebar-virtual-chat-list';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -30,6 +31,7 @@
 	import { chatActivityTimeMs } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
+		isDelegatedChild?: boolean;
 		branch?: SidebarVirtualChatRow['branch'];
 		onToggleDelegatedChats?: () => void;
 		contextOnly?: boolean;
@@ -75,6 +77,7 @@
 	}
 
 	let {
+		isDelegatedChild = false,
 		branch,
 		onToggleDelegatedChats,
 		contextOnly = false,
@@ -126,6 +129,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
+	let showDelegationArrow = $derived(isDelegatedChild && !isSingleLineLayout);
 	let contentInset = $derived(sidebarChatInset(depth));
 	let hasAdditionalLines = $derived(
 		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
@@ -251,6 +255,7 @@
 </script>
 
 {#snippet stateBadge()}
+	{#if showDelegationArrow}<SidebarDelegationArrow />{/if}
 	<SidebarBranchBadge {branch} {contextOnly} />
 	<!-- Virtualized section headers may be unmounted, so rows keep their archived
 	     state for assistive technology. -->
@@ -310,7 +315,10 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class="relative flex-1 min-w-0" data-typography-chat-list>
+	<div
+		class={cn('relative flex-1 min-w-0', showDelegationArrow && isMultiSelectMode && 'ml-3')}
+		data-typography-chat-list
+	>
 		<ChatSummary
 			{session}
 			variant="sidebar"

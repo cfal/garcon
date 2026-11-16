@@ -949,13 +949,12 @@
 							: undefined}
 					/>
 				{/if}
-				{#if row.tree}
+				{#if row.tree && displayOptions.chatItemLayout === 'single-line'}
 					<SidebarTreeGuides
 						{row}
 						guide={row.tree}
-						height={virtualItem.size}
+						contentHeight={virtualItem.size}
 						width={listWidth}
-						layout={displayOptions.chatItemLayout}
 					/>
 				{/if}
 				{#if virtualItem.index === indicatorIndex}

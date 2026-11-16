@@ -20,7 +20,8 @@ it('previews drafts without writes and discards Cancel', async () => {
 	const preview = document.querySelector('[data-sidebar-display-preview]')!;
 	expect(preview.querySelectorAll('[data-typography-chat-list]')).toHaveLength(3);
 	expect(preview.querySelectorAll('[data-sidebar-project-header]')).toHaveLength(3);
-	expect(preview.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(2);
+	expect(preview.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(0);
+	expect(preview.querySelectorAll('[data-sidebar-delegation-arrow]')).toHaveLength(1);
 	expect(preview.querySelector('[inert]')).toBeTruthy();
 	await fireEvent.click(screen.getByRole('checkbox', { name: 'Executor' }));
 	expect(

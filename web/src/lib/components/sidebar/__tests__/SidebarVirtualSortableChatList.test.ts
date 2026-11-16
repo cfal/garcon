@@ -2601,7 +2601,7 @@ describe('SidebarVirtualSortableChatList', () => {
 	);
 
 	it.each(['single-line', 'compact', 'detailed'] as const)(
-		'adds tree guides without changing standalone markup or row sizes in %s layout',
+		'decorates delegation without changing standalone markup or row sizes in %s layout',
 		async (layout) => {
 			const chats = [chat('plain'), chat('parent'), delegated('child', 'parent')];
 			const view = render(SidebarChatListHost, {
@@ -2613,6 +2613,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			const markup = content.outerHTML;
 			const height = plain.parentElement!.style.height;
 			expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
 			await view.rerender({
 				chats,
 				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
@@ -2621,21 +2622,59 @@ describe('SidebarVirtualSortableChatList', () => {
 			expect(content.outerHTML).toBe(markup);
 			expect(plain.parentElement!.style.height).toBe(height);
 			expect(plain.parentElement!.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(plain.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
 			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
 			expect(child.parentElement!.style.height).toBe(height);
-			const overlay = child.parentElement!.querySelector('[data-sidebar-tree-guides]')!;
-			expect(overlay.getAttribute('aria-hidden')).toBe('true');
-			expect(overlay.classList.contains('pointer-events-none')).toBe(true);
-			expect(overlay.querySelector('[data-sidebar-tree-incoming="end"]')).not.toBeNull();
+			if (layout === 'single-line') {
+				const overlay = child.parentElement!.querySelector('[data-sidebar-tree-guides]')!;
+				expect(overlay.getAttribute('aria-hidden')).toBe('true');
+				expect(overlay.classList.contains('pointer-events-none')).toBe(true);
+				expect(
+					overlay.querySelector<HTMLElement>('[data-sidebar-tree-incoming="end"]')!.style.height,
+				).toBe('21px');
+				expect(overlay.querySelector<HTMLElement>('[data-sidebar-tree-arm]')!.style.top).toBe(
+					'20px',
+				);
+				expect(child.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			} else {
+				expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+				const arrow = child.querySelector('[data-sidebar-delegation-arrow]')!;
+				expect(arrow.getAttribute('aria-hidden')).toBe('true');
+				expect(arrow.classList.contains('pointer-events-none')).toBe(true);
+				expect(arrow.closest('[data-slot="chat-summary-header"]')).not.toBeNull();
+			}
 			await view.rerender({
 				chats,
 				displayOptions: { chatItemLayout: layout, nestDelegatedChats: false },
 			});
 			expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
 			expect(content.isConnected).toBe(true);
 			expect(content.outerHTML).toBe(markup);
 		},
 	);
+
+	it('switches delegation decoration without remounting chat content', async () => {
+		const chats = [chat('parent'), delegated('child', 'parent')];
+		const view = render(SidebarChatListHost, {
+			chats,
+			displayOptions: { nestDelegatedChats: true },
+		});
+		const child = document.querySelector('[data-sidebar-virtual-row="child"] .chat-item-root')!;
+		for (const layout of ['compact', 'detailed', 'single-line'] as const) {
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			expect(child.isConnected).toBe(true);
+			expect(document.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(
+				layout === 'single-line' ? 1 : 0,
+			);
+			expect(document.querySelectorAll('[data-sidebar-delegation-arrow]')).toHaveLength(
+				layout === 'single-line' ? 0 : 1,
+			);
+		}
+	});
 
 	it('retains tree continuations when parents are unmounted by virtualization', async () => {
 		const chats = [

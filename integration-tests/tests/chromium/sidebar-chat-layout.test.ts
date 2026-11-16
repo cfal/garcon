@@ -123,11 +123,49 @@ test('inherited groups omit headers while differing groups retain full internal 
         const guideBounds = await guide.boundingBox();
         const incomingBounds = await incoming.boundingBox();
         expect(incomingBounds!.y).toBe(guideBounds!.y);
-        expect(incomingBounds!.x).toBeGreaterThanOrEqual(guideBounds!.x);
-        expect(incomingBounds!.x).toBeLessThan(bounds!.x + childPaddingLeft);
+        expect(incomingBounds!.x).toBe(guideBounds!.x + childPaddingLeft - 12);
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
         await mkdir(artifacts, { recursive: true });
         await page.screenshot({ path: join(artifacts, `sidebar-inherited-${mixed ? 'mixed' : 'same'}-${width}.png`) });
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 120_000);
+
+test('multi-line delegation arrows align with titles while single-line keeps tree guides', async () => {
+  await withChromiumFixture('sidebar-delegation-layouts', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1 } = await createSidebarDelegationFixture(integration);
+    await page.addInitScript(seedLocalSettings, {
+      sidebarNestDelegatedChats: true,
+      sidebarGroupingFields: [],
+      chatListFontSize: 16,
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+    const child = page.locator(`[data-sidebar-virtual-row="${a1}"]`);
+    const wrapper = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await openSidebar(page);
+      for (const label of ['Compact', 'Detailed', 'Single-line']) {
+        await chooseMenuOption(page, label);
+        const singleLine = label === 'Single-line';
+        await browserExpect(wrapper.locator('[data-sidebar-tree-guides]')).toHaveCount(singleLine ? 1 : 0);
+        const arrow = child.locator('[data-sidebar-delegation-arrow]');
+        await browserExpect(arrow).toHaveCount(singleLine ? 0 : 1);
+        if (singleLine) continue;
+        await browserExpect(arrow).toHaveAttribute('aria-hidden', 'true');
+        await browserExpect(arrow).toHaveCSS('pointer-events', 'none');
+        await browserExpect.poll(() => arrow.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          const header = element.closest('[data-slot="chat-summary-header"]')!.getBoundingClientRect();
+          const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+          return {
+            beforeTitle: bounds.right <= header.left,
+            centered: Math.abs(bounds.y + bounds.height / 2 - header.y - header.height / 2) < 0.51,
+            hitsRow: hit?.closest('[data-sidebar-virtual-row]') === element.closest('[data-sidebar-virtual-row]'),
+          };
+        })).toEqual({ beforeTitle: true, centered: true, hitsRow: true });
       }
     }
     assertNoBrowserErrors();

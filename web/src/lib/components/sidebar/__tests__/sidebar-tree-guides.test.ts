@@ -1,6 +1,8 @@
 import { render } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import SidebarTreeGuides from '../SidebarTreeGuides.svelte';
+import SidebarDisplayPreview from '../SidebarDisplayPreview.svelte';
+import { DEFAULT_SIDEBAR_DISPLAY_OPTIONS } from '$lib/sidebar/display/sidebar-display-options';
 import { buildSidebarRowModel } from '$lib/sidebar/display/sidebar-row-model';
 import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 import {
@@ -14,17 +16,15 @@ const row = buildSidebarRowModel(
 
 describe('sidebar tree guide geometry', () => {
 	it.each([
-		['single-line', 40, '21px', '20px'],
-		['compact', 62, '31px', '30px'],
-		['detailed', 76, '38px', '37px'],
+		[40, '21px', '20px'],
+		[43, '22px', '21px'],
 	] as const)(
-		'centers a terminal elbow on the %s content, excluding the separator',
-		(layout, height, incomingHeight, armTop) => {
+		'centers a terminal elbow on single-line content of height %s',
+		(contentHeight, incomingHeight, armTop) => {
 			const { container } = render(SidebarTreeGuides, {
 				row,
 				guide: row.tree!,
-				layout,
-				height,
+				contentHeight,
 				width: 320,
 			});
 			const incoming = container.querySelector<HTMLElement>('[data-sidebar-tree-incoming]')!;
@@ -33,6 +33,38 @@ describe('sidebar tree guide geometry', () => {
 			expect(incoming.style.left).toBe('12px');
 			expect(arm.style.top).toBe(armTop);
 			expect(arm.style.width).toBe('7px');
+		},
+	);
+
+	it.each([
+		[1, '19px'],
+		[15 / 14, '21px'],
+	] as const)(
+		'centers single-line preview strokes inside the bottom border at scale %s',
+		(chatFontScale, armTop) => {
+			const { container } = render(SidebarDisplayPreview, {
+				options: {
+					...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+					chatItemLayout: 'single-line',
+					chatFontScale,
+				},
+			});
+			const arm = container.querySelector<HTMLElement>('[data-sidebar-tree-arm]')!;
+			expect(arm.style.top).toBe(armTop);
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
+		'uses title arrows instead of rails in the %s preview',
+		(chatItemLayout) => {
+			const { container } = render(SidebarDisplayPreview, {
+				options: { ...DEFAULT_SIDEBAR_DISPLAY_OPTIONS, chatItemLayout },
+			});
+			expect(container.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			const arrows = container.querySelectorAll('[data-sidebar-delegation-arrow]');
+			expect(arrows).toHaveLength(1);
+			expect(arrows[0].closest('[data-slot="chat-summary-header"]')).not.toBeNull();
+			expect(arrows[0].getAttribute('aria-hidden')).toBe('true');
 		},
 	);
 
@@ -55,8 +87,7 @@ describe('sidebar tree guide geometry', () => {
 			const { container } = render(SidebarTreeGuides, {
 				row: header,
 				guide: header.tree!,
-				layout: 'detailed',
-				height,
+				contentHeight: height,
 				width: 320,
 			});
 			const incoming = container.querySelector<HTMLElement>('[data-sidebar-tree-incoming]')!;
@@ -75,8 +106,7 @@ describe('sidebar tree guide geometry', () => {
 				isLastChild: false,
 				continuations: { depth: 0, outer: null },
 			},
-			layout: 'detailed',
-			height: 76,
+			contentHeight: 74,
 			width: 320,
 		});
 		const incoming = container.querySelector<HTMLElement>('[data-sidebar-tree-incoming]')!;
@@ -90,7 +120,7 @@ describe('sidebar tree guide geometry', () => {
 		let continuations: SidebarTreeContinuation | null = null;
 		for (let depth = 0; depth < 2000; depth++) continuations = { depth, outer: continuations };
 		const guide = { parentDepth: 2000, isLastChild: false, continuations };
-		const props = { row, guide, layout: 'detailed' as const, height: 76, width: 320 };
+		const props = { row, guide, contentHeight: 74, width: 320 };
 		const view = render(SidebarTreeGuides, props);
 		expect(view.container.querySelectorAll('[data-sidebar-tree-continuation]')).toHaveLength(26);
 		expect(view.container.querySelector('[data-sidebar-tree-incoming]')).toBeNull();
