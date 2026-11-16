@@ -70,6 +70,7 @@ export interface CodexForkSessionRequest {
   readonly sourceSession: CodexChatEntry;
   readonly envOverrides?: Record<string, string>;
   readonly codexConfig?: CodexProviderConfig;
+  readonly modelProvider?: string | null;
   // Forks through this turn, inclusive, instead of the thread tip. The app-server rejects a turn
   // that is in progress or absent from native history.
   readonly lastTurnId?: string | null;

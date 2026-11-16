@@ -4105,11 +4105,12 @@ describe('CodexAppServerRuntime', () => {
       threadId: 'thread-1',
       config: { model_provider: 'custom-openai' },
     }));
+    expect(operationClient.forkThread.mock.calls[0][0]).not.toHaveProperty('modelProvider');
     expect(operationClient.unsubscribeThread).toHaveBeenCalledWith('forked-thread');
     expect(operationClient.shutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('passes the fork turn boundary to thread/fork for a point fork', async () => {
+  it.each([undefined, null, 'synthetic-provider'])('passes the fork turn boundary and saved provider to thread/fork (%j)', async (modelProvider) => {
     const nativePath = path.join(tmpDir, 'point-forked-thread.jsonl');
     const forkParams = [];
     const operationClient = new FakeClient({
@@ -4134,10 +4135,13 @@ describe('CodexAppServerRuntime', () => {
         projectPath: '/repo',
       },
       lastTurnId: 'turn-1',
+      modelProvider,
     });
 
     expect(forked).toEqual({ agentSessionId: 'point-forked-thread', nativePath });
     expect(forkParams[0]).toMatchObject({ threadId: 'thread-1', lastTurnId: 'turn-1' });
+    if (modelProvider) expect(forkParams[0]).toHaveProperty('modelProvider', modelProvider);
+    else expect(forkParams[0]).not.toHaveProperty('modelProvider');
   });
 
   it('clears thread/list native path caches when a session finishes', async () => {
@@ -5050,6 +5054,7 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
     });
+    fake.emit('notification', { method: 'thread/closed', params: { threadId: 'thread-1' } });
     fake.emit('notification', {
       method: 'item/completed',
       params: {
