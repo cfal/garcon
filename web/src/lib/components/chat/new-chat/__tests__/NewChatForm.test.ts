@@ -218,6 +218,51 @@ function previewResponse(
 }
 
 describe('NewChatForm', () => {
+	it.each([localExecutor, remoteExecutor])(
+		'submits a project-only seed on $id with the retained prompt',
+		async (executor) => {
+			stubMatchMedia(false);
+			const chatsApi = await import('$lib/api/chats');
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+			const onStartChat = vi.fn();
+			render(NewChatFormTestHost, {
+				onStartChat,
+				executorSnapshots: [localExecutor, remoteExecutor],
+				seed: {
+					prefill: 'Synthetic project prompt',
+					project: { executorId: executor.id, projectPath: '/workspace/selected' },
+				},
+			});
+			await waitFor(() =>
+				expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull(),
+			);
+			expect(screen.getByRole('textbox', { name: 'Project Path' })).toHaveProperty(
+				'value',
+				'/workspace/selected',
+			);
+			expect(screen.getByPlaceholderText('How can I help you today?')).toHaveProperty(
+				'value',
+				'Synthetic project prompt',
+			);
+			await waitFor(() =>
+				expect(screen.getByRole('button', { name: 'Start session' })).toHaveProperty(
+					'disabled',
+					false,
+				),
+			);
+			await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+			expect(onStartChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					executorId: executor.id,
+					projectPath: '/workspace/selected',
+					firstMessage: 'Synthetic project prompt',
+				}),
+				PROSPECTIVE_CHAT_ID,
+			);
+		},
+	);
+
 	it('explains why a copied direct agent cannot start when direct chats are disabled', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');

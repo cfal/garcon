@@ -15,8 +15,16 @@ export interface NewChatStartupSeed extends ResolvedModelSelection {
 	readonly preambleChoice: PreambleSelectionChoice;
 }
 
+/** An executor-qualified folder that seeds only the location, not the agent selection. */
+export interface NewChatProjectTarget {
+	readonly executorId: string;
+	readonly projectPath: string;
+}
+
 export interface NewChatDialogSeed {
 	readonly prefill?: string;
+	/** Ignored when `startup` is present, which restores its own location. */
+	readonly project?: NewChatProjectTarget;
 	readonly startup?: NewChatStartupSeed;
 	readonly prospectiveChatId?: ChatId;
 }
