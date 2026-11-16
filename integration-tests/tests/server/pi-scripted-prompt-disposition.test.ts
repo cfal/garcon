@@ -54,12 +54,13 @@ export default function (pi) {
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
         afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
+      const exitDeadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
       while (true) {
         try { process.kill(pid, 0); } catch (error) {
           if ((error as NodeJS.ErrnoException).code === 'ESRCH') break;
           throw error;
         }
-        if (Date.now() >= deadline) throw new Error('Pi did not exit after the handled command');
+        if (Date.now() >= exitDeadline) throw new Error('Pi did not exit after the handled command');
         await Bun.sleep(20);
       }
 

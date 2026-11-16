@@ -17,6 +17,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  piNativeSession,
   scriptedPiRunRequest,
   scriptedPiStartRequest,
   startScriptedPiTestEnvironment,
@@ -94,6 +95,16 @@ export default function (pi) {
   }, 120_000);
 
   test('stops an active tool turn and preserves the stopped transcript shape', async () => {
+    environment?.dispose();
+    environment = startScriptedPiTestEnvironment({ extensionSource: `
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+export default function (pi) {
+  pi.on('session_start', async (_event, ctx) => {
+    await writeFile(join(ctx.cwd, '.pi-scripted-process'), String(process.pid));
+  });
+}
+` });
     const testEnvironment = requireEnvironment();
     const stoppedReply = marker('SHOULD_NOT_COMPLETE');
     const recoveryReply = marker('RECOVERY_REPLY');
@@ -114,6 +125,8 @@ export default function (pi) {
       }));
       if (!active.turnId) throw new Error('Pi start response omitted its turn id.');
       await waitForFile(join(fixture.dirs.project, startedFile));
+      const oldPid = Number(await readFile(join(fixture.dirs.project, '.pi-scripted-process'), 'utf8'));
+      expect(Number.isInteger(oldPid) && oldPid > 0).toBe(true);
 
       const stopCursor = fixture.client.markEvents();
       const stopped = await fixture.client.stopChat({
@@ -142,6 +155,27 @@ export default function (pi) {
         expect.objectContaining({ command: `touch ${startedFile} && sleep 30` }),
       );
       expect(assistantContents(stoppedTranscript).join('\n')).not.toContain(stoppedReply);
+
+      await waitForProcessExit(oldPid);
+      const native = await piNativeSession(fixture, chatId);
+      const nativeEntries = (await readFile(native.path, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+      expect(nativeEntries).toContainEqual(expect.objectContaining({
+        type: 'message',
+        message: expect.objectContaining({ role: 'toolResult', toolCallId: 'call_stopped', isError: true }),
+      }));
+      const driftCursor = fixture.client.markEvents();
+      expect((await fixture.client.getMessages(chatId, { purpose: 'activation' })).messages).toEqual(stoppedTranscript);
+      await fixture.client.waitForEvent(
+        (event): event is ServerWsMessage => event.type === 'chat-operational-notice'
+          && event.chatId === chatId && event.detail?.type === 'native-transcript-drift',
+        'Pi aborted native tail drift notice',
+        { afterIndex: driftCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      await fixture.client.reloadChat(chatId);
+      const reloaded = (await fixture.client.getMessages(chatId)).messages;
+      const abortedTool = messagesOfType(reloaded, 'tool-result').find((message) => message.toolId === 'call_stopped');
+      expect(abortedTool?.isError).toBe(true);
+      expect(JSON.stringify(abortedTool?.content)).toMatch(/aborted/i);
 
       testEnvironment.model.reset();
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
