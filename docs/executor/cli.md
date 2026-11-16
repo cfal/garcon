@@ -271,6 +271,14 @@ persistence boundary; legacy oversized values remain readable but can still
 exceed reply bounds until renamed. Protocol revision 12 requires matched
 controller and worker builds for these forwarded-contract changes.
 
+Delegation parent editing forwards exactly `PUT /api/v1/chats/parent`, using bulk,
+the short pool, a 30-second deadline, and ordinary workspace CLI authority
+(`mutation:true`, `management:false`). The controller owns the relation; the
+origin executor does not restrict either chat's executor. The desired-state
+setter reconciles earlier uncertain persistence inline and is never automatically
+retried. Fork/handoff ancestry is protected. Protocol revision 44 requires matched
+controller and worker builds.
+
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 
 Schedule management forwards exactly `GET`, `POST`, `PUT`, and `DELETE`

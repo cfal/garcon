@@ -74,6 +74,13 @@ function dispatcher(routes: RouteMap) {
   return new ControllerCliDispatcher({ routes, serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false });
 }
 
+test('parent forwarding is a workspace-wide bulk mutation with no additional browser routes', () => {
+  expect(cliPolicy(request('PUT /api/v1/chats/parent').http)).toEqual({ lane: 'bulk', pool: 'short', timeoutMs: 30_000, management: false, mutation: true });
+  for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) expect(() => cliRoute(method, '/api/v1/chats/parent')).toThrow();
+  const input = request('PUT /api/v1/chats/parent', { chatId: '1783725900000200', parentChatId: '1783725900000201' });
+  expect(parseControllerCliRequest(input)).toEqual(input);
+});
+
 test('schedule forwarding requires explicit new-chat executors and excludes unrelated browser operations', () => {
   for (const operation of ['POST /api/v1/scheduled-prompts', 'PUT /api/v1/scheduled-prompts'] as const) {
     for (const executorId of [undefined, null, '', 'invalid']) {

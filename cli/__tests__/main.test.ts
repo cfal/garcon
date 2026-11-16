@@ -265,6 +265,22 @@ function transcriptSearchStatusResponse(): Record<string, unknown> {
 }
 
 describe('main', () => {
+  test('dispatches set-parent without reading stdin or selecting an executor', async () => {
+    const capture = capturedOutput();
+    const requests: unknown[] = [];
+    const result = await main(['set-parent', CHAT_ID, '--clear', '--json'], {
+      discoverRuntime: stubDiscovery, output: capture.output,
+      readStdin: async () => { throw new Error('Unexpected stdin'); },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), method: init?.method, body: JSON.parse(String(init?.body)) });
+        return Response.json({ success: true, chatId: CHAT_ID, parentChat: null, changed: true });
+      },
+    });
+    expect(result).toBe(0);
+    expect(requests).toEqual([{ url: 'http://127.0.0.1:8080/api/v1/chats/parent', method: 'PUT', body: { chatId: CHAT_ID, parentChatId: null } }]);
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({ parentChat: null, changed: true });
+  });
+
   test('routes transcript search administration through typed settings and search endpoints', async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = [];
     const enableCapture = capturedOutput();
@@ -1697,10 +1713,10 @@ describe('main', () => {
     ]);
   });
 
-  test('interrupts a stop command with the control-aware diagnostic', async () => {
+  test.each([['stop', CHAT_ID], ['set-parent', CHAT_ID, '--clear']])('interrupts %j with the control-aware diagnostic', async (...args) => {
     const controller = new AbortController();
     const capture = capturedOutput();
-    const result = main(['stop', CHAT_ID], {
+    const result = main(args, {
       signal: controller.signal,
       discoverRuntime: async () => {
         await new Promise<never>((_resolve, reject) => {

@@ -540,11 +540,11 @@ repaired. Fork-derived titles reserve room for their numeric suffix. Generated
 titles retain their stricter 120-character bound.
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
-for example when one agent starts another for review. Garcon records an immutable
+for example when one agent starts another for review. Garcon records a
 `delegation` relationship and shows it in Chat Map. The parent must exist in the
 same workspace. Declaring it does not copy transcript content, inherit execution
 settings, or make either chat wait for the other. `--parent` is creation-only and
-cannot be used with `resume`.
+cannot be used with `resume`. Use `set-parent` to edit delegation later.
 
 New chats resolve matching preambles from their own project, agent, and tags.
 Use `--no-preamble` to send an explicit empty selection, or repeat
@@ -906,6 +906,8 @@ bun cli/main.ts unpin 1785337200123456
 bun cli/main.ts rename 1785337200123456 "Review complete"
 bun cli/main.ts set-tags 1785337200123456 --tag review --tag complete
 bun cli/main.ts set-tags 1785337200123456 --clear
+bun cli/main.ts set-parent 1785337200123456 1785337200123457
+bun cli/main.ts set-parent 1785337200123456 --clear
 ```
 
 These commands are desired-state setters, not wrappers around toggle routes.
@@ -922,6 +924,22 @@ The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
 its compare-and-set baseline. Upgrade controller and workers together for this
 forwarded API change (executor protocol revision 12).
+
+`set-parent` sets, replaces, or clears a delegation parent by exact chat ID.
+Fork/handoff ancestry is protected. Both chats may be running, archived, or on
+different executors; target executor readiness is irrelevant. Self-parenting
+and cycles are rejected. The parent's agent gains eligibility for future
+delegated resume, stop, and remove commands; the old parent loses that eligibility.
+Already-admitted work and its result recipient remain unchanged. Setting a
+parent does not execute work, copy context, or subscribe to completion notices.
+Open webapps refresh nesting, Chat Map, and parent filters automatically.
+
+Browser and CLI parent edits are last-writer-wins. An uncertain save may already
+have changed the live relation and delegated authority. Inspect the roster before
+explicitly retrying; the next `PUT chats/parent` reconciles any unconfirmed save
+before applying its desired value. There is no automatic retry or separate
+recovery endpoint. Parent deletion remains non-cascading. Executor protocol
+revision 44 adds this forwarded operation; upgrade controller and workers together.
 
 ## Export
 

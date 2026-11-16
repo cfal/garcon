@@ -7,6 +7,7 @@ const mutations = [
   (client: GarconClient, signal?: AbortSignal) => client.setChatPinned({ chatId, isPinned: true }, signal),
   (client: GarconClient, signal?: AbortSignal) => client.setChatArchived({ chatId, isArchived: true }, signal),
   (client: GarconClient, signal?: AbortSignal) => client.setChatTags({ chatId, tags: ['review'] }, signal),
+  (client: GarconClient, signal?: AbortSignal) => client.setChatParent({ chatId, parentChatId: null }, signal),
   (client: GarconClient, signal?: AbortSignal) => client.setTranscriptSearchEnabled(true, signal),
   (client: GarconClient, signal?: AbortSignal) => client.rebuildTranscriptSearch(signal),
 ];
