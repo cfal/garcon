@@ -35,7 +35,7 @@ describe('new chat executor initialization', () => {
 	it.each([false, true])('restores explicit startup before delayed defaults and catalog discovery (offline: %s)', async offline => {
 		const { form, remoteCatalog, remoteSettings, executors } = fixture();
 		const settings = Promise.withResolvers<RemoteSettingsSnapshot>();
-		vi.spyOn(remoteSettings, 'ensureLoaded').mockReturnValue(settings.promise);
+		vi.spyOn(remoteSettings, 'refreshLatest').mockReturnValue(settings.promise);
 		const discovery = Promise.withResolvers<void>();
 		vi.mocked(remoteCatalog.refreshIfStale).mockReturnValue(discovery.promise);
 		const models = remoteCatalog.agentModels;
@@ -198,7 +198,7 @@ describe('new chat executor initialization', () => {
 	it.each(['local', remoteExecutor.id])('preserves an explicit %s choice and edits while settings load', async executorId => {
 		const { form, remoteSettings } = fixture();
 		const settings = Promise.withResolvers<RemoteSettingsSnapshot>();
-		vi.spyOn(remoteSettings, 'ensureLoaded').mockReturnValue(settings.promise);
+		vi.spyOn(remoteSettings, 'refreshLatest').mockReturnValue(settings.promise);
 		const loading = form.loadSettingsAndModels();
 		form.selectExecutor(executorId);
 		form.projectPath = '/explicit/path';
@@ -225,7 +225,7 @@ describe('new chat executor initialization', () => {
 	it.each(['executor', 'model'] as const)('hydrates untouched execution defaults after an early %s choice', async choice => {
 		const { form, remoteSettings } = fixture();
 		const settings = Promise.withResolvers<RemoteSettingsSnapshot>();
-		vi.spyOn(remoteSettings, 'ensureLoaded').mockReturnValue(settings.promise);
+		vi.spyOn(remoteSettings, 'refreshLatest').mockReturnValue(settings.promise);
 		const loading = form.loadSettingsAndModels();
 		if (choice === 'executor') form.selectExecutor(remoteExecutor.id);
 		else form.selectModel('local-edited');
@@ -244,7 +244,7 @@ describe('new chat executor initialization', () => {
 	it.each(['edited', 'restored'] as const)('preserves %s execution modes and agent settings during hydration', async kind => {
 		const { form, remoteSettings } = fixture();
 		const settings = Promise.withResolvers<RemoteSettingsSnapshot>();
-		vi.spyOn(remoteSettings, 'ensureLoaded').mockReturnValue(settings.promise);
+		vi.spyOn(remoteSettings, 'refreshLatest').mockReturnValue(settings.promise);
 		const loading = form.loadSettingsAndModels();
 		form.setPermissionMode('acceptEdits');
 		form.setThinkingMode('high');

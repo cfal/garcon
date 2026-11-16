@@ -851,7 +851,7 @@ export class NewChatFormState {
 	async loadSettingsAndModels(): Promise<void> {
 		this.#catalogRefreshCompleted = false;
 		try {
-			const settingsData = await this.#remoteSettings.ensureLoaded();
+			const settingsData = await this.#remoteSettings.refreshLatest();
 			this.#applySettings(settingsData);
 			this.validateAllModelsAgainstLive();
 		} catch (err) {

@@ -81,7 +81,7 @@ describe('scheduled chat executor initialization', () => {
 	it('never restores saved values over user edits made while settings are pending', async () => {
 		const { form, remoteSettings } = fixture();
 		const settings = Promise.withResolvers<RemoteSettingsSnapshot>();
-		vi.spyOn(remoteSettings, 'ensureLoaded').mockReturnValue(settings.promise);
+		vi.spyOn(remoteSettings, 'refreshLatest').mockReturnValue(settings.promise);
 		const initializing = form.initialize(scheduledPrompt(remoteExecutor.id));
 		expect(form.startup.executorId).toBe(remoteExecutor.id);
 		form.startup.selectExecutor('local');

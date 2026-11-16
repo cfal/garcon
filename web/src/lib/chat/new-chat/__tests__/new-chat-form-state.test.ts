@@ -121,7 +121,7 @@ function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 		get hasSnapshot() {
 			return this.snapshot !== null;
 		},
-		ensureLoaded: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
+		refreshLatest: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		refresh: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		update: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		applySnapshot: vi.fn(),
@@ -312,7 +312,7 @@ describe('NewChatFormState', () => {
 		'keeps a seeded project on %s and applies that executor startup defaults',
 		async (executorId) => {
 			const recent = { apiProviderId: null, modelEndpointId: null, modelProtocol: null };
-			mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			mockRemoteSettings.refreshLatest.mockResolvedValue(
 				makeSnapshot({
 					recentAgentSettings: [
 						{
@@ -760,7 +760,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -801,6 +801,35 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/workspace/project');
 	});
 
+	it.each([false, true])('preserves explicit edits (%s) while fresh startup defaults load', async (edited) => {
+		const pending = deferred<RemoteSettingsSnapshot>();
+		mockRemoteSettings.snapshot = makeSnapshot({ version: 1 });
+		mockRemoteSettings.refreshLatest.mockReturnValueOnce(pending.promise);
+		const loading = formState.loadSettingsAndModels();
+		expect(formState.settingsLoaded).toBe(false);
+		if (edited) {
+			formState.selectExecutor('local');
+			formState.selectAgent('codex');
+			formState.projectPath = '/workspace/typed';
+		}
+		pending.resolve(makeSnapshot({
+			version: 2,
+			recentAgentSettings: [{
+				executorId: remoteExecutor.id,
+				agentId: 'claude',
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			}],
+		}));
+		await loading;
+		expect(mockRemoteSettings.refreshLatest).toHaveBeenCalledOnce();
+		expect(formState.executorId).toBe(edited ? 'local' : remoteExecutor.id);
+		expect(formState.agentId).toBe(edited ? 'codex' : 'claude');
+		if (edited) expect(formState.projectPath).toBe('/workspace/typed');
+	});
+
 	it('uses the catalog permission modes for each integration', () => {
 		formState.agentId = 'claude';
 		expect(formState.permissionModes).toEqual([
@@ -821,7 +850,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads API provider startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -844,7 +873,7 @@ describe('NewChatFormState', () => {
 
 	it('skips a direct startup recent when direct chats are unavailable', async () => {
 		selectableAgentIds = ['claude', 'codex'];
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -872,7 +901,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('skips a startup recent whose endpoint no longer exposes the model', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -919,7 +948,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -956,7 +985,7 @@ describe('NewChatFormState', () => {
 	it('preserves a user model selection while the catalog refreshes', async () => {
 		const refresh = deferred<void>();
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1002,7 +1031,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1056,7 +1085,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1105,7 +1134,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1167,7 +1196,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1205,7 +1234,7 @@ describe('NewChatFormState', () => {
 		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
 			await refresh.promise;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1270,7 +1299,7 @@ describe('NewChatFormState', () => {
 		const refresh = deferred<void>();
 		selectableAgentIds = [];
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1305,7 +1334,7 @@ describe('NewChatFormState', () => {
 		const refresh = deferred<void>();
 		selectableAgentIds = [];
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1347,7 +1376,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({ recentAgentSettings: [] }));
+		mockRemoteSettings.refreshLatest.mockResolvedValue(makeSnapshot({ recentAgentSettings: [] }));
 
 		await formState.loadSettingsAndModels();
 		expect(formState.modelValue).toBe('');
@@ -1385,7 +1414,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1414,7 +1443,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -1438,7 +1467,7 @@ describe('NewChatFormState', () => {
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
 		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
 		selectableAgentIds = ['claude', 'codex'];
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -1468,7 +1497,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('reconciles a direct selection to the first available recent', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1501,7 +1530,7 @@ describe('NewChatFormState', () => {
 	it('preserves a user-touched selection when its agent becomes unavailable', async () => {
 		const refresh = deferred<void>();
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1534,7 +1563,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('falls back when startup defaults reference a non-agent API provider id', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -1556,7 +1585,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('normalizes invalid startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				executionDefaults: {
@@ -1576,7 +1605,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('does not replace manually touched execution modes when changing agent', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
