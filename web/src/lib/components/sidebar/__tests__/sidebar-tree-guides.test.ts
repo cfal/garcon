@@ -80,6 +80,9 @@ describe('sidebar tree guide geometry', () => {
 			expect(arrows[0].parentElement!.firstElementChild).toBe(arrows[0]);
 			expect(arrows[0].getAttribute('aria-hidden')).toBe('true');
 			expect(arrows[0].textContent).toBe('\u21b3');
+			expect(
+				arrows[0].closest<HTMLElement>('[data-typography-chat-list]')!.style.paddingLeft,
+			).toBe('12px');
 		},
 	);
 
