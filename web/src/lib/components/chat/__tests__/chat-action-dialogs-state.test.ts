@@ -31,6 +31,15 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 }
 
 describe('ChatActionDialogsState', () => {
+	it('captures a persisted menu target and never opens parent editing for a draft', () => {
+		const dialogs = new ChatActionDialogsState();
+		dialogs.requestParent(makeChat(), 'Fallback');
+		expect(dialogs.parentDialog).toBeNull();
+		dialogs.requestParent(makeChat({ id: 'background', title: '', status: 'running' }), 'Fallback');
+		expect(dialogs.parentDialog).toEqual({ chatId: 'background', chatTitle: 'Fallback' });
+		dialogs.closeParentDialog();
+		expect(dialogs.parentDialog).toBeNull();
+	});
 	it('derives every dialog payload from one chat record shape', () => {
 		const dialogs = new ChatActionDialogsState();
 		const chat = makeChat({ title: '', projectPath: '/workspace/repo', tags: ['review'] });

@@ -20,7 +20,7 @@ import { runChatCatalog } from './chat-catalog.js';
 import { runChatSearch } from './chat-search.js';
 import { runChatRead } from './chat-read.js';
 import { runPermissionAnswer, runPermissionDecision } from './chat-permission.js';
-import { runChatOrderMutation, runRename, runSetTags } from './chat-metadata.js';
+import { runChatOrderMutation, runRename, runSetTags, runSetParent } from './chat-metadata.js';
 import { runTranscriptSearchAdministration } from './transcript-search.js';
 import {
   resumeAsyncJsonEnvelope,
@@ -218,6 +218,7 @@ function interruptDiagnostic(
       'unpin',
       'rename',
       'set-tags',
+      'set-parent',
     ].includes(command.kind)
   ) {
     return 'terminal interrupted; the command may have reached Garcon; inspect the chat before retrying';
@@ -357,6 +358,11 @@ export async function main(
     if (command.kind === 'set-tags') {
       const { client } = await connectedClient(command, options);
       await runSetTags(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'set-parent') {
+      const { client } = await connectedClient(command, options);
+      await runSetParent(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'stop') {

@@ -17,6 +17,7 @@ import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring 
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
 import { ChatRegistry } from './chats/store.js';
+import { ChatParentMutationService } from './chats/chat-parent-mutation-service.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
 import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
@@ -794,6 +795,7 @@ export async function startServer(): Promise<void> {
       preambles,
       chatPreambleSelection,
       ...chatBoardRuntime,
+      chatParents: new ChatParentMutationService({ registry: chatRegistry, chatMutationLock }),
       tickets,
       terminals: terminalManager,
       searchIndex: chatSearch,

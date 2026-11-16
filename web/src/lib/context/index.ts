@@ -140,6 +140,7 @@ export interface WorkspaceChatActions {
 	requestDetails: (chat: ChatSessionRecord) => void;
 	requestShare: (chat: ChatSessionRecord) => void;
 	requestProjectPath: (chat: ChatSessionRecord) => void;
+	requestParent: (chat: ChatSessionRecord) => void;
 	configurePreambles: (chat: ChatSessionRecord, transcriptViewId: string) => void;
 	fork: (chat: ChatSessionRecord) => void;
 	reload: (chat: ChatSessionRecord) => void;

@@ -2,6 +2,7 @@
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitFork from '@lucide/svelte/icons/git-fork';
+	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
 	import Tickets from '@lucide/svelte/icons/tickets';
@@ -41,6 +42,7 @@
 		onReload,
 		onShare,
 		onProjectPath,
+		onSetParent,
 		onFork,
 		onDelete,
 	}: {
@@ -63,6 +65,7 @@
 		onReload: () => void;
 		onShare: () => void;
 		onProjectPath: () => void;
+		onSetParent: () => void;
 		onFork: () => void;
 		onDelete: () => void;
 	} = $props();
@@ -157,6 +160,12 @@
 		>
 			<FolderOpen />
 			{m.sidebar_project_path_menu_item()}
+		</menu.Item>
+	{/if}
+	{#if selectedChat.status !== 'draft'}
+		<menu.Item onSelect={onSetParent}>
+			<GitBranch />
+			{m.chat_parent_title()}
 		</menu.Item>
 	{/if}
 	{#if canReload}

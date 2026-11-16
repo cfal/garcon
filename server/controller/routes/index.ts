@@ -36,6 +36,8 @@ import type { TicketSourceReader } from '../chats/chat-message-reader.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import type { PullRequestReviewsRuntime } from '../pull-request-reviews/setup.js';
 import { createChatTagRoutes } from './chat-tags.js';
+import { createChatParentRoutes } from './chat-parent.js';
+import type { ChatParentMutationService } from '../chats/chat-parent-mutation-service.js';
 import type { ServerRuntimeState } from '../../common/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { composeRoutes } from '../lib/compose-routes.js';
@@ -110,6 +112,7 @@ export default function createAllRoutes(workspaceDir: string, {
   tickets,
   resolveTicketProject,
   chatTags,
+  chatParents,
   chatMutationLock,
   terminals,
   searchIndex,
@@ -153,6 +156,7 @@ export default function createAllRoutes(workspaceDir: string, {
   tickets: TicketRuntime;
   resolveTicketProject: Parameters<typeof createTicketRoutes>[1];
   chatTags: ChatTagMutationService;
+  chatParents: ChatParentMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
   terminals: TerminalController;
   searchIndex: TranscriptSearchController;
@@ -218,6 +222,7 @@ export default function createAllRoutes(workspaceDir: string, {
       projects: (executorId) => executors.projectService(executorId),
     }),
     createChatTagRoutes(chatTags),
+    createChatParentRoutes(chatParents),
     createChatBoardRoutes(chatBoards),
     createTicketRoutes(tickets, resolveTicketProject),
     createChatTicketSourceRoutes(registry, ticketSources),
