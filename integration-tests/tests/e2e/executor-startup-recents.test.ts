@@ -43,11 +43,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
               set: (value: typeof handler) => { handler = value; },
             });
             socket.addEventListener('message', (event) => {
-              const deliver = () => handler?.call(socket, event);
-              if (gate.hold && JSON.parse(String(event.data)).type === 'settings-changed') {
-                gate.pending.push(deliver);
+              const payload = JSON.parse(String(event.data));
+              if (gate.hold && payload.type === 'settings-changed') {
+                // Copies the payload before Lightpanda releases the event's backing storage.
+                const data = JSON.stringify(payload);
+                gate.pending.push(() => handler?.call(socket, new MessageEvent('message', { data })));
               } else {
-                deliver();
+                handler?.call(socket, event);
               }
             });
             return socket;
