@@ -11,13 +11,16 @@ it('previews drafts without writes and discards Cancel', async () => {
 	settings.set('sidebarNestDelegatedChats', false);
 	const apply = vi.spyOn(settings, 'setSidebarDisplay');
 	render(SidebarDisplayDialogHost, { settings });
+	expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
 	await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+	expect(document.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(1);
 	expect(settings.sidebarNestDelegatedChats).toBe(false);
 	await fireEvent.click(screen.getByRole('checkbox', { name: 'Project path' }));
 	await fireEvent.click(screen.getByRole('radio', { name: 'Detailed' }));
 	const preview = document.querySelector('[data-sidebar-display-preview]')!;
 	expect(preview.querySelectorAll('[data-typography-chat-list]')).toHaveLength(3);
 	expect(preview.querySelectorAll('[data-sidebar-project-header]')).toHaveLength(3);
+	expect(preview.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(2);
 	expect(preview.querySelector('[inert]')).toBeTruthy();
 	await fireEvent.click(screen.getByRole('checkbox', { name: 'Executor' }));
 	expect(

@@ -4,6 +4,7 @@
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import SidebarTreeGuides from './SidebarTreeGuides.svelte';
 	import { buildSidebarChatListProjection } from '$lib/sidebar/display/sidebar-row-model';
 	import {
 		estimateSidebarVirtualRowSize,
@@ -30,9 +31,13 @@
 		inert
 	>
 		{#each projection.rowModel.rows as row (row.key)}
-			<div
-				style={`height:${estimateSidebarVirtualRowSize(row, options.chatItemLayout, options.showProjectPath, options.chatFontScale)}px`}
-			>
+			{@const height = estimateSidebarVirtualRowSize(
+				row,
+				options.chatItemLayout,
+				options.showProjectPath,
+				options.chatFontScale,
+			)}
+			<div class="relative" style={`height:${height}px`}>
 				{#if row.type === 'executor-header'}<SidebarExecutorHeaderRow {row} preview />
 				{:else if row.type === 'project-header'}<SidebarProjectHeaderRow {row} preview />
 				{:else if row.type === 'section-header'}<SidebarSectionHeaderRow {row} />
@@ -58,6 +63,15 @@
 							</ChatSummary>
 						</div>
 					</div>
+				{/if}
+				{#if row.tree}
+					<SidebarTreeGuides
+						{row}
+						guide={row.tree}
+						{height}
+						{width}
+						layout={options.chatItemLayout}
+					/>
 				{/if}
 			</div>
 		{/each}
