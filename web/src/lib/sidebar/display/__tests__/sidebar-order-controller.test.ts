@@ -564,6 +564,7 @@ describe('SidebarOrderController', () => {
 		const write = Promise.withResolvers<ReorderChatResponse>();
 		f.write.mockReturnValueOnce(write.promise);
 		f.controller.submit(f.move('c', 'b')!);
+		expect(f.write).toHaveBeenCalledOnce();
 		f.controller.destroy();
 		write.resolve({ success: true, chatId: 'c', orderGroup: 'normal', changed: true });
 		await Promise.resolve();
