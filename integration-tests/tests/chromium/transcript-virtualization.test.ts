@@ -1749,7 +1749,8 @@ async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void>
 
 async function openAdjacentTerminalWindow(page: Page): Promise<string> {
   const existingWindowIds = new Set(await workspaceWindowIds(page));
-  await page.keyboard.press('Control+p');
+  // Terminal input owns Control+P; invoke the palette from window chrome instead.
+  await page.locator('[data-workspace-window-current="true"]').getByRole('tab', { selected: true }).press('Control+p');
   const palette = page.getByRole('dialog', { name: 'Command palette', exact: true });
   await palette.getByRole('combobox').fill('New Terminal');
   await palette.getByRole('option').filter({ has: page.getByText('New Terminal', { exact: true }) }).click();
@@ -4390,6 +4391,7 @@ async function verifyWindowCountGeometryStability(
   // again here would reduce it to 15.5%, adding a narrower layout than this
   // geometry regression covers. Split Terminal instead, leaving Chat at 31%.
   await focusWorkspaceWindow(fixture.page, terminalWindowId);
+  await fixture.page.locator(`[data-workspace-window-id="${terminalWindowId}"] .xterm-helper-textarea`).focus();
   const secondTerminalWindowId = await openAdjacentTerminalWindow(fixture.page);
   // The canonical desktop layout already provides the fourth window (Files).
   const filesWindowId = await canonicalFilesWindowId(fixture.page);
