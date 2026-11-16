@@ -1,13 +1,15 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Monitor from '@lucide/svelte/icons/monitor';
 	import Server from '@lucide/svelte/icons/server';
 	import ServerOff from '@lucide/svelte/icons/server-off';
 	import { getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SidebarVirtualExecutorHeaderRow } from './sidebar-virtual-chat-list';
+	import type { SidebarVirtualExecutorHeaderRow } from '../../sidebar/display/sidebar-virtual-chat-list';
 	import SidebarGroupHeader from './SidebarGroupHeader.svelte';
 
 	interface SidebarExecutorHeaderRowProps {
+		preview?: boolean;
 		row: SidebarVirtualExecutorHeaderRow;
 		containsSelectedChat?: boolean;
 		separated?: boolean;
@@ -15,17 +17,25 @@
 	}
 
 	let {
+		preview = false,
 		row,
 		containsSelectedChat = false,
 		separated = false,
 		onToggle,
 	}: SidebarExecutorHeaderRowProps = $props();
-	const executors = getExecutors();
-	const executor = $derived(executors.get(row.executorId));
-	const executorLabel = $derived(
-		executor?.label ?? `${m.workspace_executor_unavailable()} (${row.executorId.slice(0, 8)})`,
-	);
-	const Icon = $derived(!executor ? ServerOff : executor.kind === 'local' ? Monitor : Server);
+	const executors = untrack(() => preview) ? null : getExecutors();
+	const executor = $derived(executors?.get(row.executorId));
+	const executorLabel = $derived.by(() => {
+		if (preview) return row.executorId === 'local' ? 'Local' : 'Remote';
+		return (
+			executor?.label ?? `${m.workspace_executor_unavailable()} (${row.executorId.slice(0, 8)})`
+		);
+	});
+	const Icon = $derived.by(() => {
+		if (preview) return row.executorId === 'local' ? Monitor : Server;
+		if (!executor) return ServerOff;
+		return executor.kind === 'local' ? Monitor : Server;
+	});
 
 	function handleToggle(): void {
 		onToggle?.(row.collapseKey);
@@ -39,7 +49,8 @@
 	isCollapsed={row.isCollapsed}
 	{containsSelectedChat}
 	{separated}
-	title={`${executorLabel}${executor ? '' : ` · ${row.executorId}`}`}
+	title={preview || executor ? executorLabel : `${executorLabel} · ${row.executorId}`}
+	disabled={!onToggle}
 	onToggle={handleToggle}
 	data-sidebar-executor-header={row.executorId}
 	data-sidebar-executor-collapse-key={row.collapseKey}

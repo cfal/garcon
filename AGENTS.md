@@ -290,7 +290,7 @@ Rules:
 - `web/src/lib/project-paths/` owns shared executor-qualified path selection, completion, validation, and pinned-path preferences. Its renderers live in `components/project-paths`; chat mutation dialogs remain under Chat.
 - `web/src/lib/components/rich-text/` owns shared Markdown, code, math, and diagram presentation. Chat-reference policy and file-navigation callbacks remain explicit caller contracts.
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
-- `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
+- `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state, display projection/preferences/order coordination, and the project-collapse store.
 - `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.
 - `web/src/lib/chat-canvas/` owns canvas documents, layout/membership rules, undo history, save coordination, and draft recovery. `server/controller/chat-canvas/` persists provider-neutral canvas documents independently of chats and transcript ledgers; renderers and graph-engine adapters live in `components/chat-canvas`.
 - `web/src/lib/tickets/` owns the global ticket catalog, detail projections, mutation drafts, and tab-scoped recovery. `server/controller/tickets/` is the synchronous SQLite authority for workspace tickets, comments, relationships, attributed history, and durable operation results. Operation results support explicit retries only; they are never an execution queue or replayed at startup. Ticket renderers and DOM interaction state live in `components/tickets`; HTTP and WebSocket adaptation stay in the integration layer.

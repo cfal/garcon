@@ -2,19 +2,9 @@
 // remains a thin rendering shell. All server-side mutations and
 // refresh coordination live here.
 
-import {
-	togglePinned,
-	deleteChat,
-	reorderChat,
-	sortChatOrder,
-} from '$lib/api/chats.js';
+import { togglePinned, deleteChat } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-import type {
-	RelativeChatOrderPlacement,
-	SortChatOrderResponse,
-} from '$shared/chat-order-contracts';
-import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 
 export interface SidebarControllerDeps {
@@ -48,17 +38,6 @@ export class SidebarController {
 
 	constructor(deps: SidebarControllerDeps) {
 		this.deps = deps;
-	}
-
-	async reorderChat(chatId: string, placement: RelativeChatOrderPlacement): Promise<void> {
-		await reorderChat({ chatId, placement });
-		await this.deps.onQuietRefresh();
-	}
-
-	async sortChatOrder(sortKey: ChatOrderSortKey): Promise<SortChatOrderResponse> {
-		const response = await sortChatOrder({ sortKey });
-		await this.deps.onQuietRefresh();
-		return response;
 	}
 
 	async bulkDelete(chatIds: string[]): Promise<void> {

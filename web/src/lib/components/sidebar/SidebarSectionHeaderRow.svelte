@@ -1,10 +1,9 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import {
-		sidebarSectionKey,
 		type SidebarChatSection,
 		type SidebarVirtualSectionHeaderRow,
-	} from './sidebar-virtual-chat-list';
+	} from '../../sidebar/display/sidebar-virtual-chat-list';
 	import SidebarGroupHeader from './SidebarGroupHeader.svelte';
 
 	const sectionLabels: Record<SidebarChatSection, () => string> = {
@@ -24,11 +23,10 @@
 
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
-	let sectionKey = $derived(sidebarSectionKey(row.section, row.executorId));
 	let sectionLabel = $derived(sectionLabels[row.section]());
 
 	function handleToggle(): void {
-		onToggle?.(sectionKey);
+		onToggle?.(row.key);
 	}
 </script>
 
@@ -38,9 +36,10 @@
 	count={row.count}
 	isCollapsed={row.isCollapsed}
 	{containsSelectedChat}
+	disabled={!onToggle}
 	onToggle={handleToggle}
 	data-sidebar-section-header={row.section}
-	data-sidebar-section-key={sectionKey}
+	data-sidebar-section-key={row.key}
 	data-sidebar-section-collapsed={row.isCollapsed ? 'true' : 'false'}
 	data-sidebar-row-depth={row.depth}
 >

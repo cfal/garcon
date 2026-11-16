@@ -2,8 +2,9 @@
 	import type { Snippet } from 'svelte';
 	import type { HTMLButtonAttributes } from 'svelte/elements';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { sidebarHeaderInset } from './sidebar-virtual-chat-list';
+	import { sidebarHeaderInset } from '../../sidebar/display/sidebar-virtual-chat-list';
 
 	type SidebarGroupHeaderLevel = 'executor' | 'project' | 'section';
 
@@ -53,7 +54,7 @@
 	data-sidebar-group-header
 >
 	<!-- Actions sit outside the heading so its accessible name stays the group label. -->
-	<div class="h-full min-w-0 flex-1" role="heading" aria-level={level === 'executor' ? 2 : 3}>
+	<div class="h-full min-w-0 flex-1" role="heading" aria-level={depth + 2}>
 		<button
 			type="button"
 			class={cn(
@@ -83,6 +84,7 @@
 						containsSelectedChat && 'text-sidebar-chat-item-selected-foreground/80',
 					)}
 					data-sidebar-group-header-count
+					title={m.sidebar_group_count({ count })}
 				>
 					{count}
 				</span>

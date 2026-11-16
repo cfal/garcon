@@ -12,7 +12,7 @@ import {
 	DEFAULT_CHAT_ROW_OVERSCAN,
 	estimateSidebarVirtualRowSize,
 	type SidebarVirtualRow,
-} from './sidebar-virtual-chat-list.js';
+} from '../../sidebar/display/sidebar-virtual-chat-list.js';
 
 interface SidebarVirtualGeometryUpdate {
 	readonly rows: readonly SidebarVirtualRow[];

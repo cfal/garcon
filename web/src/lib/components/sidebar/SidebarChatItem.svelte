@@ -14,19 +14,26 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import ChatSummary from '../chat/ChatSummary.svelte';
+	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import type { SidebarVirtualChatRow } from '$lib/sidebar/display/sidebar-virtual-chat-list';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from './sidebar-display-options';
+	} from '../../sidebar/display/sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
-	import { sidebarChatInset } from './sidebar-virtual-chat-list';
+	import { sidebarChatInset } from '../../sidebar/display/sidebar-virtual-chat-list';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { WORKSPACE_DRAG_MIME } from '$lib/workspace/window-dnd.svelte.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import { chatActivityTimeMs } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
+		branch?: SidebarVirtualChatRow['branch'];
+		onToggleDelegatedChats?: () => void;
+		contextOnly?: boolean;
+		containsSelectedChat?: boolean;
 		session: ChatSessionRecord;
 		selectedChatId: string | null;
 		currentTime: Date;
@@ -57,7 +64,9 @@
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		hasPinnedChats?: boolean;
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
+		moveBoundaryLabels?: { first: string; last: string };
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
@@ -66,6 +75,10 @@
 	}
 
 	let {
+		branch,
+		onToggleDelegatedChats,
+		contextOnly = false,
+		containsSelectedChat = false,
 		session,
 		selectedChatId,
 		currentTime,
@@ -93,6 +106,9 @@
 		onManageTags,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
+		onMoveUp,
+		onMoveDown,
+		moveBoundaryLabels,
 		onMoveToTop,
 		onMoveToBottom,
 		onSortChatOrder,
@@ -102,6 +118,10 @@
 
 	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
+	const branchDescriptionId = $props.id();
+	const branchActivity = $derived(branch && branch.activity > chatActivityTimeMs(session)
+		? m.sidebar_branch_activity({ time: new Date(branch.activity).toLocaleString() })
+		: undefined);
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
@@ -231,6 +251,7 @@
 </script>
 
 {#snippet stateBadge()}
+	<SidebarBranchBadge {branch} {contextOnly} />
 	<!-- Virtualized section headers may be unmounted, so rows keep their archived
 	     state for assistive technology. -->
 	{#if !isMultiSelectMode && isArchived && !isPinned && inArchivedSection}
@@ -312,16 +333,14 @@
 	</div>
 {/snippet}
 
-<div
-	class="chat-item-root group relative flex h-full flex-col justify-center"
-	bind:this={itemEl}
->
+<div class="chat-item-root group relative flex h-full flex-col justify-center" bind:this={itemEl}>
+	{#if branchActivity}<span id={branchDescriptionId} class="sr-only">{branchActivity}</span>{/if}
 	{#if isMobile}
 		<div
 			class={cn(
 				'flex flex-1 min-h-0 items-stretch bg-sidebar-chat-item-bg',
 				!isMultiSelectMode &&
-					isSelected &&
+					(isSelected || containsSelectedChat) &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 			)}
@@ -337,6 +356,8 @@
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
 				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-describedby={branchActivity ? branchDescriptionId : undefined}
+				title={branchActivity}
 				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
@@ -367,7 +388,7 @@
 					isMultiSelectMode && 'border-l-0',
 					isSingleLineLayout ? 'py-[2px]' : 'py-[5px]',
 					!isMultiSelectMode &&
-						isSelected &&
+						(isSelected || containsSelectedChat) &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
@@ -376,6 +397,8 @@
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
 				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-describedby={branchActivity ? branchDescriptionId : undefined}
+				title={branchActivity}
 				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
@@ -412,12 +435,17 @@
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
 					<SidebarChatMenu
+						delegatedChatsCollapsed={branch?.isCollapsed}
+						{onToggleDelegatedChats}
 						{session}
 						{isPinned}
 						{isArchived}
 						{canFork}
 						{canForkNow}
 						{onEnterMultiSelect}
+						{onMoveUp}
+						{onMoveDown}
+						{moveBoundaryLabels}
 						{onMoveToTop}
 						{onMoveToBottom}
 						{onSortChatOrder}

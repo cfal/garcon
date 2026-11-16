@@ -3,14 +3,38 @@ import {
 	mountedElementForScrollTarget,
 	sidebarScrollTargetForChat,
 } from '../sidebar-chat-list-dom';
-import { sidebarProjectKey } from '../sidebar-row-model';
 import {
-	sidebarSectionKey,
-	sidebarSectionProjectKey,
-	type SidebarVirtualRow,
-} from '../sidebar-virtual-chat-list';
+	sidebarProjectKey,
+	sidebarGroupCollapseKey,
+	buildSidebarRowModel,
+} from '../../../sidebar/display/sidebar-row-model';
+import { type SidebarVirtualRow } from '../../../sidebar/display/sidebar-virtual-chat-list';
+import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 
 describe('sidebar chat scroll targets', () => {
+	it.each([
+		['executor', 'executorCollapseKey'],
+		['project', 'projectCollapseKey'],
+		['activity', 'sectionKey'],
+		['status', 'sectionKey'],
+	] as const)('anchors a delegated descendant in a collapsed %s group', (field, targetKey) => {
+		const input = projectionInput(
+			[chat('root'), delegated('child', 'root'), delegated('grandchild', 'child')],
+			{ groupingFields: [{ field, enabled: true }] },
+		);
+		const header = buildSidebarRowModel(input).rows[0];
+		const { rows } = buildSidebarRowModel({
+			...input,
+			collapsedProjectKeys: new Set([header.key]),
+		});
+		expect(rows).toHaveLength(1);
+		expect(sidebarScrollTargetForChat(rows, 'grandchild')).toEqual({
+			index: 0,
+			[targetKey]: header.key,
+		});
+		expect(sidebarScrollTargetForChat(rows, 'missing')).toBeNull();
+	});
+
 	it.each([false, true])(
 		'anchors the closest visible collapsed ancestor with executor collapsed=%s',
 		(isCollapsed) => {
@@ -22,25 +46,29 @@ describe('sidebar chat scroll targets', () => {
 					collapseKey: 'executor:worker',
 					executorId: 'worker',
 					count: 1,
-					chatIds: ['hidden'],
+					containsChat: (chatId) => chatId === 'hidden',
 					isCollapsed,
 				},
 			];
-			const sectionKey = sidebarSectionKey('inactive', 'worker');
+			const sectionKey = sidebarGroupCollapseKey(null, [
+				['executor', 'worker'],
+				['activity', 'inactive'],
+			]);
 			if (!isCollapsed)
 				rows.push({
 					type: 'section-header',
 					key: sectionKey,
 					depth: 1,
 					section: 'inactive',
-					executorId: 'worker',
 					count: 1,
-					chatIds: ['hidden'],
+					containsChat: (chatId) => chatId === 'hidden',
 					isCollapsed: true,
 				});
 			const target = sidebarScrollTargetForChat(rows, 'hidden');
 			expect(target).toEqual(
-				isCollapsed ? { index: 0, executorCollapseKey: 'executor:worker' } : { index: 1, sectionKey },
+				isCollapsed
+					? { index: 0, executorCollapseKey: 'executor:worker' }
+					: { index: 1, sectionKey },
 			);
 			const viewport = document.createElement('div');
 			const executor = document.createElement('button');
@@ -56,7 +84,10 @@ describe('sidebar chat scroll targets', () => {
 
 	it('anchors a collapsed inactive project instead of its duplicate active or section header', () => {
 		const projectKey = sidebarProjectKey('/tmp/shared-project');
-		const inactiveProjectCollapseKey = sidebarSectionProjectKey('inactive', projectKey);
+		const inactiveProjectCollapseKey = sidebarGroupCollapseKey(null, [
+			['activity', 'inactive'],
+			['project', projectKey],
+		]);
 		const rows: SidebarVirtualRow[] = [
 			{
 				type: 'project-header',
@@ -66,16 +97,16 @@ describe('sidebar chat scroll targets', () => {
 				collapseKey: projectKey,
 				projectPath: '/tmp/shared-project',
 				count: 1,
-				chatIds: ['active-chat'],
+				containsChat: (chatId) => chatId === 'active-chat',
 				isCollapsed: false,
 			},
 			{
 				type: 'section-header',
-				key: sidebarSectionKey('inactive'),
+				key: sidebarGroupCollapseKey(null, [['activity', 'inactive']]),
 				depth: 0,
 				section: 'inactive',
 				count: 1,
-				chatIds: ['inactive-chat'],
+				containsChat: (chatId) => chatId === 'inactive-chat',
 				isCollapsed: false,
 			},
 			{
@@ -86,7 +117,7 @@ describe('sidebar chat scroll targets', () => {
 				collapseKey: inactiveProjectCollapseKey,
 				projectPath: '/tmp/shared-project',
 				count: 1,
-				chatIds: ['inactive-chat'],
+				containsChat: (chatId) => chatId === 'inactive-chat',
 				isCollapsed: true,
 			},
 		];

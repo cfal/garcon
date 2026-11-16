@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { PersistedChatOrderGroup } from '../../../common/chat-order-contracts.js';
 import type { ChatListEntry } from '../../../common/chat-list.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { createSidebarDelegationFixture } from '../../support/sidebar-delegation-fixture.js';
 
 function idsForGroup(
   sessions: readonly ChatListEntry[],
@@ -11,6 +12,36 @@ function idsForGroup(
     .filter((chat) => chat.orderGroup === group)
     .map((chat) => chat.id);
 }
+
+test('root and child moves persist single-ID priorities without rewriting delegation', async () => {
+  await withIntegrationFixture('delegated-chat-reorder', async (fixture) => {
+    const { a, b, a1, a2, b1, canonical } = await createSidebarDelegationFixture(fixture);
+    const before = (await fixture.client.listChats()).sessions;
+    expect(idsForGroup(before, 'normal')).toEqual(canonical);
+    await fixture.client.reorderChat({
+      chatId: a,
+      placement: { kind: 'relative', referenceChatId: b, position: 'before' },
+    });
+    const movedRoot = idsForGroup((await fixture.client.listChats()).sessions, 'normal');
+    expect(movedRoot).toEqual([a1, a, b, b1, a2]);
+    expect(movedRoot.filter((id) => id !== a)).toEqual(canonical.filter((id) => id !== a));
+    await fixture.client.reorderChat({
+      chatId: a2,
+      placement: { kind: 'relative', referenceChatId: a1, position: 'before' },
+    });
+    const expected = [a2, a1, a, b, b1];
+    await fixture.restartGarcon();
+    const after = (await fixture.client.listChats()).sessions;
+    expect(idsForGroup(after, 'normal')).toEqual(expected);
+    expect(after.filter((chat) => !chat.parentChat).map((chat) => chat.id)).toEqual([a, b]);
+    expect(after.filter((chat) => chat.parentChat?.chatId === a).map((chat) => chat.id)).toEqual([
+      a2,
+      a1,
+    ]);
+    for (const entry of before)
+      expect(after.find((chat) => chat.id === entry.id)?.parentChat).toEqual(entry.parentChat);
+  });
+}, 60_000);
 
 test('chat placements persist across sections and emit only changed invalidations', async () => {
   await withIntegrationFixture('chat-reorder', async (fixture) => {

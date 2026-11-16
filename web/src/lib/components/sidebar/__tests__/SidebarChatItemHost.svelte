@@ -8,7 +8,7 @@
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from '../sidebar-display-options';
+	} from '../../../sidebar/display/sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -82,7 +82,8 @@
 
 	let displayOptions = $derived({
 		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
-		grouping: 'none' as const,
+		groupingFields: [],
+		nestDelegatedChats: false,
 		...displayOptionsInput,
 	});
 
@@ -93,7 +94,9 @@
 	} as never);
 
 	setModelCatalog({
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		supportsFork() {
 			return supportsFork;
 		},

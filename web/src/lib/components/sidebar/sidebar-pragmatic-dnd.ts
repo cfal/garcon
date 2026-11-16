@@ -135,6 +135,8 @@ export function resolveSidebarDropInstruction(
 ): SidebarDropInstruction | null {
 	if (!isSidebarChatDragData(sourceData)) return null;
 	for (const target of dropTargets) {
+		// Sticky records can outlive a move onto an incompatible branch; pointer fallback revalidates them.
+		if (target.isActiveDueToStickiness) continue;
 		const targetData = target.data;
 		if (!isSidebarChatDropTargetData(targetData)) continue;
 		const instruction = resolveSidebarDropInstructionForTarget({
