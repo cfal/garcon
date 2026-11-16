@@ -206,6 +206,7 @@ function makePanel() {
 function makeActions(): ConversationPanelActions {
 	return {
 		reload: vi.fn(),
+		isDirectAdmissionPending: vi.fn().mockReturnValue(false),
 		choiceStatus: vi.fn(),
 		answerChoice: vi.fn().mockResolvedValue(true),
 		decidePermission: vi.fn(),
@@ -375,6 +376,25 @@ describe('ConversationPanel', () => {
 		expect(actions.answerChoice).not.toHaveBeenCalled();
 	});
 
+	it('disables card sends while direct admission is pending', async () => {
+		const { actions, rendered } = choicePanel();
+		vi.mocked(actions.isDirectAdmissionPending).mockReturnValue(true);
+		await rendered.rerender({ actions: { ...actions } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Fast' }));
+		expect(actions.answerChoice).not.toHaveBeenCalled();
+	});
+	it('retains permission selections and notes when composer ownership remounts the dock', async () => {
+		runtime.permissions = [{ permissionOccurrenceId: 'retained', requestedTool: new AskUserQuestionToolUseMessage('2026-01-01T00:00:00Z', 'tool', undefined, [{ id: 'mode', prompt: 'Which mode?', allowNotes: true, options: [{ id: 'fast', label: 'Fast' }, { id: 'careful', label: 'Careful' }] }]) }];
+		const { rendered, actions } = choicePanel();
+		await fireEvent.click(screen.getByRole('button', { name: 'Careful' }));
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Keep this note' } });
+		await rendered.rerender({ ownsComposer: false });
+		expect(screen.queryByRole('textbox')).toBeNull();
+		await rendered.rerender({ ownsComposer: true });
+		expect(screen.getByRole('textbox')).toHaveProperty('value', 'Keep this note');
+		expect(screen.getByRole('button', { name: 'Careful' }).getAttribute('aria-pressed')).toBe('true');
+		expect(actions.decidePermission).not.toHaveBeenCalled();
+	});
 	it('renders pending structured questions in the dock and submits canonical responses', async () => {
 		runtime.permissions = [
 			{

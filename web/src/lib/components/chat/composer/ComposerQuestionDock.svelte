@@ -16,6 +16,8 @@
 		identity: string;
 		asyncPanel: AsyncQuestionPanelPort;
 		canAnswer: boolean;
+		permissionDraft?: PermissionQuestionDraft;
+		onPermissionDraftChange: (draft: PermissionQuestionDraft) => void;
 		deliveryStatus?: ResponseChoiceStatus;
 		onDecision: (permissionOccurrenceId: string, decision: PermissionDecisionPayload) => void;
 		onSubmit: (answers: readonly ResponseChoiceAnswer[]) => Promise<boolean>;
@@ -26,21 +28,13 @@
 		identity,
 		asyncPanel,
 		canAnswer,
+		permissionDraft = { selectedQuestionOptions: {}, rawInputOpen: false },
+		onPermissionDraftChange,
 		deliveryStatus,
 		onDecision,
 		onSubmit,
 		onDismiss,
 	}: Props = $props();
-	let draftIdentity = $state('');
-	let permissionDraft = $state<PermissionQuestionDraft>({
-		selectedQuestionOptions: {},
-		rawInputOpen: false,
-	});
-	const draft = $derived(
-		draftIdentity === identity
-			? permissionDraft
-			: { selectedQuestionOptions: {}, rawInputOpen: false },
-	);
 	const asyncQuestions = $derived(
 		question.kind === 'async' ? (question.message.questions?.questions ?? []) : [],
 	);
@@ -93,11 +87,8 @@
 					{canAnswer}
 					composer={true}
 					{onDismiss}
-					{draft}
-					onDraftChange={(next) => {
-						draftIdentity = identity;
-						permissionDraft = next;
-					}}
+					draft={permissionDraft}
+					onDraftChange={onPermissionDraftChange}
 					onDecision={(decision) => {
 						if (question.kind === 'permission' && canAnswer)
 							onDecision(question.request.permissionOccurrenceId, decision);

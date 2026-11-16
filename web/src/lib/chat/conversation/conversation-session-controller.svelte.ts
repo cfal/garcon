@@ -63,24 +63,14 @@ import type {
 	SessionTranscriptLoadTarget,
 	PanelTranscriptSnapshotLoader,
 } from './conversation-session-controller-types.js';
+import { ConversationAdmissionController, type DirectAdmissionBarrier } from './conversation-admission-controller.svelte.js';
+import { ConversationChoiceService } from './conversation-choice-service.js';
 export type { SessionControllerDeps } from './conversation-session-controller-types.js';
-
-interface DirectAdmissionBarrier {
-	settled: Promise<void>;
-	release: () => void;
-}
-
-function createDirectAdmissionBarrier(): DirectAdmissionBarrier {
-	let release!: () => void;
-	const settled = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	return { settled, release };
-}
 
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
-	#pendingDirectAdmissions = $state.raw<ReadonlyMap<string, DirectAdmissionBarrier>>(new Map());
+	readonly #admissions: ConversationAdmissionController;
+	readonly choices: ConversationChoiceService;
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 	readonly #acceptedInputs: AcceptedInputSubmissionService;
@@ -168,6 +158,8 @@ export class ConversationSessionController {
 				return agentSwitch;
 			},
 		});
+		this.#admissions = new ConversationAdmissionController(this.#settings, this.#queue);
+		this.choices = new ConversationChoiceService(deps, this.#admissions, this.#acceptedInputs);
 	}
 
 	#executionSelectionForChat(chatId: string): ConversationExecutionSelection | null {
@@ -204,11 +196,12 @@ export class ConversationSessionController {
 	}
 
 	async #commitHandoff(chatId: string, handoff: AgentHandoffRequest): Promise<void> {
-		const admission = this.#claimDirectAdmission(chatId);
+		const admission = this.#admissions.claim(chatId);
 		if (!admission) throw new Error(m.chat_notice_handoff_requires_idle());
 		const request = { chatId, handoff, clientRequestId: createClientCommandId() };
 		try {
-			if (this.#settings.hasPending(chatId) && !(await this.#settings.settlePending(chatId)))
+			const pendingSettings = this.#admissions.settleSettings(chatId);
+			if (pendingSettings && !(await pendingSettings))
 				return;
 			const response = await handoffChat(request);
 			const current = this.deps.sessions.byId[chatId];
@@ -230,7 +223,7 @@ export class ConversationSessionController {
 			}
 			throw uncertain ? new CommandOutcomeUnknownError({ cause: error }) : error;
 		} finally {
-			this.#releaseDirectAdmission(chatId, admission);
+			this.#admissions.release(chatId, admission);
 		}
 	}
 
@@ -450,24 +443,7 @@ export class ConversationSessionController {
 	}
 
 	isDirectAdmissionPending(chatId: string | null): boolean {
-		return chatId !== null && this.#pendingDirectAdmissions.has(chatId);
-	}
-
-	#claimDirectAdmission(chatId: string): DirectAdmissionBarrier | null {
-		if (this.#pendingDirectAdmissions.has(chatId)) return null;
-		const barrier = createDirectAdmissionBarrier();
-		const next = new Map(this.#pendingDirectAdmissions);
-		next.set(chatId, barrier);
-		this.#pendingDirectAdmissions = next;
-		return barrier;
-	}
-
-	#releaseDirectAdmission(chatId: string, barrier: DirectAdmissionBarrier): void {
-		if (this.#pendingDirectAdmissions.get(chatId) !== barrier) return;
-		const next = new Map(this.#pendingDirectAdmissions);
-		next.delete(chatId);
-		this.#pendingDirectAdmissions = next;
-		barrier.release();
+		return this.#admissions.isPending(chatId);
 	}
 
 	#restorePreflightSubmission(
@@ -526,7 +502,7 @@ export class ConversationSessionController {
 				deps.sessions.byId[chatId]?.status === 'draft'
 			)
 				return 'no-op';
-			await this.#pendingDirectAdmissions.get(chatId)?.settled;
+			await this.#admissions.wait(chatId);
 		}
 		this.#reconcileExecutionSelection(chatId);
 		const selected = deps.sessions.byId[chatId];
@@ -627,7 +603,7 @@ export class ConversationSessionController {
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
 		let directAdmission: DirectAdmissionBarrier | null = null;
 		if (!activeTurn) {
-			directAdmission = this.#claimDirectAdmission(chatId);
+			directAdmission = this.#admissions.claim(chatId);
 			if (!directAdmission) return 'no-op';
 		}
 		if (source === 'automatic-start') {
@@ -641,7 +617,8 @@ export class ConversationSessionController {
 		}
 
 		try {
-			if (this.#settings.hasPending(chatId) && !(await this.#settings.settlePending(chatId))) {
+			const pendingSettings = this.#admissions.settleSettings(chatId);
+			if (pendingSettings && !(await pendingSettings)) {
 				this.#restorePreflightSubmission(
 					chatId,
 					previousText,
@@ -650,17 +627,15 @@ export class ConversationSessionController {
 				);
 				return 'rejected';
 			}
-			const pendingControlRefresh = this.#queue.pendingControlRefresh(chatId);
-			if (!isDraft && !activeTurn && pendingControlRefresh) {
-				await this.#queue.settleControlRefresh(pendingControlRefresh);
-			}
+			const pendingControl = !isDraft && !activeTurn ? this.#admissions.settleQueueControl(chatId) : undefined;
+			if (pendingControl) await pendingControl;
 			const route = classifySubmission({
 				isDraft,
 				isProcessing: activeTurn,
 				control: deps.conversationUi.getExecutionControl(chatId),
 			});
 			if (route !== 'direct' && route !== 'draft' && directAdmission) {
-				this.#releaseDirectAdmission(chatId, directAdmission);
+				this.#admissions.release(chatId, directAdmission);
 				directAdmission = null;
 			}
 
@@ -712,7 +687,7 @@ export class ConversationSessionController {
 			await deps.requestProcessingSnapshot('admission').catch(() => undefined);
 			return outcome;
 		} finally {
-			if (directAdmission) this.#releaseDirectAdmission(chatId, directAdmission);
+			if (directAdmission) this.#admissions.release(chatId, directAdmission);
 		}
 	}
 

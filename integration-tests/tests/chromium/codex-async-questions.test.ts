@@ -40,6 +40,10 @@ for (const width of [1440, 390]) {
         const viewport = page.locator('[data-chat-scroll-viewport]:visible');
         const originalEditor = await editor.elementHandle();
         await editor.fill('Independent composer draft');
+        const dock = page.locator('[data-composer-question-dock]');
+        await browserExpect(dock).toBeVisible();
+        await dock.getByRole('button', { name: 'Dismiss question', exact: true }).click();
+        await browserExpect(dock).toHaveCount(0);
         await page.getByRole('radio', { name: 'Production', exact: true }).check();
         const deadline = page.getByRole('textbox', { name: 'Deadline?', exact: true });
         for (const character of ['x', '\u00e9']) {

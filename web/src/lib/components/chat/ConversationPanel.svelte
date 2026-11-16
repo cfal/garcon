@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { getAsyncQuestionController, setAsyncQuestionPanel } from '$lib/chat/conversation/async-question-context.js';
 	import ConversationFeed from './transcript/ConversationFeed.svelte';
+	import { ConversationFeedItemState } from './transcript/ConversationFeedItemState.svelte.js';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
 	import ComposerAvailabilityNotice from './composer/ComposerAvailabilityNotice.svelte';
@@ -70,6 +71,7 @@
 		reserveMobileToolbar = false,
 	}: Props = $props();
 
+	const itemState = new ConversationFeedItemState();
 	const sessions = getChatSessions();
 	const conversationUi = getConversationUi();
 	const localSettings = getLocalSettings();
@@ -115,7 +117,8 @@
 		get excludedResendOrdinals() { return panel.transcript.excludedResendOrdinals; },
 		canReply: canReplyToQuestion,
 		canSubmit: (ordinal) => isVisible && canReplyToQuestion(ordinal)
-			&& executors.isReady(chat.executorId ?? 'local') && modelCatalog.isValidated,
+			&& executors.isReady(chat.executorId ?? 'local') && modelCatalog.isValidated &&
+			!actions?.isDirectAdmissionPending(chatId),
 		recordedAnswer: (ordinal, questionId) => recordedQuestionAnswers.get(JSON.stringify([ordinal, questionId])),
 	});
 	$effect(() => {
@@ -215,7 +218,8 @@
 			isCommandOwner &&
 			isVisible &&
 			executors.isReady(executorId) &&
-			modelCatalog.isValidated,
+			modelCatalog.isValidated &&
+			!actions?.isDirectAdmissionPending(chatId),
 		),
 	);
 	setComposerQuestionPresentation({
@@ -390,6 +394,7 @@
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed
+				{itemState}
 				chatContext={{
 					chatId,
 					executorId: chat.executorId ?? 'local',
@@ -441,6 +446,10 @@
 					question={activeQuestion}
 					identity={questionKey}
 					asyncPanel={asyncQuestionPanel}
+					permissionDraft={activeQuestion.kind === 'permission' ? itemState.permissionDraft(activeQuestion.request.permissionOccurrenceId) : undefined}
+					onPermissionDraftChange={(draft) => {
+						if (activeQuestion?.kind === 'permission') itemState.setPermissionDraft(activeQuestion.request.permissionOccurrenceId, draft);
+					}}
 					deliveryStatus={choiceDeliveryStatus}
 					canAnswer={answerEnabled}
 					onDecision={(permissionOccurrenceId, decision) =>

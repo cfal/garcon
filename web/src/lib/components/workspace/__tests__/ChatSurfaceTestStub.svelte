@@ -28,6 +28,7 @@
 		panelAction = `${surfaceId}:${chatId}:${action}`;
 	}
 	const panelActions = {
+		isDirectAdmissionPending: () => false,
 		choiceStatus: () => undefined,
 		reload: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'reload'),
 		answerChoice: async (surfaceId, chatId) => {

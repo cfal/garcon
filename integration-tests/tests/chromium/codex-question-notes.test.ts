@@ -33,8 +33,9 @@ test('Codex options and notes submit together and remain visible after reload on
         }));
         await page.setViewportSize({ width, height: 900 });
         await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
-        const careful = page.getByRole('radio', { name: /Careful/ });
-        await careful.check();
+        const dock = page.locator('[data-composer-question-dock]');
+        const careful = dock.getByRole('button', { name: /Careful/ });
+        await careful.click();
         const note = page.getByRole('textbox', { name: 'Notes (optional)' });
         const submit = page.getByRole('button', { name: 'Submit answer', exact: true });
         await note.fill('   ');
@@ -50,8 +51,8 @@ test('Codex options and notes submit together and remain visible after reload on
         }
         await note.fill(text);
         await browserExpect(submit).toBeEnabled();
-        await browserExpect(careful).toBeChecked();
-        await browserExpect(page.getByRole('radio', { name: 'Other', exact: true })).not.toBeChecked();
+        await browserExpect(careful).toHaveAttribute('aria-pressed', 'true');
+        await browserExpect(dock.getByRole('textbox', { name: 'Which mode?', exact: true })).toHaveCount(0);
         expect(await note.evaluate(node => Number.parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(16);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
@@ -62,8 +63,9 @@ test('Codex options and notes submit together and remain visible after reload on
         await integration.client.waitForTurnTerminal(chatId, turn.turnId);
         await browserExpect(page.getByText(text, { exact: true })).toBeVisible();
         await page.reload();
-        await browserExpect(careful).toBeChecked();
-        await browserExpect(careful).toBeDisabled();
+        const recordedChoice = page.getByRole('radio', { name: /Careful/ });
+        await browserExpect(recordedChoice).toBeChecked();
+        await browserExpect(recordedChoice).toBeDisabled();
         await browserExpect(page.getByText(text, { exact: true })).toBeVisible();
         await browserExpect(submit).toHaveCount(0);
         assertNoBrowserErrors();

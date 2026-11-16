@@ -69,6 +69,9 @@
 			askUserQuestionAnswersValidationError(questions, response.answers) === null,
 	);
 
+	function autoConfirms(question: AskUserQuestionPrompt): boolean {
+		return !question.allowMultiple && !question.allowNotes && !question.options.some(option => option.preview);
+	}
 	function selectedOptions(id: string): string[] {
 		return Object.hasOwn(selections, id) ? selections[id] : [];
 	}
@@ -101,7 +104,7 @@
 			selectedQuestionOptions: { ...draft.selectedQuestionOptions, [question.id]: [...selected] },
 		};
 		onDraftChange(next);
-		if (composer && !question.allowMultiple && checked) confirm(next);
+		if (composer && autoConfirms(question) && checked) confirm(next);
 	}
 	function setText(questionId: string, text: string): void {
 		if (!isPending) return;
@@ -335,7 +338,7 @@
 					{m.chat_permission_waiting_for_executor()}
 				</div>
 			{/if}
-			{#if !composer || activeQuestion?.allowMultiple || activeQuestion?.options.length === 0 || (activeQuestion?.allowFreeText && selectedOptions(activeQuestion.id).length === 0 && answerText(activeQuestion.id).trim())}
+			{#if !composer || (activeQuestion && !autoConfirms(activeQuestion)) || activeQuestion?.options.length === 0 || (activeQuestion?.allowFreeText && selectedOptions(activeQuestion.id).length === 0 && answerText(activeQuestion.id).trim())}
 				<button
 					type="submit"
 					disabled={!canAnswer || (composer ? !activeValid : !valid)}

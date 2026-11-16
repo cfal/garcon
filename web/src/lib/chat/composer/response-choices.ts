@@ -65,7 +65,7 @@ function isChoicePrompt(value: string): boolean {
 	if (/\b(?:steps|instructions|commands)\b/i.test(value)) return false;
 	return (
 		/[?？]$/.test(value) &&
-		/\b(?:which|prefer|choose|select|pick|would you like|do you want|should (?:I|we)|shall (?:I|we)|what would you|what do you|how would you (?:most )?like)\b/i.test(
+		/\b(?:prefer|choose|select|pick|would you like|do you want|should (?:I|we)|shall (?:I|we)|what would you|what do you|how would you (?:most )?like)\b/i.test(
 			value,
 		)
 	);
@@ -112,6 +112,18 @@ interface ChoiceBlock {
 interface NearbyPrompt {
 	index: number;
 	prompt: string;
+}
+
+function selectionCueStart(lines: readonly string[], start: number, boundary: number): number {
+	let cueStart = start;
+	for (let preceding = start - 1, inspected = 0; preceding >= boundary && inspected < 3; preceding--) {
+		const directive = displayText(lines[preceding]);
+		if (!directive) continue;
+		inspected++;
+		if (!/^(?:please\s+)?(?:select|choose|pick)\b/i.test(directive)) break;
+		cueStart = preceding;
+	}
+	return cueStart;
 }
 
 function precedingPrompt(lines: readonly string[], start: number, boundary: number): NearbyPrompt | null {
@@ -181,10 +193,11 @@ export function parseResponseChoices(content: string): ResponseChoiceSet | null 
 		if (choices.length < 2 || choices.length > MAX_OPTIONS) continue;
 		if (choices.some((choice, position) => choice.position !== undefined && choice.position !== position + 1)) continue;
 		if (new Set(choices.map(choice => choice.label)).size !== choices.length) continue;
-		const afterBoundary = leading[index + 1]?.index ?? lines.length;
+		const nextPrompt = leading[index + 1];
+		const afterBoundary = nextPrompt ? selectionCueStart(lines, nextPrompt.index, block.end + 1) : lines.length;
 		const prompt = adjacentPrompt(lines, block, leading[index], afterBoundary);
 		if (!prompt) continue;
-		const cueStart = Math.min(prompt.index, block.start);
+		const cueStart = selectionCueStart(lines, Math.min(prompt.index, block.start), index ? blocks[index - 1].end + 1 : 0);
 		const cues = lines.slice(cueStart, afterBoundary).filter((_line, offset) => !block.indices.includes(cueStart + offset)).join('\n');
 		if (hasResponseChoiceLimit(cues)) continue;
 		questions.push({

@@ -259,3 +259,22 @@ describe('formatResponseChoiceAnswers', () => {
 		expect(formatResponseChoiceAnswers([{ ...questions[0], options: [] }], complete.slice(0, 1))).toBeNull();
 	});
 });
+
+it.each(['Which files changed?', 'Which tests failed?', 'Which packages were updated?'])('keeps informational reports as text: %s', (prompt) => {
+	expect(parseChoiceSet(`${prompt}\n- package.json\n- src/main.ts`)).toBeNull();
+});
+it.each(['Select all that apply.', 'Choose one or more.', 'Pick multiple options.'])('reads a selection directive before the prompt: %s', (directive) => {
+	expect(parseChoiceSet(`${directive}\nWhich features do you want?\n- Search\n- Export`)?.questions[0].allowMultiple).toBe(true);
+});
+it.each(['Select up to 2.', 'Choose exactly two.', 'Pick at most 3.'])('rejects an unsupported cap before the prompt: %s', (directive) => {
+	expect(parseChoiceSet(`${directive}\nWhich features do you want?\n- Search\n- Export`)).toBeNull();
+});
+it('does not apply a previous question directive to the next list', () => {
+	const result = parseChoiceSet('Select all that apply.\nWhich features do you want?\n- Search\n- Export\n\nWhich layout do you prefer?\n- Compact\n- Spacious');
+	expect(result?.questions.map(question => question.allowMultiple)).toEqual([true, false]);
+});
+
+it('does not apply the next question directive to the previous list', () => {
+	const result = parseChoiceSet('Which layout do you prefer?\n- Compact\n- Spacious\n\nSelect all that apply.\nWhich features do you want?\n- Search\n- Export');
+	expect(result?.questions.map(question => question.allowMultiple)).toEqual([false, true]);
+});

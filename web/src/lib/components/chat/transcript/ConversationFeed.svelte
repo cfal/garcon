@@ -52,6 +52,7 @@
 	const EMPTY_PROTECTED_KEYS: readonly string[] = [];
 
 	interface Props {
+		itemState?: ConversationFeedItemState;
 		chatContext: ConversationMessageChatContext;
 		transcript: ActiveTranscriptState;
 		agentId: SessionAgentId;
@@ -86,6 +87,7 @@
 	}
 
 	let {
+		itemState = new ConversationFeedItemState(),
 		chatContext,
 		transcript,
 		agentId,
@@ -208,7 +210,6 @@
 	);
 	const projectionState = new ConversationFeedProjectionState();
 	const retention = new ConversationFeedRetentionState();
-	const itemState = new ConversationFeedItemState();
 	const toolGroups = new ConversationToolGroupState();
 	const revealWaiters = new Map<
 		symbol,

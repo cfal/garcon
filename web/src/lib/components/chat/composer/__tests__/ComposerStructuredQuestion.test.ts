@@ -54,10 +54,32 @@ it('accepts a custom structured answer without a separate custom-answer action',
 	expect(onSubmit).toHaveBeenCalledExactlyOnceWith([{ questionId: single.id, selectedOptionIds: [], text: 'Custom environment' }]);
 });
 
-it('includes an optional note entered before a single option confirms the answer', async () => {
+it('preserves a note entered before selection and waits for explicit confirmation', async () => {
 	const onSubmit = vi.fn();
 	render(Host, { questions: [{ ...single, allowFreeText: true, allowNotes: true }], onSubmit });
 	await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Synthetic selection note' } });
 	await fireEvent.click(screen.getByRole('button', { name: 'Staging' }));
+	expect(onSubmit).not.toHaveBeenCalled();
+	await fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }));
 	expect(onSubmit).toHaveBeenCalledExactlyOnceWith([{ questionId: single.id, selectedOptionIds: ['staging'], text: 'Synthetic selection note' }]);
+});
+
+it('shows selected previews and lets the user add notes before confirmation', async () => {
+	const onSubmit = vi.fn();
+	render(Host, { questions: [{ ...single, allowNotes: true, options: [{ id: 'staging', label: 'Staging', preview: 'Synthetic preview' }, single.options[1]] }], onSubmit });
+	await fireEvent.click(screen.getByRole('button', { name: 'Staging' }));
+	expect(screen.getByText('Synthetic preview')).toBeTruthy();
+	expect(onSubmit).not.toHaveBeenCalled();
+	await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Review this note' } });
+	await fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }));
+	expect(onSubmit).toHaveBeenCalledExactlyOnceWith([{ questionId: single.id, selectedOptionIds: ['staging'], text: 'Review this note' }]);
+});
+it('requires confirmation for a preview without notes', async () => {
+	const onSubmit = vi.fn();
+	render(Host, { questions: [{ ...single, options: [{ id: 'staging', label: 'Staging', preview: 'Synthetic preview' }, single.options[1]] }], onSubmit });
+	await fireEvent.click(screen.getByRole('button', { name: 'Staging' }));
+	expect(screen.getByText('Synthetic preview')).toBeTruthy();
+	expect(onSubmit).not.toHaveBeenCalled();
+	await fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }));
+	expect(onSubmit).toHaveBeenCalledOnce();
 });

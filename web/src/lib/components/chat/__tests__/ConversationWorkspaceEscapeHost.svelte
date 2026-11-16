@@ -197,6 +197,7 @@
 		openNewChatDialog: () => {},
 	} as never);
 	setWs({
+		requestProcessingSnapshot: () => Promise.resolve(),
 		messages: [],
 		trimOffset: 0,
 		trimConsumedMessages: () => {},

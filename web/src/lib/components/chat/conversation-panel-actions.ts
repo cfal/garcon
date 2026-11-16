@@ -16,6 +16,7 @@ export class StaleConversationSurfaceError extends Error {
 }
 
 export interface ConversationPanelActions {
+	isDirectAdmissionPending(chatId: string): boolean;
 	choiceStatus(key: string): ResponseChoiceStatus | undefined;
 	reload(surfaceId: ChatViewSurfaceId, chatId: string): void;
 	answerChoice(

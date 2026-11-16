@@ -6,6 +6,7 @@ import { AsyncQuestionController } from '$lib/chat/conversation/async-question-c
 import type { AsyncQuestionPanelPort } from '$lib/chat/conversation/async-question-context.js';
 import type { ComposerQuestion } from '$lib/chat/composer/composer-question.js';
 import ComposerQuestionDock from '../ComposerQuestionDock.svelte';
+import PermissionDraftHost from './ComposerPermissionDraftHost.svelte';
 const target = {
 	chatId: 'chat',
 	transcriptViewId: 'view',
@@ -29,6 +30,7 @@ function fixture() {
 			identity: 'chat:view:3',
 			asyncPanel,
 			canAnswer: true,
+			onPermissionDraftChange: vi.fn(),
 			onDecision: vi.fn(),
 			onSubmit: vi.fn().mockResolvedValue(true),
 			onDismiss: vi.fn(),
@@ -95,4 +97,24 @@ it('resets the permission page and staged answers for a new occurrence', async (
 	expect(screen.getByText('1/2')).toBeTruthy();
 	expect(screen.queryByText('Which release?')).toBeNull();
 	expect(props.onDecision).not.toHaveBeenCalled();
+});
+
+it('retains a selected answer and note when dismissed into the transcript form', async () => {
+	const { props } = fixture();
+	const question = { kind: 'permission', request: { permissionOccurrenceId: 'retained', requestedTool: new AskUserQuestionToolUseMessage('2026-01-01T00:00:00Z', 'tool', undefined, [{ id: 'mode', prompt: 'Which mode?', allowFreeText: true, allowNotes: true, options: [{ id: 'fast', label: 'Fast' }, { id: 'careful', label: 'Careful' }] }]) } } satisfies ComposerQuestion;
+	render(PermissionDraftHost, { question, asyncPanel: props.asyncPanel });
+	await fireEvent.click(screen.getByRole('button', { name: 'Careful' }));
+	await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Retained note' } });
+	await fireEvent.click(screen.getByRole('button', { name: 'Dismiss question' }));
+	expect(screen.getByRole('radio', { name: 'Careful' })).toHaveProperty('checked', true);
+	expect(screen.getByRole('textbox')).toHaveProperty('value', 'Retained note');
+});
+it('retains a custom answer when dismissed into the transcript form', async () => {
+	const { props } = fixture();
+	const question = { kind: 'permission', request: { permissionOccurrenceId: 'custom', requestedTool: new AskUserQuestionToolUseMessage('2026-01-01T00:00:00Z', 'tool', undefined, [{ id: 'mode', prompt: 'Which mode?', allowFreeText: true, options: [{ id: 'fast', label: 'Fast' }, { id: 'careful', label: 'Careful' }] }]) } } satisfies ComposerQuestion;
+	render(PermissionDraftHost, { question, asyncPanel: props.asyncPanel });
+	await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Custom mode' } });
+	await fireEvent.click(screen.getByRole('button', { name: 'Dismiss question' }));
+	expect(screen.getByRole('radio', { name: 'Other' })).toHaveProperty('checked', true);
+	expect(screen.getByRole('textbox')).toHaveProperty('value', 'Custom mode');
 });

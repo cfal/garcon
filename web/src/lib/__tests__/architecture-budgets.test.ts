@@ -37,7 +37,7 @@ describe('web architecture budgets', () => {
 
 	test('no production file exceeds its line budget', () => {
 		for (const file of files) {
-			const ceiling = GRANDFATHER[file] ?? MAX_LINES;
+			const ceiling = GRANDFATHER[file.replaceAll('\\', '/')] ?? MAX_LINES;
 			const lines = lineCount(file);
 			expect(lines, `${file} has ${lines} lines (ceiling ${ceiling})`).toBeLessThanOrEqual(ceiling);
 		}
