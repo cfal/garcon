@@ -342,6 +342,52 @@ describe('TranscriptSearchController with v9 Workers', () => {
     }
   });
 
+  test('reports unindexed coverage between chat builds without inventing pending work', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'search-v9-controller-service-'));
+    workspaces.push(workspace);
+    const corpus = unadoptedCorpus(2);
+    const [firstChatId, secondChatId] = [...corpus.chats.keys()];
+    const betweenChats = deferred();
+    const release = deferred();
+    const service = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
+    const controller = new TranscriptSearchController({
+      listChatIds: () => [...corpus.chats.keys()],
+      hasChat: (chatId) => corpus.chats.has(chatId),
+      ledger: corpus.ledger,
+      adoption: {
+        async ensure(chatId) {
+          if (chatId === secondChatId) {
+            betweenChats.resolve();
+            await release.promise;
+          }
+          corpus.adopted.add(chatId);
+          return corpus.ledger.currentView(chatId);
+        },
+      },
+      service,
+      logger: logger(),
+    });
+    await controller.start();
+    try {
+      await betweenChats.promise;
+      const during = await controller.search({ query: corpus.marker, allowedChatIds: [...corpus.chats.keys()] });
+      expect(during.results.map((result) => result.chatId)).toEqual([firstChatId]);
+      expect(during.index).toMatchObject({
+        indexedChatCount: 1, pendingChatCount: 0, unindexedChatCount: 1, failedChatCount: 0,
+      });
+      release.resolve();
+      await waitFor(() => controller.status().phase === 'ready');
+      const ready = await controller.search({ query: corpus.marker, allowedChatIds: [...corpus.chats.keys()] });
+      expect(ready.results.map((result) => result.chatId).sort()).toEqual([firstChatId, secondChatId]);
+      expect(ready.index).toMatchObject({
+        indexedChatCount: 2, pendingChatCount: 0, unindexedChatCount: 0, failedChatCount: 0,
+      });
+    } finally {
+      release.resolve();
+      await controller.close();
+    }
+  });
+
   test('a commit during catalog watermark pacing remains searchable through the Workers', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'search-v9-controller-service-'));
     workspaces.push(workspace);
