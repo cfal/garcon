@@ -45,12 +45,17 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(landing.locator('#project-path-input')).toHaveCount(0);
 
       phase('pin the owning executor path');
+      const projectActions = projectCard.locator('..').getByRole('button', { name: /^Project actions:/ });
       if (integration.client.executorId !== 'local') {
-        await page.getByRole('button', { name: 'Unpin project path', exact: true }).click();
-        await browserExpect(page.getByRole('button', { name: 'Pin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
+        await projectActions.click();
+        await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
+        await browserExpect(projectActions).toHaveAttribute('aria-busy', 'false');
+        await browserExpect(projectCard.getByRole('img', { name: 'Pinned', exact: true })).toHaveCount(0);
       }
-      await page.getByRole('button', { name: 'Pin project path', exact: true }).click();
-      await browserExpect(page.getByRole('button', { name: 'Unpin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
+      await projectActions.click();
+      await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
+      await browserExpect(projectActions).toHaveAttribute('aria-busy', 'false');
+      await browserExpect(projectCard.getByRole('img', { name: 'Pinned', exact: true })).toBeVisible();
       await browserExpect(landing.getByRole('button', { name: 'Choose folder', exact: true })).toBeEnabled();
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
 
@@ -64,18 +69,18 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       };
       await assertExactPreambleScope();
 
-      phase('nested picker Escape leaves the new-chat form open');
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
-      const picker = page.getByRole('dialog', { name: 'Select worktree', exact: true });
-      await browserExpect(picker.getByRole('option', { name: /feature/ })).toBeVisible();
+      phase('nested folder browser Escape leaves the new-chat form open');
+      await landing.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      const picker = landing.getByRole('dialog', { name: 'Select Directory', exact: true });
+      await browserExpect(picker.getByRole('button', { name: 'feature', exact: true })).toBeVisible();
       await page.keyboard.press('Escape');
       await browserExpect(picker).toHaveCount(0);
+      await browserExpect(landing).toBeVisible();
       await browserExpect(primary).toBeChecked();
 
       phase('worktree selection updates only the draft');
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
-      await picker.getByRole('option', { name: /feature/ }).click();
       const feature = field.getByRole('radio', { name: /feature/ });
+      await feature.click();
       await browserExpect(feature).toBeChecked();
       await browserExpect(prompt).toHaveValue('Preserve this worktree draft');
       expect((await integration.client.listChats()).sessions).toEqual([]);

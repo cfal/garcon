@@ -157,6 +157,7 @@ describe("Lightpanda Tickets", () => {
         },
       });
       await fixture.page.reload({ waitUntil: [] });
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.page.waitForSelector(".ticket-recovery summary");
       await fixture.page.evaluate(() =>
         document.querySelector<HTMLElement>(".ticket-recovery summary")!.click(),

@@ -19,9 +19,11 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const otherProject = join(executionDirs.project, 'other-project');
       const linked = join(executionDirs.project, 'design-preview');
       await Promise.all([project, otherProject].map(path => mkdir(path, { recursive: true })));
+      await mkdir(join(project, 'nested-folder'));
       await initializeFixtureRepository(project);
       await initializeFixtureRepository(otherProject);
       await runFixtureGit(project, 'worktree', 'add', '-b', 'feature/design-preview', linked);
+      await mkdir(join(linked, 'nested-folder'));
       await client.put('/api/v1/app/settings', { paths: {
         ...(client.executorId === 'local'
           ? { recentProjectPaths: [project, otherProject], pinnedProjectPaths: [project, otherProject] }
@@ -58,12 +60,12 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(worktrees.getByRole('button', { name: 'Select a different worktree', exact: true })).toHaveCount(0);
       await browserExpect(dialog.getByText('Add preambles to session', { exact: true })).toBeVisible();
       await browserExpect(dialog.getByRole('button', { name: 'Clear preambles', exact: true })).toHaveCount(0);
-      phase('browsing root subfolders and entering a full path without losing the prompt');
+      phase('browsing inside the selected folder and entering a full path without losing the prompt');
       await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
       const folderBrowser = dialog.getByRole('dialog', { name: 'Select Directory', exact: true });
       const pathField = dialog.getByRole('textbox', { name: 'Project Path', exact: true });
-      await browserExpect(folderBrowser.getByRole('button', { name: 'web-project', exact: true })).toBeVisible();
-      await browserExpect(folderBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
+      await browserExpect(folderBrowser.getByRole('button', { name: 'nested-folder', exact: true })).toBeVisible();
+      await browserExpect(folderBrowser.getByRole('button', { name: 'other-project', exact: true })).toHaveCount(0);
       await browserExpect(pathField).toHaveValue(project);
       await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
@@ -80,6 +82,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(pathField).toHaveValue(project);
       await browserExpect(prompt).toHaveValue('Review the selected worktree layout.');
       await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      await folderBrowser.getByRole('button', { name: 'Parent directory', exact: true }).click();
       await folderBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
       await browserExpect(pathField).toHaveValue(toExecutorPath(otherProject));
       await folderBrowser.getByRole('button', { name: 'Close', exact: true }).click();
@@ -187,9 +190,12 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           await dialog.getByRole('button', { name: 'Enter path', exact: true }).click();
           await browserExpect(pathField).toBeFocused();
           await browserExpect(page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
-          phase('browsing root subfolders on mobile before explicit selection');
+          phase('browsing inside the selected folder on mobile before explicit selection');
           await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
           const mobileBrowser = page.getByRole('dialog', { name: 'Select Directory', exact: true });
+          await browserExpect(mobileBrowser.getByRole('button', { name: 'nested-folder', exact: true })).toBeVisible();
+          await browserExpect(mobileBrowser.getByRole('button', { name: 'other-project', exact: true })).toHaveCount(0);
+          await mobileBrowser.getByRole('button', { name: 'Parent directory', exact: true }).click();
           await browserExpect(mobileBrowser.getByRole('button', { name: 'other-project', exact: true })).toBeVisible();
           await page.screenshot({ path: join(artifacts, `folder-browser-${executionBackend}-390.png`) });
           await mobileBrowser.getByRole('button', { name: 'other-project', exact: true }).click();
