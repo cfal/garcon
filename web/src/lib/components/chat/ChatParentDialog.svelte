@@ -10,7 +10,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatParentDialogTarget } from './chat-action-dialogs-state.svelte';
-	import { eligibleParentChats, matchParentChats, typedParentId } from './chat-parent-candidates';
+	import { ChatParentDialogState } from './chat-parent-dialog-state.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -31,69 +31,44 @@
 		onConfirm: (chatId: string, parentChatId: string | null) => Promise<void>;
 	} = $props();
 
-	type ParentChoice = { kind: 'unset' } | { kind: 'chat'; chatId: string } | { kind: 'clear' };
-	let choice = $state<ParentChoice>({ kind: 'unset' });
-	let query = $state('');
-	let submitting = $state(false);
-	let errorMessage = $state<string | null>(null);
-	let suggestionsOpen = $state(true);
-	let highlightedId = $state<string | null>(null);
+	const form = new ChatParentDialogState({
+		get target() {
+			return parentDialog;
+		},
+		get chats() {
+			return chats;
+		},
+		get isConnected() {
+			return isConnected;
+		},
+		onConfirm: (chatId, parentChatId) => onConfirm(chatId, parentChatId),
+		onClose: () => onClose(),
+	});
 	let inputRef = $state<HTMLInputElement | null>(null);
-	let activeDialog = $state.raw<ChatParentDialogTarget | null>(null);
+	let activeDialog: ChatParentDialogTarget | null = null;
 	let focusOrigin: { trigger: HTMLElement; panel: HTMLElement; chatId: string } | null = null;
 	const uid = $props.id();
 	const transientLayers = getOptionalTransientLayers();
-	const suggestionsLayer: Attachment = (element) =>
+	const suggestionsLayer: Attachment<HTMLElement> = (element) =>
 		transientLayers?.register({
 			id: `${uid}-suggestions`,
 			kind: 'popover',
 			modality: 'nonmodal',
-			isOpen: () => suggestionsOpen && parentDialog !== null,
-			element: () => element as HTMLElement,
+			isOpen: () => form.suggestionsOpen && parentDialog !== null,
+			element: () => element,
 			onEscape: () => {
-				suggestionsOpen = false;
+				form.suggestionsOpen = false;
 				return true;
 			},
 			restoreFocus: () => inputRef?.focus({ preventScroll: true }),
 		});
-	const child = $derived(chats.find((chat) => chat.id === parentDialog?.chatId));
-	const currentParent = $derived(child?.parentChat ?? null);
-	const currentTitle = $derived(chats.find((chat) => chat.id === currentParent?.chatId)?.title);
-	const protectedLineage = $derived(
-		currentParent !== null && currentParent.relation !== 'delegation',
-	);
-	const eligible = $derived(eligibleParentChats(chats, parentDialog?.chatId ?? ''));
-	const suggestions = $derived(matchParentChats(eligible, query));
-	const activeSuggestion = $derived(
-		suggestionsOpen ? suggestions.find((chat) => chat.id === highlightedId) : undefined,
-	);
-	const selectedId = $derived(choice.kind === 'chat' ? choice.chatId : undefined);
-	const selected = $derived(chats.find((chat) => chat.id === selectedId));
-	const proposedId = $derived(
-		choice.kind === 'clear' ? null : choice.kind === 'chat' ? choice.chatId : typedParentId(query),
-	);
-	const canSubmit = $derived(
-		Boolean(
-			child &&
-			child.status !== 'draft' &&
-			!protectedLineage &&
-			isConnected &&
-			!submitting &&
-			proposedId !== undefined,
-		),
-	);
 
 	$effect(() => {
 		const target = parentDialog;
 		untrack(() => {
 			if (target === activeDialog) return;
 			activeDialog = target;
-			query = '';
-			choice = { kind: 'unset' };
-			submitting = false;
-			errorMessage = null;
-			suggestionsOpen = true;
-			highlightedId = null;
+			form.reset();
 			if (!target) return;
 			const trigger = document.activeElement;
 			const panel = trigger?.closest<HTMLElement>('[data-conversation-panel]');
@@ -103,60 +78,28 @@
 		});
 	});
 
-	function select(chat: ChatSessionRecord): void {
-		if (submitting) return;
-		choice = { kind: 'chat', chatId: chat.id };
-		query = chat.id;
-		suggestionsOpen = false;
-		highlightedId = null;
-		errorMessage = null;
-	}
-
 	function handleKeydown(event: KeyboardEvent): void {
 		if (event.isComposing || event.keyCode === 229) {
 			if (event.key === 'Escape') event.stopPropagation();
 			return;
 		}
-		if (submitting) return;
+		if (form.submitting) return;
 		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
 			event.preventDefault();
-			suggestionsOpen = true;
-			const current = suggestions.findIndex((chat) => chat.id === highlightedId);
-			const next =
-				event.key === 'ArrowDown'
-					? (current + 1) % suggestions.length
-					: current <= 0
-						? suggestions.length - 1
-						: current - 1;
-			highlightedId = suggestions[next]?.id ?? null;
+			form.moveHighlight(event.key);
 			void tick().then(() =>
-				document.getElementById(`${uid}-${highlightedId}`)?.scrollIntoView({ block: 'nearest' }),
+				document
+					.getElementById(`${uid}-${form.highlightedId}`)
+					?.scrollIntoView({ block: 'nearest' }),
 			);
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
-			if (activeSuggestion) select(activeSuggestion);
-			else void submit();
-		} else if (event.key === 'Escape' && suggestionsOpen) {
+			if (form.activeSuggestion) form.select(form.activeSuggestion);
+			else void form.submit();
+		} else if (event.key === 'Escape' && form.suggestionsOpen) {
 			event.preventDefault();
 			event.stopPropagation();
-			suggestionsOpen = false;
-		}
-	}
-
-	async function submit(): Promise<void> {
-		const target = parentDialog;
-		const parentId = proposedId;
-		if (!canSubmit || !target || parentId === undefined) return;
-		submitting = true;
-		errorMessage = null;
-		try {
-			await onConfirm(target.chatId, parentId);
-			if (parentDialog === target) onClose();
-		} catch (error) {
-			if (parentDialog === target)
-				errorMessage = error instanceof Error ? error.message : String(error);
-		} finally {
-			if (parentDialog === target) submitting = false;
+			form.suggestionsOpen = false;
 		}
 	}
 
@@ -181,14 +124,14 @@
 <Dialog.Root
 	open={parentDialog !== null}
 	requestClose={() => {
-		if (!submitting) onClose();
+		if (!form.submitting) onClose();
 	}}
 >
 	<Dialog.Content
 		class="max-h-[calc(100dvh-2rem)] overflow-y-auto"
 		onCloseAutoFocus={restoreFocus}
 		onOpenAutoFocus={(event) => {
-			if (!protectedLineage) {
+			if (!form.protectedLineage) {
 				event.preventDefault();
 				queueMicrotask(() => inputRef?.focus());
 			}
@@ -200,14 +143,14 @@
 		</Dialog.Header>
 		<div class="min-w-0 space-y-1 text-sm">
 			<p class="text-muted-foreground">{m.chat_parent_current()}</p>
-			{#if currentParent}
-				{#if currentTitle}<p class="truncate">{currentTitle}</p>{/if}
-				<p class="break-all font-mono text-xs">{currentParent.chatId}</p>
+			{#if form.currentParent}
+				{#if form.currentTitle}<p class="truncate">{form.currentTitle}</p>{/if}
+				<p class="break-all font-mono text-xs">{form.currentParent.chatId}</p>
 			{:else}<p>{m.chat_parent_none()}</p>{/if}
 		</div>
-		{#if !child}
+		{#if !form.child}
 			<p role="status" class="text-sm text-destructive">{m.chat_parent_missing()}</p>
-		{:else if protectedLineage}
+		{:else if form.protectedLineage}
 			<p class="text-sm text-muted-foreground">{m.chat_parent_protected()}</p>
 		{:else}
 			<p class="text-sm text-muted-foreground">{m.chat_parent_authority()}</p>
@@ -216,35 +159,32 @@
 				<Input
 					id={`${uid}-input`}
 					bind:ref={inputRef}
-					bind:value={query}
+					bind:value={form.query}
 					role="combobox"
 					autocomplete="off"
 					aria-autocomplete="list"
-					aria-expanded={suggestionsOpen}
+					aria-expanded={form.suggestionsOpen}
 					aria-controls={`${uid}-list`}
-					aria-activedescendant={activeSuggestion ? `${uid}-${activeSuggestion.id}` : undefined}
+					aria-activedescendant={form.activeSuggestion
+						? `${uid}-${form.activeSuggestion.id}`
+						: undefined}
 					aria-describedby={`${uid}-feedback`}
-					readonly={submitting}
-					aria-busy={submitting}
+					readonly={form.submitting}
+					aria-busy={form.submitting}
 					placeholder={m.chat_parent_placeholder()}
-					oninput={() => {
-						choice = { kind: 'unset' };
-						highlightedId = null;
-						suggestionsOpen = true;
-						errorMessage = null;
-					}}
+					oninput={() => form.editQuery()}
 					onkeydown={handleKeydown}
 				/>
-				{#if choice.kind === 'chat'}
+				{#if form.choice.kind === 'chat'}
 					<p class="flex min-w-0 items-center gap-2 text-sm">
 						<Check class="size-4 shrink-0" /><span class="truncate"
-							>{selected?.title || choice.chatId}</span
+							>{form.selected?.title || form.choice.chatId}</span
 						>
 					</p>
-				{:else if choice.kind === 'clear'}
+				{:else if form.choice.kind === 'clear'}
 					<p role="status" class="text-sm">{m.chat_parent_clearing()}</p>
 				{/if}
-				{#if suggestionsOpen}
+				{#if form.suggestionsOpen}
 					<div
 						{@attach suggestionsLayer}
 						id={`${uid}-list`}
@@ -252,15 +192,15 @@
 						aria-label={m.chat_parent_matches()}
 						class="max-h-64 overflow-y-auto rounded-md border border-border"
 					>
-						{#each suggestions as chat (chat.id)}
+						{#each form.suggestions as chat (chat.id)}
 							<button
 								type="button"
 								role="option"
 								id={`${uid}-${chat.id}`}
-								aria-selected={activeSuggestion?.id === chat.id}
+								aria-selected={form.activeSuggestion?.id === chat.id}
 								tabindex="-1"
-								disabled={submitting}
-								onclick={() => select(chat)}
+								disabled={form.submitting}
+								onclick={() => form.select(chat)}
 								onpointerdown={(event) => event.preventDefault()}
 								class="block w-full min-w-0 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-accent aria-selected:bg-accent"
 							>
@@ -275,22 +215,17 @@
 						{/each}
 					</div>
 					<p role="status" class="text-xs text-muted-foreground">
-						{suggestions.length
-							? m.chat_parent_match_count({ count: suggestions.length })
+						{form.suggestions.length
+							? m.chat_parent_match_count({ count: form.suggestions.length })
 							: m.chat_parent_no_matches()}
 					</p>
 				{/if}
-				{#if currentParent}
+				{#if form.currentParent}
 					<Button
 						variant="ghost"
 						size="sm"
-						disabled={submitting}
-						onclick={() => {
-							choice = { kind: 'clear' };
-							query = '';
-							suggestionsOpen = false;
-							errorMessage = null;
-						}}
+						disabled={form.submitting}
+						onclick={() => form.clearParent()}
 					>
 						<Unlink class="size-4" />{m.chat_parent_remove()}
 					</Button>
@@ -298,14 +233,20 @@
 			</div>
 		{/if}
 		<div id={`${uid}-feedback`} aria-live="polite">
-			{#if errorMessage}<p role="alert" class="text-sm text-destructive">{errorMessage}</p>{/if}
+			{#if form.errorMessage}<p role="alert" class="text-sm text-destructive">
+					{form.errorMessage}
+				</p>{/if}
 			{#if !isConnected}<p class="text-sm text-muted-foreground">{m.chat_parent_offline()}</p>{/if}
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" disabled={submitting} onclick={onClose}>{m.sidebar_actions_cancel()}</Button>
-			{#if child && !protectedLineage}
-				<Button disabled={!canSubmit} onclick={() => void submit()}>
-					{#if submitting}<Loader2 class="size-4 animate-spin" />{/if}{m.chat_parent_save()}
+			<Button variant="outline" disabled={form.submitting} onclick={onClose}
+				>{m.sidebar_actions_cancel()}</Button
+			>
+			{#if form.child && !form.protectedLineage}
+				<Button disabled={!form.canSubmit} onclick={() => void form.submit()}>
+					{#if form.submitting}<Loader2
+							class="size-4 animate-spin"
+						/>{/if}{m.sidebar_actions_save()}
 				</Button>
 			{/if}
 		</Dialog.Footer>

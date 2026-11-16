@@ -8,12 +8,15 @@ import { runCli } from '../../support/cli-fixture.js';
 
 test('parent picker and CLI converge in two tabs without reloading conversations', async () => {
   await withChromiumFixture('chat-parent', async ({ page, context, integration, assertNoBrowserErrors, withExpectedConsoleErrors }, phase) => {
-    const [child, parent, other] = [integration.newChatId(), integration.newChatId(), integration.newChatId()];
-    for (const [chatId, title] of [[child!, 'Child task'], [parent!, 'Parent task'], [other!, 'Another parent']]) {
-      const started = await integration.client.startDirectChat({ chatId: chatId!, content: 'Synthetic parent picker task.',
+    const child = integration.newChatId();
+    const parent = integration.newChatId();
+    const other = integration.newChatId();
+    const chats = [[child, 'Child task'], [parent, 'Parent task'], [other, 'Another parent']] as const;
+    for (const [chatId, title] of chats) {
+      const started = await integration.client.startDirectChat({ chatId, content: 'Synthetic parent picker task.',
         projectPath: integration.executionDirs.project, agent: integration.directAgents.openAi });
-      await integration.client.waitForTurnTerminal(chatId!, started.turnId);
-      await integration.client.updateSessionName(chatId!, title!);
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await integration.client.updateSessionName(chatId, title);
     }
     await page.goto(`${integration.garcon.baseUrl}/chat/${child}`);
     const second = await context.newPage();
@@ -52,7 +55,7 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     expect(await composer.boundingBox()).toEqual(boxBefore);
 
     phase('replacing through the CLI while both tabs remain open');
-    const replaced = await runCli(integration, ['set-parent', child!, other!, '--json'], 'controller');
+    const replaced = await runCli(integration, ['set-parent', child, other, '--json'], 'controller');
     expect(replaced, replaced.stderr).toMatchObject({ exitCode: 0 });
     await browserExpect.poll(mapParent).toBe(`chat:${other}`);
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '1');
@@ -71,7 +74,7 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     try {
       await menuTrigger.click();
       await page.getByRole('menuitem', { name: 'Set parent chat ID', exact: true }).click();
-      await input.fill(parent!);
+      await input.fill(parent);
       await input.press('Enter');
       await entered.promise;
       await browserExpect(input).toBeFocused();
@@ -84,7 +87,7 @@ test('parent picker and CLI converge in two tabs without reloading conversations
         await browserExpect(dialog.getByRole('alert')).toContainText('Synthetic parent rejection');
       });
       await browserExpect(input).toBeFocused();
-      await browserExpect(input).toHaveValue(parent!);
+      await browserExpect(input).toHaveValue(parent);
       await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     } finally {
       reply.resolve();

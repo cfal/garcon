@@ -13,8 +13,6 @@ function candidate(id: string, title = id, parentId?: string): ParentCandidate {
 		status: 'running',
 		parentChat: parentId ? { chatId: parentId, relation: 'delegation' } : null,
 		lastActivityAt: null,
-		projectPath: '/project',
-		executorId: 'offline-executor',
 	};
 }
 

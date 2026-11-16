@@ -3,7 +3,7 @@ import { parseChatId } from '$shared/chat-id';
 
 export type ParentCandidate = Pick<
 	ChatSessionRecord,
-	'id' | 'title' | 'status' | 'parentChat' | 'lastActivityAt' | 'executorId' | 'projectPath'
+	'id' | 'title' | 'status' | 'parentChat' | 'lastActivityAt'
 >;
 
 export function eligibleParentChats<T extends ParentCandidate>(

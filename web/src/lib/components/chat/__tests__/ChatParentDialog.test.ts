@@ -47,6 +47,25 @@ function props() {
 afterEach(cleanup);
 
 describe('ChatParentDialog', () => {
+	it('wraps keyboard suggestions and leaves empty results unselected', async () => {
+		const callbacks = props();
+		render(ChatParentDialog, callbacks);
+		const input = screen.getByRole('combobox');
+		const options = screen.getAllByRole('option');
+		await fireEvent.keyDown(input, { key: 'ArrowUp' });
+		expect(options.at(-1)?.getAttribute('aria-selected')).toBe('true');
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		expect(options[0]?.getAttribute('aria-selected')).toBe('true');
+		await fireEvent.keyDown(input, { key: 'ArrowUp' });
+		expect(options.at(-1)?.getAttribute('aria-selected')).toBe('true');
+		await fireEvent.input(input, { target: { value: 'No matching title' } });
+		await fireEvent.keyDown(input, { key: 'ArrowUp' });
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(screen.queryAllByRole('option')).toHaveLength(0);
+		expect(callbacks.onConfirm).not.toHaveBeenCalled();
+	});
+
 	it('leaves composing Escape and Safari Enter to the input method', async () => {
 		const callbacks = props();
 		render(ChatParentDialog, callbacks);
@@ -57,7 +76,10 @@ describe('ChatParentDialog', () => {
 		expect(screen.queryByRole('listbox')).not.toBeNull();
 		expect(callbacks.onConfirm).not.toHaveBeenCalled();
 		const escape = new KeyboardEvent('keydown', {
-			key: 'Escape', isComposing: true, bubbles: true, cancelable: true,
+			key: 'Escape',
+			isComposing: true,
+			bubbles: true,
+			cancelable: true,
 		});
 		await fireEvent(input, escape);
 		expect(callbacks.onClose).not.toHaveBeenCalled();
@@ -82,7 +104,9 @@ describe('ChatParentDialog', () => {
 		expect(callbacks.onClose).not.toHaveBeenCalled();
 		expect(screen.getByRole('dialog').getAttribute('data-state')).toBe('open');
 		pending.reject(new Error('Parent chat not found'));
-		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Parent chat not found'));
+		await waitFor(() =>
+			expect(screen.getByRole('alert').textContent).toContain('Parent chat not found'),
+		);
 		expect(input.readOnly).toBe(false);
 		expect(document.activeElement).toBe(input);
 	});
@@ -132,6 +156,9 @@ describe('ChatParentDialog', () => {
 		});
 		expect((input as HTMLInputElement).value).toBe(OTHER);
 		await rendered.rerender({ chats: callbacks.chats });
+		await rendered.rerender({ parentDialog: callbacks.parentDialog });
+		expect((input as HTMLInputElement).value).toBe(OTHER);
+		expect(callbacks.onRefresh).toHaveBeenCalledOnce();
 		await fireEvent.input(input, { target: { value: '' } });
 		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove parent' }));
