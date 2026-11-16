@@ -8,6 +8,10 @@ interface Dependencies {
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusiveMany'>;
 }
 
+function notFound(): DomainError {
+  return new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
+}
+
 function saveUnknown(): DomainError {
   return new DomainError(
     'CHAT_PARENT_SAVE_UNKNOWN',
@@ -25,10 +29,10 @@ export class ChatParentMutationService {
     return this.deps.chatMutationLock.runExclusiveMany(keys, async () => {
       try {
         const recovered = await this.deps.registry.reconcileUnknownDurability(input.chatId);
+        if (recovered === 'unavailable') throw notFound();
         if (recovered === 'still-unknown') throw saveUnknown();
-        const result = recovered === 'unavailable' ? null
-          : await this.deps.registry.setDelegationParentPhased(input.chatId, input.parentChatId);
-        if (!result) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
+        const result = await this.deps.registry.setDelegationParentPhased(input.chatId, input.parentChatId);
+        if (!result) throw notFound();
         if (result.durability === 'unknown') throw saveUnknown();
         const parentChat = result.entry.parentChat;
         if (parentChat !== null && parentChat.relation !== 'delegation') {

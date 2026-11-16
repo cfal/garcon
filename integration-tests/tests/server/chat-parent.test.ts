@@ -7,13 +7,13 @@ import { runCli, withCliFixture } from '../../support/cli-fixture.js';
 
 test('parent edits persist, broadcast, and converge through real CLI processes without changing transcripts or order', async () => {
   await withCliFixture('chat-parent', async (fixture) => {
-    const ids = [fixture.newChatId(), fixture.newChatId(), fixture.newChatId()];
+    const ids = [fixture.newChatId(), fixture.newChatId(), fixture.newChatId()] as const;
     for (const chatId of ids) {
       const started = await fixture.client.startDirectChat({ chatId, content: 'Synthetic parent editing task.',
         projectPath: fixture.executionDirs.project, agent: fixture.directAgents.openAi });
       await fixture.client.waitForTurnTerminal(chatId, started.turnId);
     }
-    const [child, parent, replacement] = ids as [string, string, string];
+    const [child, parent, replacement] = ids;
     const before = await fixture.client.getChatSnapshot(child);
     const settingsBefore = await fixture.client.get('/api/v1/app/settings');
     const cursor = fixture.client.markEvents();

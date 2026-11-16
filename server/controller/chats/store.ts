@@ -600,7 +600,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   async updateObservedProjectPath(id: string, update: ChatProjectPathUpdatedPayload): Promise<PhasedChatUpdateResult | null> {
     if (update.chatId !== id) throw new Error(`Project path update identity mismatch: ${id}`);
-    const result = await this.#updateChatPhased(id, {}, update.projectPath);
+    const result = await this.#updateChatPhased(id, {}, { observedProjectPath: update.projectPath });
     if (result?.durability === 'durable') this.#publishProjectPathUpdate(update);
     return result;
   }
@@ -608,7 +608,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   async setDelegationParentPhased(id: string, parentChatId: string | null): Promise<PhasedChatUpdateResult | null> {
     parseChatId(id);
     if (parentChatId !== null) parseChatId(parentChatId);
-    return this.#updateChatPhased(id, {}, undefined, { parentChatId });
+    return this.#updateChatPhased(id, {}, { delegation: { parentChatId } });
   }
 
   #delegationParent(id: string, existing: ChatRegistryEntry, parentChatId: string | null): ParentChatRef | null {
@@ -637,8 +637,10 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   async #updateChatPhased(
     id: string,
     patch: ChatRegistryPatch,
-    observedProjectPath?: string,
-    delegation?: { parentChatId: string | null },
+    { observedProjectPath, delegation }: {
+      observedProjectPath?: string;
+      delegation?: { parentChatId: string | null };
+    } = {},
   ): Promise<PhasedChatUpdateResult | null> {
     const target = this.#sessionsFilePath();
     return this.#registryWriteLock.runExclusive(target, async () => {
