@@ -19,6 +19,32 @@ afterEach(() => {
 });
 
 describe('Canvas connection interactions', () => {
+	it('preserves the selected node when a hidden graph is recreated', async () => {
+		const original = canvas();
+		const api = {
+			get: async () => original,
+			update: async (request) => canvas(request.content, request.expectedRevision + 1),
+		} satisfies CanvasSessionPort;
+		const session = new CanvasSession(original, api, recoveryMemory().port, vi.fn());
+		const onselect = vi.fn();
+		try {
+			for (let mount = 0; mount < 2; mount++) {
+				onselect.mockClear();
+				const view = render(CanvasFlowTestHost, {
+					session,
+					selectedIds: new Set(['box-a']),
+					onselect,
+				});
+				await tick();
+				expect(onselect).not.toHaveBeenCalledWith(new Set());
+				expect(view.container.querySelector('[data-id="box-a"]')?.classList.contains('selected')).toBe(true);
+				view.unmount();
+			}
+		} finally {
+			session.dispose();
+		}
+	});
+
 	it('removes active drag listeners when the graph unmounts without mouse-up', async () => {
 		const original = canvas();
 		const api = {

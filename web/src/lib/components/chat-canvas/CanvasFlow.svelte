@@ -44,8 +44,9 @@
 	const flow = useSvelteFlow<CanvasFlowNode>();
 	const flowStore = $derived(useStore<CanvasFlowNode>());
 	const dnd = getWorkspaceWindowDnd();
-	let nodes = $state.raw<CanvasFlowNode[]>([]);
-	let edges = $state.raw<Edge[]>([]);
+	// The engine's initial selection notification must reflect the retained document.
+	let nodes = $state.raw<CanvasFlowNode[]>(untrack(() => flowNodes(session.document.content, selectedIds)));
+	let edges = $state.raw<Edge[]>(untrack(() => flowEdges(session.document.content, selectedIds)));
 	let element: HTMLDivElement;
 	let initialized = $state(false);
 	let width = $state(0);
