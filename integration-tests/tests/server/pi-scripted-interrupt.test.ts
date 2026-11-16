@@ -149,12 +149,15 @@ export default function (pi) {
         chatId,
         active.turnId,
       );
-      const stoppedTranscript = (await fixture.client.getMessages(chatId)).messages;
+      const stoppedPage = await fixture.client.getMessages(chatId);
+      const stoppedTranscript = stoppedPage.messages;
       expect(userContents(stoppedTranscript)).toContain(stoppedPrompt);
       expect(messagesOfType(stoppedTranscript, 'bash-tool-use')).toContainEqual(
         expect.objectContaining({ command: `touch ${startedFile} && sleep 30` }),
       );
       expect(assistantContents(stoppedTranscript).join('\n')).not.toContain(stoppedReply);
+      expect(messagesOfType(stoppedTranscript, 'tool-result').some((message) => message.toolId === 'call_stopped'))
+        .toBe(false);
 
       await waitForProcessExit(oldPid);
       const native = await piNativeSession(fixture, chatId);
@@ -171,6 +174,11 @@ export default function (pi) {
         'Pi aborted native tail drift notice',
         { afterIndex: driftCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
+      expect(await fixture.client.getMessages(chatId)).toMatchObject({
+        transcriptViewId: stoppedPage.transcriptViewId,
+        lastOrdinal: stoppedPage.lastOrdinal,
+        messages: stoppedTranscript,
+      });
       await fixture.client.reloadChat(chatId);
       const reloaded = (await fixture.client.getMessages(chatId)).messages;
       const abortedTool = messagesOfType(reloaded, 'tool-result').find((message) => message.toolId === 'call_stopped');
