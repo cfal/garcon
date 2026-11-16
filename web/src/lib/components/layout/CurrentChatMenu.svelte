@@ -35,6 +35,7 @@
 		onReload: () => void;
 		onShare: () => void;
 		onProjectPath: () => void;
+		onSetParent: () => void;
 		onFork: () => void;
 		onDelete: () => void;
 	}
@@ -60,6 +61,7 @@
 		onReload,
 		onShare,
 		onProjectPath,
+		onSetParent,
 		onFork,
 		onDelete,
 	}: CurrentChatMenuProps = $props();
@@ -96,6 +98,7 @@
 			{onReload}
 			{onShare}
 			{onProjectPath}
+			{onSetParent}
 			{onFork}
 			{onDelete}
 		/>

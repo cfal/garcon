@@ -12,6 +12,7 @@ import {
 	type ApiFetchOptions,
 } from './client.js';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
+import { parseSetChatParentResponse, type SetChatParentRequest, type SetChatParentResponse } from '$shared/chat-parent-contracts';
 import {
 	normalizePermissionMode,
 	normalizeThinkingMode,
@@ -556,6 +557,20 @@ export async function sortChatOrder(request: SortChatOrderRequest): Promise<Sort
 	const parsed = parseSortChatOrderResponse(response);
 	if (!parsed) throw new Error('Invalid chat order sort response');
 	return parsed;
+}
+
+export async function setChatParent(request: SetChatParentRequest): Promise<SetChatParentResponse> {
+	try {
+		const response = parseSetChatParentResponse(await apiPut<unknown>('/api/v1/chats/parent', request));
+		if (!response || response.chatId !== request.chatId || (response.parentChat?.chatId ?? null) !== request.parentChatId) {
+			throw new ApiMutationOutcomeUnknownError('The parent save could not be confirmed.');
+		}
+		return response;
+	} catch (error) {
+		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
+		if (error instanceof ApiError && !isIntermediaryResponse(error) && error.errorCode !== 'CHAT_PARENT_SAVE_UNKNOWN') throw error;
+		throw new ApiMutationOutcomeUnknownError('The parent save may have completed. Inspect the chat before trying again.', { cause: error });
+	}
 }
 
 async function requestChatTagMutation(

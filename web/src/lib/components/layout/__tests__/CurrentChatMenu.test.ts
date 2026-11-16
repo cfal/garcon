@@ -44,6 +44,7 @@ function props(onOpenUserMessageNavigator?: () => void) {
 		onReload: vi.fn(),
 		onShare: vi.fn(),
 		onProjectPath: vi.fn(),
+		onSetParent: vi.fn(),
 		onFork: vi.fn(),
 		onDelete: vi.fn(),
 		onOpenUserMessageNavigator,
@@ -51,6 +52,24 @@ function props(onOpenUserMessageNavigator?: () => void) {
 }
 
 describe('CurrentChatMenu', () => {
+	it.each([true, false])('offers parent editing before Reload, independently of reload support (%s)', async (canReload) => {
+		const callbacks = props();
+		render(CurrentChatMenu, { ...callbacks, canReload, selectedChat: { ...chat(), status: 'running', isProcessing: true } });
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		const parent = screen.getByRole('menuitem', { name: m.chat_parent_title() });
+		if (canReload) {
+			const items = screen.getAllByRole('menuitem');
+			expect(items.indexOf(parent) + 1).toBe(items.indexOf(screen.getByRole('menuitem', { name: m.sidebar_chats_reload() })));
+		}
+		await fireEvent.click(parent);
+		expect(callbacks.onSetParent).toHaveBeenCalledOnce();
+	});
+
+	it('does not offer parent editing for drafts', async () => {
+		render(CurrentChatMenu, props());
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		expect(screen.queryByRole('menuitem', { name: m.chat_parent_title() })).toBeNull();
+	});
 	afterEach(() => {
 		cleanup();
 		document.body.innerHTML = '';

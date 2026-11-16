@@ -524,6 +524,7 @@ const chatActions = {
 	requestDetails: vi.fn(),
 	requestShare: vi.fn(),
 	requestProjectPath: vi.fn(),
+	requestParent: vi.fn(),
 	configurePreambles: vi.fn(),
 	fork: vi.fn(),
 	reload: vi.fn(),
@@ -786,6 +787,9 @@ describe('WorkspaceRoot', () => {
 			expect.objectContaining({ id: 'chat-b' }),
 			'view-chat-b',
 		);
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
+		expect(chatActions.requestParent).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-b' }));
 	});
 
 	it('adds terminal actions to both tab menus', async () => {

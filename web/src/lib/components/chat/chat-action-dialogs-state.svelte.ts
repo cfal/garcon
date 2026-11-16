@@ -12,6 +12,11 @@ export interface ChatRenameConfirmation {
 	currentName: string;
 }
 
+export interface ChatParentDialogTarget {
+	readonly chatId: string;
+	readonly chatTitle: string;
+}
+
 export interface ChatProjectPathDialog {
 	executorId?: string | null;
 	agentOwnershipEpoch: string | null;
@@ -46,6 +51,7 @@ export class ChatActionDialogsState {
 	chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
 	chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	chatProjectPathDialog = $state<ChatProjectPathDialog | null>(null);
+	parentDialog = $state<ChatParentDialogTarget | null>(null);
 	chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
 	tagDialog = $state<ChatTagDialogState | null>(null);
 	shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
@@ -86,6 +92,15 @@ export class ChatActionDialogsState {
 
 	closeProjectPathDialog(): void {
 		this.chatProjectPathDialog = null;
+	}
+
+	requestParent(chat: ChatSessionRecord, fallbackTitle: string): void {
+		if (chat.status === 'draft') return;
+		this.parentDialog = { chatId: chat.id, chatTitle: chat.title || fallbackTitle };
+	}
+
+	closeParentDialog(): void {
+		this.parentDialog = null;
 	}
 
 	requestDetails(chat: ChatSessionRecord, fallbackTitle: string): void {
