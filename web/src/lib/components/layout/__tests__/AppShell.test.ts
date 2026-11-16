@@ -572,6 +572,38 @@ describe('AppShell responsive workspace binding', () => {
 		await waitFor(() => expect(appShell.newChatDialogOpen).toBe(true));
 	});
 
+	it('defers the empty landing behind a registered modal until it closes, then opens once', async () => {
+		installContext();
+		const sessions = new ChatSessionsStore({
+			listChats: async () => ({ sessions: [], total: 0, lastSelectedChatId: null }),
+		});
+		sessions.createDraft({ id: 'draft-modal', projectPath: '/repo', startup: {
+			agentId: 'claude', model: 'opus', permissionMode: 'default', thinkingMode: 'none',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} }, firstMessage: 'Synthetic draft',
+		} });
+		testContext.current!.sessions = sessions;
+		const appShell = testContext.current!.appShell as AppShellStore;
+		const transientLayers = testContext.current!.transientLayers as TransientLayerRegistry;
+		render(AppShell);
+		await waitFor(() => expect(sessions.chatListStatus).toBe('ready'));
+		const unregister = transientLayers.register({
+			id: 'canvas-add-chats', kind: 'application-dialog', modality: 'main-inert',
+			isOpen: () => true, element: () => null, onEscape: () => true, restoreFocus: () => {},
+		});
+		sessions.removeChat('draft-modal');
+		await tick();
+		expect(appShell.newChatDialogOpen).toBe(false);
+		expect(appShell.newChatDialogRequestId).toBe(0);
+		unregister();
+		await waitFor(() => expect(appShell.newChatDialogOpen).toBe(true));
+		expect(appShell.newChatDialogRequestId).toBe(1);
+		appShell.closeNewChatDialog();
+		await sessions.quietRefreshChats();
+		await tick();
+		expect(appShell.newChatDialogOpen).toBe(false);
+		expect(appShell.newChatDialogRequestId).toBe(1);
+	});
+
 	it('preserves an explicit seeded New Chat and does not reopen it after dismissal', async () => {
 		installContext();
 		const sessions = new ChatSessionsStore({
@@ -580,11 +612,18 @@ describe('AppShell responsive workspace binding', () => {
 		testContext.current!.sessions = sessions;
 		const appShell = testContext.current!.appShell as AppShellStore;
 		appShell.openNewChatDialog({ prefill: 'Synthetic seeded prompt' });
+		const transientLayers = testContext.current!.transientLayers as TransientLayerRegistry;
+		const unregister = transientLayers.register({
+			id: 'new-chat', kind: 'application-dialog', modality: 'main-inert',
+			isOpen: () => appShell.newChatDialogOpen, element: () => null,
+			onEscape: () => true, restoreFocus: () => {},
+		});
 		render(AppShell);
 		await waitFor(() => expect(sessions.chatListStatus).toBe('ready'));
 		expect(appShell.newChatDialogRequestId).toBe(1);
 		expect(appShell.newChatDialogSeed?.prefill).toBe('Synthetic seeded prompt');
 		appShell.closeNewChatDialog();
+		unregister();
 		await sessions.quietRefreshChats();
 		await tick();
 		expect(appShell.newChatDialogOpen).toBe(false);

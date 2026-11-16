@@ -71,6 +71,8 @@ test('native readiness follows mounted login, setup, shell and recovery, not aut
       reports.length = 0;
       await page.reload();
       await browserExpect.poll(() => reports).toEqual(['shell']);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
 
       const releaseLogout = new Deferred<void>();
       const logoutRequested = new Deferred<void>();

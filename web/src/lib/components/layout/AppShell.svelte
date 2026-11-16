@@ -276,7 +276,7 @@
 	});
 	bindEmptyWorkspaceLanding({
 		openNewChat: handleNewChat,
-		sessions,
+		sessions, transientLayers,
 		shell: appShell,
 		getNavigation: () => ({
 			isBareRoute: isBareChatRoute(appPathname(page.url.pathname)),
