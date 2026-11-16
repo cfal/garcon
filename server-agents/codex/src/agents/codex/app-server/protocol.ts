@@ -74,6 +74,7 @@ export type CodexErrorInfo =
   | 'serverOverloaded'
   | 'modelNotFound'
   | 'policyCapacityUnavailable'
+  | 'inferenceHookDenied'
   | 'cyberPolicy'
   | 'misalignmentPolicyViolation'
   | 'tooManyDenials'
@@ -187,10 +188,20 @@ export interface CodexCollabAgentState {
 export type CodexFunctionCallOutputContentItem =
   | { type: 'input_text'; text: string }
   | { type: 'input_image'; image_url: string; detail?: 'auto' | 'low' | 'high' | 'original' | null }
-  | { type: 'input_audio'; audio_url: string }
+  | ({ type: 'input_audio' } & ({ audio_url: string } | { file_id: string }))
   | { type: 'encrypted_content'; encrypted_content: string };
 
 export type CodexMessagePhase = 'commentary' | 'partial_answer' | 'final_answer';
+
+export interface CodexAgentMessageModeration {
+  moderated: boolean;
+  display?: {
+    action: string;
+    blockType?: string | null;
+    cyberTrustedAccess?: boolean | null;
+    checkTrustedContacts?: boolean | null;
+  } | null;
+}
 
 export type CodexThreadItem = {
   startedAtMs?: number | null;
@@ -199,7 +210,7 @@ export type CodexThreadItem = {
   | { type: 'userMessage'; id: string; content: CodexUserInput[]; clientId?: string | null }
   | { type: 'hookPrompt'; id: string; fragments: unknown[] }
   | { type: 'agentMessage'; id: string; text: string; phase?: CodexMessagePhase | null; memoryCitation: unknown;
-      delivery?: 'async' | null; questions?: unknown }
+      delivery?: 'async' | null; questions?: unknown; moderation?: CodexAgentMessageModeration | null }
   | { type: 'plan'; id: string; text: string }
   | { type: 'reasoning'; id: string; summary: string[]; content: string[] }
   | {
@@ -320,6 +331,7 @@ const CODEX_ERROR_INFO_STRINGS = new Set<Extract<CodexErrorInfo, string>>([
   'serverOverloaded',
   'modelNotFound',
   'policyCapacityUnavailable',
+  'inferenceHookDenied',
   'cyberPolicy',
   'misalignmentPolicyViolation',
   'tooManyDenials',
@@ -440,6 +452,10 @@ export function parseThreadItemsListResponse(value: unknown): ThreadItemsListRes
       const entry = protocolRecord(value, `thread/items/list entry ${index}`);
       const turnId = protocolString(entry.turnId, `thread/items/list entry ${index} turnId`);
       if (!turnId) throw new Error(`Invalid thread/items/list entry ${index} turnId`);
+      // History import requires complete output and never requests output deferral.
+      if (entry.outputDeferred !== undefined && entry.outputDeferred !== false) {
+        throw new Error(`Invalid thread/items/list entry ${index} outputDeferred: full output required`);
+      }
       return {
         turnId,
         item: parseCodexThreadItem(entry.item, `thread/items/list entry ${index} item`),
@@ -480,6 +496,9 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
         && (typeof item.phase !== 'string' || !['commentary', 'partial_answer', 'final_answer'].includes(item.phase))
       ) throw new Error(`Invalid ${label} phase`);
       protocolString(item.text, `${label} text`);
+      if (item.moderation !== undefined && item.moderation !== null) {
+        validateAgentMessageModeration(item.moderation, `${label} moderation`);
+      }
       return;
     case 'plan':
       protocolString(item.text, `${label} text`);
@@ -591,6 +610,20 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
   }
 }
 
+function validateAgentMessageModeration(value: unknown, label: string): void {
+  const moderation = protocolRecord(value, label);
+  if (typeof moderation.moderated !== 'boolean') throw new Error(`Invalid ${label} moderated`);
+  if (moderation.display === undefined || moderation.display === null) return;
+  const display = protocolRecord(moderation.display, `${label} display`);
+  protocolString(display.action, `${label} display action`);
+  nullableProtocolString(display.blockType, `${label} display blockType`);
+  for (const field of ['cyberTrustedAccess', 'checkTrustedContacts']) {
+    if (display[field] !== undefined && display[field] !== null && typeof display[field] !== 'boolean') {
+      throw new Error(`Invalid ${label} display ${field}`);
+    }
+  }
+}
+
 function validateFunctionCallOutput(value: unknown, label: string): void {
   if (typeof value === 'string') return;
   const items = protocolArray(value, label);
@@ -609,7 +642,9 @@ function validateFunctionCallOutput(value: unknown, label: string): void {
         ) throw new Error(`Invalid ${label} item ${index} detail`);
         break;
       case 'input_audio':
-        protocolString(item.audio_url, `${label} item ${index} audio_url`);
+        if (item.audio_url === undefined) protocolString(item.file_id, `${label} item ${index} file_id`);
+        else protocolString(item.audio_url, `${label} item ${index} audio_url`);
+        if (item.file_id !== undefined) protocolString(item.file_id, `${label} item ${index} file_id`);
         break;
       case 'encrypted_content':
         protocolString(item.encrypted_content, `${label} item ${index} encrypted_content`);
