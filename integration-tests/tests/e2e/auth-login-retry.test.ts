@@ -121,6 +121,7 @@ test('Claude sign-in retries a rejected code and restores pending completion whe
     };
 
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await openProviders();
     await fixture.page.waitForFunction(() => {

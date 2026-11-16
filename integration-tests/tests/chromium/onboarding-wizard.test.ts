@@ -6,6 +6,11 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import type { Page } from 'playwright';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 
+async function dismissStartupLanding(page: Page): Promise<void> {
+  await page.getByRole('dialog', { name: 'New Chat', exact: true })
+    .getByRole('button', { name: 'Close', exact: true }).click();
+}
+
 async function expectUsableWorkspace(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await browserExpect(page.getByRole('menuitem', { name: 'Settings', exact: true })).toBeVisible();
@@ -190,9 +195,11 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       const refresh = page.getByRole('dialog', { name: 'Refresh required', exact: true });
       await browserExpect(refresh).toBeVisible();
       await refresh.getByRole('button', { name: 'Later', exact: true }).click();
+      await dismissStartupLanding(page);
       await browserExpect(page.getByRole('dialog')).toHaveCount(0);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.reload();
+      await dismissStartupLanding(page);
       await expectUsableWorkspace(page);
       expect((await integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).features.transcriptSearch.enabled).toBe(false);
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pref_local_settings')!))).toMatchObject({
@@ -214,6 +221,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await page.keyboard.press('Escape');
       await browserExpect(wizard).toHaveCount(0);
       await page.reload();
+      await dismissStartupLanding(page);
       await expectUsableWorkspace(page);
 
       for (const [button, dialog] of [['Scheduled Tasks', 'Scheduled Prompts'], ['Preambles', 'Preambles']]) {
@@ -242,12 +250,14 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         }));
       });
       await page.reload();
+      await dismissStartupLanding(page);
       await expectUsableWorkspace(page);
       await page.evaluate(() => localStorage.removeItem('pref_local_settings'));
       await page.reload();
       await browserExpect(wizard.getByRole('heading', { name: 'Welcome to Garcon' })).toBeVisible();
       await wizard.getByRole('button', { name: 'Close', exact: true }).click();
       await page.reload();
+      await dismissStartupLanding(page);
       await expectUsableWorkspace(page);
       assertNoBrowserErrors();
     } finally {

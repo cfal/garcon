@@ -39,7 +39,7 @@ test('reactivating an offline draft does not recover or repeat its pending start
       selectedAgentLabel: 'Direct (Chat Completions)', optionAgentLabel: 'Chat Completions',
       modelLabel: 'Integration Echo',
     });
-    await app.fill('[role="dialog"] input[aria-label="Project Path"]', executionDirs.project);
+    await app.enterNewChatProjectPath(executionDirs.project);
     const prompt = 'Synthetic pending initial prompt';
     await app.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', prompt);
     await app.waitForDialogButtonEnabled('Start session');

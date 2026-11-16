@@ -55,10 +55,7 @@ describe('snippet palette focus', () => {
       await fixture.waitForSpaWebSocket();
       await app.clickButton('New Chat');
       await fixture.page.waitForSelector(NEW_CHAT_COMPOSER);
-      await app.fill(
-        '[role="dialog"] input[aria-label="Project Path"]',
-        fixture.integration.dirs.project,
-      );
+      await app.enterNewChatProjectPath(fixture.integration.dirs.project);
       await fixture.page.evaluate(() => {
         const viewport = window.visualViewport;
         if (!viewport) throw new Error('Missing visual viewport.');

@@ -51,10 +51,7 @@ describe("Lightpanda new-chat snippet expansion", () => {
         modelLabel: "Integration Echo",
       });
 
-      await app.fill(
-        '[role="dialog"] input[aria-label="Project Path"]',
-        fixture.integration.dirs.project,
-      );
+      await app.enterNewChatProjectPath(fixture.integration.dirs.project);
       await app.fill(NEW_CHAT_COMPOSER, "/s handoff");
       await app.waitForDialogButtonEnabled("Start session");
       await app.clickButton("Start session");

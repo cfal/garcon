@@ -287,14 +287,13 @@
 	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
-	// Modal ownership changes preserve the closing dialog's focus restoration.
+	// Browser and modal closure preserve their controls' focus restoration.
 	$effect(() => {
 		if (
 			initialContentReady &&
 			form.validationStatus === 'valid' &&
-			!form.showBrowser &&
 			!document.activeElement?.closest('[data-slot="new-chat-worktrees"]') &&
-			untrack(canFocusTextarea)
+			untrack(() => !form.showBrowser && canFocusTextarea())
 		) {
 			untrack(returnTextareaFocus);
 		}

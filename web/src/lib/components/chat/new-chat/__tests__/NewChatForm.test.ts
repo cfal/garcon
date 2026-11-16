@@ -976,6 +976,20 @@ describe('NewChatForm', () => {
 		expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 	});
 
+	it('returns focus to Choose folder after closing the mobile browser without refocusing a validated prompt', async () => {
+		stubMatchMedia(true);
+		const prompt = await renderSubmittableForm(vi.fn());
+		const chooseFolder = screen.getByRole('button', { name: 'Choose folder' });
+		chooseFolder.focus();
+		await fireEvent.click(chooseFolder);
+		const filter = await screen.findByRole('textbox', { name: 'Filter directories...' });
+		filter.focus();
+		await fireEvent.keyDown(filter, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select Directory' })).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(chooseFolder));
+		expect(prompt.value).toBe('first line');
+	});
+
 	it('keeps project chooser focus after the initial prompt focus has been delivered', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());

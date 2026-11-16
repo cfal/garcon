@@ -17,24 +17,26 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await client.waitForTurnTerminal(localChatId, started.turnId);
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
 
       const executorPicker = '[role="dialog"] [data-executor-picker]';
       async function expectTarget(pathSelector: string, label: string, path: string) {
+        if (pathSelector.includes('Project Path')) await app.revealNewChatProjectPath();
         await fixture.page.waitForFunction(({ pathSelector, executorPicker, label, path }) => {
           const input = document.querySelector<HTMLInputElement>(pathSelector);
           return input?.value === path && document.querySelector(executorPicker)?.getAttribute('aria-label') === `Executor: ${label}`;
         }, {}, { pathSelector, executorPicker, label, path });
       }
       async function closeNewChat() {
-        await app.clickButton('Close', { last: true });
-        await fixture.page.waitForFunction(() => document.querySelector('#project-path-input') === null);
+        await app.clickDialogButton('Close');
+        await fixture.page.waitForFunction(() => document.querySelector('[data-new-chat-landing="true"]') === null);
       }
 
       await app.clickButton('New Chat');
-      await expectTarget('#project-path-input', 'Local', dirs.project);
+      await expectTarget('[data-new-chat-landing="true"] input[aria-label="Project Path"]', 'Local', dirs.project);
       await selectExecutor(fixture.page, executorPicker, 'Integration worker');
-      await app.fill('#project-path-input', executionDirs.project);
+      await app.enterNewChatProjectPath(executionDirs.project);
       await app.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', 'Synthetic remote startup');
       await app.waitForDialogButtonEnabled('Start session');
       await app.clickButton('Start session', { last: true });
@@ -47,7 +49,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         if (reload) await fixture.page.reload();
         await app.waitForButton('New Chat');
         await app.clickButton('New Chat');
-        await expectTarget('#project-path-input', 'Integration worker', executionDirs.project);
+        await expectTarget('[data-new-chat-landing="true"] input[aria-label="Project Path"]', 'Integration worker', executionDirs.project);
         await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]')?.textContent?.includes('Integration Echo'));
         await selectExecutor(fixture.page, executorPicker, 'Local');
         await closeNewChat();
@@ -71,7 +73,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await fixture.page.reload();
       await app.waitForButton('New Chat');
       await app.clickButton('New Chat');
-      await expectTarget('#project-path-input', 'Local', dirs.project);
+      await expectTarget('[data-new-chat-landing="true"] input[aria-label="Project Path"]', 'Local', dirs.project);
       fixture.assertNoBrowserErrors();
     }, { executionBackend, projectRoots: 'separate' });
   }, 90_000);
