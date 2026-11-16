@@ -23,7 +23,9 @@
 			currentTime: SIDEBAR_PREVIEW_NOW,
 		}),
 	);
-	const displayRows = $derived(sidebarDisplayRows(projection.rowModel.rows, options.chatItemLayout));
+	const displayRows = $derived(
+		sidebarDisplayRows(projection.rowModel.rows, options.chatItemLayout),
+	);
 </script>
 
 <div class="min-w-0" data-sidebar-display-preview>
@@ -64,7 +66,7 @@
 							>
 								{#snippet titlePrefix()}
 									{#if row.tree && options.chatItemLayout !== 'single-line'}
-										<SidebarDelegationArrow />
+										<SidebarDelegationArrow depth={row.tree.delegationDepth} />
 									{/if}
 								{/snippet}
 								{#snippet titleBadge()}

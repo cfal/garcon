@@ -31,7 +31,7 @@
 	import { chatActivityTimeMs } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
-		isDelegatedChild?: boolean;
+		delegationDepth?: number;
 		branch?: SidebarVirtualChatRow['branch'];
 		onToggleDelegatedChats?: () => void;
 		contextOnly?: boolean;
@@ -77,7 +77,7 @@
 	}
 
 	let {
-		isDelegatedChild = false,
+		delegationDepth = 0,
 		branch,
 		onToggleDelegatedChats,
 		contextOnly = false,
@@ -129,7 +129,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
-	let showDelegationArrow = $derived(isDelegatedChild && !isSingleLineLayout);
+	let showDelegationArrow = $derived(delegationDepth > 0 && !isSingleLineLayout);
 	let contentInset = $derived(sidebarChatInset(depth));
 	let hasAdditionalLines = $derived(
 		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
@@ -330,7 +330,7 @@
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		>
 			{#snippet titlePrefix()}
-				{#if showDelegationArrow}<SidebarDelegationArrow />{/if}
+				{#if showDelegationArrow}<SidebarDelegationArrow depth={delegationDepth} />{/if}
 			{/snippet}
 		</ChatSummary>
 		<!-- The executor header names the executor visually; the row keeps it in its

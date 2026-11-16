@@ -156,6 +156,7 @@ test('multi-line delegation arrows align with titles while single-line keeps tre
         await browserExpect(child.locator('[data-slot="chat-summary-header"]')).toHaveCSS('font-size', '16px');
         await browserExpect(child.locator('.chat-item-root button').first()).toHaveCSS('padding-left', singleLine ? '24px' : '12px');
         if (singleLine) continue;
+        await browserExpect(arrow).toHaveText('\u21b3');
         await browserExpect(arrow).toHaveAttribute('aria-hidden', 'true');
         await browserExpect(arrow).toHaveCSS('pointer-events', 'none');
         await browserExpect.poll(() => arrow.evaluate(element => {

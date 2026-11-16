@@ -2,6 +2,7 @@ import { render } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import SidebarTreeGuides from '../SidebarTreeGuides.svelte';
 import SidebarDisplayPreview from '../SidebarDisplayPreview.svelte';
+import SidebarDelegationArrow from '../SidebarDelegationArrow.svelte';
 import { DEFAULT_SIDEBAR_DISPLAY_OPTIONS } from '$lib/sidebar/display/sidebar-display-options';
 import { buildSidebarRowModel } from '$lib/sidebar/display/sidebar-row-model';
 import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
@@ -15,6 +16,18 @@ const row = buildSidebarRowModel(
 ).rows.find((item) => item.key === 'chat:child')!;
 
 describe('sidebar tree guide geometry', () => {
+	it('renders one prefix character per level without growing the element count', async () => {
+		const view = render(SidebarDelegationArrow, { depth: 1 });
+		const arrow = view.container.querySelector('[data-sidebar-delegation-arrow]')!;
+		expect(arrow.textContent).toBe('\u21b3');
+		for (const depth of [2, 3, 2000]) {
+			await view.rerender({ depth });
+			expect(arrow.isConnected).toBe(true);
+			expect(arrow.textContent).toBe('\u21b3'.repeat(depth));
+			expect(arrow.childElementCount).toBe(0);
+		}
+	});
+
 	it.each([
 		[40, '21px', '20px'],
 		[43, '22px', '21px'],
@@ -66,6 +79,7 @@ describe('sidebar tree guide geometry', () => {
 			expect(arrows[0].closest('[data-slot="chat-summary-header"]')).not.toBeNull();
 			expect(arrows[0].parentElement!.firstElementChild).toBe(arrows[0]);
 			expect(arrows[0].getAttribute('aria-hidden')).toBe('true');
+			expect(arrows[0].textContent).toBe('\u21b3');
 		},
 	);
 

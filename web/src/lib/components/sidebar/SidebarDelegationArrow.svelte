@@ -1,9 +1,9 @@
 <script lang="ts">
-	import CornerDownRight from '@lucide/svelte/icons/corner-down-right';
+	let { depth }: { depth: number } = $props();
 </script>
 
-<CornerDownRight
-	class="pointer-events-none size-3 shrink-0 text-muted-foreground"
+<span
+	class="pointer-events-none max-w-[40%] shrink-0 truncate text-muted-foreground"
 	aria-hidden="true"
-	data-sidebar-delegation-arrow
-/>
+	data-sidebar-delegation-arrow>{'\u21b3'.repeat(depth)}</span
+>

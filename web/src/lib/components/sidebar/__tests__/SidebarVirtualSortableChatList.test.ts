@@ -2642,6 +2642,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			} else {
 				expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
 				const arrow = child.querySelector('[data-sidebar-delegation-arrow]')!;
+				expect(arrow.textContent).toBe('\u21b3');
 				expect(arrow.getAttribute('aria-hidden')).toBe('true');
 				expect(arrow.classList.contains('pointer-events-none')).toBe(true);
 				expect(arrow.closest('[data-slot="chat-summary-header"]')).not.toBeNull();
@@ -2655,6 +2656,34 @@ describe('SidebarVirtualSortableChatList', () => {
 			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
 			expect(content.isConnected).toBe(true);
 			expect(content.outerHTML).toBe(markup);
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
+		'prefixes %s titles by delegation depth, not grouping depth',
+		(layout) => {
+			render(SidebarChatListHost, {
+				chats: [
+					chat('parent'),
+					delegated('child', 'parent', { projectPath: '/other' }),
+					delegated('grandchild', 'child', { projectPath: '/other' }),
+				],
+				displayOptions: {
+					chatItemLayout: layout,
+					nestDelegatedChats: true,
+					groupingFields: [{ field: 'project', enabled: true }],
+				},
+			});
+			for (const [id, prefix] of [
+				['child', '\u21b3'],
+				['grandchild', '\u21b3\u21b3'],
+			]) {
+				const row = document.querySelector(`[data-sidebar-virtual-row="${id}"]`)!;
+				expect(row.querySelector('[data-sidebar-delegation-arrow]')!.textContent).toBe(prefix);
+				expect(row.querySelector<HTMLElement>('.chat-item-root button')!.style.paddingLeft).toBe(
+					'36px',
+				);
+			}
 		},
 	);
 
