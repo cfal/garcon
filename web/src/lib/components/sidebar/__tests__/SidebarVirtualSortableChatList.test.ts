@@ -2660,6 +2660,43 @@ describe('SidebarVirtualSortableChatList', () => {
 	);
 
 	it.each(['compact', 'detailed'] as const)(
+		'uses display depth for %s separators and structural depth for branch drops',
+		async (layout) => {
+			vi.useFakeTimers();
+			render(SidebarChatListHost, {
+				chats: [chat('parent'), delegated('child', 'parent'), chat('peer')],
+				isMobile: true,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			const parent = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="parent"]')!;
+			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
+			const peer = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="peer"]')!;
+			expect(
+				document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="chat:child"]')!
+					.style.left,
+			).toBe('12px');
+			vi.spyOn(document, 'elementFromPoint').mockReturnValue(parent);
+			await fireEvent.touchStart(peer, {
+				touches: [touchAt(1, 20, 44)],
+				changedTouches: [touchAt(1, 20, 44)],
+			});
+			vi.advanceTimersByTime(370);
+			await tick();
+			await fireEvent.touchMove(window, {
+				touches: [touchAt(1, 20, 80)],
+				changedTouches: [touchAt(1, 20, 80)],
+			});
+			vi.advanceTimersByTime(17);
+			await tick();
+			const indicator = document.querySelector('[data-sidebar-branch-drop-indicator]')!;
+			expect(indicator).not.toBeNull();
+			expect(indicator.parentElement).toBe(child.closest('[data-sidebar-virtual-item]'));
+			expect(indicator.classList.contains('bottom-0')).toBe(true);
+			await fireEvent.touchCancel(window, { touches: [], changedTouches: [touchAt(1, 20, 80)] });
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
 		'prefixes %s titles by delegation depth, not grouping depth',
 		(layout) => {
 			render(SidebarChatListHost, {
