@@ -8,6 +8,7 @@ afterEach(cleanup);
 
 it('previews drafts without writes and discards Cancel', async () => {
 	const settings = createLocalSettingsStore();
+	settings.set('sidebarNestDelegatedChats', false);
 	const apply = vi.spyOn(settings, 'setSidebarDisplay');
 	render(SidebarDisplayDialogHost, { settings });
 	await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
@@ -35,6 +36,7 @@ it('previews drafts without writes and discards Cancel', async () => {
 
 it('retains moved-field focus, applies nesting with display fields, and preserves sort mode', async () => {
 	const settings = createLocalSettingsStore();
+	settings.set('sidebarNestDelegatedChats', false);
 	settings.set('sidebarSortMode', 'manual');
 	const apply = vi.spyOn(settings, 'setSidebarDisplay');
 	render(SidebarDisplayDialogHost, { settings });
@@ -69,10 +71,10 @@ it('resets only the draft and keeps inactive options disabled', async () => {
 	render(SidebarDisplayDialogHost, { settings });
 	await fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
 	expect(settings.sidebarChatItemLayout).toBe('detailed');
-	expect(settings.sidebarNestDelegatedChats).toBe(true);
+	expect(settings.sidebarNestDelegatedChats).toBe(false);
 	expect(screen.getByRole('checkbox', { name: 'Nest delegated chats' })).toHaveProperty(
 		'checked',
-		false,
+		true,
 	);
 	expect(screen.getByRole('radio', { name: 'Single-line' })).toHaveProperty('checked', true);
 	expect(screen.getByRole('checkbox', { name: 'Combine nested paths' })).toHaveProperty(
@@ -83,5 +85,21 @@ it('resets only the draft and keeps inactive options disabled', async () => {
 	expect(within(screen.getByRole('dialog')).queryByRole('radio', { name: 'Manual' })).toBeNull();
 	await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
 	expect(settings.sidebarChatItemLayout).toBe('detailed');
+	settings.destroy();
+});
+
+it('applies nested, ungrouped defaults after Reset', async () => {
+	const settings = createLocalSettingsStore();
+	settings.set('sidebarNestDelegatedChats', false);
+	settings.set('sidebarGroupingFields', [{ field: 'project', enabled: true }]);
+	render(SidebarDisplayDialogHost, { settings });
+	await fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+	expect(settings.sidebarNestDelegatedChats).toBe(false);
+	expect(settings.sidebarGroupingFields.find((field) => field.field === 'project')?.enabled).toBe(
+		true,
+	);
+	await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+	expect(settings.sidebarNestDelegatedChats).toBe(true);
+	expect(settings.sidebarGroupingFields.filter((field) => field.enabled)).toEqual([]);
 	settings.destroy();
 });

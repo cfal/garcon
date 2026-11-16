@@ -22,6 +22,7 @@ describe('LocalSettingsStore', () => {
 
 	it('applies only dialog-owned preferences against the latest settings', () => {
 		const store = createLocalSettingsStore();
+		store.set('sidebarNestDelegatedChats', false);
 		const draft = store.snapshot();
 		store.set('sidebarSortMode', 'manual');
 		store.toggle('sidebarNestDelegatedChats');
@@ -59,7 +60,7 @@ describe('LocalSettingsStore', () => {
 
 	it('normalizes grouping fields immediately and before persistence through set', () => {
 		const store = createLocalSettingsStore();
-		expect(store.sidebarNestDelegatedChats).toBe(false);
+		expect(store.sidebarNestDelegatedChats).toBe(true);
 		store.set('sidebarGroupingFields', [
 			{ field: 'project', enabled: true },
 			{ field: 'project', enabled: false },
@@ -315,6 +316,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.combineToolUseMessages).toBe(true);
 		expect(store.allowDirectChats).toBe(false);
 		expect(store.sidebarGroupingFields).toEqual(migrateSidebarGrouping('none'));
+		expect(store.sidebarNestDelegatedChats).toBe(true);
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('single-line');
@@ -324,6 +326,9 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatBoardActiveColumnByBoardId).toEqual({});
 		expect(store.sidebarSortMode).toBe('recent');
 		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.groupingFields).toEqual(store.sidebarGroupingFields);
+		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.nestDelegatedChats).toBe(
+			store.sidebarNestDelegatedChats,
+		);
 		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.sortMode).toBe(store.sidebarSortMode);
 		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
@@ -444,6 +449,29 @@ describe('LocalSettingsStore', () => {
 			store.destroy();
 		},
 	);
+
+	it.each([undefined, null, 'false', 0])(
+		'defaults missing or invalid delegation nesting %j to enabled without grouping',
+		(sidebarNestDelegatedChats) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ sidebarNestDelegatedChats }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.sidebarNestDelegatedChats).toBe(true);
+			expect(store.sidebarGroupingFields.filter((field) => field.enabled)).toEqual([]);
+			store.destroy();
+		},
+	);
+
+	it.each([false, true])('persists an explicit delegation nesting preference of %s', (enabled) => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarNestDelegatedChats', enabled);
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarNestDelegatedChats).toBe(enabled);
+		store.destroy();
+		restored.destroy();
+	});
 
 	it('preserves explicitly saved sidebar grouping and manual order', () => {
 		localStorage.setItem(

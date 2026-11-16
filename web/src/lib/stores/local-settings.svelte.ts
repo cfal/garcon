@@ -538,7 +538,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.sidebarGroupingFields === undefined
 				? migrateSidebarGrouping(parsed.sidebarGrouping)
 				: normalizeSidebarGroupingFields(parsed.sidebarGroupingFields),
-		sidebarNestDelegatedChats: parseBoolean(parsed.sidebarNestDelegatedChats, false),
+		sidebarNestDelegatedChats: parseBoolean(
+			parsed.sidebarNestDelegatedChats,
+			DEFAULTS.sidebarNestDelegatedChats,
+		),
 		sidebarInactivityDuration: parseSidebarInactivityDuration(parsed.sidebarInactivityDuration),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
@@ -676,7 +679,7 @@ export class LocalSettingsStore {
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupingFields = $state<SidebarGroupingSelection[]>(defaultSidebarGroupingFields());
-	sidebarNestDelegatedChats = $state(false);
+	sidebarNestDelegatedChats = $state(DEFAULTS.sidebarNestDelegatedChats);
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);

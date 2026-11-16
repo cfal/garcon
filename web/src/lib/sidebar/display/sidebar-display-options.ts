@@ -32,7 +32,7 @@ export type SidebarDisplayPreferences = Pick<
 export function defaultSidebarDisplayPreferences(): SidebarDisplayPreferences {
 	return {
 		sidebarGroupingFields: defaultSidebarGroupingFields(),
-		sidebarNestDelegatedChats: false,
+		sidebarNestDelegatedChats: true,
 		sidebarInactivityDuration: '3-days',
 		sidebarGroupNestedProjectPaths: false,
 		sidebarChatItemLayout: 'single-line',
