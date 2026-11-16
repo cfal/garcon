@@ -43,6 +43,8 @@ await Bun.write(${JSON.stringify(finished)}, 'finished');
       socket.on('framesent', frame => sent.push(JSON.parse(String(frame.payload))));
     });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await clickWorkspaceWindowAddAction(page, 'New Terminal');
     await browserExpect(page.locator('.xterm')).toBeVisible();
     await browserExpect.poll(() => received.filter(message => message.type === 'terminal-attached').length).toBe(1);

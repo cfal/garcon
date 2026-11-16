@@ -79,6 +79,8 @@ async function openPreambles(
   dialog: Locator;
 }> {
   const response = await page.goto(baseUrl);
+  await page.getByRole('dialog', { name: 'New Chat', exact: true })
+    .getByRole('button', { name: 'Close', exact: true }).click();
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${String(response?.status())}.`);
   const trigger = page.getByRole('button', { name: 'More actions' }).first();
   if (await page.evaluate(() => matchMedia('(max-width: 768px)').matches)) {
@@ -251,7 +253,7 @@ describe('Chromium preambles', () => {
         if (!response?.ok()) {
           throw new Error(`SPA navigation failed with ${String(response?.status())}.`);
         }
-        await fixture.page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+        await fixture.page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
         const dialog = fixture.page.locator('[role="dialog"]').filter({
           has: fixture.page.getByPlaceholder('How can I help you today?'),
         });

@@ -32,6 +32,8 @@ test('Local-only Files and Git hide executor selectors and allow Git browsing wi
     await initializeFixtureRepository(integration.dirs.project);
     await writeFile(join(integration.dirs.project, 'example.txt'), 'Local independent change\n');
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.locator('[data-file-tree-entry-text]').getByText('example.txt', { exact: true }).waitFor();
     await browserExpect(surface(page, 'files').locator('[data-executor-picker]')).toHaveCount(0);
     await collapseCanonicalFilesWindow(page);

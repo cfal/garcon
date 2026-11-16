@@ -259,6 +259,7 @@ describe("Chromium New Chat composer layout", () => {
           bounds(form),
           bounds(modelPopover),
         ]);
+        expect(dialogBox.width).toBe(576);
         expect(dialogBox.x).toBeGreaterThanOrEqual(8);
         expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(632);
         expect(popoverBox.x).toBeGreaterThanOrEqual(8);

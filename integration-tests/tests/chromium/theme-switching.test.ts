@@ -30,6 +30,8 @@ describe("theme switching", () => {
       const response = await page.goto(fixture.integration.garcon.baseUrl, {
         waitUntil: "domcontentloaded",
       });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       expect(response?.ok()).toBe(true);
       await page.waitForFunction(
         () => document.documentElement.dataset.theme === "phosphor-light",

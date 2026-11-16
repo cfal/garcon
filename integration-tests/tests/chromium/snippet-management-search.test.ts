@@ -32,7 +32,7 @@ describe('snippet management search', () => {
         });
         await page.setViewportSize(viewport);
         await page.goto(integration.garcon.baseUrl);
-        await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+        await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
         const composer = page.getByPlaceholder('How can I help you today?');
         await composer.fill(';;');
         const palette = page.getByRole('dialog', { name: 'Insert Snippet' });

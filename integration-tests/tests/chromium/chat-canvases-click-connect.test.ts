@@ -26,6 +26,8 @@ for (const interruption of ['blur', 'pointercancel', 'hide'] as const) {
         await page.goto(integration.garcon.baseUrl, {
           waitUntil: 'domcontentloaded',
         });
+        await page.getByRole('dialog', { name: 'New Chat', exact: true })
+          .getByRole('button', { name: 'Close', exact: true }).click();
         await collapseCanonicalFilesWindow(page);
         await clickWorkspaceWindowAddAction(page, 'Open Canvas');
         const handle = (id: string) =>
@@ -116,6 +118,8 @@ for (const removal of ['delete', 'reload'] as const) {
         }, original);
       }
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       const node = (id: string) => page.locator(`.svelte-flow__node[data-id="${id}"]`);

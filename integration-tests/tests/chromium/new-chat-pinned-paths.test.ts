@@ -79,6 +79,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect.poll(() => pins.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await browserExpect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         expect(await localPin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+        expect((await localPin.locator('..').boundingBox())!.height).toBeGreaterThanOrEqual(50);
         const box = await dialog.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.x).toBeCloseTo(0, 0);
@@ -138,6 +139,7 @@ test('saved projects remain accessible with a fine primary pointer and secondary
       await browserExpect(pin).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(page.getByPlaceholder('How can I help you today?')).toBeFocused();
       expect(await pin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+      expect((await pin.locator('..').boundingBox())!.height).toBeGreaterThanOrEqual(50);
       assertNoBrowserErrors();
     }, undefined, {}, browser);
   } finally {

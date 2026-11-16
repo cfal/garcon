@@ -8,6 +8,6 @@ export async function saveNewChatProject(
 ): Promise<void> {
   const paths = executorId === 'local'
     ? { pinnedProjectPaths: [projectPath], recentProjectPaths: [projectPath] }
-    : { byExecutor: { [executorId]: { pinnedPaths: [projectPath], recentPaths: [projectPath], defaultPath: projectPath } } };
+    : { byExecutor: { [executorId]: { pinnedPaths: [projectPath] } } };
   await client.put('/api/v1/app/settings', { paths });
 }

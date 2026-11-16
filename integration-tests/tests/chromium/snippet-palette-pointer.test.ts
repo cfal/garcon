@@ -41,7 +41,7 @@ test('a parked mouse cannot replace snippet selection during loading, opening, f
     try {
       await saveNewChatProject(client, integration.dirs.project);
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
       const composer = page.getByPlaceholder('How can I help you today?');
       const newChat = page.getByRole('dialog').filter({ has: composer });
       const projectCard = newChat.getByRole('region', { name: 'Saved and recent projects', exact: true })

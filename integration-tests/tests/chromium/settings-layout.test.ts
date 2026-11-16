@@ -10,6 +10,8 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -46,13 +48,13 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
   }, undefined, { executionBackend: 'remote-controller-dials' });
 }, 180_000);
 
-test('new-chat executor and project controls fit their responsive layout', async () => {
+test('new-chat executor and project fields have matching heights', async () => {
   await withChromiumFixture('new-chat-field-alignment', async ({ page, integration, assertNoBrowserErrors }) => {
     const label = 'Production build and review execution host';
     await integration.client.patch(`/api/v1/executors/${integration.client.executorId}`, { label });
     await page.goto(integration.garcon.baseUrl);
-    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByRole('dialog', { name: 'New Chat', exact: true });
+    await browserExpect(dialog).toBeVisible();
     const picker = dialog.locator('[data-executor-picker]');
     const project = dialog.getByRole('button', { name: 'Choose folder', exact: true });
     await picker.click();
@@ -68,9 +70,9 @@ test('new-chat executor and project controls fit their responsive layout', async
       await page.setViewportSize({ width, height: 900 });
       const pickerRect = (await picker.boundingBox())!;
       const projectRect = (await project.boundingBox())!;
-      expect(pickerRect.height).toBeGreaterThanOrEqual(38);
-      expect(projectRect.height).toBeGreaterThanOrEqual(40);
-      expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
+      expect(pickerRect.height).toBe(projectRect.height);
+      expect(pickerRect.x + pickerRect.width <= projectRect.x || projectRect.x + projectRect.width <= pickerRect.x
+        || pickerRect.y + pickerRect.height <= projectRect.y || projectRect.y + projectRect.height <= pickerRect.y).toBe(true);
       expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: join(artifacts, `new-chat-fields-${width}.png`) });
     }
@@ -82,6 +84,8 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
   await withChromiumFixture('scheduled-chat-field-alignment', async ({ page, context, integration, assertNoBrowserErrors }) => {
     await initializeFixtureRepository(integration.dirs.project);
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();
@@ -117,8 +121,7 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
             };
           });
           const { picker: pickerRect, project: projectRect, bounds } = geometry;
-          expect(pickerRect.height).toBeGreaterThanOrEqual(38);
-      expect(projectRect.height).toBeGreaterThanOrEqual(40);
+          expect(pickerRect.height).toBe(projectRect.height);
           expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
           expect(geometry.feedbackGap).toBe(4);
           expect(geometry.contained).toBe(true);

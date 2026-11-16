@@ -14,7 +14,10 @@ vi.mock(
 const ScheduledNewChatComposerTestHost = (await import('./ScheduledNewChatComposerTestHost.svelte'))
 	.default;
 
-function makeStartup(modelSelectionError: string | null = null, executorId = 'local'): NewChatFormState {
+function makeStartup(
+	modelSelectionError: string | null = null,
+	executorId = 'local',
+): NewChatFormState {
 	return {
 		executorId,
 		isLocalExecutor: executorId === 'local',
@@ -51,16 +54,18 @@ function makeStartup(modelSelectionError: string | null = null, executorId = 'lo
 		toggleTagInput: vi.fn(),
 		addTag: vi.fn(() => true),
 		removeTag: vi.fn(),
-		openWorktreeModal: vi.fn(),
-		worktreeModalOpen: false,
-		worktreeItems: [],
-		isLoadingWorktrees: false,
-		isCreatingWorktree: false,
-		worktreeError: null,
-		selectWorktree: vi.fn(),
-		createWorktree: vi.fn(),
-		loadWorktrees: vi.fn(),
-		closeWorktreeModal: vi.fn(),
+		worktrees: {
+			openModal: vi.fn(),
+			modalOpen: false,
+			items: [],
+			isLoading: false,
+			isCreating: false,
+			error: null,
+			select: vi.fn(),
+			create: vi.fn(),
+			load: vi.fn(),
+			closeModal: vi.fn(),
+		},
 		setPermissionMode: vi.fn(),
 		setThinkingMode: vi.fn(),
 		setAgentSetting: vi.fn(),
@@ -83,7 +88,7 @@ function makeStartup(modelSelectionError: string | null = null, executorId = 'lo
 }
 
 function renderComposer(
-		overrides: {
+	overrides: {
 		conversationInput?: boolean;
 		executorId?: string;
 		prompt?: string;
@@ -160,7 +165,7 @@ describe('ScheduledNewChatComposer', () => {
 		expect(screen.getByText('No preambles currently apply')).toBeTruthy();
 
 		await fireEvent.click(selectWorktree);
-		expect(startup.openWorktreeModal).toHaveBeenCalledOnce();
+		expect(startup.worktrees.openModal).toHaveBeenCalledOnce();
 		await fireEvent.click(addTags);
 		expect(startup.toggleTagInput).toHaveBeenCalledOnce();
 	});

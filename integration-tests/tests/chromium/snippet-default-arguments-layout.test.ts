@@ -34,7 +34,7 @@ async function setViewport(page: Page, cdp: CDPSession, scenario: ViewportScenar
 
 async function openNewChat(page: Page, client: GarconTestClient, projectPath: string): Promise<Locator> {
   await saveNewChatProject(client, projectPath);
-  await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+  await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
   const composer = page.getByPlaceholder('How can I help you today?');
   const dialog = page.locator('[role="dialog"]').filter({ has: composer });
   await dialog.waitFor();

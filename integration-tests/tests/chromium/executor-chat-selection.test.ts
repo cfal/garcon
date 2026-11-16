@@ -125,9 +125,9 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
       const project = dialog.getByRole('button', { name: 'Choose folder', exact: true });
       const pickerRect = (await picker.boundingBox())!;
       const projectRect = (await project.boundingBox())!;
-      expect(pickerRect.height).toBeGreaterThanOrEqual(38);
-      expect(projectRect.height).toBeGreaterThanOrEqual(40);
-      expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
+      expect(pickerRect.height).toBe(projectRect.height);
+      expect(pickerRect.x + pickerRect.width <= projectRect.x || projectRect.x + projectRect.width <= pickerRect.x
+        || pickerRect.y + pickerRect.height <= projectRect.y || projectRect.y + projectRect.height <= pickerRect.y).toBe(true);
       expect(await picker.locator('.executor-label').evaluate(element => getComputedStyle(element).display)).not.toBe('none');
       await page.screenshot({ path: join(artifacts, `new-chat-host-${width}.png`) });
     }

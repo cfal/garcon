@@ -28,11 +28,11 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       await integration.client.put('/api/v1/app/settings', { paths: integration.client.executorId === 'local'
         ? { recentProjectPaths: [project], pinnedProjectPaths: [] }
-        : { byExecutor: { [integration.client.executorId]: { recentPaths: [project], pinnedPaths: [], defaultPath: project } } },
+        : { byExecutor: { [integration.client.executorId]: { pinnedPaths: [project] } } },
       });
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
       const landing = page.getByRole('dialog', { name: 'New Chat', exact: true });
+      await browserExpect(landing).toBeVisible();
       const projectCard = landing.getByRole('button', { name: integration.client.executorId === 'local' ? project : `Integration worker: ${project}`, exact: true });
       await projectCard.focus();
       await page.keyboard.press('Enter');
@@ -45,6 +45,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(landing.locator('#project-path-input')).toHaveCount(0);
 
       phase('pin the owning executor path');
+      if (integration.client.executorId !== 'local') {
+        await page.getByRole('button', { name: 'Unpin project path', exact: true }).click();
+        await browserExpect(page.getByRole('button', { name: 'Pin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
+      }
       await page.getByRole('button', { name: 'Pin project path', exact: true }).click();
       await browserExpect(page.getByRole('button', { name: 'Unpin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
       await browserExpect(landing.getByRole('button', { name: 'Choose folder', exact: true })).toBeEnabled();
@@ -87,7 +91,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await page.setViewportSize({ width, height: 900 });
         await browserExpect.poll(() => field.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         for (const radio of await field.getByRole('radio').all()) {
-          expect((await radio.locator('..').boundingBox())!.height).toBeGreaterThanOrEqual(64);
+          expect((await radio.locator('..').boundingBox())!.height).toBe(touch ? 44 : 32);
         }
         await page.screenshot({ path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
       }

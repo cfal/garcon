@@ -441,9 +441,11 @@ Known missing, inaccessible, outside-base, and non-directory paths keep the exis
 
 ### New Chat And Composer
 
-The New Chat path input already supports manual editing. Add executor selection to its model selector, then select defaults and inspect against that executor. Show the advertised executor project base when known. With no successful executor description, do not guess the controller's base.
+New Chat opens a full-page landing with saved and recent projects above the composer. The project and worktree column is capped at 448px; the prompt column is capped at 576px. Five compact project cards remain visible, with additional projects in a floating More menu. Choosing a card selects its owning executor and project while preserving the prompt and attachments. Offline owners are hidden from the list without deleting their preferences or replacing an existing offline selection.
 
-For remote executors, disable directory browsing, focus-triggered browse requests, Tab directory completion, Git worktree selection, and file-mention autocomplete. Hiding a browse button alone is insufficient: [new-chat-form-state.svelte.ts](../../web/src/lib/chat/new-chat/new-chat-form-state.svelte.ts) has automatic fetch paths. Typed/pasted project paths and typed `@file` mentions remain supported. Input errors refer to the selected executor and do not trigger local fallback.
+Project actions pin, unpin, or remove a path from the saved/recent list. Each executor permits five pins; adding a sixth unpins the oldest while retaining it as a recent project. Windows drive-letter slash aliases share selection and pin identity. Removing a shortcut leaves the draft target intact.
+
+Choose folder opens Garcon's folder browser on the selected executor, inside the selected folder when available, otherwise at the advertised executor project root. A missing folder falls back to its parent with a create action. The revealed path field also accepts typed or pasted paths; mobile exposes Enter path explicitly. Browsing, validation, worktree discovery/creation, and file-mention completion use that executor's advertised capabilities and executor-qualified services. With no successful executor description, do not guess the controller's base or fall back to Local.
 
 Changing a draft executor invalidates path validation and shows that executor's default/last path; do not silently reuse a canonical result from another executor. Existing-chat executor changes use the handoff flow below and allow an explicit destination path. Preserve draft prompt text while resolving the target.
 

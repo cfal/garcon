@@ -497,6 +497,8 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
       });
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       await page
         .getByRole("button", { name: "Ticket view settings", exact: true })
@@ -592,6 +594,8 @@ test("Tickets toolbar stays aligned and search retains the board until results a
       });
       await page.setViewportSize({ width: 1920, height: 1000 });
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       await page
@@ -783,6 +787,8 @@ test("card whitespace opens details and full-width detail preference survives re
         },
       });
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       const row = page.locator('.ticket-row[data-ticket-id="G-1"]');
@@ -839,6 +845,8 @@ test("card whitespace opens details and full-width detail preference survives re
       await page.getByRole("button", { name: "Back to tickets" }).click();
       expect(await card.isVisible()).toBe(true);
       await page.reload();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await card.waitFor();
       await card.click({ position: { x: 5, y: 5 } });
       await page.locator(".ticket-detail-title").waitFor();

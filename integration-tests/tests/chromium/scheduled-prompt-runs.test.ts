@@ -46,6 +46,8 @@ test('scheduled prompts preview their schedule, report runs under the label they
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     const list = page.getByRole('dialog', { name: 'Scheduled Prompts', exact: true });
@@ -157,6 +159,8 @@ test('scheduled prompt previews and save admission follow the clock while editin
 
     await page.clock.install({ time: new Date('2030-01-01T08:59:30.000Z') });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     const list = page.getByRole('dialog', { name: 'Scheduled Prompts', exact: true });

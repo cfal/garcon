@@ -248,6 +248,8 @@ test.each([1440, 390])(
             enabled: width === 390,
           });
           await page.goto(integration.garcon.baseUrl);
+          await page.getByRole('dialog', { name: 'New Chat', exact: true })
+            .getByRole('button', { name: 'Close', exact: true }).click();
           await browserExpect(
             page.locator('[data-workspace-content]'),
           ).toBeVisible();
@@ -363,6 +365,8 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
 test('ANSI chrome stays usable on desktop and mobile, and leaves other themes unchanged', async () => {
   await withChromiumFixture('ANSI chrome', async ({ page, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions' }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -497,6 +501,8 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       );
     });
     await page.reload();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     const panel = page.locator('[data-workspace-chat-list-panel]');
     await browserExpect(panel).toHaveAttribute('data-divider-edge', 'start');
     await browserExpect(panel).toHaveCSS('border-inline-start-style', 'double');

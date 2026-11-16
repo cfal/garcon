@@ -19,7 +19,7 @@
 	$effect(() => {
 		browseContextKey;
 		untrack(() => {
-			browserPath = form.projectBasePath;
+			browserPath = form.projectPath || form.projectBasePath;
 		});
 	});
 
@@ -30,7 +30,7 @@
 			return;
 		}
 		pathFieldOpen = true;
-		browserPath = form.projectBasePath;
+		browserPath = form.projectPath || form.projectBasePath;
 		form.showBrowser = true;
 		if (form.showBrowser && !isMobile) {
 			await tick();
@@ -54,7 +54,7 @@
 				disabled={!form.filesAvailable || form.isUpdatingPinnedPath}
 				onclick={() => void toggleBrowser()}
 				aria-expanded={form.showBrowser}
-				class="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-md px-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+				class="inline-flex h-[42px] shrink-0 sm:pointer-fine:h-[38px] items-center gap-2 rounded-md px-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 			>
 				<FolderOpen class="size-4" aria-hidden="true" />{m.chat_new_chat_choose_project()}
 			</button>
@@ -107,6 +107,7 @@
 						executorId: form.executorId,
 						executorContextKey: form.pathContextKey,
 						currentPath: browserPath,
+						initialDirectory: form.projectPath || form.projectBasePath,
 						basePath: form.projectBasePath,
 						isMobile,
 						onSelect: (path) => {

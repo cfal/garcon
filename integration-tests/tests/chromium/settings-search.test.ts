@@ -7,6 +7,8 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 test('settings search preserves drafts and opens matching sections on desktop and mobile', async () => {
   await withChromiumFixture('settings-search', async ({ page, context, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });

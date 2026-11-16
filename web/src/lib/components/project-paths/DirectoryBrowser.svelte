@@ -27,6 +27,7 @@
 		executorContextKey?: string;
 		executorId?: string;
 		currentPath: string;
+		initialDirectory?: string;
 		/** Confines browsing to this subtree. */
 		basePath: string;
 		onSelect: (path: string) => void;
@@ -43,6 +44,7 @@
 		executorContextKey = '',
 		executorId = 'local',
 		currentPath,
+		initialDirectory,
 		basePath,
 		onSelect,
 		onClose,
@@ -65,6 +67,9 @@
 	const creationErrorId = $props.id();
 
 	const browser = new DirectoryBrowserState({
+		get initialDirectory() {
+			return initialDirectory;
+		},
 		get executorId() {
 			return executorId;
 		},

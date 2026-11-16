@@ -28,7 +28,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
       const landing = page.getByRole('dialog', { name: 'New Chat', exact: true });
       const choose = landing.getByRole('button', { name: 'Choose folder', exact: true });
       const projectCard = landing.getByRole('button', { name: integration.client.executorId === 'local' ? root : `Integration worker: ${root}`, exact: true });

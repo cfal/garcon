@@ -20,6 +20,8 @@ test('restores the latest Canvas list scroll position across repeated renderer r
     await integration.client.post('/api/v1/chat-canvases', { id: 'scroll-retention', content });
     await page.setViewportSize({ width: 1100, height: 720 });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await clickWorkspaceWindowAddAction(page, 'Open Canvas');
     await page.getByRole('button', { name: 'List', exact: true }).click();
     const list = page.locator('[data-canvas-list]');

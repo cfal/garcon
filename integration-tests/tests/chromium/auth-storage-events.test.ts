@@ -10,6 +10,8 @@ test('unrelated cross-tab writes skip auth probes while storage-only peer logout
     try {
       for (const tab of [page, peer]) {
         await tab.goto(integration.garcon.baseUrl);
+        await tab.getByRole('dialog', { name: 'New Chat', exact: true })
+          .getByRole('button', { name: 'Close', exact: true }).click();
         await browserExpect(tab.getByRole('button', { name: 'More actions', exact: true })).toBeVisible();
         await tab.waitForLoadState('networkidle');
       }

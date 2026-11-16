@@ -13,6 +13,8 @@ async function openCanvas({ page, integration }: ChromiumFixture) {
     id: 'diagram', content: { title: 'Diagram', nodes: [], connections: [] },
   });
   await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('dialog', { name: 'New Chat', exact: true })
+    .getByRole('button', { name: 'Close', exact: true }).click();
   await reopenCanvas(page);
 }
 

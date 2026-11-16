@@ -60,6 +60,8 @@ async function openBoard({ page, integration }: ChromiumFixture) {
     },
   });
   await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('dialog', { name: 'New Chat', exact: true })
+    .getByRole('button', { name: 'Close', exact: true }).click();
   await collapseCanonicalFilesWindow(page);
   await clickWorkspaceWindowAddAction(page, 'Open Canvas');
   await page.locator('.svelte-flow__node[data-id="c"]').waitFor({ state: 'visible' });

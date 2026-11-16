@@ -274,7 +274,6 @@
 		},
 	});
 	const emptyWorkspaceLanding = new EmptyWorkspaceLandingController(handleNewChat);
-
 	$effect(() => {
 		const snapshot = {
 			chatListStatus: sessions.chatListStatus,
@@ -282,14 +281,12 @@
 			chatCount: sessions.orderedChats.length,
 			isBareRoute: isBareChatRoute(appPathname(page.url.pathname)),
 			hasNavigationTarget: Boolean(
-				page.params.id || routeTicketId || sessions.selectedChatId ||
-				chatNavigation.pendingChatTarget,
+				page.params.id || routeTicketId || sessions.selectedChatId || chatNavigation.pendingChatTarget,
 			),
 			newChatDialogOpen: appShell.newChatDialogOpen,
-			anotherDialogOpen: Boolean(
-				appShell.showSettings || appShell.showOnboardingWizard || appShell.showPreambles ||
-				appShell.showSnippets || appShell.showScheduledPrompts || appShell.chatPreambleSelectionTarget,
-			),
+			anotherDialogOpen: Boolean(appShell.showSettings || appShell.showOnboardingWizard ||
+				appShell.showPreambles || appShell.showSnippets || appShell.showScheduledPrompts ||
+				appShell.chatPreambleSelectionTarget),
 		};
 		untrack(() => emptyWorkspaceLanding.observe(snapshot));
 	});

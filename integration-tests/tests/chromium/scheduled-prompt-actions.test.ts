@@ -32,6 +32,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       };
       const row = (name: string) => list.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) });
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await openList();
       await row('Third task').getByRole('button', { name: 'Prompt actions' }).click();
       await page.getByRole('menuitem', { name: 'Move to top', exact: true }).click();

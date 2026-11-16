@@ -120,6 +120,8 @@ test('separate credential forms retain source, sibling, and other-device work on
 test('storage failure retains memory authorization and late HTTP rejection preserves sign-in after a lost response', async () => {
   await withChromiumFixture('account-credentials-uncertainty', async ({ page, integration, withExpectedConsoleErrors }, phase) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     const settings = await openPasswordSettings(page);
     await page.setViewportSize({ width: 390, height: 844 });
     const credentials = integration.garcon.credentials!;

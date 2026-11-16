@@ -26,6 +26,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         }),
       } });
       await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page.clock.install();
 
       const validations: string[] = [];

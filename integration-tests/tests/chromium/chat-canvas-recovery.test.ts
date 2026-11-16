@@ -44,6 +44,8 @@ describe('Chromium canvas recovery', () => {
         return writeFile(join(integration.dirs.workspace, `chat-canvases/${healthy.id}.json`), JSON.stringify(healthy));
       }));
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, 'Open Canvas');
@@ -117,6 +119,8 @@ describe('Chromium canvas recovery', () => {
       });
       await writeFile(join(integration.dirs.workspace, 'chat-canvases/damaged.json'), '{broken');
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, 'Open Canvas');

@@ -136,7 +136,7 @@ describe('new chat projects', () => {
 		const updated = makeRemoteSettingsSnapshot({
 			paths: {
 				...settings.snapshot.paths,
-				pinnedProjectPaths: ['/projects/new', 'D:\\projects\\atlas'],
+				pinnedProjectPaths: ['D:\\projects\\atlas', '/projects/new'],
 			},
 		});
 		const persist = vi.fn().mockResolvedValue(updated);
@@ -144,7 +144,7 @@ describe('new chat projects', () => {
 		expect(form.projectPath).toBe('/projects/new-worktree');
 		expect(form.selectedProjectPath).toBe('/projects/new');
 		expect(persist).toHaveBeenCalledExactlyOnceWith(
-			['/projects/new', 'D:\\projects\\atlas'],
+			['D:\\projects\\atlas', '/projects/new'],
 			'local',
 		);
 	});

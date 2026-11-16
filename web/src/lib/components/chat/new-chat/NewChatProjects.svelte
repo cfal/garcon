@@ -65,66 +65,73 @@
 {#snippet projectCards(rows: readonly NewChatProject[], region: 'primary' | 'more')}
 	<div class="grid min-w-0 grid-cols-1 items-start gap-1.5">
 		{#each rows as project (newChatProjectKey(project))}
-			{@const path = project.path}
-			{@const executor = executors.get(project.executorId)}
-			{@const label = executor?.label ?? project.executorId}
-			{@const selected = projects.isSelected(project.executorId, path)}
-			{@const pinned = projects.isPinned(project.executorId, path)}
-			{@const projectLabel = project.executorId === 'local' ? path : label + ': ' + path}
-			<div
-				data-slot="new-chat-project-card"
-				class="flex min-w-0 items-stretch rounded-lg border transition-colors {selected
-					? 'border-primary bg-accent text-accent-foreground'
-					: 'border-border bg-card text-foreground hover:bg-accent/60'}"
-			>
-				<button
-					data-slot="new-chat-project-select"
-					type="button"
-					aria-label={projectLabel}
-					aria-pressed={selected}
-					disabled={form.isUpdatingPinnedPath}
-					onclick={() => selectProject(project.executorId, path)}
-					title={path}
-					class="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+			<svelte:boundary>
+				{@const path = project.path}
+				{@const executor = executors.get(project.executorId)}
+				{@const label = executor?.label ?? project.executorId}
+				{@const selected = projects.isSelected(project.executorId, path)}
+				{@const pinned = projects.isPinned(project.executorId, path)}
+				{@const projectLabel = project.executorId === 'local' ? path : label + ': ' + path}
+				<div
+					data-slot="new-chat-project-card"
+					class="flex min-w-0 items-stretch rounded-lg border transition-colors {selected
+						? 'border-primary bg-accent text-accent-foreground'
+						: 'border-border bg-card text-foreground hover:bg-accent/60'}"
 				>
-					<Folder class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-					<span class="min-w-0 flex-1">
-						<span
-							class="block truncate text-sm font-medium"
-							title={splitProjectPath(path).name}>{splitProjectPath(path).name}</span
-						>
-						<span class="block truncate text-xs text-muted-foreground">
-							{#if groups.length > 1 || project.executorId !== 'local'}{label}: {/if}{path}
+					<button
+						data-slot="new-chat-project-select"
+						type="button"
+						aria-label={projectLabel}
+						aria-pressed={selected}
+						disabled={form.isUpdatingPinnedPath}
+						onclick={() => selectProject(project.executorId, path)}
+						title={path}
+						class="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+					>
+						<Folder class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+						<span class="min-w-0 flex-1">
+							<span
+								class="block truncate text-sm font-medium"
+								title={splitProjectPath(path).name}>{splitProjectPath(path).name}</span
+							>
+							<span class="block truncate text-xs text-muted-foreground">
+								{#if groups.length > 1 || project.executorId !== 'local'}{label}: {/if}{path}
+							</span>
 						</span>
-					</span>
-					{#if pinned}
-						<span data-slot="new-chat-project-pinned" role="img" aria-label={m.chat_new_chat_project_pinned()} title={m.chat_new_chat_project_pinned()} class="shrink-0 text-primary">
-							<Pin class="size-3.5 rotate-45" aria-hidden="true" />
-						</span>
+						{#if pinned}
+							<span data-slot="new-chat-project-pinned" role="img" aria-label={m.chat_new_chat_project_pinned()} title={m.chat_new_chat_project_pinned()} class="shrink-0 text-primary">
+								<Pin class="size-3.5 rotate-45" aria-hidden="true" />
+							</span>
+						{/if}
+					</button>
+					{#if region === 'primary'}
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								disabled={form.isUpdatingPinnedPath}
+								aria-label={m.chat_new_chat_project_actions({ project: projectLabel })}
+								title={m.chat_new_chat_project_actions({ project: projectLabel })}
+								aria-busy={projects.isPending(project.executorId, path)}
+								class="inline-flex min-w-11 shrink-0 items-center justify-center rounded-r-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+							>
+								{#if projects.isPending(project.executorId, path)}<Loader2 class="size-4 animate-spin" aria-hidden="true" />{:else}<Ellipsis class="size-4" aria-hidden="true" />{/if}
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" class="w-44">
+								<DropdownMenuItem disabled={form.isUpdatingPinnedPath} onSelect={() => togglePin(project.executorId, path)}>
+									{#if pinned}<PinOff class="size-4" aria-hidden="true" />{m.chat_new_chat_project_unpin()}{:else}<Pin class="size-4" aria-hidden="true" />{m.chat_new_chat_project_pin()}{/if}
+								</DropdownMenuItem>
+								<DropdownMenuItem disabled={form.isUpdatingPinnedPath} onSelect={() => void removeFromList(project.executorId, path)}>
+									<ListMinus class="size-4" aria-hidden="true" />{m.chat_new_chat_project_remove()}
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
 					{/if}
-				</button>
-				{#if region === 'primary'}
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							disabled={form.isUpdatingPinnedPath}
-							aria-label={m.chat_new_chat_project_actions({ project: projectLabel })}
-							title={m.chat_new_chat_project_actions({ project: projectLabel })}
-							aria-busy={projects.isPending(project.executorId, path)}
-							class="inline-flex min-w-11 shrink-0 items-center justify-center rounded-r-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-						>
-							{#if projects.isPending(project.executorId, path)}<Loader2 class="size-4 animate-spin" aria-hidden="true" />{:else}<Ellipsis class="size-4" aria-hidden="true" />{/if}
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" class="w-44">
-							<DropdownMenuItem disabled={form.isUpdatingPinnedPath} onSelect={() => togglePin(project.executorId, path)}>
-								{#if pinned}<PinOff class="size-4" aria-hidden="true" />{m.chat_new_chat_project_unpin()}{:else}<Pin class="size-4" aria-hidden="true" />{m.chat_new_chat_project_pin()}{/if}
-							</DropdownMenuItem>
-							<DropdownMenuItem disabled={form.isUpdatingPinnedPath} onSelect={() => void removeFromList(project.executorId, path)}>
-								<ListMinus class="size-4" aria-hidden="true" />{m.chat_new_chat_project_remove()}
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				{/if}
-			</div>
+				</div>
+				{#snippet failed()}
+					<p role="status" class="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground">
+						{m.common_unavailable()}
+					</p>
+				{/snippet}
+				</svelte:boundary>
 		{/each}
 	</div>
 {/snippet}
