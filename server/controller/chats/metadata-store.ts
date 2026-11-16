@@ -13,6 +13,7 @@ import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { isRecord } from '../../../common/json.js';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import type { ChatRunOutcome } from '../../../common/chat-activity.js';
+import { ChatActivityOutcomes, type ActivityFailureAttempt } from './chat-activity-outcomes.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -44,7 +45,6 @@ export interface ChatMetadata {
   lastMessage: string;
   firstMessage: string;
   source: MetadataSource;
-  lastRunOutcome?: ChatRunOutcome | null;
   identity?: ChatMetadataIdentity;
 }
 
@@ -73,6 +73,7 @@ interface MetadataCarryOverSource {
 }
 
 export class MetadataIndex {
+  readonly #outcomes: ChatActivityOutcomes;
   #metadataByChatId = new Map<string, ChatMetadata>();
   #validatedChatIds = new Set<string>();
   #registry: IChatRegistry;
@@ -99,6 +100,7 @@ export class MetadataIndex {
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
     this.#readRunOutcome = options.readRunOutcome;
+    this.#outcomes = new ChatActivityOutcomes(chatId => this.#transcripts.getExistingTranscriptViewId(chatId));
   }
 
   async init(): Promise<void> {
@@ -107,6 +109,7 @@ export class MetadataIndex {
       this.#registry.onChatRemoved((chatId) => {
         this.#metadataByChatId.delete(String(chatId));
         this.#validatedChatIds.delete(String(chatId));
+        this.#outcomes.delete(String(chatId));
         this.#scheduleSave();
       });
     }
@@ -137,6 +140,7 @@ export class MetadataIndex {
 
   invalidateTranscriptView(chatId: string): void {
     this.#validatedChatIds.delete(String(chatId));
+    this.#outcomes.delete(String(chatId));
   }
 
   listAllChatMetadata(): Map<string, ChatMetadata> {
@@ -156,6 +160,9 @@ export class MetadataIndex {
   ): void {
     const key = String(chatId);
     if (this.#transcripts.getExistingTranscriptViewId(key) !== transcriptViewId) return;
+    if (appendedMessages.some(message => message.type === 'user-message') && this.getRunOutcome(key) !== null) {
+      this.clearRunOutcome(key);
+    }
     const cached = this.#metadataByChatId.get(key);
     let current = cached?.transcriptViewId === transcriptViewId ? cached : null;
     if (cached && !this.#validatedChatIds.has(key)) {
@@ -178,8 +185,6 @@ export class MetadataIndex {
       lastMessage,
       firstMessage,
       source: 'live',
-      lastRunOutcome: appendedMessages.some(message => message.type === 'user-message')
-        ? null : current?.lastRunOutcome ?? null,
       ...(identity ?? current?.identity
         ? { identity: identity ?? current?.identity }
         : {}),
@@ -188,12 +193,32 @@ export class MetadataIndex {
     this.#scheduleSave();
   }
 
-  updateRunOutcome(chatId: string, transcriptViewId: string, outcome: ChatRunOutcome): boolean {
-    const current = this.getChatMetadata(chatId);
-    if (!current || current.transcriptViewId !== transcriptViewId
-      || this.#transcripts.getExistingTranscriptViewId(chatId) !== transcriptViewId) return false;
-    this.#metadataByChatId.set(chatId, { ...current, lastRunOutcome: outcome });
-    return true;
+  getRunOutcome(chatId: string): ChatRunOutcome | null {
+    return this.#outcomes.get(chatId);
+  }
+
+  clearRunOutcome(chatId: string, runId?: string): void {
+    this.#outcomes.clear(chatId, runId);
+  }
+
+  beginRunAttempt(chatId: string, runId: string): void {
+    this.#outcomes.begin(chatId, runId);
+  }
+
+  captureFailureAttempt(chatId: string, runId?: string): ActivityFailureAttempt | null {
+    return this.#outcomes.captureFailure(chatId, runId);
+  }
+
+  recordFailedAttempt(attempt: ActivityFailureAttempt | null): boolean {
+    return this.#outcomes.fail(attempt);
+  }
+
+  recordCommittedOutcome(attempt: ActivityFailureAttempt | null, viewId: string, outcome: ChatRunOutcome): boolean {
+    return this.#outcomes.commit(attempt, viewId, outcome);
+  }
+
+  updateRunOutcome(chatId: string, transcriptViewId: string, outcome: ChatRunOutcome, runId?: string): boolean {
+    return this.#outcomes.update(chatId, transcriptViewId, outcome, runId);
   }
 
   // Recomputes the cached preview from the complete replacement view.
@@ -285,12 +310,14 @@ export class MetadataIndex {
   async #repairRunOutcome(chatId: string): Promise<void> {
     const current = this.getChatMetadata(chatId);
     if (!this.#readRunOutcome || !current?.transcriptViewId) return;
+    const attempt = this.#outcomes.capture(chatId);
+    if (!attempt) return;
     try {
       const outcome = await this.#readRunOutcome(chatId, current.transcriptViewId);
       if (this.#closed || this.getChatMetadata(chatId) !== current
+        || !this.#outcomes.isCurrent(attempt)
         || this.#transcripts.getExistingTranscriptViewId(chatId) !== current.transcriptViewId) return;
-      this.#metadataByChatId.set(chatId, { ...current, lastRunOutcome: outcome });
-      this.#scheduleSave();
+      this.#outcomes.restore(attempt, outcome);
     } catch (error) {
       logger.warn(`metadata: failed to repair run outcome for ${chatId}:`, errorMessage(error));
     }
@@ -404,10 +431,7 @@ export class MetadataIndex {
     if (!this.#metadataPath) return;
     const snapshot = {
       version: METADATA_VERSION,
-      chats: Object.fromEntries([...this.#metadataByChatId].map(([chatId, entry]) => {
-        const { lastRunOutcome: _outcome, ...stored } = entry;
-        return [chatId, stored];
-      })),
+      chats: Object.fromEntries(this.#metadataByChatId),
     };
     await writeJsonFileAtomic(this.#metadataPath, snapshot, { mode: 0o600 });
   }
@@ -440,7 +464,6 @@ function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadat
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
     lastMessage: lastMessagePreview(typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage),
     firstMessage,
-    lastRunOutcome: null,
     source: isMetadataSource(value.source)
       ? value.source
       : 'startup',

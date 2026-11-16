@@ -21,7 +21,7 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
   return new ChatListProjector({
     registry,
     settings,
-    metadata,
+    metadata: { getRunOutcome: () => null, ...metadata },
     processing,
     transientFeeds: { hasPendingUserAction: () => false },
     canReloadFromNativeHistory: () => false,

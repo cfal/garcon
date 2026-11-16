@@ -74,6 +74,53 @@ function action(overrides = {}) {
 }
 
 describe('ChatTransientFeedStore', () => {
+  it('hides claimed controls and restores only the same live permission on abandonment', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    feed.apply(permissionEvent());
+    const original = feed.validateAction(action());
+    const control = {
+      chatId: CHAT_ID, viewId: 'view-1', runId: 'run-1', permissionOccurrenceId: 'occurrence-one',
+    };
+    const claim = { control, actionability: 'claimed' };
+    expect(feed.applyPermissionActionability(claim)).toMatchObject({
+      kind: 'mutation', value: { transientRevision: 2, mutation: { kind: 'remove' } },
+    });
+    expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
+    expect(feed.currentSnapshot(CHAT_ID).rows).toEqual([]);
+    expect(() => feed.validateAction(action())).toThrow(TransientControlActionError);
+    expect(feed.applyPermissionActionability(claim)).toEqual({ kind: 'unchanged' });
+    for (const stale of [{ viewId: 'old-view' }, { runId: 'old-run' }, { chatId: 'other-chat' }]) {
+      expect(feed.applyPermissionActionability({
+        control: { ...control, ...stale }, actionability: 'actionable',
+      })).toEqual({ kind: 'unchanged' });
+    }
+    expect(feed.applyPermissionActionability({ control, actionability: 'actionable' })).toMatchObject({
+      kind: 'mutation', value: { transientRevision: 3, mutation: { kind: 'upsert', row: original } },
+    });
+    expect(feed.hasPendingUserAction(CHAT_ID)).toBe(true);
+    expect(feed.validateAction(action())).toBe(original);
+  });
+
+  for (const retire of [
+    (feed, control) => feed.retirePermission(control),
+    (feed) => feed.apply(permissionEvent({ kind: 'cancelled', ordinal: 4 })),
+    (feed) => feed.apply(runEndedEvent()),
+    (feed) => feed.apply({ type: 'view-replaced', chatId: CHAT_ID, previousViewId: 'view-1', view: { viewId: 'view-2' } }),
+    (feed) => feed.deleteChat(CHAT_ID),
+  ]) {
+    it('does not restore a claimed control after its occurrence is retired', () => {
+      const feed = new ChatTransientFeedStore('server-1');
+      feed.apply(permissionEvent());
+      const control = {
+        chatId: CHAT_ID, viewId: 'view-1', runId: 'run-1', permissionOccurrenceId: 'occurrence-one',
+      };
+      feed.applyPermissionActionability({ control, actionability: 'claimed' });
+      retire(feed, control);
+      expect(feed.applyPermissionActionability({ control, actionability: 'actionable' })).toEqual({ kind: 'unchanged' });
+      expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
+    });
+  }
+
   it('exposes only current actionable controls as list attention', () => {
     const feed = new ChatTransientFeedStore('server-1');
     expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);

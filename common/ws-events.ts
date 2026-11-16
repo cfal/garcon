@@ -43,7 +43,7 @@ import {
   isTranscriptSearchStatusV1,
   type TranscriptSearchStatusV1,
 } from './chat-search';
-import { InvalidChatIdError, parseChatId } from './chat-id';
+import { canonicalChatId, nonNegativeInt, requiredPath, requiredStr, str } from './ws-value-parsing.js';
 import {
   CHAT_BOARD_INVALIDATION_REASONS,
   type ChatBoardInvalidationReason,
@@ -497,23 +497,6 @@ export type ServerWsMessage =
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
-
-function str(v: unknown): string {
-  return typeof v === 'string' ? v : '';
-}
-
-function requiredStr(v: unknown): string | null {
-  if (typeof v !== 'string') return null;
-  return v.trim() || null;
-}
-
-function requiredPath(v: unknown): string | null {
-  return typeof v === 'string' && v.trim().length > 0 ? v : null;
-}
-
-function nonNegativeInt(v: unknown): number | null {
-  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
-}
 
 function isValidTranscriptSpan(
   firstOrdinal: number,
@@ -997,14 +980,5 @@ export function parseServerWsMessage(
     }
     default:
       return null;
-  }
-}
-
-function canonicalChatId(value: unknown): string | null {
-  try {
-    return parseChatId(value);
-  } catch (error) {
-    if (error instanceof InvalidChatIdError) return null;
-    throw error;
   }
 }

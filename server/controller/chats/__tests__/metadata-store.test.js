@@ -76,19 +76,60 @@ describe('metadata-store', () => {
   });
 
   describe('extractPreviewText uses full message content', () => {
+    it('retains a pre-run failure before startup repair validates a cold preview', async () => {
+      const metadataPath = path.join(tmpDir, 'cold-activity.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({ cold: { firstMessage: 'Synthetic input' } })));
+      const registry = makeRegistry({ cold: session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        metadataPath, readRunOutcome: async () => 'finished',
+      });
+      await index.init();
+      expect(index.getChatMetadata('cold')).toBeNull();
+      expect(index.recordFailedAttempt(index.captureFailureAttempt('cold', 'pre-run-attempt'))).toBe(true);
+      expect(index.getRunOutcome('cold')).toBe('failed');
+      await index.repair();
+      expect(index.getChatMetadata('cold')).not.toBeNull();
+      expect(index.getRunOutcome('cold')).toBe('failed');
+      index.clearRunOutcome('cold');
+      await index.repair();
+      expect(index.getRunOutcome('cold')).toBeNull();
+      await index.close();
+      await index.flush();
+    });
+
+    it('reconstructs a successful terminal after failed working-directory settlement without changing its live result', async () => {
+      const metadataPath = path.join(tmpDir, 'successful-terminal.json');
+      const registry = makeRegistry({ completed: session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, { metadataPath });
+      index.addNewChatMetadata('completed', 'Synthetic input');
+      index.updateRunOutcome('completed', 'view-1', 'finished', 'successful-run');
+      expect(index.recordFailedAttempt(index.captureFailureAttempt('completed', 'successful-run'))).toBe(false);
+      expect(index.getRunOutcome('completed')).toBe('finished');
+      await index.flush();
+      const restarted = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        metadataPath, readRunOutcome: async () => 'finished',
+      });
+      await restarted.init();
+      await restarted.repair();
+      expect(restarted.getRunOutcome('completed')).toBe(index.getRunOutcome('completed'));
+      await restarted.close();
+      await restarted.flush();
+      await index.close();
+    });
+
     it('retains a completed result through output and clears it for the next input', () => {
       metadata.updateRunOutcome(chatId, 'view-1', 'finished');
-      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBe('finished');
+      expect(metadata.getRunOutcome(chatId)).toBe('finished');
       metadata.updateFromAppendedMessages(chatId, 'view-1', [{
         type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'Late output',
       }]);
-      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBe('finished');
+      expect(metadata.getRunOutcome(chatId)).toBe('finished');
       metadata.updateFromAppendedMessages(chatId, 'view-1', [{
         type: 'user-message', timestamp: '2026-01-03T00:00:00Z', content: 'New input',
       }]);
-      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBeNull();
+      expect(metadata.getRunOutcome(chatId)).toBeNull();
       metadata.updateRunOutcome(chatId, 'old-view', 'failed');
-      expect(metadata.getChatMetadata(chatId).lastRunOutcome).toBeNull();
+      expect(metadata.getRunOutcome(chatId)).toBeNull();
     });
 
     it('fences a startup outcome repair against a newer live result', async () => {
@@ -104,7 +145,7 @@ describe('metadata-store', () => {
       index.updateRunOutcome('repairing', 'view-1', 'failed');
       read.resolve('finished');
       await repair;
-      expect(index.getChatMetadata('repairing').lastRunOutcome).toBe('failed');
+      expect(index.getRunOutcome('repairing')).toBe('failed');
     });
 
     it('keeps runtime outcomes out of persistence and reconstructs them from the ledger source', async () => {
@@ -121,7 +162,7 @@ describe('metadata-store', () => {
       });
       await restarted.init();
       await restarted.repair();
-      expect(restarted.getChatMetadata('runtime-chat').lastRunOutcome).toBe('finished');
+      expect(restarted.getRunOutcome('runtime-chat')).toBe('finished');
       await restarted.close();
       await restarted.flush();
       await index.close();

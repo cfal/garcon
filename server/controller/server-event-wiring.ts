@@ -15,7 +15,8 @@ import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
 import type { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import type { AppliedTransientFeedEvent, ChatTransientFeedStore } from './chats/chat-transient-feed.js';
-import type { ChatMetadata, MetadataIndex } from './chats/metadata-store.js';
+import type { MetadataIndex } from './chats/metadata-store.js';
+import type { ActivityFailureAttempt } from './chats/chat-activity-outcomes.js';
 import type { ShareStore } from './chats/shares/store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
@@ -309,12 +310,9 @@ export function wireServerEvents({
     chatId: string,
     message: string,
     turnMetadata: TurnEventMetadata | undefined,
-    failedAttempt: ChatMetadata | null,
+    failedAttempt: ActivityFailureAttempt | null,
   ): void {
-    if (failedAttempt?.transcriptViewId
-      && metadata.getChatMetadata(chatId) === failedAttempt
-      && processing.phase(chatId) === null
-      && metadata.updateRunOutcome(chatId, failedAttempt.transcriptViewId, 'failed')) {
+    if (processing.phase(chatId) === null && metadata.recordFailedAttempt(failedAttempt)) {
       broadcastActivity(chatId);
     }
     broadcast(
@@ -362,10 +360,10 @@ export function wireServerEvents({
     agentErrorMessage: string,
     agentErrorCode: string,
     turnMetadata?: TurnEventMetadata,
+    failedAttempt = metadata.captureFailureAttempt(chatId, turnMetadata?.turnId),
   ): Promise<void> {
     if (!chatExists(chatId)) return;
     if (!markTurnFailure(chatId, turnMetadata)) return;
-    const failedAttempt = metadata.getChatMetadata(chatId);
     await settleExecutionCommand(
       chatId,
       turnMetadata,
@@ -381,10 +379,10 @@ export function wireServerEvents({
     chatId: string,
     queueErrorMessage: string,
     options: TurnEventMetadata,
+    failedAttempt: ActivityFailureAttempt | null,
   ): Promise<void> {
     broadcastProcessing(chatId, processing.phase(chatId));
     if (!markTurnFailure(chatId, options)) return;
-    const failedAttempt = metadata.getChatMetadata(chatId);
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     broadcastAgentFailure(chatId, queueErrorMessage, options, failedAttempt);
     await markPublicTurnTerminal(chatId, options);
@@ -397,7 +395,7 @@ export function wireServerEvents({
     broadcast(new ChatActivityUpdatedMessage(chatId, projectChatActivityStatus({
       processingPhase: phase,
       pendingUserAction: transientFeeds.hasPendingUserAction(chatId),
-      lastRunOutcome: metadata.getChatMetadata(chatId)?.lastRunOutcome ?? null,
+      lastRunOutcome: metadata.getRunOutcome(chatId),
     })));
   }
 
@@ -439,13 +437,18 @@ export function wireServerEvents({
   agentRegistry.onPermissionRetired(control => {
     publishTransientFeedMutation(transientFeeds.retirePermission(control));
   });
+  agentRegistry.onPermissionActionabilityChanged(event => {
+    publishTransientFeedMutation(transientFeeds.applyPermissionActionability(event));
+  });
   agentRegistry.onTranscriptCommitted(async (event) => {
+    const terminalAttempt = event.type === 'run-ended'
+      ? metadata.captureFailureAttempt(event.chatId, event.runId) : null;
     if (event.type === 'view-replaced') metadata.invalidateTranscriptView(event.chatId);
     transcriptFanout(event);
     if (event.type === 'run-ended' || event.type === 'view-replaced') {
       scheduleChatTask(event.chatId, 'chat activity publication', () => {
         if (!chatExists(event.chatId)) return;
-        if (event.type === 'run-ended') metadata.updateRunOutcome(event.chatId, event.viewId, event.row.outcome);
+        if (event.type === 'run-ended') metadata.recordCommittedOutcome(terminalAttempt, event.viewId, event.row.outcome);
         broadcastActivity(event.chatId);
       });
     }
@@ -485,6 +488,11 @@ export function wireServerEvents({
   queue.onProcessingInvalidated((chatId) => {
     if (inlineTerminalReleases.has(chatId)) return;
     publishProcessing(chatId);
+  });
+  queue.onTurnStarted((chatId, runId) => metadata.beginRunAttempt(chatId, runId));
+  queue.onInputAccepted((chatId, runId) => {
+    metadata.clearRunOutcome(chatId, runId);
+    scheduleChatTask(chatId, 'accepted input activity publication', () => broadcastActivity(chatId));
   });
   const broadcastSessionStopped = (
     chatId: string,
@@ -529,6 +537,7 @@ export function wireServerEvents({
   });
   agentRegistry.onFinished((chatId, exitCode, turnMetadata, outcome) => {
     if (!chatExists(chatId)) return;
+    const failedAttempt = metadata.captureFailureAttempt(chatId, turnMetadata?.turnId);
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
     // Settlement notices enqueue their fanout here; failure delivery waits outside this task.
     let failurePublication: Promise<void> | undefined;
@@ -541,7 +550,7 @@ export function wireServerEvents({
         released = true;
         if (settlement.kind === 'failed') {
           failurePublication = scheduleChatTask(chatId, 'settlement failure', () =>
-            handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata));
+            handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata, failedAttempt));
           return;
         }
         await settleExecutionCommand(chatId, turnMetadata, 'finished');
@@ -566,7 +575,7 @@ export function wireServerEvents({
           const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
           if (settlement.kind === 'failed') {
             failurePublication = scheduleChatTask(chatId, 'settlement failure', () =>
-              handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata));
+              handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata, failedAttempt));
           }
         }
         void queue.checkChatIdle(chatId).catch((err) => {
@@ -577,6 +586,7 @@ export function wireServerEvents({
   });
   agentRegistry.onFailed(async (chatId, agentErrorMessage, agentErrorCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
+    const failedAttempt = metadata.captureFailureAttempt(chatId, turnMetadata?.turnId);
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
     let failurePublication: Promise<void> | undefined;
     return scheduleChatTask(chatId, 'turn failure handling', async () => {
@@ -588,9 +598,9 @@ export function wireServerEvents({
         released = true;
         if (settlement.kind === 'failed') {
           failurePublication = scheduleChatTask(chatId, 'settlement failure', () =>
-            handleAgentFailure(chatId, `${agentErrorMessage}\n${settlement.message}`, agentErrorCode, turnMetadata));
+            handleAgentFailure(chatId, `${agentErrorMessage}\n${settlement.message}`, agentErrorCode, turnMetadata, failedAttempt));
         } else {
-          await handleAgentFailure(chatId, agentErrorMessage, agentErrorCode, turnMetadata);
+          await handleAgentFailure(chatId, agentErrorMessage, agentErrorCode, turnMetadata, failedAttempt);
         }
       } finally {
         if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
@@ -706,8 +716,10 @@ export function wireServerEvents({
     publishProcessing(chatId);
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
+    if (!chatExists(chatId)) return;
+    const failedAttempt = metadata.captureFailureAttempt(chatId, options.turnId);
     scheduleChatTask(chatId, 'queued turn failure handling', () =>
-      handleQueueFailure(chatId, queueErrorMessage, options));
+      handleQueueFailure(chatId, queueErrorMessage, options, failedAttempt));
   });
   queue.onProjectUnavailable((chatId, error) => {
     scheduleChatTask(chatId, 'project unavailable notice', () => {

@@ -56,7 +56,8 @@ function queueCallbacks(overrides = {}) {
     discardPreparedInput: mock(() => undefined),
     publishIdle: mock(() => undefined),
     publishProjectUnavailable: mock(() => undefined),
-    publishTurnFailed: mock(() => undefined),
+    publishTurnStarted: () => undefined,
+        publishTurnFailed: mock(() => undefined),
     retireAttempt: mock(() => undefined),
     ...overrides,
   };
@@ -67,6 +68,7 @@ describe('QueueDrainer', () => {
     const repository = new InMemoryChatExecutionControlRepository('server-1');
     const controls = new ChatExecutionControlOperations(repository, {
       runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
+      inputAccepted: () => undefined,
       unsettledQueueReceiptKeys: () => new Set(), publish() {},
     }, availableProjectAdmission());
     await controls.create('chat-1', { content: 'queued input', images: [] });
@@ -139,6 +141,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput,
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed: mock(() => undefined),
         retireAttempt: mock(() => undefined),
       },
@@ -198,6 +201,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed: mock(() => undefined),
         retireAttempt,
       },
@@ -280,6 +284,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed,
         retireAttempt: mock(() => undefined),
       },
@@ -347,6 +352,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed,
         retireAttempt: mock(() => undefined),
       },
@@ -419,6 +425,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => {}),
         publishIdle: mock(() => {}),
         publishProjectUnavailable: mock(() => {}),
+        publishTurnStarted: () => undefined,
         publishTurnFailed: mock(() => {}),
         retireAttempt: mock(() => {}),
       },
@@ -522,7 +529,8 @@ describe('QueueDrainer', () => {
         {
           runExclusive: (_chatId, operation) => operation(),
           chatExists: () => true,
-          unsettledQueueReceiptKeys: () => new Set(),
+          inputAccepted: () => undefined,
+      unsettledQueueReceiptKeys: () => new Set(),
           publish: () => undefined,
         },
         availableProjectAdmission(),
@@ -671,7 +679,8 @@ describe('QueueDrainer queued attachments', () => {
       {
         runExclusive: (_chatId, operation) => operation(),
         chatExists: () => true,
-        unsettledQueueReceiptKeys: () => new Set(),
+        inputAccepted: () => undefined,
+      unsettledQueueReceiptKeys: () => new Set(),
         publish: () => undefined,
       },
       availableProjectAdmission(),

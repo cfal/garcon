@@ -13,7 +13,7 @@ import type { ChatRegistryEntry } from './registry-contracts.js';
 import { extractFirstLine } from '../lib/text.js';
 import { resolveChatTitle } from './chat-title.js';
 import { carryOverRevision } from './carryover/segments.js';
-import type { ChatActivityStatus } from '../../../common/chat-activity.js';
+import type { ChatActivityStatus, ChatRunOutcome } from '../../../common/chat-activity.js';
 import type { ChatTransientFeedStore } from './chat-transient-feed.js';
 import { projectChatActivityStatus } from './chat-activity-status.js';
 
@@ -27,6 +27,7 @@ interface ChatListProjectorSettings {
 interface ChatListProjectorMetadata {
   listAllChatMetadata(): Map<string, ChatMetadata>;
   getChatMetadata(chatId: string): ChatMetadata | null;
+  getRunOutcome(chatId: string): ChatRunOutcome | null;
 }
 
 export interface ChatListMembershipSnapshot {
@@ -52,11 +53,11 @@ export interface ChatSummaryProjection {
 export class ChatListProjector {
   constructor(private readonly deps: ChatListProjectorDeps) {}
 
-  #activityStatus(chatId: string, metadata: ChatMetadata | null, processingPhase: ChatProcessingPhase | null): ChatActivityStatus | null {
+  #activityStatus(chatId: string, processingPhase: ChatProcessingPhase | null): ChatActivityStatus | null {
     return projectChatActivityStatus({
       processingPhase,
       pendingUserAction: this.deps.transientFeeds.hasPendingUserAction(chatId),
-      lastRunOutcome: metadata?.lastRunOutcome ?? null,
+      lastRunOutcome: this.deps.metadata.getRunOutcome(chatId),
     });
   }
 
@@ -125,7 +126,7 @@ export class ChatListProjector {
     return {
       chat: {
         id: chatId,
-        activityStatus: this.#activityStatus(chatId, metadata, processingPhase),
+        activityStatus: this.#activityStatus(chatId, processingPhase),
         ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
         agentId: session.agentId,
         agentOwnershipEpoch: session.agentOwnershipEpoch,

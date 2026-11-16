@@ -7,13 +7,14 @@ import type {
   ChatTransientFeedSnapshot,
   TransientFeedRow,
 } from '../../../common/chat-transient-feed.js';
-import type { RetiredPermissionControl, TranscriptCommitEvent } from '../ledger/service.js';
+import type { PermissionActionabilityChange, RetiredPermissionControl, TranscriptCommitEvent } from '../ledger/service.js';
 
 interface TransientFeedRecord {
   readonly chatId: string;
   transcriptViewId: string;
   transientRevision: number;
   rows: Map<string, TransientFeedRow>;
+  claimedRows: Map<string, TransientFeedRow>;
 }
 
 export type AppliedTransientFeedEvent =
@@ -34,6 +35,7 @@ export class ChatTransientFeedStore {
         transcriptViewId: event.view.viewId,
         transientRevision: 0,
         rows: new Map(),
+        claimedRows: new Map(),
       });
       return { kind: 'unchanged' };
     }
@@ -42,10 +44,13 @@ export class ChatTransientFeedStore {
     let mutation: ChatTransientFeedMutation['mutation'];
     if (event.type === 'run-ended') {
       const removed = [...record.rows.values()].some((row) => row.runId === event.runId);
-      if (!removed) return { kind: 'unchanged' };
       for (const [id, row] of record.rows) {
         if (row.runId === event.runId) record.rows.delete(id);
       }
+      for (const [id, row] of record.claimedRows) {
+        if (row.runId === event.runId) record.claimedRows.delete(id);
+      }
+      if (!removed) return { kind: 'unchanged' };
       mutation = { kind: 'clear-run', runId: event.runId };
     } else if (event.row.lifecycle.kind === 'requested') {
       if (!event.runId) return { kind: 'unchanged' };
@@ -69,7 +74,9 @@ export class ChatTransientFeedStore {
       mutation = { kind: 'upsert', row };
     } else {
       const lifecycle = event.row.lifecycle;
-      if (!record.rows.delete(lifecycle.permissionOccurrenceId)) return { kind: 'unchanged' };
+      const removed = record.rows.delete(lifecycle.permissionOccurrenceId);
+      record.claimedRows.delete(lifecycle.permissionOccurrenceId);
+      if (!removed) return { kind: 'unchanged' };
       mutation = {
         kind: 'remove',
         permissionOccurrenceId: lifecycle.permissionOccurrenceId,
@@ -80,14 +87,33 @@ export class ChatTransientFeedStore {
 
   retirePermission(control: RetiredPermissionControl): AppliedTransientFeedEvent {
     const record = this.#records.get(control.chatId);
+    const row = record?.rows.get(control.permissionOccurrenceId)
+      ?? record?.claimedRows.get(control.permissionOccurrenceId);
     if (
       !record || record.transcriptViewId !== control.viewId
-      || record.rows.get(control.permissionOccurrenceId)?.runId !== control.runId
+      || row?.runId !== control.runId
     ) return { kind: 'unchanged' };
-    record.rows.delete(control.permissionOccurrenceId);
+    const removed = record.rows.delete(control.permissionOccurrenceId);
+    record.claimedRows.delete(control.permissionOccurrenceId);
+    if (!removed) return { kind: 'unchanged' };
     return this.#mutation(record, {
       kind: 'remove', permissionOccurrenceId: control.permissionOccurrenceId,
     });
+  }
+
+  applyPermissionActionability(event: PermissionActionabilityChange): AppliedTransientFeedEvent {
+    const { control, actionability } = event;
+    const record = this.#records.get(control.chatId);
+    if (!record || record.transcriptViewId !== control.viewId) return { kind: 'unchanged' };
+    const source = actionability === 'claimed' ? record.rows : record.claimedRows;
+    const target = actionability === 'claimed' ? record.claimedRows : record.rows;
+    const row = source.get(control.permissionOccurrenceId);
+    if (row?.runId !== control.runId) return { kind: 'unchanged' };
+    source.delete(control.permissionOccurrenceId);
+    target.set(control.permissionOccurrenceId, row);
+    return this.#mutation(record, actionability === 'claimed'
+      ? { kind: 'remove', permissionOccurrenceId: control.permissionOccurrenceId }
+      : { kind: 'upsert', row });
   }
 
   snapshot(input: {
@@ -97,7 +123,7 @@ export class ChatTransientFeedStore {
     const record = this.#records.get(input.chatId);
     if (!record) return emptySnapshot(this.serverInstanceId, input);
     if (record.transcriptViewId !== input.transcriptViewId) {
-      if (record.rows.size > 0) {
+      if (record.rows.size > 0 || record.claimedRows.size > 0) {
         throw new TypeError('Transient feed snapshot does not match the current transcript view');
       }
       record.transcriptViewId = input.transcriptViewId;
@@ -150,7 +176,7 @@ export class ChatTransientFeedStore {
     const existing = this.#records.get(chatId);
     if (existing) {
       if (existing.transcriptViewId !== transcriptViewId) {
-        if (existing.rows.size > 0) {
+        if (existing.rows.size > 0 || existing.claimedRows.size > 0) {
           throw new TypeError('Cannot replace a transient feed with active controls');
         }
         existing.transcriptViewId = transcriptViewId;
@@ -163,6 +189,7 @@ export class ChatTransientFeedStore {
       transcriptViewId,
       transientRevision: 0,
       rows: new Map(),
+      claimedRows: new Map(),
     };
     this.#records.set(chatId, created);
     return created;

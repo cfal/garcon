@@ -54,7 +54,7 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId.a.activityStatus).toBe('error');
 	});
 
-	it('rechecks a list snapshot superseded by a live activity update', async () => {
+	it('merges live activity into an older list snapshot without refetching', async () => {
 		let resolveList!: (value: ChatListResponse) => void;
 		const listChats = vi.fn()
 			.mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve; }))
@@ -65,7 +65,7 @@ describe('ChatSessionsStore', () => {
 		store.patchChat('a', { activityStatus: 'error' });
 		resolveList({ sessions: [makeServerSession({ activityStatus: 'working' })], total: 1, lastSelectedChatId: null });
 		await refresh;
-		expect(listChats).toHaveBeenCalledTimes(2);
+		expect(listChats).toHaveBeenCalledTimes(1);
 		expect(store.byId.a.activityStatus).toBe('error');
 	});
 	it('remembers a deep-link visit before hydration and prunes absent targets afterward', () => {

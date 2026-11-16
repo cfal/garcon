@@ -34,7 +34,6 @@ import type {
   LedgerRowDraft,
   LedgerRunEndedRow,
   LedgerSessionRow,
-  LedgerUserInputDetail,
   TranscriptPage,
   TranscriptNativeActivityState,
   TranscriptView,
@@ -53,6 +52,9 @@ import {
 } from './garcon-command-publication.js';
 import { LedgerFencedError, PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
 import { permissionRowKind, validatePermissionDecision } from './permission-rows.js';
+import { PermissionControlEvents, type PermissionActionabilityChange } from './permission-control-events.js';
+import { inputDetail } from './input-submission.js';
+export type { PermissionActionabilityChange } from './permission-control-events.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
@@ -85,7 +87,7 @@ export class TranscriptLedgerService {
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #runEndCommitListeners = new Set<(chatId: string, runId: string) => void>();
   readonly #runAbandonedListeners = new Set<(chatId: string, runId: string) => void | Promise<void>>();
-  readonly #permissionRetiredListeners = new Set<(control: RetiredPermissionControl) => void>();
+  readonly #permissionEvents: PermissionControlEvents;
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
@@ -98,6 +100,7 @@ export class TranscriptLedgerService {
     this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
     this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
+    this.#permissionEvents = new PermissionControlEvents(this.#onListenerError);
     this.#commandSinks = {
       chatIdRequests: options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK,
       interAgentMessages: options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK,
@@ -132,8 +135,11 @@ export class TranscriptLedgerService {
   }
 
   subscribePermissionRetired(listener: (control: RetiredPermissionControl) => void): () => void {
-    this.#permissionRetiredListeners.add(listener);
-    return () => this.#permissionRetiredListeners.delete(listener);
+    return this.#permissionEvents.subscribeRetired(listener);
+  }
+
+  subscribePermissionActionabilityChanged(listener: (event: PermissionActionabilityChange) => void): () => void {
+    return this.#permissionEvents.subscribeActionability(listener);
   }
 
   initializeChat(
@@ -324,6 +330,7 @@ export class TranscriptLedgerService {
       claimId: claim.claimId,
     });
     this.#permissionClaims.set(claim.claimId, claim);
+    this.#permissionEvents.changeActionability(claim, 'claimed');
     return claim;
   }
 
@@ -379,8 +386,10 @@ export class TranscriptLedgerService {
     if (
       active?.claimId === claim.claimId
       && this.#activeRuns.get(claim.chatId) === claim.runId
+      && this.#store.currentView(claim.chatId)?.viewId === claim.viewId
     ) {
       permissions!.set(claim.permissionOccurrenceId, { ...active, claimId: null });
+      this.#permissionEvents.changeActionability(claim, 'actionable');
     }
   }
 
@@ -392,15 +401,7 @@ export class TranscriptLedgerService {
       permissions.delete(claim.permissionOccurrenceId);
       this.#deleteEmptyPermissionMap(claim.chatId);
       const { chatId, viewId, runId, permissionOccurrenceId } = claim;
-      queueMicrotask(() => {
-        for (const listener of this.#permissionRetiredListeners) {
-          try {
-            listener({ chatId, viewId, runId, permissionOccurrenceId });
-          } catch (error) {
-            this.#onListenerError(error);
-          }
-        }
-      });
+      queueMicrotask(() => this.#permissionEvents.retire({ chatId, viewId, runId, permissionOccurrenceId }));
     }
   }
 
@@ -711,7 +712,7 @@ export class TranscriptLedgerService {
     this.#sessionCommitListeners.clear();
     this.#runEndCommitListeners.clear();
     this.#runAbandonedListeners.clear();
-    this.#permissionRetiredListeners.clear();
+    this.#permissionEvents.clear();
     this.#store.close();
   }
 
@@ -882,9 +883,7 @@ export class TranscriptLedgerService {
     // Prior committed rows reach their fanout before failure-derived lifecycle state.
     queueMicrotask(() => {
       for (const control of retired) {
-        for (const listener of this.#permissionRetiredListeners) {
-          try { listener(control); } catch (error) { this.#onListenerError(error); }
-        }
+        this.#permissionEvents.retire(control);
       }
       for (const listener of this.#runAbandonedListeners) {
         try {
@@ -976,22 +975,6 @@ export class TranscriptLedgerService {
 
 function inputKey(chatId: string, clientMessageId: string): string {
   return `${chatId}\u0000${clientMessageId}`;
-}
-
-function inputDetail(input: {
-  readonly message: UserMessage;
-  readonly attachments: readonly AgentAttachment[];
-  readonly clientMessageId: string | null;
-  readonly steer: boolean;
-}): LedgerUserInputDetail {
-  return {
-    clientMessageId: input.clientMessageId,
-    message: input.message,
-    attachments: input.attachments,
-    steer: input.steer,
-    preambleBoundary: null,
-    preamblePrefixReceipt: null,
-  };
 }
 
 function timestampAtOrAfter(candidate: string, floor: string | null): string {

@@ -54,7 +54,6 @@ import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './director
 import {
   isLedgerCliRowNoticeRow,
   isLedgerPreambleSelectionChangedNoticeRow,
-  isPresentationOnlyProviderRow,
   PREAMBLES_UPDATED_MESSAGE,
   transcriptViewId,
 } from './contracts.js';
@@ -96,6 +95,7 @@ import {
   preparePreambleInput,
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
+import { composeInputPrompt, readResendCandidates } from './input-composition.js';
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
 import { readAnchorPage, type AnchorScanInput, type AnchorScanResult } from './anchor-page.js';
 import { readRawPage } from './raw-page.js';
@@ -282,7 +282,7 @@ export class TranscriptLedgerStore {
         insertEncodedRows(entry.db, request.viewId, encoded, firstOrdinal);
         return prepared.detail.steer || prepared.detail.message.metadata?.contentMode === 'literal'
           ? [input]
-          : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
+          : composeInputPrompt(entry, request.viewId, input, request.excludedOrdinals);
       });
       entry.nextOrdinal += committedRows.length;
       return {
@@ -398,17 +398,7 @@ export class TranscriptLedgerStore {
   resendCandidates(chatId: string): readonly LedgerUserInputRow[] {
     return this.#read(chatId, (entry) => {
       const view = this.#requireCurrent(entry);
-      const statement = entry.db.query<StoredLedgerRow, [string]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ?
-        ORDER BY ordinal DESC
-      `);
-      try {
-        return collectResendCandidates(statement.iterate(view.viewId));
-      } finally {
-        statement.finalize();
-      }
+      return readResendCandidates(entry, view.viewId);
     });
   }
 
@@ -890,31 +880,6 @@ export class TranscriptLedgerStore {
     }
   }
 
-  #composePrompt(
-    entry: ConnectionEntry,
-    viewId: TranscriptViewId,
-    current: LedgerUserInputRow,
-    excludedOrdinals: ReadonlySet<number> | undefined,
-  ): readonly LedgerUserInputRow[] {
-    return runQuery(() => {
-      const statement = entry.db.query<StoredLedgerRow, [string, number]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND ordinal < ?
-        ORDER BY ordinal DESC
-      `);
-      try {
-        const preceding = collectResendCandidates(
-          statement.iterate(viewId, current.ordinal),
-          excludedOrdinals,
-        );
-        return [...preceding, current];
-      } finally {
-        statement.finalize();
-      }
-    });
-  }
-
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
     return this.#failureFences.read(chatId, () => this.#availableConnection(chatId), work);
   }
@@ -996,26 +961,6 @@ export class TranscriptLedgerStore {
     }
     return current;
   }
-}
-
-function collectResendCandidates(
-  storedRows: Iterable<StoredLedgerRow>,
-  excludedOrdinals?: ReadonlySet<number>,
-): readonly LedgerUserInputRow[] {
-  const candidates: LedgerUserInputRow[] = [];
-  for (const stored of storedRows) {
-    const row = decodeStoredLedgerRow(stored);
-    if (row.kind === 'user-input') {
-      if (row.detail.message.metadata?.contentMode !== 'literal' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
-      continue;
-    }
-    if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
-    if (isPresentationOnlyProviderRow(row)) continue;
-    if (row.kind === 'provider-row'
-        || row.kind === 'permission-requested'
-        || row.kind === 'run-ended') break;
-  }
-  return candidates;
 }
 
 function validateChatDirectoryName(chatId: string): void {
