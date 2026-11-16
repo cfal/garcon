@@ -32,17 +32,16 @@ export interface SidebarVirtualProjectHeaderRow {
 	executorId?: string;
 	type: 'project-header';
 	key: string;
-	/** Nesting level beneath executor and project headers; section labels do not nest. */
 	depth: number;
 	projectKey: string;
 	collapseKey: string;
 	projectPath: string;
 	count: number;
-	chatIds: string[];
+	containsChat: (chatId: string) => boolean;
 	isCollapsed: boolean;
 	/** True when an executor header already identifies this project's executor. */
 	executorGrouped?: boolean;
-	/** True when another project under the same executor shares this folder name. */
+	/** True when another displayed project shares this folder name. */
 	showParentPath?: boolean;
 }
 
@@ -53,41 +52,20 @@ export interface SidebarVirtualExecutorHeaderRow {
 	executorId: string;
 	collapseKey: string;
 	count: number;
-	chatIds: string[];
+	containsChat: (chatId: string) => boolean;
 	isCollapsed: boolean;
 }
 
 export type SidebarChatSection =
 	'active' | 'inactive' | 'archived' | 'in-progress' | 'ready-for-review' | 'caught-up';
 
-// Cross-project sections share the project collapse store's key space.
-export function sidebarSectionKey(section: SidebarChatSection, executorId?: string): string {
-	return executorId === undefined
-		? `section:${section}`
-		: `executor:${executorId}:section:${section}`;
-}
-
-export function sidebarSectionProjectKey(section: SidebarChatSection, projectKey: string): string {
-	return `${sidebarSectionKey(section)}:project:${projectKey}`;
-}
-
-export const SIDEBAR_SECTION_COLLAPSE_KEYS: readonly string[] = [
-	sidebarSectionKey('active'),
-	sidebarSectionKey('inactive'),
-	sidebarSectionKey('archived'),
-	sidebarSectionKey('in-progress'),
-	sidebarSectionKey('ready-for-review'),
-	sidebarSectionKey('caught-up'),
-];
-
 export interface SidebarVirtualSectionHeaderRow {
 	type: 'section-header';
-	executorId?: string;
 	key: string;
 	depth: number;
 	section: SidebarChatSection;
 	count: number;
-	chatIds: string[];
+	containsChat: (chatId: string) => boolean;
 	isCollapsed: boolean;
 }
 
@@ -99,14 +77,21 @@ export interface SidebarVirtualChatRow {
 	list: PersistedChatOrderGroup;
 	isPinned: boolean;
 	isArchived: boolean;
-	projectPath: string;
-	groupProjectKey: string;
-	groupProjectPath: string;
 	reorderScopeKey: string;
 	reorderScopeIds: string[];
+	contextOnly?: boolean;
+	branch?: {
+		collapseKey: string;
+		isCollapsed: boolean;
+		descendants: number;
+		unread: number;
+		processing: number;
+		activity: number;
+		containsChat: (chatId: string) => boolean;
+	};
 	/** True when an executor header already identifies this chat's executor. */
 	executorGrouped?: boolean;
-	/** Section header the chat renders directly beneath, when it is not within a project. */
+	/** Activity bucket in this chat's grouping path. */
 	section?: SidebarChatSection;
 }
 
@@ -120,10 +105,9 @@ export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 
 export interface SidebarRowModel {
 	rows: SidebarVirtualRow[];
-	visibleOrders: SidebarChatOrderMap;
 	visibleChatIds: string[];
-	reorderScopesByChatId: Map<string, string[]>;
-	projectKeys: string[];
+	matchingChatIds: string[];
+	actionableChatIds: string[];
 }
 
 export function estimateSidebarVirtualRowSize(

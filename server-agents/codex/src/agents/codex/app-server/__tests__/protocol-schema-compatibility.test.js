@@ -247,7 +247,7 @@ describe('bundled Codex experimental schema compatibility', () => {
     }
   });
 
-  it('keeps function audio outputs inline despite the wider raw audio input schema', () => {
+  it('preserves inline and file-backed function audio outputs', () => {
     const rawAudio = definitions.ContentItem.oneOf.find(
       (variant) => variant.properties.type.enum.includes('input_audio'),
     );
@@ -259,25 +259,72 @@ describe('bundled Codex experimental schema compatibility', () => {
     const audio = definitions.FunctionCallOutputContentItem.oneOf.find(
       (variant) => variant.properties.type.enum.includes('input_audio'),
     );
-    expect(audio.required).toEqual(['audio_url', 'type']);
-    // File-backed raw audio becomes text, not audio, in function outputs.
-    // https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/protocol/src/models.rs#L2292-L2300
-    const output = [{ type: 'input_audio', audio_url: 'https://example.invalid/synthetic.wav' }];
-    const item = { type: 'functionCallOutput', id: 'synthetic-audio', ...itemFields.functionCallOutput, output };
-    const parsed = decodeItem(item);
-    expect(parsed).toEqual(item);
-    const [message] = convertCodexAppServerItem(parsed);
-    expect(message.type).toBe('tool-result');
-    expect(message.content).toEqual({ items: output });
-    expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+    expect(audio.required).toEqual(['type']);
+    expect(audio.anyOf.map((variant) => variant.required)).toEqual([['audio_url'], ['file_id']]);
     for (const reference of [
-      {}, { audio_url: null }, { audio_url: 3 }, { file_id: 'synthetic-audio-file' },
+      { audio_url: 'https://example.invalid/synthetic.wav' },
+      { file_id: 'synthetic-audio-file' },
+    ]) {
+      const output = [{ type: 'input_audio', ...reference }];
+      const item = { type: 'functionCallOutput', id: 'synthetic-audio', ...itemFields.functionCallOutput, output };
+      const parsed = decodeItem(item);
+      expect(parsed).toEqual(item);
+      const [message] = convertCodexAppServerItem(parsed);
+      expect(message.type).toBe('tool-result');
+      expect(message.content).toEqual({ items: output });
+      expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+    }
+    for (const reference of [
+      {}, { audio_url: null }, { audio_url: 3 }, { file_id: null }, { file_id: 3 },
       { file_id: 'synthetic-audio-file', audio_url: 3 },
+      { audio_url: 'https://example.invalid/synthetic.wav', file_id: 3 },
     ]) {
       expect(() => decodeItem({
         type: 'functionCallOutput', id: 'synthetic-audio', ...itemFields.functionCallOutput,
         output: [{ type: 'input_audio', ...reference }],
       })).toThrow('Invalid');
+    }
+  });
+
+  it('requires complete history item output instead of importing deferred placeholders', () => {
+    expect(definitions.ThreadItemEntry.properties.outputDeferred.type).toBe('boolean');
+    const entry = { turnId: 'synthetic-turn', item: { type: 'contextCompaction', id: 'synthetic-item' } };
+    expect(parseThreadItemsListResponse({ data: [{ ...entry, outputDeferred: false }] }).data).toEqual([entry]);
+    for (const outputDeferred of [true, null, 'false', 0, {}]) {
+      expect(() => parseThreadItemsListResponse({ data: [{ ...entry, outputDeferred }] })).toThrow('outputDeferred');
+    }
+  });
+
+  it('decodes moderation metadata without interpreting provider-owned display instructions', () => {
+    const agent = definitions.ThreadItem.oneOf.find((variant) => variant.properties.type.enum.includes('agentMessage'));
+    expect(agent.properties.moderation.anyOf[0].$ref).toBe('#/definitions/AgentMessageModeration');
+    expect(definitions.AgentMessageModeration.required).toEqual(['moderated']);
+    expect(definitions.AgentMessageDisplay.required).toEqual(['action']);
+    for (const moderation of [
+      null, { moderated: false }, { moderated: true, display: null },
+      { moderated: true, display: { action: 'synthetic-action' } },
+      { moderated: true, display: {
+        action: 'synthetic-action', blockType: 'synthetic-block',
+        cyberTrustedAccess: true, checkTrustedContacts: false,
+      } },
+    ]) {
+      const item = { type: 'agentMessage', id: 'synthetic-answer', ...itemFields.agentMessage, moderation };
+      expect(decodeItem(item)).toEqual(item);
+      const [message] = convertCodexAppServerItem(item);
+      expect(message.type).toBe('assistant-message');
+      expect(message.content).toBe(item.text);
+      expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+    }
+    for (const moderation of [
+      [], true, {}, { moderated: 'true' }, { moderated: true, display: [] },
+      { moderated: true, display: {} }, { moderated: true, display: { action: 3 } },
+      { moderated: true, display: { action: 'synthetic', blockType: 3 } },
+      { moderated: true, display: { action: 'synthetic', cyberTrustedAccess: 'true' } },
+      { moderated: true, display: { action: 'synthetic', checkTrustedContacts: 1 } },
+    ]) {
+      expect(() => decodeItem({
+        type: 'agentMessage', id: 'synthetic-answer', ...itemFields.agentMessage, moderation,
+      })).toThrow('moderation');
     }
   });
 

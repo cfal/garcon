@@ -100,12 +100,11 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
         await browserExpect.poll(() => wizard.evaluate(element => element.scrollTop)).toBe(0);
 
         if (title === 'Arrange your sidebar') {
-          const grouping = wizard.getByRole('combobox', { name: 'Chat grouping' });
-          await browserExpect(grouping).toHaveValue('none');
-          expect(await grouping.evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
-          await browserExpect(wizard.getByRole('radio', { name: 'Recent activity', exact: true })).toBeChecked();
-          await grouping.selectOption('project');
-          await wizard.getByText('Manual', { exact: true }).click();
+          await browserExpect(wizard.getByRole('checkbox', { name: 'Nest delegated chats', exact: true })).toBeChecked();
+          const grouping = wizard.getByRole('checkbox', { name: 'Project path', exact: true });
+          await browserExpect(grouping).not.toBeChecked();
+          await grouping.check();
+          expect(await wizard.getByRole('combobox', { name: 'Inactivity duration' }).evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
           await wizard.getByRole('checkbox', { name: 'Show project path', exact: true }).check();
           await wizard.getByRole('checkbox', { name: 'Dock sidebar on the right', exact: true }).check();
           for (const width of [320, 1440]) {
@@ -114,7 +113,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
               await page.evaluate(size => {
                 document.documentElement.style.setProperty('--interface-font-scale', String(size / 14));
               }, fontSize);
-              for (const name of ['Recent activity', 'Manual']) {
+              for (const name of ['Single-line', 'Compact', 'Detailed']) {
                 expect(await wizard.getByRole('radio', { name, exact: true }).evaluate(input => {
                   const label = input.closest('label')!;
                   const text = [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())!;
@@ -196,8 +195,14 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       await expectUsableWorkspace(page);
       expect((await integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).features.transcriptSearch.enabled).toBe(false);
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pref_local_settings')!))).toMatchObject({
-        sidebarGrouping: 'project',
-        sidebarSortMode: 'manual',
+        sidebarGroupingFields: [
+          { field: 'executor', enabled: false },
+          { field: 'project', enabled: true },
+          { field: 'activity', enabled: false },
+          { field: 'status', enabled: false },
+        ],
+        sidebarSortMode: 'recent',
+        sidebarNestDelegatedChats: true,
         sidebarShowProjectPath: true,
         chatListDock: 'right',
         combineToolUseMessages: false,

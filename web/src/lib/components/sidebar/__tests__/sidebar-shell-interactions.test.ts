@@ -1,6 +1,8 @@
+import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
+import { chat, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 import { getSavedSearches } from '$lib/api/settings';
@@ -74,8 +76,10 @@ describe('sidebar search dialog flow', () => {
 			onNewProjectChat,
 			autoLoadSavedSearches: false,
 			chats: [createChat('chat-1', 'First chat')],
-			collapsedProjectKeys: new Set(['path:/tmp/project']),
 		});
+		const header = container.querySelector<HTMLElement>('[data-sidebar-project-collapsed]');
+		if (!header) throw new Error('Expected the project header');
+		await fireEvent.click(header);
 		await fireEvent.click(await screen.findByRole('button', { name: 'New chat in /tmp/project' }));
 		expect(onNewProjectChat).toHaveBeenCalledExactlyOnceWith({
 			executorId: 'local',
@@ -117,7 +121,7 @@ describe('sidebar search dialog flow', () => {
 		(sidebarGrouping) => {
 			render(SidebarHost, {
 				chats: [createChat('chat-1', 'First chat')],
-				sidebarGrouping,
+				sidebarGroupingFields: migrateSidebarGrouping(sidebarGrouping),
 				autoLoadSavedSearches: false,
 			});
 			expect(screen.queryByRole('button', { name: /^New chat in / })).toBeNull();
@@ -241,7 +245,7 @@ describe('sidebar search dialog flow', () => {
 		});
 	});
 
-	it('switches chat grouping from the sidebar actions menu', async () => {
+	it('applies grouping changes only when the display dialog is accepted', async () => {
 		render(SidebarHost, {
 			chats: [
 				createChat('chat-a', 'Project B chat', { projectPath: '/tmp/project-b' }),
@@ -249,111 +253,76 @@ describe('sidebar search dialog flow', () => {
 			],
 			autoLoadSavedSearches: false,
 		});
-
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Project path' }));
 		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
-
-		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTrigger);
-
-		const projectGrouping = await screen.findByRole('menuitemradio', {
-			name: 'Project',
-		});
-		expect(projectGrouping.getAttribute('aria-checked')).toBe('true');
-		const noGrouping = screen.getByRole('menuitemradio', { name: 'No grouping' });
-		expect(noGrouping.getAttribute('aria-checked')).toBe('false');
-
-		await fireEvent.click(noGrouping);
-
-		await waitFor(() => {
-			expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
-		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() =>
+			expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull(),
+		);
 	});
 
-	it('groups inactive and archived chats by project activity from the sidebar actions menu', async () => {
+	it.each([false, true])('restores display dialog focus (mobile=%s)', async (isMobile) => {
+		render(SidebarHost, { isMobile, autoLoadSavedSearches: false });
+		const trigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		for (const action of ['Apply', 'Cancel', 'Close', 'Escape']) {
+			trigger.focus();
+			await openDisplay();
+			const checkbox = screen.getByRole('checkbox', { name: 'Project path' });
+			checkbox.focus();
+			if (action === 'Escape') await fireEvent.keyDown(checkbox, { key: 'Escape' });
+			else await fireEvent.click(screen.getByRole('button', { name: action }));
+			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+			await waitFor(() => expect(document.activeElement).toBe(trigger));
+		}
+	});
+
+	it('composes activity and project fields without the retired preset', async () => {
 		render(SidebarHost, {
 			chats: [
-				createChat('chat-active', 'Active chat', {
+				createChat('active', 'Active chat', { status: 'running' }),
+				createChat('inactive', 'Inactive chat', {
 					status: 'running',
-					projectPath: '/tmp/project-a',
+					createdAt: '2024-12-20T00:00:00Z',
+					lastActivityAt: '2024-12-20T00:00:00Z',
 				}),
-				createChat('chat-inactive', 'Inactive chat', {
-					status: 'running',
-					projectPath: '/tmp/project-b',
-					createdAt: '2024-12-20T00:00:00.000Z',
-					lastActivityAt: '2024-12-20T00:00:00.000Z',
-				}),
-				createChat('chat-archived', 'Archived chat', {
-					status: 'running',
-					projectPath: '/tmp/project-a',
-					isArchived: true,
-				}),
+				createChat('archived', 'Archived chat', { status: 'running', isArchived: true }),
 			],
 			autoLoadSavedSearches: false,
 		});
-
-		expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeNull();
-
-		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTrigger);
-
-		const projectAndActivity = await screen.findByRole('menuitemradio', {
-			name: 'Project and activity',
-		});
-		expect(projectAndActivity.getAttribute('aria-checked')).toBe('false');
-
-		await fireEvent.click(projectAndActivity);
-
-		await waitFor(() => {
-			expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeTruthy();
-		});
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Activity' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() =>
+			expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeTruthy(),
+		);
 		expect(document.querySelector('[data-sidebar-section-header="archived"]')).toBeTruthy();
-		expect(screen.getByText('Inactive')).toBeTruthy();
-
-		const [menuTriggerAgain] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTriggerAgain);
-		const activity = await screen.findByRole('menuitemradio', {
-			name: 'Activity',
-		});
-		await fireEvent.click(activity);
-
-		await waitFor(() => {
-			expect(document.querySelector('[data-sidebar-section-header="active"]')).toBeTruthy();
-		});
-		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
-		expect(screen.getByText('Active')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-project-header]')).toBeTruthy();
 	});
 
-	it('groups chats by processing and unread status from the sidebar actions menu', async () => {
+	it('groups chats by their own processing and unread state', async () => {
 		render(SidebarHost, {
 			chats: [
-				createChat('chat-processing', 'Processing chat', {
-					status: 'running',
+				createChat('processing', 'Processing chat', {
 					isProcessing: true,
 					processingPhase: 'running',
-					isUnread: true,
 				}),
-				createChat('chat-unread', 'Unread chat', { isUnread: true }),
-				createChat('chat-caught-up', 'Caught up chat'),
+				createChat('unread', 'Unread chat', { isUnread: true }),
+				createChat('caught-up', 'Caught up chat'),
 			],
 			autoLoadSavedSearches: false,
 		});
-
-		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTrigger);
-		const status = await screen.findByRole('menuitemradio', { name: 'Status' });
-		await fireEvent.click(status);
-
-		await waitFor(() => {
-			expect(document.querySelector('[data-sidebar-section-header="in-progress"]')).toBeTruthy();
-		});
-		expect(
-			Array.from(document.querySelectorAll('[data-sidebar-section-header]')).map((header) =>
-				header.getAttribute('data-sidebar-section-header'),
-			),
-		).toEqual(['in-progress', 'ready-for-review', 'caught-up']);
-		expect(screen.getByText('In Progress')).toBeTruthy();
-		expect(screen.getByText('Ready for Review')).toBeTruthy();
-		expect(screen.getByText('Caught Up')).toBeTruthy();
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Project path' }));
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Status' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() =>
+			expect(
+				Array.from(document.querySelectorAll('[data-sidebar-section-header]')).map((header) =>
+					header.getAttribute('data-sidebar-section-header'),
+				),
+			).toEqual(['in-progress', 'ready-for-review', 'caught-up']),
+		);
 		expect(document.querySelector('[data-sidebar-project-header]')).toBeNull();
 	});
 
@@ -369,7 +338,7 @@ describe('sidebar search dialog flow', () => {
 		const view = render(SidebarHost, {
 			chats,
 			autoLoadSavedSearches: false,
-			sidebarGrouping: 'project-and-activity',
+			sidebarGroupingFields: migrateSidebarGrouping('project-and-activity'),
 			sidebarInactivityDuration: '2-weeks',
 		});
 
@@ -379,7 +348,7 @@ describe('sidebar search dialog flow', () => {
 		await view.rerender({
 			chats,
 			autoLoadSavedSearches: false,
-			sidebarGrouping: 'project-and-activity',
+			sidebarGroupingFields: migrateSidebarGrouping('project-and-activity'),
 			sidebarInactivityDuration: '2-days',
 		});
 
@@ -389,37 +358,53 @@ describe('sidebar search dialog flow', () => {
 		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
 	});
 
-	it('toggles nested project grouping from the sidebar actions menu when project grouping is enabled', async () => {
+	it('toggles delegation nesting without changing project combination', async () => {
+		render(SidebarHost, {
+			chats: [delegated('child', 'parent'), chat('parent')],
+			autoLoadSavedSearches: false,
+		});
+		const order = () =>
+			Array.from(document.querySelectorAll('[data-sidebar-virtual-row]'), (row) =>
+				row.getAttribute('data-sidebar-virtual-row'),
+			);
+		expect(order()).toEqual(['child', 'parent']);
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+		expect(order()).toEqual(['child', 'parent']);
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() => expect(order()).toEqual(['parent', 'child']));
+		expect(document.querySelector('[data-sidebar-virtual-row-content] > button')).toBeNull();
+		await openDisplay();
+		expect(screen.getByRole('checkbox', { name: 'Combine nested paths' })).toHaveProperty(
+			'checked',
+			false,
+		);
+		expect(screen.getByRole('checkbox', { name: 'Nest delegated chats' })).toHaveProperty(
+			'checked',
+			true,
+		);
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Nest delegated chats' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() => expect(order()).toEqual(['child', 'parent']));
+	});
+
+	it('combines known project ancestors through the display dialog', async () => {
 		render(SidebarHost, {
 			chats: [
-				createChat('chat-a', 'Root chat', { projectPath: '/tmp/project' }),
-				createChat('chat-b', 'Nested chat', { projectPath: '/tmp/project/packages/app' }),
+				createChat('root', 'Root chat', { projectPath: '/tmp/project' }),
+				createChat('nested', 'Nested chat', { projectPath: '/tmp/project/packages/app' }),
 			],
 			autoLoadSavedSearches: false,
 		});
-
-		expect(document.querySelector('[data-sidebar-project-header="/tmp/project"]')).toBeTruthy();
-		expect(
-			document.querySelector('[data-sidebar-project-header="/tmp/project/packages/app"]'),
-		).toBeTruthy();
-
-		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTrigger);
-
-		const nestedProjectItem = await screen.findByRole('menuitemcheckbox', {
-			name: 'Combine nested paths',
-		});
-		expect(nestedProjectItem.getAttribute('aria-checked')).toBe('false');
-
-		await fireEvent.click(nestedProjectItem);
-
-		await waitFor(() => {
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'Combine nested paths' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() =>
 			expect(
 				document.querySelector('[data-sidebar-project-header="/tmp/project/packages/app"]'),
-			).toBeNull();
-		});
+			).toBeNull(),
+		);
 		expect(document.querySelector('[data-sidebar-project-header="/tmp/project"]')).toBeTruthy();
-		expect(screen.queryByTitle('/tmp/project/packages/app')).toBeNull();
 	});
 
 	it('updates chat sidebar autohide and docking from the sidebar actions menu', async () => {
@@ -459,53 +444,31 @@ describe('sidebar search dialog flow', () => {
 		).toBe('true');
 	});
 
-	it('switches chat item layout from the sidebar actions menu', async () => {
+	it('applies compact row appearance from the display dialog', async () => {
 		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],
 			autoLoadSavedSearches: false,
 		});
-
 		expect(screen.getByText('First chat preview')).toBeTruthy();
-
-		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTrigger);
-
-		const detailedLayout = await screen.findByRole('menuitemradio', { name: 'Detailed' });
-		expect(detailedLayout.getAttribute('aria-checked')).toBe('true');
-		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact' });
-		expect(compactLayout.getAttribute('aria-checked')).toBe('false');
-
-		await fireEvent.click(compactLayout);
-
-		await waitFor(() => {
-			expect(screen.queryByText('First chat preview')).toBeNull();
-		});
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('radio', { name: 'Compact' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() => expect(screen.queryByText('First chat preview')).toBeNull());
 		expect(screen.getByText('First chat')).toBeTruthy();
 	});
 
-	it('renders single-line chat items from the sidebar actions menu', async () => {
+	it('applies single-line row appearance from the display dialog', async () => {
 		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],
 			autoLoadSavedSearches: false,
 		});
-
-		expect(screen.getByText('First chat preview')).toBeTruthy();
-
-		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(menuTrigger);
-
-		const singleLineLayout = await screen.findByRole('menuitemradio', {
-			name: 'Single-line',
-		});
-		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
-
-		await fireEvent.click(singleLineLayout);
-
-		await waitFor(() => {
-			expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
-		});
+		await openDisplay();
+		await fireEvent.click(screen.getByRole('radio', { name: 'Single-line' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+		await waitFor(() =>
+			expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy(),
+		);
 		expect(screen.queryByText('First chat preview')).toBeNull();
-		expect(screen.getByText('First chat')).toBeTruthy();
 	});
 
 	it.each(['none', 'project', 'project-and-activity', 'activity', 'status'] as const)(
@@ -513,7 +476,7 @@ describe('sidebar search dialog flow', () => {
 		async (sidebarGrouping) => {
 			render(SidebarHost, {
 				chats: [createChat('chat-1', 'First chat')],
-				sidebarGrouping,
+				sidebarGroupingFields: migrateSidebarGrouping(sidebarGrouping),
 				sidebarChatItemLayout: 'single-line',
 				autoLoadSavedSearches: false,
 			});
@@ -521,8 +484,9 @@ describe('sidebar search dialog flow', () => {
 			const summary = document.querySelector('[data-slot="sidebar-chat-summary"]');
 			expect(summary?.querySelector('[data-slot="chat-project-path"]')).toBeNull();
 			for (const enabled of [true, false]) {
-				await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
-				await fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show project path' }));
+				await openDisplay();
+				await fireEvent.click(screen.getByRole('checkbox', { name: 'Show project path' }));
+				await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 				await waitFor(() => {
 					expect(Boolean(summary?.querySelector('[data-slot="chat-project-path"]'))).toBe(enabled);
 				});
@@ -626,3 +590,9 @@ describe('sidebar back-to-top control', () => {
 		expect(document.activeElement).toBe(viewport);
 	});
 });
+
+async function openDisplay() {
+	await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+	await fireEvent.click(await screen.findByRole('menuitem', { name: 'Sidebar display' }));
+	await screen.findByRole('dialog');
+}

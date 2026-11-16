@@ -12,8 +12,16 @@ import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 
-test('refuses a saved Codex provider mismatch without replacing its session or losing readable history', async () => {
+test.each(['paginated', 'legacy'] as const)('keeps saved native providers on resume and fork after the default changes (%s)', async (historyMode) => {
   const environment = await startScriptedCodexTestEnvironment();
+  let alternateRequests = 0;
+  const alternate = Bun.serve({
+    hostname: '0.0.0.0', port: 0,
+    fetch() {
+      alternateRequests += 1;
+      return new Response('The alternate provider must not receive saved sessions.', { status: 429 });
+    },
+  });
   try {
     await withIntegrationFixture('codex-scripted-provider-admission', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -31,27 +39,121 @@ test('refuses a saved Codex provider mismatch without replacing its session or l
         originalConfig.replace(/^model_provider = .*$/m, 'model_provider = "synthetic-alternate-429"'),
         '[model_providers.synthetic-alternate-429]',
         'name = "Synthetic alternate"',
-        `base_url = ${JSON.stringify(`${environment.proxyBaseUrl}/v1`)}`,
+        `base_url = "http://127.0.0.1:${alternate.port}/v1"`,
         'wire_api = "responses"',
+        'request_max_retries = 0',
+        'stream_max_retries = 0',
         '',
       ].join('\n');
-      await fixture.restartGarcon({ beforeStart: () => writeFile(configPath, alternateConfig) });
+      await writeFile(configPath, alternateConfig);
 
-      const failureCursor = fixture.client.markEvents();
-      const failed = await fixture.client.runChat(liveCodexRunRequest({
-        chatId, command: 'Do not move this session to another provider.',
-      }));
-      const terminal = await fixture.client.waitForTurnTerminal(chatId, failed.turnId, { afterIndex: failureCursor });
-      expect(terminal).toMatchObject({
-        type: 'agent-run-failed',
-        error: 'Codex error: This chat uses garcon-live-testing, but your current provider is synthetic-alternate-429. Switch to garcon-live-testing to continue.',
-      });
-      expect(environment.model.requests()).toHaveLength(1);
+      const answers = [answer];
+      for (const restart of [false, true]) {
+        if (restart) {
+          await fixture.restartGarcon({ beforeStart: async () => {
+            if (historyMode !== 'legacy') return;
+            const path = String(native.nativeSession!.value.path);
+            const lines = (await readFile(path, 'utf8')).trimEnd().split('\n');
+            const metadata = JSON.parse(lines[0]!);
+            // Selects the legacy decoding path; paginated history is exercised through list APIs.
+            metadata.payload.history_mode = 'legacy';
+            delete metadata.payload.history_base;
+            lines[0] = JSON.stringify(metadata);
+            await writeFile(path, `${lines.join('\n')}\n`);
+          } });
+        }
+        const continuedAnswer = `Synthetic original-provider answer on ${restart ? 'cold' : 'retained'} resume.`;
+        environment.model.scriptTurn([codexAssistantMessage(continuedAnswer)]);
+        const continuedCursor = fixture.client.markEvents();
+        const continued = await fixture.client.runChat(liveCodexRunRequest({
+          chatId, command: 'Continue on the saved provider, not the new default.',
+        }));
+        await waitForVisibleResponse({
+          fixture, chatId, turnId: continued.turnId, marker: continuedAnswer, afterIndex: continuedCursor,
+        });
+        answers.push(continuedAnswer);
+        expect(alternateRequests).toBe(0);
+      }
+      expect(environment.model.requests()).toHaveLength(3);
       await fixture.client.reloadChat(chatId);
-      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([answer]);
+      const source = await fixture.client.getMessages(chatId);
+      expect(assistantContents(source.messages)).toEqual(answers);
       const preserved = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: 'codex' });
       expect(preserved.agentSessionId).toBe(native.agentSessionId);
       expect(preserved.nativeSession).toEqual(native.nativeSession);
+
+      const sourcePath = String(native.nativeSession!.value.path);
+      const originalHistory = await readFile(sourcePath, 'utf8');
+      for (const point of [undefined, source.messages.at(-1)!.ordinal]) {
+        const childId = fixture.newChatId();
+        await fixture.client.forkChat({
+          sourceChatId: chatId, chatId: childId,
+          ...(point ? { transcriptViewId: source.transcriptViewId, upToOrdinal: point } : {}),
+        });
+        const childNative = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId: childId, agentId: 'codex' });
+        const childHistory = await readFile(String(childNative.nativeSession!.value.path), 'utf8');
+        expect(JSON.parse(childHistory.split('\n')[0]!).payload.model_provider).toBe('garcon-live-testing');
+        const childAnswer = `Synthetic original-provider ${point ? 'point' : 'whole'} fork answer.`;
+        environment.model.scriptTurn([codexAssistantMessage(childAnswer)]);
+        const childCursor = fixture.client.markEvents();
+        const child = await fixture.client.runChat(liveCodexRunRequest({ chatId: childId, command: 'Continue the saved-provider fork.' }));
+        await waitForVisibleResponse({ fixture, chatId: childId, turnId: child.turnId, marker: childAnswer, afterIndex: childCursor });
+        expect(alternateRequests).toBe(0);
+        expect(await readFile(sourcePath, 'utf8')).toBe(originalHistory);
+      }
+      expect(environment.model.requests()).toHaveLength(5);
+      environment.model.assertSettled();
+    }, environment);
+  } finally {
+    alternate.stop(true);
+    await environment.dispose();
+  }
+}, 120_000);
+
+test('refuses a missing saved native provider without replacing its session or losing readable history', async () => {
+  const environment = await startScriptedCodexTestEnvironment();
+  try {
+    await withIntegrationFixture('codex-scripted-missing-provider', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const answer = 'Synthetic answer owned by the original provider.';
+      environment.model.scriptTurn([codexAssistantMessage(answer)]);
+      const cursor = fixture.client.markEvents();
+      const started = await fixture.client.startChat(liveCodexStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'Start a synthetic provider-bound session.',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: started.turnId, marker: answer, afterIndex: cursor });
+      const native = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: 'codex' });
+      const configPath = join(fixture.executionDirs.home, '.codex', 'config.toml');
+      const originalConfig = await readFile(configPath, 'utf8');
+      await fixture.restartGarcon({ beforeStart: () => writeFile(
+        configPath, originalConfig.replaceAll('garcon-live-testing', 'synthetic-alternate-429'),
+      ) });
+      const failureCursor = fixture.client.markEvents();
+      const failed = await fixture.client.runChat(liveCodexRunRequest({ chatId, command: 'Do not replace the missing provider.' }));
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, failed.turnId, { afterIndex: failureCursor });
+      expect(terminal).toMatchObject({
+        type: 'agent-run-failed', error: expect.stringMatching(/garcon-live-testing.*no longer configured/),
+      });
+      expect(environment.model.requests()).toHaveLength(1);
+      await fixture.client.reloadChat(chatId);
+      const source = await fixture.client.getMessages(chatId);
+      expect(assistantContents(source.messages)).toEqual([answer]);
+      const preserved = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: 'codex' });
+      expect(preserved.agentSessionId).toBe(native.agentSessionId);
+      expect(preserved.nativeSession).toEqual(native.nativeSession);
+
+      const sourcePath = String(native.nativeSession!.value.path);
+      const originalHistory = await readFile(sourcePath, 'utf8');
+      for (const point of [undefined, source.messages.at(-1)!.ordinal]) {
+        const target = fixture.newChatId();
+        expect(await rejectionOf(fixture.client.forkChat({
+          sourceChatId: chatId, chatId: target, allowHandoffFork: true,
+          ...(point ? { transcriptViewId: source.transcriptViewId, upToOrdinal: point } : {}),
+        }))).toMatchObject({ status: 500, body: { errorCode: 'INTERNAL_ERROR' } });
+        expect((await fixture.client.listChats()).sessions.some((entry) => entry.id === target)).toBe(false);
+        expect(await readFile(sourcePath, 'utf8')).toBe(originalHistory);
+        expect(environment.model.requests()).toHaveLength(1);
+      }
 
       await fixture.restartGarcon({ beforeStart: () => writeFile(configPath, originalConfig) });
       const restoredAnswer = 'Synthetic answer after restoring the original provider.';

@@ -29,7 +29,6 @@
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
-		getExecutors,
 		getWorkbenchCommands,
 		getNavigation,
 		getChatSessions,
@@ -37,10 +36,8 @@
 		getWs,
 		getLocalSettings,
 		getRemoteSettings,
-		getMinuteClock,
 		getNotifications,
 		getSidebarSearch,
-		getSidebarProjectCollapse,
 		getWorkspaceCoordinator,
 		getSingletonSurfaces,
 		getTransientLayers,
@@ -73,7 +70,8 @@
 		SearchResultNavigationPort,
 		SearchResultSelection,
 	} from '$lib/sidebar/search/search-result-navigation-controller.js';
-	import { buildSidebarChatListProjection } from '$lib/components/sidebar/sidebar-row-model';
+	import { createAppShellSidebarOrder } from './app-shell-sidebar-order';
+	import SidebarDisplayDialog from '../sidebar/SidebarDisplayDialog.svelte';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
@@ -83,7 +81,6 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
-	const executors = getExecutors();
 	const commandRegistry = getWorkbenchCommands();
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -96,8 +93,6 @@
 	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
 	let handledTicketLink: string | null = null;
 	const sidebarSearch = getSidebarSearch();
-	const projectCollapse = getSidebarProjectCollapse();
-	const minuteClock = getMinuteClock();
 	const workspace = getWorkspaceCoordinator();
 	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
@@ -108,22 +103,10 @@
 		notifications,
 	});
 	const chatActionDialogs = new ChatActionDialogsState();
-	const sidebarProjection = $derived.by(() =>
-		buildSidebarChatListProjection({
-			displayedChats: sidebarSearch.filteredChats,
-			executorOrder: executors.executors.map((executor) => executor.id),
-			grouping: localSettings.sidebarGrouping,
-			currentTime: minuteClock.currentTime,
-			inactivityDuration: localSettings.sidebarInactivityDuration,
-			sortMode: localSettings.sidebarSortMode,
-			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-			isChatOptimisticallyArchived: (chatId) => sessions.isChatOptimisticallyArchived(chatId),
-			optimisticArchiveOrder: sessions.orderedChats,
-			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
-		}),
-	);
-	const displayedSidebarChatIds = $derived(sidebarProjection.rowModel.visibleChatIds);
+	let sidebarDisplayOpen = $state(false);
+	let sidebarDisplayReturnFocus = $state<(() => void) | undefined>();
+	const sidebarOrder = createAppShellSidebarOrder();
+	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
 	const mobileSidebarLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -475,6 +458,7 @@
 		const targetId = resolveAdjacentChatId({
 			selectedChatId: sessions.selectedChatId,
 			displayedChatIds: sidebarMounted ? displayedSidebarChatIds : null,
+			displayedRows: sidebarMounted ? sidebarOrder.projection.rowModel.rows : undefined,
 			fallbackOrder: sessions.order,
 			offset,
 		});
@@ -667,6 +651,7 @@
 	);
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => {
+		sidebarOrder.destroy();
 		archiveUndo.destroy();
 		chatNavigation.destroy();
 		chatDrafts.destroy();
@@ -719,10 +704,16 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
-		projection={sidebarProjection}
+		projection={sidebarOrder.projection}
+		reorder={sidebarOrder}
+		onShowDisplay={(returnFocus) => {
+			sidebarDisplayReturnFocus = returnFocus;
+			sidebarDisplayOpen = true;
+		}}
 		chats={sessions.orderedChats}
 		selectedChatId={sessions.selectedChatId}
 		isLoading={sessions.isLoadingChats}
+		rosterReady={sessions.chatListStatus === 'ready'}
 		{isMobile}
 		{onChatSelect}
 		onNewChat={handleNewChat}
@@ -751,6 +742,12 @@
 		{newWindowEdges}
 	/>
 {/snippet}
+{#if sidebarDisplayOpen}
+	<SidebarDisplayDialog
+		returnFocus={sidebarDisplayReturnFocus}
+		onClose={() => (sidebarDisplayOpen = false)}
+	/>
+{/if}
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}

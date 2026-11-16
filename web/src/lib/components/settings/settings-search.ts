@@ -52,7 +52,6 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 		...[
 			m.settings_tab_behavior(),
 			m.settings_image_cache_size(),
-			m.settings_sidebar_inactivity_duration(),
 			m.settings_chat_auto_expand_tools(),
 			m.settings_chat_combine_tool_use_messages(),
 			m.settings_chat_always_expand_cli_messages(),

@@ -547,6 +547,12 @@ function createDeps(chat = createRunningChat()) {
 		beginTurn: vi.fn(),
 	};
 	const deps = {
+		moveChatToBoundary: vi.fn<SessionControllerDeps['moveChatToBoundary']>().mockResolvedValue({
+			success: true,
+			chatId: chat.id,
+			orderGroup: 'normal',
+			changed: true,
+		}),
 		sessions: {
 			selectedChatId: chat.id,
 			selectedChat: chat,
@@ -571,12 +577,6 @@ function createDeps(chat = createRunningChat()) {
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			renameChat: vi.fn().mockResolvedValue(true),
-			moveChatToBoundary: vi.fn().mockResolvedValue({
-				success: true,
-				chatId: chat.id,
-				orderGroup: 'normal',
-				changed: true,
-			}),
 			tagReconciliationKind: vi.fn(() => null),
 			applyChatTagDelta: vi.fn(
 				async (request: {
@@ -1098,7 +1098,7 @@ describe('ConversationSessionController', () => {
 				expect(await controller[submit]('chat-1')).toBe('accepted');
 			}
 			expect(deps.sessions.renameChat).toHaveBeenCalledWith('chat-1', 'Synthetic title');
-			expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith('chat-1', 'top');
+			expect(deps.moveChatToBoundary).toHaveBeenCalledWith('chat-1', 'top');
 			expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
 				chatId: 'chat-1',
 				addTags: ['urgent'],
@@ -1171,7 +1171,7 @@ describe('ConversationSessionController', () => {
 
 		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
 
-		expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith('chat-1', 'top');
+		expect(deps.moveChatToBoundary).toHaveBeenCalledWith('chat-1', 'top');
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');

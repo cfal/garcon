@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -248,7 +248,8 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'compact',
 				sortMode: 'manual',
@@ -267,7 +268,8 @@ describe('shared sidebar chat row', () => {
 			session: createChat({ isUnread: false }),
 			isPinned: true,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -327,7 +329,8 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat({ isUnread: false }),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -350,7 +353,8 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat({ isUnread: false, isProcessing: true }),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -380,7 +384,8 @@ describe('shared sidebar chat row', () => {
 			isPinned: true,
 			isArchived: true,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -398,7 +403,8 @@ describe('shared sidebar chat row', () => {
 			isPinned: true,
 			isMobile: true,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -425,7 +431,8 @@ describe('shared sidebar chat row', () => {
 			session: createChat({ isUnread: false }),
 			isMultiSelectMode: true,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -465,7 +472,8 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -523,13 +531,13 @@ describe('shared sidebar chat row', () => {
 			'Select',
 			'Move to top',
 			'Move to bottom',
-			'Reorder chats',
+			'Reorder all chats',
 		]);
 		expect(menuParts).toEqual([
 			'Select',
 			'Move to top',
 			'Move to bottom',
-			'Reorder chats',
+			'Reorder all chats',
 			'separator',
 			'Pin',
 			'Archive',
@@ -556,6 +564,19 @@ describe('shared sidebar chat row', () => {
 		expect(forkItem.hasAttribute('data-disabled')).toBe(false);
 		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
+	});
+
+	it('closes the archive menu when its action immediately becomes pending', async () => {
+		const onToggleArchive = vi.fn(() => {
+			void view.rerender({ isArchiveMutationPending: true });
+		});
+		const view = render(SidebarChatItemHost, { session: createChat(), onToggleArchive });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Archive' }));
+
+		expect(onToggleArchive).toHaveBeenCalledExactlyOnceWith('chat-1');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 	});
 
 	it('disables pin and archive toggles while an archive mutation is pending', async () => {
@@ -591,7 +612,7 @@ describe('shared sidebar chat row', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-		const reorderSubmenu = screen.getByRole('menuitem', { name: 'Reorder chats' });
+		const reorderSubmenu = screen.getByRole('menuitem', { name: 'Reorder all chats' });
 		reorderSubmenu.focus();
 		await fireEvent.keyDown(reorderSubmenu, { key: 'ArrowRight' });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: label }));
@@ -607,7 +628,7 @@ describe('shared sidebar chat row', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 
-		expect(screen.getByRole('menuitem', { name: 'Reorder chats' })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: 'Reorder all chats' })).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: 'Move to top' })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: 'Move to bottom' })).toBeNull();
 	});

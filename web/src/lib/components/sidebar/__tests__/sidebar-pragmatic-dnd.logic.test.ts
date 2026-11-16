@@ -231,6 +231,24 @@ describe('sidebar pragmatic drag data', () => {
 			]),
 		).toBeNull();
 	});
+	it('does not accept a previous peer retained only by stickiness', () => {
+		const source = getSidebarChatDragData({
+			chatId: 'root-a',
+			list: 'normal',
+			index: 0,
+			instanceId: Symbol('sidebar'),
+			reorderScopeKey: 'roots',
+		});
+		const target = makeDropTarget(
+			getSidebarChatDropTargetData({
+				...source,
+				chatId: 'root-b',
+				index: 1,
+			}),
+		);
+		target.isActiveDueToStickiness = true;
+		expect(resolveSidebarDropInstruction(source, [target])).toBeNull();
+	});
 
 	it('skips incompatible row records before resolving a compatible drop target', () => {
 		const instanceId = Symbol('instance');

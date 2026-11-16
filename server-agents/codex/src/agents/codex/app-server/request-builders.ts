@@ -259,6 +259,7 @@ export function buildThreadForkParams(sourceSession: {
   projectPath: string;
   codexConfig?: CodexProviderConfig;
   lastTurnId?: string | null;
+  modelProvider?: string | null;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId: sourceSession.agentSessionId,
@@ -270,6 +271,7 @@ export function buildThreadForkParams(sourceSession: {
   if (sourceSession.nativePath) params.path = sourceSession.nativePath;
   if (sourceSession.codexConfig?.config) params.config = sourceSession.codexConfig.config;
   if (sourceSession.lastTurnId) params.lastTurnId = sourceSession.lastTurnId;
+  if (sourceSession.modelProvider) params.modelProvider = sourceSession.modelProvider;
   return params;
 }
 

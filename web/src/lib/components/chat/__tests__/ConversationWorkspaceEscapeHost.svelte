@@ -10,6 +10,7 @@
 	import {
 		setAppShell,
 		setChatSessions,
+		setSidebarOrder,
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
@@ -178,6 +179,7 @@
 	};
 
 	setChatSessions(sessions as never);
+	setSidebarOrder({ moveChatToBoundary: async () => null });
 	setLocalSettings({
 		...COMPOSER_STATUS_BAR_DEFAULTS,
 		autoScrollToBottom: true,

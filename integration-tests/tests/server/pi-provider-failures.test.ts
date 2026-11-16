@@ -45,6 +45,7 @@ describe('scripted Pi provider failures', () => {
     'The pending stream has been canceled',
     'upstream_stream_read_error',
     'stream disconnected before completion: stream closed before response.completed',
+    'upstream response was cut short after the reply had begun',
     'request to https://synthetic.invalid/token failed, reason:',
   ])(
     'keeps the turn active while retrying %s and publishes only the recovered final response', async (message) => {

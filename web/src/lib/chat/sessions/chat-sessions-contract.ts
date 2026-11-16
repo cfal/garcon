@@ -3,7 +3,6 @@ import type {
 	deleteChat,
 	generateChatTitle,
 	recoverChatTags,
-	reorderChat,
 	replaceChatTags,
 	setLastSelectedChat,
 	transitionChatTags,
@@ -12,7 +11,6 @@ import type {
 import type { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
-import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import type {
 	ChatProcessingEntry,
 	ChatProcessingPhase,
@@ -32,7 +30,6 @@ export interface ChatSessionsStoreDeps {
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
 	updateSessionName?: typeof updateSessionName;
-	reorderChat?: typeof reorderChat;
 	replaceChatTags?: typeof replaceChatTags;
 	applyChatTagDelta?: typeof applyChatTagDelta;
 	transitionChatTags?: typeof transitionChatTags;
@@ -76,10 +73,6 @@ export interface ChatSessionsPort {
 	setSelectedChatId(chatId: string | null): void;
 	quietRefreshChats(): Promise<void>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
-	moveChatToBoundary(
-		chatId: string,
-		boundary: ChatOrderBoundary,
-	): Promise<ReorderChatResponse | null>;
 	readonly orderedChats: ChatSessionRecord[];
 	readonly pendingTagMutationChatIds: ReadonlySet<string>;
 	readonly tagRecoveryRequiredChatIds: ReadonlySet<string>;

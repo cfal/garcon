@@ -6,6 +6,10 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import { effectiveExecutorId } from '$shared/executors';
+import { sidebarProjectKey } from '../display/sidebar-row-model';
+import { SIDEBAR_GROUPING_FIELDS } from '../display/sidebar-preferences';
 
 export interface SidebarProjectCollapseSnapshot {
 	collapsedProjectKeys: string[];
@@ -91,13 +95,52 @@ export class SidebarProjectCollapseStore {
 		this.setCollapsed(projectKey, !this.isCollapsed(projectKey));
 	}
 
-	pruneToProjectKeys(projectKeys: Iterable<string>): void {
-		const allowed = new Set(projectKeys);
-		const next = new Set<string>();
-		for (const projectKey of this.collapsedProjectKeys) {
-			if (allowed.has(projectKey)) next.add(projectKey);
-		}
-		this.#replaceAndPersist(next);
+	pruneToRoster(chats: readonly ChatSessionRecord[]): void {
+		const ids = new Set(chats.map((chat) => chat.id));
+		const executors = new Set(chats.map((chat) => effectiveExecutorId(chat.executorId)));
+		const projects = new Set(
+			chats.map((chat) => sidebarProjectKey(chat.projectPath, chat.executorId)),
+		);
+		const activitySections = new Set(['active', 'inactive', 'archived']);
+		const statusSections = new Set(['in-progress', 'ready-for-review', 'caught-up']);
+		const retainedKeys = [...this.collapsedProjectKeys].filter((key) => {
+			if (key.startsWith('delegation:')) return ids.has(key.slice('delegation:'.length));
+			if (!key.startsWith('group:')) return false;
+			try {
+				const value: unknown = JSON.parse(key.slice('group:'.length));
+				if (!Array.isArray(value) || value.length !== 2) return false;
+				const [parent, path] = value;
+				if (parent !== null && !ids.has(parent)) return false;
+				if (
+					!Array.isArray(path) ||
+					path.length === 0 ||
+					path.length > SIDEBAR_GROUPING_FIELDS.length
+				)
+					return false;
+				const fields = new Set<string>();
+				return path.every((pair) => {
+					if (!Array.isArray(pair) || pair.length !== 2) return false;
+					const [field, entry] = pair;
+					if (typeof field !== 'string' || fields.has(field)) return false;
+					fields.add(field);
+					switch (field) {
+						case 'executor':
+							return executors.has(entry);
+						case 'project':
+							return projects.has(entry);
+						case 'activity':
+							return activitySections.has(entry);
+						case 'status':
+							return statusSections.has(entry);
+						default:
+							return false;
+					}
+				});
+			} catch {
+				return false;
+			}
+		});
+		this.#replaceAndPersist(new Set(retainedKeys));
 	}
 
 	snapshot(): SidebarProjectCollapseSnapshot {

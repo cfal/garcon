@@ -9,7 +9,6 @@
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
 	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
-	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import SidebarChatItem from './SidebarChatItem.svelte';
 	import {
 		getSidebarChatDragData,
@@ -21,14 +20,15 @@
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		sidebarChatInset,
 		type SidebarVirtualChatRow,
-	} from './sidebar-virtual-chat-list';
-	import type { SidebarDisplayOptions } from './sidebar-display-options';
+	} from '../../sidebar/display/sidebar-virtual-chat-list';
+	import type { SidebarDisplayOptions } from '../../sidebar/display/sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarVirtualSortableChatRowProps {
+		onToggleBranch?: (key: string) => void;
 		row: SidebarVirtualChatRow;
 		index: number;
 		instanceId: symbol;
@@ -43,7 +43,6 @@
 		dragEnabled?: boolean;
 		reorderEnabled?: boolean;
 		isDragging?: boolean;
-		dropIndicatorEdge?: Edge | null;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
 		onDragSourceUnmount: (chatId: string) => void;
 		onChatSelect: (chatId: string) => void;
@@ -59,7 +58,9 @@
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		hasPinnedChats?: boolean;
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
+		moveBoundaryLabels?: { first: string; last: string };
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
@@ -70,6 +71,7 @@
 	}
 
 	let {
+		onToggleBranch,
 		row,
 		index,
 		instanceId,
@@ -82,7 +84,6 @@
 		dragEnabled = true,
 		reorderEnabled = true,
 		isDragging = false,
-		dropIndicatorEdge = null,
 		onDragStart,
 		onDragSourceUnmount,
 		onChatSelect,
@@ -98,6 +99,9 @@
 		onManageTags,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
+		onMoveUp,
+		onMoveDown,
+		moveBoundaryLabels,
 		onMoveToTop,
 		onMoveToBottom,
 		onSortChatOrder,
@@ -105,11 +109,16 @@
 		newWindowEdges,
 		onDragUpdate,
 		onDropOnRow,
-		hasPinnedChats = false,
 	}: SidebarVirtualSortableChatRowProps = $props();
 
 	let rowEl = $state<HTMLElement | null>(null);
-	let isActiveChat = $derived(!isMultiSelectMode && selectedChatId === row.chat.id);
+	let isActiveChat = $derived(
+		!isMultiSelectMode &&
+			(selectedChatId === row.chat.id ||
+				Boolean(
+					selectedChatId && row.branch?.isCollapsed && row.branch.containsChat(selectedChatId),
+				)),
+	);
 
 	onMount(() => {
 		if (!rowEl) return;
@@ -117,7 +126,12 @@
 		const cleanupDragAndDrop = combine(
 			draggable({
 				element: rowEl,
-				canDrag: () => dragEnabled && !isMobile,
+				canDrag: ({ input }) =>
+					dragEnabled &&
+					!isMobile &&
+					!document
+						.elementFromPoint(input.clientX, input.clientY)
+						?.closest('[data-sidebar-touch-drag-ignore]'),
 				getInitialData: () =>
 					getSidebarChatDragData({
 						chatId: row.chat.id,
@@ -189,21 +203,9 @@
 	data-sidebar-virtual-reorder-scope={row.reorderScopeKey}
 	data-sidebar-drag-disabled={!dragEnabled ? 'true' : undefined}
 >
-	{#if dropIndicatorEdge === 'top'}
-		<div
-			class="pointer-events-none absolute right-2 top-0 z-20 h-0.5 rounded-full bg-primary"
-			style={`left:${sidebarChatInset(row.depth)}px;`}
-		></div>
-	{:else if dropIndicatorEdge === 'bottom'}
-		<div
-			class="pointer-events-none absolute bottom-0 right-2 z-20 h-0.5 rounded-full bg-primary"
-			style={`left:${sidebarChatInset(row.depth)}px;`}
-		></div>
-	{/if}
-
 	<div
 		class={cn(
-			'overflow-hidden',
+			'flex items-stretch overflow-hidden',
 			isActiveChat ? 'bg-sidebar-chat-item-selected-bg' : 'bg-sidebar-chat-item-bg',
 		)}
 		style={`height:${
@@ -213,51 +215,61 @@
 		};`}
 		data-sidebar-virtual-row-content
 	>
-		<svelte:boundary>
-			<SidebarChatItem
-				session={row.chat}
-				{selectedChatId}
-				{currentTime}
-				{isMobile}
-				isPinned={row.isPinned}
-				isArchived={row.isArchived}
-				{displayOptions}
-				depth={row.depth}
-				executorGrouped={row.executorGrouped}
-				inArchivedSection={row.section === 'archived'}
-				{isMultiSelectMode}
-				{isMultiSelected}
-				enableNativeDrag={false}
-				enableRecenterOnRequest={false}
-				{onChatSelect}
-				{onDeleteChat}
-				{onStartRenameChat}
-				{onTogglePinned}
-				{onToggleArchive}
-				{isArchiveMutationPending}
-				{onShowDetails}
-				{onForkChat}
-				{onShareChat}
-				{onTagClick}
-				{onManageTags}
-				{onEnterMultiSelect}
-				{onMultiSelectToggle}
-				{onMoveToTop}
-				{onMoveToBottom}
-				{onSortChatOrder}
-				{onOpenInNewWindow}
-				{newWindowEdges}
-				{hasPinnedChats}
-			/>
-			{#snippet failed()}
-				<div
-					class="flex h-full items-center pr-3 text-sm text-muted-foreground"
-					style={`padding-left:${sidebarChatInset(row.depth)}px;`}
-					data-sidebar-virtual-row-error={row.chat.id}
-				>
-					{row.chat.title || m.sidebar_chats_unnamed()}
-				</div>
-			{/snippet}
-		</svelte:boundary>
+		<div class="min-w-0 flex-1">
+			<svelte:boundary>
+				<SidebarChatItem
+					session={row.chat}
+					{selectedChatId}
+					containsSelectedChat={isActiveChat && selectedChatId !== row.chat.id}
+					{currentTime}
+					{isMobile}
+					isPinned={row.isPinned}
+					isArchived={row.isArchived}
+					{displayOptions}
+					depth={row.depth}
+					branch={row.branch}
+					onToggleDelegatedChats={row.branch && onToggleBranch
+						? () => onToggleBranch?.(row.branch!.collapseKey)
+						: undefined}
+					contextOnly={row.contextOnly}
+					executorGrouped={row.executorGrouped}
+					inArchivedSection={row.section === 'archived'}
+					{isMultiSelectMode}
+					{isMultiSelected}
+					enableNativeDrag={false}
+					enableRecenterOnRequest={false}
+					{onChatSelect}
+					{onDeleteChat}
+					{onStartRenameChat}
+					{onTogglePinned}
+					{onToggleArchive}
+					{isArchiveMutationPending}
+					{onShowDetails}
+					{onForkChat}
+					{onShareChat}
+					{onTagClick}
+					{onManageTags}
+					{onEnterMultiSelect}
+					{onMultiSelectToggle}
+					{onMoveUp}
+					{onMoveDown}
+					{moveBoundaryLabels}
+					{onMoveToTop}
+					{onMoveToBottom}
+					{onSortChatOrder}
+					{onOpenInNewWindow}
+					{newWindowEdges}
+				/>
+				{#snippet failed()}
+					<div
+						class="flex h-full items-center pr-3 text-sm text-muted-foreground"
+						style={`padding-left:${sidebarChatInset(row.depth)}px;`}
+						data-sidebar-virtual-row-error={row.chat.id}
+					>
+						{row.chat.title || m.sidebar_chats_unnamed()}
+					</div>
+				{/snippet}
+			</svelte:boundary>
+		</div>
 	</div>
 </div>

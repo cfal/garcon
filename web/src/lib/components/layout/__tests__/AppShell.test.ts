@@ -18,6 +18,11 @@ import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
+import { NavigationStore } from '$lib/stores/navigation';
+import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte';
+import { chat } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -32,7 +37,8 @@ vi.mock('$lib/chat/actions/chat-navigation.js', () => ({
 }));
 
 vi.mock('$lib/context', () => ({
-	getExecutors: () => ({ executors: [] } satisfies Pick<ExecutorsStore, 'executors'>),
+	setSidebarOrder: vi.fn(),
+	getExecutors: () => ({ executors: [] }) satisfies Pick<ExecutorsStore, 'executors'>,
 	getAppShell: () => testContext.current?.appShell,
 	getChatSessions: () => testContext.current?.sessions,
 	getGhCapability: () => testContext.current?.ghCapability,
@@ -167,9 +173,8 @@ function setViewportWidth(width: number, dispatch = true): void {
 	if (dispatch) window.dispatchEvent(new Event('resize'));
 }
 
-function installContext(): AppShellBreakpointWorkspace {
+function installContext(chats: ChatSessionRecord[] = []): AppShellBreakpointWorkspace {
 	const workspace = new AppShellBreakpointWorkspace();
-	const noOpSubscription = () => () => undefined;
 	const appShell = new AppShellStore();
 	vi.spyOn(appShell, 'setSidebarOpen');
 	vi.spyOn(appShell, 'requestComposerFocus');
@@ -182,14 +187,15 @@ function installContext(): AppShellBreakpointWorkspace {
 	vi.spyOn(notifications, 'dismissKey');
 	let selectedChatId: string | null = null;
 	const sessions = {
-		orderedChats: [],
+		orderedChats: chats,
 		get selectedChatId() {
 			return selectedChatId;
 		},
 		selectedChat: null,
 		lastSelectedChatId: null,
 		isLoadingChats: false,
-		order: [],
+		chatListStatus: 'ready',
+		order: chats.map((entry) => entry.id),
 		byId: {},
 		setSelectedChatId: vi.fn((chatId: string | null) => {
 			selectedChatId = chatId;
@@ -197,14 +203,41 @@ function installContext(): AppShellBreakpointWorkspace {
 		rememberSelectedChat: vi.fn(),
 		refreshChats: vi.fn(async () => undefined),
 		quietRefreshChats: vi.fn(async () => undefined),
+		refreshOrderSnapshot: vi.fn(async () => true),
+		isChatOptimisticallyArchived: vi.fn(() => false),
 		projectPathRevision: vi.fn(() => 0),
 		upsertServerChat: vi.fn(),
-		hasChat: vi.fn((chatId: string) => chatId === 'chat-test'),
+		hasChat: vi.fn(
+			(chatId: string) => chatId === 'chat-test' || chats.some((entry) => entry.id === chatId),
+		),
 		removeChat: vi.fn(),
 		deleteRemoteChat: vi.fn(async () => undefined),
-		renameChat: vi.fn(async () => undefined),
+		renameChat: vi.fn(async () => true),
 		patchChat: vi.fn(),
-	};
+	} satisfies Pick<
+		ChatSessionsStore,
+		| 'orderedChats'
+		| 'selectedChatId'
+		| 'selectedChat'
+		| 'lastSelectedChatId'
+		| 'isLoadingChats'
+		| 'chatListStatus'
+		| 'order'
+		| 'byId'
+		| 'setSelectedChatId'
+		| 'rememberSelectedChat'
+		| 'refreshChats'
+		| 'quietRefreshChats'
+		| 'refreshOrderSnapshot'
+		| 'isChatOptimisticallyArchived'
+		| 'projectPathRevision'
+		| 'upsertServerChat'
+		| 'hasChat'
+		| 'removeChat'
+		| 'deleteRemoteChat'
+		| 'renameChat'
+		| 'patchChat'
+	>;
 	testContext.current = {
 		workspace,
 		commands: {
@@ -213,10 +246,7 @@ function installContext(): AppShellBreakpointWorkspace {
 			),
 		} satisfies Pick<WorkbenchCommandRegistry, 'registerChatNavigation'>,
 		transientLayers,
-		navigation: {
-			onNavigateChatAboveRequested: noOpSubscription,
-			onNavigateChatBelowRequested: noOpSubscription,
-		},
+		navigation: new NavigationStore(),
 		sessions,
 		appShell,
 		ws: {
@@ -233,7 +263,15 @@ function installContext(): AppShellBreakpointWorkspace {
 		minuteClock: { currentTime: new Date('2025-01-02T00:00:00.000Z') },
 		terminals: { orderedSessions: [] },
 		notifications,
-		sidebarSearch: { filteredChats: [], allKnownTags: [], resetDialogs: vi.fn() },
+		sidebarSearch: {
+			activeQuery: '',
+			filteredChats: [],
+			allKnownTags: [],
+			resetDialogs: vi.fn(),
+		} satisfies Pick<
+			SidebarSearchStore,
+			'activeQuery' | 'filteredChats' | 'allKnownTags' | 'resetDialogs'
+		>,
 		projectCollapse: { collapsedProjectKeys: new Set<string>() },
 		ghCapability: { available: true },
 	};
@@ -512,6 +550,25 @@ describe('AppShell responsive workspace binding', () => {
 
 		await waitFor(() => expect(sessions.refreshChats).toHaveBeenCalledOnce());
 	});
+
+	it.each([-1, 1])(
+		'navigates through the real sidebar projection with offset %s',
+		async (offset) => {
+			const workspace = installContext([chat('above'), chat('selected'), chat('below')]);
+			const sessions = testContext.current!.sessions as Pick<
+				ChatSessionsStore,
+				'setSelectedChatId'
+			>;
+			const navigation = testContext.current!.navigation as NavigationStore;
+			const show = vi.spyOn(workspace, 'showChatInCurrentWindow');
+			render(AppShell);
+			await tick();
+			sessions.setSelectedChatId('selected');
+			if (offset === -1) navigation.requestNavigateChatAbove();
+			else navigation.requestNavigateChatBelow();
+			await waitFor(() => expect(show).toHaveBeenCalledWith(offset === -1 ? 'above' : 'below'));
+		},
+	);
 
 	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {
 		const workspace = installContext();
@@ -814,7 +871,9 @@ describe('AppShell responsive workspace binding', () => {
 			expect(chatList?.style.width).toBe('320px');
 			expect(chatList?.inert).toBe(false);
 			expect(panel?.inert).toBe(false);
-			expect(chatList?.classList.contains(dock === 'left' ? 'order-first' : 'order-last')).toBe(true);
+			expect(chatList?.classList.contains(dock === 'left' ? 'order-first' : 'order-last')).toBe(
+				true,
+			);
 			selectChat.focus();
 			expect(document.activeElement).toBe(selectChat);
 			await fireEvent.click(selectChat);
