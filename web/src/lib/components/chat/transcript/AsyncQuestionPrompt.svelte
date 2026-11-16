@@ -1,6 +1,9 @@
 <script lang="ts">
 	import type { AsyncQuestionPrompt } from '$shared/async-user-questions';
-	import { askUserQuestionAnswersValidationError, type AskUserQuestionAnswerPayload } from '$shared/ask-user-question-response';
+	import {
+		askUserQuestionAnswersValidationError,
+		type AskUserQuestionAnswerPayload,
+	} from '$shared/ask-user-question-response';
 	import type { AsyncQuestionPanelPort } from '$lib/chat/conversation/async-question-context.js';
 	import { asyncQuestionDraftKey } from '$lib/chat/conversation/async-question-controller.svelte.js';
 	import type { QuestionDraft } from '$lib/chat/conversation/question-draft.js';
@@ -13,12 +16,26 @@
 		question: AsyncQuestionPrompt;
 		ordinal?: number;
 		panel?: AsyncQuestionPanelPort;
+		composer?: boolean;
+		questionNumber?: number;
+		questionCount?: number;
+		onDismiss?: () => void;
 	}
 
-	let { question, ordinal, panel }: Props = $props();
+	let {
+		question,
+		ordinal,
+		panel,
+		composer = false,
+		questionNumber,
+		questionCount,
+		onDismiss,
+	}: Props = $props();
 	const formId = $props.id();
 	const target = $derived(panel?.identity);
-	const key = $derived(target && ordinal ? asyncQuestionDraftKey(target, ordinal, question.id) : '');
+	const key = $derived(
+		target && ordinal ? asyncQuestionDraftKey(target, ordinal, question.id) : '',
+	);
 	const entry = $derived(panel?.controller.get(key));
 	const recorded = $derived(ordinal ? panel?.recordedAnswer(ordinal, question.id) : undefined);
 	const replyable = $derived(Boolean(ordinal && panel?.canReply(ordinal)));
@@ -26,11 +43,20 @@
 	const hasCapacity = $derived(panel?.controller.canRetain(key) ?? true);
 	const editable = $derived(!sending && hasCapacity);
 	const canAnswer = $derived(Boolean(editable && ordinal && panel?.canSubmit(ordinal)));
-	const collapsed = $derived(entry?.dismissed || entry?.status === 'sent' || (recorded !== undefined && !entry?.draft));
-	const replyLabel = $derived(recorded !== undefined || entry?.status === 'sent' ? m.chat_async_reply_again() : m.chat_async_reply());
-	const draft = $derived<QuestionDraft>(entry?.draft ?? {
-		selectedQuestionOptions: question.options[0] ? { [question.id]: [question.options[0].id] } : {},
-	});
+	const collapsed = $derived(
+		entry?.dismissed || entry?.status === 'sent' || (recorded !== undefined && !entry?.draft),
+	);
+	const replyLabel = $derived(
+		recorded !== undefined || entry?.status === 'sent'
+			? m.chat_async_reply_again()
+			: m.chat_async_reply(),
+	);
+	const draft = $derived<QuestionDraft>(
+		entry?.draft ?? {
+			selectedQuestionOptions:
+				!composer && question.options[0] ? { [question.id]: [question.options[0].id] } : {},
+		},
+	);
 
 	function edit(next: QuestionDraft): void {
 		if (!target || !panel || sending) return;
@@ -46,7 +72,9 @@
 		if (!canAnswer || !target || !panel || !ordinal) return;
 		if (askUserQuestionAnswersValidationError([question], answers)) return;
 		const selected = answers[0];
-		const answer = selected.text ?? question.options.find(option => option.id === selected.selectedOptionIds[0])?.label;
+		const answer =
+			selected.text ??
+			question.options.find((option) => option.id === selected.selectedOptionIds[0])?.label;
 		if (!answer) return;
 		void panel.controller.submit(target, ordinal, question, answer, panel.excludedResendOrdinals);
 	}
@@ -54,7 +82,9 @@
 
 <section class="min-w-0 space-y-2 pb-3 last:pb-0" aria-label={m.chat_async_question()}>
 	{#if collapsed || !replyable}
-		<p class="whitespace-pre-wrap break-words text-sm font-medium text-foreground">{question.prompt}</p>
+		<p class="whitespace-pre-wrap break-words text-sm font-medium text-foreground">
+			{question.prompt}
+		</p>
 		{#if recorded !== undefined}
 			<p class="whitespace-pre-wrap break-words text-sm text-foreground">{recorded}</p>
 		{:else if !entry?.dismissed}
@@ -79,27 +109,33 @@
 			{formId}
 			isPending={editable}
 			{canAnswer}
+			{composer}
+			{questionNumber}
+			{questionCount}
+			{onDismiss}
 			{draft}
 			onDraftChange={edit}
 			onSubmit={submit}
 			submitLabel={m.chat_async_send_answer()}
 		/>
-		<button
-			type="button"
-			disabled={!editable}
-			title={m.chat_async_dismiss_question()}
-			aria-label={m.chat_async_dismiss_question()}
-			class="inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent disabled:opacity-50"
-			onclick={dismiss}
-		>
-			<X class="size-4" />
-		</button>
+		{#if !composer}<button
+				type="button"
+				disabled={!editable}
+				title={m.chat_async_dismiss_question()}
+				aria-label={m.chat_async_dismiss_question()}
+				class="inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent disabled:opacity-50"
+				onclick={dismiss}
+			>
+				<X class="size-4" />
+			</button>{/if}
 	{/if}
 	{#if sending}
 		<p role="status" class="text-xs text-muted-foreground">{m.chat_async_sending_answer()}</p>
 	{:else if replyable && !hasCapacity}
 		<p role="status" class="text-xs text-muted-foreground">{m.chat_async_capacity_exhausted()}</p>
 	{:else if entry?.message}
-		<p role="status" class="whitespace-pre-wrap break-words text-xs text-muted-foreground">{entry.message}</p>
+		<p role="status" class="whitespace-pre-wrap break-words text-xs text-muted-foreground">
+			{entry.message}
+		</p>
 	{/if}
 </section>

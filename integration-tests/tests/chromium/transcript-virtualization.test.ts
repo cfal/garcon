@@ -4911,6 +4911,10 @@ async function verifyPermissionDraftPersistence(
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
   await waitForTranscriptReady(fixture.page);
+  const questionDock = fixture.page.locator('[data-composer-question-dock]');
+  await browserExpect(questionDock).toBeVisible();
+  await questionDock.getByRole('button', { name: 'Dismiss question', exact: true }).click();
+  await browserExpect(questionDock).toHaveCount(0);
 
   const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
   await postgres.waitFor({ state: 'visible' });

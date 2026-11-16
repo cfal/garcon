@@ -20,7 +20,10 @@ import {
 	startChat,
 	stopChat,
 	updateChatModel,
+	updateExecutionSettings,
 } from '$lib/api/chats.js';
+import { composerQuestion, composerQuestionKey } from '$lib/chat/composer/composer-question.js';
+import type { ChoiceTranscript } from '../conversation-choice-service.js';
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { clearChat } from '$lib/api/chat-clear.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
@@ -3719,6 +3722,69 @@ describe('ConversationSessionController', () => {
 			return { deps, controller: new ConversationSessionController(deps) };
 		}
 
+		it('shares one in-flight decision across duplicate question controls', async () => {
+			const response = deferred<CommandAcceptedResponse>();
+			const { deps, controller } = pendingPermissionController();
+			mockSendPermissionDecision.mockReturnValue(response.promise);
+
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: false });
+			controller.handleExitPlanModeForChat('chat-1', 'permission-1', 'deny', 'Synthetic plan');
+
+			expect(mockSendPermissionDecision).toHaveBeenCalledOnce();
+			expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(1);
+			response.resolve(permissionDecisionAccepted('decision-1'));
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+		});
+
+		it('admits a different permission occurrence while the first answer is pending', async () => {
+			const firstResponse = deferred<CommandAcceptedResponse>();
+			const secondResponse = deferred<CommandAcceptedResponse>();
+			const { deps, controller } = pendingPermissionController();
+			deps.conversationUi.pendingPermissionRequests.push({
+				permissionOccurrenceId: 'permission-2',
+				requestedTool: new BashToolUseMessage('', 'tool-2', 'printf second'),
+				control: { ...control, permissionOccurrenceId: 'permission-2' },
+			});
+			mockSendPermissionDecision
+				.mockReturnValueOnce(firstResponse.promise)
+				.mockReturnValueOnce(secondResponse.promise);
+
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: false });
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-2', { allow: false });
+
+			expect(mockSendPermissionDecision).toHaveBeenCalledTimes(2);
+			expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ permissionOccurrenceId: 'permission-2', allow: false }),
+			);
+			firstResponse.resolve(permissionDecisionAccepted('decision-1'));
+			secondResponse.resolve(permissionDecisionAccepted('decision-2'));
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+		});
+
+		it('permits a deliberate retry after a definite delivery failure', async () => {
+			const { deps, controller } = pendingPermissionController();
+			mockSendPermissionDecision
+				.mockRejectedValueOnce(
+					new ApiError(503, 'not sent', 'PERMISSION_DECISION_NOT_DELIVERED', undefined, true),
+				)
+				.mockResolvedValueOnce(permissionDecisionAccepted('decision-2'));
+
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			await vi.waitFor(() =>
+				expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledOnce(),
+			);
+			controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+
+			expect(mockSendPermissionDecision).toHaveBeenCalledTimes(2);
+			const [first, second] = mockSendPermissionDecision.mock.calls.map(([request]) => request);
+			expect(second.clientRequestId).not.toBe(first.clientRequestId);
+			expect(second.control).toBe(first.control);
+		});
+
 		it('retries a lost reply under the same request identity', async () => {
 			const { deps, controller } = pendingPermissionController();
 			mockSendPermissionDecision
@@ -5475,4 +5541,103 @@ describe('ConversationSessionController', () => {
 			},
 		);
 	});
+
+describe('literal response choices share session admission', () => {
+	function choice(controller: ConversationSessionController) {
+		const entries = [{ ordinal: 1, message: new AssistantMessage('2026-01-01T00:00:00Z', 'Which command do you prefer?\n- /clear\n- Continue') }];
+		const transcript = { entries, transcriptViewId: 'generation-1', hasLaterMessages: false, excludedResendOrdinals: [7] } satisfies ChoiceTranscript;
+		const question = composerQuestion(entries, [], { isProcessing: false, hasLaterMessages: false });
+		if (question?.kind !== 'plain') throw new Error('Expected choice');
+		const key = composerQuestionKey(question, 'chat-1', 'generation-1');
+		const send = () => controller.choices.submit({ chatId: 'chat-1', transcriptViewId: 'generation-1', questionKey: key, answers: [{ questionId: question.questions[0].id, selectedOptionIds: ['option-1'] }], transcript, isCurrent: () => true, clearResendExclusions: vi.fn() });
+		return { send, transcript, key };
+	}
+	it.each(['accepted', 'rejected'] as const)('waits for a pending model update: %s', async outcome => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps);
+		const pending = deferred<Awaited<ReturnType<typeof updateChatModel>>>();
+		mockUpdateChatModel.mockReturnValueOnce(pending.promise);
+		mockRunChat.mockResolvedValueOnce({ success: true, commandType: 'run', clientRequestId: 'choice', chatId: 'chat-1', turnId: 'turn', status: 'accepted', acceptedAt: '2026-01-01T00:00:00Z' });
+		deps.composerState.inputText = 'Keep my draft';
+		const attachment = new File(['generic'], 'generic.txt');
+		deps.composerState.images = [attachment];
+		controller.handleModelChange('opus');
+		const { send } = choice(controller);
+		const submission = send();
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(true);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(await send()).toBe(false);
+		expect(await controller.submitForChat('chat-1')).toBe('no-op');
+		if (outcome === 'accepted') pending.resolve({ success: true, chatId: 'chat-1', model: 'opus' });
+		else pending.reject(new ApiError(400, 'Rejected', 'VALIDATION_FAILED'));
+		expect(await submission).toBe(outcome === 'accepted');
+		expect(mockRunChat).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0);
+		if (outcome === 'accepted') expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({ command: '/clear', expectedAgentOwnershipEpoch: 'epoch-1' }));
+		expect(deps.composerState.inputText).toBe('Keep my draft');
+		expect(deps.composerState.images).toEqual([attachment]);
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(false);
+	});
+	it('waits for serialized thinking and permission changes before dispatch', async () => {
+		const { deps } = createDeps(createRunningChat({ permissionMode: 'bypassPermissions' }));
+		const controller = new ConversationSessionController(deps);
+		const thinking = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		const permission = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		vi.mocked(updateExecutionSettings).mockReturnValueOnce(thinking.promise).mockReturnValueOnce(permission.promise);
+		controller.handleThinkingModeChange('high');
+		controller.handlePermissionModeChange('default');
+		const submission = choice(controller).send();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		thinking.resolve({ success: true, chatId: 'chat-1', thinkingMode: 'high', agentSettings: deps.agentState.agentSettings });
+		await vi.waitFor(() => expect(updateExecutionSettings).toHaveBeenCalledTimes(2));
+		expect(mockRunChat).not.toHaveBeenCalled();
+		permission.resolve({ success: true, chatId: 'chat-1', permissionMode: 'default', agentSettings: deps.agentState.agentSettings });
+		expect(await submission).toBe(true);
+		expect(mockRunChat).toHaveBeenCalledOnce();
+	});
+	it('rejects a choice while an ownership handoff is pending', async () => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps);
+		const pending = deferred<Awaited<ReturnType<typeof handoffChat>>>();
+		mockHandoffChat.mockReturnValueOnce(pending.promise);
+		controller.handleModelSelectionChange({ agentId: 'codex', modelValue: 'gpt-5.5' });
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(true);
+		expect(await choice(controller).send()).toBe(false);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		pending.resolve({ success: true, chatId: 'chat-1', chat: { ...createServerEntry('chat-1'), agentId: 'codex', agentOwnershipEpoch: 'next' } });
+		await vi.waitFor(() => expect(controller.isDirectAdmissionPending('chat-1')).toBe(false));
+	});
+	it('settles queue refresh before choosing queue admission', async () => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps);
+		const pending = deferred<Awaited<ReturnType<typeof getChatExecutionControl>>>();
+		mockGetChatExecutionControl.mockReturnValueOnce(pending.promise);
+		controller.handleChatSwitch('chat-1');
+		const submission = choice(controller).send();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		const control = controlWithQueue({ pause: { id: 'pause', kind: 'manual', pausedAt: '2026-01-01T00:00:00Z' } });
+		mockCreateQueuedInput.mockResolvedValueOnce({ success: true, commandType: 'queue-entry-create', clientRequestId: 'choice', chatId: 'chat-1', status: 'accepted', acceptedAt: '2026-01-01T00:00:00Z', entryId: 'queued', control });
+		deps.conversationUi.setExecutionControlFromRefresh.mockImplementation(() => { deps.conversationUi.getExecutionControl.mockReturnValue(control); return true; });
+		pending.resolve({ success: true, chatId: 'chat-1', control });
+		expect(await submission).toBe(true);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(expect.objectContaining({ content: '/clear' }));
+	});
+	it.each(['view', 'owner', 'selection', 'executor'] as const)('fences a stale %s after settings settle', async change => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps);
+		const pending = deferred<Awaited<ReturnType<typeof updateChatModel>>>();
+		mockUpdateChatModel.mockReturnValueOnce(pending.promise);
+		controller.handleModelChange('opus');
+		const { send, transcript } = choice(controller);
+		const submission = send();
+		if (change === 'view') transcript.transcriptViewId = 'replacement';
+		if (change === 'owner') deps.sessions.byId['chat-1'] = { ...deps.sessions.byId['chat-1'], agentOwnershipEpoch: 'replacement' };
+		if (change === 'selection') deps.sessions.selectedChatId = 'other-chat';
+		if (change === 'executor') deps.canSubmitToExecutor.mockReturnValue(false);
+		pending.resolve({ success: true, chatId: 'chat-1', model: 'opus' });
+		expect(await submission).toBe(false);
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+});
+
 });

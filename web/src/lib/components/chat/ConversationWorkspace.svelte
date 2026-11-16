@@ -377,7 +377,23 @@
 		return agent?.executionPolicy === 'conversation';
 	}
 
+	$effect(() => {
+		controller.choices.replies.prune(new Set(sessions.order));
+	});
 	const panelActions: ConversationPanelActions = {
+		isDirectAdmissionPending(chatId) { return controller.isDirectAdmissionPending(chatId); },
+		choiceStatus(key) {
+			return controller.choices.replies.status(key);
+		},
+		answerChoice(surfaceId, chatId, transcriptViewId, questionKey, answers) {
+			const panel = assertRenderedPanel(surfaceId, chatId);
+			return controller.choices.submit({
+				chatId, transcriptViewId, questionKey, answers, transcript: panel.transcript,
+				isCurrent: () => conversationPanels.panel(surfaceId) === panel && panel.isPresentationVisible
+					&& allowsConversationalActions(chatId),
+				clearResendExclusions: () => conversationPanels.clearResendExclusions(chatId),
+			});
+		},
 		reload(surfaceId, chatId) {
 			const panel = assertRenderedPanel(surfaceId, chatId);
 			void controller.loadPanelChat(chatId, panel.transcript, (options) =>

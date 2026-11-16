@@ -53,6 +53,10 @@ for (const width of [1440, 390]) {
         const editor = composer.locator('textarea');
         const dock = page.locator('[data-conversation-panel-composer-anchor="true"] [data-conversation-panel-status-dock]');
         const viewport = page.locator('[data-chat-scroll-viewport]:visible');
+        const questionDock = page.locator('[data-composer-question-dock]');
+        await browserExpect(questionDock).toBeVisible();
+        await questionDock.getByRole('button', { name: 'Dismiss question', exact: true }).click();
+        await browserExpect(questionDock).toHaveCount(0);
         const originalEditor = await editor.elementHandle();
         const composerTop = (await composer.boundingBox())!.y;
         const dockTop = await dock.evaluate(element => element.getBoundingClientRect().y);
@@ -67,6 +71,15 @@ for (const width of [1440, 390]) {
           await browserExpect(page.locator('[data-conversation-panel-composer-anchor="true"]'))
             .toHaveAttribute('data-conversation-panel-chat-id', chatId);
           if (width === 390) await browserExpect(page.getByRole('dialog', { name: 'Chats', exact: true })).toBeHidden();
+          if (chatId === questionId) {
+            await browserExpect.poll(async () =>
+              await questionDock.isVisible() || await page.getByRole('radio', { name: /Careful/ }).isVisible(),
+            ).toBe(true);
+            if (await questionDock.isVisible()) {
+              await questionDock.getByRole('button', { name: 'Dismiss question', exact: true }).click();
+              await browserExpect(questionDock).toHaveCount(0);
+            }
+          }
           expect(await editor.evaluate((element, original) => element === original, originalEditor)).toBe(true);
           expect((await composer.boundingBox())!.y).toBe(composerTop);
           expect(await dock.evaluate(element => element.getBoundingClientRect().y)).toBe(dockTop);
