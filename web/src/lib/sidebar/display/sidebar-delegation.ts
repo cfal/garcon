@@ -75,15 +75,17 @@ export function buildSidebarDelegationForest(
 			// Archived branches retain all descendants, regardless of their own archive state.
 			if (byId.get(id)!.isArchived) continue;
 			const branch = branches.get(id)!;
-			branch.children = branch.children.filter((childId) => {
+			const retainedChildren: string[] = [];
+			for (const childId of branch.children) {
 				if (byId.get(childId)!.isArchived) {
 					branches.get(childId)!.parentId = null;
 					roots.push(childId);
-					return false;
+					continue;
 				}
 				pending.push(childId);
-				return true;
-			});
+				retainedChildren.push(childId);
+			}
+			branch.children = retainedChildren;
 		}
 	}
 	const traversal: string[] = [];
