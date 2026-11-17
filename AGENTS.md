@@ -501,6 +501,18 @@ A bug or flake first observed in a live suite or in production may only be close
 
 ## Reviewer Guidance
 
+Concurrent editing of the same resource from multiple browser tabs is unsupported.
+Lost updates, stale drafts, and last-writer-wins caused solely by that usage are
+not actionable defects. Do not add tab takeover guards. Side-by-side monitoring
+and existing cross-tab notification, terminal identity, authentication, logout,
+and credential-revocation behavior remain supported.
+
+Single-document races (reentrancy, lost replies, reconnect ordering, and stale
+responses) and concurrent server actors (CLI, scheduled prompts, agents,
+background jobs, and executors) remain in scope. Across devices or profiles the
+server must preserve consistency and report conflicts; a conflict plus refresh
+is acceptable without collaborative merging or draft preservation.
+
 Reviewers should explicitly check:
 
 - effect misuse vs derivation opportunities
