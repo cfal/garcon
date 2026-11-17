@@ -89,7 +89,7 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
       return integrations.require(agentId);
     },
   } satisfies ExecutionIntegrationDirectory;
-  const directory = new AgentDirectory(new IntegrationRegistry({ instances: [] }), executors);
+  const directory = new AgentDirectory(executors);
   const adoption = new TranscriptAdoptionService({
     ledger, registry: chats, integrations: directory, getCarryOverRevision: () => '', loadFrozenPrefix: async () => [],
   });

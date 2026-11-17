@@ -66,7 +66,7 @@ import {
   withCurrentExecutionControl,
 } from '../lib/command-execution-control-error.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
-import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { interactiveDeadline } from '../../common/interactive-deadline.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
 import {
@@ -189,7 +189,7 @@ export interface ChatCommandServiceDeps {
   >;
   transientFeeds: Pick<ChatTransientFeedStore, 'validateAction'>;
   preambles: Pick<PreambleService, 'snapshot'>;
-  chatMutationLock?: KeyedPromiseLock;
+  chatMutationLock: KeyedPromiseLock;
   chatTags: Pick<ChatTagMutationService, 'applyDeltaWhileChatLocked'>;
 }
 
@@ -359,7 +359,8 @@ export class CommandSupport {
   readonly #chatMutationLocks: KeyedPromiseLock;
 
   constructor(readonly deps: ChatCommandServiceDeps) {
-    this.#chatMutationLocks = deps.chatMutationLock ?? new KeyedPromiseLock();
+    if (!deps.chatMutationLock) throw new Error('CommandSupport requires the shared chat mutation lock');
+    this.#chatMutationLocks = deps.chatMutationLock;
     this.settlement = new ChatCommandSettlement(deps.ledger);
   }
 

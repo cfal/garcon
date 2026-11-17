@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ScheduledPromptsStore, type ScheduledPromptMoveDirection } from '../scheduled-prompts-store.svelte';
-import { ApiError } from '$lib/api/client';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
 import type { ScheduledPromptsMutationResponse, ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
 
 function scheduledPrompt(id: string) {
@@ -20,6 +20,28 @@ function snapshot(revision: number, ids: string[]): ScheduledPromptsSnapshot {
 }
 
 describe('ScheduledPromptsStore', () => {
+	it.each([false, true])('refreshes unknown creation after an older read, without inferring success (%s)', async (refreshFails) => {
+		const earlier = Promise.withResolvers<ScheduledPromptsSnapshot>();
+		const unknown = new ApiMutationOutcomeUnknownError('Check the schedule list');
+		const create = vi.fn().mockRejectedValue(unknown);
+		const get = vi.fn().mockReturnValueOnce(earlier.promise);
+		if (refreshFails) get.mockRejectedValueOnce(new Error('Offline'));
+		else get.mockResolvedValueOnce(snapshot(2, ['new']));
+		const store = new ScheduledPromptsStore({ create, get });
+		store.applySnapshot(snapshot(1, []));
+		const staleRead = store.refresh();
+		const creation = store.create({ prompt: 'Prompt new', target: scheduledPrompt('new').target,
+			schedule: { type: 'once', runAtUtc: '2030-01-01T09:00:00.000Z' } });
+		const rejected = expect(creation).rejects.toBe(unknown);
+		await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+		earlier.resolve(snapshot(1, []));
+		await staleRead;
+		await rejected;
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(create).toHaveBeenCalledOnce();
+		if (!refreshFails) expect(store.prompts.map(prompt => prompt.id)).toEqual(['new']);
+	});
+
 	it.each([
 		['c', 'top', ['c', 'a', 'b', 'd']],
 		['b', 'bottom', ['a', 'c', 'd', 'b']],

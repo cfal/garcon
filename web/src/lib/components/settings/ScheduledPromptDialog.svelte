@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount, untrack } from 'svelte';
+	import { ApiMutationOutcomeUnknownError } from '$lib/api/client';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
@@ -198,6 +199,7 @@
 			onClose();
 		} catch (error) {
 			if (form !== submittingForm) return;
+			if (error instanceof ApiMutationOutcomeUnknownError) submittingForm.creationUnconfirmed = true;
 			submittingForm.error =
 				error instanceof Error ? error.message : m.scheduled_prompts_save_error();
 		} finally {

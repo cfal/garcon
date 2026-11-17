@@ -224,7 +224,7 @@ function discoveryFixture() {
     if (!ready) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is offline', 503);
     return registry;
   };
-  const directory = new AgentDirectory(registry, {
+  const directory = new AgentDirectory({
     knownIntegration: ({ agentId }) => registry.get(agentId),
     requireIntegration: ({ agentId }) => requireRegistry().require(agentId),
     integrationsFor: requireRegistry,

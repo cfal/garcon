@@ -30,7 +30,6 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
-import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
@@ -215,14 +214,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   constructor(args: {
     registry: IChatRegistry;
-    integrations: IntegrationRegistry;
-    executors?: ExecutionIntegrationDirectory;
+    executors: ExecutionIntegrationDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     onSettingsCommitted?: (chatId: string) => void;
-    chatMutationLock?: KeyedPromiseLock;
+    chatMutationLock: KeyedPromiseLock;
     settingsExecution: SettingsExecutionPort;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
@@ -235,7 +233,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#getCarryOverRevision = args.getCarryOverRevision;
     this.#ledger = args.ledger;
     this.#adoption = args.adoption;
-    this.#directory = new AgentDirectory(args.integrations, args.executors);
+    this.#directory = new AgentDirectory(args.executors);
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
       endpointResolver: args.endpointResolver,

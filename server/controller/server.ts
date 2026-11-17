@@ -145,6 +145,7 @@ import {
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
 import { splitChatRelationships } from './migrations/chat-relationships-split.js';
+import { installUnhandledRejectionPolicy } from '../common/unhandled-rejection-policy.js';
 
 const logger = createLogger('server');
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -154,9 +155,7 @@ type ServeOptionsWithConnectionLimit = Parameters<
 };
 
 export async function startServer(): Promise<void> {
-  process.on('unhandledRejection', (err: unknown) => {
-    logger.error('unhandled rejection (non-fatal):', errorMessage(err));
-  });
+  const stopRejectionPolicy = installUnhandledRejectionPolicy(logger);
 
   let workspaceLease: WorkspaceLease | null = null;
   try {
@@ -177,6 +176,7 @@ export async function startServer(): Promise<void> {
       logger.info(`Carryover migration rollback ${result}. The server was not started.`);
       await workspaceLease.release();
       workspaceLease = null;
+      stopRejectionPolicy();
       return;
     }
     // Rollback recovery answers to the migration marker, not the workspace
@@ -243,7 +243,7 @@ export async function startServer(): Promise<void> {
       }
     });
     const integrationRegistry = executors.localIntegrations;
-    const directory = new AgentDirectory(integrationRegistry, executors);
+    const directory = new AgentDirectory(executors);
     const { inspectProject, resolveFileMentions } = executors;
     const projectBasePath = executors.localInfo.projectBasePath;
     const resolveTicketProject = createTicketProjectResolver((executorId) => executors.projectService(executorId));
@@ -442,7 +442,6 @@ export async function startServer(): Promise<void> {
       },
       resolveFileMentions,
       registry: chatRegistry,
-      integrations: integrationRegistry,
       executors: executors,
       endpointResolver,
       getCarryOverRevision: (entry) => carryOver.revision(
@@ -980,6 +979,7 @@ export async function startServer(): Promise<void> {
         }
         workspaceLease = null;
       }
+      stopRejectionPolicy();
       process.exit(shutdownExitCode({ abortTimedOut, cleanupFailed }));
     };
     process.on('SIGTERM', shutdown);
@@ -992,6 +992,7 @@ export async function startServer(): Promise<void> {
       logger.warn('Failed to release workspace lease:', errorMessage(releaseError));
     });
     logger.error('Failed to start server:', error);
+    stopRejectionPolicy();
     process.exit(1);
   }
 }

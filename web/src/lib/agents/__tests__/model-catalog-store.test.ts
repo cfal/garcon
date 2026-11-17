@@ -4,7 +4,8 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import { createModelCatalogStore } from '../model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
-vi.mock('$lib/api/client', () => ({
+vi.mock('$lib/api/client', async (importOriginal) => ({
+	...await importOriginal<typeof clientApi>(),
 	apiFetch: vi.fn(),
 }));
 

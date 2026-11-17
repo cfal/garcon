@@ -15,6 +15,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - Use `bun run start --port 0` and a timeout to validate that the server can compile and startup iff there have been code changes.
 - DO NOT kill or pkill any running server processes. When testing, always start a NEW server on a different port (e.g. `--port 0` for random or a specific unused port). The user's primary server must never be disrupted.
 - Run `bun run test` to validate your changes
+- New backend/provider/CLI tests must use TypeScript. The explicit exclusions in `tsconfig.tests.json` may only shrink; run `bun scripts/test-debt-gate.ts <base>` to check the branch against its review base.
 - DO NOT use `sed`, remove items using tools if needed.
 - DO NOT stop until the goal has been achieved
 - DO NOT run git commands that modify the git tree, treat it as read-only unless instructed.
@@ -108,6 +109,7 @@ Every execution, executor-service, and related UI change must account for Local 
 - Treat readiness and capabilities per executor, independently of browser WebSocket connectivity. An unavailable executor must not block controller startup or healthy hosts. Preserve unavailable selections and drafts; invalidate affected catalogs and revalidate execution admission on every submit path without gating controller-only actions. Empty success is not an offline result.
 - Reuse the paired Noise lanes in both dial directions; a worker may have no reachable inbound HTTP endpoint. Primary owns authority, execution, producers, terminals, credentials, and Git quick summary; bulk carries Files bodies/listings, other Git/GH, history, and large-capable reverse CLI. Classify every RPC and CLI route explicitly. Bulk never falls back to primary, and bulk loss never retires healthy primary. Fence old receivers before lane-local reconciliation, bind bulk to its parent generation, and keep shared admission/queue reservations across replacements. Liveness observes authenticated progress separately per lane. Do not add channels, schedulers, or replay as incidental feature work.
 - Bump `EXECUTOR_PROTOCOL_REVISION` (`server/remote/transport/rpc-protocol.ts`) in any change to what the controller or worker sends or accepts over the link. Builds of one release share a package version, so without the bump a mismatched controller and worker pass the handshake and fail mid-session.
+- Each commit touching a curated wire source must bump the revision or include a `Protocol-Unchanged: <reason>` trailer explaining why the wire contract is unchanged. Run `bun scripts/protocol-review-gate.ts <base>` before review; a trailer is not a substitute for a required bump.
 - Each disconnected socket retires its session; there is no transport replay. Continuity lives at the application layer: producer notifications and lost launch outcomes resume through the worker's `ProducerRelay`, journaled RPC replies through its `RpcReplyJournal`, and a request is sent again only when the worker proves it never arrived: a journaled call by its per-session sequence number, a launch by its relay's record of the launches it received. Classify every new RPC method in `rpcContinuity`: resources that end with their session stay `session`, and cleanup of a resource that outlives its session, such as a fork, a path preparation, or a producer binding, is `journaled`. Timeout, cancellation, and lost replies without a journal record are not rollback or proof of non-execution. Preserve definite versus unknown outcomes; retries require the operation's existing idempotency and generation guarantees. Start/resume/compaction have no implicit RPC deadline.
 - Worker processes outlive connection authority. Disconnected native turns may continue. Within the reconnect grace the executor is `reconnecting`: calls wait for the replacement session within their own deadlines, except that an interactive operation holding a chat or queue-control lock bounds its waits by one `interactiveDeadline()` taken when it asks for the lock (its calls pass it as `dispatchDeadline`, and a turn's preparation does not count against it; read-only calls also end near it; background work passes none), runs stay active, pending permissions stay pending, Stop is delivered after resume, and the next session resumes each transcript binding from the controller's last received sequence number; retained output beyond the relay budget drops oldest rows first and surfaces as one gap notice. After the grace, or when the worker restarted, fence old publication and permissions, preserve native busy guards, report uncertainty, and retain explicit native Reload recovery. Remote PTYs survive browser/controller disconnects and restarts while the worker survives; preserve bounded terminal replay, not transport replay. Local shares the controller's process lifetime.
 - Handle late success and failure against the captured operation. Clean up late remote resources only through their originating session, never a replacement; a journaled cleanup call that session loses is reconciled with the same worker instance, never another. Cancellation must not release process-owned mutation locks or admission while the underlying work remains unsettled.
@@ -500,6 +502,18 @@ A bug or flake first observed in a live suite or in production may only be close
 - All HTTP requests via `authenticatedFetch` carry a default timeout (30s). Pass a custom timeout only for operations known to be long-running.
 
 ## Reviewer Guidance
+
+Concurrent editing of the same resource from multiple browser tabs is unsupported.
+Lost updates, stale drafts, and last-writer-wins caused solely by that usage are
+not actionable defects. Do not add tab takeover guards. Side-by-side monitoring
+and existing cross-tab notification, terminal identity, authentication, logout,
+and credential-revocation behavior remain supported.
+
+Single-document races (reentrancy, lost replies, reconnect ordering, and stale
+responses) and concurrent server actors (CLI, scheduled prompts, agents,
+background jobs, and executors) remain in scope. Across devices or profiles the
+server must preserve consistency and report conflicts; a conflict plus refresh
+is acceptable without collaborative merging or draft preservation.
 
 Reviewers should explicitly check:
 

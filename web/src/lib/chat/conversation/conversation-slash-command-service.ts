@@ -1,5 +1,5 @@
 import { compactChat } from '$lib/api/chats.js';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ScheduledPromptExecutionSelection } from '$shared/scheduled-prompts';
@@ -315,6 +315,12 @@ export class ConversationSlashCommandService {
 			}
 			return 'accepted';
 		} catch (error) {
+			if (error instanceof ApiMutationOutcomeUnknownError) {
+				deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_notice_schedule_in_unconfirmed({
+					command: `/in ${command.duration} ${command.prompt}`,
+				}));
+				return 'unknown';
+			}
 			if (clearedRevision !== null) {
 				deps.composerState.restoreDraftIfRevision(chatId, clearedRevision, previousText, []);
 			}

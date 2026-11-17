@@ -2279,6 +2279,8 @@
 	"scheduled_prompts_runs_in": "in {duration}",
 	"scheduled_prompts_save": "Save Prompt",
 	"scheduled_prompts_save_error": "The prompt could not be saved.",
+	"scheduled_prompts_creation_unconfirmed": "Could not confirm whether the scheduled prompt was created. It may still be saved. Check Scheduled prompts and its run log before creating another.",
+	"chat_notice_schedule_in_unconfirmed": "Could not confirm whether this prompt was scheduled. It may still be saved. Check Scheduled prompts and its run log before submitting it again. Original command:\n{command}",
 	"scheduled_prompts_saving": "Saving...",
 	"scheduled_prompts_select_chat": "Select chat",
 	"scheduled_prompts_selected_chat_missing": "Chat {id} is no longer available. Select another chat.",

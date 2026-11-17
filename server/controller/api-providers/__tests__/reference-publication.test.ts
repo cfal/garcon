@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +34,7 @@ async function fixture() {
   cleanup.push(() => chats.flush());
   chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null });
   await chats.flush();
-  const ownership = new AgentOwnershipJournal({ workspaceDir: root, registry: chats, retainProviderReferences,
+  const ownership = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), workspaceDir: root, registry: chats, retainProviderReferences,
     integrations: { get: () => null, require: () => { throw new Error('No integration needed'); } }, ledger: { deleteChat: () => {} } });
   await ownership.initialize();
   const selection = { agentId: 'test', model: 'synthetic-model', projectPath: root, apiProviderId: provider.id,

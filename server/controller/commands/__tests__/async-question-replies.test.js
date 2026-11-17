@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { expect, it, mock } from 'bun:test';
 import { CommandSupport } from '../command-support.js';
 import { asyncQuestionReplyText } from '../../../../common/async-user-questions.js';
@@ -12,7 +13,7 @@ function fixture() {
   const row = { ordinal: 5, kind: 'provider-row', message: new AssistantMessage('now', question.prompt, { id: 'set', questions: [question] }) };
   const view = { viewId: 'view', contentStartOrdinal: 1 };
   const replayRows = mock(() => [row]);
-  const support = new CommandSupport({
+  const support = new CommandSupport({ ...controllerSafetyDependencies(),
     chats: { getChat: () => ({ agentId: 'codex', agentOwnershipEpoch: 'epoch' }) },
     transcripts: { currentView: () => view, highWatermark: () => ({ viewId: view.viewId, ordinal: 5 }), replayRows },
   });

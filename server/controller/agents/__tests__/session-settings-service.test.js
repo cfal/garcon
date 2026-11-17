@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
@@ -50,7 +51,7 @@ function makeService(thinkingMode = 'high') {
     readChatExecutionControl: mock(async () => control),
     withChatExecutionControl: mock(async (_chatId, operation) => operation(control)),
   };
-  const service = new AgentSessionSettingsService({
+  const service = new AgentSessionSettingsService({ ...controllerSafetyDependencies(),
     execution,
     onCommitted,
     registry: {

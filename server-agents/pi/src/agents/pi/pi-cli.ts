@@ -1,5 +1,6 @@
 import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import { captureSingleQueryInputFailure } from '@garcon/server-agent-common/shared/single-query-input';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import type { PiConfig } from '../../config.js';
@@ -151,17 +152,11 @@ async function runPiCommand(
     signal,
   });
 
-  if (input != null) {
-    const stdin = proc.stdin;
-    if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
-    stdin.write(input);
-    stdin.end();
-  }
-
-  const [stdout, stderr, exitCode] = await Promise.all([
+  const [stdout, stderr, exitCode, inputFailure] = await Promise.all([
     new Response(proc.stdout as ReadableStream).text(),
     new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
+    captureSingleQueryInputFailure(proc.stdin, input, 'Pi'),
   ]);
   signal?.throwIfAborted();
 
@@ -169,6 +164,7 @@ async function runPiCommand(
     const details = (stderr || stdout || '').trim();
     throw new Error(`Pi command failed with code ${exitCode}${details ? `: ${details}` : ''}`);
   }
+  if (inputFailure) throw inputFailure.error;
   return stdout;
 }
 

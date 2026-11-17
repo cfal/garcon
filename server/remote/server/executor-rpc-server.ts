@@ -12,6 +12,7 @@ import { GitRpcServer } from './git-rpc-server.js';
 import { isGitRpcMethod, type GitRpcRequest } from '../transport/git-protocol.js';
 import { HistoryRpcServer } from './history-rpc-server.js';
 import type { ProducerRelay, ProducerRelaySession } from './producer-relay.js';
+import { createLogger } from '../../common/log.js';
 
 export interface ExecutorRpcServer {
   readonly ready: Promise<void>;
@@ -64,7 +65,9 @@ export function serveExecutionRuntime(
   };
   // Registration precedes readiness so an immediate describe cannot outrun dispatch installation.
   let unsubscribe = () => {};
-  unsubscribe = rpc.transport.onFailure(() => { void dispose(); });
+  unsubscribe = rpc.transport.onFailure(() => {
+    void dispose().catch((error: unknown) => { createLogger('executor-rpc').error('Session cleanup failed:', error); });
+  });
   void ready.catch((error: unknown) => rpc.transport.close(error instanceof Error ? error : new Error(String(error))));
   rpc.onProducerAck((acknowledgements) => relay.acknowledge(producerSession, acknowledgements));
   rpc.onTerminalDetach(async (request) => {

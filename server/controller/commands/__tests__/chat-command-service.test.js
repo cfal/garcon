@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -746,7 +747,7 @@ function makeService(overrides = {}) {
       snapshot: () => ({ revision: 0, preambles: [] }),
     },
     chatTags,
-    chatMutationLock: overrides.chatMutationLock,
+    chatMutationLock: overrides.chatMutationLock ?? controllerSafetyDependencies().chatMutationLock,
   };
   const service = new TestChatCommandService(dependencies);
   activeServices.push(service);
@@ -798,7 +799,7 @@ function makeRealQueue(
     () => ({}),
     () => true,
     controlRepository,
-    {
+    { ...controllerSafetyDependencies(),
       projectAdmission,
       attachmentAdmission: { assertSupported: () => undefined },
       isControlInputViewCurrent: () => true,
