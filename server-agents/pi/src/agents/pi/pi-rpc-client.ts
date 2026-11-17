@@ -170,7 +170,7 @@ export class PiRpcClient {
           throw new Error('Pi process is not writable');
         }
         pending.writeAttempted = true;
-        stdin.write(line);
+        await stdin.write(line);
         await stdin.flush();
       } finally {
         release();

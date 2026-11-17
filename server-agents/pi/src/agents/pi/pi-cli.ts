@@ -154,8 +154,8 @@ async function runPiCommand(
   if (input != null) {
     const stdin = proc.stdin;
     if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
-    stdin.write(input);
-    stdin.end();
+    await stdin.write(input);
+    await stdin.end();
   }
 
   const [stdout, stderr, exitCode] = await Promise.all([

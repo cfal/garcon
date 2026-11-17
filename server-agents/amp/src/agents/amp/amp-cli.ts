@@ -113,8 +113,8 @@ async function runAmpCommand(
   if (input != null) {
     const stdin = proc.stdin;
     if (!stdin || typeof stdin === 'number') throw new Error('Amp process stdin is unavailable');
-    stdin.write(input);
-    stdin.end();
+    await stdin.write(input);
+    await stdin.end();
   }
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -543,7 +543,9 @@ class AmpCliRuntime {
     if (turn.stdinClosed) return;
     turn.stdinClosed = true;
     const stdin = turn.process?.stdin;
-    if (stdin && typeof stdin !== 'number') stdin.end();
+    if (stdin && typeof stdin !== 'number') void Promise.resolve(stdin.end()).catch(error => {
+      this.#logger.warn('Amp stdin close failed.', { error: error instanceof Error ? error.message : String(error) });
+    });
   }
 
   #settlePendingEchoes(turn: AmpTurnContext, result: AgentSteerResult): void {
@@ -568,14 +570,14 @@ class AmpCliRuntime {
     } catch { /* stream closed */ }
   }
 
-  #spawnAmp(
+  async #spawnAmp(
     session: AmpSession,
     turn: AmpTurnContext,
     cwd: string,
     args: string[],
     prompt: string,
     attachments: readonly AgentAttachment[] = [],
-  ): ReturnType<typeof Bun.spawn> {
+  ): Promise<ReturnType<typeof Bun.spawn>> {
     const ampBinary = this.#config.binary();
 
     this.#logger.info('Spawning Amp.', { binary: ampBinary, arguments: args });
@@ -590,28 +592,26 @@ class AmpCliRuntime {
     turn.process = proc;
     session.sources.add(turn);
 
-    turn.pendingInputEchoes.push({ text: prompt });
-    this.#writeInput(
-      turn,
-      buildAmpUserInput(prompt, crypto.randomUUID(), attachments),
-    );
-
-    this.#readStdout(session, proc, turn);
-    this.#pipeStderr(session.id, proc);
-
-    proc.exited.then(exitCode => {
-      this.#logger.info('Amp process exited.', { sessionId: session.id, exitCode });
+    void this.#readStdout(session, proc, turn).catch(error => {
+      this.#logger.error('Amp stdout settlement failed.', { error: error instanceof Error ? error.message : String(error) });
     });
-
+    void this.#pipeStderr(session.id, proc);
+    void proc.exited.then(exitCode => {
+      this.#logger.info('Amp process exited.', { sessionId: session.id, exitCode });
+    }).catch(error => {
+      this.#logger.warn('Amp exit observation failed.', { error: error instanceof Error ? error.message : String(error) });
+    });
+    turn.pendingInputEchoes.push({ text: prompt });
+    await this.#writeInput(turn, buildAmpUserInput(prompt, crypto.randomUUID(), attachments));
     return proc;
   }
 
-  #writeInput(turn: AmpTurnContext, input: string): void {
+  async #writeInput(turn: AmpTurnContext, input: string): Promise<void> {
     const stdin = turn.process?.stdin;
     if (!stdin || typeof stdin === 'number' || turn.stdinClosed) {
       throw new Error('Amp process stdin is unavailable');
     }
-    stdin.write(input);
+    await stdin.write(input);
   }
 
   #rollbackTurnLaunch(
@@ -713,7 +713,9 @@ class AmpCliRuntime {
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
-      this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
+      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, true);
       if (!request.executionAdmission?.signal.aborted) {
@@ -770,7 +772,9 @@ class AmpCliRuntime {
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
-      this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
+      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, false);
       if (!request.executionAdmission?.signal.aborted) {
@@ -839,7 +843,7 @@ class AmpCliRuntime {
         turn.pendingInputEchoes.push(pendingEcho);
       });
       try {
-        this.#writeInput(
+        await this.#writeInput(
           turn,
           buildAmpUserInput(request.input, request.clientMessageId, [], true),
         );

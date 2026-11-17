@@ -151,5 +151,39 @@ export function processExitConformance(create: () => TurnRuntime): void {
       await stopping;
       await running;
     });
+
+    test('a rejected stdin write fails launch and fences the child until exit', async () => {
+      const { runtime, first, second, request } = setup();
+      const write = spyOn(first.stdin, 'write').mockImplementation(() => Promise.reject(new Error('synthetic stdin failure')));
+      try {
+        await expect(runtime.runTurn(request)).rejects.toThrow('synthetic stdin failure');
+        expect(first.signals).toEqual(['SIGTERM']);
+        const next = runtime.runTurn(request);
+        await turn();
+        expect(spawn).toHaveBeenCalledTimes(1);
+        first.exit();
+        await turn();
+        expect(spawn).toHaveBeenCalledTimes(2);
+        const stopping = runtime.abort(request.agentSessionId);
+        second.exit();
+        await stopping;
+        await next;
+      } finally { write.mockRestore(); }
+    });
+
+    test('release during admission prevents a late spawn', async () => {
+      const { runtime, request } = setup();
+      const admitted = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const running = runtime.runTurn({ ...request, executionAdmission: {
+        signal: new AbortController().signal,
+        async markStarted() { entered.resolve(); await admitted.promise; },
+      } });
+      await entered.promise;
+      runtime.releaseSession(request.chatId, request.agentSessionId);
+      admitted.resolve();
+      await expect(running).rejects.toThrow('retired before launch');
+      expect(spawn).not.toHaveBeenCalled();
+    });
   });
 }

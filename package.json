@@ -64,7 +64,8 @@
     "test:live:claude": "bun run --cwd integration-tests test:live:claude",
     "test:live:codex": "bun run --cwd integration-tests test:live:codex",
     "test:live:opencode": "bun run --cwd integration-tests test:live:opencode",
-    "lint": "bun run --cwd web lint",
+    "lint:runtime": "eslint server/remote server-agents --no-warn-ignored --max-warnings=0",
+    "lint": "bun run lint:runtime && bun run --cwd web lint",
     "check": "bun run lint && bun run typecheck",
     "typecheck:tests": "bun scripts/test-debt-gate.ts && bunx tsc -p tsconfig.tests.json",
     "typecheck:server": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run typecheck:tests",
@@ -98,6 +99,8 @@
   },
   "devDependencies": {
     "@xyflow/system": "0.0.83",
-    "typescript": "^6.0.3"
+    "eslint": "^10.12.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2"
   }
 }

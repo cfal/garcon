@@ -677,14 +677,14 @@ export class FactoryCliRuntime {
     }
   }
 
-  #spawnFactory(
+  async #spawnFactory(
     session: FactorySession,
     turn: FactoryTurnContext,
     args: string[],
     prompt: string,
     cwd: string,
     airgap: boolean,
-  ): ReturnType<typeof Bun.spawn> {
+  ): Promise<ReturnType<typeof Bun.spawn>> {
     const factoryBinary = this.#config.binary();
     const proc = Bun.spawn([factoryBinary, ...args], {
       cwd,
@@ -698,11 +698,12 @@ export class FactoryCliRuntime {
 
     const stdin = proc.stdin;
     if (!stdin || typeof stdin === 'number') throw new Error('Factory process stdin is unavailable');
-    stdin.write(prompt);
-    stdin.end();
-
-    void this.#readStdout(session, proc, turn);
+    void this.#readStdout(session, proc, turn).catch(error => {
+      this.#logger.error('Factory stdout settlement failed.', { error: error instanceof Error ? error.message : String(error) });
+    });
     void this.#pipeStderr(session.id || 'pending', proc);
+    await stdin.write(prompt);
+    await stdin.end();
 
     return proc;
   }
@@ -810,7 +811,9 @@ export class FactoryCliRuntime {
 
     try {
       if (request.executionAdmission) await markFactoryExecutionStarted(request);
-      this.#spawnFactory(
+      assertFactoryExecutionOpen(request);
+      if (turn.aborted) throw new Error('Factory session was retired before launch');
+      await this.#spawnFactory(
         session,
         turn,
         args,
@@ -873,7 +876,9 @@ export class FactoryCliRuntime {
       session.lastActivityAt = Date.now();
       this.#runningSessions.set(session.id, session);
       if (request.executionAdmission) await markFactoryExecutionStarted(request);
-      this.#spawnFactory(
+      assertFactoryExecutionOpen(request);
+      if (turn.aborted) throw new Error('Factory session was retired before launch');
+      await this.#spawnFactory(
         session,
         turn,
         args,

@@ -244,7 +244,7 @@ export class ClaudeProcessTransport<Message> {
     await this.#writeTail;
     const stdin = this.process.stdin as import('bun').FileSink & { end?: () => void };
     try {
-      stdin?.end?.();
+      await stdin?.end?.();
     } catch {
       // Signal escalation below remains authoritative when stdin cannot close.
     }
