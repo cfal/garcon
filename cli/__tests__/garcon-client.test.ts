@@ -39,7 +39,8 @@ function accepted(request: AgentRunCommandRequest): Response {
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: new Date().toISOString(),
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     chat: null,
   });
 }
@@ -113,7 +114,8 @@ function validChatList(): Record<string, unknown> {
   return {
     sessions: [{
       id: runRequest.chatId,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       agentId: 'codex',
       agentOwnershipEpoch: 'epoch-1',
       model: 'gpt-5.4',
@@ -852,7 +854,8 @@ describe('GarconClient', () => {
         turnId: 'turn-1',
         status: 'accepted',
         acceptedAt: new Date().toISOString(),
-        parentChat: null,
+        parentChatId: null,
+        lineage: null,
         tagMutation,
       }),
     });
@@ -895,18 +898,18 @@ describe('GarconClient', () => {
     const chatId = runRequest.chatId;
     const parentChatId = '1785337200123457';
     const requests: unknown[] = [];
-    let reply: unknown = { success: true, chatId, parentChat: { chatId: parentChatId, relation: 'delegation' }, changed: true };
+    let reply: unknown = { success: true, chatId, parentChatId, changed: true };
     const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       requests.push({ url: String(input), method: init?.method, body: JSON.parse(String(init?.body)) });
       return Response.json(reply);
     } });
     expect(await client.setChatParent({ chatId, parentChatId })).toEqual(reply);
     expect(requests).toEqual([{ url: `${connection.baseUrl}/api/v1/chats/parent`, method: 'PUT', body: { chatId, parentChatId } }]);
-    reply = { success: true, chatId, parentChat: null, changed: true };
+    reply = { success: true, chatId, parentChatId: null, changed: true };
     await expect(client.setChatParent({ chatId, parentChatId })).rejects.toThrow('mutation outcome is unknown');
     expect(requests).toHaveLength(2);
     expect(await client.setChatParent({ chatId, parentChatId: null })).toEqual(reply);
-    reply = { success: true, chatId: parentChatId, parentChat: null, changed: true };
+    reply = { success: true, chatId: parentChatId, parentChatId: null, changed: true };
     await expect(client.setChatParent({ chatId, parentChatId: null })).rejects.toThrow('mutation outcome is unknown');
     expect(requests).toHaveLength(4);
   });
@@ -1334,7 +1337,8 @@ describe('GarconClient', () => {
       clientRequestId: request.clientRequestId,
       chatId: request.chatId,
       turnId: 'turn-active',
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       status: 'accepted',
       acceptedAt: new Date().toISOString(),
     });
@@ -1457,7 +1461,8 @@ describe('GarconClient', () => {
       commandType: 'agent-stop',
       clientRequestId: stopRequest.clientRequestId,
       chatId: stopRequest.chatId,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       status: 'accepted',
       acceptedAt: new Date().toISOString(),
       outcome: 'interrupt-requested',
@@ -1612,9 +1617,9 @@ function validHandoffArtifact(): Record<string, unknown> {
 describe('GarconClient fork', () => {
   const sourceChatId = runRequest.chatId;
   const targetChatId = '1785337200123457';
-  const parentChat = {
-    chatId: sourceChatId,
-    relation: 'fork' as const,
+  const lineage = {
+    sourceChatId,
+    kind: 'fork' as const,
     transcriptViewId: 'view-1',
     ordinal: 4,
   };
@@ -1634,8 +1639,27 @@ describe('GarconClient fork', () => {
 
   function forkedChat(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     const source = (validChatList().sessions as Array<Record<string, unknown>>)[0]!;
-    return { ...source, id: targetChatId, parentChat, ...overrides };
+    return { ...source, id: targetChatId, lineage, ...overrides };
   }
+
+  test('correlates forks by lineage after an independent delegation assignment', async () => {
+    const parentChatId = '1785337200123458';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
+        const chat = forkedChat({ parentChatId });
+        if (String(input).endsWith('/fork')) return Response.json({ success: true, chat });
+        return Response.json({
+          success: true, commandType: 'fork-run', clientRequestId: forkRunRequest.clientRequestId,
+          chatId: targetChatId, turnId: 'turn-fork', status: 'accepted',
+          acceptedAt: '2026-09-18T12:00:00.000Z', chat,
+        });
+      },
+    });
+    await expect(client.forkChat(forkRequest)).resolves.toMatchObject({ chat: { parentChatId, lineage } });
+    await expect(client.forkRun(forkRunRequest)).resolves.toMatchObject({ chat: { parentChatId, lineage } });
+  });
 
   test('posts and strictly correlates a bare fork without automatic retry', async () => {
     let submitted: { url: string; body: string; signal: AbortSignal | null | undefined } | undefined;
@@ -1648,7 +1672,7 @@ describe('GarconClient fork', () => {
     });
 
     await expect(client.forkChat(forkRequest)).resolves.toMatchObject({
-      chat: { id: targetChatId, parentChat },
+      chat: { id: targetChatId, lineage },
     });
     expect(submitted?.url).toBe(`${connection.baseUrl}/api/v1/chats/fork`);
     expect(submitted?.body).toBe(JSON.stringify(forkRequest));
@@ -1732,8 +1756,9 @@ describe('GarconClient fork', () => {
           turnId: 'turn-fork',
           status: 'accepted',
           acceptedAt: '2026-09-18T12:00:00.000Z',
-          parentChat,
-          chat: forkedChat({ parentChat: { ...parentChat, chatId: '1785337200123455' } }),
+          parentChatId: null,
+          lineage,
+          chat: forkedChat({ lineage: { ...lineage, sourceChatId: '1785337200123455' } }),
         });
       },
     });
@@ -1752,7 +1777,7 @@ describe('GarconClient fork', () => {
         if (String(input).match(/\/api\/v1\/(runtime|cli\/context)/)) return runtimeResponse(input);
         bodies.push(String(init?.body));
         const responseChat = bodies.length === 1
-          ? forkedChat({ parentChat: { ...parentChat, chatId: '1785337200123455' } })
+          ? forkedChat({ lineage: { ...lineage, sourceChatId: '1785337200123455' } })
           : forkedChat();
         return Response.json({
           success: true,
@@ -1762,7 +1787,8 @@ describe('GarconClient fork', () => {
           turnId: 'turn-fork',
           status: bodies.length === 1 ? 'accepted' : 'duplicate',
           acceptedAt: '2026-09-18T12:00:00.000Z',
-          parentChat,
+          parentChatId: null,
+          lineage,
           chat: responseChat,
         });
       },
@@ -1770,8 +1796,9 @@ describe('GarconClient fork', () => {
 
     await expect(client.forkRun(forkRunRequest)).resolves.toMatchObject({
       chatId: targetChatId,
-      parentChat,
-      chat: { id: targetChatId, parentChat },
+      parentChatId: null,
+      lineage,
+      chat: { id: targetChatId, lineage },
     });
     expect(bodies).toEqual([JSON.stringify(forkRunRequest), JSON.stringify(forkRunRequest)]);
   });
@@ -1790,9 +1817,10 @@ describe('GarconClient fork', () => {
           turnId: 'turn-fork',
           status: 'accepted',
           acceptedAt: '2026-09-18T12:00:00.000Z',
-          parentChat,
+          parentChatId: null,
+          lineage,
           chat: forkedChat({
-            parentChat: { ...parentChat, transcriptViewId: 'view-2', ordinal: 5 },
+            lineage: { ...lineage, transcriptViewId: 'view-2', ordinal: 5 },
           }),
         }),
     });

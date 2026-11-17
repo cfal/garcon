@@ -213,7 +213,8 @@ Chat research:
   conversation spine; use --include tools for tool calls and results.
   Search coverage warnings are diagnostics. A truncated or partially indexed
   result cannot establish that no other matching chat exists.
-  Metadata filters include exact id:<chat-id> and direct parent:<chat-id>, plus
+  Metadata filters include exact id:<chat-id>, delegation parent:<chat-id>, and
+  lineage source:<chat-id>, plus
   created-before/after and updated-before/after. Date-only values use midnight
   UTC; timestamps require an RFC3339 timezone. updated means transcript/list
   activity, not title, tag, pin, or archive modification time.

@@ -24,7 +24,8 @@ const receipt = {
   turnId: 'turn-1',
   status: 'accepted' as const,
   acceptedAt: '2026-09-08T00:00:00.000Z',
-  parentChat: { chatId: PARENT_ID, relation: 'delegation' as const },
+  parentChatId: PARENT_ID,
+  lineage: null,
 };
 const terminalReceipt: AgentTurnReceipt = {
   state: 'completed',
@@ -48,7 +49,7 @@ describe('automation JSON output', () => {
       accepted,
       titleUpdate: { status: 'failed', error: new Error('title unavailable') },
     })).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'start-async',
       workspace: 'default',
       serverInstanceId: 'instance-1',
@@ -60,7 +61,8 @@ describe('automation JSON output', () => {
         status: 'accepted',
         acceptedAt: '2026-09-08T00:00:00.000Z',
       },
-      parentChat: { chatId: PARENT_ID, relation: 'delegation' },
+      parentChatId: PARENT_ID,
+      lineage: null,
       titleUpdate: {
         status: 'failed',
         error: { phase: 'submission', errorCode: null, message: 'title unavailable' },
@@ -74,10 +76,11 @@ describe('automation JSON output', () => {
       delivery: 'new-turn',
       response: resumed,
     })).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'resume-async',
       receipt: { chatId: CHAT_ID, turnId: 'turn-1', status: 'accepted' },
-      parentChat: { chatId: PARENT_ID, relation: 'delegation' },
+      parentChatId: PARENT_ID,
+      lineage: null,
       delivery: 'new-turn',
     });
 
@@ -88,7 +91,7 @@ describe('automation JSON output', () => {
       control: emptyChatExecutionControlState('instance-1'),
     };
     expect(stopJsonEnvelope(context, { response: stopped })).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'stop',
       receipt: {
         commandType: 'agent-stop',
