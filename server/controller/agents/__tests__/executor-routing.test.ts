@@ -17,6 +17,7 @@ import { IntegrationRegistry } from '../../../runtime/agents/integration-registr
 import { AgentEventBus } from '../event-bus.js';
 import { AgentRuntimeRouter } from '../runtime-router.js';
 import { DomainError } from '../../../common/domain-error.js';
+import { interactiveDeadline } from '../../../common/interactive-deadline.js';
 
 const FIRST = '22222222-2222-4222-8222-222222222222';
 const SECOND = '33333333-3333-4333-8333-333333333333';
@@ -205,11 +206,11 @@ test('a permission reply remains actionable while its executor is reconnecting',
     runId, permissionOccurrenceId: occurrence,
   };
   f.ready.delete(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, Date.now() + 20_000))
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, interactiveDeadline()))
     .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
   expect(respond).not.toHaveBeenCalled();
   f.ready.add(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, Date.now() + 20_000)).resolves.toBeUndefined();
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, interactiveDeadline())).resolves.toBeUndefined();
   expect(respond).toHaveBeenCalledTimes(1);
   expect(f.ledger.currentRows(chatId).filter(row => row.kind === 'permission-resolved')).toHaveLength(1);
 });
