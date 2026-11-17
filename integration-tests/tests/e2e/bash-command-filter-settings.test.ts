@@ -57,18 +57,40 @@ describe('Lightpanda hidden Bash command settings', () => {
         { timeout: 20_000 },
       );
 
-      await app.waitForButtonEnabled('Add preset');
-      await app.clickButton('Add preset');
-      await app.waitForMenuItemEnabled('Garcon-amp rules');
-      await app.clickMenuItem('Garcon-amp rules');
-      await fixture.page.waitForFunction(
-        (expectedPatterns) => {
-          const list = document.querySelector('[data-testid="hidden-bash-command-patterns"]');
-          return expectedPatterns.every((pattern) => list?.textContent?.includes(pattern));
-        },
-        { timeout: 20_000 },
-        GARCON_AMP_PATTERNS.map((entry) => entry.pattern),
-      );
+      const saveGate = await fixture.page.evaluateHandle(() => {
+        const nativeFetch = globalThis.fetch;
+        let release!: () => void;
+        const pending = new Promise<void>(resolve => { release = resolve; });
+        globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+          const response = await nativeFetch(...args);
+          const input = args[0];
+          const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+          if (url.pathname === '/api/v1/app/settings' && args[1]?.method === 'PUT') {
+            await pending;
+          }
+          return response;
+        }, { preconnect: nativeFetch.preconnect });
+        return { release: () => { globalThis.fetch = nativeFetch; release(); } };
+      });
+      try {
+        await app.waitForButtonEnabled('Add preset');
+        await app.clickButton('Add preset');
+        await app.waitForMenuItemEnabled('Garcon-amp rules');
+        await app.clickMenuItem('Garcon-amp rules');
+        await fixture.page.waitForFunction(
+          (expectedPatterns) => {
+            const list = document.querySelector('[data-testid="hidden-bash-command-patterns"]');
+            return expectedPatterns.every((pattern) => list?.textContent?.includes(pattern));
+          },
+          { timeout: 20_000 },
+          GARCON_AMP_PATTERNS.map((entry) => entry.pattern),
+        );
+        await fixture.page.waitForFunction(() => !document.querySelector('[role="menuitem"]'));
+        expect(await fixture.page.$eval('button[aria-label="Add preset"]', button => button.disabled)).toBe(true);
+      } finally {
+        await saveGate.evaluate(gate => gate.release());
+        await saveGate.dispose();
+      }
 
       // The settings-changed broadcast can render the patterns before the save's own response
       // re-enables the trigger.

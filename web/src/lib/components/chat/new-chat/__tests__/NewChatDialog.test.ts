@@ -191,7 +191,7 @@ describe('NewChatDialog', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		shell.openNewChatDialog();
 		await waitFor(() => expect(screen.getByPlaceholderText('How can I help you today?')).toHaveProperty('value', edited));
-		const send = screen.getByRole('button', { name: 'Start session' });
+		const send = await screen.findByRole('button', { name: 'Start session' });
 		await waitFor(() => expect(send).toHaveProperty('disabled', false));
 		await fireEvent.click(send);
 		expect(onCreateDraft).toHaveBeenCalledWith(expect.objectContaining({

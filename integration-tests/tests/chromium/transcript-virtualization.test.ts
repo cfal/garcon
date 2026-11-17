@@ -1747,6 +1747,23 @@ async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void>
   );
 }
 
+async function openAdjacentTerminalWindow(page: Page): Promise<string> {
+  const existingWindowIds = new Set(await workspaceWindowIds(page));
+  // Terminal input owns Control+P; invoke the palette from window chrome instead.
+  await page.locator('[data-workspace-window-current="true"]').getByRole('tab', { selected: true }).press('Control+p');
+  const palette = page.getByRole('dialog', { name: 'Command palette', exact: true });
+  await palette.getByRole('combobox').fill('New Terminal');
+  await palette.getByRole('option').filter({ has: page.getByText('New Terminal', { exact: true }) }).click();
+  await palette.waitFor({ state: 'detached' });
+  await page.waitForFunction(
+    (expectedCount) => document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
+    existingWindowIds.size + 1,
+  );
+  const windowId = (await workspaceWindowIds(page)).find((id) => !existingWindowIds.has(id));
+  if (!windowId) throw new Error('The adjacent Terminal window did not open.');
+  return windowId;
+}
+
 async function closeWorkspaceWindow(page: Page, windowId: string): Promise<void> {
   await page.locator(`[data-workspace-window-close="${windowId}"]`).click();
   await page.locator(`[data-workspace-window-id="${windowId}"]`).waitFor({ state: 'detached' });
@@ -4350,10 +4367,14 @@ async function verifyWindowCountGeometryStability(
   await expectFixedTranscriptTypography(fixture.page);
   const canonicalAnchor = await readingAnchor(fixture.page);
   const canonicalLayout = await transcriptLayoutSnapshot(fixture.page, canonicalAnchor.key);
+  const originalFeed = await fixture.page.locator(FEED_SELECTOR).elementHandle();
+  if (!originalFeed) throw new Error('The reading transcript is not mounted.');
 
-  const terminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  // Adjacent placement resizes Chat without invoking non-combined hide/cache restoration.
+  const terminalWindowId = await openAdjacentTerminalWindow(fixture.page);
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
+  expect(await originalFeed.evaluate((feed) => feed.isConnected)).toBe(true);
   await expectFixedTranscriptTypography(fixture.page);
   const threeWindowAnchor = await anchorByKey(fixture.page, canonicalAnchor.key);
   const threeWindowLayout = await transcriptLayoutSnapshot(fixture.page, canonicalAnchor.key);
@@ -4370,13 +4391,15 @@ async function verifyWindowCountGeometryStability(
   // again here would reduce it to 15.5%, adding a narrower layout than this
   // geometry regression covers. Split Terminal instead, leaving Chat at 31%.
   await focusWorkspaceWindow(fixture.page, terminalWindowId);
-  const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  await fixture.page.locator(`[data-workspace-window-id="${terminalWindowId}"] .xterm-helper-textarea`).focus();
+  const secondTerminalWindowId = await openAdjacentTerminalWindow(fixture.page);
   // The canonical desktop layout already provides the fourth window (Files).
   const filesWindowId = await canonicalFilesWindowId(fixture.page);
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);
   await scrollToPosition(fixture.page, 'middle');
+  expect(await originalFeed.evaluate((feed) => feed.isConnected)).toBe(true);
   const fourWindowAnchor = await readingAnchor(fixture.page);
   const fourWindowLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
   const fourWindowGeometry = await transcriptGeometry(fixture.page);
@@ -4387,6 +4410,7 @@ async function verifyWindowCountGeometryStability(
   await closeWorkspaceWindow(fixture.page, secondTerminalWindowId);
   await closeWorkspaceWindow(fixture.page, terminalWindowId);
   await expectFixedTranscriptTypography(fixture.page);
+  expect(await originalFeed.evaluate((feed) => feed.isConnected)).toBe(true);
   const restoredAnchor = await anchorByKey(fixture.page, fourWindowAnchor.key);
   const restoredLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
   expect(
@@ -4398,13 +4422,15 @@ async function verifyWindowCountGeometryStability(
   expect(restoredGeometry.horizontalOverflow).toEqual([]);
 
   await scrollToPosition(fixture.page, 'end');
-  const visibleResizeWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  const visibleResizeWindowId = await openAdjacentTerminalWindow(fixture.page);
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await expectFixedTranscriptTypography(fixture.page);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-window-enter');
   await closeWorkspaceWindow(fixture.page, visibleResizeWindowId);
   await expectFixedTranscriptTypography(fixture.page);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-window-exit');
+  expect(await originalFeed.evaluate((feed) => feed.isConnected)).toBe(true);
+  await originalFeed.dispose();
 
   const backgroundWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
