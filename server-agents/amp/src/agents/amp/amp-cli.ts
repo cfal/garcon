@@ -19,6 +19,7 @@ import {
 import { convertAmpMessageToChatMessages, getAssistantContent, getUserText, type AmpCliMessage } from './amp-message.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { ProcessExitFence, type TerminationTimings } from '@garcon/server-agent-common/lifecycle/process-exit-fence';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
 import {
@@ -29,6 +30,7 @@ import {
   type AmpStartedSession,
 } from './runtime-types.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import { captureSingleQueryInputFailure } from '@garcon/server-agent-common/shared/single-query-input';
 import { buildAmpUserInput } from './amp-stream-input.js';
 import {
   type AgentLogger,
@@ -114,15 +116,7 @@ async function runAmpCommand(
     readAmpStdout(proc),
     proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
     proc.exited,
-    (async () => {
-      if (input == null) return;
-      try {
-        const stdin = proc.stdin;
-        if (!stdin || typeof stdin === 'number') throw new Error('Amp process stdin is unavailable');
-        await stdin.write(input);
-        await stdin.end();
-      } catch (error) { return { error }; }
-    })(),
+    captureSingleQueryInputFailure(proc.stdin, input, 'Amp'),
   ]);
   signal?.throwIfAborted();
 
@@ -546,9 +540,11 @@ class AmpCliRuntime {
     if (turn.stdinClosed) return;
     turn.stdinClosed = true;
     const stdin = turn.process?.stdin;
-    if (stdin && typeof stdin !== 'number') void Promise.resolve(stdin.end()).catch(error => {
-      this.#logger.warn('Amp stdin close failed.', { error: error instanceof Error ? error.message : String(error) });
-    });
+    if (stdin && typeof stdin !== 'number') {
+      void Promise.resolve(stdin.end()).catch(error => {
+        this.#logger.warn('Amp stdin close failed.', { error: errorMessage(error) });
+      });
+    }
   }
 
   #settlePendingEchoes(turn: AmpTurnContext, result: AgentSteerResult): void {
@@ -581,7 +577,7 @@ class AmpCliRuntime {
     prompt: string,
     attachments: readonly AgentAttachment[] = [],
     signal?: AbortSignal,
-  ): Promise<ReturnType<typeof Bun.spawn>> {
+  ): Promise<void> {
     const ampBinary = this.#config.binary();
 
     this.#logger.info('Spawning Amp.', { binary: ampBinary, arguments: args });
@@ -597,13 +593,13 @@ class AmpCliRuntime {
     session.sources.add(turn);
 
     void this.#readStdout(session, proc, turn).catch(error => {
-      this.#logger.error('Amp stdout settlement failed.', { error: error instanceof Error ? error.message : String(error) });
+      this.#logger.error('Amp stdout settlement failed.', { error: errorMessage(error) });
     });
     void this.#pipeStderr(session.id, proc);
     void proc.exited.then(exitCode => {
       this.#logger.info('Amp process exited.', { sessionId: session.id, exitCode });
     }).catch(error => {
-      this.#logger.warn('Amp exit observation failed.', { error: error instanceof Error ? error.message : String(error) });
+      this.#logger.warn('Amp exit observation failed.', { error: errorMessage(error) });
     });
     const abort = () => { void this.#terminate(session, turn); };
     signal?.addEventListener('abort', abort, { once: true });
@@ -612,8 +608,9 @@ class AmpCliRuntime {
       turn.pendingInputEchoes.push({ text: prompt });
       await this.#writeInput(turn, buildAmpUserInput(prompt, crypto.randomUUID(), attachments));
       signal?.throwIfAborted();
-    } finally { signal?.removeEventListener('abort', abort); }
-    return proc;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+    }
   }
 
   async #writeInput(turn: AmpTurnContext, input: string): Promise<void> {
@@ -928,11 +925,17 @@ class AmpCliRuntime {
       session.sources.delete(turn);
       this.#completeTurn(session, turn);
     };
-    if (!turn.process) { settle(); return Promise.resolve(true); }
-    return turn.termination = this.#exits.terminate(session.id, turn.process, settle).then(exited => {
-      if (!exited) this.#logger.error('Amp process exit unconfirmed after SIGKILL.', { sessionId: session.id });
+    if (!turn.process) {
+      settle();
+      return Promise.resolve(true);
+    }
+    turn.termination = this.#exits.terminate(session.id, turn.process, settle).then(exited => {
+      if (!exited) {
+        this.#logger.error('Amp process exit unconfirmed after SIGKILL.', { sessionId: session.id });
+      }
       return exited;
     });
+    return turn.termination;
   }
 
   isRunning(agentSessionId: string): boolean {

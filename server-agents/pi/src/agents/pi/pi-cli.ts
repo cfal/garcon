@@ -1,5 +1,6 @@
 import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import { captureSingleQueryInputFailure } from '@garcon/server-agent-common/shared/single-query-input';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import type { PiConfig } from '../../config.js';
@@ -155,15 +156,7 @@ async function runPiCommand(
     new Response(proc.stdout as ReadableStream).text(),
     new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
-    (async () => {
-      if (input == null) return;
-      try {
-        const stdin = proc.stdin;
-        if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
-        await stdin.write(input);
-        await stdin.end();
-      } catch (error) { return { error }; }
-    })(),
+    captureSingleQueryInputFailure(proc.stdin, input, 'Pi'),
   ]);
   signal?.throwIfAborted();
 

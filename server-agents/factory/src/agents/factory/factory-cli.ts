@@ -16,6 +16,7 @@ import {
 import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { ProcessExitFence, type TerminationTimings } from '@garcon/server-agent-common/lifecycle/process-exit-fence';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import {
   assertFactoryExecutionOpen,
   markFactoryExecutionStarted,
@@ -648,7 +649,7 @@ export class FactoryCliRuntime {
         }
       }
     } catch (error) {
-      this.#logger.warn('Factory stdout read failed.', { sessionId: session.id, error: error instanceof Error ? error.message : String(error) });
+      this.#logger.warn('Factory stdout read failed.', { sessionId: session.id, error: errorMessage(error) });
     } finally {
       const exitCode = await proc.exited;
       await eventProcessing;
@@ -685,7 +686,7 @@ export class FactoryCliRuntime {
     cwd: string,
     airgap: boolean,
     signal?: AbortSignal,
-  ): Promise<ReturnType<typeof Bun.spawn>> {
+  ): Promise<void> {
     const factoryBinary = this.#config.binary();
     const proc = Bun.spawn([factoryBinary, ...args], {
       cwd,
@@ -700,7 +701,7 @@ export class FactoryCliRuntime {
     const stdin = proc.stdin;
     if (!stdin || typeof stdin === 'number') throw new Error('Factory process stdin is unavailable');
     void this.#readStdout(session, proc, turn).catch(error => {
-      this.#logger.error('Factory stdout settlement failed.', { error: error instanceof Error ? error.message : String(error) });
+      this.#logger.error('Factory stdout settlement failed.', { error: errorMessage(error) });
     });
     void this.#pipeStderr(session.id || 'pending', proc);
     const abort = () => { void this.#terminate(session, turn); };
@@ -710,9 +711,9 @@ export class FactoryCliRuntime {
       await stdin.write(prompt);
       await stdin.end();
       signal?.throwIfAborted();
-    } finally { signal?.removeEventListener('abort', abort); }
-
-    return proc;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+    }
   }
 
   #waitForTurnComplete(turn: FactoryTurnContext): Promise<void> {
@@ -938,11 +939,17 @@ export class FactoryCliRuntime {
       session.sources.delete(turn);
       this.#completeTurn(session, turn);
     };
-    if (!turn.process) { settle(); return Promise.resolve(true); }
-    return turn.termination = this.#exits.terminate(session.id, turn.process, settle).then(exited => {
-      if (!exited) this.#logger.error('Factory process exit unconfirmed after SIGKILL.', { sessionId: session.id });
+    if (!turn.process) {
+      settle();
+      return Promise.resolve(true);
+    }
+    turn.termination = this.#exits.terminate(session.id, turn.process, settle).then(exited => {
+      if (!exited) {
+        this.#logger.error('Factory process exit unconfirmed after SIGKILL.', { sessionId: session.id });
+      }
       return exited;
     });
+    return turn.termination;
   }
 
   isRunning(agentSessionId: string): boolean {

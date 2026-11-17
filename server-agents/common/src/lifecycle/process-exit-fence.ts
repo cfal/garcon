@@ -53,16 +53,21 @@ export class ProcessExitFence {
     for (;;) {
       const pending = this.#pending.get(key);
       if (!pending?.size) return;
-      const attempts = Promise.all(pending);
+      let settled = Promise.all(pending);
       let abort: (() => void) | undefined;
       try {
-        const outcomes = await (signal ? Promise.race([attempts, new Promise<never>((_resolve, reject) => {
-          abort = () => reject(signal.reason);
+        if (signal) {
+          const aborted = Promise.withResolvers<never>();
+          abort = () => aborted.reject(signal.reason);
           signal.addEventListener('abort', abort, { once: true });
-        })]) : attempts);
+          settled = Promise.race([settled, aborted.promise]);
+        }
+        const outcomes = await settled;
         signal?.throwIfAborted();
         if (outcomes.includes(false)) throw new Error('A previous process for this session has not exited');
-      } finally { if (abort) signal?.removeEventListener('abort', abort); }
+      } finally {
+        if (abort) signal?.removeEventListener('abort', abort);
+      }
     }
   }
 }

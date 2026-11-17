@@ -89,8 +89,13 @@ export function processExitConformance(create: () => TurnRuntime): void {
       const running = runtime.runTurn(request);
       await turn();
       expect(spawn).toHaveBeenCalledTimes(1);
-      const stopping = action === 'abort' ? runtime.abort(request.agentSessionId)
-        : (runtime.releaseSession(request.chatId, request.agentSessionId), Promise.resolve(true));
+      let stopping: Promise<boolean>;
+      if (action === 'abort') {
+        stopping = runtime.abort(request.agentSessionId);
+      } else {
+        runtime.releaseSession(request.chatId, request.agentSessionId);
+        stopping = Promise.resolve(true);
+      }
       const next = runtime.runTurn(request);
       await turn();
       expect(spawn).toHaveBeenCalledTimes(1);
