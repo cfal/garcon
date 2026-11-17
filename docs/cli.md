@@ -519,9 +519,9 @@ bun cli/main.ts --runtime controller start-async \
 ```
 
 `start-async` prints the accepted chat and turn IDs, then returns. `--json` emits
-one versioned envelope containing the exact receipt, parent relationship, server
-instance, workspace, and title-update outcome. Use the turn ID with `wait` when
-exact completion identity matters.
+one versioned envelope containing the exact receipt, delegation parent, lineage,
+server instance, workspace, and title-update outcome. Use the turn ID with `wait`
+when exact completion identity matters.
 
 Synchronous `start --json` and `resume --json` buffer one versioned document
 until the turn settles. They reuse the matching async acceptance fields and add
@@ -541,10 +541,11 @@ titles retain their stricter 120-character bound.
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
 for example when one agent starts another for review. Garcon records a
-delegation parent in `parentChatId` and nests the child in the sidebar. The parent must exist in the
-same workspace. Declaring it does not copy transcript content, inherit execution
-settings, or make either chat wait for the other. `--parent` is creation-only and
-cannot be used with `resume`. Use `set-parent` to edit delegation later.
+delegation parent in `parentChatId` and nests the child in the sidebar. The parent
+must exist in the same workspace. Declaring it does not copy transcript content,
+inherit execution settings, or make either chat wait for the other. `--parent` is
+creation-only and cannot be used with `resume`. Use `set-parent` to edit delegation
+later.
 
 New chats resolve matching preambles from their own project, agent, and tags.
 Use `--no-preamble` to send an explicit empty selection, or repeat
@@ -1030,8 +1031,9 @@ bun cli/main.ts --runtime controller resume-async 1785337200123456 \
 
 Successful output identifies `delivery: new-turn|steer` and the accepted turn
 ID. `--json` emits one versioned envelope with the exact receipt, delivery,
-parent relationship, server instance, and workspace. Garcon bounds run/steer
-race retries and reports ambiguity rather than risking duplicate delivery.
+delegation parent, lineage, server instance, and workspace. Garcon bounds
+run/steer race retries and reports ambiguity rather than risking duplicate
+delivery.
 
 Codex's asynchronous questions are conversational messages, not pending
 permissions. In the browser, each inline question can be answered independently

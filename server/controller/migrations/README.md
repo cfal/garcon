@@ -9,9 +9,9 @@ Before an incompatible registry write, `checkpointThrough` durably records a
 completed migration prefix without changing the boot's original `initialVersion`.
 Failed callbacks cannot advance that prefix. Fresh initialization observes the
 same checkpoint ordering without running historical migrations.
-Checkpoint stamps carry `checkpoint: true`; only `finish()` removes it. A boot
-resumed from a checkpoint retains carryover rollback backups until a subsequent
-boot starts from a completed stamp.
+Checkpoint stamps carry `checkpoint: true`; `finish()` clears that flag after a
+successful upgrade. A boot resumed from a checkpoint retains carryover rollback
+backups until a subsequent boot starts from a completed stamp.
 
 A migration entry may be removed two releases after it ships. Removing an
 entry ends direct upgrade support for workspaces older than that entry; those
