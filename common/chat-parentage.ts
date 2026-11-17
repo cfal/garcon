@@ -8,6 +8,11 @@ export interface ChatLineage {
   readonly ordinal: number;
 }
 
+export interface ChatRelationships {
+  parentChatId: string | null;
+  lineage: ChatLineage | null;
+}
+
 export function chatLineagesEqual(left: ChatLineage | null, right: ChatLineage | null): boolean {
   if (left === right) return true;
   if (left === null || right === null) return false;

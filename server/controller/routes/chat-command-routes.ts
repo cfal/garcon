@@ -33,7 +33,7 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../../common/chat-modes.js';
-import type { ChatListEntry } from '../../../common/chat-list.js';
+import type { ChatRelationships } from '../../../common/chat-parentage.js';
 import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../../common/handoff-timeouts.js';
 import type { JsonObject } from '../../../common/json.js';
 import { parseSelfHandoffRunCommandRequest } from '../../../common/self-handoff-contracts.js';
@@ -77,7 +77,7 @@ function isRequestTimeoutServer(value: unknown): value is RequestTimeoutServer {
 
 function acceptedTurnResponse(
   result: CommandAcceptedResponse,
-  chat: Pick<ChatListEntry, 'parentChatId' | 'lineage'> | null,
+  chat: ChatRelationships | null,
   request: Request,
 ): Response {
   if (!result.chatId || !result.turnId) {
@@ -91,7 +91,7 @@ function acceptedTurnResponse(
   );
 }
 
-function chatRelationships(chat: Pick<ChatListEntry, 'parentChatId' | 'lineage'> | null | undefined) {
+function chatRelationships(chat: ChatRelationships | null | undefined) {
   return { parentChatId: chat?.parentChatId ?? null, lineage: chat?.lineage ?? null };
 }
 

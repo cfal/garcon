@@ -43,8 +43,8 @@ import {
   normalizeRecoverChatTagsResponse,
 } from '@garcon/common/chat-tag-mutations';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
-import { parseChatListResponse, type ChatListEntry, type ChatListResponse } from '@garcon/common/chat-list';
-import { chatLineagesEqual, parseChatLineage } from '@garcon/common/chat-parentage';
+import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
+import { chatLineagesEqual, parseChatLineage, type ChatRelationships } from '@garcon/common/chat-parentage';
 import { parseChatId } from '@garcon/common/chat-id';
 import {
   parseChatHistoryResponse,
@@ -267,7 +267,7 @@ function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
   };
 }
 
-function parseRelationships(raw: Record<string, unknown> | null): Pick<ChatListEntry, 'parentChatId' | 'lineage'> {
+function parseRelationships(raw: Record<string, unknown> | null): ChatRelationships {
   try {
     if (!raw || 'parentChat' in raw) throw new Error('Missing current relationship fields');
     const parentChatId = raw.parentChatId === null ? null : parseChatId(raw.parentChatId);
