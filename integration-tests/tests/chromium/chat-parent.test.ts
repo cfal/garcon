@@ -1,27 +1,35 @@
 import { expect, test } from 'bun:test';
-import { expect as browserExpect } from 'playwright/test';
+import { expect as browserExpect, type Page } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 import { runCli } from '../../support/cli-fixture.js';
 
-test('parent picker and CLI converge in two tabs without reloading conversations', async () => {
+test('fork parent picker and CLI converge without changing lineage or reloading conversations', async () => {
   await withChromiumFixture('chat-parent', async ({ page, context, integration, assertNoBrowserErrors, withExpectedConsoleErrors }, phase) => {
     const child = integration.newChatId();
+    const source = integration.newChatId();
     const parent = integration.newChatId();
     const other = integration.newChatId();
-    const chats = [[child, 'Child task'], [parent, 'Parent task'], [other, 'Another parent']] as const;
+    const chats = [[source, 'Source task'], [parent, 'Parent task'], [other, 'Another parent']] as const;
     for (const [chatId, title] of chats) {
       const started = await integration.client.startDirectChat({ chatId, content: 'Synthetic parent picker task.',
         projectPath: integration.executionDirs.project, agent: integration.directAgents.openAi });
       await integration.client.waitForTurnTerminal(chatId, started.turnId);
       await integration.client.updateSessionName(chatId, title);
     }
+    const forked = await integration.client.forkChat({ sourceChatId: source, chatId: child });
+    await integration.client.updateSessionName(child, 'Child task');
     await page.goto(`${integration.garcon.baseUrl}/chat/${child}`);
     const second = await context.newPage();
     await second.goto(`${integration.garcon.baseUrl}/chat/${parent}`);
     await clickWorkspaceWindowAddAction(second, 'Open Chat Map');
+    const sidebarParent = (tab: Page) => tab.locator('[data-sidebar-virtual-row]').evaluateAll((rows, id) => {
+      const index = rows.findIndex((row) => row.getAttribute('data-sidebar-virtual-row') === id);
+      return rows[index - 1]?.getAttribute('data-sidebar-virtual-row') ?? null;
+    }, child);
+    const secondChildRow = second.locator(`[data-sidebar-virtual-row="${child}"]`);
     const childRow = page.locator(`[data-sidebar-virtual-row="${child}"]`);
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '0');
     const menuTrigger = page.locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]');
@@ -74,9 +82,11 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
     await browserExpect(dialog).toHaveCount(0);
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '1');
+    await browserExpect(secondChildRow).toHaveAttribute('data-sidebar-row-depth', '1');
+    for (const tab of [page, second]) await browserExpect.poll(() => sidebarParent(tab)).toBe(parent);
     const mapParent = () => second.locator(`[data-chat-map-chat-id="${child}"]`).evaluate((element) =>
       element.closest('[data-chat-map-node]')?.parentElement?.closest<HTMLElement>('[data-chat-map-node]')?.dataset.chatMapNode ?? null);
-    await browserExpect.poll(mapParent).toBe(`chat:${parent}`);
+    await browserExpect.poll(mapParent).toBe(`chat:${source}`);
     await browserExpect(composer).toHaveAttribute('data-parent-test-identity', 'retained');
     expect(await viewport.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
     expect(await composer.boundingBox()).toEqual(boxBefore);
@@ -84,7 +94,8 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     phase('replacing through the CLI while both tabs remain open');
     const replaced = await runCli(integration, ['set-parent', child, other, '--json'], 'controller');
     expect(replaced, replaced.stderr).toMatchObject({ exitCode: 0 });
-    await browserExpect.poll(mapParent).toBe(`chat:${other}`);
+    for (const tab of [page, second]) await browserExpect.poll(() => sidebarParent(tab)).toBe(other);
+    await browserExpect.poll(mapParent).toBe(`chat:${source}`);
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '1');
     expect(page.url()).toContain(`/chat/${child}`);
 
@@ -145,9 +156,12 @@ test('parent picker and CLI converge in two tabs without reloading conversations
     await dialog.getByRole('button', { name: 'Remove parent', exact: true }).click();
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
     await browserExpect(dialog).toHaveCount(0);
-    await browserExpect.poll(mapParent).toBeNull();
+    await browserExpect.poll(mapParent).toBe(`chat:${source}`);
+    expect((await integration.client.listChats()).sessions.find((chat) => chat.id === child)?.lineage)
+      .toEqual(forked.chat.lineage);
     await page.setViewportSize({ width: 1440, height: 900 });
     await browserExpect(childRow).toHaveAttribute('data-sidebar-row-depth', '0');
+    await browserExpect(secondChildRow).toHaveAttribute('data-sidebar-row-depth', '0');
     await browserExpect(composer).toHaveAttribute('data-parent-test-identity', 'retained');
     assertNoBrowserErrors();
   });

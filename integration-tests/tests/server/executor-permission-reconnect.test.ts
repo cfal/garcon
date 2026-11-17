@@ -94,7 +94,8 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
     ledger, registry: chats, integrations: directory, getCarryOverRevision: () => '', loadFrozenPrefix: async () => [],
   });
   chats.addChat({ id: CHAT, executorId: EXECUTOR, agentId: 'test', model: 'synthetic-model', projectPath: root,
-    parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
+    parentChatId: null,
+    lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
   ledger.initializeChat(CHAT);
   const router = new AgentRuntimeRouter({
     registry: chats, directory, ledger, adoption, events: new AgentEventBus(),

@@ -132,7 +132,8 @@ function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
 function sidebarChat(chatId: string): Record<string, unknown> {
   return {
     id: chatId,
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     projectPath: '/workspace/search-gate',
     effectiveProjectKey: '/workspace/search-gate',
     projectIdentityState: 'available',

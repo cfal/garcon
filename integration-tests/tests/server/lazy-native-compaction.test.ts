@@ -61,7 +61,8 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
         });
         chats.addChat({ id: CHAT, agentId: 'test', executorId: native.scope.executorId,
           projectPath: root, model: 'synthetic-model', agentSettingsById: { test: integration.settings.defaults() },
-          parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
+          parentChatId: null,
+          lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
         if (source === 'ledger') {
           ledger.initializeChat(CHAT, [{ kind: 'session', at: AT, detail: SESSION, providerMeta: null }]);
           chats.updateChat(CHAT, { agentSessionId: null, nativeSession: null });

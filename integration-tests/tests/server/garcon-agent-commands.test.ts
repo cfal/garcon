@@ -72,7 +72,7 @@ describe('assistant start and schedule commands', () => {
           apiProviderId: expectedProvider, modelEndpointId: expectedEndpoint, modelProtocol: original.provider.protocol,
           thinkingMode: parentRequest.thinkingMode, permissionMode: parentRequest.permissionMode,
           agentSettingsById: { [original.agentId]: original.agentSettings },
-          projectPath: fixture.dirs.project, parentChat: { chatId: source, relation: 'delegation' },
+          projectPath: fixture.dirs.project, parentChatId: source, lineage: null,
           preambleSelection: { revision: 0, orderedPreambleIds: [] },
         });
       }
@@ -113,7 +113,8 @@ describe('assistant start and schedule commands', () => {
         const persisted: ChatRegistrySnapshot = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
         expect(persisted.sessions[outcome.chatId]).toMatchObject({
           apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,
-          parentChat: { chatId: source, relation: 'delegation' },
+          parentChatId: source,
+          lineage: null,
         });
       }
       const control = await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: garconCommandResultContent(outcome) });
@@ -175,7 +176,7 @@ describe('assistant start and schedule commands', () => {
       const chats = await fixture.client.listChats();
       expect(chats.sessions).toHaveLength(2);
       const created = chats.sessions.find((chat) => chat.id === startOutcome.chatId);
-      expect(created).toMatchObject({ parentChat: { chatId: source, relation: 'delegation' }, projectPath: fixture.dirs.project, permissionMode: 'default' });
+      expect(created).toMatchObject({ parentChatId: source, lineage: null, projectPath: fixture.dirs.project, permissionMode: 'default' });
       const schedules = await fixture.client.getScheduledPrompts();
       expect(schedules.prompts).toHaveLength(1);
       expect(schedules.prompts[0]).toMatchObject({
@@ -206,8 +207,8 @@ describe('assistant start and schedule commands', () => {
       expect(startResult.lastUserText).toBe(expectedStartResult);
       expect(scheduleResult.lastUserText).toBe(expectedScheduleResult);
       await fixture.restartGarcon();
-      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === startOutcome.chatId)?.parentChat)
-        .toEqual({ chatId: source, relation: 'delegation' });
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === startOutcome.chatId)?.parentChatId)
+        .toEqual(source);
       expect((await fixture.client.getScheduledPrompts()).prompts).toHaveLength(1);
     });
   }, 60_000);
@@ -233,7 +234,7 @@ describe('assistant start and schedule commands', () => {
       expect(received.lastUserText).toBe('/synthetic-command');
       const chats = await fixture.client.listChats();
       expect(chats.sessions).toHaveLength(2);
-      expect(chats.sessions.find((chat) => chat.id === outcome.chatId)?.parentChat).toEqual({ chatId: source, relation: 'delegation' });
+      expect(chats.sessions.find((chat) => chat.id === outcome.chatId)?.parentChatId).toEqual(source);
       const child = await fixture.client.getMessages(outcome.chatId);
       expect(userContents(child.messages)).toEqual(['/synthetic-command']);
       expect(messagesOfType(child.messages, 'transcript-notice').some((notice) => notice.detail?.type === 'preamble-application')).toBe(false);

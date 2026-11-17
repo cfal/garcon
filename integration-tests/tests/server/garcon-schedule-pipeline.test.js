@@ -49,7 +49,7 @@ async function withPipeline(run) {
     nativeSession: null, nativeSeedReceipt: null, agentSessionId: '', projectPath: root,
     model: 'initial-model', permissionMode: 'default', thinkingMode: 'none', tags: [],
     agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } },
-    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChat: null,
+    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChatId: null, lineage: null,
   });
   const view = ledger.initializeChat(CHAT);
   const publisher = ledger.openProducer(CHAT, 'test');

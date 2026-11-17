@@ -25,7 +25,7 @@ test.each(['success', 'before-commit', 'after-commit'] as const)(
       await registry.init();
       registry.addChat({ id: chatId, agentId: 'test', projectPath: '/source', model: 'synthetic-model',
         preambleSelection: { revision: 0, orderedPreambleIds: [] },
-        agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } }, parentChat: null });
+        agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } }, parentChatId: null, lineage: null });
       registry.updateChat(chatId, session(source));
       await registry.flush();
       await writeFile(source, 'Synthetic native history');

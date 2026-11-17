@@ -42,7 +42,7 @@ describe('delegated startup progress', () => {
       await compacting.received;
       expect(await startupPhases(fixture, child)).toEqual(['preparing-context', 'compacting-context']);
       const persisted = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
-      expect(persisted.sessions[child].parentChat).toEqual({ chatId: parent, relation: 'delegation' });
+      expect(persisted.sessions[child].parentChatId).toEqual(parent);
       expect(messagesOfType((await fixture.client.getMessages(child)).messages, 'user-message')
         .some((message) => message.content === CHILD_TASK)).toBe(true);
 

@@ -7,6 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatListEntry } from '../../../common/chat-list.js';
+import type { ChatLineage } from '../../../common/chat-parentage.js';
 import type { ForkRunCommandResponse } from '../../../common/chat-command-contracts.js';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
@@ -47,9 +48,9 @@ describe('self handoff', () => {
       // The response names the continuation, which is what the client navigates to.
       expect(response.chat.id).toBe(targetChatId);
       expect(response.chat.title).toBe('the original request (1)');
-      expect(response.chat.parentChat).toEqual({
-        chatId: sourceChatId,
-        relation: 'handoff',
+      expect(response.chat.lineage).toEqual({
+        sourceChatId,
+        kind: 'handoff',
         transcriptViewId: sourceAnchor.transcriptViewId,
         ordinal: sourceAnchor.lastOrdinal,
       });
@@ -68,7 +69,7 @@ describe('self handoff', () => {
       const source = chats.find((chat) => chat.id === sourceChatId);
       const target = chats.find((chat) => chat.id === targetChatId);
       expect(target).toBeDefined();
-      expect(target?.parentChat).toEqual(response.chat.parentChat);
+      expect(target?.lineage).toEqual(response.chat.lineage);
       expect(target?.title).toBe('the original request (1)');
       // Same agent and model; a fresh chat, not a switch in place.
       expect(target?.agentId).toBe(source?.agentId);
@@ -136,12 +137,18 @@ describe('self handoff', () => {
         beforeStart: async () => {
           const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
             version: number;
-            sessions: Record<string, Record<string, unknown>>;
+            sessions: Record<string, Record<string, unknown> & { lineage: ChatLineage | null; parentChatId: string | null }>;
           };
           beforeMigration = structuredClone(registry);
-          for (const entry of Object.values(registry.sessions)) {
+          registry.version = 5;
+          for (const [chatId, entry] of Object.entries(registry.sessions)) {
             expect(entry).not.toHaveProperty('nextForkOrdinal');
-            entry.nextForkOrdinal = 42;
+            const { lineage, parentChatId, ...rest } = entry;
+            const parentChat = lineage ? {
+              chatId: lineage.sourceChatId, relation: lineage.kind,
+              transcriptViewId: lineage.transcriptViewId, ordinal: lineage.ordinal,
+            } : parentChatId === null ? null : { chatId: parentChatId, relation: 'delegation' };
+            Object.assign(registry.sessions, { [chatId]: { ...rest, parentChat, nextForkOrdinal: 42 } });
           }
           await writeFile(registryPath, JSON.stringify(registry));
           await writeFile(join(fixture.dirs.workspace, 'workspace-version.json'), JSON.stringify({ version: 7 }));

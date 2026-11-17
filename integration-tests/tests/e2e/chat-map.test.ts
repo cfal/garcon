@@ -27,9 +27,9 @@ describe("Lightpanda Chat Map", () => {
       const fork = (await fixture.integration.client.listChats()).sessions.find(
         (entry) => entry.id === forkId,
       );
-      expect(fork?.parentChat).toMatchObject({
-        chatId: source.id,
-        relation: "fork",
+      expect(fork?.lineage).toMatchObject({
+        sourceChatId: source.id,
+        kind: "fork",
       });
       expect(Object.values(await app.workspaceChatsByWindow())).toEqual(
         expect.arrayContaining([source.id, forkId]),
