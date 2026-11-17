@@ -120,7 +120,7 @@ test('an offline known integration without native forking needs only retained co
     sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
   })).toBeNull();
   f.registries.set(FIRST, new IntegrationRegistry({ instances: [{ ...f.providers[1]!.integration,
-    forking: { fork: mock(async () => ({ kind: 'unmaterialized' })), discard: mock(async () => undefined) },
+    forking: { fork: mock(async () => ({ kind: 'unmaterialized' as const })), discard: mock(async () => undefined) },
   }] }));
   await expect(f.router.forkAgentSession({ sourceSession: f.chats.getChat(CHAT_IDS[1]!)!,
     sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
@@ -205,11 +205,11 @@ test('a permission reply remains actionable while its executor is reconnecting',
     runId, permissionOccurrenceId: occurrence,
   };
   f.ready.delete(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control))
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, Date.now() + 20_000))
     .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
   expect(respond).not.toHaveBeenCalled();
   f.ready.add(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control)).resolves.toBeUndefined();
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, Date.now() + 20_000)).resolves.toBeUndefined();
   expect(respond).toHaveBeenCalledTimes(1);
   expect(f.ledger.currentRows(chatId).filter(row => row.kind === 'permission-resolved')).toHaveLength(1);
 });

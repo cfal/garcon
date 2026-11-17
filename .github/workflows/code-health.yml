@@ -21,3 +21,8 @@ jobs:
           REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
           REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
         run: bun scripts/protocol-review-gate.ts "$REVIEW_BASE" "$REVIEW_HEAD"
+      - name: Ratchet backend test debt
+        env:
+          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+          REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bun scripts/test-debt-gate.ts "$REVIEW_BASE" "$REVIEW_HEAD"
