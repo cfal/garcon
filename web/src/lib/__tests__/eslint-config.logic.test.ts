@@ -34,4 +34,16 @@ describe('effective ESLint boundaries', () => {
 		const [allowed] = await eslint.lintText("import { apiFetch } from './client'; export { apiFetch };", { filePath: 'src/lib/api/example.ts' });
 		expect(allowed.messages).toEqual([]);
 	});
+
+	it.each([
+		['src/routes/example.ts', "import { apiFetch } from '$lib/api/client'; export { apiFetch };"],
+		['src/lib/chat/example.ts', "export { apiFetch as fetch } from '$lib/api/client';"],
+		['src/lib/chat/example.ts', "import * as client from '$lib/api/client'; export const fetch = client.apiFetch;"],
+		['src/lib/chat/example.ts', "export const fetch = (await import('$lib/api/client')).apiFetch;"],
+		['src/lib/chat/example.ts', "export const { apiFetch: fetch } = await import('$lib/api/client');"],
+		['src/lib/chat/example.ts', "import * as client from '$lib/api/client'; export const fetch = client['apiFetch'];"],
+	])('rejects raw API access in %s: %s', async (filePath, source) => {
+		const [result] = await eslint.lintText(source, { filePath });
+		expect(result.messages.some(message => message.ruleId === 'no-restricted-syntax')).toBe(true);
+	});
 });

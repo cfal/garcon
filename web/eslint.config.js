@@ -106,11 +106,17 @@ export default defineConfig(
 		},
 	},
 	{
-		files: ['src/lib/**/*.{ts,svelte}'],
-		ignores: ['src/lib/api/**', 'src/lib/**/__tests__/**'],
+		files: ['src/**/*.{ts,svelte}'],
+		ignores: ['src/lib/api/**', 'src/**/__tests__/**'],
 		rules: {
 			'no-restricted-syntax': ['error', {
-				selector: 'ImportSpecifier[imported.name="apiFetch"]',
+				selector: [
+					'ImportSpecifier[imported.name="apiFetch"]',
+					'ExportSpecifier[local.name="apiFetch"]',
+					'MemberExpression[computed=false][property.name="apiFetch"]',
+					'MemberExpression[computed=true][property.value="apiFetch"]',
+					'ObjectPattern > Property[key.name="apiFetch"]',
+				].join(', '),
 				message: 'Keep raw authenticated HTTP handling in lib/api; consume a domain API function.',
 			}],
 		},
