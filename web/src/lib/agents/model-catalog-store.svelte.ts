@@ -1,4 +1,4 @@
-import { apiFetch } from '$lib/api/client.js';
+import { fetchModelCatalogResponse } from '$lib/api/model-catalog';
 import { effectiveExecutorId, type ExecutorSnapshot } from '$shared/executors';
 import { agentLabelFor } from './agent-labels.js';
 import {
@@ -759,7 +759,7 @@ export class ModelCatalogStore {
 		this.isRefreshing = true;
 
 		try {
-			const response = await this.#fetchCatalogResponse(options);
+			const response = await fetchModelCatalogResponse(this.executorId, options.force ? null : this.etag);
 			if (requestVersion !== this.#requestVersion) return;
 			const responseEtag = response.headers?.get?.('etag') ?? null;
 
@@ -771,9 +771,6 @@ export class ModelCatalogStore {
 				return;
 			}
 
-			if (!response.ok) {
-				throw new Error(`Failed to fetch model catalog: ${response.status}`);
-			}
 			const data = (await response.json()) as ModelCatalogResponse;
 			if (requestVersion !== this.#requestVersion) return;
 
@@ -799,18 +796,6 @@ export class ModelCatalogStore {
 		} finally {
 			if (requestVersion === this.#requestVersion) this.isRefreshing = false;
 		}
-	}
-
-	#fetchCatalogResponse(options: { force?: boolean }): Promise<Response> {
-		const url = this.executorId === 'local' ? '/api/v1/models' : `/api/v1/models?executorId=${encodeURIComponent(this.executorId)}`;
-		if (!options.force && this.etag) {
-			return apiFetch(url, {
-				headers: {
-					'If-None-Match': this.etag,
-				},
-			});
-		}
-		return apiFetch(url);
 	}
 
 	#currentSnapshot(): ModelCatalogSnapshot {
