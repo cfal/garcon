@@ -17,6 +17,7 @@ import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { ProcessExitFence, type TerminationTimings } from '@garcon/server-agent-common/lifecycle/process-exit-fence';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { exitCodeAfterInputFailure } from '@garcon/server-agent-common/lifecycle/process-input-failure';
 import {
   assertFactoryExecutionOpen,
   markFactoryExecutionStarted,
@@ -711,6 +712,13 @@ export class FactoryCliRuntime {
       await stdin.write(prompt);
       await stdin.end();
       signal?.throwIfAborted();
+    } catch (error) {
+      if (turn.aborted || signal?.aborted) throw error;
+      const exitCode = await exitCodeAfterInputFailure(proc);
+      if (!turn.aborted && !signal?.aborted && exitCode !== null) {
+        throw new Error(`Factory process exited while receiving its prompt (code ${exitCode})`, { cause: error });
+      }
+      throw error;
     } finally {
       signal?.removeEventListener('abort', abort);
     }

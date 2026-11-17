@@ -20,6 +20,7 @@ import { convertAmpMessageToChatMessages, getAssistantContent, getUserText, type
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { ProcessExitFence, type TerminationTimings } from '@garcon/server-agent-common/lifecycle/process-exit-fence';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { exitCodeAfterInputFailure } from '@garcon/server-agent-common/lifecycle/process-input-failure';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
 import {
@@ -608,6 +609,13 @@ class AmpCliRuntime {
       turn.pendingInputEchoes.push({ text: prompt });
       await this.#writeInput(turn, buildAmpUserInput(prompt, crypto.randomUUID(), attachments));
       signal?.throwIfAborted();
+    } catch (error) {
+      if (turn.aborted || signal?.aborted) throw error;
+      const exitCode = await exitCodeAfterInputFailure(proc);
+      if (!turn.aborted && !signal?.aborted && exitCode !== null) {
+        throw new Error(`Amp process exited while receiving its prompt (code ${exitCode})`, { cause: error });
+      }
+      throw error;
     } finally {
       signal?.removeEventListener('abort', abort);
     }

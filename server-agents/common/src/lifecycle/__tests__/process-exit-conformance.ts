@@ -184,6 +184,41 @@ export function processExitConformance(create: () => TurnRuntime): void {
       } finally { write.mockRestore(); }
     });
 
+    test('an exited child retains its exit diagnostic when the launch write rejects', async () => {
+      const { runtime, first, request, events } = setup();
+      const failure = new Error('EPIPE: broken pipe, write');
+      const write = spyOn(first.stdin, 'write').mockImplementation(() => {
+        first.exit(3);
+        return Promise.reject(failure);
+      });
+      try {
+        await expect(runtime.runTurn(request)).rejects.toMatchObject({
+          message: expect.stringContaining('code 3'), cause: failure,
+        });
+        for (const event of events) {
+          if (event.type === 'run-ended') expect(event.error?.message).toContain('code 3');
+        }
+      } finally { write.mockRestore(); }
+    });
+
+    test('a real child exiting before reading a large prompt reports its exit code', async () => {
+      const child = Bun.spawn([process.execPath, '-e', 'process.exit(3)'], {
+        env: { ...process.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+      });
+      const { runtime, request, events } = setup();
+      spawn.mockReset().mockReturnValue(child);
+      try {
+        await expect(runtime.runTurn({ ...request, command: 'x'.repeat(4 * 1024 * 1024) }))
+          .rejects.toThrow('code 3');
+        for (const event of events) {
+          if (event.type === 'run-ended') expect(event.error?.message).toContain('code 3');
+        }
+      } finally {
+        child.kill('SIGKILL');
+        await child.exited;
+      }
+    });
+
     test('release during admission prevents a late spawn', async () => {
       const { runtime, request } = setup();
       const admitted = Promise.withResolvers<void>();
