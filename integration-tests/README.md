@@ -181,6 +181,87 @@ The separate WebKit CI lane installs Playwright WebKit with its system dependenc
 
 Transcript inventory supports direct `test`/`it`/`describe` registrations, `each`, `skipIf`/`runIf`, and `concurrent`/`serial`. Titles may use literal strings, template fragments, and literal object tables in `for...of` loops. Keep case IDs in those forms: registration aliases, computed titles, arbitrary function bodies, focused/inverted tests, and statically skipped declarations do not count. Platform conditions and nonliteral loop bounds are not evaluated. This is a source-inventory guard, not a JavaScript interpreter or proof that every matrix case executed; runtime suites own that evidence.
 
+## Bombadil Exploration
+
+`bun run test:bombadil` is a separate Linux-only, credential-free lane. Install
+integration dependencies and Playwright Chromium, then build the production SPA:
+
+```bash
+bun install --frozen-lockfile
+cd integration-tests
+bun install --frozen-lockfile
+bunx playwright install chromium
+cd ..
+bun run build
+bun run test:bombadil
+GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials bun run test:bombadil
+GARCON_TEST_EXECUTION_BACKEND=remote-executor-dials bun run test:bombadil
+```
+
+On hosts that cannot run Chromium's sandbox, explicitly set
+`BOMBADIL_NO_SANDBOX=1`. Use a disposable runner, not a privileged host with
+private mounts. On RAM-backed `/tmp` hosts, set `TMPDIR` to an existing directory
+on disk. Missing dependencies fail the lane; they are never silently skipped.
+
+The exact-pinned Bombadil **0.7.10 release** drives its own Chromium using the
+Playwright executable. Every invocation gets fresh Garcon, provider, browser,
+home and project state. The private document-start bootstrap seeds auth once,
+only on the fixture's exact origin, without headers or credential-bearing argv.
+Generated source is mode 0600 and removed even when fixture retention is enabled.
+
+Campaigns seed eight turns per chat and force authenticated A/B/A navigation,
+browser reload and measured transcript scroll movement before bounded random
+chat switching and nested scrolling. Additional campaigns exercise Send,
+Enter, held output, queue edit/removal, Stop and post-stop submission. Only these
+controls are allowlisted; clicks revalidate visibility, command ownership and
+hit testing at execution time. They invoke DOM clicks, not trusted pointer
+events. Typing and Enter use Bombadil's native actions; focus can change between
+observation and dispatch. All campaigns use a fixed 1440x900 desktop viewport,
+not mobile layouts. Settings, terminals,
+files, Git, native-history reload, deletion and executor administration are not
+explored. Source composer coverage does not establish formatted-editor parity.
+
+The wrapper rejects violations, action failures, cancellation, missing or
+malformed traces, unfinished workflows and leaked processes. Canonical
+presentation rows, view identity, provider counts, correlated terminal outcomes,
+queue settlement and selected executor/project are independently checked after
+browser exit. Completion requires a healthy final browser observation, not an
+earlier checkpoint. Both remote dial directions run with separate project roots.
+This is selected-executor/primary
+path coverage, not executor fault injection or native-history bulk coverage.
+
+The first campaigns disable coverage rewriting; a separate compatibility run
+enables it. Production service-worker behavior stays enabled. Neither mode
+claims complete network, service-worker or branch coverage. The passive fetch
+observer checks same-origin API response statuses, not every browser request.
+It retains only chat, turn and committed-input identities from UI turn acceptances
+to correlate successful terminal events with canonical rows; it never records
+request bodies, headers or credentials.
+WebSocket close codes and capture gaps are diagnostic observations, not grounds
+for suppressing failures or changing heartbeat settings.
+
+Failures retain `trace/trace.jsonl`, screenshots, bounded output, a versioned
+manifest and synthetic fixture diagnostics under `artifacts/bombadil/`. Successful
+runs print capture/action counts and remove artifacts. Never upload private
+bootstrap files, browser profiles or arbitrary fixture directories. The manual
+and nightly workflow retains failed artifacts for seven days, runs serially,
+and is deliberately not a required PR check; test failures still fail the job.
+
+Replay is manual and best-effort, against an entirely new fixture. Select only
+the matching campaign and instrumentation mode:
+
+```bash
+cd integration-tests
+BOMBADIL_REPRODUCE=/absolute/path/to/retained/trace \
+  bun test --test-name-pattern='seeded navigation' tests/bombadil/campaigns.test.ts
+```
+
+Use the original revision, backend, production build and browser version.
+Ephemeral IDs and asynchronous timing can still diverge. Do not use `fuzz`,
+automatic `shrink`, the upstream Action, or development-main binary-trace tools
+with this release. Translate useful failures into deterministic regressions in
+the existing suites before promoting this exploratory lane to a PR gate.
+
 ## Provider Scope
 
 The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
