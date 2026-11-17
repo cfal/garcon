@@ -14,6 +14,8 @@ import {
 } from '../../support/scripted-codex.js';
 
 const SCRIPTED_MODEL_DEFAULTS = {
+  'gpt-6.2-sol': 'low',
+  'gpt-6.2-astra': 'low',
   'gpt-6-astra': 'low',
   'gpt-6.1-sol': 'low',
   'gpt-6-sol': 'medium',
@@ -56,6 +58,7 @@ describe('Codex scripted default effort model switching', () => {
       });
 
       for (const model of [
+        'gpt-6.2-sol', 'gpt-6.2-astra',
         'gpt-5.5', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol',
         'gpt-5.4', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra',
       ] as const) {
@@ -152,12 +155,14 @@ describe('Codex scripted default effort model switching', () => {
     });
   }, 120_000);
 
-  test('uses bundled metadata to preserve Sol and Terra Ultra semantics', async () => {
+  test('uses bundled metadata to preserve Sol, Astra and Terra Ultra semantics', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
 
     await withIntegrationFixture('codex-scripted-sol-ultra', async (fixture) => {
       for (const [model, ultraEffort] of [
+        ['gpt-6.2-sol', 'xhigh'],
+        ['gpt-6.2-astra', 'xhigh'],
         ['gpt-6.1-sol', 'xhigh'],
         ['gpt-6.1-terra', 'xhigh'],
         ['gpt-6-sol', 'max'],
@@ -199,36 +204,40 @@ describe('Codex scripted default effort model switching', () => {
   }, 120_000);
 
   test.each([
-    ['catalog', undefined],
-    ['configured medium', 'medium'],
-  ] as const)('preserves GPT-6.1 Terra %s Default with published metadata', async (_label, configuredEffort) => {
+    ['gpt-6.1-terra', 'catalog', undefined],
+    ['gpt-6.1-terra', 'configured medium', 'medium'],
+    ['gpt-6.2-sol', 'catalog', undefined],
+    ['gpt-6.2-sol', 'configured medium', 'medium'],
+    ['gpt-6.2-astra', 'catalog', undefined],
+    ['gpt-6.2-astra', 'configured medium', 'medium'],
+  ] as const)('preserves %s %s Default with published metadata', async (nativeModel, _label, configuredEffort) => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
 
-    await withIntegrationFixture('codex-scripted-terra-default', async (fixture) => {
+    await withIntegrationFixture('codex-scripted-native-model-default', async (fixture) => {
       const chatId = fixture.newChatId();
-      const terraDefaultEffort = configuredEffort ?? 'low';
-      const terraTurnOptions = {
+      const defaultEffort = configuredEffort ?? 'low';
+      const turnOptions = {
         fixture,
         testEnvironment,
         chatId,
-        model: 'gpt-6.1-terra' as const,
+        model: nativeModel,
       };
-      const runTerraTurn = (thinkingMode: 'none' | 'max') => runScriptedTurn({
-        ...terraTurnOptions,
-        command: `Continue with Terra ${thinkingMode}.`,
+      const runNativeTurn = (thinkingMode: 'none' | 'max') => runScriptedTurn({
+        ...turnOptions,
+        command: `Continue with ${nativeModel} ${thinkingMode}.`,
         thinkingMode,
-        expectedEffort: thinkingMode === 'max' ? 'max' : terraDefaultEffort,
+        expectedEffort: thinkingMode === 'max' ? 'max' : defaultEffort,
       });
 
       await runScriptedTurn({
-        ...terraTurnOptions,
-        command: 'Start with Terra Default.',
+        ...turnOptions,
+        command: `Start with ${nativeModel} Default.`,
         start: true,
-        expectedEffort: terraDefaultEffort,
+        expectedEffort: defaultEffort,
       });
-      await runTerraTurn('max');
-      await runTerraTurn('none');
+      await runNativeTurn('max');
+      await runNativeTurn('none');
 
       for (const thinkingMode of ['high', 'none'] as const) {
         const response = await fixture.client.fetch('/api/v1/chats/execution-settings', {
@@ -241,11 +250,11 @@ describe('Codex scripted default effort model switching', () => {
           body: { success: true, chatId, thinkingMode },
         });
       }
-      await runTerraTurn('none');
+      await runNativeTurn('none');
 
       for (const [model, expectedEffort] of [
         ['gpt-6-sol', configuredEffort ?? 'medium'],
-        ['gpt-6.1-terra', terraDefaultEffort],
+        [nativeModel, defaultEffort],
       ] as const) {
         const response = await fixture.client.fetch('/api/v1/chats/model', {
           method: 'PATCH',
@@ -266,7 +275,7 @@ describe('Codex scripted default effort model switching', () => {
     }, {
       serverEnvironment: {
         ...testEnvironment.serverEnvironment,
-        OPENAI_API_KEY: 'garcon-scripted-terra-catalog-key',
+        OPENAI_API_KEY: 'garcon-scripted-native-catalog-key',
       },
       prepareWorkspace: async (directories) => {
         await testEnvironment.prepareWorkspace(directories, { useFixtureModelCatalog: false });
