@@ -78,6 +78,11 @@ export const invariants = specification.properties;
           sources: ['browser.ts', 'properties.ts', 'specification.ts'].map(name => join(ROOT, 'integration-tests/bombadil', name)),
         });
         console.log(`Bombadil ${campaign}: ${summary.states} states, ${summary.actions} actions, largest capture gap ${Math.round(summary.maxCaptureGapMs)}ms`);
+        const explorationStage = { navigation: 9, submission: 15, queue: 25 }[campaign];
+        const prefix = summary.observations.filter(({ stage }) => typeof stage === 'number' && stage < explorationStage);
+        expect(prefix.length).toBeGreaterThan(0);
+        expect(prefix.every(({ randomActions }) => randomActions === 0)).toBe(true);
+        expect(summary.observations.at(-1)?.randomActions).toBe(30);
         if (held) await held.expectAbort();
         const afterA = await client.getMessages(chatA, { limit: 200 });
         const afterB = await client.getMessages(chatB, { limit: 200 });

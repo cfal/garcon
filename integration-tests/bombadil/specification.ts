@@ -94,7 +94,7 @@ export function createSpecification(config: BrowserConfig) {
       } else {
         requireTarget(document, findControl(document, config, choice)).click();
       }
-      progress.randomActions++;
+      if (progress.stage >= steps.length) progress.randomActions++;
     } catch (error) {
       progress.actionErrors.push(String(error));
     }
