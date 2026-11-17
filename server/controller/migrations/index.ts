@@ -34,11 +34,13 @@ export class WorkspaceMigrationRunner {
   readonly #initialVersion: number;
   readonly #skipLadder: boolean;
   #nextEntry = 0;
+  #checkpointVersion: number;
 
   private constructor(workspaceDir: string, initialVersion: number, skipLadder: boolean) {
     this.#workspaceDir = workspaceDir;
     this.#initialVersion = initialVersion;
     this.#skipLadder = skipLadder;
+    this.#checkpointVersion = initialVersion;
   }
 
   get initialVersion(): number {
@@ -68,8 +70,22 @@ export class WorkspaceMigrationRunner {
     if (!entry || entry.name !== name) {
       throw new Error(`Workspace migration order violation: expected ${entry?.name ?? 'completion'}, got ${name}`);
     }
-    this.#nextEntry += 1;
     if (!this.#skipLadder && this.#initialVersion < entry.version) await migrate();
+    this.#nextEntry += 1;
+  }
+
+  async checkpointThrough(name: WorkspaceMigrationName): Promise<void> {
+    const index = MIGRATIONS.findIndex((entry) => entry.name === name);
+    if (index < 0 || index >= this.#nextEntry) {
+      throw new Error(`Cannot checkpoint incomplete workspace migration ${name}`);
+    }
+    const { version } = MIGRATIONS[index];
+    if (version <= this.#checkpointVersion) return;
+    // Later schema writes must not be replayed through this completed prefix.
+    await writeJsonFileAtomic(path.join(this.#workspaceDir, WORKSPACE_VERSION_FILE), {
+      version,
+    } satisfies WorkspaceVersionFile);
+    this.#checkpointVersion = version;
   }
 
   async finish(): Promise<void> {

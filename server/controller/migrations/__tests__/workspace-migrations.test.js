@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,44 @@ async function readVersion() {
 }
 
 describe('WorkspaceMigrationRunner', () => {
+  it.each([true, false])('checkpoints a completed prefix without changing the boot version (fresh: %s)', async (fresh) => {
+    if (!fresh) await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'), '{"version":0}');
+    const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+    const migrate = mock(async () => undefined);
+    await runner.run('chat-id-migration', migrate);
+    await runner.run('core-record-migration', migrate);
+    await runner.checkpointThrough('core-record-migration');
+    expect(await readVersion()).toEqual({ version: 2 });
+    expect(runner.initialVersion).toBe(0);
+    expect(runner.isFresh).toBe(fresh);
+
+    const restarted = await WorkspaceMigrationRunner.open(workspaceDir);
+    const replay = mock(async () => undefined);
+    await restarted.run('chat-id-migration', replay);
+    await restarted.run('core-record-migration', replay);
+    await restarted.run('ephemeral-queue-state-cleanup', replay);
+    expect(replay).toHaveBeenCalledTimes(1);
+    await restarted.checkpointThrough('chat-id-migration');
+    expect(await readVersion()).toEqual({ version: 2 });
+  });
+
+  it('cannot checkpoint past a failed migration or an unconfirmed checkpoint write', async () => {
+    await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'), '{"version":0}');
+    const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+    await expect(runner.run('chat-id-migration', async () => { throw new Error('failed'); })).rejects.toThrow('failed');
+    await expect(runner.checkpointThrough('chat-id-migration')).rejects.toThrow('incomplete');
+    await runner.run('chat-id-migration', async () => undefined);
+    const rename = spyOn(fs, 'rename').mockRejectedValue(new Error('disk unavailable'));
+    try {
+      await expect(runner.checkpointThrough('chat-id-migration')).rejects.toThrow('disk unavailable');
+      expect(await readVersion()).toEqual({ version: 0 });
+    } finally {
+      rename.mockRestore();
+    }
+    await runner.checkpointThrough('chat-id-migration');
+    expect(await readVersion()).toEqual({ version: 1 });
+  });
+
   it('stamps a fresh workspace without running historical migrations', async () => {
     const migrate = mock(async () => undefined);
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
