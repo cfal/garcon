@@ -18,6 +18,7 @@ import {
 } from '@garcon/common/chat-types';
 import { convertAmpMessageToChatMessages, getAssistantContent, getUserText, type AmpCliMessage } from './amp-message.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { ProcessExitFence, type TerminationTimings } from '@garcon/server-agent-common/lifecycle/process-exit-fence';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
 import {
@@ -65,6 +66,7 @@ interface AmpTurnContext {
   readonly hiddenToolUseIds: Set<string>;
   resolve: (() => void) | null;
   process: ReturnType<typeof Bun.spawn> | null;
+  termination: Promise<boolean> | null;
 }
 
 interface AmpPendingInputEcho {
@@ -322,6 +324,7 @@ function createTurn(operation: AgentRuntimeOperation): AmpTurnContext {
     hiddenToolUseIds: new Set(),
     resolve: null,
     process: null,
+    termination: null,
   };
 }
 
@@ -343,6 +346,7 @@ function buildContinueArgs(
 class AmpCliRuntime {
   readonly #config: AmpConfig;
   readonly #logger: AgentLogger;
+  readonly #exits: ProcessExitFence;
   #runningSessions = new Map<string, AmpSession>();
   #steerTargets = new WeakMap<AgentSteerTarget, {
     readonly session: AmpSession;
@@ -355,9 +359,10 @@ class AmpCliRuntime {
     purge: (_id, session) => this.#retireSession(session),
   });
 
-  constructor(options: { config?: AmpConfig; logger?: AgentLogger } = {}) {
+  constructor(options: { config?: AmpConfig; logger?: AgentLogger; terminationTimings?: TerminationTimings } = {}) {
     this.#config = options.config ?? DEFAULT_CONFIG;
     this.#logger = options.logger ?? SILENT_LOGGER;
+    this.#exits = new ProcessExitFence(options.terminationTimings);
   }
 
   #routeMessage(session: AmpSession, turn: AmpTurnContext, msg: AmpCliMessage): void {
@@ -465,7 +470,7 @@ class AmpCliRuntime {
       }
     } finally {
       const exitCode = await proc.exited;
-      if (!turn.completed) {
+      if (!turn.completed && !turn.termination) {
         if (!turn.aborted) {
           this.#failTurn(session, turn, `Amp process exited before result (code ${exitCode})`);
         } else {
@@ -506,7 +511,7 @@ class AmpCliRuntime {
   }
 
   #finishTurn(session: AmpSession, turn: AmpTurnContext): void {
-    if (turn.completed) return;
+    if (turn.completed || turn.termination) return;
     this.#completeTurn(session, turn);
     this.#publishTurnEvent(session, turn, {
       type: 'run-ended',
@@ -518,7 +523,7 @@ class AmpCliRuntime {
   }
 
   #failTurn(session: AmpSession, turn: AmpTurnContext, message: string): void {
-    if (turn.completed) return;
+    if (turn.completed || turn.termination) return;
     this.#completeTurn(session, turn);
     this.#publishTurnEvent(session, turn, {
       type: 'run-ended',
@@ -617,11 +622,7 @@ class AmpCliRuntime {
     turn.aborted = true;
     turn.sourceRetired = true;
     session.lastActivityAt = Date.now();
-    const proc = turn.process;
-    turn.process = null;
-    if (proc && !proc.killed) proc.kill();
-    session.sources.delete(turn);
-    this.#completeTurn(session, turn);
+    void this.#terminate(session, turn);
     if (removeSession && this.#runningSessions.get(session.id) === session) {
       this.#runningSessions.delete(session.id);
     }
@@ -680,9 +681,7 @@ class AmpCliRuntime {
         outcome: 'unknown',
         message: 'Amp session was retired before steering was acknowledged',
       });
-      if (turn.process && !turn.process.killed) turn.process.kill();
-      turn.process = null;
-      if (!turn.completed) this.#completeTurn(session, turn);
+      void this.#terminate(session, turn);
     }
     session.sources.clear();
     if (this.#runningSessions.get(session.id) === session) {
@@ -747,6 +746,9 @@ class AmpCliRuntime {
     } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
+    await this.#exits.wait(threadId, request.executionAdmission?.signal);
+    assertAmpExecutionOpen(request);
+    this.#exits.assertClear(threadId);
 
     let session = this.#runningSessions.get(threadId);
     if (!session) {
@@ -887,7 +889,7 @@ class AmpCliRuntime {
     return null;
   }
 
-  abort(agentSessionId: string): boolean {
+  async abort(agentSessionId: string): Promise<boolean> {
     const session = this.#runningSessions.get(agentSessionId);
     const turn = session?.activeTurn;
     if (!session || !turn?.process) return false;
@@ -898,9 +900,23 @@ class AmpCliRuntime {
       outcome: 'unknown',
       message: 'Amp turn was interrupted before steering was acknowledged',
     });
-    turn.process.kill();
-    this.#completeTurn(session, turn);
-    return true;
+    return this.#terminate(session, turn);
+  }
+
+  #terminate(session: AmpSession, turn: AmpTurnContext): Promise<boolean> {
+    if (turn.termination) return turn.termination;
+    turn.aborted = true;
+    const settle = () => {
+      turn.sourceRetired = true;
+      turn.process = null;
+      session.sources.delete(turn);
+      this.#completeTurn(session, turn);
+    };
+    if (!turn.process) { settle(); return Promise.resolve(true); }
+    return turn.termination = this.#exits.terminate(session.id, turn.process, settle).then(exited => {
+      if (!exited) this.#logger.error('Amp process exit unconfirmed after SIGKILL.', { sessionId: session.id });
+      return exited;
+    });
   }
 
   isRunning(agentSessionId: string): boolean {

@@ -764,6 +764,8 @@ describe('FactoryCliRuntime lifecycle', () => {
       operation: second.operation,
     }).then(() => { secondSettled = true; });
 
+    while (spawnMock.mock.calls.length < 2) await Promise.resolve();
+
     firstProc.pushJson({
       type: 'message',
       role: 'assistant',

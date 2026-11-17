@@ -589,7 +589,7 @@ describe('AmpCliRuntime lifecycle', () => {
     });
 
     const started = await startedPromise;
-    expect(provider.abort(started.agentSessionId)).toBe(true);
+    expect(await provider.abort(started.agentSessionId)).toBe(true);
     firstProc.kill();
     await firstProc.exited;
 
