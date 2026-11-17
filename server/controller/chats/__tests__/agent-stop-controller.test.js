@@ -7,7 +7,7 @@ const TARGET = '2000000000000000';
 const source = { chatId: SOURCE, viewId: 'view-source', runId: 'run-source', requestOrdinal: 3, at: '2030-01-01T00:00:00.000Z' };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 function fixture() {
-  const chats = new Map([[SOURCE, {}], [TARGET, { parentChat: { chatId: SOURCE, relation: 'delegation' } }]]);
+  const chats = new Map([[SOURCE, {}], [TARGET, { parentChatId: SOURCE, lineage: null }]]);
   const options = {
     registry: { getChat: (id) => chats.get(id) ?? null },
     notices: { existingCurrentView: mock(() => ({ viewId: source.viewId })), appendNotice: mock() },
@@ -35,8 +35,8 @@ describe('delegated stop controller', () => {
   });
 
   it.each([
-    null, {}, { parentChat: { chatId: TARGET, relation: 'delegation' } },
-    { parentChat: { chatId: SOURCE, relation: 'fork' } }, { parentChat: { chatId: SOURCE, relation: 'handoff' } },
+    null, {}, { parentChatId: TARGET, lineage: null },
+    { parentChatId: null, lineage: { sourceChatId: SOURCE, kind: 'fork' } }, { parentChatId: null, lineage: { sourceChatId: SOURCE, kind: 'handoff' } },
   ])('rejects an unauthorized target before acquiring a foreign lock: %j', async (target) => {
     const f = fixture();
     if (target) f.chats.set(TARGET, target); else f.chats.delete(TARGET);
@@ -71,7 +71,7 @@ describe('delegated stop controller', () => {
 
   it('rejects self delegation and continues admitted deletion despite source cancellation', async () => {
     const f = fixture();
-    f.chats.set(SOURCE, { parentChat: { chatId: SOURCE, relation: 'delegation' } });
+    f.chats.set(SOURCE, { parentChatId: SOURCE, lineage: null });
     f.controller.request(source, { type: 'stop-agent', chatId: SOURCE, remove: true });
     await tick();
     expect(f.options.commands.submitAgentCommandStopLocked).not.toHaveBeenCalled();

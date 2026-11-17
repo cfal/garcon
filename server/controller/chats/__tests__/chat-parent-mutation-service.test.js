@@ -16,11 +16,10 @@ let service;
 let lock;
 let changed;
 
-function add(id, parentChat = null) {
+function add(id, parentChatId = null, lineage = null) {
   registry.addChat({ id, agentId: 'test', model: 'test', projectPath: '/project',
-    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChat });
+    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChatId, lineage });
 }
-const delegation = (chatId) => ({ chatId, relation: 'delegation' });
 const set = (chatId, parentChatId) => service.set({ chatId, parentChatId });
 
 beforeEach(async () => {
@@ -72,22 +71,21 @@ describe('delegation parent mutation', () => {
   it('attaches, replaces, clears and survives restart without changing other fields', async () => {
     add(A); add(B); add(C);
     const before = registry.getChat(A);
-    expect(await set(A, B)).toMatchObject({ changed: true, parentChat: delegation(B) });
-    expect(Object.isFrozen(registry.getChat(A).parentChat)).toBe(true);
-    expect(registry.getChat(A)).toEqual({ ...before, parentChat: delegation(B) });
+    expect(await set(A, B)).toMatchObject({ changed: true, parentChatId: B });
+    expect(registry.getChat(A)).toEqual({ ...before, parentChatId: B });
     const restored = new ChatRegistry(directory);
     await restored.init();
-    expect(restored.getChat(A).parentChat).toEqual(delegation(B));
-    expect(await set(A, C)).toMatchObject({ changed: true, parentChat: delegation(C) });
-    expect(await set(A, null)).toMatchObject({ changed: true, parentChat: null });
+    expect(restored.getChat(A).parentChatId).toEqual(B);
+    expect(await set(A, C)).toMatchObject({ changed: true, parentChatId: C });
+    expect(await set(A, null)).toMatchObject({ changed: true, parentChatId: null });
     expect(await set(A, null)).toMatchObject({ changed: false });
     expect(changed.mock.calls).toEqual([[A], [A], [A]]);
   });
 
   it('preserves generic patch protection and changes future delegated authority only', async () => {
     add(A); add(B); add(C);
-    registry.updateChat(A, { parentChat: delegation(B) });
-    expect(registry.getChat(A).parentChat).toBeNull();
+    registry.updateChat(A, { parentChatId: B });
+    expect(registry.getChat(A).parentChatId).toBeNull();
     await set(A, B);
     expect(isDirectDelegatedChild(B, A, registry.getChat(A))).toBe(true);
     await set(A, C);
@@ -98,40 +96,53 @@ describe('delegation parent mutation', () => {
   });
 
   it.each(['fork', 'handoff'])('preserves %s ancestry when replacing or clearing', async (relation) => {
-    const parent = { chatId: B, relation, transcriptViewId: 'synthetic-view', ordinal: 3 };
-    add(A, parent); add(B); add(C);
-    await expect(set(A, C)).rejects.toMatchObject({ code: 'CHAT_PARENT_LINEAGE_LOCKED' });
-    await expect(set(A, null)).rejects.toMatchObject({ code: 'CHAT_PARENT_LINEAGE_LOCKED' });
-    expect(registry.getChat(A).parentChat).toEqual(parent);
-    expect(changed).not.toHaveBeenCalled();
+    const lineage = { sourceChatId: B, kind: relation, transcriptViewId: 'synthetic-view', ordinal: 3 };
+    add(A, null, lineage); add(B); add(C); add(D);
+    expect(isDirectDelegatedChild(B, A, registry.getChat(A))).toBe(false);
+    registry.updateChat(A, { lineage: null, parentChatId: B });
+    expect(registry.getChat(A).lineage).toEqual(lineage);
+    expect(registry.getChat(A).parentChatId).toBeNull();
+    for (const parentChatId of [C, D, null]) {
+      expect(await set(A, parentChatId)).toMatchObject({ changed: true, parentChatId });
+      const restored = new ChatRegistry(directory);
+      await restored.init();
+      expect(restored.getChat(A).lineage).toEqual(lineage);
+      expect(Object.isFrozen(restored.getChat(A).lineage)).toBe(true);
+      expect(restored.getChat(A).parentChatId).toBe(parentChatId);
+      expect(isDirectDelegatedChild(B, A, registry.getChat(A))).toBe(false);
+      expect(isDirectDelegatedChild(D, A, registry.getChat(A))).toBe(parentChatId === D);
+    }
+    expect(changed.mock.calls).toEqual([[A], [A], [A]]);
   });
 
   it('handles missing chats and unchanged dangling parents', async () => {
-    add(A, delegation(B));
+    add(A, B);
     expect(await set(A, B)).toMatchObject({ changed: false });
     await expect(set(A, C)).rejects.toMatchObject({ code: 'PARENT_CHAT_NOT_FOUND' });
     await expect(set(MISSING, A)).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' });
     expect(await set(A, null)).toMatchObject({ changed: true });
   });
 
-  it('rejects self, mixed-lineage and pre-existing ancestry cycles', async () => {
-    add(A); add(B, { chatId: A, relation: 'fork', transcriptViewId: 'view', ordinal: 0 });
-    add(C, delegation(D)); add(D, delegation(C));
-    for (const parent of [A, B, C]) {
+  it('rejects delegation cycles but permits mixed lineage/delegation loops', async () => {
+    add(A); add(B, null, { sourceChatId: A, kind: 'fork', transcriptViewId: 'view', ordinal: 0 });
+    add(C, D); add(D, C);
+    for (const parent of [A, C]) {
       await expect(set(A, parent)).rejects.toMatchObject({ code: 'CHAT_PARENT_CYCLE' });
     }
+    expect(await set(A, B)).toMatchObject({ changed: true, parentChatId: B });
+    await expect(set(B, A)).rejects.toMatchObject({ code: 'CHAT_PARENT_CYCLE' });
     await set(C, null);
     await set(A, D);
-    expect(registry.getChat(A).parentChat).toEqual(delegation(D));
+    expect(registry.getChat(A).parentChatId).toEqual(D);
   });
 
   it('allows ancestry ending at a missing higher parent', async () => {
-    add(A); add(B, delegation(MISSING));
+    add(A); add(B, MISSING);
     expect(await set(A, B)).toMatchObject({ changed: true });
   });
 
   it('serializes disjoint endpoint writes before checking longer cycles', async () => {
-    add(A); add(B, delegation(C)); add(C); add(D, delegation(A));
+    add(A); add(B, C); add(C); add(D, A);
     await registry.flush();
     const entered = Promise.withResolvers();
     const release = Promise.withResolvers();
@@ -149,7 +160,7 @@ describe('delegation parent mutation', () => {
       expect(await first).toMatchObject({ changed: true });
       expect(await second).toMatchObject({ code: 'CHAT_PARENT_CYCLE' });
     } finally { release.resolve(); held.mockRestore(); }
-    expect(registry.getChat(C).parentChat).toBeNull();
+    expect(registry.getChat(C).parentChatId).toBeNull();
   });
 
   it('re-reads parent existence after acquiring the shared mutation locks', async () => {
@@ -174,7 +185,7 @@ describe('delegation parent mutation', () => {
     const failure = spyOn(fs, 'rename').mockRejectedValueOnce(new Error('Synthetic write failure'));
     try { await expect(set(A, B)).rejects.toMatchObject({ code: 'CHAT_PARENT_SAVE_FAILED' }); }
     finally { failure.mockRestore(); }
-    expect(registry.getChat(A).parentChat).toBeNull();
+    expect(registry.getChat(A).parentChatId).toBeNull();
     expect(changed).not.toHaveBeenCalled();
   });
 
@@ -183,9 +194,9 @@ describe('delegation parent mutation', () => {
     await registry.flush();
     await withFailingDirectorySync(directory, async () => {
       await expect(set(A, B)).rejects.toMatchObject({ code: 'CHAT_PARENT_SAVE_UNKNOWN' });
-      expect(registry.getChat(A).parentChat).toEqual(delegation(B));
+      expect(registry.getChat(A).parentChatId).toEqual(B);
       await expect(set(A, C)).rejects.toMatchObject({ code: 'CHAT_PARENT_SAVE_UNKNOWN' });
-      expect(registry.getChat(A).parentChat).toEqual(delegation(B));
+      expect(registry.getChat(A).parentChatId).toEqual(B);
     });
     expect(changed.mock.calls).toEqual([[A]]);
     expect(await set(A, B)).toMatchObject({ changed: false });

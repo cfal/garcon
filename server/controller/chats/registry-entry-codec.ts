@@ -11,9 +11,10 @@ import {
 import type { JsonObject, JsonValue } from '../../../common/json.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import {
-  parseParentChatRef,
-  type ParentChatRef,
+  parseChatLineage,
+  type ChatLineage,
 } from '../../../common/chat-parentage.js';
+import { parseChatId } from '../../../common/chat-id.js';
 import {
   normalizeChatPreambleSelection,
   normalizePendingPreambleBoundary,
@@ -27,11 +28,8 @@ import {
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
 import { isExecutorId } from '../../../common/executors.js';
-import { createLogger } from '../../common/log.js';
 import { isCarryOverSegmentId } from './carryover/segment-types.js';
 import { CHAT_REGISTRY_VERSION, type CarryOverHandoffTarget, type CarryOverMigrationQuarantine, type CarryOverSegmentRef, type ChatRegistryEntry, type ChatRegistrySnapshot } from './registry-contracts.js';
-
-const logger = createLogger('chats:store');
 
 export function createEmptyRegistry(): ChatRegistrySnapshot {
   return { version: CHAT_REGISTRY_VERSION, sessions: {} };
@@ -102,6 +100,7 @@ export function normalizeChatRegistryEntry(
   rawEntry: Record<string, unknown>,
   chatId: string,
 ): ChatRegistryEntry {
+  if ('parentChat' in rawEntry) throw new Error(`Legacy parentChat in registry entry ${chatId}`);
   const executorId = rawEntry.executorId;
   if (executorId != null && !isExecutorId(executorId)) throw new Error('Invalid executor ID');
   const agentId = normalizeAgentId(rawEntry);
@@ -138,23 +137,24 @@ export function normalizeChatRegistryEntry(
     carryOverMigrationQuarantine: normalizeMigrationQuarantine(rawEntry.carryOverMigrationQuarantine),
     pendingPreambleBoundary,
     preambleSelection,
-    parentChat: readParentChat(rawEntry.parentChat, chatId),
+    parentChatId: requireParentChatId(rawEntry.parentChatId, chatId),
+    lineage: requireChatLineage(rawEntry.lineage, chatId),
   };
 }
 
-export function readParentChat(value: unknown, chatId: string): ParentChatRef | null {
-  if (value === undefined || value === null) return null;
-  const parsed = parseParentChatRef(value);
-  if (!parsed) logger.warn(`sessions: ignoring invalid parentChat for ${chatId}`);
+export function requireChatLineage(value: unknown, chatId: string): ChatLineage | null {
+  if (value === null) return null;
+  const parsed = parseChatLineage(value);
+  if (!parsed) throw new Error(`Invalid lineage for ${chatId}`);
+  if (parsed.sourceChatId === chatId) throw new Error(`Chat ${chatId} cannot be its own lineage source`);
   return parsed;
 }
 
-export function requireNewParentChat(value: unknown, chatId: string): ParentChatRef | null {
+export function requireParentChatId(value: unknown, chatId: string): string | null {
   if (value === null) return null;
-  const parsed = parseParentChatRef(value);
-  if (!parsed) throw new Error(`Invalid parent chat for ${chatId}`);
-  if (parsed.chatId === chatId) throw new Error(`Chat ${chatId} cannot be its own parent`);
-  return parsed;
+  const parentChatId = parseChatId(value);
+  if (parentChatId === chatId) throw new Error(`Chat ${chatId} cannot be its own parent`);
+  return parentChatId;
 }
 
 export function parseCarryOverSegmentRefs(value: unknown): readonly CarryOverSegmentRef[] {

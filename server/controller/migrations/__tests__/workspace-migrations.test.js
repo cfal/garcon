@@ -30,18 +30,20 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('chat-id-migration', migrate);
     await runner.run('core-record-migration', migrate);
     await runner.checkpointThrough('core-record-migration');
-    expect(await readVersion()).toEqual({ version: 2 });
+    expect(await readVersion()).toEqual({ version: 2, checkpoint: true });
     expect(runner.initialVersion).toBe(0);
     expect(runner.isFresh).toBe(fresh);
+    expect(runner.resumedFromCheckpoint).toBe(false);
 
     const restarted = await WorkspaceMigrationRunner.open(workspaceDir);
+    expect(restarted.resumedFromCheckpoint).toBe(true);
     const replay = mock(async () => undefined);
     await restarted.run('chat-id-migration', replay);
     await restarted.run('core-record-migration', replay);
     await restarted.run('ephemeral-queue-state-cleanup', replay);
     expect(replay).toHaveBeenCalledTimes(1);
     await restarted.checkpointThrough('chat-id-migration');
-    expect(await readVersion()).toEqual({ version: 2 });
+    expect(await readVersion()).toEqual({ version: 2, checkpoint: true });
   });
 
   it('cannot checkpoint past a failed migration or an unconfirmed checkpoint write', async () => {
@@ -58,7 +60,7 @@ describe('WorkspaceMigrationRunner', () => {
       rename.mockRestore();
     }
     await runner.checkpointThrough('chat-id-migration');
-    expect(await readVersion()).toEqual({ version: 1 });
+    expect(await readVersion()).toEqual({ version: 1, checkpoint: true });
   });
 
   it('stamps a fresh workspace without running historical migrations', async () => {
@@ -76,6 +78,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-execution-mode-refresh', migrate);
     await runner.run('fork-ordinal-cleanup', migrate);
     await runner.run('provider-assignments', migrate);
+    await runner.run('chat-relationships-split', async () => undefined);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -111,6 +114,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-execution-mode-refresh', async () => { events.push('execution-mode-refresh'); });
     await runner.run('fork-ordinal-cleanup', async () => { events.push('fork-ordinal-cleanup'); });
     await runner.run('provider-assignments', async () => { events.push('provider-assignments'); });
+    await runner.run('chat-relationships-split', async () => undefined);
     await runner.finish();
 
     expect(events).toEqual([
@@ -155,6 +159,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-execution-mode-refresh', cleanup);
     await runner.run('fork-ordinal-cleanup', cleanup);
     await runner.run('provider-assignments', cleanup);
+    await runner.run('chat-relationships-split', async () => undefined);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
@@ -181,6 +186,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('agent-execution-mode-refresh', executionModeRefresh);
     await runner.run('fork-ordinal-cleanup', async () => undefined);
     await runner.run('provider-assignments', async () => undefined);
+    await runner.run('chat-relationships-split', async () => undefined);
     await runner.finish();
 
     expect(previous).not.toHaveBeenCalled();
@@ -209,6 +215,7 @@ describe('WorkspaceMigrationRunner', () => {
       } else {
         await runner.run('fork-ordinal-cleanup', cleanup);
         await runner.run('provider-assignments', async () => undefined);
+        await runner.run('chat-relationships-split', async () => undefined);
         await runner.finish();
       }
     }
@@ -219,6 +226,10 @@ describe('WorkspaceMigrationRunner', () => {
   });
 
   it('rejects invalid, future, and out-of-order workspace versions', async () => {
+    await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'),
+      JSON.stringify({ version: 9, checkpoint: 'true' }));
+    await expect(WorkspaceMigrationRunner.open(workspaceDir)).rejects.toThrow('checkpoint must be true');
+
     await fs.writeFile(
       path.join(workspaceDir, 'workspace-version.json'),
       JSON.stringify({ version: CURRENT_WORKSPACE_VERSION + 1 }),

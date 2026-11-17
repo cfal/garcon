@@ -220,7 +220,7 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
 export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & {
   origin: ChatStartOrigin;
   title?: string;
-  transcriptSnapshot?: TranscriptWatermark;
+  transcriptSnapshot?: TranscriptWatermark & { sourceChatId: string };
 };
 
 export type AgentCommandStartInput = Omit<ChatStartInput,
@@ -266,7 +266,7 @@ export interface ScheduledChatStartInput {
 export interface NormalizedChatStart {
   executorId: string;
   title: string | null;
-  transcriptSnapshot: TranscriptWatermark | null;
+  transcriptSnapshot: (TranscriptWatermark & { sourceChatId: string }) | null;
   origin: ChatStartOrigin;
   chatId: ChatId;
   parentChatId: ChatId | null;

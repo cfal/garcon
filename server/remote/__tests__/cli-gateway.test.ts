@@ -78,11 +78,10 @@ test('forwards the parent setter unchanged and preserves permission and controll
   const parentChatId = '1783725900000201';
   const f = await fixture(createChatParentRoutes({ set: async (input) => {
     requests.push(input);
-    return { success: true, chatId: input.chatId, parentChat: input.parentChatId === null ? null
-      : { chatId: input.parentChatId, relation: 'delegation' }, changed: true };
+    return { success: true, chatId: input.chatId, parentChatId: input.parentChatId, changed: true };
   } }));
   const client = new GarconClient(await f.discover());
-  await expect(client.setChatParent({ chatId, parentChatId })).resolves.toMatchObject({ parentChat: { chatId: parentChatId } });
+  await expect(client.setChatParent({ chatId, parentChatId })).resolves.toMatchObject({ parentChatId });
   expect(requests).toEqual([{ chatId, parentChatId }]);
   f.deny();
   await expect(client.setChatParent({ chatId, parentChatId: null })).rejects.toMatchObject({ errorCode: 'CLI_ACCESS_DENIED' });

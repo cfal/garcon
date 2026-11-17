@@ -3,7 +3,7 @@ import path from 'node:path';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 
-export const CURRENT_WORKSPACE_VERSION = 9;
+export const CURRENT_WORKSPACE_VERSION = 10;
 
 const WORKSPACE_VERSION_FILE = 'workspace-version.json';
 const FRESH_WORKSPACE_IGNORED_FILES = new Set([
@@ -21,26 +21,30 @@ const MIGRATIONS = [
   { name: 'agent-execution-mode-refresh', version: 7 },
   { name: 'fork-ordinal-cleanup', version: 8 },
   { name: 'provider-assignments', version: 9 },
+  { name: 'chat-relationships-split', version: 10 },
 ] as const;
 
 export type WorkspaceMigrationName = typeof MIGRATIONS[number]['name'];
 
 interface WorkspaceVersionFile {
   version: number;
+  checkpoint?: true;
 }
 
 export class WorkspaceMigrationRunner {
   readonly #workspaceDir: string;
   readonly #initialVersion: number;
   readonly #skipLadder: boolean;
+  readonly resumedFromCheckpoint: boolean;
   #nextEntry = 0;
   #checkpointVersion: number;
 
-  private constructor(workspaceDir: string, initialVersion: number, skipLadder: boolean) {
+  private constructor(workspaceDir: string, initialVersion: number, skipLadder: boolean, checkpoint = false) {
     this.#workspaceDir = workspaceDir;
     this.#initialVersion = initialVersion;
     this.#skipLadder = skipLadder;
     this.#checkpointVersion = initialVersion;
+    this.resumedFromCheckpoint = checkpoint;
   }
 
   get initialVersion(): number {
@@ -52,12 +56,12 @@ export class WorkspaceMigrationRunner {
   static async open(workspaceDir: string): Promise<WorkspaceMigrationRunner> {
     const version = await readWorkspaceVersion(workspaceDir);
     if (version !== null) {
-      if (version > CURRENT_WORKSPACE_VERSION) {
+      if (version.version > CURRENT_WORKSPACE_VERSION) {
         throw new Error(
-          `Workspace version ${version} is newer than supported version ${CURRENT_WORKSPACE_VERSION}`,
+          `Workspace version ${version.version} is newer than supported version ${CURRENT_WORKSPACE_VERSION}`,
         );
       }
-      return new WorkspaceMigrationRunner(workspaceDir, version, false);
+      return new WorkspaceMigrationRunner(workspaceDir, version.version, false, version.checkpoint === true);
     }
 
     const entries = await fs.readdir(workspaceDir);
@@ -84,6 +88,7 @@ export class WorkspaceMigrationRunner {
     // Later schema writes must not be replayed through this completed prefix.
     await writeJsonFileAtomic(path.join(this.#workspaceDir, WORKSPACE_VERSION_FILE), {
       version,
+      checkpoint: true,
     } satisfies WorkspaceVersionFile);
     this.#checkpointVersion = version;
   }
@@ -92,7 +97,7 @@ export class WorkspaceMigrationRunner {
     if (this.#nextEntry !== MIGRATIONS.length) {
       throw new Error(`Workspace migration ladder stopped before ${MIGRATIONS[this.#nextEntry].name}`);
     }
-    if (this.#initialVersion === CURRENT_WORKSPACE_VERSION) return;
+    if (this.#initialVersion === CURRENT_WORKSPACE_VERSION && !this.resumedFromCheckpoint) return;
     await writeJsonFileAtomic(path.join(this.#workspaceDir, WORKSPACE_VERSION_FILE), {
       version: CURRENT_WORKSPACE_VERSION,
     } satisfies WorkspaceVersionFile);
@@ -111,7 +116,7 @@ export async function cleanupLegacyQueueState(options: {
   ].map((file) => fs.rm(path.join(options.workspaceDir, file), { force: true })));
 }
 
-async function readWorkspaceVersion(workspaceDir: string): Promise<number | null> {
+async function readWorkspaceVersion(workspaceDir: string): Promise<WorkspaceVersionFile | null> {
   const filePath = path.join(workspaceDir, WORKSPACE_VERSION_FILE);
   let value: unknown;
   try {
@@ -129,5 +134,9 @@ async function readWorkspaceVersion(workspaceDir: string): Promise<number | null
   ) {
     throw new Error(`${WORKSPACE_VERSION_FILE} must contain a nonnegative integer version`);
   }
-  return Number((value as Record<string, unknown>).version);
+  const record = value as Record<string, unknown>;
+  if (record.checkpoint !== undefined && record.checkpoint !== true) {
+    throw new Error(`${WORKSPACE_VERSION_FILE} checkpoint must be true when present`);
+  }
+  return { version: Number(record.version), ...(record.checkpoint === true ? { checkpoint: true } : {}) };
 }

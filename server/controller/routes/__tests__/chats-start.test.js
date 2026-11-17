@@ -298,9 +298,11 @@ describe('POST /api/v1/chats/start', () => {
     expect(response.status).toBe(202);
     expect(registry.addChat).toHaveBeenCalledWith(expect.objectContaining({
       id: childChatId,
-      parentChat: { chatId: parentChatId, relation: 'delegation' },
+      parentChatId,
+      lineage: null,
     }));
-    expect(body.chat.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+    expect(body.chat.parentChatId).toBe(parentChatId);
+    expect(body.chat.lineage).toBeNull();
   });
 
   it('rejects a nonexistent parent before creating the child', async () => {

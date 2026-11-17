@@ -27,7 +27,7 @@ async function until(predicate) {
 function fixture(mode) {
   const turns = new CommandLedger({ recordLimit: 1 });
   const chats = new Map([[PARENT, { permissionMode: 'default', projectPath: '/synthetic' }],
-    [CHILD, { parentChat: { chatId: PARENT, relation: 'delegation' } }]]);
+    [CHILD, { parentChatId: PARENT, lineage: null }]]);
   const notices = [];
   const deliveries = [];
   const admissions = [];
@@ -69,8 +69,8 @@ for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, (
     const f = fixture(mode);
     f.controller.request(SOURCE, f.command);
     await until(() => f.deliveries.length === 1);
-    f.chats.set(CHILD, { parentChat: { chatId: '2000000000000000', relation: 'delegation' } });
-    f.chats.set(CHILD, { parentChat: null });
+    f.chats.set(CHILD, { parentChatId: '2000000000000000', lineage: null });
+    f.chats.set(CHILD, { parentChatId: null, lineage: null });
     await f.finish('Synthetic captured result.');
     await until(() => f.deliveries.length === 2);
     expect(f.deliveries[1]).toMatchObject({ status: 'completed', chatId: CHILD });
@@ -265,10 +265,15 @@ describe('delegated startup dispatch gate', () => {
 });
 
 describe('resume authority', () => {
-  it.each([null, { chatId: PARENT, relation: 'fork' }, { chatId: PARENT, relation: 'handoff' },
-    { chatId: '2000000000000000', relation: 'delegation' }])('rejects a nondelegated edge without taking a foreign lock: %j', async (parentChat) => {
+  it.each([
+    { parentChatId: null, lineage: null },
+    ...['fork', 'handoff'].map((kind) => ({ parentChatId: null, lineage: {
+      sourceChatId: PARENT, kind, transcriptViewId: 'source-view', ordinal: 1,
+    } })),
+    { parentChatId: '2000000000000000', lineage: null },
+  ])('rejects a nondelegated edge without taking a foreign lock: %j', async (relationships) => {
     const f = fixture('resume');
-    f.chats.set(CHILD, { parentChat });
+    f.chats.set(CHILD, relationships);
     const lock = spyOn(f.context.chatMutationLock, 'runExclusiveMany');
     f.controller.request(SOURCE, f.command);
     await until(() => f.deliveries.length === 1);

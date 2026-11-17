@@ -43,7 +43,8 @@ describe('AgentRegistry session cache', () => {
         test: { ownerId: 'test', schemaVersion: 1, values: {} },
       },
       preambleSelection: { revision: 0, orderedPreambleIds: [] },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
     });
     ledger = new TranscriptLedgerService(
       new TranscriptLedgerStore(path.join(root, 'transcript-ledgers')),
