@@ -10,13 +10,20 @@ import { withIntegrationFixture } from './integration-fixture.js';
 import { requireCurrentWebBuild } from './web-build-gate.js';
 
 const ROOT = resolve(import.meta.dir, '../..');
+const SEED_TURNS_PER_CHAT = 8;
+const campaignPrompts: Record<Campaign, string[]> = {
+  navigation: [],
+  submission: ['bombadilclick', 'bombadilenter'],
+  queue: ['bombadilheld', 'bombadilafterstop'],
+};
 
 export async function runBombadilCampaign(campaign: Campaign, instrument = false): Promise<void> {
   assertBombadilNotInterrupted();
   const signal = AbortSignal.timeout(120_000);
   await requireCurrentWebBuild();
-  const artifacts = await mkdtemp(await mkdir(join(ROOT, 'integration-tests/artifacts/bombadil'), { recursive: true })
-    .then(() => join(ROOT, `integration-tests/artifacts/bombadil/${campaign}-`)));
+  const artifactRoot = join(ROOT, 'integration-tests/artifacts/bombadil');
+  await mkdir(artifactRoot, { recursive: true });
+  const artifacts = await mkdtemp(join(artifactRoot, `${campaign}-`));
   // Private source is outside retained artifacts, including when fixture retention is enabled.
   const privateDirectory = await mkdtemp(join(tmpdir(), 'garcon-bombadil-'));
   let fixtureDiagnostics: (() => unknown) | undefined;
@@ -28,7 +35,7 @@ export async function runBombadilCampaign(campaign: Campaign, instrument = false
       const chatB = '1700000000000002';
       const expectedTurns: ExpectedTurn[] = [];
       for (const [chatId, content] of [[chatA, 'bombadilalpha'], [chatB, 'bombadilbravo']]) {
-        for (let index = 0; index < 8; index++) {
+        for (let index = 0; index < SEED_TURNS_PER_CHAT; index++) {
           const input = { chatId, content: `${content}${index}`, projectPath: executionDirs.project, agent: directAgents.openAi };
           const started = index === 0 ? await client.startDirectChat(input) : await client.runDirectChat(input);
           if (!started.turnId) throw new Error('Seed command is missing its turn identity');
@@ -59,12 +66,17 @@ export const invariants = specification.properties;
 `, { mode: 0o600 });
         await writeFile(join(artifacts, 'fixture.json'), JSON.stringify({
           campaign, backend: fixture.diagnostics().executionBackend, executorId: client.executorId,
-          recipe: { chatA, chatB, prompts: ['bombadilalpha', 'bombadilbravo'], turnsPerChat: 8 },
+          recipe: { chatA, chatB, prompts: ['bombadilalpha', 'bombadilbravo'], turnsPerChat: SEED_TURNS_PER_CHAT },
           webBuild: JSON.parse(await readFile(join(ROOT, 'web/build/.garcon-build-input-hash'), 'utf8')),
         }, null, 2));
-        const summary = await runBombadil({ origin: `${config.origin}/chat/${chatA}`, specification, privateDirectory, artifacts,
-          seconds: campaign === 'queue' ? 60 : 35, instrument, signal, redact: [config.token], reproduce: process.env.BOMBADIL_REPRODUCE,
-          sources: ['browser.ts', 'properties.ts', 'specification.ts'].map(name => join(ROOT, 'integration-tests/bombadil', name)) });
+        const summary = await runBombadil({
+          origin: `${config.origin}/chat/${chatA}`,
+          specification, privateDirectory, artifacts, instrument, signal,
+          seconds: campaign === 'queue' ? 60 : 35,
+          redact: [config.token],
+          reproduce: process.env.BOMBADIL_REPRODUCE,
+          sources: ['browser.ts', 'properties.ts', 'specification.ts'].map(name => join(ROOT, 'integration-tests/bombadil', name)),
+        });
         console.log(`Bombadil ${campaign}: ${summary.states} states, ${summary.actions} actions, largest capture gap ${Math.round(summary.maxCaptureGapMs)}ms`);
         if (held) await held.expectAbort();
         const afterA = await client.getMessages(chatA, { limit: 200 });
@@ -77,14 +89,14 @@ export const invariants = specification.properties;
         const ordinals = afterA.messages.map(row => row.ordinal);
         expect(ordinals).toEqual([...new Set(ordinals)].sort((left, right) => left - right));
         if (campaign === 'navigation') expect(afterA).toEqual(beforeA);
-        const newPrompts = campaign === 'navigation' ? [] : campaign === 'submission' ? ['bombadilclick', 'bombadilenter']
-          : ['bombadilheld', 'bombadilafterstop'];
-        const prompts = [...userContents(beforeA.messages), ...newPrompts];
+        const prompts = [...userContents(beforeA.messages), ...campaignPrompts[campaign]];
         expect(userContents(afterA.messages)).toEqual(prompts);
         // Direct providers coalesce adjacent user messages after an interrupted turn.
         const providerPrompts = prompts.map(prompt => prompt === 'bombadilafterstop' ? 'bombadilheld\n\nbombadilafterstop' : prompt);
-        expect(assistantContents(afterA.messages)).toEqual(providerPrompts.filter(prompt => prompt !== 'bombadilheld').map(prompt => `echo:${prompt}`));
-        expect(fakeProviders.openAi.requests().map(request => request.lastUserText).sort()).toEqual([...providerPrompts, ...userContents(beforeB.messages)].sort());
+        const replies = providerPrompts.filter(prompt => prompt !== 'bombadilheld').map(prompt => `echo:${prompt}`);
+        expect(assistantContents(afterA.messages)).toEqual(replies);
+        const requestedPrompts = fakeProviders.openAi.requests().map(request => request.lastUserText).sort();
+        expect(requestedPrompts).toEqual([...providerPrompts, ...userContents(beforeB.messages)].sort());
         expect(fakeProviders.anthropic.requests()).toHaveLength(0);
         expect(fakeProviders.openAiResponses.diagnosticRequests()).toHaveLength(0);
         const acceptedTurns = summary.observations.at(-1)?.acceptedTurns as AcceptedTurn[];
@@ -110,7 +122,9 @@ export const invariants = specification.properties;
         }
         expect(terminalOutcomesMatch(expectedTurns, client.events())).toBe(true);
         await writeFile(join(artifacts, 'assertions.json'), JSON.stringify({ passed: true, prompts, view: afterA.transcriptViewId }));
-      } finally { held?.releaseEcho(); }
+      } finally {
+        held?.releaseEcho();
+      }
     }, { projectRoots: 'separate' });
     await rm(artifacts, { recursive: true, force: true });
   } catch (error) {
@@ -119,5 +133,7 @@ export const invariants = specification.properties;
       fixture: fixtureDiagnostics?.(),
     }, null, 2));
     throw error;
-  } finally { await rm(privateDirectory, { recursive: true, force: true }); }
+  } finally {
+    await rm(privateDirectory, { recursive: true, force: true });
+  }
 }

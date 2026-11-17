@@ -10,6 +10,7 @@ import { readTrace, requireCoverage, type TraceSummary } from './trace.js';
 export const BOMBADIL_VERSION = '0.7.10';
 export const BOMBADIL_REVISION = '832faf4d953e2c56d1d901aca1bb2c3c3170221d';
 const ROOT = resolve(import.meta.dir, '../..');
+const VIEWPORT = { width: 1440, height: 900 };
 let interruptedSignal: NodeJS.Signals | null = null;
 
 export function assertBombadilNotInterrupted(): void {
@@ -38,8 +39,15 @@ async function executableVersion(binary: string, env: Record<string, string>): P
     if (code !== 0) throw new Error(`Executable version check exited ${code}`);
     return version.trim();
   } finally {
-    if (child.exitCode === null) { child.kill('SIGKILL'); await child.exited; }
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await child.exited;
+    }
   }
+}
+
+async function fileHash(path: string): Promise<string> {
+  return new Bun.CryptoHasher('sha256').update(await readFile(path)).digest('hex');
 }
 
 export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
@@ -59,13 +67,19 @@ export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
   const bombadilVersion = await executableVersion(binary, env);
   if (bombadilVersion !== `bombadil ${BOMBADIL_VERSION}`) throw new Error(`Unexpected Bombadil version: ${bombadilVersion}`);
   const chromeVersion = await executableVersion(chrome, env);
-  const cmd = [binary, 'browser', 'test', '--headless',
-    ...(options.reproduce ? ['--reproduce', resolve(options.reproduce)] : ['--exit-on-violation', '--time-limit', `${options.seconds}s`]),
-    '--width', '1440', '--height', '900',
+  const command = [binary, 'browser', 'test', '--headless'];
+  if (options.reproduce) {
+    command.push('--reproduce', resolve(options.reproduce));
+  } else {
+    command.push('--exit-on-violation', '--time-limit', `${options.seconds}s`);
+  }
+  command.push(
+    '--width', String(VIEWPORT.width), '--height', String(VIEWPORT.height),
     `--instrument-javascript=${options.instrument ? 'files,inline' : ''}`,
     '--output-path', join(options.artifacts, 'trace'),
-    ...(process.env.BOMBADIL_NO_SANDBOX === '1' ? ['--no-sandbox'] : []),
-    options.origin, options.specification];
+  );
+  if (process.env.BOMBADIL_NO_SANDBOX === '1') command.push('--no-sandbox');
+  command.push(options.origin, options.specification);
   const logs = new BoundedLog<string>(1_000);
   let actionFailure = false;
   let canceled = false;
@@ -74,7 +88,7 @@ export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
   let summary: TraceSummary | undefined;
   let failure: unknown;
   const redact = (text: string) => (options.redact ?? []).reduce((result, value) => result.replaceAll(value, '[REDACTED]'), text);
-  const child = Bun.spawn(cmd, { cwd: join(ROOT, 'integration-tests'), env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn(command, { cwd: join(ROOT, 'integration-tests'), env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
   const drain = async (stream: ReadableStream<Uint8Array>) => {
     const decoder = new TextDecoder();
     let tail = '';
@@ -86,7 +100,9 @@ export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
       logs.push(redact(text.slice(-8_192)));
     }
   };
-  const pumps = Promise.all([drain(child.stdout), drain(child.stderr)]).catch(error => { failure = error; });
+  const outputDrained = Promise.all([drain(child.stdout), drain(child.stderr)]).catch(error => {
+    failure = error;
+  });
   let escalation: ReturnType<typeof setTimeout> | undefined;
   const cancel = () => {
     if (canceled) return;
@@ -95,7 +111,11 @@ export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
     escalation = setTimeout(() => child.kill('SIGKILL'), 5_000);
   };
   const timer = setTimeout(cancel, options.deadlineMs ?? (options.seconds + 30) * 1_000);
-  const interrupted = (signal: NodeJS.Signals) => { interruptedSignal = signal; process.exitCode = 1; cancel(); };
+  const interrupted = (signal: NodeJS.Signals) => {
+    interruptedSignal = signal;
+    process.exitCode = 1;
+    cancel();
+  };
   const onInterrupt = () => interrupted('SIGINT');
   const onTerminate = () => interrupted('SIGTERM');
   process.on('SIGINT', onInterrupt);
@@ -112,10 +132,14 @@ export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
     process.off('SIGTERM', onTerminate);
     try {
       forcedCleanup = await owned.cleanup();
-    } catch (error) { failure = error; }
+    } catch (error) {
+      failure = error;
+    }
     try {
-      await withTimeout(pumps, 5_000, () => 'Bombadil output pipes did not close');
-    } catch (error) { failure = error; }
+      await withTimeout(outputDrained, 5_000, () => 'Bombadil output pipes did not close');
+    } catch (error) {
+      failure = error;
+    }
   }
   try {
     if (failure) throw failure;
@@ -125,23 +149,27 @@ export async function runBombadil(options: RunOptions): Promise<TraceSummary> {
     if (forcedCleanup) throw new Error(`Bombadil leaked ${forcedCleanup} owned processes`);
     if (actionFailure) throw new Error('Bombadil failed to apply action');
     requireCoverage(summary);
-  } catch (error) { failure = error; }
+  } catch (error) {
+    failure = error;
+  }
   const revision = Bun.spawn(['git', 'rev-parse', 'HEAD'], { cwd: ROOT, stdout: 'pipe', stderr: 'ignore' });
   const garconRevision = (await new Response(revision.stdout).text()).trim();
   await revision.exited;
-  await writeFile(join(options.artifacts, 'run.json'), JSON.stringify({
+  const manifest = {
     bombadilVersion: BOMBADIL_VERSION, bombadilRevision: BOMBADIL_REVISION, garconRevision,
-    binaryHash: new Bun.CryptoHasher('sha256').update(await readFile(binary)).digest('hex'),
+    binaryHash: await fileHash(binary),
     startedAt, finishedAt: new Date().toISOString(),
-    specificationHash: new Bun.CryptoHasher('sha256').update(await readFile(options.specification)).digest('hex'),
+    specificationHash: await fileHash(options.specification),
     specificationSources: Object.fromEntries(await Promise.all((options.sources ?? []).map(async path =>
-      [basename(path), new Bun.CryptoHasher('sha256').update(await readFile(path)).digest('hex')]))),
-    chrome, chromeVersion, seconds: options.seconds, instrument: options.instrument ?? false, viewport: [1440, 900],
+      [basename(path), await fileHash(path)]))),
+    chrome, chromeVersion, seconds: options.seconds, instrument: options.instrument ?? false,
+    viewport: [VIEWPORT.width, VIEWPORT.height],
     reproduce: options.reproduce ?? null,
     noSandbox: process.env.BOMBADIL_NO_SANDBOX === '1', exitCode, canceled, forcedCleanup, actionFailure,
     summary: summary && { ...summary, observations: summary.observations.slice(-1) },
     failure: failure instanceof Error ? failure.message : failure,
-  }, null, 2));
+  };
+  await writeFile(join(options.artifacts, 'run.json'), JSON.stringify(manifest, null, 2));
   await writeFile(join(options.artifacts, 'output.log'), redact(logs.values().join('')));
   if (failure) throw new Error(`${failure instanceof Error ? failure.message : failure}\nBombadil artifacts: ${options.artifacts}`);
   return summary!;

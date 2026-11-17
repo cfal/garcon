@@ -89,7 +89,11 @@ export function bootstrap(config: BrowserConfig): void {
       super(url, protocols);
       const parsed = new URL(url, location.href);
       if (parsed.host !== location.host) return;
-      this.addEventListener('open', () => { observation.wsOpens++; observation.documentWsOpen = true; persist(); });
+      this.addEventListener('open', () => {
+        observation.wsOpens++;
+        observation.documentWsOpen = true;
+        persist();
+      });
       this.addEventListener('close', event => {
         observation.documentWsOpen = false;
         if (observation.wsCloses.length < 20) observation.wsCloses.push(event.code);
@@ -108,25 +112,34 @@ export function commandPanel(document: Document): HTMLElement | null {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-conversation-panel-command-owner="true"]')).find(visible) ?? null;
 }
 
-export type Control = 'chatA' | 'chatB' | 'composer' | 'send' | 'queue' | 'stop' | 'edit' | 'editor' | 'save' | 'menu' | 'remove';
+export const controlNames = ['chatA', 'chatB', 'composer', 'send', 'queue', 'stop', 'edit', 'editor', 'save', 'menu', 'remove'] as const;
+export type Control = typeof controlNames[number];
 
 export function findControl(document: Document, config: BrowserConfig, control: Control): HTMLElement | null {
   const panel = commandPanel(document);
-  if (control === 'chatA' || control === 'chatB') {
-    return document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${config[control]}"] button`);
+  switch (control) {
+    case 'chatA':
+    case 'chatB':
+      return document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${config[control]}"] button`);
+    case 'composer':
+      return document.querySelector<HTMLElement>('textarea[placeholder="Reply..."]');
+    case 'editor':
+      return document.querySelector<HTMLElement>('#queued-input-draft');
+    case 'save':
+      return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"] button'))
+        .find(button => button.textContent?.trim() === 'Save edit') ?? null;
+    case 'remove':
+      return Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+        .find(item => item.textContent?.trim() === 'Remove from queue') ?? null;
   }
-  if (control === 'composer') return document.querySelector<HTMLElement>('textarea[placeholder="Reply..."]');
-  if (control === 'editor') return document.querySelector<HTMLElement>('#queued-input-draft');
-  if (control === 'save') return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"] button'))
-    .find(button => button.textContent?.trim() === 'Save edit') ?? null;
-  if (control === 'remove') return Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
-    .find(item => item.textContent?.trim() === 'Remove from queue') ?? null;
   const selectors = {
     send: 'button[aria-label="Send message"]', queue: 'button[aria-label="Queue message"]',
     stop: 'button[aria-label="Stop"]', edit: '[data-queue-edit-id]', menu: '[data-queue-menu-id]',
   };
-  return panel?.querySelector<HTMLElement>(selectors[control])
-    ?? (control === 'send' || control === 'queue' ? document.querySelector<HTMLElement>(selectors[control]) : null);
+  const target = panel?.querySelector<HTMLElement>(selectors[control]);
+  if (target) return target;
+  if (control === 'send' || control === 'queue') return document.querySelector<HTMLElement>(selectors[control]);
+  return null;
 }
 
 export function requireTarget(document: Document, element: HTMLElement | null): HTMLElement {
