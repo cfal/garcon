@@ -52,4 +52,15 @@ export const SIDEBAR_PREVIEW_CHATS: ChatSessionRecord[] = [
 		lastActivityAt: '2026-11-15T11:45:00.000Z',
 		lastMessage: 'The targeted tests now pass.',
 	},
+	{
+		...parent,
+		id: '1794000000000004',
+		title: 'Previous release audit',
+		projectPath: '/workspace/app/packages/api',
+		parentChatId: parent.id,
+		lineage: null,
+		isArchived: true,
+		orderGroup: 'archived',
+		lastMessage: 'The previous release is complete.',
+	},
 ];

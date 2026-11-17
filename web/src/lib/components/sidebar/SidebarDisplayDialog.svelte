@@ -21,6 +21,7 @@
 	let draft = $state({
 		sidebarGroupingFields: settings.sidebarGroupingFields.map((field) => ({ ...field })),
 		sidebarNestDelegatedChats: settings.sidebarNestDelegatedChats,
+		sidebarSeparateArchivedBranches: settings.sidebarSeparateArchivedBranches,
 		sidebarInactivityDuration: settings.sidebarInactivityDuration,
 		sidebarGroupNestedProjectPaths: settings.sidebarGroupNestedProjectPaths,
 		sidebarChatItemLayout: settings.sidebarChatItemLayout,

@@ -44,6 +44,7 @@
 		autoLoadSavedSearches?: boolean;
 		sidebarGroupingFields?: SidebarGroupingSelection[];
 		sidebarNestDelegatedChats?: boolean;
+		sidebarSeparateArchivedBranches?: boolean;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
@@ -60,6 +61,7 @@
 		autoLoadSavedSearches = true,
 		sidebarGroupingFields = [{ field: 'project', enabled: true }],
 		sidebarNestDelegatedChats = false,
+		sidebarSeparateArchivedBranches = false,
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
@@ -142,6 +144,7 @@
 		setSidebarDisplay: ((value) => {
 			sidebarGroupingFields = value.sidebarGroupingFields;
 			sidebarNestDelegatedChats = value.sidebarNestDelegatedChats;
+			sidebarSeparateArchivedBranches = value.sidebarSeparateArchivedBranches;
 			sidebarInactivityDuration = value.sidebarInactivityDuration;
 			sidebarGroupNestedProjectPaths = value.sidebarGroupNestedProjectPaths;
 			sidebarChatItemLayout = value.sidebarChatItemLayout;
@@ -150,6 +153,9 @@
 		sidebarSortMode: 'manual',
 		get sidebarNestDelegatedChats() {
 			return sidebarNestDelegatedChats;
+		},
+		get sidebarSeparateArchivedBranches() {
+			return sidebarSeparateArchivedBranches;
 		},
 		get sidebarGroupingFields() {
 			return sidebarGroupingFields;
@@ -224,6 +230,7 @@
 			: undefined,
 		groupingFields: sidebarGroupingFields,
 		nestDelegatedChats: sidebarNestDelegatedChats,
+		separateArchivedBranches: sidebarSeparateArchivedBranches,
 		currentTime: new Date('2025-01-02T00:00:00.000Z'),
 		inactivityDuration: sidebarInactivityDuration,
 		sortMode: 'manual' as const,
