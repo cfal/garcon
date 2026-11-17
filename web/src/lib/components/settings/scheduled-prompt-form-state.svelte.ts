@@ -71,6 +71,7 @@ export class ScheduledPromptFormState {
 	customTitleEnabled = $state(false);
 	customTitleTemplate = $state('');
 	saving = $state(false);
+	creationUnconfirmed = $state(false);
 	promptTransformPending = $state(false);
 	error = $state<string | null>(null);
 	#originalNextRunAt: string | null = null;
@@ -104,6 +105,7 @@ export class ScheduledPromptFormState {
 	canSaveAt(now: Date): boolean {
 		return (
 			!this.saving &&
+			!this.creationUnconfirmed &&
 			!this.promptTransformPending &&
 			this.promptError === null &&
 			this.nameError === null &&

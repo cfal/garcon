@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
+import { ApiMutationOutcomeUnknownError } from '$lib/api/client';
 import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
@@ -1021,6 +1022,22 @@ describe('ConversationSlashCommandService', () => {
 			'error',
 			expect.stringContaining('storage unavailable'),
 		);
+	});
+
+	it('keeps an unconfirmed schedule command as a notice, not a resubmittable draft, across chat switches', async () => {
+		const { deps, composerState, appendLocalNoticeForChat } = createDeps();
+		const pending = deferred<Awaited<ReturnType<typeof scheduleChatPrompt>>>();
+		mockScheduleChatPrompt.mockReturnValueOnce(pending.promise);
+		const service = new ConversationSlashCommandService(deps);
+		const submitted = service.submitScheduleInCommand('chat-1', deps.sessions.byId['chat-1'],
+			{ kind: 'valid', duration: '1m', delayMinutes: 1, prompt: 'Continue' }, [], true);
+		deps.chatState.activeChatId = 'chat-2';
+		pending.reject(new ApiMutationOutcomeUnknownError('Unknown'));
+		expect(await submitted).toBe('unknown');
+		expect(composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
+		expect(composerState.inputText).toBe('');
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', expect.stringContaining('/in 1m Continue'));
+		expect(mockScheduleChatPrompt).toHaveBeenCalledOnce();
 	});
 
 	it('reports a successful schedule only in its still-active chat', async () => {

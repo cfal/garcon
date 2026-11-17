@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import {
 	createScheduledPrompt,
 	getScheduledPrompts,
@@ -105,6 +105,11 @@ export class ScheduledPromptsStore {
 			});
 			return this.applySnapshot(result.snapshot);
 		} catch (error) {
+			if (error instanceof ApiMutationOutcomeUnknownError) {
+				// An earlier read cannot reconcile a later creation. Visibility never proves non-creation.
+				await this.#loadPromise?.catch(() => {});
+				await this.refresh().catch(() => {});
+			}
 			await this.#refreshAfterConflict(error);
 			throw error;
 		}
