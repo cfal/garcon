@@ -9,10 +9,14 @@
 	let {
 		session,
 		editing = true,
+		selectedIds = new Set<string>(),
+		onselect = () => {},
 		onstore,
 	}: {
 		session: CanvasSession;
 		editing?: boolean;
+		selectedIds?: ReadonlySet<string>;
+		onselect?: (ids: ReadonlySet<string>) => void;
 		onstore?: (store: ReturnType<typeof useStore<CanvasFlowNode>>) => void;
 	} = $props();
 	const controller = new CanvasController();
@@ -33,10 +37,10 @@
 	<CanvasFlow
 		{session}
 		{controller}
-		selectedIds={new Set()}
+		{selectedIds}
 		{editing}
 		presentation="window-main"
-		onselect={() => {}}
+		{onselect}
 		onerror={(message) => {
 			throw new Error(message);
 		}}

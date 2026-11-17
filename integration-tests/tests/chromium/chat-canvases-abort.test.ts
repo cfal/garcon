@@ -95,6 +95,7 @@ for (const gesture of ['connection', 'node'] as const) {
         await page.mouse.down();
         await page.mouse.move(start.x + 80, start.y + 30, { steps: 8 });
         expect(await page.evaluate(() => window.canvasGestureListeners())).not.toEqual(baseline.listeners);
+        const viewport = await page.locator('.svelte-flow__viewport').evaluate(element => getComputedStyle(element).transform);
         if (interruption === 'hide') {
           await page.getByRole('tab').first().dispatchEvent('click');
           await page.locator('[data-canvas-panel]').waitFor({ state: 'hidden' });
@@ -105,12 +106,26 @@ for (const gesture of ['connection', 'node'] as const) {
         expect(await page.evaluate(() => window.canvasGestureListeners())).toEqual(baseline.listeners);
         expect(await page.evaluate(() => window.canvasGestureFrames())).toBeLessThanOrEqual(baseline.frames);
         expect(await page.locator('.svelte-flow__connection').count()).toBe(0);
-        if (interruption === 'hide') await page.getByRole('tab', { name: 'Canvas', exact: true }).dispatchEvent('click');
+        expect((await integration.client.get<ChatCanvas>('/api/v1/chat-canvases?id=diagram')).content).toEqual(original.content);
+        // Cancellation is verified before resetting the browser's physical button state.
+        await page.mouse.up();
+        if (interruption === 'hide') {
+          await page.getByRole('tab', { name: 'Canvas', exact: true }).dispatchEvent('click');
+          await node(page, 'c').waitFor({ state: 'visible' });
+          await page.waitForFunction(expected => {
+            const element = document.querySelector('.svelte-flow__viewport');
+            return element && getComputedStyle(element).transform === expected;
+          }, viewport);
+          await settle(page);
+        }
+        if (gesture === 'node') expect(await node(page, 'a').locator('.canvas-selected').count()).toBe(1);
+        await handle(page, 'b').hover();
         const next = await point(handle(page, 'b'));
         const target = await point(handle(page, 'c'));
         await page.mouse.move(next.x, next.y);
         await page.mouse.down();
         await page.mouse.move(target.x, target.y, { steps: 8 });
+        await page.locator('.svelte-flow__connection').waitFor({ state: 'attached' });
         await page.mouse.up();
         await page.locator('.svelte-flow__edge').waitFor({ state: 'attached' });
         await page.waitForFunction(() => document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved');

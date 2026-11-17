@@ -90,6 +90,10 @@ function aggregateOversizedPatch(): string {
 	return `@@ -1,${count} +1 @@\n${deletions}\n+const next = true;\n`;
 }
 
+function largeSupportedPatch(): string {
+	return `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, line) => `+const value${line} = true;`).join('\n')}\n`;
+}
+
 function projectSide(
 	side: GitDiffSyntheticSide,
 	path: string,
@@ -116,6 +120,7 @@ function projectSide(
 afterEach(() => {
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe('Git diff syntax reconstruction', () => {
@@ -208,9 +213,10 @@ describe('Git diff syntax eligibility', () => {
 
 describe('Git diff syntax highlighting', () => {
 	it('highlights supported text beyond the former 2,000-row cutoff', async () => {
-		const patch = `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, line) => `+const value${line} = true;`).join('\n')}\n`;
+		// Parsing correctness is independent of the runner's available CPU time.
+		vi.spyOn(Date, 'now').mockReturnValue(0);
 		const result = await highlightGitDiffFile(
-			input(file('large.ts'), body('large.ts', patch)),
+			input(file('large.ts'), body('large.ts', largeSupportedPatch())),
 			new AbortController().signal,
 		);
 		expect(result.status).toBe('highlighted');
@@ -222,6 +228,24 @@ describe('Git diff syntax highlighting', () => {
 				?.map((segment) => segment.text)
 				.join(''),
 		).toBe('const value2999 = true;');
+		expect(result.result.after?.lines.get(2999)).toContainEqual({
+			text: 'const',
+			className: 'cm-code-keyword',
+		});
+	});
+
+	it('keeps supported text plain when the real parser exhausts its time budget', async () => {
+		let elapsed = 0;
+		vi.spyOn(Date, 'now').mockImplementation(
+			() => (elapsed += GIT_DIFF_SYNTAX_LIMITS.parseTimeoutMs + 1),
+		);
+
+		await expect(
+			highlightGitDiffFile(
+				input(file('large.ts'), body('large.ts', largeSupportedPatch())),
+				new AbortController().signal,
+			),
+		).resolves.toEqual({ status: 'plain', reason: 'parse-timeout' });
 	});
 
 	it('preserves Unicode UTF-16 text and offsets across highlighted segments', async () => {

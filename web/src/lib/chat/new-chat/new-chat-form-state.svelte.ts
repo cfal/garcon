@@ -851,19 +851,21 @@ export class NewChatFormState {
 	async loadSettingsAndModels(): Promise<void> {
 		this.#catalogRefreshCompleted = false;
 		try {
-			const settingsData = await this.#remoteSettings.ensureLoaded();
-			this.#applySettings(settingsData);
+			this.#applySettings(await this.#remoteSettings.refreshLatest());
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings', err);
+			if (this.#remoteSettings.snapshot) {
+				this.#applySettings(this.#remoteSettings.snapshot);
+				this.validateAllModelsAgainstLive();
+				return;
+			}
 			if (this.#startupSelectionAutomatic) {
 				for (const agentId of this.#selectableAgentIds) {
 					this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
 				}
 			}
-			if (!this.projectPath) {
-				this.projectPath = this.projectBasePath;
-			}
+			if (!this.projectPath) this.projectPath = this.projectBasePath;
 		} finally {
 			this.settingsLoaded = true;
 			void this.#refreshModelsInBackground();
