@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { protocolReviewProblem, protocolRevision, requiresProtocolReview } from '../protocol-review-gate.ts';
+import { existsSync } from 'node:fs';
+import { protocolReviewProblem, protocolRevision, requiresProtocolReview, sharedWireFiles } from '../protocol-review-gate.ts';
+
+test('every curated wire source names an existing module', () => {
+  for (const file of sharedWireFiles) expect(existsSync(new URL(`../../${file}`, import.meta.url)), file).toBe(true);
+  expect(requiresProtocolReview('common/transcript-seed.ts')).toBe(true);
+});
 
 test('wire review covers both historical missed protocol bumps', () => {
   // 27eb5a41d added a rendered Pi message; a8a913dea added Shell Notes manifest fields.

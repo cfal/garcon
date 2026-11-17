@@ -1,11 +1,17 @@
 import { execFileSync } from 'node:child_process';
 
 const protocolFile = 'server/remote/transport/rpc-protocol.ts';
-const sharedWireFiles = new Set([
+export const sharedWireFiles = new Set([
   'common/agent-execution.ts', 'common/agent-integration.ts', 'common/agents.ts',
   'common/chat-types.ts', 'common/chat-message-coercion.ts', 'common/executors.ts',
   'common/agent-settings.ts', 'common/attachments.ts', 'common/chat-modes.ts',
-  'common/cli-contracts.ts', 'common/http-error.ts',
+  'common/http-error.ts', 'common/transcript-seed.ts', 'common/server-runtime.ts',
+  'common/api-providers.ts', 'common/git.ts', 'common/gh.ts', 'common/git-execution.ts',
+  'common/git-request-validation.ts', 'common/file-contracts.ts', 'common/terminal.ts',
+  'common/terminal-error.ts', 'common/async-user-questions.ts', 'common/executor-path.ts',
+  'common/tickets.ts', 'common/project-resolution.ts', 'common/chat-command-contracts.ts',
+  'common/command-output.ts', 'common/usage.ts', 'common/agent-auth.ts',
+  'common/input-format.ts', 'common/slash-commands.ts', 'common/json.ts',
 ]);
 
 export function requiresProtocolReview(file: string): boolean {

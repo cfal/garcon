@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+
+export function testConfigurationProblems(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const { exclude: _before, ...previous } = before;
+  const { exclude: _after, ...current } = after;
+  return isDeepStrictEqual(previous, current) ? [] : ['Test typecheck configuration changed outside the shrink-only exclusion list'];
+}
 
 export function testDebtProblems(before: readonly string[] | null, after: readonly string[], addedFiles: readonly string[]): string[] {
   const problems: string[] = [];
@@ -25,15 +32,19 @@ if (import.meta.main) {
   const base = process.argv[2];
   const head = process.argv[3] ?? 'HEAD';
   let before: string[] | null = null;
+  let previous: Record<string, unknown> | null = null;
   let added: string[] = [];
   if (base) {
     const commonBase = git('merge-base', base, head);
     if (git('ls-tree', '--name-only', commonBase, '--', file)) {
-      before = JSON.parse(git('show', `${commonBase}:${file}`)).exclude;
+      previous = JSON.parse(git('show', `${commonBase}:${file}`));
+      before = previous!.exclude as string[];
     }
+    // Moving legacy tests requires the same typing cleanup as adding them at the new path.
     added = git('diff', '--no-renames', '--diff-filter=A', '--name-only', commonBase, head).split('\n');
   }
   const problems = testDebtProblems(before, current.exclude, added);
+  if (previous) problems.push(...testConfigurationProblems(previous, current));
   for (const path of current.exclude) if (!existsSync(path)) problems.push(`Missing excluded test: ${path}`);
   if (problems.length) throw new Error(problems.join('\n'));
   console.log(`Test exclusions checked: ${current.exclude.length}${base ? ' (shrink-only)' : ''}.`);
