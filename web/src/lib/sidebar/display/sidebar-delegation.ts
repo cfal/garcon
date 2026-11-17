@@ -22,12 +22,12 @@ export interface SidebarDelegationForest {
 
 export function buildSidebarDelegationForest(
 	chats: readonly ChatSessionRecord[],
-	nested: boolean,
+	options: { nestDelegatedChats: boolean; separateArchivedBranches?: boolean },
 ): SidebarDelegationForest {
 	const byId = new Map(chats.map((chat) => [chat.id, chat]));
 	const branches = new Map<string, SidebarBranch>();
 	for (const chat of byId.values()) {
-		const parent = nested ? chat.parentChatId : null;
+		const parent = options.nestDelegatedChats ? chat.parentChatId : null;
 		branches.set(chat.id, {
 			parentId: parent && byId.has(parent) ? parent : null,
 			children: [],
@@ -67,6 +67,24 @@ export function buildSidebarDelegationForest(
 	for (const [id, branch] of branches) {
 		if (branch.parentId === null) roots.push(id);
 		else branches.get(branch.parentId)!.children.push(id);
+	}
+	if (options.nestDelegatedChats && options.separateArchivedBranches) {
+		const pending = [...roots];
+		while (pending.length) {
+			const id = pending.pop()!;
+			// Archived branches retain all descendants, regardless of their own archive state.
+			if (byId.get(id)!.isArchived) continue;
+			const branch = branches.get(id)!;
+			branch.children = branch.children.filter((childId) => {
+				if (byId.get(childId)!.isArchived) {
+					branches.get(childId)!.parentId = null;
+					roots.push(childId);
+					return false;
+				}
+				pending.push(childId);
+				return true;
+			});
+		}
 	}
 	const traversal: string[] = [];
 	const stack = [...roots].reverse();
