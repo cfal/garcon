@@ -198,7 +198,7 @@ describe('ChatMapPanel', () => {
 		expect(screen.getByText(m.chat_map_no_results_title())).toBeTruthy();
 	});
 
-	it('renders shared unavailable-parent and cycle warnings', () => {
+	it('renders shared unavailable-source and cycle warnings', () => {
 		const { container } = renderPanel([
 			chat('dangling-a', { lineage: parent('gone') }),
 			chat('dangling-b', { lineage: parent('gone', 'handoff') }),
@@ -206,6 +206,9 @@ describe('ChatMapPanel', () => {
 		]);
 
 		expect(container.querySelectorAll('[data-chat-map-missing-parent="gone"]')).toHaveLength(1);
+		expect(screen.getByText('Source unavailable')).toBeTruthy();
+		expect(screen.getByText('Referenced source gone is not available.')).toBeTruthy();
+		expect(screen.getByText('1 unavailable sources')).toBeTruthy();
 		expect(screen.getAllByText(m.chat_map_cycle_warning()).length).toBeGreaterThan(0);
 		expect(screen.getByText(m.chat_map_relation_handoff())).toBeTruthy();
 	});
