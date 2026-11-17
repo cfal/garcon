@@ -1110,13 +1110,18 @@ describe('ChatCommandService', () => {
   it.each(['self', 'missing', 'unrelated', 'grandchild', 'fork', 'handoff', 'stale', 'aborted'])('refuses delegated stop before side effects: %s', async (invalid) => {
     const f = makeService();
     const abort = new AbortController();
-    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChatId: invalid === 'fork' || invalid === 'handoff' ? null
-        : invalid === 'grandchild' ? CLI_CHAT_ID : SOURCE_CHAT_ID,
-      lineage: invalid === 'fork' || invalid === 'handoff' ? {
+    const child = { ...f.sessions.get(SOURCE_CHAT_ID), parentChatId: SOURCE_CHAT_ID, lineage: null };
+    if (invalid === 'fork' || invalid === 'handoff') {
+      child.parentChatId = null;
+      child.lineage = {
         sourceChatId: SOURCE_CHAT_ID, kind: invalid, transcriptViewId: 'view-1', ordinal: 1,
-      } : null });
-    if (invalid === 'unrelated') f.sessions.get(TARGET_CHAT_ID).parentChatId = null;
+      };
+    } else if (invalid === 'grandchild') {
+      child.parentChatId = CLI_CHAT_ID;
+    } else if (invalid === 'unrelated') {
+      child.parentChatId = null;
+    }
+    f.sessions.set(TARGET_CHAT_ID, child);
     if (invalid === 'missing') f.sessions.delete(TARGET_CHAT_ID);
     if (invalid === 'aborted') abort.abort();
     await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,

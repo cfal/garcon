@@ -2,6 +2,7 @@ import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
 import type { ChatOrderGroup } from '$shared/chat-list';
 import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-modes';
+import { chatLineagesEqual } from '$shared/chat-parentage';
 import { stableJsonStringify } from '$shared/json';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -104,26 +105,12 @@ function arraysEqual(a: string[], b: string[]): boolean {
 	return true;
 }
 
-function sameLineage(
-	left: ChatSessionRecord['lineage'],
-	right: ChatSessionRecord['lineage'],
-): boolean {
-	if (left === right) return true;
-	if (left === null || right === null) return false;
-	if (left.sourceChatId !== right.sourceChatId) return false;
-	return (
-		left.kind === right.kind &&
-		left.transcriptViewId === right.transcriptViewId &&
-		left.ordinal === right.ordinal
-	);
-}
-
 export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
 		(a.executorId ?? 'local') === (b.executorId ?? 'local') &&
 		a.parentChatId === b.parentChatId &&
-		sameLineage(a.lineage, b.lineage) &&
+		chatLineagesEqual(a.lineage, b.lineage) &&
 		a.projectPath === b.projectPath &&
 		a.orderGroup === b.orderGroup &&
 		a.title === b.title &&

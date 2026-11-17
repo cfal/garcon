@@ -43,8 +43,8 @@ import {
   normalizeRecoverChatTagsResponse,
 } from '@garcon/common/chat-tag-mutations';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
-import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
-import { parseChatLineage, type ChatLineage } from '@garcon/common/chat-parentage';
+import { parseChatListResponse, type ChatListEntry, type ChatListResponse } from '@garcon/common/chat-list';
+import { chatLineagesEqual, parseChatLineage } from '@garcon/common/chat-parentage';
 import { parseChatId } from '@garcon/common/chat-id';
 import {
   parseChatHistoryResponse,
@@ -267,7 +267,7 @@ function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
   };
 }
 
-function parseRelationships(raw: Record<string, unknown> | null): Pick<ChatListResponse['sessions'][number], 'parentChatId' | 'lineage'> {
+function parseRelationships(raw: Record<string, unknown> | null): Pick<ChatListEntry, 'parentChatId' | 'lineage'> {
   try {
     if (!raw || 'parentChat' in raw) throw new Error('Missing current relationship fields');
     const parentChatId = raw.parentChatId === null ? null : parseChatId(raw.parentChatId);
@@ -278,16 +278,6 @@ function parseRelationships(raw: Record<string, unknown> | null): Pick<ChatListR
   } catch (error) {
     throw new CliError('submission', 'server returned invalid chat relationships', 3, { cause: error });
   }
-}
-
-function lineagesEqual(
-  left: ChatLineage | null,
-  right: ChatLineage | null,
-): boolean {
-  if (left === null || right === null) return left === right;
-  if (left.sourceChatId !== right.sourceChatId || left.kind !== right.kind) return false;
-  return left.transcriptViewId === right.transcriptViewId
-    && left.ordinal === right.ordinal;
 }
 
 function parseStartResponse(value: unknown): StartChatCommandResponse {
@@ -827,11 +817,9 @@ export class GarconClient {
         const chatLineage = response.chat.lineage;
         if (
           response.chat.id !== request.chatId
-          || responseLineage?.sourceChatId !== request.sourceChatId
-          || responseLineage.kind !== 'fork'
           || chatLineage?.sourceChatId !== request.sourceChatId
           || chatLineage.kind !== 'fork'
-          || !lineagesEqual(responseLineage, chatLineage)
+          || !chatLineagesEqual(responseLineage, chatLineage)
         ) {
           throw new CliError('submission', 'server returned an uncorrelated fork-run response', 3);
         }

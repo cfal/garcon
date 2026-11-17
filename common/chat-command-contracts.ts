@@ -12,6 +12,7 @@ import type { ChatExecutionControlState } from './chat-execution-control.js';
 import { parseChatTransientControlAction, type ChatTransientControlAction } from './chat-transient-feed.js';
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
+import type { ChatLineage } from './chat-parentage.js';
 import type { CommandTagMutationOutcome } from './chat-tag-mutations.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
@@ -150,10 +151,12 @@ export interface CommandAcceptedResponse {
   tagMutation?: CommandTagMutationOutcome;
 }
 
-export interface AgentTurnCommandResponse extends CommandAcceptedResponse, Partial<Pick<ChatListEntry, 'parentChatId' | 'lineage'>> {
+export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
   chatId: string;
   turnId: string;
   chat?: ChatListEntry | null;
+  parentChatId?: string | null;
+  lineage?: ChatLineage | null;
 }
 
 export interface StartChatCommandResponse extends AgentTurnCommandResponse {
@@ -371,11 +374,13 @@ export interface SteerCommandRequest {
   whenTurnUnavailable?: SteerUnavailableTurnPolicy;
 }
 
-export interface SteerCommandResponse extends CommandAcceptedResponse, Partial<Pick<ChatListEntry, 'parentChatId' | 'lineage'>> {
+export interface SteerCommandResponse extends CommandAcceptedResponse {
   commandType: 'steer';
   chatId: string;
   turnId: string;
   delivery?: never;
+  parentChatId?: string | null;
+  lineage?: ChatLineage | null;
 }
 
 export interface QueuedSteerCommandResponse extends CommandAcceptedResponse {
@@ -459,9 +464,11 @@ export interface AgentStopCommandRequest {
   agentId?: string;
 }
 
-export interface AgentStopResponse extends CommandAcceptedResponse, Partial<Pick<ChatListEntry, 'parentChatId' | 'lineage'>> {
+export interface AgentStopResponse extends CommandAcceptedResponse {
   outcome: ChatStopOutcome;
   control: ChatExecutionControlState;
+  parentChatId?: string | null;
+  lineage?: ChatLineage | null;
 }
 
 export interface AgentInterruptAndSendCommandRequest {

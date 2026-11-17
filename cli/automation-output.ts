@@ -168,11 +168,16 @@ function startEnvelopeFields(
   context: CliAutomationContext,
   result: ConsultationResult | StartConsultationAsyncResult,
 ): Omit<StartJsonEnvelopeBase, 'schemaVersion'> {
+  const { accepted } = result;
+  const {
+    parentChatId = accepted.chat?.parentChatId ?? null,
+    lineage = accepted.chat?.lineage ?? null,
+  } = accepted;
   return {
     ...context,
-    receipt: turnReceipt(result.accepted),
-    parentChatId: result.accepted.parentChatId === undefined ? result.accepted.chat?.parentChatId ?? null : result.accepted.parentChatId,
-    lineage: result.accepted.lineage === undefined ? result.accepted.chat?.lineage ?? null : result.accepted.lineage,
+    receipt: turnReceipt(accepted),
+    parentChatId,
+    lineage,
     titleUpdate: titleUpdate(result.titleUpdate),
   };
 }

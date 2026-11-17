@@ -13,6 +13,7 @@ import {
   stopJsonEnvelope,
 } from '../automation-output.js';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import { chat } from './chat-research-fixtures.js';
 
 const CHAT_ID = '1785337200123456';
 const PARENT_ID = '1785337200123455';
@@ -39,6 +40,37 @@ const terminalReceipt: AgentTurnReceipt = {
 };
 
 describe('automation JSON output', () => {
+  test('falls back to nested relationships only when the top-level field is undefined', () => {
+    const nested = chat({
+      parentChatId: PARENT_ID,
+      lineage: { sourceChatId: PARENT_ID, kind: 'fork', transcriptViewId: 'source-view', ordinal: 1 },
+    });
+    const accepted: StartChatCommandResponse = {
+      ...receipt,
+      commandType: 'chat-start',
+      chat: nested,
+      parentChatId: undefined,
+      lineage: undefined,
+    };
+    const titleUpdate = { status: 'not-requested' as const };
+    expect(startAsyncJsonEnvelope(context, { accepted, titleUpdate })).toMatchObject({
+      parentChatId: PARENT_ID,
+      lineage: nested.lineage,
+    });
+    expect(startAsyncJsonEnvelope(context, {
+      accepted: { ...accepted, parentChatId: null, lineage: null },
+      titleUpdate,
+    })).toMatchObject({ parentChatId: null, lineage: null });
+    expect(startAsyncJsonEnvelope(context, {
+      accepted: { ...accepted, parentChatId: '1785337200123457', lineage: null },
+      titleUpdate,
+    })).toMatchObject({ parentChatId: '1785337200123457', lineage: null });
+    expect(startAsyncJsonEnvelope(context, {
+      accepted: { ...accepted, chat: null },
+      titleUpdate,
+    })).toMatchObject({ parentChatId: null, lineage: null });
+  });
+
   test('projects a stable start-async envelope including accepted work and title failure', () => {
     const accepted: StartChatCommandResponse = {
       ...receipt,

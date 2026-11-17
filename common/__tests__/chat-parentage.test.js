@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'bun:test';
-import { parseChatLineage } from '../chat-parentage.ts';
+import { chatLineagesEqual, parseChatLineage } from '../chat-parentage.ts';
 
 const sourceChatId = '1783725900000200';
 
 describe('chat lineage', () => {
+  it('compares identity, kind and the complete watermark with nullable values', () => {
+    const lineage = { sourceChatId, kind: 'fork', transcriptViewId: 'source-view', ordinal: 1 };
+    expect(chatLineagesEqual(null, null)).toBe(true);
+    expect(chatLineagesEqual(lineage, lineage)).toBe(true);
+    expect(chatLineagesEqual(lineage, { ...lineage })).toBe(true);
+    for (const other of [
+      null,
+      { ...lineage, sourceChatId: '1783725900000201' },
+      { ...lineage, kind: 'handoff' },
+      { ...lineage, transcriptViewId: 'other-view' },
+      { ...lineage, ordinal: 2 },
+    ]) {
+      expect(chatLineagesEqual(lineage, other)).toBe(false);
+      expect(chatLineagesEqual(other, lineage)).toBe(false);
+    }
+  });
+
   it.each(['fork', 'handoff'])('parses and freezes %s provenance', (kind) => {
     const lineage = { sourceChatId, kind, transcriptViewId: 'source-view', ordinal: 0 };
     const parsed = parseChatLineage(lineage);
