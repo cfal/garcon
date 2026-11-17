@@ -10,6 +10,7 @@ import { defaultSidebarGroupingFields, type SidebarGroupingSelection } from './s
 export interface SidebarDisplayOptions {
 	groupingFields: readonly SidebarGroupingSelection[];
 	nestDelegatedChats: boolean;
+	separateArchivedBranches: boolean;
 	inactivityDuration: SidebarInactivityDuration;
 	groupNestedProjectPaths: boolean;
 	chatItemLayout: ChatItemLayout;
@@ -23,6 +24,7 @@ export type SidebarDisplayPreferences = Pick<
 	LocalSettingsSnapshot,
 	| 'sidebarGroupingFields'
 	| 'sidebarNestDelegatedChats'
+	| 'sidebarSeparateArchivedBranches'
 	| 'sidebarInactivityDuration'
 	| 'sidebarGroupNestedProjectPaths'
 	| 'sidebarChatItemLayout'
@@ -33,6 +35,7 @@ export function defaultSidebarDisplayPreferences(): SidebarDisplayPreferences {
 	return {
 		sidebarGroupingFields: defaultSidebarGroupingFields(),
 		sidebarNestDelegatedChats: true,
+		sidebarSeparateArchivedBranches: false,
 		sidebarInactivityDuration: '3-days',
 		sidebarGroupNestedProjectPaths: false,
 		sidebarChatItemLayout: 'single-line',
@@ -47,6 +50,7 @@ export function sidebarDisplayOptions(
 	return {
 		groupingFields: preferences.sidebarGroupingFields,
 		nestDelegatedChats: preferences.sidebarNestDelegatedChats,
+		separateArchivedBranches: preferences.sidebarSeparateArchivedBranches,
 		inactivityDuration: preferences.sidebarInactivityDuration,
 		groupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
 		chatItemLayout: preferences.sidebarChatItemLayout,

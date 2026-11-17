@@ -393,7 +393,7 @@ describe('recursive sidebar projection', () => {
 	});
 	it('cuts malformed cycles deterministically without mutating lineage', () => {
 		const chats = [delegated('b', 'a'), delegated('a', 'b'), delegated('self', 'self')];
-		const forest = buildSidebarDelegationForest(chats, true);
+		const forest = buildSidebarDelegationForest(chats, { nestDelegatedChats: true });
 		expect(forest.roots).toEqual(['a', 'self']);
 		expect(forest.ambiguousIds).toEqual(new Set(['a', 'b', 'self']));
 		expect(chats[1].parentChatId).toBe('b');

@@ -253,7 +253,7 @@ describe('OnboardingWizard', () => {
 		] as const) {
 			await fireEvent.click(screen.getByRole('radio', { name: label }));
 			expect(localSettings.sidebarChatItemLayout).toBe(layout);
-			expect(preview?.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(3);
+			expect(preview?.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(4);
 			expect(
 				Array.from(preview!.querySelectorAll('[data-slot="sidebar-chat-summary"]')).every(
 					(row) => row.getAttribute('data-layout') === layout,

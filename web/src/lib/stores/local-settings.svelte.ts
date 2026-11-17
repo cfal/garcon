@@ -193,6 +193,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	sidebarWidth: number;
 	sidebarGroupingFields: SidebarGroupingSelection[];
 	sidebarNestDelegatedChats: boolean;
+	sidebarSeparateArchivedBranches: boolean;
 	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: ChatItemLayout;
@@ -245,6 +246,7 @@ type BooleanLocalSettingKey =
 	| 'sidebarVisible'
 	| 'sidebarGroupNestedProjectPaths'
 	| 'sidebarNestDelegatedChats'
+	| 'sidebarSeparateArchivedBranches'
 	| 'sidebarShowProjectPath'
 	| 'codeEditorWordWrap'
 	| 'codeEditorVimMode'
@@ -542,6 +544,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.sidebarNestDelegatedChats,
 			DEFAULTS.sidebarNestDelegatedChats,
 		),
+		sidebarSeparateArchivedBranches: parseBoolean(
+			parsed.sidebarSeparateArchivedBranches,
+			DEFAULTS.sidebarSeparateArchivedBranches,
+		),
 		sidebarInactivityDuration: parseSidebarInactivityDuration(parsed.sidebarInactivityDuration),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
@@ -680,6 +686,7 @@ export class LocalSettingsStore {
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupingFields = $state<SidebarGroupingSelection[]>(defaultSidebarGroupingFields());
 	sidebarNestDelegatedChats = $state(DEFAULTS.sidebarNestDelegatedChats);
+	sidebarSeparateArchivedBranches = $state(DEFAULTS.sidebarSeparateArchivedBranches);
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
@@ -779,6 +786,7 @@ export class LocalSettingsStore {
 			...this.snapshot(),
 			sidebarGroupingFields: normalizeSidebarGroupingFields(preferences.sidebarGroupingFields),
 			sidebarNestDelegatedChats: Boolean(preferences.sidebarNestDelegatedChats),
+			sidebarSeparateArchivedBranches: Boolean(preferences.sidebarSeparateArchivedBranches),
 			sidebarInactivityDuration: preferences.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: preferences.sidebarChatItemLayout,
@@ -870,6 +878,7 @@ export class LocalSettingsStore {
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupingFields: this.sidebarGroupingFields.map((entry) => ({ ...entry })),
 			sidebarNestDelegatedChats: this.sidebarNestDelegatedChats,
+			sidebarSeparateArchivedBranches: this.sidebarSeparateArchivedBranches,
 			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
@@ -951,6 +960,7 @@ export class LocalSettingsStore {
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupingFields = snap.sidebarGroupingFields;
 		this.sidebarNestDelegatedChats = snap.sidebarNestDelegatedChats;
+		this.sidebarSeparateArchivedBranches = snap.sidebarSeparateArchivedBranches;
 		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;

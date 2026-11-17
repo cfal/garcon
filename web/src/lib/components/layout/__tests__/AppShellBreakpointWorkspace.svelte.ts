@@ -31,6 +31,7 @@ export class AppShellLocalSettingsState implements Pick<
 	| 'sidebarInactivityDuration'
 	| 'sidebarGroupNestedProjectPaths'
 	| 'sidebarNestDelegatedChats'
+	| 'sidebarSeparateArchivedBranches'
 	| 'sidebarSortMode'
 	| 'set'
 > {
@@ -43,6 +44,7 @@ export class AppShellLocalSettingsState implements Pick<
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>('3-days');
 	sidebarGroupNestedProjectPaths = $state(false);
 	sidebarNestDelegatedChats = $state(false);
+	sidebarSeparateArchivedBranches = $state(false);
 	sidebarSortMode = $state<SidebarSortMode>('manual');
 
 	set(): void {}
