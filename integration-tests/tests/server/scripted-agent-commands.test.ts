@@ -266,8 +266,10 @@ describe('scripted provider agent commands', () => {
           const accepted = outcomes[0];
           if (accepted?.status !== 'accepted') throw new Error('Missing accepted child');
           expect((await fixture.client.getChatSnapshot(accepted.chatId)).chat.title).toBe('Synthetic delegated review');
-          expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === accepted.chatId)?.parentChat)
-            .toEqual({ chatId: source, relation: 'delegation' });
+          expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === accepted.chatId)?.parentChatId)
+            .toEqual(source);
+          expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === accepted.chatId)?.lineage)
+            .toMatchObject({ sourceChatId: source, kind: 'fork', transcriptViewId: history.transcriptViewId, ordinal: expect.any(Number) });
           expect(userContents(history.messages)).toEqual([start.command]);
           expect(userContents((await fixture.client.getMessages(accepted.chatId)).messages)).toEqual([start.command, childPrompt, followup]);
           environment.settled();
@@ -337,7 +339,7 @@ describe('scripted provider agent commands', () => {
               const chats = await fixture.client.listChats();
               const child = chats.sessions.find((chat) => chat.id !== source);
               expect(chats.sessions).toHaveLength(2);
-              expect(child?.parentChat).toEqual({ chatId: source, relation: 'delegation' });
+              expect(child?.parentChatId).toEqual(source);
               expect(child).toMatchObject({
                 agentId: start.agentId, model: start.model, apiProviderId: null, modelEndpointId: null, modelProtocol: null,
                 thinkingMode: start.thinkingMode, permissionMode: start.permissionMode,

@@ -79,7 +79,8 @@ describe('chats API contract', () => {
 	function chatEntry(id: string) {
 		return {
 			id,
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			agentId: 'claude',
 			agentOwnershipEpoch: 'epoch-1',
 			model: 'opus',
@@ -154,7 +155,8 @@ describe('chats API contract', () => {
 			sessions: [
 				{
 					id: chatId,
-					parentChat: null,
+					parentChatId: null,
+					lineage: null,
 					agentId: 'claude',
 					agentOwnershipEpoch: 'epoch-1',
 					model: 'opus',

@@ -156,7 +156,8 @@ export class ChatListProjector {
     return {
       id: chat.id,
       ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
-      parentChat: session.parentChat,
+      parentChatId: session.parentChatId,
+      lineage: session.lineage,
       agentId: chat.agentId,
       agentOwnershipEpoch: session.agentOwnershipEpoch,
       model: chat.model,

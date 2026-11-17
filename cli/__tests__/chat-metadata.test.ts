@@ -66,7 +66,7 @@ function client(): ChatMetadataClient & {
     },
     async setChatParent(request) {
       return { success: true, chatId: request.chatId,
-        parentChat: request.parentChatId === null ? null : { chatId: request.parentChatId, relation: 'delegation' },
+        parentChatId: request.parentChatId,
         changed: true };
     },
   };
@@ -79,7 +79,7 @@ describe('chat metadata commands', () => {
     await runSetParent({ ...connection, kind: 'set-parent', chatId: CHAT_ID, parentChatId: null, json: false }, api, output);
     expect(output.results[0]).toBe(`chat id: ${CHAT_ID}\nparent chat id: none\nchanged: yes`);
     await runSetParent({ ...connection, kind: 'set-parent', chatId: CHAT_ID, parentChatId: '1785337200123457', json: true }, api, output);
-    expect(JSON.parse(output.results[1]!)).toMatchObject({ parentChat: { chatId: '1785337200123457', relation: 'delegation' } });
+    expect(JSON.parse(output.results[1]!)).toMatchObject({ parentChatId: '1785337200123457' });
   });
   test('repeated lifecycle commands submit the same desired state', async () => {
     const api = client();

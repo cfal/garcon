@@ -27,7 +27,8 @@ function newChat(overrides = {}) {
     model: 'model-a',
     projectPath: '/repo',
     agentSettingsById: { test: envelope('test') },
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     ...overrides,
   };
 }
@@ -53,7 +54,8 @@ function persistedEntry(overrides = {}) {
     carryOverMigrationQuarantine: null,
     pendingPreambleBoundary: null,
     preambleSelection: { revision: 0, orderedPreambleIds: [] },
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     ...overrides,
   };
 }
@@ -66,7 +68,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function writeRegistry(sessions, version = 5) {
+async function writeRegistry(sessions, version = 6) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
 
@@ -109,7 +111,8 @@ describe('ChatRegistry phased updates', () => {
       agentSettingsById: { test: envelope('test') },
       preambleSelection: { revision: 0, orderedPreambleIds: [] },
       pendingPreambleBoundary: null,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
     });
     const epoch = registry.getChat(CHAT_ID).agentOwnershipEpoch;
 
@@ -173,7 +176,7 @@ describe('ChatRegistry', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  it.each([null, [], 1, { version: 5 }, { version: 5, sessions: null }, { version: 5, sessions: [] }].map((value) => [value]))(
+  it.each([null, [], 1, { version: 6 }, { version: 6, sessions: null }, { version: 6, sessions: [] }].map((value) => [value]))(
     'rejects malformed registry containers without modifying their bytes: %j', async (value) => {
       const raw = JSON.stringify(value);
       const file = path.join(tempDir, 'chats.json');
@@ -262,7 +265,8 @@ describe('ChatRegistry', () => {
       agentSettingsById: { test: envelope('test') },
       permissionMode: 'default',
       thinkingMode: 'none',
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
     });
     expect(added).toHaveBeenCalledWith(CHAT_ID);
     expect(registry.getChat(CHAT_ID)).not.toHaveProperty('nextForkOrdinal');
@@ -278,25 +282,25 @@ describe('ChatRegistry', () => {
   });
 
   it('persists and freezes immutable parentage', async () => {
-    const parentChat = {
-      chatId: CHAT_ID,
-      relation: 'fork',
+    const lineage = {
+      sourceChatId: CHAT_ID,
+      kind: 'fork',
       transcriptViewId: 'view-a',
       ordinal: 0,
     };
     registry.addChat(newChat({
       id: SECOND_CHAT_ID,
-      parentChat,
+      lineage,
     }));
 
     const child = registry.getChat(SECOND_CHAT_ID);
-    expect(child.parentChat).toEqual(parentChat);
-    expect(Object.isFrozen(child.parentChat)).toBeTrue();
+    expect(child.lineage).toEqual(lineage);
+    expect(Object.isFrozen(child.lineage)).toBeTrue();
 
     await registry.flush();
     registry = new ChatRegistry(tempDir);
     await registry.init();
-    expect(registry.getChat(SECOND_CHAT_ID)?.parentChat).toEqual(parentChat);
+    expect(registry.getChat(SECOND_CHAT_ID)?.lineage).toEqual(lineage);
   });
 
   it('keeps the registry owner-only after saving', async () => {
@@ -310,7 +314,7 @@ describe('ChatRegistry', () => {
   it('repairs permissions on an existing registry during init', async () => {
     if (process.platform === 'win32') return;
     const registryPath = path.join(tempDir, 'chats.json');
-    await fs.writeFile(registryPath, JSON.stringify({ version: 5, sessions: {} }), { mode: 0o644 });
+    await fs.writeFile(registryPath, JSON.stringify({ version: 6, sessions: {} }), { mode: 0o644 });
 
     registry = new ChatRegistry(tempDir);
     await registry.init();
@@ -321,44 +325,43 @@ describe('ChatRegistry', () => {
   it('loads an existing registry when permission repair fails', async () => {
     if (process.platform === 'win32') return;
     const registryPath = path.join(tempDir, 'chats.json');
-    await fs.writeFile(registryPath, JSON.stringify({ version: 5, sessions: {} }), { mode: 0o644 });
+    await fs.writeFile(registryPath, JSON.stringify({ version: 6, sessions: {} }), { mode: 0o644 });
     const chmod = spyOn(fs, 'chmod').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EPERM' }));
     try {
       registry = new ChatRegistry(tempDir);
-      await expect(registry.init()).resolves.toEqual({ version: 5, sessions: {} });
+      await expect(registry.init()).resolves.toEqual({ version: 6, sessions: {} });
     } finally {
       chmod.mockRestore();
     }
   });
 
-  it('persists and freezes watermark-free delegation parentage', async () => {
-    const parentChat = { chatId: CHAT_ID, relation: 'delegation' };
-    registry.addChat(newChat({ id: SECOND_CHAT_ID, parentChat }));
+  it('persists watermark-free delegation parentage', async () => {
+    const parentChatId = CHAT_ID;
+    registry.addChat(newChat({ id: SECOND_CHAT_ID, parentChatId }));
 
     const child = registry.getChat(SECOND_CHAT_ID);
-    expect(child.parentChat).toEqual(parentChat);
-    expect(Object.isFrozen(child.parentChat)).toBeTrue();
+    expect(child.parentChatId).toEqual(parentChatId);
 
     await registry.flush();
     registry = new ChatRegistry(tempDir);
     await registry.init();
-    expect(registry.getChat(SECOND_CHAT_ID)?.parentChat).toEqual(parentChat);
+    expect(registry.getChat(SECOND_CHAT_ID)?.parentChatId).toEqual(parentChatId);
   });
 
   it('rejects malformed and self-referential new parentage', () => {
-    expect(() => registry.addChat(newChat({ parentChat: undefined }))).toThrow(
-      'Invalid parent chat',
-    );
+    expect(() => registry.addChat(newChat({ parentChatId: undefined }))).toThrow();
     expect(() => registry.addChat(newChat({
-      parentChat: {
-        chatId: CHAT_ID,
-        relation: 'fork',
+      parentChatId: null,
+      lineage: {
+        sourceChatId: CHAT_ID,
+        kind: 'fork',
         transcriptViewId: 'view-a',
         ordinal: 1,
       },
-    }))).toThrow('cannot be its own parent');
+    }))).toThrow('cannot be its own lineage source');
     expect(() => registry.addChat(newChat({
-      parentChat: { chatId: CHAT_ID, relation: 'delegation' },
+      parentChatId: CHAT_ID,
+      lineage: null,
     }))).toThrow('cannot be its own parent');
     expect(registry.listAllChats()).toEqual({});
   });
@@ -483,15 +486,16 @@ describe('ChatRegistry', () => {
     registry.addChat(newChat());
 
     registry.updateChat(CHAT_ID, {
-      parentChat: {
-        chatId: SECOND_CHAT_ID,
-        relation: 'handoff',
+      parentChatId: null,
+      lineage: {
+        sourceChatId: SECOND_CHAT_ID,
+        kind: 'handoff',
         transcriptViewId: 'view-b',
         ordinal: 2,
       },
     });
 
-    expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
+    expect(registry.getChat(CHAT_ID)?.parentChatId).toBeNull();
   });
 
   it('validates owner-bound settings patches', () => {
@@ -509,7 +513,7 @@ describe('ChatRegistry', () => {
     }, { flush: true });
 
     const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
-    expect(persisted.version).toBe(5);
+    expect(persisted.version).toBe(6);
     expect(persisted.sessions[CHAT_ID]).toMatchObject({
       agentSessionId: 'native-1',
       nativeSession: nativeSession('test', { id: 'native-1' }),
@@ -954,7 +958,8 @@ describe('ChatRegistry', () => {
       agentSettingsById: { test: envelope('test') },
       preambleSelection: { revision: 0, orderedPreambleIds: [] },
       pendingPreambleBoundary: null,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
     });
     await phasedRegistry.flush();
 
@@ -1003,7 +1008,7 @@ describe('ChatRegistry', () => {
     await fs.rm(phasedDir, { recursive: true, force: true });
   });
 
-  it('loads a strict version-five registry and rebuilds its native ID index', async () => {
+  it('loads a strict version-six registry and rebuilds its native ID index', async () => {
     await registry.flush();
     await writeRegistry({ [CHAT_ID]: persistedEntry() });
     registry = new ChatRegistry(tempDir);
@@ -1028,40 +1033,19 @@ describe('ChatRegistry', () => {
     expect(registry.lookupNativeSession('ses_duplicate', 'test')).toEqual({ status: 'ambiguous' });
   });
 
-  it('normalizes absent and malformed persisted parentage to roots', async () => {
-    const { parentChat: _parentChat, ...legacyEntry } = persistedEntry();
-    const malformed = [
-      'invalid',
-      { chatId: 'invalid', relation: 'fork', transcriptViewId: 'view-a', ordinal: 1 },
-      { chatId: CHAT_ID, relation: 'merge', transcriptViewId: 'view-a', ordinal: 1 },
-      { chatId: CHAT_ID, relation: 'fork', transcriptViewId: '', ordinal: 1 },
-      { chatId: CHAT_ID, relation: 'fork', transcriptViewId: 'view-a', ordinal: -1 },
-    ];
-    const originalWarn = console.warn;
-    const warnings = [];
-    console.warn = mock((...args) => warnings.push(args));
-
-    try {
-      for (const entry of [legacyEntry, persistedEntry({ parentChat: null })]) {
-        await writeRegistry({ [CHAT_ID]: entry });
-        registry = new ChatRegistry(tempDir);
-        await registry.init();
-        expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
-      }
-      expect(warnings).toEqual([]);
-
-      for (const parentChat of malformed) {
-        const warningCount = warnings.length;
-        await writeRegistry({ [CHAT_ID]: { ...persistedEntry(), parentChat } });
-        registry = new ChatRegistry(tempDir);
-        await registry.init();
-        expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
-        expect(warnings.slice(warningCount)).toEqual([
-          ['[chats:store]', `sessions: ignoring invalid parentChat for ${CHAT_ID}`],
-        ]);
-      }
-    } finally {
-      console.warn = originalWarn;
+  it('rejects missing, legacy and malformed current relationships without rewriting them', async () => {
+    for (const patch of [
+      { parentChatId: undefined }, { lineage: undefined }, { parentChat: null },
+      { parentChatId: 'invalid' }, { parentChatId: CHAT_ID },
+      { lineage: { sourceChatId: SECOND_CHAT_ID, kind: 'fork', transcriptViewId: '', ordinal: 1 } },
+      { lineage: { sourceChatId: SECOND_CHAT_ID, kind: 'fork', transcriptViewId: 'view-a', ordinal: -1 } },
+      { lineage: { sourceChatId: CHAT_ID, kind: 'handoff', transcriptViewId: 'view-a', ordinal: 1 } },
+    ]) {
+      await writeRegistry({ [CHAT_ID]: persistedEntry(patch) });
+      const bytes = await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8');
+      registry = new ChatRegistry(tempDir);
+      await expect(registry.init()).rejects.toThrow();
+      expect(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8')).toBe(bytes);
     }
   });
 

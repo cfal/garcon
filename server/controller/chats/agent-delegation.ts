@@ -3,9 +3,8 @@ import type { ChatRegistryEntry } from './registry-contracts.js';
 export function isDirectDelegatedChild(
   sourceChatId: string,
   targetChatId: string,
-  target: Pick<ChatRegistryEntry, 'parentChat'> | null,
+  target: Pick<ChatRegistryEntry, 'parentChatId'> | null,
 ): boolean {
   return target !== null && targetChatId !== sourceChatId
-    && target.parentChat?.relation === 'delegation'
-    && target.parentChat.chatId === sourceChatId;
+    && target.parentChatId === sourceChatId;
 }

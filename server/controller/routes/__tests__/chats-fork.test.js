@@ -272,9 +272,10 @@ describe('POST /api/v1/chats/fork', () => {
         carryOverSegments: [],
         nativeSeedReceipt: null,
         carryOverMigrationQuarantine: null,
-        parentChat: {
-          chatId: SOURCE_CHAT_ID,
-          relation: 'fork',
+        parentChatId: null,
+        lineage: {
+          sourceChatId: SOURCE_CHAT_ID,
+          kind: 'fork',
           transcriptViewId: 'view-source',
           ordinal: 1,
         },

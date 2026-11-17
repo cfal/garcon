@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { IntegrationDirectories, IntegrationFixture } from './integration-fixture.js';
 import type { ChatRegistryEntry, ChatRegistrySnapshot } from '../../server/controller/chats/registry-contracts.js';
+import { CHAT_REGISTRY_VERSION } from '../../server/controller/chats/registry-contracts.js';
 
 export async function restartWithSeededChat(
   fixture: IntegrationFixture,
@@ -11,7 +12,7 @@ export async function restartWithSeededChat(
   await fixture.restartGarcon({ beforeStart: async () => {
     const registryPath = join(fixture.dirs.workspace, 'chats.json');
     const file = Bun.file(registryPath);
-    const registry: ChatRegistrySnapshot = await file.exists() ? await file.json() : { version: 5, sessions: {} };
+    const registry: ChatRegistrySnapshot = await file.exists() ? await file.json() : { version: CHAT_REGISTRY_VERSION, sessions: {} };
     registry.sessions[chatId] = {
       executorId: fixture.client.executorId,
       projectPath: fixture.executionDirs.project,
@@ -31,7 +32,8 @@ export async function restartWithSeededChat(
       carryOverMigrationQuarantine: null,
       pendingPreambleBoundary: null,
       preambleSelection: { revision: 0, orderedPreambleIds: [] },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       ...entry,
     };
     await writeFile(registryPath, JSON.stringify(registry));

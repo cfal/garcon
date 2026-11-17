@@ -11,13 +11,13 @@ function candidate(id: string, title = id, parentId?: string): ParentCandidate {
 		id,
 		title,
 		status: 'running',
-		parentChat: parentId ? { chatId: parentId, relation: 'delegation' } : null,
+		parentChatId: parentId ?? null,
 		lastActivityAt: null,
 	};
 }
 
 describe('parent chat candidates', () => {
-	it('excludes self, drafts and descendants through every relation kind, including cycles', () => {
+	it('excludes self, drafts and delegation descendants, including cycles', () => {
 		const chats = [
 			candidate('a'),
 			candidate('b', 'B', 'a'),
@@ -25,10 +25,20 @@ describe('parent chat candidates', () => {
 			candidate('d'),
 			candidate('draft'),
 		];
-		chats[1]!.parentChat = { chatId: 'a', relation: 'fork', transcriptViewId: 'view', ordinal: 0 };
-		chats[0]!.parentChat = { chatId: 'c', relation: 'delegation' };
+		chats[0]!.parentChatId = 'c';
 		chats[4]!.status = 'draft';
 		expect(eligibleParentChats(chats, 'a').map((chat) => chat.id)).toEqual(['d']);
+	});
+
+	it('does not exclude lineage descendants from delegation candidates', () => {
+		const chats = [
+			candidate('a'),
+			{
+				...candidate('fork'),
+				lineage: { sourceChatId: 'a', kind: 'fork', transcriptViewId: 'view', ordinal: 0 },
+			},
+		];
+		expect(eligibleParentChats(chats, 'a').map((chat) => chat.id)).toEqual(['fork']);
 	});
 
 	it('ranks exact ID before literal prefixes and title substrings, retaining duplicate titles', () => {

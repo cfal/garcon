@@ -36,7 +36,8 @@ function makeServerChat(
 		isUnread: false,
 		canReloadFromNativeHistory: false,
 		tags: [],
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentOwnershipEpoch: 'epoch-1',
 	};
 }
@@ -63,7 +64,8 @@ describe('sidebar bulk archive flow', () => {
 			makeServerChat('parent'),
 			{
 				...makeServerChat('child'),
-				parentChat: { chatId: 'parent', relation: 'delegation' as const },
+				parentChatId: 'parent',
+				lineage: null,
 			},
 		];
 		const chatSessions = new ChatSessionsStore({

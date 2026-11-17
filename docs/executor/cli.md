@@ -276,8 +276,12 @@ the short pool, a 30-second deadline, and ordinary workspace CLI authority
 (`mutation:true`, `management:false`). The controller owns the relation; the
 origin executor does not restrict either chat's executor. The desired-state
 setter reconciles earlier uncertain persistence inline and is never automatically
-retried. Fork/handoff ancestry is protected. Protocol revision 44 requires matched
-controller and worker builds.
+retried. It edits only `parentChatId`, including on fork/handoff chats; immutable
+`lineage` remains separate and grants no delegation authority. Revision 45 changes
+chat-list and command projections to those two fields, and the setter reply to a
+scalar `parentChatId`. Fork acknowledgement correlation uses lineage, not the
+mutable parent. CLI automation schema 2 makes the same split. Matched controller,
+worker, CLI, and browser builds are required.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 

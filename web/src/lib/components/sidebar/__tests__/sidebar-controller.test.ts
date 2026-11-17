@@ -38,7 +38,8 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		status: 'draft',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }

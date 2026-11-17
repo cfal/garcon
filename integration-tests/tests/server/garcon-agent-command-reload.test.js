@@ -37,7 +37,7 @@ async function withReload(run) {
     nativeSession, nativeSeedReceipt: null, agentSessionId: 'synthetic-session', projectPath: root,
     model: 'synthetic-model', permissionMode: 'default', thinkingMode: 'none', tags: [],
     agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } },
-    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChat: null,
+    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChatId: null, lineage: null,
   });
   await registry.flush();
   const view = ledger.initializeChat(CHAT, [{ kind: 'session', at: AT, providerMeta: null,

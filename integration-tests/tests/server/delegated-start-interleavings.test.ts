@@ -64,7 +64,7 @@ describe('delegated startup admission interleavings', () => {
       projectPath: directory, tags: [], agentSettingsById: {}, agentOwnershipEpoch: 'synthetic-epoch',
       nativeSession: null, agentSessionId: null, nativeSeedReceipt: null, carryOverSegments: [],
       carryOverMigrationQuarantine: null, pendingPreambleBoundary: null,
-      preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChat: null,
+      preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChatId: null, lineage: null,
     };
     const turns = new CommandLedger();
     const wait = spyOn(turns, 'waitForTurnTerminal');

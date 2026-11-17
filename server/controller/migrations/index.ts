@@ -1,9 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { isRecord } from '../../../common/json.js';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 
-export const CURRENT_WORKSPACE_VERSION = 9;
+export const CURRENT_WORKSPACE_VERSION = 10;
 
 const WORKSPACE_VERSION_FILE = 'workspace-version.json';
 const FRESH_WORKSPACE_IGNORED_FILES = new Set([
@@ -21,24 +22,30 @@ const MIGRATIONS = [
   { name: 'agent-execution-mode-refresh', version: 7 },
   { name: 'fork-ordinal-cleanup', version: 8 },
   { name: 'provider-assignments', version: 9 },
+  { name: 'chat-relationships-split', version: 10 },
 ] as const;
 
 export type WorkspaceMigrationName = typeof MIGRATIONS[number]['name'];
 
 interface WorkspaceVersionFile {
   version: number;
+  checkpoint?: true;
 }
 
 export class WorkspaceMigrationRunner {
   readonly #workspaceDir: string;
   readonly #initialVersion: number;
   readonly #skipLadder: boolean;
+  readonly resumedFromCheckpoint: boolean;
   #nextEntry = 0;
+  #checkpointVersion: number;
 
-  private constructor(workspaceDir: string, initialVersion: number, skipLadder: boolean) {
+  private constructor(workspaceDir: string, stamp: WorkspaceVersionFile, skipLadder: boolean) {
     this.#workspaceDir = workspaceDir;
-    this.#initialVersion = initialVersion;
+    this.#initialVersion = stamp.version;
     this.#skipLadder = skipLadder;
+    this.#checkpointVersion = stamp.version;
+    this.resumedFromCheckpoint = stamp.checkpoint === true;
   }
 
   get initialVersion(): number {
@@ -48,19 +55,19 @@ export class WorkspaceMigrationRunner {
   get isFresh(): boolean { return this.#skipLadder; }
 
   static async open(workspaceDir: string): Promise<WorkspaceMigrationRunner> {
-    const version = await readWorkspaceVersion(workspaceDir);
-    if (version !== null) {
-      if (version > CURRENT_WORKSPACE_VERSION) {
+    const stamp = await readWorkspaceVersion(workspaceDir);
+    if (stamp !== null) {
+      if (stamp.version > CURRENT_WORKSPACE_VERSION) {
         throw new Error(
-          `Workspace version ${version} is newer than supported version ${CURRENT_WORKSPACE_VERSION}`,
+          `Workspace version ${stamp.version} is newer than supported version ${CURRENT_WORKSPACE_VERSION}`,
         );
       }
-      return new WorkspaceMigrationRunner(workspaceDir, version, false);
+      return new WorkspaceMigrationRunner(workspaceDir, stamp, false);
     }
 
     const entries = await fs.readdir(workspaceDir);
     const fresh = entries.every((entry) => FRESH_WORKSPACE_IGNORED_FILES.has(entry));
-    return new WorkspaceMigrationRunner(workspaceDir, 0, fresh);
+    return new WorkspaceMigrationRunner(workspaceDir, { version: 0 }, fresh);
   }
 
   async run(name: WorkspaceMigrationName, migrate: () => Promise<void>): Promise<void> {
@@ -68,15 +75,30 @@ export class WorkspaceMigrationRunner {
     if (!entry || entry.name !== name) {
       throw new Error(`Workspace migration order violation: expected ${entry?.name ?? 'completion'}, got ${name}`);
     }
-    this.#nextEntry += 1;
     if (!this.#skipLadder && this.#initialVersion < entry.version) await migrate();
+    this.#nextEntry += 1;
+  }
+
+  async checkpointThrough(name: WorkspaceMigrationName): Promise<void> {
+    const index = MIGRATIONS.findIndex((entry) => entry.name === name);
+    if (index < 0 || index >= this.#nextEntry) {
+      throw new Error(`Cannot checkpoint incomplete workspace migration ${name}`);
+    }
+    const { version } = MIGRATIONS[index];
+    if (version <= this.#checkpointVersion) return;
+    // Later schema writes must not be replayed through this completed prefix.
+    await writeJsonFileAtomic(path.join(this.#workspaceDir, WORKSPACE_VERSION_FILE), {
+      version,
+      checkpoint: true,
+    } satisfies WorkspaceVersionFile);
+    this.#checkpointVersion = version;
   }
 
   async finish(): Promise<void> {
     if (this.#nextEntry !== MIGRATIONS.length) {
       throw new Error(`Workspace migration ladder stopped before ${MIGRATIONS[this.#nextEntry].name}`);
     }
-    if (this.#initialVersion === CURRENT_WORKSPACE_VERSION) return;
+    if (this.#initialVersion === CURRENT_WORKSPACE_VERSION && !this.resumedFromCheckpoint) return;
     await writeJsonFileAtomic(path.join(this.#workspaceDir, WORKSPACE_VERSION_FILE), {
       version: CURRENT_WORKSPACE_VERSION,
     } satisfies WorkspaceVersionFile);
@@ -95,7 +117,7 @@ export async function cleanupLegacyQueueState(options: {
   ].map((file) => fs.rm(path.join(options.workspaceDir, file), { force: true })));
 }
 
-async function readWorkspaceVersion(workspaceDir: string): Promise<number | null> {
+async function readWorkspaceVersion(workspaceDir: string): Promise<WorkspaceVersionFile | null> {
   const filePath = path.join(workspaceDir, WORKSPACE_VERSION_FILE);
   let value: unknown;
   try {
@@ -105,13 +127,15 @@ async function readWorkspaceVersion(workspaceDir: string): Promise<number | null
     throw new Error(`Could not read ${WORKSPACE_VERSION_FILE}`, { cause: error });
   }
   if (
-    !value
-    || typeof value !== 'object'
-    || Array.isArray(value)
-    || !Number.isSafeInteger((value as Record<string, unknown>).version)
-    || Number((value as Record<string, unknown>).version) < 0
+    !isRecord(value)
+    || typeof value.version !== 'number'
+    || !Number.isSafeInteger(value.version)
+    || value.version < 0
   ) {
     throw new Error(`${WORKSPACE_VERSION_FILE} must contain a nonnegative integer version`);
   }
-  return Number((value as Record<string, unknown>).version);
+  if (value.checkpoint !== undefined && value.checkpoint !== true) {
+    throw new Error(`${WORKSPACE_VERSION_FILE} checkpoint must be true when present`);
+  }
+  return { version: value.version, ...(value.checkpoint === true ? { checkpoint: true } : {}) };
 }

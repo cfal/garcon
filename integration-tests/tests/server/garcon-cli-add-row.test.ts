@@ -75,7 +75,7 @@ async function runAddRow(
       status: envelope.response.status,
     };
     expect(envelope).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'add-row',
       workspace: WORKSPACE,
       response: {

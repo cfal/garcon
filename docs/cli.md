@@ -519,9 +519,9 @@ bun cli/main.ts --runtime controller start-async \
 ```
 
 `start-async` prints the accepted chat and turn IDs, then returns. `--json` emits
-one versioned envelope containing the exact receipt, parent relationship, server
-instance, workspace, and title-update outcome. Use the turn ID with `wait` when
-exact completion identity matters.
+one versioned envelope containing the exact receipt, delegation parent, lineage,
+server instance, workspace, and title-update outcome. Use the turn ID with `wait`
+when exact completion identity matters.
 
 Synchronous `start --json` and `resume --json` buffer one versioned document
 until the turn settles. They reuse the matching async acceptance fields and add
@@ -541,10 +541,11 @@ titles retain their stricter 120-character bound.
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
 for example when one agent starts another for review. Garcon records a
-`delegation` relationship and shows it in Chat Map. The parent must exist in the
-same workspace. Declaring it does not copy transcript content, inherit execution
-settings, or make either chat wait for the other. `--parent` is creation-only and
-cannot be used with `resume`. Use `set-parent` to edit delegation later.
+delegation parent in `parentChatId` and nests the child in the sidebar. The parent
+must exist in the same workspace. Declaring it does not copy transcript content,
+inherit execution settings, or make either chat wait for the other. `--parent` is
+creation-only and cannot be used with `resume`. Use `set-parent` to edit delegation
+later.
 
 New chats resolve matching preambles from their own project, agent, and tags.
 Use `--no-preamble` to send an explicit empty selection, or repeat
@@ -673,7 +674,7 @@ bun cli/main.ts --runtime controller chats \
 ```
 
 Supported metadata operators are `title:`, `tag:`, `agent:`, `model:`,
-`project:`, exact `id:`, direct-parent `parent:`, `created-before:`,
+`project:`, exact `id:`, direct delegation `parent:`, direct lineage `source:`, `created-before:`,
 `created-after:`, `updated-before:`, `updated-after:`, `status:active|unread`,
 and `is:pinned|normal|archived`. Negate an
 order group with `is:!pinned`, `is:!normal`, or `is:!archived`. Pipe-separated
@@ -682,6 +683,11 @@ clauses are ANDed. Repeated title and tag groups are also ANDed; agent,
 model, and project values accumulate as alternatives. Bare terms are ANDed and
 match chat title, project path, first and last previews, and tags. `chats` sorts
 by effective activity descending and uses the chat ID as a stable tie-breaker.
+
+`parent:<chat-id>` lists direct delegated children; `source:<chat-id>` lists
+forks and handoff continuations created from that source. Neither follows
+ancestors. A chat can match both with different IDs. JSON summaries expose
+`parentChatId` and immutable `lineage` independently, not `parentRelation`.
 
 Date-only filter values mean `00:00:00.000Z`. Datetimes must be RFC3339 with an
 explicit `Z` or numeric offset and at most millisecond precision. Before and
@@ -926,20 +932,31 @@ its compare-and-set baseline. Upgrade controller and workers together for this
 forwarded API change (executor protocol revision 12).
 
 `set-parent` sets, replaces, or clears a delegation parent by exact chat ID.
-Fork/handoff ancestry is protected. Both chats may be running, archived, or on
+Forks and handoff continuations can be assigned without changing their ancestry.
+Both chats may be running, archived, or on
 different executors; target executor readiness is irrelevant. Self-parenting
-and cycles are rejected. The parent's agent gains eligibility for future
+and delegation cycles are rejected; lineage does not participate in that check.
+The parent's agent gains eligibility for future
 delegated resume, stop, and remove commands; the old parent loses that eligibility.
 Already-admitted work and its result recipient remain unchanged. Setting a
 parent does not execute work, copy context, or subscribe to completion notices.
-Open webapps refresh nesting, Chat Map, and parent filters automatically.
+Open webapps refresh nesting and parent filters automatically. Chat Map shows
+only immutable fork/handoff lineage, so assignment does not change its topology.
+
+Ordinary forks and `/handoff` continuations start without a delegation parent.
+Agent-command `fork="true"` starts explicitly record both their delegation parent
+and the copied source watermark. Lineage alone grants no delegated controls.
 
 Browser and CLI parent edits are last-writer-wins. An uncertain save may already
 have changed the live relation and delegated authority. Inspect the roster before
 explicitly retrying; the next `PUT chats/parent` reconciles any unconfirmed save
 before applying its desired value. There is no automatic retry or separate
 recovery endpoint. Parent deletion remains non-cascading. Executor protocol
-revision 44 adds this forwarded operation; upgrade controller and workers together.
+revision 45 separates delegation and lineage in forwarded chat payloads; upgrade
+controller, workers, browser, and CLI together. CLI automation envelopes use
+schema 2. Workspace migration 10 converts registry schema 5 to 6 without rewriting
+transcripts. Legacy delegation records retain their parent but cannot recover
+unrecorded snapshot lineage. The upgrade is incompatible with older binaries.
 
 ## Export
 
@@ -1014,8 +1031,9 @@ bun cli/main.ts --runtime controller resume-async 1785337200123456 \
 
 Successful output identifies `delivery: new-turn|steer` and the accepted turn
 ID. `--json` emits one versioned envelope with the exact receipt, delivery,
-parent relationship, server instance, and workspace. Garcon bounds run/steer
-race retries and reports ambiguity rather than risking duplicate delivery.
+delegation parent, lineage, server instance, and workspace. Garcon bounds
+run/steer race retries and reports ambiguity rather than risking duplicate
+delivery.
 
 Codex's asynchronous questions are conversational messages, not pending
 permissions. In the browser, each inline question can be answered independently

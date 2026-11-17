@@ -109,7 +109,7 @@ describe('completion working directory settlement', () => {
     try {
       await registry.init();
       registry.addChat({ id, agentId: 'literal-test', model: 'test', projectPath: '/project',
-        agentOwnershipEpoch: 'epoch-1', agentSettingsById: {}, parentChat: null });
+        agentOwnershipEpoch: 'epoch-1', agentSettingsById: {}, parentChatId: null, lineage: null });
       await registry.flush();
       const dispatched = mock(async () => {});
       const turn = { ...fixture().turn, agentOwnershipEpoch: 'epoch-1' };

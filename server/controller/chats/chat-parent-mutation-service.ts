@@ -34,11 +34,7 @@ export class ChatParentMutationService {
         const result = await this.deps.registry.setDelegationParentPhased(input.chatId, input.parentChatId);
         if (!result) throw notFound();
         if (result.durability === 'unknown') throw saveUnknown();
-        const parentChat = result.entry.parentChat;
-        if (parentChat !== null && parentChat.relation !== 'delegation') {
-          throw new Error('Delegation setter returned protected lineage');
-        }
-        return { success: true, chatId: input.chatId, parentChat, changed: result.changed };
+        return { success: true, chatId: input.chatId, parentChatId: result.entry.parentChatId, changed: result.changed };
       } catch (error) {
         if (error instanceof ChatRegistryDurabilityUnknownError) throw saveUnknown();
         if (error instanceof DomainError) throw error;

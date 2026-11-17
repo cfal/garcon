@@ -499,8 +499,15 @@ async function directorySize(directory: string): Promise<number> {
 }
 
 async function targetRegistryHasQuarantine(workspaceDir: string): Promise<boolean> {
-  const registry = parseTargetRegistry(await fs.readFile(path.join(workspaceDir, 'chats.json')));
-  return Object.values(registry.sessions).some((entry) => (
+  const value: unknown = parseStoredJson(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'), 'Chat registry');
+  if (!isRecord(value) || (value.version !== 5 && value.version !== 6) || !isRecord(value.sessions)) {
+    throw new Error('Invalid chat registry during carryover finalization');
+  }
+  const sessions = Object.values(value.sessions).map((entry) => {
+    if (!isRecord(entry)) throw new Error('Invalid chat registry entry during carryover finalization');
+    return entry;
+  });
+  return sessions.some((entry) => (
     entry.carryOverMigrationQuarantine !== null
     && entry.carryOverMigrationQuarantine !== undefined
   ));

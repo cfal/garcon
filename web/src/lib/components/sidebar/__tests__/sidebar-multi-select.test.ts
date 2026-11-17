@@ -27,7 +27,8 @@ const chat = {
 	lastMessage: '',
 	firstMessage: '',
 	tags: [],
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	agentOwnershipEpoch: null,
 } satisfies ChatSessionRecord;
 
@@ -41,7 +42,8 @@ describe('sidebar multi-select', () => {
 				...chat,
 				id: 'child',
 				title: 'Match',
-				parentChat: { chatId: 'parent', relation: 'delegation' as const },
+				parentChatId: 'parent',
+				lineage: null,
 			},
 		];
 		const sidebarSearch = createSidebarSearchStore({

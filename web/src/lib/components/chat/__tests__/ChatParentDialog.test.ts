@@ -10,7 +10,8 @@ function chat(id: string, title = 'Duplicate'): ChatSessionRecord {
 	return {
 		id,
 		title,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/project',
 		executorId: 'offline-executor',
 		orderGroup: 'normal',
@@ -145,13 +146,13 @@ describe('ChatParentDialog', () => {
 
 	it('keeps typed proposals across roster changes and stages clear explicitly', async () => {
 		const callbacks = props();
-		callbacks.chats[0]!.parentChat = { chatId: PARENT, relation: 'delegation' };
+		callbacks.chats[0]!.parentChatId = PARENT;
 		const rendered = render(ChatParentDialog, callbacks);
 		const input = screen.getByRole('combobox');
 		await fireEvent.input(input, { target: { value: OTHER } });
 		await rendered.rerender({
 			chats: callbacks.chats.map((entry) =>
-				entry.id === CHILD ? { ...entry, parentChat: null } : entry,
+				entry.id === CHILD ? { ...entry, parentChatId: null, lineage: null } : entry,
 			),
 		});
 		expect((input as HTMLInputElement).value).toBe(OTHER);
@@ -187,19 +188,25 @@ describe('ChatParentDialog', () => {
 	});
 
 	it.each(['fork', 'handoff'] as const)(
-		'shows protected %s ancestry without editable controls',
-		(relation) => {
+		'assigns delegation without replacing %s ancestry',
+		async (kind) => {
 			const callbacks = props();
-			callbacks.chats[0]!.parentChat = {
-				chatId: PARENT,
-				relation,
+			callbacks.chats[0]!.lineage = {
+				sourceChatId: PARENT,
+				kind,
 				transcriptViewId: 'view',
 				ordinal: 0,
 			};
 			render(ChatParentDialog, callbacks);
-			expect(screen.queryByRole('combobox')).toBeNull();
-			expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
-			expect(screen.getByText('Fork and handoff ancestry cannot be changed.')).toBeTruthy();
+			await fireEvent.input(screen.getByRole('combobox'), { target: { value: OTHER } });
+			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+			expect(callbacks.onConfirm).toHaveBeenCalledWith(CHILD, OTHER);
+			expect(callbacks.chats[0]!.lineage).toEqual({
+				sourceChatId: PARENT,
+				kind,
+				transcriptViewId: 'view',
+				ordinal: 0,
+			});
 		},
 	);
 

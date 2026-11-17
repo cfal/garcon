@@ -36,7 +36,8 @@ function queueEntry(id: string, revision: number): QueueEntry {
 function chatRecord(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/repo',
 		orderGroup: 'normal',
 		title: 'Chat 1',

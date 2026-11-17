@@ -96,7 +96,8 @@ export class StartCommands {
     if (this.deps.transcripts.existingCurrentView(input.parentChatId)?.viewId !== input.sourceViewId) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
     }
-    if (input.transcriptSnapshot && input.transcriptSnapshot.viewId !== input.sourceViewId) {
+    if (input.transcriptSnapshot && (input.transcriptSnapshot.viewId !== input.sourceViewId
+      || input.transcriptSnapshot.sourceChatId !== input.parentChatId)) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'Snapshot does not belong to the requesting view', 409);
     }
     const request: ChatStartInput = {
@@ -156,7 +157,7 @@ export class StartCommands {
       if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
         throw new CommandValidationError('VALIDATION_FAILED', 'Snapshot requires a committed parent ordinal');
       }
-      const tip = this.deps.transcripts.highWatermark(parentChatId);
+      const tip = this.deps.transcripts.highWatermark(transcriptSnapshot.sourceChatId);
       if (tip.viewId !== transcriptSnapshot.viewId || transcriptSnapshot.ordinal > tip.ordinal) {
         throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'Snapshot is outside the current parent transcript', 409);
       }
@@ -288,9 +289,8 @@ export class StartCommands {
             if (this.deps.chats.getChat(input.chatId) || this.deps.transcripts.existingCurrentView(input.chatId)) {
               throw new CommandValidationError('CHAT_ID_COLLISION', 'Snapshot target already exists', 409);
             }
-            const rows = frozenConversationDrafts(await this.deps.transcripts.rowsThrough(
-              input.parentChatId!, input.transcriptSnapshot,
-            ));
+            const { sourceChatId, ...watermark } = input.transcriptSnapshot;
+            const rows = frozenConversationDrafts(await this.deps.transcripts.rowsThrough(sourceChatId, watermark));
             seedOwned = true;
             await this.deps.transcripts.seedChat(input.chatId, rows, rows.length + 1);
           }
@@ -311,9 +311,13 @@ export class StartCommands {
             thinkingMode: input.thinkingMode,
             agentSettingsById: { [input.agentId]: input.agentSettings },
             preambleSelection: input.preambleSelection,
-            parentChat: input.parentChatId === null
-              ? null
-              : { chatId: input.parentChatId, relation: 'delegation' },
+            parentChatId: input.parentChatId,
+            lineage: input.transcriptSnapshot ? {
+              sourceChatId: input.transcriptSnapshot.sourceChatId,
+              kind: 'fork',
+              transcriptViewId: input.transcriptSnapshot.viewId,
+              ordinal: input.transcriptSnapshot.ordinal,
+            } : null,
           });
           if (!registered) throw new CommandValidationError('CHAT_ID_COLLISION', 'Start target already exists', 409);
           if (input.title !== null) {

@@ -46,7 +46,8 @@ function executionControl(serverInstanceId: string, version: number, content: st
 function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-a',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/repo',
 		orderGroup: 'normal',
 		title: 'Chat A',

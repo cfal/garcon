@@ -132,7 +132,8 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				agentId: 'claude',
 				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
@@ -173,7 +174,8 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				agentId: 'claude',
 				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
@@ -200,7 +202,8 @@ describe('ReadReceiptOutboxStore', () => {
 			},
 			{
 				id: 'b',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				agentId: 'claude',
 				agentOwnershipEpoch: 'epoch-b',
 				model: 'opus',

@@ -13,7 +13,7 @@ async function call(service, input) {
 
 describe('chat parent route', () => {
   it('passes only validated desired state to the service', async () => {
-    const reply = { success: true, chatId, parentChat: null, changed: true };
+    const reply = { success: true, chatId, parentChatId: null, changed: true };
     const service = { set: mock(async () => reply) };
     expect(await (await call(service, { chatId, parentChatId: null })).json()).toEqual(reply);
     expect(service.set).toHaveBeenCalledWith({ chatId, parentChatId: null });
@@ -25,7 +25,7 @@ describe('chat parent route', () => {
 
   it.each([
     ['SESSION_NOT_FOUND', 404], ['PARENT_CHAT_NOT_FOUND', 404],
-    ['CHAT_PARENT_LINEAGE_LOCKED', 409], ['CHAT_PARENT_CYCLE', 409],
+    ['CHAT_PARENT_CYCLE', 409],
     ['CHAT_PARENT_SAVE_FAILED', 503], ['CHAT_PARENT_SAVE_UNKNOWN', 503],
   ])('preserves %s errors', async (code, status) => {
     const service = { set: mock(async () => { throw new DomainError(code, 'Synthetic rejection', status); }) };

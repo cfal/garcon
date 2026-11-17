@@ -90,7 +90,7 @@ export class AgentStartController {
                 command: command.prompt,
                 projectPath: parent.projectPath,
                 ...(command.title === null ? {} : { title: command.title }),
-                ...(command.fork ? { transcriptSnapshot: { viewId: source.viewId, ordinal: source.requestOrdinal } } : {}),
+                ...(command.fork ? { transcriptSnapshot: { sourceChatId: source.chatId, viewId: source.viewId, ordinal: source.requestOrdinal } } : {}),
               }, signal, deadline);
               turnId = result.turnId;
               start = result.start;

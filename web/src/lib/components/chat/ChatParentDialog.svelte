@@ -131,10 +131,8 @@
 		class="max-h-[calc(100dvh-2rem)] overflow-y-auto"
 		onCloseAutoFocus={restoreFocus}
 		onOpenAutoFocus={(event) => {
-			if (!form.protectedLineage) {
-				event.preventDefault();
-				queueMicrotask(() => inputRef?.focus());
-			}
+			event.preventDefault();
+			queueMicrotask(() => inputRef?.focus());
 		}}
 	>
 		<Dialog.Header>
@@ -143,15 +141,13 @@
 		</Dialog.Header>
 		<div class="min-w-0 space-y-1 text-sm">
 			<p class="text-muted-foreground">{m.chat_parent_current()}</p>
-			{#if form.currentParent}
+			{#if form.currentParentId}
 				{#if form.currentTitle}<p class="truncate">{form.currentTitle}</p>{/if}
-				<p class="break-all font-mono text-xs">{form.currentParent.chatId}</p>
+				<p class="break-all font-mono text-xs">{form.currentParentId}</p>
 			{:else}<p>{m.chat_parent_none()}</p>{/if}
 		</div>
 		{#if !form.child}
 			<p role="status" class="text-sm text-destructive">{m.chat_parent_missing()}</p>
-		{:else if form.protectedLineage}
-			<p class="text-sm text-muted-foreground">{m.chat_parent_protected()}</p>
 		{:else}
 			<p class="text-sm text-muted-foreground">{m.chat_parent_authority()}</p>
 			<div class="min-w-0 space-y-2">
@@ -220,7 +216,7 @@
 							: m.chat_parent_no_matches()}
 					</p>
 				{/if}
-				{#if form.currentParent}
+				{#if form.currentParentId}
 					<Button
 						variant="ghost"
 						size="sm"
@@ -242,7 +238,7 @@
 			<Button variant="outline" disabled={form.submitting} onclick={onClose}
 				>{m.sidebar_actions_cancel()}</Button
 			>
-			{#if form.child && !form.protectedLineage}
+			{#if form.child}
 				<Button disabled={!form.canSubmit} onclick={() => void form.submit()}>
 					{#if form.submitting}<Loader2
 							class="size-4 animate-spin"

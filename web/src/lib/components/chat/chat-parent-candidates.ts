@@ -3,7 +3,7 @@ import { parseChatId } from '$shared/chat-id';
 
 export type ParentCandidate = Pick<
 	ChatSessionRecord,
-	'id' | 'title' | 'status' | 'parentChat' | 'lastActivityAt'
+	'id' | 'title' | 'status' | 'parentChatId' | 'lastActivityAt'
 >;
 
 export function eligibleParentChats<T extends ParentCandidate>(
@@ -12,7 +12,7 @@ export function eligibleParentChats<T extends ParentCandidate>(
 ): T[] {
 	const children = new Map<string, string[]>();
 	for (const chat of chats) {
-		const parent = chat.parentChat?.chatId;
+		const parent = chat.parentChatId;
 		if (!parent) continue;
 		const siblings = children.get(parent) ?? [];
 		siblings.push(chat.id);

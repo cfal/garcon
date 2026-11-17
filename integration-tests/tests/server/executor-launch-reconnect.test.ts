@@ -152,7 +152,8 @@ async function remoteRouter({ root, chats, ledger, remote }: {
     ledger, registry: chats, integrations: directory, getCarryOverRevision: () => '', loadFrozenPrefix: async () => [],
   });
   chats.addChat({ id: CHAT, executorId: EXECUTOR, agentId: 'test', model: 'synthetic-model', projectPath: root,
-    parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
+    parentChatId: null,
+    lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
   ledger.initializeChat(CHAT);
   // The agent registry forwards ledger terminals to the event bus, which releases the tracked turn.
   const events = new AgentEventBus();

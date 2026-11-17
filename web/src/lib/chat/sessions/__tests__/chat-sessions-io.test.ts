@@ -84,7 +84,8 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }
@@ -186,17 +187,44 @@ describe('ChatSessionsStore IO', () => {
 		const store = new ChatSessionsStore();
 		const first = deferred<Awaited<ReturnType<typeof listChats>>>();
 		const original = makeServerSession({ id: 'child' });
-		store.upsertServerChat(original);
+		store.upsertFromServer([original]);
 		store.setSelectedChatId('child');
 		mockListChats.mockReturnValueOnce(first.promise).mockResolvedValueOnce({
-			sessions: [{ ...original, parentChat: { chatId: '1783725900000201', relation: 'delegation' } }], total: 1, lastSelectedChatId: null,
+			sessions: [{ ...original, parentChatId: '1783725900000201', lineage: null }],
+			total: 1,
+			lastSelectedChatId: null,
 		});
 		const stale = store.quietRefreshChats();
 		const invalidated = store.quietRefreshChats();
 		first.resolve({ sessions: [original], total: 1, lastSelectedChatId: null });
 		await Promise.all([stale, invalidated]);
 		expect(mockListChats).toHaveBeenCalledTimes(2);
-		expect(store.byId.child?.parentChat).toEqual({ chatId: '1783725900000201', relation: 'delegation' });
+		expect(store.byId.child?.parentChatId).toBe('1783725900000201');
+		expect(store.selectedChatId).toBe('child');
+	});
+
+	it('catches up after a delayed creation acknowledgement overwrites newer delegation', async () => {
+		const child = makeServerSession({
+			id: 'child',
+			lineage: {
+				sourceChatId: '1783725900000201',
+				kind: 'fork',
+				transcriptViewId: 'source-view',
+				ordinal: 3,
+			},
+		});
+		const assigned = { ...child, parentChatId: '1783725900000202' };
+		const refresh = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const fetchChats = vi.fn<typeof listChats>().mockReturnValueOnce(refresh.promise);
+		const store = new ChatSessionsStore({ listChats: fetchChats });
+		store.upsertFromServer([assigned]);
+		store.setSelectedChatId('child');
+		store.upsertServerChat(child);
+		expect(fetchChats).toHaveBeenCalledOnce();
+		refresh.resolve({ sessions: [assigned], total: 1, lastSelectedChatId: null });
+		await flushMicrotasks();
+		expect(store.byId.child?.parentChatId).toBe(assigned.parentChatId);
+		expect(store.byId.child?.lineage).toEqual(child.lineage);
 		expect(store.selectedChatId).toBe('child');
 	});
 
@@ -1241,7 +1269,7 @@ describe('ChatSessionsStore IO', () => {
 		mutation.reject(conflict);
 
 		await expect(pending).rejects.toBe(conflict);
-		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(2));
 		expect(store.byId['chat-1'].tags).toEqual(['newer']);
 		expect(store.tagReconciliationKind('chat-1')).toBe('conflict-refresh');
 	});
