@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../../server/controller/__tests__/safety-dependencies.js";
 import { describe, expect, test, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -59,7 +60,7 @@ async function withReload(run) {
   const execution = new ChatExecutionCoordinator(turnRunner, {
     admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput: () => {},
-  }, () => ({}), (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('test-server'), {
+  }, () => ({}), (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('test-server'), { ...controllerSafetyDependencies(),
     projectAdmission: { assertAvailable: async () => {} },
     attachmentAdmission: { assertSupported: () => {} },
     appendControlReceipt: appendReceipt,

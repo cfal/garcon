@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../../server/controller/__tests__/safety-dependencies.js";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -47,7 +48,7 @@ describe('delegated startup admission interleavings', () => {
       },
       hasMatchingInput: () => false, admitQueuedInput: () => ({ inserted: true }),
       discardPreparedInput: (chatId, messageId) => transcripts.discardPreparedInput(chatId, messageId),
-    }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+    }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
       projectAdmission: { assertAvailable: async () => {} }, isControlInputViewCurrent: () => true,
       attachmentAdmission: { assertSupported: () => {} },
     });

@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -124,14 +125,14 @@ describe('AgentOwnershipJournal', () => {
     const registry = createRegistry({ chat: chat() });
     const integrations = { get: () => null, require: () => { throw new Error('offline'); } };
     const options = { workspaceDir, registry, integrations, ledger: { deleteChat: mock(() => {}) } };
-    const journal = new AgentOwnershipJournal(options);
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
     await journal.initialize();
     const intent = await journal.decideHandoff(decisionInput(registry, {
       target: { ...target(), executorId, projectPath: '/worker/project' },
     }));
     expect(journal.referencesExecutor(executorId)).toBe(true);
     expect(journal.blocksExecutorRemoval(executorId)).toBe(true);
-    const restarted = new AgentOwnershipJournal(options);
+    const restarted = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
     await restarted.initialize();
     await restarted.applyHandoffDecision(intent.operationId);
     expect(registry.installAgentOwnership).toHaveBeenCalledTimes(1);
@@ -143,7 +144,7 @@ describe('AgentOwnershipJournal', () => {
 
   it('persists the complete handoff decision and accepts an identical retry', async () => {
     const registry = createRegistry({ chat: chat() });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(),
@@ -172,7 +173,7 @@ describe('AgentOwnershipJournal', () => {
 
   it('retries the same decision after a post-rename failure without progressing registry ownership', async () => {
     const registry = createRegistry({ chat: chat() });
-    const journal = new AgentOwnershipJournal({ workspaceDir, registry, integrations: createIntegrations(), ledger: { deleteChat: mock(() => {}) } });
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), workspaceDir, registry, integrations: createIntegrations(), ledger: { deleteChat: mock(() => {}) } });
     await journal.initialize();
     const open = fs.open.bind(fs);
     const candidates = [];
@@ -201,7 +202,7 @@ describe('AgentOwnershipJournal', () => {
 
   it('rejects a conflicting retry without changing the durable decision', async () => {
     const registry = createRegistry({ chat: chat() });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(),
@@ -222,7 +223,7 @@ describe('AgentOwnershipJournal', () => {
   it('rolls registry ownership forward without deleting the source transcript', async () => {
     const registry = createRegistry({ chat: chat() });
     const release = mock(async () => {});
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(release),
@@ -257,7 +258,7 @@ describe('AgentOwnershipJournal', () => {
         preambleSelection: { revision: 3, orderedPreambleIds: [selectedId] },
       }),
     });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(mock(async () => {})),
@@ -285,7 +286,7 @@ describe('AgentOwnershipJournal', () => {
       version: 5,
       ownershipIntents: [persisted],
     });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(),
@@ -304,7 +305,7 @@ describe('AgentOwnershipJournal', () => {
       version: 5,
       ownershipIntents: [{ ...persistedHandoff(), watermark: { viewId: '', ordinal: -1 } }],
     });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry: createRegistry({}),
       integrations: createIntegrations(),
@@ -320,7 +321,7 @@ describe('AgentOwnershipJournal', () => {
       ownershipIntents: [],
       transferCleanup: [],
     });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry: createRegistry({}),
       integrations: createIntegrations(),
@@ -338,7 +339,7 @@ describe('AgentOwnershipJournal', () => {
       version: 3,
       ownershipIntents: [{ kind: 'handoff', chatId: 'chat', operationId: 'legacy' }],
     });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry: createRegistry({}),
       integrations: createIntegrations(),
@@ -357,7 +358,7 @@ describe('AgentOwnershipJournal', () => {
       releaseStarted?.();
     }));
     const ledger = { deleteChat: mock(() => {}) };
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(release),
@@ -388,7 +389,7 @@ describe('AgentOwnershipJournal', () => {
       if (request.chat.chatId === 'chatA') return new Promise((resolve) => { releaseA = resolve; });
       return Promise.resolve();
     });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(release),
@@ -412,7 +413,7 @@ describe('AgentOwnershipJournal', () => {
     let releaseProvider;
     const release = mock(() => new Promise((resolve) => { releaseProvider = resolve; }));
     const ledger = { deleteChat: mock(() => {}) };
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry,
       integrations: createIntegrations(release),
@@ -438,7 +439,7 @@ describe('AgentOwnershipJournal', () => {
     const release = mock(async () => {});
     let configured = true;
     const options = { workspaceDir, registry, ledger, integrations: createIntegrations(release), isExecutorConfigured: () => configured };
-    const journal = new AgentOwnershipJournal(options);
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
     if (mode !== 'delete') {
       registry.removeChat('chat');
       await writeJournal(workspaceDir, { version: 5, ownershipIntents: [{
@@ -455,7 +456,7 @@ describe('AgentOwnershipJournal', () => {
     await journal.retireRemovedExecutor(executorId);
     expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
     expect(release).not.toHaveBeenCalled();
-    const restarted = new AgentOwnershipJournal(options);
+    const restarted = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
     await restarted.initialize();
     await restarted.waitForProviderCleanup();
     expect(ledger.deleteChat).toHaveBeenCalledTimes(2);
@@ -467,7 +468,7 @@ describe('AgentOwnershipJournal', () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat('source-agent', { executorId }) });
     let configured = true;
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir, registry, integrations: { get: () => null },
       ledger: { deleteChat: mock(() => {}) },
       isExecutorConfigured: () => configured,
@@ -495,12 +496,12 @@ describe('AgentOwnershipJournal', () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat('source-agent', { executorId }) });
     const options = { workspaceDir, registry, ledger: { deleteChat: mock(() => {}) } };
-    const journal = new AgentOwnershipJournal({ ...options, integrations: { get: () => null } });
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options, integrations: { get: () => null } });
     await journal.initialize();
     await journal.delete('chat');
     await journal.waitForProviderCleanup();
     const release = mock(async () => {});
-    const restarted = new AgentOwnershipJournal({
+    const restarted = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       ...options, integrations: createIntegrations(release), isExecutorConfigured: (id) => id === 'local',
     });
     await restarted.initialize();
@@ -523,13 +524,13 @@ describe('AgentOwnershipJournal', () => {
       workspaceDir, registry, ledger: { deleteChat: mock(() => {}) },
       integrations: { get: (agentId, executor) => available.has(executor) ? native.get(agentId) : null },
     };
-    let journal = new AgentOwnershipJournal(options);
+    let journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
     await journal.initialize();
     await journal.delete('chat');
     await journal.delete('other');
     await journal.waitForProviderCleanup();
     if (restart) {
-      journal = new AgentOwnershipJournal(options);
+      journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
       await journal.initialize();
       await journal.waitForProviderCleanup();
     }
@@ -548,7 +549,7 @@ describe('AgentOwnershipJournal', () => {
   it('retains a failed readiness cleanup and retries on the next readiness edge', async () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const release = mock(async () => { throw new Error('Synthetic release failure'); });
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir, registry: createRegistry({ chat: chat('source-agent', { executorId }) }),
       integrations: createIntegrations(release), ledger: { deleteChat: mock(() => {}) },
     });
@@ -571,7 +572,7 @@ describe('AgentOwnershipJournal', () => {
     const started = Promise.withResolvers();
     const release = mock(async () => { started.resolve(); await pending.promise; });
     let configured = true;
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir, registry, integrations: createIntegrations(release),
       ledger: { deleteChat: mock(() => {}) }, isExecutorConfigured: () => configured,
     });
@@ -603,7 +604,7 @@ describe('AgentOwnershipJournal', () => {
     });
     const release = mock(async () => { throw new Error('provider unavailable'); });
     const ledger = { deleteChat: mock(() => {}) };
-    const journal = new AgentOwnershipJournal({
+    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
       workspaceDir,
       registry: createRegistry({}),
       integrations: createIntegrations(release),

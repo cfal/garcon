@@ -5,7 +5,7 @@ import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
-import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { AgentChatEntry, AgentSessionSettingsPatch } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import { toAgentEndpointSelection } from './execution-planning.js';
@@ -44,10 +44,11 @@ export class AgentSessionSettingsService {
     directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     execution: SettingsExecutionPort;
-    chatMutationLock?: KeyedPromiseLock;
+    chatMutationLock: KeyedPromiseLock;
     onCommitted?: (chatId: string) => void;
   }) {
-    this.#lock = deps.chatMutationLock ?? new KeyedPromiseLock();
+    if (!deps.chatMutationLock) throw new Error('AgentSessionSettingsService requires the shared chat mutation lock');
+    this.#lock = deps.chatMutationLock;
   }
 
   async validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {

@@ -43,7 +43,7 @@ export interface ChatExecutionCoordinatorOptions {
   workingDirectorySettlement?: WorkingDirectorySettlementPort;
   projectAdmission: ProjectAdmissionPort;
   attachmentAdmission: QueuedAttachmentAdmissionPort;
-  canDispatch?: (chatId: string) => boolean;
+  canDispatch: (chatId: string) => boolean;
   isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;

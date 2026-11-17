@@ -53,7 +53,7 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
       const integration = remote ? await remote.executor.getAgentIntegration('test') : local.integration;
       try {
         const integrations = new IntegrationRegistry({ instances: [integration] });
-        const directory = new AgentDirectory(integrations, {
+        const directory = new AgentDirectory({
           isReady: () => true,
           integrationsFor: () => integrations,
           knownIntegration: ({ agentId }) => integrations.get(agentId),

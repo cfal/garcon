@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -120,7 +121,7 @@ describe('completion working directory settlement', () => {
       execution = new ChatExecutionCoordinator({ isChatRunning: () => false, runAgentTurn: dispatched },
         { admitInput: async () => ({ inserted: true }), hasMatchingInput: () => false,
           admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {} },
-        () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+        () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
           projectAdmission: { assertAvailable: async () => {} }, attachmentAdmission: { assertSupported() {} },
           isControlInputViewCurrent: () => true, executionPolicy: () => 'literal', workingDirectorySettlement: settler,
         });

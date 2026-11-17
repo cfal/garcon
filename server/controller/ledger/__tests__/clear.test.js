@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { expect, it, mock } from 'bun:test';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -392,7 +393,7 @@ it('rejects Clear when a production background reply queues after its initial em
       admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
       admitQueuedInput: () => ({ inserted: true }), discardPreparedInput: () => {},
     }, () => ({ model: 'test-model', permissionMode: 'default', thinkingMode: 'none' }),
-    () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+    () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
       projectAdmission: { assertAvailable: async () => {} }, attachmentAdmission: { assertSupported: () => {} },
       unsettledQueueReceiptKeys: () => new Set(), appendControlReceipt: () => {},
       isControlInputViewCurrent: (_id, viewId) => viewId === ledger.currentView(chatId)?.viewId,

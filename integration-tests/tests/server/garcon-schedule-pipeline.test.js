@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../../server/controller/__tests__/safety-dependencies.js";
 import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -78,13 +79,13 @@ async function withPipeline(run) {
   };
   const execution = new ChatExecutionCoordinator(runner, admission,
     () => ({ model: registry.getChat(CHAT).model, permissionMode: registry.getChat(CHAT).permissionMode, thinkingMode: 'none' }),
-    (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('synthetic-server'), {
+    (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
       projectAdmission: { assertAvailable: async () => {} },
       attachmentAdmission: { assertSupported: () => {} },
       appendControlReceipt: () => {},
       isControlInputViewCurrent: (chatId, viewId) => ledger.existingCurrentView(chatId)?.viewId === viewId,
     });
-  const commands = new QueueCommands(new CommandSupport({ chats: registry, queue: execution,
+  const commands = new QueueCommands(new CommandSupport({ ...controllerSafetyDependencies(), chats: registry, queue: execution,
     ledger: new CommandLedger(), chatMutationLock: lock,
     agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId,
       executionPolicy: () => 'conversation' },

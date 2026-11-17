@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies, localIntegrationDirectory } from "../../__tests__/safety-dependencies.js";
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 import crypto from 'node:crypto';
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
@@ -137,7 +138,7 @@ describe('AgentHandoffService', () => {
     const repository = new InMemoryChatExecutionControlRepository('test-instance');
     const coordinator = new ChatExecutionCoordinator({
       captureSteerTarget: () => null, isChatRunning: () => false,
-    }, {}, () => ({}), () => true, repository, {
+    }, {}, () => ({}), () => true, repository, { ...controllerSafetyDependencies(),
       projectAdmission: { assertAvailable: async () => {} },
       attachmentAdmission: { assertSupported: () => {} },
       isControlInputViewCurrent: () => true,
@@ -255,7 +256,7 @@ describe('AgentHandoffService', () => {
   it('reports an unsupported destination agent as a typed validation error', async () => {
     const service = createService({
       ...targetResolutionDeps(),
-      integrations: new AgentDirectory(new IntegrationRegistry({ instances: [] })),
+      integrations: new AgentDirectory(localIntegrationDirectory(new IntegrationRegistry({ instances: [] }))),
     });
     await expect(service.resolveTarget({ chat: sourceChat(), handoff: handoff('unsupported') }))
       .rejects.toMatchObject({ code: 'UNSUPPORTED_AGENT', status: 422 });

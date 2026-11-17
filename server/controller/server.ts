@@ -243,7 +243,7 @@ export async function startServer(): Promise<void> {
       }
     });
     const integrationRegistry = executors.localIntegrations;
-    const directory = new AgentDirectory(integrationRegistry, executors);
+    const directory = new AgentDirectory(executors);
     const { inspectProject, resolveFileMentions } = executors;
     const projectBasePath = executors.localInfo.projectBasePath;
     const resolveTicketProject = createTicketProjectResolver((executorId) => executors.projectService(executorId));
@@ -442,7 +442,6 @@ export async function startServer(): Promise<void> {
       },
       resolveFileMentions,
       registry: chatRegistry,
-      integrations: integrationRegistry,
       executors: executors,
       endpointResolver,
       getCarryOverRevision: (entry) => carryOver.revision(
