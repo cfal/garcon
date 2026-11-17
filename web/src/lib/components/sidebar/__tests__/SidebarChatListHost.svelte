@@ -110,6 +110,7 @@
 			: undefined,
 		groupingFields: displayOptions.groupingFields,
 		nestDelegatedChats: displayOptions.nestDelegatedChats,
+		separateArchivedBranches: displayOptions.separateArchivedBranches,
 		currentTime: new Date('2025-01-01T03:00:00.000Z'),
 		inactivityDuration: displayOptions.inactivityDuration,
 		sortMode: displayOptions.sortMode,

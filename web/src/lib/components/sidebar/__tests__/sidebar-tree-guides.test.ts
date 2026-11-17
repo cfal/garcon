@@ -75,7 +75,7 @@ describe('sidebar tree guide geometry', () => {
 			});
 			expect(container.querySelector('[data-sidebar-tree-guides]')).toBeNull();
 			const arrows = container.querySelectorAll('[data-sidebar-delegation-arrow]');
-			expect(arrows).toHaveLength(1);
+			expect(arrows).toHaveLength(2);
 			expect(arrows[0].closest('[data-slot="chat-summary-header"]')).not.toBeNull();
 			expect(arrows[0].parentElement!.firstElementChild).toBe(arrows[0]);
 			expect(arrows[0].getAttribute('aria-hidden')).toBe('true');

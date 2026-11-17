@@ -38,6 +38,7 @@ export interface SidebarRowModelInput {
 	orders: SidebarChatOrderMap;
 	groupingFields: readonly SidebarGroupingSelection[];
 	nestDelegatedChats: boolean;
+	separateArchivedBranches?: boolean;
 	currentTime: Date;
 	inactivityDuration: SidebarInactivityDuration;
 	sortMode: SidebarSortMode;
@@ -141,7 +142,7 @@ function childTreeScope(
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
-	const forest = buildSidebarDelegationForest(input.allChats, input.nestDelegatedChats);
+	const forest = buildSidebarDelegationForest(input.allChats, input);
 	const matches = input.matchingChatIds ?? new Set(byId.keys());
 	const filtered = input.matchingChatIds !== undefined;
 	const matchCounts = new Map<string, number>();
@@ -369,7 +370,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
 				executorGrouped: task.executorGrouped,
-				reorderScopeKey: JSON.stringify([input.nestDelegatedChats, task.parentId, list, task.path]),
+				reorderScopeKey: JSON.stringify([
+					input.nestDelegatedChats,
+					input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
+					task.parentId,
+					list,
+					task.path,
+				]),
 				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
 				contextOnly,
 				section: task.path.find(([field]) => field === 'activity')?.[1] as
