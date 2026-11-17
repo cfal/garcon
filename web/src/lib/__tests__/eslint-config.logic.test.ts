@@ -1,7 +1,8 @@
 import { ESLint } from 'eslint';
+import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-const eslint = new ESLint();
+const eslint = new ESLint({ cwd: fileURLToPath(new URL('../../../', import.meta.url)) });
 beforeAll(async () => { await eslint.calculateConfigForFile('src/lib/components/example.ts'); }, 60_000);
 
 describe('effective ESLint boundaries', () => {
