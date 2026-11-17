@@ -439,7 +439,7 @@ describe('AgentOwnershipJournal', () => {
     const release = mock(async () => {});
     let configured = true;
     const options = { workspaceDir, registry, ledger, integrations: createIntegrations(release), isExecutorConfigured: () => configured };
-    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
+    const journal = new AgentOwnershipJournal(options);
     if (mode !== 'delete') {
       registry.removeChat('chat');
       await writeJournal(workspaceDir, { version: 5, ownershipIntents: [{
@@ -456,7 +456,7 @@ describe('AgentOwnershipJournal', () => {
     await journal.retireRemovedExecutor(executorId);
     expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
     expect(release).not.toHaveBeenCalled();
-    const restarted = new AgentOwnershipJournal({ ...controllerSafetyDependencies(), ...options });
+    const restarted = new AgentOwnershipJournal(options);
     await restarted.initialize();
     await restarted.waitForProviderCleanup();
     expect(ledger.deleteChat).toHaveBeenCalledTimes(2);
@@ -468,7 +468,7 @@ describe('AgentOwnershipJournal', () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat('source-agent', { executorId }) });
     let configured = true;
-    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
+    const journal = new AgentOwnershipJournal({
       workspaceDir, registry, integrations: { get: () => null },
       ledger: { deleteChat: mock(() => {}) },
       isExecutorConfigured: () => configured,
@@ -501,7 +501,7 @@ describe('AgentOwnershipJournal', () => {
     await journal.delete('chat');
     await journal.waitForProviderCleanup();
     const release = mock(async () => {});
-    const restarted = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
+    const restarted = new AgentOwnershipJournal({
       ...options, integrations: createIntegrations(release), isExecutorConfigured: (id) => id === 'local',
     });
     await restarted.initialize();
@@ -572,7 +572,7 @@ describe('AgentOwnershipJournal', () => {
     const started = Promise.withResolvers();
     const release = mock(async () => { started.resolve(); await pending.promise; });
     let configured = true;
-    const journal = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
+    const journal = new AgentOwnershipJournal({
       workspaceDir, registry, integrations: createIntegrations(release),
       ledger: { deleteChat: mock(() => {}) }, isExecutorConfigured: () => configured,
     });

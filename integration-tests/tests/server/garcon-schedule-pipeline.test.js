@@ -85,7 +85,7 @@ async function withPipeline(run) {
       appendControlReceipt: () => {},
       isControlInputViewCurrent: (chatId, viewId) => ledger.existingCurrentView(chatId)?.viewId === viewId,
     });
-  const commands = new QueueCommands(new CommandSupport({ ...controllerSafetyDependencies(), chats: registry, queue: execution,
+  const commands = new QueueCommands(new CommandSupport({ chats: registry, queue: execution,
     ledger: new CommandLedger(), chatMutationLock: lock,
     agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId,
       executionPolicy: () => 'conversation' },

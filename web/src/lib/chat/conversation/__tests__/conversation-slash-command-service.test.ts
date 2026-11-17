@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
-import { ApiMutationOutcomeUnknownError } from '$lib/api/client';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';

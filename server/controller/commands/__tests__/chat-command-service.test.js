@@ -766,7 +766,7 @@ function makeService(overrides = {}) {
     handoffs,
     handoffPreparations,
     transcripts,
-    support: new CommandSupport({ ...controllerSafetyDependencies(), ...dependencies }),
+    support: new CommandSupport(dependencies),
     chatTags,
   };
 }
