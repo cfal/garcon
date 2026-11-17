@@ -7,7 +7,7 @@ const root = resolve(import.meta.dir, '../..');
 const scripts = directory => JSON.parse(readFileSync(resolve(root, directory, 'package.json'), 'utf8')).scripts;
 const rootScripts = scripts('.');
 const integrationScripts = scripts('integration-tests');
-const directoryLanes = ['sacs', 'e2e', 'live/claude', 'live/codex', 'live/opencode'];
+const directoryLanes = ['sacs', 'e2e', 'live/claude', 'live/codex', 'live/opencode', 'bombadil'];
 const lanes = [
   { name: 'common', include: ['common/__tests__/*.test.js'] },
   { name: 'scripts', include: ['scripts/__tests__/*.test.js'] },
@@ -45,6 +45,7 @@ test('inventory patterns match the executable discovery commands', () => {
     ['integration', 'test'], ['integration:server', 'test:server'], ['integration:e2e', 'test:e2e'],
     ['integration:chromium', 'test:chromium'], ['integration:webkit', 'test:webkit'], ['search-gate', 'test:search-gate'],
     ['search-endurance', 'test:search-endurance'], ['live', 'test:live'],
+    ['bombadil', 'test:bombadil'],
     ...['claude', 'codex', 'opencode'].map(agent => [`live:${agent}`, `test:live:${agent}`]),
   ]) {
     expect(rootScripts[`test:${name}`]).toBe(`bun run --cwd integration-tests ${target}`);
@@ -59,7 +60,7 @@ test('inventory patterns match the executable discovery commands', () => {
     'test:search-endurance': `bun test --max-concurrency=1 --timeout=2400000 ${integrationPattern('search endurance')}`,
     'test:live': 'bun run test:live:claude && bun run test:live:codex && bun run test:live:opencode',
   });
-  const timeouts = [120000, 60000, 120000, 240000, 180000];
+  const timeouts = [120000, 60000, 120000, 240000, 180000, 180000];
   directoryLanes.forEach((directory, index) => {
     expect(integrationScripts[`test:${directory.replace('/', ':')}`])
       .toBe(`bun test --max-concurrency=1 --timeout=${timeouts[index]} tests/${directory}`);
