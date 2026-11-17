@@ -792,6 +792,8 @@ class AmpCliRuntime {
       assertAmpExecutionOpen(request);
       if (turn.aborted) throw new Error('Amp session was retired before launch');
       await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments, request.executionAdmission?.signal);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, false);
       if (!request.executionAdmission?.signal.aborted) {

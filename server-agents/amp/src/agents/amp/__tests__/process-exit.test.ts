@@ -57,7 +57,10 @@ test('admission cancellation rejects a real blocked pipe write after child exit'
   }
 }, 5_000);
 
-test.each(['signal', 'abort', 'release', 'shutdown'] as const)('a pending start write remains reachable by %s', async action => {
+test.each([
+  ['start', 'signal'], ['start', 'abort'], ['start', 'release'], ['start', 'shutdown'],
+  ['resume', 'signal'], ['resume', 'abort'], ['resume', 'release'], ['resume', 'shutdown'],
+] as const)('a pending %s write remains reachable by %s', async (launch, action) => {
   const threadId = 'T-11111111-2222-4333-8444-555555555555';
   const command = new DelayedExitProcess();
   command.pushRaw(`${threadId}\n`);
@@ -67,16 +70,21 @@ test.each(['signal', 'abort', 'release', 'shutdown'] as const)('a pending start 
   const entered = Promise.withResolvers<void>();
   const written = Promise.withResolvers<number>();
   const write = spyOn(child.stdin, 'write').mockImplementation(() => { entered.resolve(); return written.promise; });
-  const spawn = spyOn(Bun, 'spawn').mockReturnValueOnce(command).mockReturnValueOnce(child);
+  const spawn = spyOn(Bun, 'spawn');
+  if (launch === 'start') spawn.mockReturnValueOnce(command);
+  spawn.mockReturnValueOnce(child);
   const runtime = new AmpCliRuntime({ terminationTimings: { termMs: 20, killMs: 20 } });
   const admission = new AbortController();
   const events: AgentRuntimeEvent[] = [];
   try {
-    const started = runtime.startSession({
+    const request = {
       chatId: 'synthetic-chat', projectPath: '/workspace', model: '', permissionMode: 'default', command: 'synthetic prompt',
-      operation: { runId: 'synthetic-run', publish: event => { events.push(event); } },
+      operation: { runId: 'synthetic-run', publish: (event: AgentRuntimeEvent) => { events.push(event); } },
       executionAdmission: { signal: admission.signal, async markStarted() {} },
-    });
+    } as const;
+    const started = launch === 'start'
+      ? runtime.startSession(request)
+      : runtime.runTurn({ ...request, agentSessionId: threadId });
     await entered.promise;
     let stopped: Promise<boolean> | undefined;
     if (action === 'signal') admission.abort(new Error('cancelled pending write'));
