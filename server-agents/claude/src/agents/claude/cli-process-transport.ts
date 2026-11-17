@@ -244,7 +244,8 @@ export class ClaudeProcessTransport<Message> {
     await this.#writeTail;
     const stdin = this.process.stdin as import('bun').FileSink & { end?: () => void };
     try {
-      await stdin?.end?.();
+      // A blocked close must not delay the bounded signal escalation.
+      void Promise.resolve(stdin?.end?.()).catch(() => undefined);
     } catch {
       // Signal escalation below remains authoritative when stdin cannot close.
     }
