@@ -12,12 +12,14 @@ export const sharedWireFiles = new Set([
   'common/tickets.ts', 'common/project-resolution.ts', 'common/chat-command-contracts.ts',
   'common/command-output.ts', 'common/usage.ts', 'common/agent-auth.ts',
   'common/input-format.ts', 'common/slash-commands.ts', 'common/json.ts',
+  'common/user-message-presentation.ts', 'common/transcript-notice-details.ts', 'common/chat-stop.ts',
 ]);
 
 export function requiresProtocolReview(file: string): boolean {
   return sharedWireFiles.has(file)
+    || file === 'server-agents/interface/src/errors.ts'
     || /^server-agents\/interface\/src\/contracts\/.*\.ts$/.test(file)
-    || /^server\/remote\/transport\/(?:.*-protocol|rpc-routing|websocket-link|message-session|session-socket)\.ts$/.test(file);
+    || /^server\/remote\/transport\/(?:.*-protocol|rpc|rpc-routing|rpc-lane|link-handshake|websocket-link|message-session|session-socket)\.ts$/.test(file);
 }
 
 export function protocolRevision(source: string): number {

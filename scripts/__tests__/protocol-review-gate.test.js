@@ -26,7 +26,10 @@ test('a bump or a substantive unchanged declaration records the review', () => {
 
 test('recognizes protocol, routing, framing and derived interface contracts without all common sources', () => {
   for (const file of ['server/remote/transport/cli-protocol.ts', 'server/remote/transport/rpc-routing.ts',
-    'server/remote/transport/websocket-link.ts', 'server-agents/interface/src/contracts/services.ts']) {
+    'server/remote/transport/websocket-link.ts', 'server-agents/interface/src/contracts/services.ts',
+    'server/remote/transport/link-handshake.ts', 'server/remote/transport/rpc-lane.ts',
+    'server/remote/transport/rpc.ts', 'server-agents/interface/src/errors.ts',
+    'common/user-message-presentation.ts', 'common/transcript-notice-details.ts', 'common/chat-stop.ts']) {
     expect(requiresProtocolReview(file)).toBe(true);
   }
   expect(requiresProtocolReview('common/local-calendar.ts')).toBe(false);
