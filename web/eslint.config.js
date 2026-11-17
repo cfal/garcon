@@ -5,6 +5,15 @@ import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import ts from 'typescript-eslint';
 
+const restrictedPaths = [{
+	name: '@lucide/svelte',
+	message: 'Import individual icons from @lucide/svelte/icons/*.',
+}];
+const componentBoundary = {
+	regex: '^(?:\\$lib/components/|(?:\\.\\.?/)+components/)',
+	message: 'Move reusable behavior to its domain; non-component modules cannot import components.',
+};
+
 export default defineConfig(
 	{
 		ignores: [
@@ -49,12 +58,7 @@ export default defineConfig(
 			'no-restricted-imports': [
 				'error',
 				{
-					paths: [
-						{
-							name: '@lucide/svelte',
-							message: 'Import individual icons from @lucide/svelte/icons/*.',
-						},
-					],
+					paths: restrictedPaths,
 				},
 			],
 		},
@@ -75,13 +79,8 @@ export default defineConfig(
 			'no-restricted-imports': [
 				'error',
 				{
-					patterns: [
-						{
-							regex: '^(?:\\$lib/components/|(?:\\.\\.?/)+components/)',
-							message:
-								'Move reusable behavior to its domain; non-component modules cannot import components.',
-						},
-					],
+					paths: restrictedPaths,
+					patterns: [componentBoundary],
 				},
 			],
 		},
@@ -93,7 +92,9 @@ export default defineConfig(
 			'no-restricted-imports': [
 				'error',
 				{
+					paths: restrictedPaths,
 					patterns: [
+						componentBoundary,
 						{
 							regex: '^(?:\\$lib/(?!utils/)|\\.\\./)',
 							message:
@@ -102,6 +103,16 @@ export default defineConfig(
 					],
 				},
 			],
+		},
+	},
+	{
+		files: ['src/lib/**/*.{ts,svelte}'],
+		ignores: ['src/lib/api/**', 'src/lib/**/__tests__/**'],
+		rules: {
+			'no-restricted-syntax': ['error', {
+				selector: 'ImportSpecifier[imported.name="apiFetch"]',
+				message: 'Keep raw authenticated HTTP handling in lib/api; consume a domain API function.',
+			}],
 		},
 	},
 	{
