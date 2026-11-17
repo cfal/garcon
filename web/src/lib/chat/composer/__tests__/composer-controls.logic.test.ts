@@ -16,6 +16,14 @@ describe('buildThinkingOptions', () => {
 		]);
 	});
 
+	it.each(['gpt-6.2-sol', 'acme-openai:gpt-6.2-sol'])(
+		'marks Ultra as rainbow for %s',
+		(model) => {
+			const ultra = buildThinkingOptions(allModes, model).find((option) => option.value === 'ultra');
+			expect(ultra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
+		},
+	);
+
 	it('marks Ultra as rainbow for GPT-6 Sol and GPT-5.6 Sol', () => {
 		const solUltra = buildThinkingOptions(allModes, 'gpt-6-sol').find(
 			(option) => option.value === 'ultra',
