@@ -25,7 +25,8 @@ function sourceChat(overrides = {}) {
     carryOverMigrationQuarantine: null,
     pendingPreambleBoundary: null,
     preambleSelection: { revision: 2, orderedPreambleIds: ['80becfa6-c9c7-4b31-9190-fd23c0bedf9c'] },
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     ...overrides,
   };
 }
@@ -145,9 +146,9 @@ describe('self handoff commands', () => {
     expect(target.agentSessionId).toBeNull();
     expect(target.nativeSession).toBeNull();
     expect(target.nativeSeedReceipt).toBeNull();
-    expect(target.parentChat).toEqual({
-      chatId: SOURCE_ID,
-      relation: 'handoff',
+    expect(target.lineage).toEqual({
+      sourceChatId: SOURCE_ID,
+      kind: 'handoff',
       transcriptViewId: 'source-view',
       ordinal: 4,
     });

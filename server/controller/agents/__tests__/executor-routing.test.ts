@@ -52,7 +52,8 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
   for (const [index, executorId] of chatExecutors.entries()) {
     chats.addChat({
       id: CHAT_IDS[index]!, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root,
-      parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
+      parentChatId: null,
+      lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
     });
     ledger.initializeChat(CHAT_IDS[index]!);
   }

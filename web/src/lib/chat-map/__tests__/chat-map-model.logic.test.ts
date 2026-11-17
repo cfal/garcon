@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
+import type { ChatLineage } from '$shared/chat-parentage';
 import { buildChatMapModel, type ChatMapChatNode, type ChatMapNode } from '../chat-map-model';
 
-function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentChatRef {
-	return relation === 'delegation'
-		? { chatId, relation }
-		: { chatId, relation, transcriptViewId: `view-${chatId}`, ordinal: 1 };
+function parent(sourceChatId: string, kind: ChatLineage['kind'] = 'fork'): ChatLineage {
+	return { sourceChatId, kind, transcriptViewId: `view-${sourceChatId}`, ordinal: 1 };
 }
 
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: `Chat ${id}`,
@@ -61,20 +60,20 @@ describe('buildChatMapModel', () => {
 	it('builds immediate-parent chains and retains incoming relations', () => {
 		const model = buildChatMapModel([
 			chat('root'),
-			chat('fork', { parentChat: parent('root', 'fork') }),
-			chat('handoff', { parentChat: parent('fork', 'handoff') }),
-			chat('delegation', { parentChat: parent('handoff', 'delegation') }),
+			chat('fork', { lineage: parent('root', 'fork') }),
+			chat('handoff', { lineage: parent('fork', 'handoff') }),
+			chat('delegation', { parentChatId: 'handoff' }),
 		]);
 
-		expect(model.roots).toHaveLength(1);
-		expect(model.roots[0].key).toBe('chat:root');
-		expect(model.roots[0].children[0].key).toBe('chat:fork');
-		expect(model.roots[0].children[0].children[0].key).toBe('chat:handoff');
-		expect(model.roots[0].children[0].children[0].children[0].key).toBe('chat:delegation');
+		expect(model.roots.map((node) => node.key)).toEqual(['chat:delegation', 'chat:root']);
+		const root = chatNode(model.roots, 'root');
+		expect(root.children[0].key).toBe('chat:fork');
+		expect(root.children[0].children[0].key).toBe('chat:handoff');
+		expect(root.children[0].children[0].children).toEqual([]);
 		expect(chatNode(flatten(model.roots), 'root').relation).toBeNull();
 		expect(chatNode(flatten(model.roots), 'fork').relation).toBe('fork');
 		expect(chatNode(flatten(model.roots), 'handoff').relation).toBe('handoff');
-		expect(chatNode(flatten(model.roots), 'delegation').relation).toBe('delegation');
+		expect(chatNode(flatten(model.roots), 'delegation').relation).toBeNull();
 	});
 
 	it('orders siblings by creation time and ID, then roots by newest subtree activity', () => {
@@ -84,12 +83,12 @@ describe('buildChatMapModel', () => {
 				lastActivityAt: '2026-01-01T00:00:00.000Z',
 			}),
 			chat('later-b', {
-				parentChat: parent('older-root'),
+				lineage: parent('older-root'),
 				createdAt: '2026-02-01T00:00:00.000Z',
 				lastActivityAt: '2026-12-01T00:00:00.000Z',
 			}),
 			chat('later-a', {
-				parentChat: parent('older-root'),
+				lineage: parent('older-root'),
 				createdAt: '2026-02-01T00:00:00.000Z',
 			}),
 			chat('newer-root', {
@@ -107,8 +106,8 @@ describe('buildChatMapModel', () => {
 
 	it('shares one missing-parent root across dangling children', () => {
 		const model = buildChatMapModel([
-			chat('child-b', { parentChat: parent('gone', 'handoff') }),
-			chat('child-a', { parentChat: parent('gone', 'fork') }),
+			chat('child-b', { lineage: parent('gone', 'handoff') }),
+			chat('child-a', { lineage: parent('gone', 'fork') }),
 		]);
 
 		expect(model.missingParentCount).toBe(1);
@@ -122,7 +121,7 @@ describe('buildChatMapModel', () => {
 	});
 
 	it('replaces a removed parent with a missing-parent root without dropping its child', () => {
-		const child = chat('child', { parentChat: parent('parent') });
+		const child = chat('child', { lineage: parent('parent') });
 		const withParent = buildChatMapModel([chat('parent'), child]);
 		const withoutParent = buildChatMapModel([child]);
 
@@ -135,7 +134,7 @@ describe('buildChatMapModel', () => {
 	});
 
 	it('cuts a self-cycle and marks its chat', () => {
-		const model = buildChatMapModel([chat('solo', { parentChat: parent('solo') })]);
+		const model = buildChatMapModel([chat('solo', { lineage: parent('solo') })]);
 		const node = chatNode(flatten(model.roots), 'solo');
 
 		expect(model.cycleChatCount).toBe(1);
@@ -145,9 +144,9 @@ describe('buildChatMapModel', () => {
 
 	it('cuts the lexicographically smallest member of a multi-chat cycle', () => {
 		const model = buildChatMapModel([
-			chat('charlie', { parentChat: parent('bravo') }),
-			chat('alpha', { parentChat: parent('charlie', 'handoff') }),
-			chat('bravo', { parentChat: parent('alpha') }),
+			chat('charlie', { lineage: parent('bravo') }),
+			chat('alpha', { lineage: parent('charlie', 'handoff') }),
+			chat('bravo', { lineage: parent('alpha') }),
 		]);
 		const nodes = flatten(model.roots);
 
@@ -188,9 +187,9 @@ describe('buildChatMapModel', () => {
 		const model = buildChatMapModel(
 			[
 				chat('root'),
-				chat('context', { parentChat: parent('root') }),
-				chat('match', { parentChat: parent('context'), title: 'Find me' }),
-				chat('unrelated', { parentChat: parent('root') }),
+				chat('context', { lineage: parent('root') }),
+				chat('match', { lineage: parent('context'), title: 'Find me' }),
+				chat('unrelated', { lineage: parent('root') }),
 			],
 			'find me',
 		);
@@ -219,7 +218,7 @@ describe('buildChatMapModel', () => {
 			const id = `chat-${String(index).padStart(4, '0')}`;
 			sessions.push(
 				chat(id, {
-					parentChat: index === 0 ? null : parent(`chat-${String(index - 1).padStart(4, '0')}`),
+					lineage: index === 0 ? null : parent(`chat-${String(index - 1).padStart(4, '0')}`),
 				}),
 			);
 		}

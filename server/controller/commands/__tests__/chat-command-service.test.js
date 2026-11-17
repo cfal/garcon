@@ -1029,7 +1029,8 @@ describe('ChatCommandService', () => {
     const viewId = '00000000-0000-4000-8000-000000000001';
     f.transcripts.existingCurrentView.mockReturnValue({ viewId });
     f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null });
     if (phase === 'adoption') f.agents.currentTranscriptViewId.mockRejectedValue(new DomainError(code, 'Synthetic adoption failure'));
     else {
       f.agents.currentTranscriptViewId.mockResolvedValue(viewId);
@@ -1067,7 +1068,8 @@ describe('ChatCommandService', () => {
     const child = { ...f.sessions.get(SOURCE_CHAT_ID), agentId: 'codex', model: 'synthetic-current-model',
       projectPath: projectBaseDir, permissionMode: 'bypassPermissions', thinkingMode: 'high',
       agentSettingsById: { codex: agentSettings('codex') },
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } };
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null };
     f.sessions.set(TARGET_CHAT_ID, child);
     const result = await f.service.submitAgentCommandResumeLocked({
       sourceChatId: SOURCE_CHAT_ID, sourceViewId: 'view-1', chatId: TARGET_CHAT_ID,
@@ -1090,7 +1092,8 @@ describe('ChatCommandService', () => {
     const locks = new KeyedPromiseLock();
     const f = makeService({ chatMutationLock: locks });
     f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null });
     await locks.runExclusiveMany([`chat:${SOURCE_CHAT_ID}`, `chat:${TARGET_CHAT_ID}`], () =>
       f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID, sourceViewId: 'view-1',
         chatId: TARGET_CHAT_ID, remove }, new AbortController().signal));
@@ -1107,10 +1110,18 @@ describe('ChatCommandService', () => {
   it.each(['self', 'missing', 'unrelated', 'grandchild', 'fork', 'handoff', 'stale', 'aborted'])('refuses delegated stop before side effects: %s', async (invalid) => {
     const f = makeService();
     const abort = new AbortController();
-    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChat: { chatId: invalid === 'grandchild' ? CLI_CHAT_ID : SOURCE_CHAT_ID,
-        relation: invalid === 'fork' || invalid === 'handoff' ? invalid : 'delegation' } });
-    if (invalid === 'unrelated') f.sessions.get(TARGET_CHAT_ID).parentChat = null;
+    const child = { ...f.sessions.get(SOURCE_CHAT_ID), parentChatId: SOURCE_CHAT_ID, lineage: null };
+    if (invalid === 'fork' || invalid === 'handoff') {
+      child.parentChatId = null;
+      child.lineage = {
+        sourceChatId: SOURCE_CHAT_ID, kind: invalid, transcriptViewId: 'view-1', ordinal: 1,
+      };
+    } else if (invalid === 'grandchild') {
+      child.parentChatId = CLI_CHAT_ID;
+    } else if (invalid === 'unrelated') {
+      child.parentChatId = null;
+    }
+    f.sessions.set(TARGET_CHAT_ID, child);
     if (invalid === 'missing') f.sessions.delete(TARGET_CHAT_ID);
     if (invalid === 'aborted') abort.abort();
     await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
@@ -1128,7 +1139,8 @@ describe('ChatCommandService', () => {
       abortForChatDeletion: mock(async () => false),
     } });
     f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null });
     await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
       sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, remove }, new AbortController().signal))
       .rejects.toMatchObject({ code: 'SESSION_BUSY' });
@@ -1142,7 +1154,8 @@ describe('ChatCommandService', () => {
     const queueService = makeRealQueue(projection, {}, undefined, repository);
     const f = makeService({ queueService });
     f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null });
     await queueService.createChatQueueEntry(TARGET_CHAT_ID, 'Synthetic pending input.');
     repository.save(TARGET_CHAT_ID, { ...repository.load(TARGET_CHAT_ID), controlEntries: [controlEntry('synthetic-control')] });
     const pending = await queueService.readChatExecutionControl(TARGET_CHAT_ID);
@@ -1166,7 +1179,8 @@ describe('ChatCommandService', () => {
     const queueService = makeRealQueue(projection, {}, undefined, repository);
     const f = makeService({ queueService });
     f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null });
     if (blocked !== 'control') await queueService.createChatQueueEntry(TARGET_CHAT_ID, 'Synthetic pending input.');
     if (blocked === 'paused') await queueService.pauseChatQueue(TARGET_CHAT_ID);
     if (blocked === 'control') {
@@ -1253,6 +1267,15 @@ describe('ChatCommandService', () => {
     }
   });
 
+  it('rejects a delegated snapshot from a different chat before creation', async () => {
+    const f = makeService();
+    await expect(f.service.submitAgentCommandStartLocked(agentStartInput('view-1', {
+      transcriptSnapshot: { sourceChatId: CLI_CHAT_ID, viewId: 'view-1', ordinal: 1 },
+    }), new AbortController().signal)).rejects.toMatchObject({ code: 'STALE_TRANSCRIPT_VIEW' });
+    expect(f.chats.addChat).not.toHaveBeenCalled();
+    expect(f.agents.startSession).not.toHaveBeenCalled();
+  });
+
   it.each(['claude', 'codex'])('seeds a fixed snapshot before publication with a custom title and no preambles: %s', async (agentId) => {
     const store = new TranscriptLedgerStore(path.join(workspaceDir, 'snapshot'));
     const transcripts = new TranscriptLedgerService(store);
@@ -1283,7 +1306,7 @@ describe('ChatCommandService', () => {
         await releaseTitle.promise;
       });
       const input = agentStartInput(source.viewId, { agentId, agentSettings: agentSettings(agentId),
-        transcriptSnapshot: snapshot, title: '  Synthetic custom title  ' });
+        transcriptSnapshot: { sourceChatId: SOURCE_CHAT_ID, ...snapshot }, title: '  Synthetic custom title  ' });
       const starting = f.service.submitAgentCommandStartLocked(input, new AbortController().signal);
       await waitForCheckpoint(titleSaved.promise, starting, 'custom title persistence');
       expect(f.agents.startSession).not.toHaveBeenCalled();
@@ -1293,7 +1316,8 @@ describe('ChatCommandService', () => {
       result.start();
       expect(result.turnId).toBeString();
       expect(f.sessions.get(TARGET_CHAT_ID)).toMatchObject({
-        parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' },
+        parentChatId: SOURCE_CHAT_ID,
+        lineage: { sourceChatId: SOURCE_CHAT_ID, kind: 'fork', transcriptViewId: snapshot.viewId, ordinal: snapshot.ordinal },
         preambleSelection: { revision: 0, orderedPreambleIds: [] },
         pendingPreambleBoundary: { kind: 'fork' }, agentSessionId: null, nativeSession: null,
       });
@@ -1332,7 +1356,7 @@ describe('ChatCommandService', () => {
         message: new AssistantMessage('2030-01-01T00:00:00.000Z', 'Synthetic context'),
       }]);
       const admitted = await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
-        transcriptSnapshot: transcripts.highWatermark(SOURCE_CHAT_ID), title: 'Synthetic delayed startup',
+        transcriptSnapshot: { sourceChatId: SOURCE_CHAT_ID, ...transcripts.highWatermark(SOURCE_CHAT_ID) }, title: 'Synthetic delayed startup',
       }), new AbortController().signal);
       admitted.start();
       await f.queue.waitForDispatches();
@@ -1372,7 +1396,7 @@ describe('ChatCommandService', () => {
       const initialize = spyOn(transcripts, 'seedChat');
       const f = makeService({ transcripts });
       const admitted = await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
-        transcriptSnapshot: snapshot, title: 'Large synthetic snapshot',
+        transcriptSnapshot: { sourceChatId: SOURCE_CHAT_ID, ...snapshot }, title: 'Large synthetic snapshot',
       }), new AbortController().signal);
       admitted.start();
       expect(read.mock.calls).toEqual([[SOURCE_CHAT_ID, snapshot]]);
@@ -1411,7 +1435,7 @@ describe('ChatCommandService', () => {
       if (failure === 'registry') f.chats.flush.mockRejectedValueOnce(new Error('registry failure'));
       if (failure === 'input') f.queue.admitUserInput.mockRejectedValue(new Error('input failure'));
       if (failure === 'collision') transcripts.initializeChat(TARGET_CHAT_ID);
-      const input = agentStartInput(source.viewId, { title: 'Synthetic title', transcriptSnapshot: transcripts.highWatermark(SOURCE_CHAT_ID) });
+      const input = agentStartInput(source.viewId, { title: 'Synthetic title', transcriptSnapshot: { sourceChatId: SOURCE_CHAT_ID, ...transcripts.highWatermark(SOURCE_CHAT_ID) } });
       await expect(f.service.submitAgentCommandStartLocked(input, new AbortController().signal)).rejects.toThrow();
       expect(f.sessions.has(TARGET_CHAT_ID)).toBe(false);
       expect(transcripts.existingCurrentView(TARGET_CHAT_ID) !== null).toBe(failure === 'collision');
@@ -1429,7 +1453,7 @@ describe('ChatCommandService', () => {
       const f = makeService({ transcripts });
       f.chats.flush.mockRejectedValue(new Error('uncertain registry write'));
       await expect(f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
-        title: 'Retained title', transcriptSnapshot: transcripts.highWatermark(SOURCE_CHAT_ID),
+        title: 'Retained title', transcriptSnapshot: { sourceChatId: SOURCE_CHAT_ID, ...transcripts.highWatermark(SOURCE_CHAT_ID) },
       }), new AbortController().signal)).rejects.toThrow();
       expect(transcripts.existingCurrentView(TARGET_CHAT_ID)).not.toBeNull();
       expect(f.settings.removeSessionName).not.toHaveBeenCalled();
@@ -1437,9 +1461,9 @@ describe('ChatCommandService', () => {
   });
 
   it('rejects unauthorized resume before ledger adoption or command acceptance', async () => {
-    for (const target of [null, { parentChat: null },
-      { parentChat: { chatId: SOURCE_CHAT_ID, relation: 'fork' } },
-      { parentChat: { chatId: CLI_CHAT_ID, relation: 'delegation' } }]) {
+    for (const target of [null, { parentChatId: null, lineage: null },
+      { parentChatId: null, lineage: { sourceChatId: SOURCE_CHAT_ID, kind: 'fork' } },
+      { parentChatId: CLI_CHAT_ID, lineage: null }]) {
       const f = makeService();
       if (target) f.sessions.set(TARGET_CHAT_ID, target);
       await expect(f.service.submitAgentCommandResumeLocked({
@@ -1460,7 +1484,8 @@ describe('ChatCommandService', () => {
       const source = transcripts.initializeChat(SOURCE_CHAT_ID);
       const f = makeService({ transcripts, chatMutationLock: locks });
       f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
-        parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+        parentChatId: SOURCE_CHAT_ID,
+        lineage: null });
       const loading = deferred();
       const adoption = new TranscriptAdoptionService({ ledger: transcripts, registry: f.chats,
         integrations: { require: () => ({ legacyHistoryImport: null }) },
@@ -1906,7 +1931,8 @@ describe('ChatCommandService', () => {
 
     expect(chats.addChat).toHaveBeenCalledWith(expect.objectContaining({
       id: TARGET_CHAT_ID,
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' },
+      parentChatId: SOURCE_CHAT_ID,
+      lineage: null,
     }));
     const record = await readLedgerRecord(
       ledger,
@@ -2052,7 +2078,7 @@ describe('ChatCommandService', () => {
     expect(interactiveBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: interactiveEpoch });
     expect(cliBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: cliEpoch });
     expect(scheduledBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: scheduledEpoch });
-    expect(interactive.parentChat).toBeNull();
+    expect(interactive.parentChatId).toBeNull();
     expect(interactive.thinkingMode).toBe('ultra');
     expect(interactive.tags).toEqual(['qa', 'review-needed']);
     expect(agents.startSession).toHaveBeenNthCalledWith(
@@ -4408,7 +4434,8 @@ describe('ChatCommandService', () => {
         registry.set(targetChatId, {
           ...registry.get(sourceChatId),
           id: targetChatId,
-          parentChat: { chatId: sourceChatId, relation: 'fork', transcriptViewId: 'view-1', ordinal: 2 },
+          parentChatId: null,
+          lineage: { sourceChatId, kind: 'fork', transcriptViewId: 'view-1', ordinal: 2 },
         });
         if (remainingFailures > 0) {
           remainingFailures -= 1;

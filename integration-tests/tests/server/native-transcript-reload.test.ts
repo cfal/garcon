@@ -83,9 +83,9 @@ describe('native transcript reload', () => {
         },
       );
       await fixture.client.waitForTurnTerminal(childChatId, child.turnId);
-      expect(child.chat.parentChat).toEqual({
-        chatId,
-        relation: 'handoff',
+      expect(child.chat.lineage).toEqual({
+        sourceChatId: chatId,
+        kind: 'handoff',
         transcriptViewId: parentAnchor.transcriptViewId,
         ordinal: parentAnchor.lastOrdinal,
       });
@@ -233,10 +233,10 @@ describe('native transcript reload', () => {
       const childAfterReload = (await fixture.client.listChats()).sessions.find(
         (chat) => chat.id === childChatId,
       );
-      expect(childAfterReload?.parentChat).toEqual(child.chat.parentChat);
-      const childParentAfterReload = childAfterReload?.parentChat;
-      expect(childParentAfterReload?.relation).toBe('handoff');
-      if (childParentAfterReload?.relation !== 'handoff') {
+      expect(childAfterReload?.lineage).toEqual(child.chat.lineage);
+      const childParentAfterReload = childAfterReload?.lineage;
+      expect(childParentAfterReload?.kind).toBe('handoff');
+      if (childParentAfterReload?.kind !== 'handoff') {
         throw new Error('Expected handoff parentage after native transcript reload.');
       }
       expect(childParentAfterReload.transcriptViewId).not.toBe(reloaded.transcriptViewId);
@@ -256,7 +256,7 @@ describe('native transcript reload', () => {
       ]);
       expect((await fixture.client.listChats()).sessions.find(
         (chat) => chat.id === childChatId,
-      )?.parentChat).toEqual(child.chat.parentChat);
+      )?.lineage).toEqual(child.chat.lineage);
       const sharedAfterReload = await fixture.client.get<GetSharedChatResponse>(
         `/api/v1/shared?token=${encodeURIComponent(share.shareToken)}&limit=100`,
       );

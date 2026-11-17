@@ -40,7 +40,7 @@ describe('carryover bootstrap migration', () => {
         expect(firstEntry.carryOverSegments).toHaveLength(2);
         const migratedSegments = firstEntry.carryOverSegments;
 
-        expect(firstRegistry.version).toBe(5);
+        expect(firstRegistry.version).toBe(6);
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
           version: CURRENT_WORKSPACE_VERSION,
         });
@@ -99,6 +99,41 @@ describe('carryover bootstrap migration', () => {
     );
   }, 30_000);
 
+  test.each([5, 6])('resumes a schema-%s checkpoint without closing the carryover rollback window', async (schema) => {
+    await withIntegrationFixture(`carryover-checkpoint-${schema}`, async (fixture) => {
+      await fixture.restartGarcon({ beforeStart: async () => {
+        if (schema === 5) {
+          const registryPath = join(fixture.dirs.workspace, 'chats.json');
+          const registry = JSON.parse(await readFile(registryPath, 'utf8'));
+          registry.version = 5;
+          for (const entry of Object.values(registry.sessions) as Record<string, unknown>[]) {
+            expect(entry.parentChatId).toBeNull();
+            expect(entry.lineage).toBeNull();
+            delete entry.parentChatId;
+            delete entry.lineage;
+            entry.parentChat = null;
+          }
+          await writeFile(registryPath, JSON.stringify(registry));
+        }
+        await writeFile(join(fixture.dirs.workspace, 'workspace-version.json'),
+          JSON.stringify({ version: 9, checkpoint: true }));
+      } });
+      expect(await readJson(fixture, 'workspace-version.json')).toEqual({ version: CURRENT_WORKSPACE_VERSION });
+      expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 6 });
+      expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
+        .toMatchObject({ phase: 'complete', rollbackSafe: true });
+      expect(await readdir(join(fixture.dirs.workspace, 'migration-backups'))).toHaveLength(2);
+      expect(await migratedCarryOverFiles(fixture)).toHaveLength(1);
+      await expectMigratedHistory(fixture);
+
+      await fixture.restartGarcon();
+      expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
+        .toMatchObject({ rollbackSafe: false });
+      expect(await readdir(join(fixture.dirs.workspace, 'migration-backups'))).toEqual([]);
+      expect(await migratedCarryOverFiles(fixture)).toEqual([]);
+    }, { prepareWorkspace: writeLegacyWorkspace });
+  }, 30_000);
+
   test('resumes an interrupted rollback before the version ladder', async () => {
     await withIntegrationFixture(
       'carryover-rollback-resume',
@@ -125,7 +160,7 @@ describe('carryover bootstrap migration', () => {
         });
 
         // The rollback finished from its marker, then the boot re-migrated.
-        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 5 });
+        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 6 });
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
           .toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
@@ -154,7 +189,8 @@ describe('carryover bootstrap migration', () => {
               projectPath: fixture.dirs.project,
               agentSettingsById: {},
               preambleSelection: { revision: 0, orderedPreambleIds: [] },
-              parentChat: null,
+              parentChatId: null,
+              lineage: null,
             });
             await registry.flush();
 
@@ -176,7 +212,7 @@ describe('carryover bootstrap migration', () => {
       'carryover-missing-linked-manifest',
       async (fixture) => {
         const registry = await readJson<RegistryFile>(fixture, 'chats.json');
-        expect(registry.version).toBe(5);
+        expect(registry.version).toBe(6);
         expect(registry.sessions[CHAT_ID]).toMatchObject({
           carryOverSegments: [],
           carryOverMigrationQuarantine: {

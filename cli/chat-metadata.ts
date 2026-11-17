@@ -121,7 +121,7 @@ export async function runSetParent(
   }, signal);
   writeMetadataResult(output, command.json, response, [
     `chat id: ${response.chatId}`,
-    `parent chat id: ${response.parentChat?.chatId ?? 'none'}`,
+    `parent chat id: ${response.parentChatId ?? 'none'}`,
     `changed: ${response.changed ? 'yes' : 'no'}`,
   ]);
 }

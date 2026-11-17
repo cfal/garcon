@@ -8,7 +8,8 @@ export function chat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
   const agentId = overrides.agentId ?? 'codex';
   return {
     id: CHAT_ID,
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     agentId,
     agentOwnershipEpoch: 'epoch-1',
     model: 'gpt-5.4',

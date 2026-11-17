@@ -19,7 +19,8 @@ function makeSession(overrides = {}) {
     thinkingMode: 'none',
     carryOverSegments: [],
     carryOverMigrationQuarantine: null,
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     ...overrides,
   };
 }
@@ -74,7 +75,8 @@ describe('ChatListProjector', () => {
     expect(one).toEqual(many.get(CHAT_ID));
     expect(one).toMatchObject({
       id: CHAT_ID,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       orderGroup: 'normal',
       isPinned: false,
       isArchived: false,
@@ -86,22 +88,24 @@ describe('ChatListProjector', () => {
     });
   });
 
-  it('projects immutable child parentage without changing the summary', () => {
-    const parentChat = Object.freeze({
-      chatId: '1783725900000800',
-      relation: 'fork',
+  it('projects independent delegation and lineage without changing the summary', () => {
+    const lineage = Object.freeze({
+      sourceChatId: '1783725900000800',
+      kind: 'fork',
       transcriptViewId: 'view-a',
       ordinal: 4,
     });
     const { deps, session } = makeDeps();
-    session.parentChat = parentChat;
+    session.lineage = lineage;
+    session.parentChatId = '1783725900000801';
 
     const projector = new ChatListProjector(deps);
     const many = projector.buildMany([[CHAT_ID, session]]);
 
-    expect(projector.buildOne(CHAT_ID)?.parentChat).toBe(parentChat);
-    expect(many.get(CHAT_ID)?.parentChat).toBe(parentChat);
-    expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('parentChat');
+    expect(projector.buildOne(CHAT_ID)?.lineage).toBe(lineage);
+    expect(many.get(CHAT_ID)?.lineage).toBe(lineage);
+    expect(many.get(CHAT_ID)?.parentChatId).toBe(session.parentChatId);
+    expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('lineage');
   });
 
   it('builds a path-independent normalized summary', () => {

@@ -130,9 +130,10 @@ describe('fork-run lifecycle', () => {
         chatId: targetChatId,
         chat: {
           id: targetChatId,
-          parentChat: {
-            chatId: sourceChatId,
-            relation: 'fork',
+          parentChatId: null,
+          lineage: {
+            sourceChatId,
+            kind: 'fork',
             transcriptViewId: sourceAnchor.transcriptViewId,
             ordinal: sourceAnchor.lastOrdinal,
           },
@@ -228,8 +229,8 @@ describe('fork-run lifecycle', () => {
       expect(restartedChats.map((chat) => chat.id).sort()).toEqual(
         [sourceChatId, targetChatId].sort(),
       );
-      expect(restartedChats.find((chat) => chat.id === targetChatId)?.parentChat)
-        .toEqual(accepted.chat.parentChat);
+      expect(restartedChats.find((chat) => chat.id === targetChatId)?.lineage)
+        .toEqual(accepted.chat.lineage);
       expect(userContents((await fixture.client.getMessages(sourceChatId)).messages)).toEqual(
         ['fork-source-first', 'fork-source-second'],
       );

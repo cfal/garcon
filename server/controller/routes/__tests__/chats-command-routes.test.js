@@ -484,9 +484,10 @@ function createRouteAgent(sessionOverrides = {}) {
             value: { id: 'forked-session' },
           },
           agentOwnershipEpoch: 'forked-epoch',
-          parentChat: {
-            chatId: sourceSession.id,
-            relation: 'fork',
+          parentChatId: null,
+          lineage: {
+            sourceChatId: sourceSession.id,
+            kind: 'fork',
             transcriptViewId: 'view-source',
             ordinal: 1,
           },

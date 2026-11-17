@@ -38,7 +38,8 @@ function createChat(): ChatSessionRecord {
 		lastMessage: 'First chat preview',
 		firstMessage: 'First chat first',
 		tags: [],
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentOwnershipEpoch: null,
 	};
 }

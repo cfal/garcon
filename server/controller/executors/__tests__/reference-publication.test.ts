@@ -40,7 +40,7 @@ async function fixture() {
   await preambles.init();
   await schedules.init();
   cleanup.push(() => chats.flush());
-  chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null });
+  chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null });
   await chats.flush();
   const ownership = new AgentOwnershipJournal({
     workspaceDir: root, registry: chats, retainExecutorReferences,
@@ -207,7 +207,7 @@ test('chat creation rechecks configuration at synchronous registry publication',
   const gate = gateRename('executors.json');
   const deleting = manager.remove(executor.id);
   await gate.entered;
-  const entry = { id: '1767225600000001', executorId: executor.id, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null };
+  const entry = { id: '1767225600000001', executorId: executor.id, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null };
   expect(() => chats.addChat(entry)).toThrow('This executor is being changed');
   expect(chats.getChat(entry.id)).toBeNull();
   chats.addChat({ ...entry, executorId: undefined });
@@ -219,7 +219,7 @@ test('chat creation rechecks configuration at synchronous registry publication',
 async function addRemoteChat(chats: ChatRegistry, root: string, executorId: string, withSettings = false) {
   const id = '1767225600000001';
   chats.addChat({
-    id, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null,
+    id, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null,
     agentSettingsById: withSettings ? { test: { ownerId: 'test', schemaVersion: 1, values: {} } } : {},
   });
   await chats.flush();

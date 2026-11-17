@@ -27,8 +27,7 @@ export function buildSidebarDelegationForest(
 	const byId = new Map(chats.map((chat) => [chat.id, chat]));
 	const branches = new Map<string, SidebarBranch>();
 	for (const chat of byId.values()) {
-		const parent =
-			nested && chat.parentChat?.relation === 'delegation' ? chat.parentChat.chatId : null;
+		const parent = nested ? chat.parentChatId : null;
 		branches.set(chat.id, {
 			parentId: parent && byId.has(parent) ? parent : null,
 			children: [],

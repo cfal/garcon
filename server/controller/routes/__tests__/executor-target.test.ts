@@ -10,6 +10,7 @@ const CHAT_ID = '1783725900000400';
 
 function makeChatEntry() {
   return normalizeChatRegistryEntry({ agentId: 'test', projectPath: '/project',
+    parentChatId: null, lineage: null,
     agentSettingsById: {}, carryOverSegments: [], agentOwnershipEpoch: 'synthetic-epoch',
     nativeSeedReceipt: null, carryOverMigrationQuarantine: null, pendingPreambleBoundary: null,
     preambleSelection: { revision: 0, orderedPreambleIds: [] } }, CHAT_ID);

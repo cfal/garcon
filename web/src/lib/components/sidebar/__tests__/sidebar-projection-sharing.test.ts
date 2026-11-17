@@ -47,7 +47,8 @@ const chat = {
 	lastMessage: '',
 	firstMessage: '',
 	tags: [],
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	agentOwnershipEpoch: null,
 } satisfies ChatSessionRecord;
 

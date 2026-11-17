@@ -144,6 +144,7 @@ import {
 } from './migrations/index.js';
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
+import { splitChatRelationships } from './migrations/chat-relationships-split.js';
 
 const logger = createLogger('server');
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -277,6 +278,8 @@ export async function startServer(): Promise<void> {
     await workspaceMigrations.run('fork-ordinal-cleanup', () => removeLegacyForkOrdinals(workspaceDir));
     await providerPolicy.initialize(workspaceMigrations);
     providerAccess = access;
+    await workspaceMigrations.checkpointThrough('provider-assignments');
+    await workspaceMigrations.run('chat-relationships-split', () => splitChatRelationships(workspaceDir));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
@@ -330,10 +333,9 @@ export async function startServer(): Promise<void> {
     });
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
-    // A resumed rollback restores the source workspace version before the
-    // ladder opens, so its re-migration skips this the way a first migration
-    // does and keeps its rollback window.
-    if (workspaceMigrations.initialVersion >= 5) {
+    // Only a completed earlier boot closes the rollback window; a migration
+    // checkpoint or resumed rollback must retain the first-boot backups.
+    if (workspaceMigrations.initialVersion >= 5 && !workspaceMigrations.resumedFromCheckpoint) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
     const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);

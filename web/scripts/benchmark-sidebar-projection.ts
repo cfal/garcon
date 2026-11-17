@@ -54,7 +54,8 @@ function fixture(size: number, nestedProjects: boolean): ChatSessionRecord[] {
 		const isArchived = !isPinned && index % 11 === 0;
 		return {
 			id: `chat-${index}`,
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			projectPath,
 			effectiveProjectKey: projectPath,
 			projectIdentityState: 'available',
@@ -113,10 +114,7 @@ function scenario(
 	if (shape !== 'flat') {
 		chats.forEach((chat, index) => {
 			if (index > 0 && (shape === 'chain' || index % 8 !== 0)) {
-				chat.parentChat = {
-					relation: 'delegation',
-					chatId: chats[shape === 'chain' ? index - 1 : index - (index % 8)].id,
-				};
+				chat.parentChatId = chats[shape === 'chain' ? index - 1 : index - (index % 8)].id;
 			}
 		});
 	}
@@ -164,7 +162,7 @@ function scenario(
 				buildSidebarChatListProjection({
 					...projectionInput,
 					collapsedProjectKeys: new Set(
-						chats.filter((chat) => !chat.parentChat).map((chat) => 'delegation:' + chat.id),
+						chats.filter((chat) => !chat.parentChatId).map((chat) => 'delegation:' + chat.id),
 					),
 				}).rowModel.rows.length,
 			iterations,

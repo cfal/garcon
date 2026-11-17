@@ -5,7 +5,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 import { migrateWorkspaceChatIds } from '../chat-id-migration.ts';
-import { ChatRegistry } from '../../chats/store.ts';
+import { splitChatRelationships } from '../chat-relationships-split.ts';
 import { commandLedgerKey, commandPayloadHash } from '../../commands/command-ledger.ts';
 
 const SECONDS_ID = '1772710502';
@@ -234,9 +234,6 @@ describe('workspace chat ID migration', () => {
       migratedChatIds: {},
       changedFiles: [],
     });
-    const registry = new ChatRegistry(workspaceDir);
-    await expect(registry.init()).rejects.toThrow(
-      'Chat ID must be a valid 16-digit Unix-microsecond timestamp',
-    );
+    await expect(splitChatRelationships(workspaceDir)).rejects.toThrow('entry 177463477993');
   });
 });

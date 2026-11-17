@@ -27,7 +27,8 @@ const board: ChatBoard = {
 
 const chats: ChatSessionRecord[] = Array.from({ length: CHAT_COUNT }, (_, chatIndex) => ({
 	id: `chat-${chatIndex}`,
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	projectPath: `/workspace/project-${chatIndex % 25}`,
 	orderGroup: 'normal',
 	title: `Chat ${chatIndex}`,

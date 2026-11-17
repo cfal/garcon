@@ -17,7 +17,8 @@ async function fixture(executorId?: string | null) {
   await registry.init();
   registry.addChat({
     id: CHAT_ID, executorId, agentId: 'test', model: 'synthetic-model', projectPath: '/project',
-    parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
+    parentChatId: null,
+    lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
   });
   await registry.flush();
   return { directory, registry, file: path.join(directory, 'chats.json') };
@@ -27,7 +28,7 @@ test('new local chats omit the executor field; remote ownership survives save an
   for (const executorId of [undefined, null, 'local', EXECUTOR_ID]) {
     const { file, directory } = await fixture(executorId);
     const stored = JSON.parse(await readFile(file, 'utf8'));
-    expect(stored.version).toBe(5);
+    expect(stored.version).toBe(6);
     expect(stored.sessions[CHAT_ID].executorId).toBe(executorId === EXECUTOR_ID ? EXECUTOR_ID : undefined);
     const reloaded = new ChatRegistry(directory);
     await reloaded.init();
@@ -67,7 +68,7 @@ test('native identity is qualified by executor and agent', async () => {
   const otherAgentId = '1783725900000302';
   for (const [id, agentId] of [[localId, 'test'], [otherAgentId, 'other']] as const) {
     registry.addChat({ id, agentId, projectPath: '/project', model: 'synthetic-model',
-      agentSessionId: 'shared-native-id', parentChat: null,
+      agentSessionId: 'shared-native-id', parentChatId: null, lineage: null,
       preambleSelection: { revision: 0, orderedPreambleIds: [] } });
   }
   expect(registry.lookupNativeSession('shared-native-id')).toEqual({ status: 'ambiguous' });

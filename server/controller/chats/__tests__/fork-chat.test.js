@@ -38,7 +38,8 @@ function sourceSession(overrides = {}) {
     carryOverMigrationQuarantine: null,
     pendingPreambleBoundary: null,
     preambleSelection: { revision: 3, orderedPreambleIds: ['3502b645-222b-49d2-ac39-1c91f9fb1174'] },
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     ...overrides,
   };
 }
@@ -151,9 +152,10 @@ describe('createForkedChat', () => {
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       carryOverSegments: [],
-      parentChat: {
-        chatId: 'source-chat',
-        relation: 'fork',
+      parentChatId: null,
+      lineage: {
+        sourceChatId: 'source-chat',
+        kind: 'fork',
         transcriptViewId: 'source-view',
         ordinal: 3,
       },
@@ -210,9 +212,9 @@ describe('createForkedChat', () => {
       ordinal: 2,
     });
     expect(deps.ledger.seedChat.mock.calls[0][1]).toHaveLength(2);
-    expect(deps.sessions.get('target-chat').parentChat).toEqual({
-      chatId: 'source-chat',
-      relation: 'fork',
+    expect(deps.sessions.get('target-chat').lineage).toEqual({
+      sourceChatId: 'source-chat',
+      kind: 'fork',
       transcriptViewId: 'source-view',
       ordinal: 2,
     });
@@ -453,7 +455,7 @@ describe('createForkedChat', () => {
       expect.objectContaining({ kind: 'provider-row' }),
       expect.objectContaining({ kind: 'user-input' }),
     ]);
-    expect(deps.sessions.get('target-chat').parentChat).toMatchObject({ relation: 'fork' });
+    expect(deps.sessions.get('target-chat').lineage).toMatchObject({ kind: 'fork' });
   });
 
   it('records the immediate source when forking a fork', async () => {
@@ -461,9 +463,10 @@ describe('createForkedChat', () => {
       source: sourceSession({
         agentSessionId: null,
         nativeSession: null,
-        parentChat: {
-          chatId: 'root-chat',
-          relation: 'fork',
+        parentChatId: null,
+        lineage: {
+          sourceChatId: 'root-chat',
+          kind: 'fork',
           transcriptViewId: 'root-view',
           ordinal: 2,
         },
@@ -477,7 +480,7 @@ describe('createForkedChat', () => {
       ...deps,
     });
 
-    expect(deps.sessions.get('target-chat').parentChat.chatId).toBe('source-chat');
+    expect(deps.sessions.get('target-chat').lineage.sourceChatId).toBe('source-chat');
   });
 
   it('retries an unmaterialized fork as native when the provider later materializes it', async () => {

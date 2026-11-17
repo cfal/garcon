@@ -6,7 +6,8 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js
 function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-summary',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Polished board card',

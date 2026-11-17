@@ -85,8 +85,8 @@ describe('delegated snapshot turns and results', () => {
       await fixture.restartGarcon();
       expect(model.requests()).toHaveLength(requestCount);
       expect((await fixture.client.getChatSnapshot(admitted.chatId)).chat.title).toBe('Synthetic pending child');
-      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === admitted.chatId)?.parentChat)
-        .toEqual({ chatId: parent, relation: 'delegation' });
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === admitted.chatId)?.parentChatId)
+        .toEqual(parent);
       const next = model.holdNext({ lastUserTextIncludes: 'Fresh turn after restart.' });
       const nextCursor = fixture.client.markEvents();
       const fresh = await fixture.client.runDirectChat({ chatId: admitted.chatId, content: 'Fresh turn after restart.', agent });
@@ -168,8 +168,8 @@ describe('delegated snapshot turns and results', () => {
       const requestCount = childModel.requests().length;
       await fixture.restartGarcon();
       expect((await fixture.client.getChatSnapshot(admitted.chatId)).chat.title).toBe('Synthetic snapshot review');
-      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === admitted.chatId)?.parentChat)
-        .toEqual({ chatId: parent, relation: 'delegation' });
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === admitted.chatId)?.parentChatId)
+        .toEqual(parent);
       await fixture.client.deleteChat(parent);
       expect((await fixture.client.getMessages(admitted.chatId)).messages).toEqual(beforeRestart);
       expect(childModel.requests()).toHaveLength(requestCount);

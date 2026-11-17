@@ -1,75 +1,42 @@
 import { describe, expect, it } from 'bun:test';
+import { chatLineagesEqual, parseChatLineage } from '../chat-parentage.ts';
 
-import {
-  CHAT_PARENT_RELATIONS,
-  isChatParentRelation,
-  parseParentChatRef,
-} from '../chat-parentage.ts';
+const sourceChatId = '1783725900000200';
 
-const CHAT_ID = '1783725900000200';
-
-describe('chat parentage', () => {
-  it('parses and freezes transcript-sourced parent relations', () => {
-    for (const relation of ['fork', 'handoff']) {
-      const parsed = parseParentChatRef({
-        chatId: CHAT_ID,
-        relation,
-        transcriptViewId: 'view-a',
-        ordinal: 0,
-      });
-
-      expect(parsed).toEqual({
-        chatId: CHAT_ID,
-        relation,
-        transcriptViewId: 'view-a',
-        ordinal: 0,
-      });
-      expect(Object.isFrozen(parsed)).toBeTrue();
-      expect(isChatParentRelation(relation)).toBeTrue();
-    }
-  });
-
-  it('parses delegation without a transcript watermark', () => {
-    const parsed = parseParentChatRef({
-      chatId: CHAT_ID,
-      relation: 'delegation',
-      transcriptViewId: 'ignored-view',
-      ordinal: 42,
-    });
-
-    expect(parsed).toEqual({ chatId: CHAT_ID, relation: 'delegation' });
-    expect(Object.isFrozen(parsed)).toBeTrue();
-    expect(CHAT_PARENT_RELATIONS).toContain('delegation');
-    expect(isChatParentRelation('delegation')).toBeTrue();
-  });
-
-  it('rejects malformed parent references', () => {
-    const valid = {
-      chatId: CHAT_ID,
-      relation: 'fork',
-      transcriptViewId: 'view-a',
-      ordinal: 1,
-    };
-
-    for (const value of [
-      undefined,
+describe('chat lineage', () => {
+  it('compares identity, kind and the complete watermark with nullable values', () => {
+    const lineage = { sourceChatId, kind: 'fork', transcriptViewId: 'source-view', ordinal: 1 };
+    expect(chatLineagesEqual(null, null)).toBe(true);
+    expect(chatLineagesEqual(lineage, lineage)).toBe(true);
+    expect(chatLineagesEqual(lineage, { ...lineage })).toBe(true);
+    for (const other of [
       null,
-      [],
-      'parent',
-      { ...valid, chatId: 'invalid' },
-      { ...valid, relation: 'sub-agent' },
-      { ...valid, relation: 'merge' },
-      { chatId: CHAT_ID, relation: 'fork' },
-      { chatId: CHAT_ID, relation: 'handoff' },
-      { ...valid, transcriptViewId: '' },
-      { ...valid, transcriptViewId: null },
-      { ...valid, ordinal: -1 },
-      { ...valid, ordinal: 1.5 },
-      { ...valid, ordinal: Number.MAX_SAFE_INTEGER + 1 },
+      { ...lineage, sourceChatId: '1783725900000201' },
+      { ...lineage, kind: 'handoff' },
+      { ...lineage, transcriptViewId: 'other-view' },
+      { ...lineage, ordinal: 2 },
     ]) {
-      expect(parseParentChatRef(value)).toBeNull();
+      expect(chatLineagesEqual(lineage, other)).toBe(false);
+      expect(chatLineagesEqual(other, lineage)).toBe(false);
     }
+  });
 
-    expect(isChatParentRelation('merge')).toBeFalse();
+  it.each(['fork', 'handoff'])('parses and freezes %s provenance', (kind) => {
+    const lineage = { sourceChatId, kind, transcriptViewId: 'source-view', ordinal: 0 };
+    const parsed = parseChatLineage(lineage);
+    expect(parsed).toEqual(lineage);
+    expect(Object.isFrozen(parsed)).toBeTrue();
+  });
+
+  it('rejects incomplete, mixed, legacy and malformed references', () => {
+    const valid = { sourceChatId, kind: 'fork', transcriptViewId: 'source-view', ordinal: 1 };
+    for (const value of [undefined, null, [], 'source',
+      { ...valid, sourceChatId: 'invalid' }, { ...valid, kind: 'delegation' },
+      { ...valid, kind: 'merge' }, { sourceChatId, kind: 'fork' },
+      { ...valid, transcriptViewId: '' }, { ...valid, transcriptViewId: null },
+      { ...valid, ordinal: -1 }, { ...valid, ordinal: 1.5 },
+      { ...valid, ordinal: Number.MAX_SAFE_INTEGER + 1 }, { ...valid, extra: true },
+      { chatId: sourceChatId, relation: 'fork', transcriptViewId: 'source-view', ordinal: 1 },
+    ]) expect(parseChatLineage(value)).toBeNull();
   });
 });

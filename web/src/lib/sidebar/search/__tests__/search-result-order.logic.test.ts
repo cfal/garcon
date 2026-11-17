@@ -15,7 +15,8 @@ function chat(
 ): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace',
 		orderGroup: 'normal',
 		title: id,

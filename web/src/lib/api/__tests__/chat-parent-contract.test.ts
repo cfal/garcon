@@ -7,7 +7,7 @@ const parentChatId = '1783725900000201';
 const reply = {
 	success: true,
 	chatId,
-	parentChat: { chatId: parentChatId, relation: 'delegation' },
+	parentChatId,
 	changed: true,
 };
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -35,7 +35,7 @@ describe('parent mutation API', () => {
 	});
 	it.each([
 		() => Response.json({ ...reply, chatId: parentChatId }),
-		() => Response.json({ ...reply, parentChat: null }),
+		() => Response.json({ ...reply, parentChatId: null }),
 		() => new Response('{'),
 		() => new Response('Gateway failure', { status: 502 }),
 		() =>

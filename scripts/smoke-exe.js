@@ -397,10 +397,12 @@ async function run() {
       message: { role: 'user', content: 'embeddedworkertoken' },
     })}\n`);
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
-      version: 5,
+      version: 6,
       sessions: {
         [SMOKE_CHAT_ID]: {
           agentId: 'claude',
+          parentChatId: null,
+          lineage: null,
           nativeSession: {
             ownerId: 'claude',
             schemaVersion: 1,

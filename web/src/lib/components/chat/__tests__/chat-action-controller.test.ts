@@ -57,7 +57,8 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		status: 'running',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch:
 			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
@@ -85,7 +86,8 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isUnread: false,
 		canReloadFromNativeHistory: false,
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch:
 			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
@@ -201,7 +203,7 @@ describe('ChatActionController', () => {
 		vi.mocked(chatsApi.setChatParent).mockReturnValueOnce(saved.promise);
 		const pending = harness.controller.setParent('chat-1', 'parent');
 		harness.setSelectedChatId('other');
-		saved.resolve({ success: true, chatId: 'chat-1', parentChat: { chatId: 'parent', relation: 'delegation' }, changed: true });
+		saved.resolve({ success: true, chatId: 'chat-1', parentChatId: 'parent', changed: true });
 		await pending;
 		expect(chatsApi.setChatParent).toHaveBeenCalledWith({ chatId: 'chat-1', parentChatId: 'parent' });
 		expect(harness.callbacks.onQuietRefresh).toHaveBeenCalledOnce();

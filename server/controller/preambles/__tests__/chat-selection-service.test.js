@@ -106,7 +106,8 @@ describe('ChatPreambleSelectionService', () => {
       agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } },
       pendingPreambleBoundary: null,
       preambleSelection: { revision: 0, orderedPreambleIds: [] },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
     });
     ledger = new TranscriptLedgerService(
       new TranscriptLedgerStore(path.join(root, 'transcript-ledgers')),

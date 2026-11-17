@@ -66,8 +66,8 @@ for (const creation of ['markup', 'cli'] as const) for (const remove of [false, 
         await fixture.client.waitForProcessing(parent, false, { afterIndex: ackCursor });
       }
       await heldChild.received;
-      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === child)?.parentChat)
-        .toEqual({ chatId: parent, relation: 'delegation' });
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === child)?.parentChatId)
+        .toEqual(parent);
 
       const stopEmission = model.holdNext({ lastUserText: 'Stop synthetic child.' });
       const beforeStop = model.requests().length;

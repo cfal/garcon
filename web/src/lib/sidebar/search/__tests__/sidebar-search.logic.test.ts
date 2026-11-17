@@ -397,7 +397,8 @@ describe('serializeChatFilter project', () => {
 describe('matchesChatFilter project', () => {
 	const chat = {
 		id: '1785337200123456',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		title: 'Test',
 		projectPath: '/workspace/garcon-monorepo',
 		agentId: 'claude',
@@ -456,7 +457,8 @@ describe('matchesChatFilter is: filters', () => {
 	const chats = {
 		pinned: {
 			id: '1785337200123456',
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			title: 'Pinned',
 			projectPath: '/workspace/test',
 			agentId: 'claude',
@@ -471,7 +473,8 @@ describe('matchesChatFilter is: filters', () => {
 		},
 		normal: {
 			id: '1785337200123457',
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			title: 'Normal',
 			projectPath: '/workspace/test',
 			agentId: 'claude',
@@ -486,7 +489,8 @@ describe('matchesChatFilter is: filters', () => {
 		},
 		archived: {
 			id: '1785337200123458',
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			title: 'Archived',
 			projectPath: '/workspace/test',
 			agentId: 'claude',
@@ -526,7 +530,8 @@ describe('matchesChatFilter is: filters', () => {
 describe('matchesChatFilter OR groups', () => {
 	const chat = {
 		id: '1785337200123456',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		title: 'Test',
 		projectPath: '/workspace/test',
 		agentId: 'claude',
@@ -572,7 +577,8 @@ describe('matchesChatFilter OR groups', () => {
 describe('matchesChatFilter identity and time filters', () => {
 	const chat = {
 		id: '1785337200123456',
-		parentChat: { chatId: '1785337200123457' },
+		parentChatId: '1785337200123457',
+		lineage: null,
 		title: 'Test',
 		projectPath: '/workspace/test',
 		agentId: 'claude',
@@ -596,10 +602,12 @@ describe('matchesChatFilter identity and time filters', () => {
 		)).toBe(true);
 		expect(matchesChatFilter(chat, parseChatSearch('id:1785337200123455'))).toBe(false);
 		expect(matchesChatFilter(chat, parseChatSearch('parent:1785337200123458'))).toBe(false);
-		expect(matchesChatFilter(
-			{ ...chat, parentChat: null },
-			parseChatSearch('parent:1785337200123457'),
-		)).toBe(false);
+		expect(
+			matchesChatFilter(
+				{ ...chat, parentChatId: null, lineage: null },
+				parseChatSearch('parent:1785337200123457'),
+			),
+		).toBe(false);
 	});
 
 	it('uses strict created and transcript-activity boundaries', () => {

@@ -20,8 +20,6 @@
 				return m.chat_map_relation_fork();
 			case 'handoff':
 				return m.chat_map_relation_handoff();
-			case 'delegation':
-				return m.chat_map_relation_delegation();
 			case null:
 				return null;
 		}

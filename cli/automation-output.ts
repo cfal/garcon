@@ -7,7 +7,7 @@ import type {
 } from '@garcon/common/chat-command-contracts';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type { AddChatRowResponse } from '@garcon/common/chat-row-contracts';
-import type { ParentChatRef } from '@garcon/common/chat-parentage';
+import type { ChatLineage } from '@garcon/common/chat-parentage';
 import type { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { ResumeChatAsyncResult, StopChatResult } from './chat-control.js';
@@ -18,7 +18,7 @@ import type {
   StartConsultationAsyncResult,
 } from './consultation.js';
 
-export const CLI_AUTOMATION_SCHEMA_VERSION = 1 as const;
+export const CLI_AUTOMATION_SCHEMA_VERSION = 2 as const;
 
 export interface CliAutomationContext {
   readonly workspace: string | null;
@@ -48,7 +48,8 @@ export type CliTitleUpdate =
 interface StartJsonEnvelopeBase extends CliAutomationContext {
   readonly schemaVersion: typeof CLI_AUTOMATION_SCHEMA_VERSION;
   readonly receipt: CliCommandReceipt & { readonly turnId: string };
-  readonly parentChat: ParentChatRef | null;
+  readonly parentChatId: string | null;
+  readonly lineage: ChatLineage | null;
   readonly titleUpdate: CliTitleUpdate;
 }
 
@@ -64,7 +65,8 @@ export interface StartJsonEnvelope extends StartJsonEnvelopeBase {
 interface ResumeJsonEnvelopeBase extends CliAutomationContext {
   readonly schemaVersion: typeof CLI_AUTOMATION_SCHEMA_VERSION;
   readonly receipt: CliCommandReceipt & { readonly turnId: string };
-  readonly parentChat: ParentChatRef | null;
+  readonly parentChatId: string | null;
+  readonly lineage: ChatLineage | null;
   readonly delivery: ResumeChatAsyncResult['delivery'];
 }
 
@@ -95,7 +97,8 @@ interface ForkRunJsonEnvelopeBase extends CliAutomationContext {
   readonly schemaVersion: typeof CLI_AUTOMATION_SCHEMA_VERSION;
   readonly sourceChatId: string;
   readonly receipt: CliCommandReceipt & { readonly turnId: string };
-  readonly parentChat: ParentChatRef;
+  readonly parentChatId: string | null;
+  readonly lineage: ChatLineage;
   readonly chat: ForkRunCommandResponse['chat'];
 }
 
@@ -112,7 +115,8 @@ export interface StopJsonEnvelope extends CliAutomationContext {
   readonly schemaVersion: typeof CLI_AUTOMATION_SCHEMA_VERSION;
   readonly command: 'stop';
   readonly receipt: CliCommandReceipt;
-  readonly parentChat: ParentChatRef | null;
+  readonly parentChatId: string | null;
+  readonly lineage: ChatLineage | null;
   readonly outcome: Exclude<AgentStopResponse['outcome'], 'failed'>;
   readonly control: AgentStopResponse['control'];
 }
@@ -164,10 +168,16 @@ function startEnvelopeFields(
   context: CliAutomationContext,
   result: ConsultationResult | StartConsultationAsyncResult,
 ): Omit<StartJsonEnvelopeBase, 'schemaVersion'> {
+  const { accepted } = result;
+  const {
+    parentChatId = accepted.chat?.parentChatId ?? null,
+    lineage = accepted.chat?.lineage ?? null,
+  } = accepted;
   return {
     ...context,
-    receipt: turnReceipt(result.accepted),
-    parentChat: result.accepted.parentChat ?? result.accepted.chat?.parentChat ?? null,
+    receipt: turnReceipt(accepted),
+    parentChatId,
+    lineage,
     titleUpdate: titleUpdate(result.titleUpdate),
   };
 }
@@ -180,7 +190,8 @@ function resumeEnvelopeFields(
   return {
     ...context,
     receipt: turnReceipt(response),
-    parentChat: response.parentChat ?? null,
+    parentChatId: response.parentChatId ?? null,
+    lineage: response.lineage ?? null,
     delivery,
   };
 }
@@ -263,13 +274,14 @@ function forkRunEnvelopeFields(
   sourceChatId: string,
   accepted: ForkRunCommandResponse,
 ): Omit<ForkRunJsonEnvelopeBase, 'schemaVersion'> {
-  const parentChat = accepted.parentChat ?? accepted.chat.parentChat;
-  if (!parentChat) throw new Error('Fork-run response is missing its parent relation');
+  const lineage = accepted.chat.lineage;
+  if (!lineage) throw new Error('Fork-run response is missing its lineage');
   return {
     ...context,
     sourceChatId,
     receipt: turnReceipt(accepted),
-    parentChat,
+    parentChatId: accepted.chat.parentChatId,
+    lineage,
     chat: accepted.chat,
   };
 }
@@ -307,7 +319,8 @@ export function stopJsonEnvelope(
     command: 'stop',
     ...context,
     receipt: commandReceipt(result.response),
-    parentChat: result.response.parentChat ?? null,
+    parentChatId: result.response.parentChatId ?? null,
+    lineage: result.response.lineage ?? null,
     outcome: result.response.outcome,
     control: result.response.control,
   };
