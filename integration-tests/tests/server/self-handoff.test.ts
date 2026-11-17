@@ -144,10 +144,15 @@ describe('self handoff', () => {
           for (const [chatId, entry] of Object.entries(registry.sessions)) {
             expect(entry).not.toHaveProperty('nextForkOrdinal');
             const { lineage, parentChatId, ...rest } = entry;
-            const parentChat = lineage ? {
-              chatId: lineage.sourceChatId, relation: lineage.kind,
-              transcriptViewId: lineage.transcriptViewId, ordinal: lineage.ordinal,
-            } : parentChatId === null ? null : { chatId: parentChatId, relation: 'delegation' };
+            let parentChat = null;
+            if (lineage) {
+              parentChat = {
+                chatId: lineage.sourceChatId, relation: lineage.kind,
+                transcriptViewId: lineage.transcriptViewId, ordinal: lineage.ordinal,
+              };
+            } else if (parentChatId !== null) {
+              parentChat = { chatId: parentChatId, relation: 'delegation' };
+            }
             Object.assign(registry.sessions, { [chatId]: { ...rest, parentChat, nextForkOrdinal: 42 } });
           }
           await writeFile(registryPath, JSON.stringify(registry));

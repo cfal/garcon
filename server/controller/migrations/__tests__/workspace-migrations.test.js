@@ -226,6 +226,10 @@ describe('WorkspaceMigrationRunner', () => {
   });
 
   it('rejects invalid, future, and out-of-order workspace versions', async () => {
+    for (const stamp of [null, [], {}, { version: '9' }, { version: -1 }, { version: 1.5 }]) {
+      await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'), JSON.stringify(stamp));
+      await expect(WorkspaceMigrationRunner.open(workspaceDir)).rejects.toThrow('nonnegative integer version');
+    }
     await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'),
       JSON.stringify({ version: 9, checkpoint: 'true' }));
     await expect(WorkspaceMigrationRunner.open(workspaceDir)).rejects.toThrow('checkpoint must be true');
