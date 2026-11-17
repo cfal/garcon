@@ -84,18 +84,23 @@ export function bootstrap(config: BrowserConfig): void {
     return response;
   } });
   const OriginalWebSocket = window.WebSocket;
+  let currentSocket: WebSocket | undefined;
   window.WebSocket = class extends OriginalWebSocket {
     constructor(url: string | URL, protocols?: string | string[]) {
       super(url, protocols);
       const parsed = new URL(url, location.href);
       if (parsed.host !== location.host) return;
+      // The SPA retires its previous socket before creating a replacement.
+      currentSocket = this;
+      observation.documentWsOpen = false;
+      persist();
       this.addEventListener('open', () => {
         observation.wsOpens++;
-        observation.documentWsOpen = true;
+        if (currentSocket === this) observation.documentWsOpen = true;
         persist();
       });
       this.addEventListener('close', event => {
-        observation.documentWsOpen = false;
+        if (currentSocket === this) observation.documentWsOpen = false;
         if (observation.wsCloses.length < 20) observation.wsCloses.push(event.code);
         persist();
       });

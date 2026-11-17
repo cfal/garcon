@@ -84,3 +84,46 @@ test('turn observation preserves responses and retains only acceptance identitie
     expect(await page.evaluate(() => window.__bombadil?.acceptedTurns)).toEqual(result.observation?.acceptedTurns);
   } finally { await browser.close(); await server.stop(true); }
 });
+
+test('WebSocket readiness follows the replacement socket, not late events from its predecessor', async () => {
+  const server = Bun.serve({
+    hostname: '0.0.0.0', port: 0,
+    fetch(request, server) {
+      if (server.upgrade(request)) return;
+      return new Response('<p>synthetic</p>', { headers: { 'Content-Type': 'text/html' } });
+    },
+    websocket: { message() {} },
+  });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const origin = `http://127.0.0.1:${server.port}`;
+    const config = { origin, token: 'synthetic-canary-token', runId: 'canary', chatA: 'a', chatB: 'b', campaign: 'navigation' };
+    const page = await browser.newPage();
+    await page.addInitScript({ content: `const observerKey=${JSON.stringify(observerKey)}; (${bootstrap.toString()})(${JSON.stringify(config)});` });
+    await page.goto(origin);
+    const result = await page.evaluate(async () => {
+      const observed = () => window.__bombadil!.documentWsOpen;
+      const event = (socket: WebSocket, name: 'open' | 'close') => new Promise<void>(resolve =>
+        socket.addEventListener(name, () => resolve(), { once: true }));
+      const predecessor = new WebSocket(`ws://${location.host}`);
+      await event(predecessor, 'open');
+      const initiallyOpen = observed();
+      const replacement = new WebSocket(`ws://${location.host}`);
+      const replacementPending = observed();
+      await event(replacement, 'open');
+      const replacementOpen = observed();
+      predecessor.close();
+      await event(predecessor, 'close');
+      const afterStaleClose = observed();
+      replacement.close();
+      await event(replacement, 'close');
+      return { initiallyOpen, replacementPending, replacementOpen, afterStaleClose,
+        afterCurrentClose: observed(), wsOpens: window.__bombadil!.wsOpens, wsCloses: window.__bombadil!.wsCloses.length };
+    });
+    expect(result).toEqual({ initiallyOpen: true, replacementPending: false, replacementOpen: true,
+      afterStaleClose: true, afterCurrentClose: false, wsOpens: 2, wsCloses: 2 });
+  } finally {
+    await browser.close();
+    await server.stop(true);
+  }
+});
