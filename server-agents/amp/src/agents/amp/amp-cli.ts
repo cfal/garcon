@@ -110,17 +110,19 @@ async function runAmpCommand(
     signal,
   });
 
-  if (input != null) {
-    const stdin = proc.stdin;
-    if (!stdin || typeof stdin === 'number') throw new Error('Amp process stdin is unavailable');
-    await stdin.write(input);
-    await stdin.end();
-  }
-
-  const [stdout, stderr, exitCode] = await Promise.all([
+  const [stdout, stderr, exitCode, inputFailure] = await Promise.all([
     readAmpStdout(proc),
     proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
     proc.exited,
+    (async () => {
+      if (input == null) return;
+      try {
+        const stdin = proc.stdin;
+        if (!stdin || typeof stdin === 'number') throw new Error('Amp process stdin is unavailable');
+        await stdin.write(input);
+        await stdin.end();
+      } catch (error) { return { error }; }
+    })(),
   ]);
   signal?.throwIfAborted();
 
@@ -128,6 +130,7 @@ async function runAmpCommand(
     const details = (stderr || stdout || '').trim();
     throw new Error(`Amp command failed with code ${exitCode}${details ? `: ${details}` : ''}`);
   }
+  if (inputFailure) throw inputFailure.error;
 
   return stdout;
 }
@@ -577,6 +580,7 @@ class AmpCliRuntime {
     args: string[],
     prompt: string,
     attachments: readonly AgentAttachment[] = [],
+    signal?: AbortSignal,
   ): Promise<ReturnType<typeof Bun.spawn>> {
     const ampBinary = this.#config.binary();
 
@@ -601,8 +605,14 @@ class AmpCliRuntime {
     }).catch(error => {
       this.#logger.warn('Amp exit observation failed.', { error: error instanceof Error ? error.message : String(error) });
     });
-    turn.pendingInputEchoes.push({ text: prompt });
-    await this.#writeInput(turn, buildAmpUserInput(prompt, crypto.randomUUID(), attachments));
+    const abort = () => { void this.#terminate(session, turn); };
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      signal?.throwIfAborted();
+      turn.pendingInputEchoes.push({ text: prompt });
+      await this.#writeInput(turn, buildAmpUserInput(prompt, crypto.randomUUID(), attachments));
+      signal?.throwIfAborted();
+    } finally { signal?.removeEventListener('abort', abort); }
     return proc;
   }
 
@@ -712,10 +722,13 @@ class AmpCliRuntime {
     const args = buildContinueArgs(threadId, model);
 
     try {
+      this.#runningSessions.set(threadId, session);
       if (request.executionAdmission) await markAmpExecutionStarted(request);
       assertAmpExecutionOpen(request);
       if (turn.aborted) throw new Error('Amp session was retired before launch');
-      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
+      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments, request.executionAdmission?.signal);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, true);
       if (!request.executionAdmission?.signal.aborted) {
@@ -730,7 +743,6 @@ class AmpCliRuntime {
       throw err;
     }
     this.#retireSupersededChatSessions(session);
-    this.#runningSessions.set(threadId, session);
     this.#publishTurnEvent(session, turn, { type: 'steerable' });
 
     return started;
@@ -774,7 +786,7 @@ class AmpCliRuntime {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
       assertAmpExecutionOpen(request);
       if (turn.aborted) throw new Error('Amp session was retired before launch');
-      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
+      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments, request.executionAdmission?.signal);
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, false);
       if (!request.executionAdmission?.signal.aborted) {

@@ -764,7 +764,10 @@ describe('FactoryCliRuntime lifecycle', () => {
       operation: second.operation,
     }).then(() => { secondSettled = true; });
 
-    while (spawnMock.mock.calls.length < 2) await Promise.resolve();
+    for (let attempt = 0; attempt < 100 && spawnMock.mock.calls.length < 2; attempt++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    expect(spawnMock).toHaveBeenCalledTimes(2);
 
     firstProc.pushJson({
       type: 'message',

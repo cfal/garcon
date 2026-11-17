@@ -151,17 +151,19 @@ async function runPiCommand(
     signal,
   });
 
-  if (input != null) {
-    const stdin = proc.stdin;
-    if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
-    await stdin.write(input);
-    await stdin.end();
-  }
-
-  const [stdout, stderr, exitCode] = await Promise.all([
+  const [stdout, stderr, exitCode, inputFailure] = await Promise.all([
     new Response(proc.stdout as ReadableStream).text(),
     new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
+    (async () => {
+      if (input == null) return;
+      try {
+        const stdin = proc.stdin;
+        if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
+        await stdin.write(input);
+        await stdin.end();
+      } catch (error) { return { error }; }
+    })(),
   ]);
   signal?.throwIfAborted();
 
@@ -169,6 +171,7 @@ async function runPiCommand(
     const details = (stderr || stdout || '').trim();
     throw new Error(`Pi command failed with code ${exitCode}${details ? `: ${details}` : ''}`);
   }
+  if (inputFailure) throw inputFailure.error;
   return stdout;
 }
 

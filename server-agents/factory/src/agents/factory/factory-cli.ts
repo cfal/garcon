@@ -684,6 +684,7 @@ export class FactoryCliRuntime {
     prompt: string,
     cwd: string,
     airgap: boolean,
+    signal?: AbortSignal,
   ): Promise<ReturnType<typeof Bun.spawn>> {
     const factoryBinary = this.#config.binary();
     const proc = Bun.spawn([factoryBinary, ...args], {
@@ -702,8 +703,14 @@ export class FactoryCliRuntime {
       this.#logger.error('Factory stdout settlement failed.', { error: error instanceof Error ? error.message : String(error) });
     });
     void this.#pipeStderr(session.id || 'pending', proc);
-    await stdin.write(prompt);
-    await stdin.end();
+    const abort = () => { void this.#terminate(session, turn); };
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      signal?.throwIfAborted();
+      await stdin.write(prompt);
+      await stdin.end();
+      signal?.throwIfAborted();
+    } finally { signal?.removeEventListener('abort', abort); }
 
     return proc;
   }
@@ -820,6 +827,7 @@ export class FactoryCliRuntime {
         prompt,
         request.projectPath,
         shouldAirgapFactoryInvocation(request.model, { resume: false }),
+        request.executionAdmission?.signal,
       );
       const result = await startedSession.promise;
       assertFactoryExecutionOpen(request);
@@ -885,6 +893,7 @@ export class FactoryCliRuntime {
         prompt,
         request.projectPath,
         shouldAirgapFactoryInvocation(request.model, { resume: true }),
+        request.executionAdmission?.signal,
       );
       await this.#waitForTurnComplete(turn);
     } catch (error) {

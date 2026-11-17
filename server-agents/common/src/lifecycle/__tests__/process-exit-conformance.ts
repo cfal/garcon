@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { AgentRuntimeEvent, AgentRuntimeOperation } from '../../execution/runtime-events.js';
 
-class DelayedExitProcess implements Bun.Subprocess<'pipe', 'pipe', 'pipe'> {
+export class DelayedExitProcess implements Bun.Subprocess<'pipe', 'pipe', 'pipe'> {
   readonly stdin = Bun.file('/dev/null').writer();
   #stdout!: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>;
   #stderr!: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>;
+  #outputClosed = false;
   readonly stdout = new ReadableStream<Uint8Array<ArrayBuffer>>({ start: controller => { this.#stdout = controller; } });
   readonly stderr = new ReadableStream<Uint8Array<ArrayBuffer>>({ start: controller => { this.#stderr = controller; } });
   readonly readable = this.stdout;
@@ -23,12 +24,19 @@ class DelayedExitProcess implements Bun.Subprocess<'pipe', 'pipe', 'pipe'> {
   send(_message: unknown) {}
   disconnect() {}
   resourceUsage() { return undefined; }
-  push(message: unknown) { this.#stdout.enqueue(new TextEncoder().encode(`${JSON.stringify(message)}\n`)); }
-  exit() { this.exitCode = 143; this.#exit.resolve(143); }
-  async [Symbol.asyncDispose]() {
-    this.exit();
+  pushRaw(text: string) { this.#stdout.enqueue(new TextEncoder().encode(text)); }
+  pushStderr(text: string) { this.#stderr.enqueue(new TextEncoder().encode(text)); }
+  push(message: unknown) { this.pushRaw(`${JSON.stringify(message)}\n`); }
+  exit(code = 143) { this.exitCode = code; this.#exit.resolve(code); }
+  closeOutput() {
+    if (this.#outputClosed) return;
+    this.#outputClosed = true;
     this.#stdout.close();
     this.#stderr.close();
+  }
+  async [Symbol.asyncDispose]() {
+    this.exit();
+    this.closeOutput();
     await this.stdin.end();
   }
 }
@@ -184,6 +192,27 @@ export function processExitConformance(create: () => TurnRuntime): void {
       admitted.resolve();
       await expect(running).rejects.toThrow('retired before launch');
       expect(spawn).not.toHaveBeenCalled();
+    });
+
+    test('admission cancellation terminates a child with a pending launch write', async () => {
+      const { runtime, first, request, events } = setup();
+      const entered = Promise.withResolvers<void>();
+      const written = Promise.withResolvers<number>();
+      const write = spyOn(first.stdin, 'write').mockImplementation(() => { entered.resolve(); return written.promise; });
+      const admission = new AbortController();
+      const running = runtime.runTurn({ ...request, executionAdmission: {
+        signal: admission.signal, async markStarted() {},
+      } });
+      try {
+        await entered.promise;
+        admission.abort(new Error('cancelled pending write'));
+        expect(first.signals).toEqual(['SIGTERM']);
+        first.exit();
+        written.resolve(1);
+        await expect(running).rejects.toThrow('cancelled pending write');
+        expect(events.some(event => event.type === 'steerable')).toBe(false);
+        expect(runtime.isRunning(request.agentSessionId)).toBe(false);
+      } finally { write.mockRestore(); }
     });
   });
 }
