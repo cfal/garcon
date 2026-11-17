@@ -23,12 +23,9 @@ export class ChatParentDialogState {
 	child = $derived.by(() =>
 		this.options.chats.find((chat) => chat.id === this.options.target?.chatId),
 	);
-	currentParent = $derived(this.child?.parentChat ?? null);
+	currentParentId = $derived(this.child?.parentChatId ?? null);
 	currentTitle = $derived.by(
-		() => this.options.chats.find((chat) => chat.id === this.currentParent?.chatId)?.title,
-	);
-	protectedLineage = $derived(
-		this.currentParent !== null && this.currentParent.relation !== 'delegation',
+		() => this.options.chats.find((chat) => chat.id === this.currentParentId)?.title,
 	);
 	#eligible = $derived.by(() =>
 		eligibleParentChats(this.options.chats, this.options.target?.chatId ?? ''),
@@ -58,7 +55,6 @@ export class ChatParentDialogState {
 		return (
 			this.child !== undefined &&
 			this.child.status !== 'draft' &&
-			!this.protectedLineage &&
 			this.options.isConnected &&
 			!this.submitting &&
 			this.#proposedId !== undefined

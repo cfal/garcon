@@ -286,17 +286,19 @@ describe('recursive sidebar projection', () => {
 			delegated('pinned', 'root', { isPinned: true }),
 			delegated('normal', 'root'),
 			chat('fork', {
-				parentChat: {
-					chatId: 'root',
-					relation: 'fork',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: 'root',
+					kind: 'fork',
 					transcriptViewId: 'view-fixture',
 					ordinal: 0,
 				},
 			}),
 			chat('handoff', {
-				parentChat: {
-					chatId: 'root',
-					relation: 'handoff',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: 'root',
+					kind: 'handoff',
 					transcriptViewId: 'view-fixture',
 					ordinal: 0,
 				},
@@ -394,7 +396,7 @@ describe('recursive sidebar projection', () => {
 		const forest = buildSidebarDelegationForest(chats, true);
 		expect(forest.roots).toEqual(['a', 'self']);
 		expect(forest.ambiguousIds).toEqual(new Set(['a', 'b', 'self']));
-		expect(chats[1].parentChat?.chatId).toBe('b');
+		expect(chats[1].parentChatId).toBe('b');
 		expect(buildSidebarRowModel(projectionInput(chats)).visibleChatIds).toEqual(['a', 'b', 'self']);
 	});
 	it('combines only known executor-qualified ancestors from the full roster', () => {

@@ -32,7 +32,8 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 	return {
 		id: session.id,
 		executorId: session.executorId,
-		parentChat: session.parentChat,
+		parentChatId: session.parentChatId,
+		lineage: session.lineage,
 		projectPath: session.projectPath,
 		orderGroup: session.orderGroup,
 		title: session.title,
@@ -67,7 +68,8 @@ export function toDraftRecord(
 ): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath,
 		executorId: startup.executorId,
 		orderGroup: null,
@@ -102,17 +104,15 @@ function arraysEqual(a: string[], b: string[]): boolean {
 	return true;
 }
 
-function sameParentChat(
-	left: ChatSessionRecord['parentChat'],
-	right: ChatSessionRecord['parentChat'],
+function sameLineage(
+	left: ChatSessionRecord['lineage'],
+	right: ChatSessionRecord['lineage'],
 ): boolean {
 	if (left === right) return true;
 	if (left === null || right === null) return false;
-	if (left.chatId !== right.chatId) return false;
-	if (left.relation === 'delegation') return right.relation === 'delegation';
-	if (right.relation === 'delegation') return false;
+	if (left.sourceChatId !== right.sourceChatId) return false;
 	return (
-		left.relation === right.relation &&
+		left.kind === right.kind &&
 		left.transcriptViewId === right.transcriptViewId &&
 		left.ordinal === right.ordinal
 	);
@@ -122,7 +122,8 @@ export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean 
 	return (
 		a.id === b.id &&
 		(a.executorId ?? 'local') === (b.executorId ?? 'local') &&
-		sameParentChat(a.parentChat, b.parentChat) &&
+		a.parentChatId === b.parentChatId &&
+		sameLineage(a.lineage, b.lineage) &&
 		a.projectPath === b.projectPath &&
 		a.orderGroup === b.orderGroup &&
 		a.title === b.title &&

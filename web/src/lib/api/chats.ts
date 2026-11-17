@@ -569,7 +569,7 @@ export async function setChatParent(request: SetChatParentRequest): Promise<SetC
 		if (
 			!response ||
 			response.chatId !== request.chatId ||
-			(response.parentChat?.chatId ?? null) !== request.parentChatId
+			response.parentChatId !== request.parentChatId
 		) {
 			throw new ApiMutationOutcomeUnknownError('The parent save could not be confirmed.');
 		}

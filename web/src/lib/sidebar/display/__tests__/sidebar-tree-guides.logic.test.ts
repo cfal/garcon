@@ -69,9 +69,10 @@ describe('delegated sidebar tree guides', () => {
 				chat('plain'),
 				delegated('orphan', 'missing'),
 				chat('fork', {
-					parentChat: {
-						chatId: 'root',
-						relation: 'fork',
+					parentChatId: null,
+					lineage: {
+						sourceChatId: 'root',
+						kind: 'fork',
 						transcriptViewId: 'synthetic-view',
 						ordinal: 0,
 					},

@@ -4,7 +4,8 @@ export const SIDEBAR_PREVIEW_NOW = new Date('2026-11-15T12:00:00.000Z');
 
 const parent: ChatSessionRecord = {
 	id: '1794000000000001',
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	executorId: 'local',
 	projectPath: '/workspace/app',
 	orderGroup: 'normal',
@@ -45,7 +46,8 @@ export const SIDEBAR_PREVIEW_CHATS: ChatSessionRecord[] = [
 		id: '1794000000000002',
 		title: 'Investigate failing tests',
 		projectPath: '/workspace/app/packages/api',
-		parentChat: { chatId: parent.id, relation: 'delegation' },
+		parentChatId: parent.id,
+		lineage: null,
 		isUnread: true,
 		lastActivityAt: '2026-11-15T11:45:00.000Z',
 		lastMessage: 'The targeted tests now pass.',

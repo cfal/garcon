@@ -22,7 +22,8 @@ export function scheduledNewChat(): ScheduledPrompt & { target: NewChatScheduled
 export function sourceChat(): ChatSessionRecord {
 	return {
 		id: '1000000000000001', executorId: '00000000-0000-4000-8000-000000000001',
-		parentChat: null, projectPath: '/worker/current', orderGroup: 'normal', title: 'Synthetic source',
+		parentChatId: null,
+		lineage: null, projectPath: '/worker/current', orderGroup: 'normal', title: 'Synthetic source',
 		agentId: 'codex', model: 'current-model', permissionMode: 'default', thinkingMode: 'none',
 		agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
 		createdAt: null, lastActivityAt: null, lastReadAt: null, isPinned: false, isArchived: false,
