@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { CommandAcceptedResponse, CompactCommandRequest } from '../../../common/chat-command-contracts.js';
+import { generationModelTestConfigurationKey, type GenerationModelTestResponse } from '../../../common/generation-test-contracts.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
 import { codexRequestModel, LIVE_CODEX_THINKING_MODE, liveCodexRunRequest, liveCodexStartRequest } from '../../support/live-codex.js';
@@ -17,6 +20,8 @@ describe('Codex scripted per-chat speed', () => {
     await withIntegrationFixture('codex-speed', async (fixture) => {
       const config = join(fixture.executionDirs.home, '.codex', 'config.toml');
       const originalConfig = await readFile(config, 'utf8');
+      const restrictedConfig = `features.ultrafast_mode = false\n${originalConfig}`;
+      await writeFile(config, restrictedConfig);
       const fastChat = fixture.newChatId();
       const standardChat = fixture.newChatId();
       const run = async (chatId: string, expectedTier: string, start = false) => {
@@ -64,6 +69,9 @@ describe('Codex scripted per-chat speed', () => {
       try {
         expect((await held.requested).body.service_tier).toBe('priority');
         await fixture.client.enqueueNew(fastChat, 'Use the saved speed when this is dequeued.');
+        // Feature discovery reloads this file, but the active thread still filters with its original config.
+        expect(await readFile(config, 'utf8')).toBe(restrictedConfig);
+        await writeFile(config, originalConfig);
         await changeSpeed('ultrafast');
       } finally {
         held.release();
@@ -75,27 +83,46 @@ describe('Codex scripted per-chat speed', () => {
       expect(environment.model.requests().at(-1)?.body.service_tier).toBe('ultrafast');
       await run(fastChat, 'ultrafast');
       await run(standardChat, 'default');
+      for (const [sourceChatId, tier] of [[fastChat, 'ultrafast'], [standardChat, 'default']] as const) {
+        const child = fixture.newChatId();
+        const beforeFork = environment.model.requests().length;
+        await fixture.client.forkChat({ sourceChatId, chatId: child });
+        expect(environment.model.requests()).toHaveLength(beforeFork);
+        await run(child, tier);
+      }
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === fastChat)?.agentSettings.values.speed).toBe('ultrafast');
       await run(fastChat, 'ultrafast');
+      await changeSpeed('fast');
+      environment.model.scriptTurn([codexAssistantMessage('Synthetic compaction summary.')]);
+      const beforeCompact = environment.model.requests().length;
+      const compactCursor = fixture.client.markEvents();
+      const compact = await fixture.client.post<CommandAcceptedResponse>('/api/v1/chats/compact', {
+        chatId: fastChat, clientRequestId: crypto.randomUUID(),
+      } satisfies CompactCommandRequest);
+      expect((await fixture.client.waitForTurnTerminal(fastChat, compact.turnId, { afterIndex: compactCursor })).type).toBe('agent-run-finished');
+      expect(environment.model.requests()[beforeCompact]?.body.service_tier).toBe('priority');
       await changeSpeed('standard');
       await run(fastChat, 'default');
       expect(await readFile(config, 'utf8')).toBe(originalConfig);
       await fixture.client.patch('/api/v1/chats/model', { chatId: fastChat, model: STANDARD_ONLY_MODEL });
       const beforeRejection = environment.model.requests().length;
-      const unavailable = await fixture.client.fetch('/api/v1/chats/execution-settings', {
-        method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chatId: fastChat, agentSettingsPatch: { speed: 'ultrafast' } }),
-      });
-      expect(unavailable.ok).toBe(false);
-      expect(await unavailable.text()).toContain('Ultrafast speed is unavailable');
+      for (const thinkingMode of [undefined, 'none']) {
+        const unavailable = await fixture.client.fetch('/api/v1/chats/execution-settings', {
+          method: 'PATCH', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chatId: fastChat, thinkingMode, agentSettingsPatch: { speed: 'ultrafast' } }),
+        });
+        expect(unavailable.ok).toBe(false);
+        expect(await unavailable.text()).toContain('Ultrafast speed is unavailable');
+      }
       expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === fastChat)?.agentSettings.values.speed).toBe('standard');
       expect(environment.model.requests()).toHaveLength(beforeRejection);
-      await fixture.restartGarcon({ beforeStart: () => writeFile(config, `features.ultrafast_mode = false\n${originalConfig}`) });
+      await fixture.restartGarcon({ beforeStart: () => writeFile(config, restrictedConfig) });
       const denied = fixture.newChatId();
-      await expect(fixture.client.startChat({ ...liveCodexStartRequest({ chatId: denied,
+      const denial = await rejectionOf(fixture.client.startChat({ ...liveCodexStartRequest({ chatId: denied,
         projectPath: fixture.executionDirs.project, command: 'Must never reach inference.' }),
-        agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'ultrafast' } } })).rejects.toMatchObject({
+        agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'ultrafast' } } }));
+      expect(denial).toMatchObject({
         status: 422, body: { errorCode: 'INVALID_SETTINGS', error: expect.stringContaining('Ultrafast speed is unavailable') },
       });
       expect(environment.model.requests()).toHaveLength(beforeRejection);
@@ -105,4 +132,25 @@ describe('Codex scripted per-chat speed', () => {
       prepareWorkspace: (directories) => prepareScriptedCodexSpeed(environment, directories),
     });
   }, 120_000);
+
+  test('runs background generation at Standard despite an Ultrafast executor default', async () => {
+    await withIntegrationFixture('codex-speed-generation', async ({ client }) => {
+      const selection = { executorId: client.executorId, agentId: 'codex', model: codexRequestModel(), thinkingMode: LIVE_CODEX_THINKING_MODE } as const;
+      await client.updateSettings({ ui: { commitMessage: selection } });
+      const index = environment.model.requests().length;
+      environment.model.scriptTurn([codexAssistantMessage('OK')]);
+      const result = await client.post<GenerationModelTestResponse>('/api/v1/app/generation/test', {
+        target: 'commitMessage', configurationKey: generationModelTestConfigurationKey(selection),
+      });
+      expect(result.success).toBe(true);
+      expect(environment.model.requests()).toHaveLength(index + 1);
+      const { body } = environment.model.requests()[index]!;
+      expect(body.model).toBe(selection.model);
+      expect(body.service_tier).toBeUndefined();
+      environment.model.assertSettled();
+    }, {
+      serverEnvironment: environment.serverEnvironment,
+      prepareWorkspace: (directories) => prepareScriptedCodexSpeed(environment, directories),
+    });
+  }, 60_000);
 });
