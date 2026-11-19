@@ -166,18 +166,26 @@ export class ConversationSlashCommandService {
 		private readonly acceptedInputs = new AcceptedInputSubmissionService(),
 	) {}
 
-	#afterSettings(
-		chat: ChatSessionRecord, ownsComposer: boolean,
+	#submitAfterPendingSettings(
+		chat: ChatSessionRecord,
+		ownsComposer: boolean,
 		submit: (current: ChatSessionRecord) => Promise<ConversationSubmissionOutcome>,
 	): Promise<ConversationSubmissionOutcome> {
 		const pending = this.deps.pendingSettings(chat.id);
 		if (!pending) return submit(chat);
-		const revision = this.deps.composerState.contentRevision;
+		const draftRevision = this.deps.composerState.contentRevision;
 		return pending.then((accepted) => {
 			const current = this.deps.sessions.byId[chat.id];
-			if (!accepted || !current || current.agentOwnershipEpoch !== chat.agentOwnershipEpoch
-				|| current.executorId !== chat.executorId || current.agentId !== chat.agentId) return 'rejected';
-			if (ownsComposer && (this.deps.sessions.selectedChatId !== chat.id || this.deps.composerState.contentRevision !== revision)) return 'no-op';
+			if (!accepted || !current) return 'rejected';
+			if (
+				current.agentOwnershipEpoch !== chat.agentOwnershipEpoch
+				|| current.executorId !== chat.executorId
+				|| current.agentId !== chat.agentId
+			) return 'rejected';
+			if (ownsComposer && (
+				this.deps.sessions.selectedChatId !== chat.id
+				|| this.deps.composerState.contentRevision !== draftRevision
+			)) return 'no-op';
 			return submit(current);
 		});
 	}
@@ -260,7 +268,7 @@ export class ConversationSlashCommandService {
 				}
 				return {
 					kind: 'handled',
-					outcome: this.#afterSettings(chat, ownsComposer, (current) =>
+					outcome: this.#submitAfterPendingSettings(chat, ownsComposer, (current) =>
 						this.submitForkCommand(chatId, current, fork.message, images, ownsComposer)),
 				};
 			}
@@ -270,7 +278,7 @@ export class ConversationSlashCommandService {
 		if (handoff) {
 			return {
 				kind: 'handled',
-				outcome: this.#afterSettings(chat, ownsComposer, (current) =>
+				outcome: this.#submitAfterPendingSettings(chat, ownsComposer, (current) =>
 					this.submitHandoffCommand(chatId, current, handoff.message, images, ownsComposer)),
 			};
 		}
@@ -279,7 +287,7 @@ export class ConversationSlashCommandService {
 		if (compact) {
 			return {
 				kind: 'handled',
-				outcome: this.#afterSettings(chat, ownsComposer, (current) =>
+				outcome: this.#submitAfterPendingSettings(chat, ownsComposer, (current) =>
 					this.submitCompactCommand(chatId, current, compact.instructions, ownsComposer)),
 			};
 		}
@@ -797,7 +805,7 @@ export class ConversationSlashCommandService {
 		);
 		const progressNoticeRevision = this.deps.chatState.noticeRevisionForChat(sourceChatId);
 		try {
-			await this.#afterSettings(sourceChat, false, async () => {
+			await this.#submitAfterPendingSettings(sourceChat, false, async () => {
 				await this.#performForkOnly(sourceChatId, upToOrdinal, source);
 				return 'accepted';
 			});

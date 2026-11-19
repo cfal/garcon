@@ -145,7 +145,7 @@ export class AgentSessionSettingsService {
         };
         await integration.configurationValidation?.validate(configuration, readBefore(deadline, signal));
         this.deps.endpointResolver.resolveEndpointReference(next);
-        const commit = async (): Promise<AgentChatEntry> => {
+        const applyAndPersistSettings = async (): Promise<AgentChatEntry> => {
           if (entry.agentSessionId && integration.sessionConfiguration) {
             await integration.sessionConfiguration.apply(
               entry.agentSessionId,
@@ -181,11 +181,13 @@ export class AgentSessionSettingsService {
           return updated;
         };
         // Dequeue must not observe a new native setting before the matching durable selection.
-        return await this.deps.selectionAdmissionLock.runExclusive(`chat:${chatId}`, () =>
-          reservation ? this.deps.execution.withChatExecutionControl(chatId, async (control) => {
+        return await this.deps.selectionAdmissionLock.runExclusive(`chat:${chatId}`, () => {
+          if (!reservation) return applyAndPersistSettings();
+          return this.deps.execution.withChatExecutionControl(chatId, async (control) => {
             assertEmptyQueue(control);
-            return commit();
-          }) : commit());
+            return applyAndPersistSettings();
+          });
+        });
       } finally {
         if (reservation) await this.deps.execution.releaseTranscriptSnapshot(reservation);
       }
