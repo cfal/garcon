@@ -123,7 +123,7 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (chatId, admit) => {
           expect(chatId).toBe('chat-1');
-          expect(admit({ kind: 'user', entry })).toBe(true);
+          expect(admit({ kind: 'user', entry })).toBe('inserted');
           throw failure;
         }),
       },
@@ -181,7 +181,7 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
-          const inserted = admit(input);
+          const inserted = admit(input) === 'inserted';
           shuttingDown = true;
           return { input, control: {}, inserted };
         }),
@@ -264,7 +264,7 @@ describe('QueueDrainer', () => {
           const entry = entries.shift();
           if (!entry) return null;
           const input = { kind: 'user', entry };
-          return { input, control: {}, inserted: admit(input) };
+          return { input, control: {}, inserted: admit(input) === 'inserted' };
         }),
         read: mock(async () => control([...entries])),
         pause: mock(async () => ({ control: control([...entries]), changed: true })),
@@ -334,7 +334,7 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
-          return { input, control: {}, inserted: admit(input) };
+          return { input, control: {}, inserted: admit(input) === 'inserted' };
         }),
       },
       projectAdmission: availableProjectAdmission(),
@@ -500,7 +500,7 @@ describe('QueueDrainer', () => {
           const controlEntry = pending.controlEntries.shift();
           if (!controlEntry) return null;
           const input = { kind: 'control', entry: controlEntry };
-          return { input, control: pending, inserted: admit(input) };
+          return { input, control: pending, inserted: admit(input) === 'inserted' };
         }),
       },
       turnRunner: { isChatRunning: () => false, runAgentTurn },
