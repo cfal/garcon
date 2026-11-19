@@ -210,6 +210,7 @@ function createDeps(chat = createChat()) {
 		supportsSteering: vi.fn(() => false),
 	};
 	const deps = {
+		pendingSettings: vi.fn<ConversationSlashCommandDeps['pendingSettings']>(() => null),
 		moveChatToBoundary: vi.fn<ConversationSlashCommandDeps['moveChatToBoundary']>().mockResolvedValue({
 			success: true,
 			chatId: chat.id,
@@ -302,6 +303,23 @@ describe('ConversationSlashCommandService', () => {
 		});
 
 		expect(result).toEqual({ kind: 'steer', content: 'Focus on the failing assertion' });
+	});
+
+	it.each(['/fork Continue', '/compact'])('does not dispatch %s past a rejected setting', async (text) => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const chat = deps.sessions.byId['chat-1'];
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text, images: [], ownsComposer: true,
+		});
+		if (result.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(deps.pendingSettings).toHaveBeenCalledWith(chat.id);
+		gate.resolve(false);
+		expect(await result.outcome).toBe('rejected');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockCompactChat).not.toHaveBeenCalled();
 	});
 
 	it('rejects steering when the capability is absent or attachments are present', () => {

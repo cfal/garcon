@@ -259,6 +259,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
+      selectionAdmissionLock: args.selectionAdmissionLock,
       onCommitted: args.onSettingsCommitted,
       execution: args.settingsExecution,
     });

@@ -45,6 +45,7 @@ export class AgentSessionSettingsService {
     endpointResolver: ApiProviderEndpointResolver;
     execution: SettingsExecutionPort;
     chatMutationLock: KeyedPromiseLock;
+    selectionAdmissionLock: KeyedPromiseLock;
     onCommitted?: (chatId: string) => void;
   }) {
     if (!deps.chatMutationLock) throw new Error('AgentSessionSettingsService requires the shared chat mutation lock');
@@ -179,11 +180,12 @@ export class AgentSessionSettingsService {
           this.deps.onCommitted?.(chatId);
           return updated;
         };
-        if (!reservation) return await commit();
-        return await this.deps.execution.withChatExecutionControl(chatId, async (control) => {
-          assertEmptyQueue(control);
-          return commit();
-        });
+        // Dequeue must not observe a new native setting before the matching durable selection.
+        return await this.deps.selectionAdmissionLock.runExclusive(`chat:${chatId}`, () =>
+          reservation ? this.deps.execution.withChatExecutionControl(chatId, async (control) => {
+            assertEmptyQueue(control);
+            return commit();
+          }) : commit());
       } finally {
         if (reservation) await this.deps.execution.releaseTranscriptSnapshot(reservation);
       }

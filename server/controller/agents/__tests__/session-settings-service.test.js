@@ -51,7 +51,8 @@ function makeService(thinkingMode = 'high') {
     readChatExecutionControl: mock(async () => control),
     withChatExecutionControl: mock(async (_chatId, operation) => operation(control)),
   };
-  const service = new AgentSessionSettingsService({ ...controllerSafetyDependencies(),
+  const locks = controllerSafetyDependencies();
+  const service = new AgentSessionSettingsService({ ...locks,
     execution,
     onCommitted,
     registry: {
@@ -61,10 +62,24 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
+  return { service, locks, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('serializes queue admission with native confirmation and durable settings publication', async () => {
+    const f = makeService();
+    f.entry.agentSessionId = 'native-1';
+    const applying = Promise.withResolvers();
+    const confirmed = Promise.withResolvers();
+    f.integration.sessionConfiguration = { apply: async () => { applying.resolve(); await confirmed.promise; } };
+    const patch = f.service.updateSessionSettings('chat-1', { permissionMode: 'default' });
+    await applying.promise;
+    const admission = f.locks.selectionAdmissionLock.runExclusive('chat:chat-1', async () => f.onCommitted.mock.calls.length);
+    confirmed.resolve();
+    expect(await admission).toBe(1);
+    await patch;
+  });
+
   it.each(['entries', 'controlEntries'])('rejects literal mode changes with pending %s', async lane => {
     const f = makeService('none');
     f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };

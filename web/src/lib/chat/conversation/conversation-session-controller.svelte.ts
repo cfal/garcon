@@ -109,6 +109,7 @@ export class ConversationSessionController {
 			{
 				...deps,
 				refetchTranscript: (chatId) => this.#loadChat(chatId),
+				pendingSettings: (id) => this.#settings.hasPending(id) ? this.#settings.settlePending(id) : null,
 				confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
 			},
 			this.#acceptedInputs,
