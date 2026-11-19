@@ -1,7 +1,7 @@
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { LocalNoticeRow } from './local-notice.js';
-import type { OptimisticUserInput } from './optimistic-user-input.js';
+import type { InputStatus, OptimisticUserInput } from './optimistic-user-input.js';
 import { responseMessageType } from './conversation-feed-mutations.js';
 
 export interface ChatTranscriptRow {
@@ -9,7 +9,7 @@ export interface ChatTranscriptRow {
 	id: string;
 	message: ChatMessage;
 	ordinal?: number;
-	awaitingDelivery?: boolean;
+	inputStatus?: InputStatus;
 }
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
@@ -23,7 +23,9 @@ function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 			...(input.contentMode ? { contentMode: input.contentMode } : {}),
 			...(input.contentFormat ? { contentFormat: input.contentFormat } : {}),
 		}),
-		...(input.delivery === 'pending' ? { awaitingDelivery: true } : {}),
+		...(input.delivery === 'delivered' ? {} : {
+			inputStatus: input.delivery === 'pending' ? 'sending' : 'waiting-to-steer',
+		}),
 	};
 }
 

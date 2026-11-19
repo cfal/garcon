@@ -1,5 +1,13 @@
 import type { ChatImage } from '$shared/chat-types';
 
+export interface QueuedSteerReceipt {
+	readonly clientMessageId: string;
+	readonly serverInstanceId: string;
+	readonly entryId: string;
+}
+
+export type InputStatus = 'sending' | 'waiting-to-steer';
+
 export interface OptimisticUserInput {
 	readonly chatId: string;
 	readonly clientMessageId: string;
@@ -8,8 +16,5 @@ export interface OptimisticUserInput {
 	readonly contentFormat?: 'plain' | 'markdown';
 	readonly createdAt: string;
 	readonly images?: ChatImage[];
-	// Whether the submitting request has come back. A row stays pending while the HTTP call is
-	// in flight, which is the only window where the user cannot tell delivery from lost
-	// connectivity.
-	readonly delivery: 'pending' | 'delivered';
+	readonly delivery: 'pending' | 'delivered' | QueuedSteerReceipt;
 }

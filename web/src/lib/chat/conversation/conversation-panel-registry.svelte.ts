@@ -15,7 +15,8 @@ import {
 	InactiveTranscriptWindowStore,
 	type InactiveTranscriptWindow,
 } from '$lib/chat/transcript/inactive-transcript-window-store.js';
-import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
 	TranscriptReconnectReplayState,
@@ -118,6 +119,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	// Parked transcripts must not retain the reconciliation scope and its retired panels.
 	#onSnapshotResendCandidates: NonNullable<ActiveTranscriptStateOptions['onSnapshotResendCandidates']> = (chatId, candidates, frontier) => {
 		this.publishSnapshotResendCandidates(chatId, candidates, frontier);
+	};
+	readonly clearSnapshotEchoes = (chatId: string, messages: readonly TranscriptMessage[]): void => {
+		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages);
+		if (mutation) this.#applyOverlayMutation(chatId, mutation);
 	};
 	#recoverTranscript = async (chatId: string, viewId: string): Promise<void> => {
 		if (this.resetForViewReplacement(chatId, viewId)) {
@@ -284,6 +289,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.overlays,
 				{
 					onSnapshotResendCandidates: this.#onSnapshotResendCandidates,
+					onSnapshotMessages: this.clearSnapshotEchoes,
 					combineMessages: this.options.combineMessages,
 					recoverTranscript: this.#recoverTranscript,
 				},
@@ -588,6 +594,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const mutation = this.options.overlays.clearOptimisticInput(chatId, clientMessageId);
 		if (!mutation) return;
 		this.#applyOverlayMutation(chatId, mutation);
+	}
+
+	reconcileQueuedSteers(chatId: string, control: ChatExecutionControlState | null, receipt?: QueuedSteerReceipt): void {
+		const mutation = this.options.overlays.reconcileQueuedSteers(chatId, control, receipt);
+		if (mutation) this.#applyOverlayMutation(chatId, mutation);
 	}
 
 	excludeResendCandidate(chatId: string, ordinal: number): void {

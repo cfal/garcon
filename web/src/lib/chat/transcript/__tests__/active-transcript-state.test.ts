@@ -1493,11 +1493,11 @@ describe('ActiveTranscriptState', () => {
 		chat.upsertOptimisticUserInput(optimisticInput());
 
 		const pendingRow = () => chat.visibleRows.find((row) => row.id === 'optimistic:msg-1');
-		expect(pendingRow()).toMatchObject({ awaitingDelivery: true });
+		expect(pendingRow()).toMatchObject({ inputStatus: 'sending' });
 
 		chat.markOptimisticUserInputDelivered('msg-1');
 
-		expect(pendingRow()).not.toHaveProperty('awaitingDelivery');
+		expect(pendingRow()).not.toHaveProperty('inputStatus');
 	});
 
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {
