@@ -342,6 +342,8 @@ In a Codex composer, use **Selected speed** (the gauge) to choose **Standard**, 
 
 Availability depends on your model, account, and workspace policy. An unloaded chat can save a preference for its next run; Garcon refuses to submit a prompt if Codex cannot apply that tier. Choose Standard or select a supported model rather than changing the executor's config. See [Codex speed settings](https://developers.openai.com/codex/speed).
 
+If Codex reports a capacity failure and you change the chat's model or speed, Garcon does not automatically retry the failed turn under a different selection. Submit again to use the new settings.
+
 Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 
 ## Automate And Delegate

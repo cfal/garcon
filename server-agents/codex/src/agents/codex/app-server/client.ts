@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfigObject } from '../runtime-types.js';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import { appendCodexConfigArgs } from './config-overrides.js';
@@ -374,7 +375,7 @@ export class CodexAppServerClient extends EventEmitter {
     const promise = new Promise<T>((resolve, reject) => {
       const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`Codex ${method} timed out`));
+        reject(new AgentIntegrationError('TIMEOUT', `Codex ${method} timed out`, true));
       }, timeoutMs);
       this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
     });

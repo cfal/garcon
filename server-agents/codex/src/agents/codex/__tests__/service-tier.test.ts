@@ -43,7 +43,25 @@ describe('Codex speed selection', () => {
     const client = { request: mock(async () => ({ data: [], nextCursor: 'cycle' })) };
     await assertLoadedTierAvailable(client, 't', 'm', 'default', 100);
     expect(client.request).not.toHaveBeenCalled();
-    await expect(assertLoadedTierAvailable(client, 't', 'm', 'ultrafast', 100)).rejects.toThrow('unavailable');
+    await expect(assertLoadedTierAvailable(client, 't', 'm', 'ultrafast', 100))
+      .rejects.toMatchObject({ code: 'UNAVAILABLE', retryable: true });
     expect(client.request).toHaveBeenCalledTimes(4);
+  });
+
+  it('distinguishes an expired or incomplete discovery from a definitive unsupported tier', async () => {
+    const client = { request: mock(async (): Promise<unknown> => ({ data: [] })) };
+    const check = (ms = 100) => assertLoadedTierAvailable(client, 't', 'm', 'ultrafast', ms);
+    await expect(check(0)).rejects.toMatchObject({ code: 'TIMEOUT', retryable: true });
+    expect(client.request).not.toHaveBeenCalled();
+    await expect(check()).rejects.toMatchObject({ code: 'INVALID_SETTINGS', retryable: false });
+    for (const page of [null, { data: [null] }, { data: [], nextCursor: 3 }]) {
+      client.request.mockResolvedValue(page);
+      await expect(check()).rejects.toMatchObject({ code: 'UNAVAILABLE', retryable: true });
+    }
+    for (const [serviceTiers, enabled] of [[null, true], [[{ name: 'ultrafast' }], true], [[], 'unknown']]) {
+      client.request.mockResolvedValueOnce({ data: [{ model: 'm', serviceTiers }] });
+      client.request.mockResolvedValueOnce({ data: [{ name: 'ultrafast_mode', enabled }] });
+      await expect(check()).rejects.toMatchObject({ code: 'UNAVAILABLE', retryable: true });
+    }
   });
 });

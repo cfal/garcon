@@ -77,7 +77,7 @@ import {
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
-import { assertEffectiveTier, codexServiceTier, type CodexServiceTier } from '../service-tier.js';
+import { assertEffectiveTier, codexServiceTier, type CodexServiceTier, type CodexSpeed } from '../service-tier.js';
 import { assertLoadedTierAvailable } from './service-tier-discovery.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
@@ -499,7 +499,9 @@ export class CodexAppServerRuntime {
         assertEffectiveTier(codexServiceTier(args.speed), forked.serviceTier, forked.model);
       } catch (error) {
         // Removes the unpublished child from native discovery, never its parent.
-        await client.request('thread/archive', { threadId: forked.thread.id });
+        await client.request('thread/archive', { threadId: forked.thread.id }, this.#settingsUpdateTimeoutMs).catch((cause) => {
+          this.#logger.warn('Codex could not archive rejected fork', { threadId: forked.thread.id, error: String(cause) });
+        });
         throw error;
       }
       const nativePath = await waitForMaterializedThread(forked.thread, {
@@ -534,6 +536,19 @@ export class CodexAppServerRuntime {
     takePendingApproval(this.#pendingApprovals, pending.client, pending.requestId, pending);
   }
 
+  async validateDeferredSpeed(threadId: string, model: string, speed: CodexSpeed): Promise<void> {
+    const session = this.#sourceForThread(threadId);
+    if (!session || speed === 'standard') return;
+    await assertLoadedTierAvailable(session.client, threadId, model, codexServiceTier(speed), this.#settingsUpdateTimeoutMs);
+    this.#assertSettingsSourceCurrent(session);
+  }
+
+  #assertSettingsSourceCurrent(session: RunningCodexSession): void {
+    if (this.#sources.get(session.client) !== session || session.superseded) {
+      throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while updating settings', true);
+    }
+  }
+
   updateSessionSettings(
     agentSessionId: string,
     configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>
@@ -553,7 +568,7 @@ export class CodexAppServerRuntime {
     session: RunningCodexSession,
     target: CodexThreadSettingsTarget,
   ): Promise<void> {
-    if (this.#sources.get(session.client) !== session) return;
+    this.#assertSettingsSourceCurrent(session);
     if (session.configurationFenced) {
       throw new AgentIntegrationError(
         'INVALID_SETTINGS',
@@ -563,9 +578,7 @@ export class CodexAppServerRuntime {
     }
     if (target.serviceTier !== 'default') {
       await assertLoadedTierAvailable(session.client, session.threadId, target.model, target.serviceTier, this.#settingsUpdateTimeoutMs);
-      if (this.#sources.get(session.client) !== session || session.superseded) {
-        throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while checking speed', true);
-      }
+      this.#assertSettingsSourceCurrent(session);
     }
     // Records explicit intent before the RPC because its confirmation may precede its response.
     if (target.effort !== null) session.providerOwnsReasoningEffort = false;
@@ -784,6 +797,7 @@ export class CodexAppServerRuntime {
     // Keyed by Codex's own turn id so an event it labels later still names the run that asked
     // for that turn, long after the session moved on to the next one.
     const turnRoutes = new Map<string, CodexOperation>();
+    const activatedRoute = { model: args.confirmedThreadSettings.model, tier: args.turnServiceTier };
     const session: RunningCodexSession = {
       chatId: args.chatId,
       threadId: args.threadId,
@@ -808,7 +822,8 @@ export class CodexAppServerRuntime {
         publishRows(this.#logger, args.chatId, messages, turnRoutes.get(turnId))
       )),
       turnRoutes,
-      turnServiceTier: args.turnServiceTier,
+      turnRoute: activatedRoute,
+      activatedRoute,
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
@@ -847,9 +862,10 @@ export class CodexAppServerRuntime {
       request = await this.#resolveResumePath(request);
     }
     const tier = codexServiceTier(request.speed);
-    // Compact has no turn overrides. A different tier needs a fresh effective thread configuration.
+    // A live settings echo cannot prove a new premium route; a fresh resume can.
     const settingsAreReusable = () => retained?.confirmedThreadSettings.serviceTier === tier
-      && (tier === 'default' || retained.confirmedThreadSettings.model === request.model)
+      && (tier === 'default' || (retained.confirmedThreadSettings.model === request.model
+        && retained.activatedRoute.model === request.model && retained.activatedRoute.tier === tier))
       && (!providerOwnsReasoningEffort(request) || retained.providerOwnsReasoningEffort);
     const matchingPath = !retained?.nativePath
       || !request.nativePath
@@ -924,13 +940,14 @@ export class CodexAppServerRuntime {
     if (retained && canReactivate()) {
       if (tier !== 'default') {
         await assertLoadedTierAvailable(retained.client, retained.threadId, request.model, tier, this.#settingsUpdateTimeoutMs);
+        await retained.threadSettingsUpdateChain;
         assertCodexExecutionOpen(request);
-        if (!canReactivate()) throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while checking speed', true);
+        if (!canReactivate() && (this.#latestSourceByChat.get(request.chatId) !== retained
+          || !isTerminalSessionStatus(retained.status) || retained.pendingThreadSettings)) {
+          throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while checking speed', true);
+        }
       }
-      return {
-        session: this.#reactivateSession(retained, request, operation),
-        buffered: false,
-      };
+      if (canReactivate()) return { session: this.#reactivateSession(retained, request, operation), buffered: false };
     }
 
     request = await this.#resolveResumePath(request);
@@ -1014,13 +1031,12 @@ export class CodexAppServerRuntime {
     session.terminalWaiters.clear();
     session.liveCodeModeResultToolIds.clear();
     session.capacityRetryCount = 0;
-    session.turnServiceTier = codexServiceTier(request.speed);
+    session.turnRoute = { model: request.model, tier: codexServiceTier(request.speed) };
     session.turnAttemptGeneration += 1;
     session.pendingCapacityFailure = null;
     session.sourceOperation = operation;
     session.nextTurnOperation = operation;
     session.lastTurnOperation = null;
-    session.threadSettingsUpdateChain = Promise.resolve();
     this.#sessions.set(session.threadId, session);
     return session;
   }
@@ -1391,7 +1407,8 @@ export class CodexAppServerRuntime {
     session.status = 'running';
     await this.#capacityRetryDelay(delayMs);
 
-    const retry = session.activeInputChain.then(async () => {
+    // A retry cannot cross a native settings write, even before its notification arrives.
+    const retry = Promise.all([session.activeInputChain, session.threadSettingsUpdateChain]).then(async () => {
       if (
         this.#sessions.get(session.threadId) !== session
         || session.status !== 'running'
@@ -1402,12 +1419,14 @@ export class CodexAppServerRuntime {
       session.activeDeliveryReservations += 1;
       try {
         if (session.activeTurnId) return true;
-        const tier = session.turnServiceTier;
+        const { model, tier } = session.turnRoute;
+        const routeUnchanged = () => !session.configurationFenced && !session.pendingThreadSettings
+          && session.confirmedThreadSettings.model === model && session.confirmedThreadSettings.serviceTier === tier;
+        if (!routeUnchanged()) return false;
         if (tier !== 'default') {
-          const model = session.confirmedThreadSettings.model;
           await assertLoadedTierAvailable(session.client, session.threadId, model, tier, this.#settingsUpdateTimeoutMs);
           if (!this.#canApplyTurnAttempt(session, retryGeneration) || session.activeTurnId) return true;
-          if (session.confirmedThreadSettings.model !== model) throw new Error('Codex model changed during capacity retry');
+          if (!routeUnchanged()) return false;
         }
         session.nextTurnOperation = operation;
         const turn = await session.client.startTurn({
@@ -1428,7 +1447,9 @@ export class CodexAppServerRuntime {
         this.#flushPendingFinish(session);
       }
     });
-    session.activeInputChain = retry.then(() => undefined, () => undefined);
+    const settled = retry.then(() => undefined, () => undefined);
+    session.activeInputChain = settled;
+    session.threadSettingsUpdateChain = settled;
     return retry;
   }
 

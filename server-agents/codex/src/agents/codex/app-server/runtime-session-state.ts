@@ -26,6 +26,11 @@ export type FinishSessionOptions = {
   emitFinishedOnAbort?: boolean;
 };
 
+interface CodexRoute {
+  readonly model: string;
+  readonly tier: CodexServiceTier;
+}
+
 export interface ThreadSettingsWaiter {
   readonly target: CodexThreadSettingsTarget;
   readonly timeout: ReturnType<typeof setTimeout>;
@@ -68,7 +73,10 @@ export interface RunningCodexSession {
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
-  turnServiceTier: CodexServiceTier;
+  turnRoute: CodexRoute;
+  // Native filtering is bound to the model and feature state at activation, not a later settings echo.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/core/src/session/session.rs#L755-L771
+  readonly activatedRoute: CodexRoute;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
   sourceOperation: CodexOperation;

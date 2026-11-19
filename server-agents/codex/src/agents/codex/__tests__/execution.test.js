@@ -62,6 +62,7 @@ function createRuntime(host = createHost()) {
   runtime.isRunning = mock(() => false);
   runtime.sourceEndpointId = mock(() => undefined);
   runtime.getRunningSessions = mock(() => []);
+  runtime.validateDeferredSpeed = mock(async () => undefined);
   runtime.updateSessionSettings = mock(() => undefined);
   runtime.resolvePermission = mock(async () => undefined);
   return runtime;
@@ -471,9 +472,11 @@ describe('CodexExecution', () => {
     await execution.applySessionConfiguration('thread-1', {
       ...previous,
       thinkingMode: 'none',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'ultrafast' } },
     }, previous);
 
     expect(runtime.isRunning).toHaveBeenCalledWith('thread-1');
+    expect(runtime.validateDeferredSpeed).toHaveBeenCalledWith('thread-1', previous.model, 'ultrafast');
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 

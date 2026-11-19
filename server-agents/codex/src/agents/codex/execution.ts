@@ -130,8 +130,10 @@ export class CodexExecution implements AgentRuntimeExecution {
       configuration.model,
     );
     if (previousEffort !== undefined && nextEffort === undefined) {
-      // Defers the whole update because the runtime replaces explicit-effort sources before Default turns.
-      if (!this.runtime.isRunning(agentSessionId)) return;
+      // A fresh resume clears explicit effort; a deferred native write still validates the saved speed.
+      if (!this.runtime.isRunning(agentSessionId)) {
+        return this.runtime.validateDeferredSpeed(agentSessionId, configuration.model, codexSpeed(configuration.settings));
+      }
       throw new AgentIntegrationError(
         'INVALID_SETTINGS',
         'Codex cannot clear a concrete reasoning effort during an active turn',
