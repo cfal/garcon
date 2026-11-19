@@ -67,7 +67,11 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   including remote compaction, before that response's `token_count`. Once a
   rollout has records, only records are billed, keyed by `response_id`, and
   `token_count` only reports context size. Records with no response id or
-  usage, or with no known model, are malformed.
+  usage, or with no known model, are malformed. Records with a matching turn ID
+  use that turn's speed, not a speed selected while its response was in flight.
+  If the record names a different turn than the current context, its tokens
+  still count but the cost is unknown.
+  The rollout does not record every one-turn override or the actual billed tier.
 - Rollouts written before records existed bill `token_count` events, which
   take their model from the latest `turn_context` and their tier from the
   latest `thread_settings_applied`. Cumulative counters reconcile each request

@@ -1,6 +1,6 @@
 import type { UsageTokenTotals } from '@garcon/common/usage';
 
-export type UsageSpeed = 'standard' | 'fast' | 'ultrafast' | 'flex';
+export type UsageSpeed = 'standard' | 'fast' | 'ultrafast' | 'flex' | 'unknown';
 
 /** One billed model request read from a native transcript. */
 export interface UsageRecord {

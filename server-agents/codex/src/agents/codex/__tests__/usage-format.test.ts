@@ -17,8 +17,8 @@ function isMalformed(line: string, state: CodexUsageState): boolean {
 const SESSION_ID = '00000000-0000-4000-8000-0000000000c1';
 const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10-01T05:17:41.289Z') =>
   JSON.stringify({ type: 'session_meta', timestamp, payload: { id: SESSION_ID, ...payload } });
-const turnContext = (model = 'gpt-6-sol') =>
-  JSON.stringify({ type: 'turn_context', timestamp: '2026-10-01T05:17:42.694Z', payload: { model } });
+const turnContext = (model = 'gpt-6-sol', turnId?: string) =>
+  JSON.stringify({ type: 'turn_context', timestamp: '2026-10-01T05:17:42.694Z', payload: { model, turn_id: turnId } });
 const threadSettings = (serviceTier: string) =>
   JSON.stringify({ type: 'event_msg', timestamp: '2026-10-01T05:17:43.000Z', payload: { type: 'thread_settings_applied', thread_settings: { model: 'gpt-6-sol', service_tier: serviceTier } } });
 
@@ -39,11 +39,11 @@ function tokenCount(last: unknown, total?: unknown, timestamp = '2026-10-01T05:1
 }
 
 // Mirrors the pinned 0.169.0 rollout line written for each billed response.
-function usageRecordLine(responseId: unknown, usage: unknown, timestamp = '2026-10-01T05:17:49.900Z'): string {
+function usageRecordLine(responseId: unknown, usage: unknown, timestamp = '2026-10-01T05:17:49.900Z', turnId = 'turn-1'): string {
   return JSON.stringify({
     type: 'token_usage_record',
     timestamp,
-    payload: { thread_id: SESSION_ID, turn_id: 'turn-1', session_id: SESSION_ID, root_turn_id: 'turn-1', response_id: responseId, usage },
+    payload: { thread_id: SESSION_ID, turn_id: turnId, session_id: SESSION_ID, root_turn_id: turnId, response_id: responseId, usage },
   });
 }
 
@@ -55,6 +55,18 @@ function started(): CodexUsageState {
 }
 
 describe('Codex usage lines', () => {
+  test('attributes a response to the speed at turn start, not a selection made during inference', () => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(turnContext('gpt-6-sol', 'turn-1'), state);
+    parseCodexUsageLine(threadSettings('priority'), state);
+    parseCodexUsageLine(threadSettings('ultrafast'), state);
+    expect(parseCodexUsageLine(usageRecordLine('resp_fast', counters(100, 10)), state)?.speed).toBe('fast');
+    parseCodexUsageLine(turnContext('gpt-6-sol', 'turn-2'), state);
+    expect(parseCodexUsageLine(usageRecordLine('resp_ultrafast', counters(120, 10), undefined, 'turn-2'), state)?.speed).toBe('ultrafast');
+    const late = parseCodexUsageLine(usageRecordLine('late_response', counters(10, 3), undefined, 'turn-1'), state);
+    expect(late).toMatchObject({ speed: 'unknown', totals: { outputTokens: 3 } });
+  });
+
   test('attribute requests to the session and model from earlier context lines', () => {
     const state = started();
     const record = parseCodexUsageLine(tokenCount(counters(19_239, 299, { cached_input_tokens: 11_008, reasoning_output_tokens: 116 })), state);

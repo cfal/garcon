@@ -45,7 +45,9 @@ const FORK_COPY_MAX_GAP_MS = 1000;
  */
 export interface CodexUsageState {
   model: string;
-  speed: UsageSpeed;
+  speed: UsageSpeed | null;
+  turnId: string | null;
+  turnSpeed: UsageSpeed | null;
   sessionId: string;
   sawSessionMeta: boolean;
   lastUsageSignature: string | null;
@@ -58,7 +60,9 @@ export interface CodexUsageState {
 export function createCodexUsageState(): CodexUsageState {
   return {
     model: '',
-    speed: 'standard',
+    speed: null,
+    turnId: null,
+    turnSpeed: null,
     sessionId: '',
     sawSessionMeta: false,
     lastUsageSignature: null,
@@ -125,7 +129,8 @@ function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
 // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/config_types.rs#L528-L531
 function codexSpeed(serviceTier: unknown): UsageSpeed {
   if (serviceTier === 'priority' || serviceTier === 'fast') return 'fast';
-  return serviceTier === 'flex' || serviceTier === 'ultrafast' ? serviceTier : 'standard';
+  if (serviceTier == null || serviceTier === 'default') return 'standard';
+  return serviceTier === 'flex' || serviceTier === 'ultrafast' ? serviceTier : 'unknown';
 }
 
 // Forks copy and restamp parent history in a burst right after their session_meta;
@@ -141,7 +146,7 @@ function consumeForkCopyBurst(state: CodexUsageState, timestampMs: number): bool
   return false;
 }
 
-function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTokenUsage, dedupeKey: string): UsageRecord {
+function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTokenUsage, dedupeKey: string, speed = state.speed): UsageRecord {
   return {
     timestampMs,
     model: state.model,
@@ -155,7 +160,7 @@ function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTo
       reasoningTokens: usage.reasoning_output_tokens,
     },
     cacheWrite1hTokens: 0,
-    speed: state.speed,
+    speed: speed ?? 'standard',
     dedupeKey,
   };
 }
@@ -172,7 +177,9 @@ function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string
     return { malformed: true, timestampMs };
   }
   if (usage.input_tokens + usage.output_tokens === 0) return null;
-  return usageRecord(state, timestampMs, usage, `codex-response:${responseId}`);
+  const speed = state.turnId === null ? state.speed
+    : payload.turn_id === state.turnId ? state.turnSpeed : 'unknown';
+  return usageRecord(state, timestampMs, usage, `codex-response:${responseId}`, speed);
 }
 
 export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | MalformedUsage | null {
@@ -201,10 +208,19 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   if (entry.type === 'token_usage_record') return parseUsageRecord(entry, payload, state);
   if (entry.type === 'turn_context') {
     if (typeof payload.model === 'string') state.model = payload.model;
+    const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+    if (state.turnId !== turnId) {
+      state.turnId = turnId;
+      state.turnSpeed = state.speed;
+    }
     return null;
   }
   if (payload.type === 'thread_settings_applied') {
-    if (isRecord(payload.thread_settings)) state.speed = codexSpeed(payload.thread_settings.service_tier);
+    if (isRecord(payload.thread_settings)) {
+      state.speed = codexSpeed(payload.thread_settings.service_tier);
+      // The initial checkpoint can follow turn_context; later edits apply to subsequent turns.
+      state.turnSpeed ??= state.speed;
+    }
     return null;
   }
   if (payload.type !== 'token_count' || !isRecord(payload.info)) return null;

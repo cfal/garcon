@@ -37,8 +37,9 @@ export function lookupModelPrice(model: string): ModelPrice | null {
   return price;
 }
 
-/** Returns null for models without a known price. Reasoning tokens are already part of output. */
+/** Returns null when the rate is unknown. Reasoning tokens are already part of output. */
 export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed' | 'timestampMs'>): PricedUsage | null {
+  if (record.speed === 'unknown') return null;
   const price = lookupModelPrice(record.model);
   if (!price) return null;
   const { uncachedInputTokens, cachedInputTokens, cacheWriteTokens, outputTokens } = record.totals;

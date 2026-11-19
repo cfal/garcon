@@ -57,6 +57,10 @@ describe('price table keys', () => {
 });
 
 describe('pricing', () => {
+  test('keeps a response with ambiguous speed unpriced even for a known model', () => {
+    expect(priceUsageRecord(record('gpt-6.2-sol', { outputTokens: 100 }, { speed: 'unknown' }))).toBeNull();
+  });
+
   test('bills each Claude token type at its own rate, including one-hour cache writes', () => {
     // Opus 5.5 has no long-context tier, so a 3M-token prompt stays at standard rates.
     const priced = priceUsageRecord(record('claude-opus-5-5', {
