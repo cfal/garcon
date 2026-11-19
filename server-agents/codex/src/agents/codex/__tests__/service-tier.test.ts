@@ -6,8 +6,15 @@ describe('Codex speed selection', () => {
   it('defaults an old empty settings envelope to Standard without accepting unknown values', () => {
     const envelope = { ownerId: 'codex', schemaVersion: 1, values: {} };
     expect(codexServiceTier(codexSpeed(envelope))).toBe('default');
-    expect(() => codexSpeed({ ...envelope, values: { speed: null } })).toThrow('Invalid value');
-    for (const standard of [null, 'default']) expect(() => assertEffectiveTier('default', standard, 'm')).not.toThrow();
+    for (const speed of [null, 'priority', 'toString']) {
+      expect(() => codexSpeed({ ...envelope, values: { speed } })).toThrow('Invalid value');
+    }
+  });
+
+  it('accepts native aliases but rejects a different effective tier', () => {
+    for (const standard of [null, 'default']) {
+      expect(() => assertEffectiveTier('default', standard, 'm')).not.toThrow();
+    }
     expect(() => assertEffectiveTier('priority', 'fast', 'm')).not.toThrow();
     for (const effective of [null, 'priority', 'default', 'flex']) {
       expect(() => assertEffectiveTier('ultrafast', effective, 'm')).toThrow('Ultrafast speed is unavailable');
@@ -20,21 +27,24 @@ describe('Codex speed selection', () => {
     ['ultrafast', 'ultrafast_mode', 'fast_mode'],
   ] as const)('requires the %s ID and its own resolved thread feature', async (tier, gate, otherGate) => {
     const model = { model: 'test-slug', id: 'preset', serviceTiers: [{ id: tier, name: 'Synthetic label' }] };
-    const features = [{ name: gate, enabled: true }, { name: otherGate, enabled: false }];
-    const client = { request: mock(async (method: string, params: Record<string, unknown>, _timeout: number) => {
-      if (method === 'experimentalFeature/list') {
-        expect(params.threadId).toBe('test-thread');
-        return { data: features };
-      }
-      return params.cursor ? { data: [model] } : { data: [], nextCursor: 'next-page' };
-    }) };
+    const selectedFeature = { name: gate, enabled: true };
+    const otherFeature = { name: otherGate, enabled: false };
+    const client = {
+      async request(method: string, params: Record<string, unknown>) {
+        if (method === 'experimentalFeature/list') {
+          expect(params.threadId).toBe('test-thread');
+          return { data: [selectedFeature, otherFeature] };
+        }
+        return params.cursor ? { data: [model] } : { data: [], nextCursor: 'next-page' };
+      },
+    };
     const check = (slug = model.model) => assertLoadedTierAvailable(client, 'test-thread', slug, tier, 1000);
     await check();
     await expect(check('preset')).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
-    features[0]!.enabled = false;
-    features[1]!.enabled = true;
+    selectedFeature.enabled = false;
+    otherFeature.enabled = true;
     await expect(check()).rejects.toThrow('unavailable');
-    features[0]!.enabled = true;
+    selectedFeature.enabled = true;
     model.serviceTiers = [{ id: tier === 'priority' ? 'ultrafast' : 'priority', name: tier }];
     await expect(check()).rejects.toThrow('unavailable');
   });
@@ -58,7 +68,11 @@ describe('Codex speed selection', () => {
       client.request.mockResolvedValue(page);
       await expect(check()).rejects.toMatchObject({ code: 'UNAVAILABLE', retryable: true });
     }
-    for (const [serviceTiers, enabled] of [[null, true], [[{ name: 'ultrafast' }], true], [[], 'unknown']]) {
+    for (const { serviceTiers, enabled } of [
+      { serviceTiers: null, enabled: true },
+      { serviceTiers: [{ name: 'ultrafast' }], enabled: true },
+      { serviceTiers: [], enabled: 'unknown' },
+    ]) {
       client.request.mockResolvedValueOnce({ data: [{ model: 'm', serviceTiers }] });
       client.request.mockResolvedValueOnce({ data: [{ name: 'ultrafast_mode', enabled }] });
       await expect(check()).rejects.toMatchObject({ code: 'UNAVAILABLE', retryable: true });

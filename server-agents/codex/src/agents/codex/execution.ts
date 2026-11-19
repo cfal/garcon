@@ -1,5 +1,4 @@
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
-import { codexSpeed } from './service-tier.js';
 import {
   AgentIntegrationError,
   type AgentEstablishedSession,
@@ -17,6 +16,7 @@ import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-
 import type { CodexConfig } from '../../config.js';
 import type { CodexAuthStatus } from './codex-auth.js';
 import { codexQuestionReplyInput } from './async-questions.js';
+import { codexSpeed } from './service-tier.js';
 import {
   assertCodexSessionEndpoint,
   buildCodexAppServerEndpointRuntime,
@@ -130,15 +130,15 @@ export class CodexExecution implements AgentRuntimeExecution {
       configuration.model,
     );
     if (previousEffort !== undefined && nextEffort === undefined) {
-      // A fresh resume clears explicit effort; a deferred native write still validates the saved speed.
-      if (!this.runtime.isRunning(agentSessionId)) {
-        return this.runtime.validateDeferredSpeed(agentSessionId, configuration.model, codexSpeed(configuration.settings));
+      if (this.runtime.isRunning(agentSessionId)) {
+        throw new AgentIntegrationError(
+          'INVALID_SETTINGS',
+          'Codex cannot clear a concrete reasoning effort during an active turn',
+          false,
+        );
       }
-      throw new AgentIntegrationError(
-        'INVALID_SETTINGS',
-        'Codex cannot clear a concrete reasoning effort during an active turn',
-        false,
-      );
+      // A fresh resume clears explicit effort; deferring that write must not skip speed validation.
+      return this.runtime.validateDeferredSpeed(agentSessionId, configuration.model, codexSpeed(configuration.settings));
     }
     await this.runtime.updateSessionSettings(agentSessionId, {
       model: configuration.model,

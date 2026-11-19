@@ -2378,6 +2378,10 @@ describe('CodexAppServerRuntime', () => {
     return { fake, createClient, provider, published, started };
   }
 
+  function startUltrafastSession(runtimeOptions = {}) {
+    return startSettingsSession(runtimeOptions, { speed: 'ultrafast' }, 'ultrafast');
+  }
+
   function emitThreadSettings(fake, overrides = {}, threadId = 'thread-1') {
     fake.emit('notification', {
       method: 'thread/settings/updated',
@@ -2422,7 +2426,7 @@ describe('CodexAppServerRuntime', () => {
   }
 
   it('refuses retained premium execution when current workspace policy no longer allows it', async () => {
-    const { fake, createClient, provider, published } = await startSettingsSession({}, { speed: 'ultrafast' }, 'ultrafast');
+    const { fake, createClient, provider, published } = await startUltrafastSession();
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
     await published.waitForEvent((event) => event.type === 'run-ended');
     fake.request = mock(async (method) => ultrafastDiscovery(method, false));
@@ -2433,7 +2437,7 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('finishes a concurrent native settings change before reopening an admitted premium turn', async () => {
-    const { fake, createClient, provider, published } = await startSettingsSession({}, { speed: 'ultrafast' }, 'ultrafast');
+    const { fake, createClient, provider, published } = await startUltrafastSession();
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
     await published.waitForEvent((event) => event.type === 'run-ended');
     const check = createControlledDelay();
@@ -3453,7 +3457,7 @@ describe('CodexAppServerRuntime', () => {
     { model: 'gpt-5.4-codex', serviceTier: 'default' },
     { model: 'another-model', serviceTier: 'ultrafast' },
   ])('does not retry after the originating model or speed changes (%o)', async (change) => {
-    const { provider, fake, published } = await startSettingsSession({ capacityRetryDelaysMs: [0] }, { speed: 'ultrafast' }, 'ultrafast');
+    const { provider, fake, published } = await startUltrafastSession({ capacityRetryDelaysMs: [0] });
     emitThreadSettings(fake, change);
     emitCapacityFailure(fake, 'turn-1');
     await published.waitForEvent((event) => event.type === 'run-ended' && event.outcome === 'failed');
@@ -3464,7 +3468,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('holds capacity retry admission behind an unconfirmed native model update', async () => {
     const backoff = createControlledDelay();
-    const { fake, provider, published } = await startSettingsSession({ capacityRetryDelay: backoff.wait }, { speed: 'ultrafast' }, 'ultrafast');
+    const { fake, provider, published } = await startUltrafastSession({ capacityRetryDelay: backoff.wait });
     fake.request = mock(async (method) => ultrafastDiscovery(method));
     const update = provider.updateSessionSettings('thread-1', makeRequest({ model: 'standard-only', speed: 'standard' }));
     await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
@@ -3482,7 +3486,7 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('holds later native settings writes until the admitted retry has its own turn', async () => {
-    const { fake, provider } = await startSettingsSession({ capacityRetryDelaysMs: [0] }, { speed: 'ultrafast' }, 'ultrafast');
+    const { fake, provider } = await startUltrafastSession({ capacityRetryDelaysMs: [0] });
     const retryAck = createControlledDelay();
     fake.request = mock(async (method) => ultrafastDiscovery(method));
     fake.startTurn.mockImplementation(async () => {

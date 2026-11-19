@@ -1,6 +1,6 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { CodexStartRequest } from '../runtime-types.js';
+import type { CodexThreadConfiguration } from '../runtime-types.js';
 import type { CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
@@ -12,7 +12,7 @@ import type {
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
-  codexThreadSettingsTarget,
+  mapThinkingModeToCodexEffort,
   type CodexConfirmedThreadSettings,
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
@@ -26,10 +26,7 @@ export type FinishSessionOptions = {
   emitFinishedOnAbort?: boolean;
 };
 
-interface CodexRoute {
-  readonly model: string;
-  readonly tier: CodexServiceTier;
-}
+type CodexInferenceRoute = Pick<CodexThreadSettingsTarget, 'model' | 'serviceTier'>;
 
 export interface ThreadSettingsWaiter {
   readonly target: CodexThreadSettingsTarget;
@@ -73,10 +70,10 @@ export interface RunningCodexSession {
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
-  turnRoute: CodexRoute;
+  capacityRetryRoute: CodexInferenceRoute;
   // Native filtering is bound to the model and feature state at activation, not a later settings echo.
   // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/core/src/session/session.rs#L755-L771
-  readonly activatedRoute: CodexRoute;
+  readonly activatedRoute: CodexInferenceRoute;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
   sourceOperation: CodexOperation;
@@ -96,17 +93,29 @@ export interface RunningCodexSession {
   idleSince: number | null;
 }
 
-export function providerOwnsReasoningEffort(
-  request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
-): boolean {
-  return codexThreadSettingsTarget(request).effort === null;
+function providerOwnsReasoningEffort(request: CodexThreadConfiguration): boolean {
+  return mapThinkingModeToCodexEffort(request.thinkingMode, request.model) === undefined;
 }
 
 export function recordExplicitReasoningEffort(
   session: RunningCodexSession,
-  request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
+  request: CodexThreadConfiguration,
 ): void {
   if (!providerOwnsReasoningEffort(request)) session.providerOwnsReasoningEffort = false;
+}
+
+export function canReuseThreadSettings(
+  session: RunningCodexSession, request: CodexThreadConfiguration, tier: CodexServiceTier,
+): boolean {
+  if (session.configurationFenced || session.pendingThreadSettings) return false;
+  if (session.confirmedThreadSettings.serviceTier !== tier) return false;
+  if (providerOwnsReasoningEffort(request) && !session.providerOwnsReasoningEffort) return false;
+  // A live settings echo cannot prove a new premium route; a fresh resume can.
+  return tier === 'default' || (
+    session.confirmedThreadSettings.model === request.model
+    && session.activatedRoute.model === request.model
+    && session.activatedRoute.serviceTier === tier
+  );
 }
 
 export interface CodexAppServerRuntimeOptions {

@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
-import { codexServiceTier, normalizeCodexServiceTier, type CodexSpeed, type CodexServiceTier } from '../service-tier.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import {
   GPT_6_2_SOL_MODEL,
@@ -11,7 +10,8 @@ import {
   GPT_6_SOL_MODEL,
   GPT_6_LUNA_MODEL,
 } from '@garcon/common/models';
-import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
+import type { CodexProviderConfig, CodexStartRequest, CodexThreadConfiguration } from '../runtime-types.js';
+import { codexServiceTier, normalizeCodexServiceTier, type CodexSpeed, type CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type {
   CodexThreadSettings,
@@ -95,12 +95,7 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
 }
 
-export function codexThreadSettingsTarget(configuration: {
-  readonly model: string;
-  readonly permissionMode: PermissionMode;
-  readonly thinkingMode: ThinkingMode;
-  readonly speed?: CodexSpeed;
-}): CodexThreadSettingsTarget {
+export function codexThreadSettingsTarget(configuration: CodexThreadConfiguration): CodexThreadSettingsTarget {
   const { sandbox, approvalPolicy } = codexSandboxSettings(configuration.permissionMode);
   return {
     model: configuration.model,

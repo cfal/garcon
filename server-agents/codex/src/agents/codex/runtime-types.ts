@@ -1,7 +1,7 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
-import type { CodexSpeed } from './service-tier.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
+import type { CodexSpeed } from './service-tier.js';
 
 export type CodexConfigValue =
   | string
@@ -23,14 +23,17 @@ export interface CodexExecutionAdmission {
   markStarted(): Promise<void>;
 }
 
-export interface CodexExecutionRequest {
-  readonly chatId: string;
-  readonly projectPath: string;
+export interface CodexThreadConfiguration {
   readonly model: string;
-  readonly modelEndpointId: string | null;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
   readonly speed?: CodexSpeed;
+}
+
+export interface CodexExecutionRequest extends CodexThreadConfiguration {
+  readonly chatId: string;
+  readonly projectPath: string;
+  readonly modelEndpointId: string | null;
   readonly clientMessageId?: string;
   readonly executionAdmission?: CodexExecutionAdmission;
   readonly command: string;
