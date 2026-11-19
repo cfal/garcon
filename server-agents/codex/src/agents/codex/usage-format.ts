@@ -33,8 +33,8 @@ const USAGE_FIELDS = [
 const FORK_COPY_MAX_GAP_MS = 1000;
 
 /**
- * Usage events carry neither model nor service tier, so both carry forward
- * from the latest `turn_context` and `thread_settings_applied`. Codex writes a
+ * Usage events carry neither model nor service tier. `turn_context` supplies
+ * the model and captures the latest thread speed for records naming that turn. Codex writes a
  * `token_usage_record` for every billed response, including remote compaction,
  * before that response's `token_count`:
  * https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/core/src/session/mod.rs#L5697-L5719
@@ -45,7 +45,7 @@ const FORK_COPY_MAX_GAP_MS = 1000;
  */
 export interface CodexUsageState {
   model: string;
-  speed: UsageSpeed | null;
+  threadSpeed: UsageSpeed | null;
   turnId: string | null;
   turnSpeed: UsageSpeed | null;
   sessionId: string;
@@ -60,7 +60,7 @@ export interface CodexUsageState {
 export function createCodexUsageState(): CodexUsageState {
   return {
     model: '',
-    speed: null,
+    threadSpeed: null,
     turnId: null,
     turnSpeed: null,
     sessionId: '',
@@ -124,10 +124,10 @@ function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
   return typeof spawn?.parent_thread_id === 'string';
 }
 
-// Missing, default, and standard tiers bill as standard; `fast` aliases priority.
+// An omitted tier or the native `default` sentinel means Standard; `fast` aliases priority.
 // Mirrors codex-rs ServiceTier at the pinned 0.169.0:
 // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/config_types.rs#L528-L531
-function codexSpeed(serviceTier: unknown): UsageSpeed {
+function usageSpeedFromServiceTier(serviceTier: unknown): UsageSpeed {
   if (serviceTier === 'priority' || serviceTier === 'fast') return 'fast';
   if (serviceTier == null || serviceTier === 'default') return 'standard';
   return serviceTier === 'flex' || serviceTier === 'ultrafast' ? serviceTier : 'unknown';
@@ -146,7 +146,9 @@ function consumeForkCopyBurst(state: CodexUsageState, timestampMs: number): bool
   return false;
 }
 
-function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTokenUsage, dedupeKey: string, speed = state.speed): UsageRecord {
+function usageRecord(
+  state: CodexUsageState, timestampMs: number, usage: CodexTokenUsage, speed: UsageSpeed | null, dedupeKey: string,
+): UsageRecord {
   return {
     timestampMs,
     model: state.model,
@@ -177,9 +179,11 @@ function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string
     return { malformed: true, timestampMs };
   }
   if (usage.input_tokens + usage.output_tokens === 0) return null;
-  const speed = state.turnId === null ? state.speed
-    : payload.turn_id === state.turnId ? state.turnSpeed : 'unknown';
-  return usageRecord(state, timestampMs, usage, `codex-response:${responseId}`, speed);
+  let speed = state.threadSpeed;
+  if (state.turnId !== null) {
+    speed = payload.turn_id === state.turnId ? state.turnSpeed : 'unknown';
+  }
+  return usageRecord(state, timestampMs, usage, speed, `codex-response:${responseId}`);
 }
 
 export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | MalformedUsage | null {
@@ -211,15 +215,15 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
     if (state.turnId !== turnId) {
       state.turnId = turnId;
-      state.turnSpeed = state.speed;
+      state.turnSpeed = state.threadSpeed;
     }
     return null;
   }
   if (payload.type === 'thread_settings_applied') {
     if (isRecord(payload.thread_settings)) {
-      state.speed = codexSpeed(payload.thread_settings.service_tier);
+      state.threadSpeed = usageSpeedFromServiceTier(payload.thread_settings.service_tier);
       // The initial checkpoint can follow turn_context; later edits apply to subsequent turns.
-      state.turnSpeed ??= state.speed;
+      state.turnSpeed ??= state.threadSpeed;
     }
     return null;
   }
@@ -282,7 +286,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
 
   // Garcon's JSONL fork copies these events verbatim under a new session id, so the
   // event's time and counters, not its session, identify the request across copies.
-  return usageRecord(state, timestampMs, last,
+  return usageRecord(state, timestampMs, last, state.threadSpeed,
     `codex:${timestampMs}:${state.model}:${signature}:${cumulative === null ? '' : JSON.stringify(cumulative)}`);
 }
 

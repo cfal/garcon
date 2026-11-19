@@ -1,6 +1,6 @@
 import type { UsageCategoryCost } from '@garcon/common/usage';
 import { MODEL_PRICES, type ModelPrice } from './model-prices.js';
-import type { UsageRecord } from './usage-record.js';
+import type { UsageRecord, UsageSpeed } from './usage-record.js';
 
 export interface PricedUsage {
   readonly costUsd: number;
@@ -37,20 +37,28 @@ export function lookupModelPrice(model: string): ModelPrice | null {
   return price;
 }
 
+function speedMultiplier(price: ModelPrice, speed: Exclude<UsageSpeed, 'unknown'>, timestampMs: number): number | null {
+  switch (speed) {
+    case 'fast': return price.fastMultiplier ?? 1;
+    case 'flex': return price.flexMultiplier ?? 1;
+    case 'ultrafast': return price.ultrafastMultiplier?.(timestampMs) ?? null;
+    default: return 1;
+  }
+}
+
 /** Returns null when the rate is unknown. Reasoning tokens are already part of output. */
 export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed' | 'timestampMs'>): PricedUsage | null {
   if (record.speed === 'unknown') return null;
   const price = lookupModelPrice(record.model);
   if (!price) return null;
+  const multiplier = speedMultiplier(price, record.speed, record.timestampMs);
+  if (multiplier === null) return null;
   const { uncachedInputTokens, cachedInputTokens, cacheWriteTokens, outputTokens } = record.totals;
   const promptTokens = uncachedInputTokens + cachedInputTokens + cacheWriteTokens;
   const rates = price.longContext && promptTokens > price.longContext.promptTokensAbove
     ? price.longContext.rates
     : price.rates;
-  const tier = record.speed === 'ultrafast' ? price.ultrafastMultiplier?.(record.timestampMs)
-    : record.speed === 'fast' ? price.fastMultiplier : record.speed === 'flex' ? price.flexMultiplier : 1;
-  if (record.speed === 'ultrafast' && tier === undefined) return null;
-  const scale = (tier ?? 1) / 1_000_000;
+  const scale = multiplier / 1_000_000;
   const write1h = Math.min(record.cacheWrite1hTokens, cacheWriteTokens);
   const categoryCostUsd = {
     input: uncachedInputTokens * rates.input * scale,
