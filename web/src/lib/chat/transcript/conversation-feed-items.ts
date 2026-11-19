@@ -9,6 +9,7 @@ import {
 } from '$shared/chat-types';
 import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
+import type { InputStatus } from './optimistic-user-input.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
@@ -32,7 +33,7 @@ export interface ConversationFeedMessageRenderItem {
 	message: ChatMessage;
 	index: number;
 	ordinal?: number;
-	awaitingDelivery?: boolean;
+	inputStatus?: InputStatus;
 	pairedToolUse?: ToolUseChatMessage;
 	permissionWrapperRowId?: string;
 }
@@ -266,7 +267,7 @@ export function buildConversationFeedRenderModel(
 			message,
 			index,
 			ordinal: row.ordinal,
-			...(row.awaitingDelivery ? { awaitingDelivery: true } : {}),
+			...(row.inputStatus ? { inputStatus: row.inputStatus } : {}),
 			...(message instanceof ToolResultMessage
 				? {
 						pairedToolUse: toolPairs.toolUseByResultRowId.get(row.id),

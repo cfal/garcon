@@ -468,6 +468,7 @@ function createDeps(chat = createRunningChat()) {
 					: input,
 			);
 		}),
+		acceptQueuedSteer: vi.fn(),
 		clearOptimisticUserInput: vi.fn((clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
 				(input) => input.clientMessageId !== clientMessageId,
@@ -5034,7 +5035,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).not.toHaveBeenCalled();
 	});
 
-	it('moves a steer the turn cannot take yet from the transcript to the queue', async () => {
+	it('correlates a local steer with the accepted queue state, not its possibly stale response', async () => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
 		deps.composerState.inputText = '/steer Keep the current turn';
 		const control = controlWithQueue({
@@ -5061,15 +5062,18 @@ describe('ConversationSessionController', () => {
 			entryId: 'entry-steer',
 			control,
 		});
+		const newer = { ...emptyControl(), version: control.version + 1 };
+		deps.conversationUi.getExecutionControl.mockReturnValue(newer);
 
 		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
 
 		expect(outcome).toBe('accepted');
 		const steerRequest = mockSteerChat.mock.calls[0][0];
-		expect(deps.chatState.clearOptimisticUserInput).toHaveBeenCalledWith(
-			steerRequest.clientMessageId,
-		);
-		expect(deps.chatState.optimisticUserInputs).toEqual([]);
+		expect(deps.chatState.acceptQueuedSteer).toHaveBeenCalledWith({
+			clientMessageId: steerRequest.clientMessageId, entryId: 'entry-steer',
+			serverInstanceId: control.serverInstanceId,
+		}, newer);
+		expect(deps.chatState.clearOptimisticUserInput).not.toHaveBeenCalled();
 		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
 			'chat-1',
 			control,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
 function candidate(ordinal: number): ResendCandidate {
@@ -90,6 +91,55 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(view.optimisticInputs.map((input) => input.clientMessageId)).toEqual(['input-2']);
 		expect(view.optimisticAfterOrdinals.get('input-2')).toBe(3);
 		expect(view.resendCandidates).toEqual([candidate(3)]);
+	});
+
+	it('follows only its own queued steer across edits and dispatch before echo', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chatId = 'chat-1';
+		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'server-1' };
+		const input = optimistic(receipt.clientMessageId);
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		const entry = { id: receipt.entryId, content: 'edited guidance', kind: 'steer' as const,
+			attachments: [], revision: 2, createdAt: input.createdAt, updatedAt: input.createdAt };
+		control.queue.entries = [entry, { ...entry, id: 'from-another-tab' }];
+		overlays.upsertOptimisticInput(chatId, input, 7);
+		const view = overlays.forChat(chatId);
+		overlays.reconcileQueuedSteers(chatId, control);
+		expect(view.optimisticInputs).toEqual([input]);
+		overlays.reconcileQueuedSteers(chatId, control, receipt);
+		expect(view.optimisticInputs).toEqual([{ ...input, delivery: receipt, content: entry.content }]);
+		expect(view.optimisticAfterOrdinals.get(input.clientMessageId)).toBe(7);
+		expect(overlays.reconcileQueuedSteers(chatId, control)?.feedStructureChanged).toBe(false);
+
+		control.queue.entries = [];
+		control.queue.recentlyDispatched = [{ entryId: entry.id, revision: 2, dispatchedAt: input.createdAt }];
+		overlays.reconcileQueuedSteers(chatId, control);
+		expect(view.optimisticInputs).toHaveLength(1);
+		overlays.applyCommittedBatch({ chatId, transcriptViewId: 'view', lastOrdinal: 8,
+			messages: [echoed(input.clientMessageId, 8)], resendCandidates: [], noticeRevision: 0 });
+		overlays.reconcileQueuedSteers(chatId, control, receipt);
+		expect(view.optimisticInputs).toEqual([]);
+		expect(view.optimisticAfterOrdinals.size).toBe(0);
+	});
+
+	it.each(['removed', 'restart', 'pruned'] as const)('drops only the queued row when its entry is %s', reason => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const receipt = { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server' };
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		const input = optimistic(receipt.clientMessageId);
+		const other = optimistic('still-in-flight');
+		control.queue.entries = [{ id: receipt.entryId, kind: 'steer', attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
+		for (const row of [input, other]) overlays.upsertOptimisticInput(row.chatId, row, 3);
+		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
+		if (reason === 'removed') control.queue.entries = [];
+		if (reason === 'restart') control.serverInstanceId = 'new-server';
+		const latest = reason === 'pruned' ? null : control;
+		overlays.reconcileQueuedSteers(input.chatId, latest);
+		overlays.reconcileQueuedSteers(input.chatId, latest, receipt);
+		const view = overlays.forChat(input.chatId);
+		expect(view.optimisticInputs).toEqual([other]);
+		expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3]]);
 	});
 
 	it('clears prior notices only when a new optimistic submission begins', () => {

@@ -1,7 +1,8 @@
 import { SvelteMap } from 'svelte/reactivity';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
-import type { OptimisticUserInput } from './optimistic-user-input.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from './optimistic-user-input.js';
 import { echoedClientMessageOrdinals } from './transcript-row-projection.js';
 import { createRandomId } from '$lib/utils/random-id';
 
@@ -163,6 +164,39 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return feedMutation(true);
 	}
 
+	reconcileQueuedSteers(
+		control: ChatExecutionControlState | null,
+		receipt?: QueuedSteerReceipt,
+	): ConversationTranscriptOverlayMutation {
+		if (!this.#optimisticInputs.some(input => typeof input.delivery === 'object'
+			|| input.clientMessageId === receipt?.clientMessageId)) return feedMutation(false);
+		const entries = new Map(control?.queue.entries.map(entry => [entry.id, entry.content]));
+		const dispatched = new Set(control?.queue.recentlyDispatched.map(entry => entry.entryId));
+		const next: OptimisticUserInput[] = [];
+		let removedOrdinals: Map<string, number> | undefined;
+		for (const input of this.#optimisticInputs) {
+			const delivery = receipt?.clientMessageId === input.clientMessageId ? receipt : input.delivery;
+			if (typeof delivery === 'string') {
+				next.push(input);
+				continue;
+			}
+			const content = entries.get(delivery.entryId);
+			// A dispatch update can reach the browser before the committed echo.
+			if (delivery.serverInstanceId !== control?.serverInstanceId
+				|| (content === undefined && !dispatched.has(delivery.entryId))) {
+				removedOrdinals ??= new Map(this.#optimisticAfterOrdinals);
+				removedOrdinals.delete(input.clientMessageId);
+				continue;
+			}
+			const text = content ?? input.content;
+			next.push(delivery === input.delivery && text === input.content ? input : { ...input, content: text, delivery });
+		}
+		if (removedOrdinals) this.#optimisticAfterOrdinals = removedOrdinals;
+		else if (next.every((input, index) => input === this.#optimisticInputs[index])) return feedMutation(false);
+		this.#optimisticInputs = next;
+		return feedMutation(true);
+	}
+
 	replaceResendCandidates(
 		candidates: readonly ResendCandidate[],
 	): ConversationTranscriptOverlayMutation {
@@ -208,7 +242,14 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			feedStructureChanged = true;
 		}
 
-		const echoed = echoedClientMessageOrdinals(batch.messages);
+		const echoes = this.clearEchoedInputs(batch.messages);
+		this.publishSnapshotResendCandidates(batch.resendCandidates, batch);
+		return feedMutation(feedStructureChanged || echoes.feedStructureChanged);
+	}
+
+	clearEchoedInputs(messages: readonly TranscriptMessage[]): ConversationTranscriptOverlayMutation {
+		if (!this.#optimisticInputs.length) return feedMutation(false);
+		const echoed = echoedClientMessageOrdinals(messages);
 		if (echoed.size > 0) {
 			const ordinals = new Map(this.#optimisticAfterOrdinals);
 			const remaining: OptimisticUserInput[] = [];
@@ -231,12 +272,10 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			if (remaining.length !== this.#optimisticInputs.length) {
 				this.#optimisticInputs = remaining;
 				this.#optimisticAfterOrdinals = ordinals;
-				feedStructureChanged = true;
+				return feedMutation(true);
 			}
 		}
-
-		this.publishSnapshotResendCandidates(batch.resendCandidates, batch);
-		return feedMutation(feedStructureChanged);
+		return feedMutation(false);
 	}
 
 	#installResendCandidates(candidates: readonly ResendCandidate[]): void {
@@ -319,6 +358,14 @@ export class ConversationTranscriptOverlayStore {
 		clientMessageId: string,
 	): ConversationTranscriptOverlayMutation | null {
 		return this.#entries.get(chatId)?.clearOptimisticInput(clientMessageId) ?? null;
+	}
+
+	reconcileQueuedSteers(chatId: string, control: ChatExecutionControlState | null, receipt?: QueuedSteerReceipt) {
+		return this.#entries.get(chatId)?.reconcileQueuedSteers(control, receipt) ?? null;
+	}
+
+	clearEchoedInputs(chatId: string, messages: readonly TranscriptMessage[]) {
+		return this.#entries.get(chatId)?.clearEchoedInputs(messages) ?? null;
 	}
 
 	replaceResendCandidates(

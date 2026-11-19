@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import type {
 	ActiveTranscriptState,
 	ChatLoadMessagesOptions,
@@ -1314,6 +1315,29 @@ describe('ConversationPanelRegistry', () => {
 		selected.markOptimisticUserInputDelivered('input-1');
 
 		expect(markDelivered).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('retires a background steer when a recovery snapshot supplies its missed echo', () => {
+		const { cache, registry, overlays } = fixture();
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-2' });
+		const chatId = 'chat-1';
+		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'instance-1' };
+		const timestamp = '2026-08-30T00:00:00.000Z';
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		control.queue.recentlyDispatched = [{ entryId: receipt.entryId, revision: 1, dispatchedAt: timestamp }];
+		seed(cache, chatId);
+		selected.upsertOptimisticUserInput({ chatId, clientMessageId: receipt.clientMessageId,
+			content: 'guidance', createdAt: timestamp, delivery: 'pending' });
+		selected.acceptQueuedSteer(receipt, control);
+		expect(overlays.viewFor('chat-2')).toBeNull();
+		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(receipt);
+		cache.replace(chatId, 'view-1', [message(1), { ordinal: 2,
+			message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: receipt.clientMessageId }) }], 2, null);
+		registry.reconcile([presentation('chat-view:window-left', chatId)]);
+		registry.panel('chat-view:window-left')!.installInitialSnapshot();
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
 		registry.destroy();
 		cache.flush();
 	});

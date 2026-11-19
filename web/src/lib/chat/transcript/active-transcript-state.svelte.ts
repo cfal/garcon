@@ -78,6 +78,7 @@ type PageApplyResult = MessageApplyResult | 'stale';
 
 export interface ActiveTranscriptStateOptions {
 	combineMessages?: boolean;
+	onSnapshotMessages?: (chatId: string, messages: readonly TranscriptMessage[]) => void;
 	recoverTranscript?: (chatId: string, transcriptViewId: string) => Promise<void>;
 	onSnapshotResendCandidates?: (
 		chatId: string,
@@ -565,6 +566,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			? countTranscriptAnchors(this.entries, page.nextBeforeOrdinal ?? 1) : 0;
 		if (installMode === 'replace') this.#invalidatePageLoad();
 		this.#snapshots.installWindow(chatId, page, installMode);
+		this.options.onSnapshotMessages?.(chatId, page.messages);
 		if (requiredInstallMode === 'replace') this.#windowSelectionRevision += 1;
 		if (page.resendCandidates !== undefined) {
 			this.#snapshots.publishResendCandidates(chatId, page.resendCandidates, anchorSnapshot?.page ?? page);

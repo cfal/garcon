@@ -98,6 +98,18 @@ function makeTransientFeed(chatId: string): ChatTransientFeedSnapshot {
 }
 
 describe('ConversationUiState', () => {
+	it('notifies queue projections only for accepted controls and authoritative removal', () => {
+		const changed = vi.fn();
+		const ui = new ConversationUiState(changed);
+		const newer = makeControl(makeQueue(), { version: 2 });
+		ui.setExecutionControlFromRefresh('chat-1', newer);
+		ui.setExecutionControlFromLiveUpdate('chat-1', makeControl());
+		ui.setExecutionControlFromRefresh('chat-1', makeControl());
+		ui.markExecutionControlSocketDisconnected();
+		expect(changed.mock.calls).toEqual([['chat-1', newer]]);
+		ui.confirmExecutionControlSocketInstance('replacement');
+		expect(changed.mock.calls).toEqual([['chat-1', newer], ['chat-1', null]]);
+	});
 	it('updates pending permission requests through values or updater functions', () => {
 		const store = new ConversationUiState();
 		const first = makePermissionRequest('one');

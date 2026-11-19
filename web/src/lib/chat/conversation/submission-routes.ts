@@ -162,9 +162,13 @@ export async function submitSteerRoute(
 	try {
 		const response = await submission.submit();
 		if (response.delivery === 'queued') {
-			// The queue shows the steer until it is delivered with the same client message ID.
-			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
 			deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, response.control);
+			// A socket edit, removal, or restart can overtake the HTTP acknowledgement.
+			deps.chatState.acceptQueuedSteer({
+				clientMessageId: submission.clientMessageId,
+				serverInstanceId: response.control.serverInstanceId,
+				entryId: response.entryId,
+			}, deps.conversationUi.getExecutionControl(context.chatId));
 		} else {
 			deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		}
