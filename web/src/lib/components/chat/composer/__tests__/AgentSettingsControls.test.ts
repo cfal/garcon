@@ -33,10 +33,11 @@ describe('AgentSettingsControls', () => {
 				},
 				{ key: 'review', type: 'boolean', label: 'Review changes' },
 			],
+			defaults: { ownerId: 'sample-agent', schemaVersion: 1, values: { effort: 'low' } },
 			envelope: {
 				ownerId: 'sample-agent',
 				schemaVersion: 1,
-				values: { effort: 'low', review: false },
+				values: { review: false },
 			},
 			onChange,
 		});

@@ -338,6 +338,10 @@ Garcon keeps that development loop coherent:
 
 Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
 
+In a Codex composer, use **Selected speed** (the gauge) to choose **Standard**, **Fast**, or **Ultrafast**. Fast and Ultrafast request faster routing for the same model and reasoning effort and use more credits or incur higher API charges. A change applies to subsequent turns, including queued prompts. Existing chats without a selection use Standard, regardless of the executor's `service_tier` setting. Background generation such as chat titles also uses Standard.
+
+Availability depends on your model, account, and workspace policy. An unloaded chat can save a preference for its next run; Garcon refuses to submit a prompt if Codex cannot apply that tier. Choose Standard or select a supported model rather than changing the executor's config. See [Codex speed settings](https://developers.openai.com/codex/speed).
+
 Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 
 ## Automate And Delegate

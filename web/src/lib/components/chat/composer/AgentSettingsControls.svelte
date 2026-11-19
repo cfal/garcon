@@ -14,29 +14,35 @@
 		DropdownMenuRadioItem,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
+	import Gauge from '@lucide/svelte/icons/gauge';
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
 	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 
 	interface Props {
 		descriptors: readonly AgentSettingDescriptor[];
 		envelope: AgentSettingsEnvelope;
+		defaults: AgentSettingsEnvelope;
 		onChange: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 		disabled?: boolean;
 	}
 
-	let { descriptors, envelope, onChange, disabled = false }: Props = $props();
+	let { descriptors, envelope, defaults, onChange, disabled = false }: Props = $props();
 
 	function controlId(descriptor: AgentSettingDescriptor): string {
 		return `agent-setting-${envelope.ownerId}-${descriptor.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 	}
 
+	function currentValue(descriptor: AgentSettingDescriptor) {
+		return settingValue(envelope, descriptor) ?? settingValue(defaults, descriptor);
+	}
+
 	function numberValue(descriptor: Extract<AgentSettingDescriptor, { type: 'number' }>): number {
-		const value = settingValue(envelope, descriptor);
+		const value = currentValue(descriptor);
 		return typeof value === 'number' ? value : descriptor.min;
 	}
 
 	function stringValue(descriptor: AgentSettingDescriptor): string {
-		const value = settingValue(envelope, descriptor);
+		const value = currentValue(descriptor);
 		return typeof value === 'string' ? value : '';
 	}
 
@@ -61,7 +67,7 @@
 						<input
 							id={controlId(descriptor)}
 							type="checkbox"
-							checked={settingValue(envelope, descriptor) === true}
+							checked={currentValue(descriptor) === true}
 							{disabled}
 							class="size-4 rounded border-border accent-primary focus-visible:ring-2 focus-visible:ring-ring"
 							onchange={(event) => onChange(descriptor, event.currentTarget.checked)}
@@ -80,6 +86,8 @@
 						>
 							{#if descriptor.labelKey === 'thinking'}
 								<AgentThinkingIcon />
+							{:else if descriptor.labelKey === 'speed'}
+								<Gauge class="size-4" aria-hidden="true" />
 							{:else}
 								<BrainCircuit class="size-4" aria-hidden="true" />
 							{/if}
