@@ -14,7 +14,10 @@ export const CODEX_SPEED_SETTING = {
 
 export type CodexServiceTier = keyof typeof SPEED_OPTION_BY_TIER;
 export type CodexSpeed = typeof SPEED_OPTION_BY_TIER[CodexServiceTier]['value'];
-const TIER_BY_SPEED = { standard: 'default', fast: 'priority', ultrafast: 'ultrafast' } as const satisfies Record<CodexSpeed, CodexServiceTier>;
+
+const TIER_BY_SPEED = Object.fromEntries(
+  Object.entries(SPEED_OPTION_BY_TIER).map(([tier, option]) => [option.value, tier]),
+) as Record<CodexSpeed, CodexServiceTier>;
 
 export function codexSpeed(settings: AgentSettingsEnvelope): CodexSpeed {
   const speed = settings.values.speed;
