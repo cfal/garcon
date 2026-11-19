@@ -1,7 +1,6 @@
 import type { UsageTokenTotals } from '@garcon/common/usage';
 
-// Anthropic fast mode and OpenAI priority processing bill above standard; OpenAI flex bills below.
-export type UsageSpeed = 'standard' | 'fast' | 'flex';
+export type UsageSpeed = 'standard' | 'fast' | 'ultrafast' | 'flex';
 
 /** One billed model request read from a native transcript. */
 export interface UsageRecord {

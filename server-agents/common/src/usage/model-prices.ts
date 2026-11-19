@@ -1,8 +1,9 @@
 // Built-in list prices in USD per million tokens. Anthropic rates follow
 // https://platform.claude.com/docs/en/about-claude/pricing; OpenAI rates follow
-// LiteLLM's model_prices_and_context_window.json. Both were read on this date.
+// LiteLLM's model_prices_and_context_window.json (2026-10-27), with the Ultrafast
+// models updated from https://developers.openai.com/api/docs/pricing.md.
 // Models missing here are reported as unpriced, never as free.
-export const USAGE_PRICING_AS_OF = '2026-10-27';
+export const USAGE_PRICING_AS_OF = '2026-11-19';
 
 export interface TokenRates {
   readonly input: number;
@@ -17,6 +18,7 @@ export interface ModelPrice {
   readonly rates: TokenRates;
   // Anthropic fast mode and OpenAI priority processing bill every category at this multiple.
   readonly fastMultiplier: number | null;
+  readonly ultrafastMultiplier?: (timestampMs: number) => number;
   // OpenAI flex processing bills every category at this multiple.
   readonly flexMultiplier: number | null;
   // A request whose prompt, including cache reads and writes, exceeds the threshold bills at these rates.
@@ -76,6 +78,13 @@ function openAiWithLongContext(rates: TokenRates, fast: number): ModelPrice {
   return openAi(rates, { fast, flex: 0.5, longContext: openAiLongContext(rates) });
 }
 
+// Uses request time so the end of the GPT-6.2 promotion does not reprice earlier turns.
+const ULTRAFAST_PROMOTION_END = Date.parse('2027-03-01T00:00:00-08:00');
+function ultrafastModel(rates: TokenRates, multiplier: (timestampMs: number) => number, flex?: number): ModelPrice {
+  return { ...openAi(rates, { fast: 2, flex, longContext: openAiLongContext(rates) }), ultrafastMultiplier: multiplier };
+}
+const gpt62Ultrafast = (time: number) => time < ULTRAFAST_PROMOTION_END ? 3 : 6;
+
 export const MODEL_PRICES: ReadonlyMap<string, ModelPrice> = new Map<string, ModelPrice>([
   ['claude-fable-5-1', anthropic(10, 50, 0.25)],
   ['claude-mythos-5-1', anthropic(10, 50, 0.25)],
@@ -101,10 +110,12 @@ export const MODEL_PRICES: ReadonlyMap<string, ModelPrice> = new Map<string, Mod
     longContext: { promptTokensAbove: 100_000, rates: anthropicRates(0.5, 2.5, 0.05) },
   })],
   ['claude-haiku-4-5', anthropic(1, 5, 0.1)],
-  ['gpt-6-astra', openAiWithLongContext(openAiRates(10, 50, 1, 12.5), 2)],
+  ['gpt-6.2-astra', ultrafastModel(openAiRates(8, 40, 0.4, 10), gpt62Ultrafast)],
+  ['gpt-6.2-sol', ultrafastModel(openAiRates(2, 10, 0.1, 2.5), gpt62Ultrafast)],
+  ['gpt-6-astra', ultrafastModel(openAiRates(10, 50, 1, 12.5), () => 6, 0.5)],
   ['gpt-6-sol', openAiWithLongContext(openAiRates(2, 10, 0.2, 2.5), 2)],
   ['gpt-6-luna', openAiWithLongContext(openAiRates(0.1, 0.5, 0.01, 0.125), 2)],
-  ['gpt-6.1-sol', openAiWithLongContext(openAiRates(2, 10, 0.1, 2.5), 2)],
+  ['gpt-6.1-sol', ultrafastModel(openAiRates(2, 10, 0.1, 2.5), () => 6, 0.5)],
   ['gpt-6.1-terra', openAiWithLongContext(openAiRates(1, 5, 0.05, 1.25), 2)],
   ['gpt-5.6', openAiWithLongContext(openAiRates(4, 20, 0.4, 5), 2)],
   ['gpt-5.6-sol', openAiWithLongContext(openAiRates(4, 20, 0.4, 5), 2)],

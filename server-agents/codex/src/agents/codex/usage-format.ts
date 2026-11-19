@@ -125,7 +125,7 @@ function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
 // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/config_types.rs#L528-L531
 function codexSpeed(serviceTier: unknown): UsageSpeed {
   if (serviceTier === 'priority' || serviceTier === 'fast') return 'fast';
-  return serviceTier === 'flex' ? 'flex' : 'standard';
+  return serviceTier === 'flex' || serviceTier === 'ultrafast' ? serviceTier : 'standard';
 }
 
 // Forks copy and restamp parent history in a burst right after their session_meta;

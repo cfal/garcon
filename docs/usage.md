@@ -91,7 +91,10 @@ Costs are API list-price estimates from the built-in table in
 plans. Anthropic rates follow the official pricing page, including per-model
 cache-read rates, one-hour cache writes, fast mode, and Haiku 5.5's long-prompt
 tier. OpenAI rates follow LiteLLM's published table, including priority
-processing, flex processing, and the 272K-token long-context tier. Model names are matched after
+processing, flex processing, and the 272K-token long-context tier. Ultrafast estimates use
+[OpenAI’s published API rates](https://developers.openai.com/api/docs/pricing) for the model,
+including the GPT-6.2 promotional rate at the time of the request. Ultrafast usage without a
+published rate counts toward tokens but is reported as unpriced. Model names are matched after
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens
 count, its cost is shown as unknown rather than zero, and totals note the

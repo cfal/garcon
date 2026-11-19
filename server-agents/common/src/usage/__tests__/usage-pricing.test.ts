@@ -32,6 +32,17 @@ describe('price table keys', () => {
     expect(priceUsageRecord(record('<synthetic>', { outputTokens: 10 }))).toBeNull();
   });
 
+  test('prices Ultrafast by model, context length and request time, not the Fast multiplier', () => {
+    const price = (model: string, time: string, input = 0) => priceUsageRecord(record(model,
+      { uncachedInputTokens: input, outputTokens: 1_000_000 }, { speed: 'ultrafast', timestampMs: Date.parse(time) }));
+    const before = '2027-03-01T07:59:59Z';
+    expect(price('gpt-6.2-astra', before)?.categoryCostUsd.output).toBe(120);
+    expect(price('gpt-6.2-astra', '2027-03-01T08:00:00Z')?.categoryCostUsd.output).toBe(240);
+    expect(price('gpt-6.2-sol', before, 272_001)?.categoryCostUsd.output).toBe(45);
+    expect(price('gpt-6.1-sol', before)?.categoryCostUsd.output).toBe(60);
+    expect(price('gpt-5.6-sol', before)).toBeNull();
+  });
+
   test('every entry has finite, non-negative rates', () => {
     for (const [model, price] of MODEL_PRICES) {
       const tiers = [price.rates, ...(price.longContext ? [price.longContext.rates] : [])];

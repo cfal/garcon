@@ -38,7 +38,7 @@ export function lookupModelPrice(model: string): ModelPrice | null {
 }
 
 /** Returns null for models without a known price. Reasoning tokens are already part of output. */
-export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed'>): PricedUsage | null {
+export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed' | 'timestampMs'>): PricedUsage | null {
   const price = lookupModelPrice(record.model);
   if (!price) return null;
   const { uncachedInputTokens, cachedInputTokens, cacheWriteTokens, outputTokens } = record.totals;
@@ -46,8 +46,9 @@ export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 
   const rates = price.longContext && promptTokens > price.longContext.promptTokensAbove
     ? price.longContext.rates
     : price.rates;
-  const tier = record.speed === 'fast' ? price.fastMultiplier : record.speed === 'flex' ? price.flexMultiplier : null;
-  // A tier the table does not price for this model bills at standard rates.
+  const tier = record.speed === 'ultrafast' ? price.ultrafastMultiplier?.(record.timestampMs)
+    : record.speed === 'fast' ? price.fastMultiplier : record.speed === 'flex' ? price.flexMultiplier : 1;
+  if (record.speed === 'ultrafast' && tier === undefined) return null;
   const scale = (tier ?? 1) / 1_000_000;
   const write1h = Math.min(record.cacheWrite1hTokens, cacheWriteTokens);
   const categoryCostUsd = {

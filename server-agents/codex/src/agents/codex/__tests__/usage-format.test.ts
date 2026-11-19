@@ -135,6 +135,8 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(tokenCount(counters(100, 10)), state)?.speed).toBe('fast');
     parseCodexUsageLine(threadSettings('flex'), state);
     expect(parseCodexUsageLine(tokenCount(counters(200, 10)), state)?.speed).toBe('flex');
+    parseCodexUsageLine(threadSettings('ultrafast'), state);
+    expect(parseCodexUsageLine(tokenCount(counters(250, 10)), state)?.speed).toBe('ultrafast');
     parseCodexUsageLine(threadSettings('default'), state);
     expect(parseCodexUsageLine(tokenCount(counters(300, 10)), state)?.speed).toBe('standard');
   });
