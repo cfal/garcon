@@ -1,6 +1,7 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { CodexStartRequest } from '../runtime-types.js';
+import type { CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import type { CodexOperation } from './operation-routes.js';
@@ -67,6 +68,7 @@ export interface RunningCodexSession {
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
+  turnServiceTier: CodexServiceTier;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
   sourceOperation: CodexOperation;

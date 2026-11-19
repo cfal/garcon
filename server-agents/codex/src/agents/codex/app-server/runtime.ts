@@ -77,6 +77,8 @@ import {
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
+import { assertEffectiveTier, codexServiceTier, type CodexServiceTier } from '../service-tier.js';
+import { assertLoadedTierAvailable } from './service-tier-discovery.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
   rejectedCodexSteer,
@@ -218,6 +220,7 @@ export class CodexAppServerRuntime {
       projectPath: request.projectPath,
       permissionMode: request.permissionMode,
       thinkingMode: request.thinkingMode,
+      speed: request.speed,
       clientMessageId: request.clientMessageId,
       skills,
     }));
@@ -281,6 +284,7 @@ export class CodexAppServerRuntime {
         client,
         runtimeIdentity: codexSourceRuntimeIdentity(request),
         modelEndpointId: request.modelEndpointId,
+        turnServiceTier: codexServiceTier(request.speed),
         providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
         confirmedThreadSettings: this.#initialThreadSettings(request, started),
         operation,
@@ -484,12 +488,20 @@ export class CodexAppServerRuntime {
         agentSessionId: sourceThreadId,
         nativePath: sourceSession.nativePath,
         model: sourceSession.model,
+        speed: args.speed,
         projectPath: sourceSession.projectPath,
         codexConfig: args.codexConfig,
         lastTurnId: args.lastTurnId,
         modelProvider: args.modelProvider,
       }));
       await this.#unsubscribeBestEffort(client, forked.thread.id);
+      try {
+        assertEffectiveTier(codexServiceTier(args.speed), forked.serviceTier, forked.model);
+      } catch (error) {
+        // Removes the unpublished child from native discovery, never its parent.
+        await client.request('thread/archive', { threadId: forked.thread.id });
+        throw error;
+      }
       const nativePath = await waitForMaterializedThread(forked.thread, {
         timeoutMs: this.#materializationTimeoutMs,
       });
@@ -524,13 +536,12 @@ export class CodexAppServerRuntime {
 
   updateSessionSettings(
     agentSessionId: string,
-    configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>,
+    configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>
+      & Pick<CodexStartRequest, 'speed'>,
   ): Promise<void> {
     const session = this.#sourceForThread(agentSessionId);
     if (!session) return Promise.resolve();
     const target = codexThreadSettingsTarget(configuration);
-    // Records explicit intent before the RPC because its confirmation may precede its response.
-    if (target.effort !== null) session.providerOwnsReasoningEffort = false;
     const update = session.threadSettingsUpdateChain.then(() => (
       this.#applyThreadSettings(session, target)
     ));
@@ -550,6 +561,14 @@ export class CodexAppServerRuntime {
         false,
       );
     }
+    if (target.serviceTier !== 'default') {
+      await assertLoadedTierAvailable(session.client, session.threadId, target.model, target.serviceTier, this.#settingsUpdateTimeoutMs);
+      if (this.#sources.get(session.client) !== session || session.superseded) {
+        throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while checking speed', true);
+      }
+    }
+    // Records explicit intent before the RPC because its confirmation may precede its response.
+    if (target.effort !== null) session.providerOwnsReasoningEffort = false;
     if (threadSettingsMatch(session.confirmedThreadSettings, target)) {
       session.permissionMode = target.permissionMode;
       return;
@@ -757,6 +776,7 @@ export class CodexAppServerRuntime {
     client: CodexAppServerClient;
     runtimeIdentity: string;
     modelEndpointId: string | null;
+    turnServiceTier: CodexServiceTier;
     providerOwnsReasoningEffort: boolean;
     confirmedThreadSettings: CodexConfirmedThreadSettings;
     operation: CodexOperation;
@@ -788,6 +808,7 @@ export class CodexAppServerRuntime {
         publishRows(this.#logger, args.chatId, messages, turnRoutes.get(turnId))
       )),
       turnRoutes,
+      turnServiceTier: args.turnServiceTier,
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
@@ -825,9 +846,11 @@ export class CodexAppServerRuntime {
       && retained.nativePath && request.nativePath && retained.nativePath !== request.nativePath) {
       request = await this.#resolveResumePath(request);
     }
-    // Omitted effort is reusable only when no prior turn or settings update took ownership.
-    const reasoningEffortIsReusable = () => !providerOwnsReasoningEffort(request)
-      || retained?.providerOwnsReasoningEffort === true;
+    const tier = codexServiceTier(request.speed);
+    // Compact has no turn overrides. A different tier needs a fresh effective thread configuration.
+    const settingsAreReusable = () => retained?.confirmedThreadSettings.serviceTier === tier
+      && (tier === 'default' || retained.confirmedThreadSettings.model === request.model)
+      && (!providerOwnsReasoningEffort(request) || retained.providerOwnsReasoningEffort);
     const matchingPath = !retained?.nativePath
       || !request.nativePath
       || retained.nativePath === request.nativePath;
@@ -837,7 +860,7 @@ export class CodexAppServerRuntime {
       && !retained.pendingThreadSettings
       && retained.runtimeIdentity === runtimeIdentity
       && matchingPath
-      && reasoningEffortIsReusable(),
+      && settingsAreReusable(),
     );
     let interruptedWriterReady = false;
     if (
@@ -881,15 +904,13 @@ export class CodexAppServerRuntime {
       && (
         retained.configurationFenced
         || retained.pendingThreadSettings
-        || !reasoningEffortIsReusable()
+        || !settingsAreReusable()
       )
     ) {
       await this.#waitForSourceTerminal(retained, request);
       assertCodexExecutionOpen(request);
     }
-    if (
-      retained
-      && this.#latestSourceByChat.get(request.chatId) === retained
+    const canReactivate = () => retained && this.#latestSourceByChat.get(request.chatId) === retained
       && retained.threadId === request.agentSessionId
       && !retained.superseded
       && !retained.configurationFenced
@@ -899,8 +920,13 @@ export class CodexAppServerRuntime {
       ))
       && retained.runtimeIdentity === runtimeIdentity
       && matchingPath
-      && reasoningEffortIsReusable()
-    ) {
+      && settingsAreReusable();
+    if (retained && canReactivate()) {
+      if (tier !== 'default') {
+        await assertLoadedTierAvailable(retained.client, retained.threadId, request.model, tier, this.#settingsUpdateTimeoutMs);
+        assertCodexExecutionOpen(request);
+        if (!canReactivate()) throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while checking speed', true);
+      }
       return {
         session: this.#reactivateSession(retained, request, operation),
         buffered: false,
@@ -932,6 +958,7 @@ export class CodexAppServerRuntime {
           client,
           runtimeIdentity,
           modelEndpointId: request.modelEndpointId,
+          turnServiceTier: tier,
           providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
           confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
           operation,
@@ -987,6 +1014,7 @@ export class CodexAppServerRuntime {
     session.terminalWaiters.clear();
     session.liveCodeModeResultToolIds.clear();
     session.capacityRetryCount = 0;
+    session.turnServiceTier = codexServiceTier(request.speed);
     session.turnAttemptGeneration += 1;
     session.pendingCapacityFailure = null;
     session.sourceOperation = operation;
@@ -1058,11 +1086,12 @@ export class CodexAppServerRuntime {
   }
 
   #initialThreadSettings(
-    request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
+    request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode' | 'speed'>,
     response: ThreadStartResponse,
   ): CodexConfirmedThreadSettings {
     const requested = codexThreadSettingsTarget(request);
     const model = response.model || response.thread.model || requested.model;
+    assertEffectiveTier(requested.serviceTier, response.serviceTier, model);
     const responseEffort = response.reasoningEffort !== undefined
       ? response.reasoningEffort
       : response.thread.reasoningEffort;
@@ -1373,10 +1402,18 @@ export class CodexAppServerRuntime {
       session.activeDeliveryReservations += 1;
       try {
         if (session.activeTurnId) return true;
+        const tier = session.turnServiceTier;
+        if (tier !== 'default') {
+          const model = session.confirmedThreadSettings.model;
+          await assertLoadedTierAvailable(session.client, session.threadId, model, tier, this.#settingsUpdateTimeoutMs);
+          if (!this.#canApplyTurnAttempt(session, retryGeneration) || session.activeTurnId) return true;
+          if (session.confirmedThreadSettings.model !== model) throw new Error('Codex model changed during capacity retry');
+        }
         session.nextTurnOperation = operation;
         const turn = await session.client.startTurn({
           threadId: session.threadId,
           input: [],
+          serviceTierForTurn: tier,
         });
         if (
           this.#sessions.get(session.threadId) !== session

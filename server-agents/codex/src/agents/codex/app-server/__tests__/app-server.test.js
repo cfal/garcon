@@ -378,6 +378,14 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('expires a stalled discovery read without blocking the client on a late reply', async () => {
+    const { client, writes, sendResult } = createRpcClientFixture((message) =>
+      message.method === 'model/list' ? undefined : initializeResponse, { allowMissingResponse: true });
+    await expect(client.request('model/list', {}, 5)).rejects.toThrow('model/list timed out');
+    sendResult(writes.find((message) => message.method === 'model/list').id, { data: [] });
+    await expect(client.request('config/read', {})).resolves.toEqual(initializeResponse);
+    await client.shutdown();
+  });
   it('does not advertise human-only approval support', async () => {
     const { client, writes } = createRpcClientFixture(() => initializeResponse);
     await client.connect();
@@ -1030,6 +1038,17 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
 });
 
 describe('Codex app-server request builders', () => {
+  it.each([[undefined, 'default'], ['standard', 'default'], ['fast', 'priority'], ['ultrafast', 'ultrafast']])(
+    'applies %s without changing model or effort', (speed, serviceTier) => {
+      const request = makeRequest({ speed, model: 'model-a', thinkingMode: 'high' });
+      expect(buildThreadStartParams(request)).toMatchObject({ model: 'model-a', serviceTier });
+      expect(buildThreadResumeParams({ ...request, agentSessionId: 'source' })).toMatchObject({ serviceTier });
+      expect(buildThreadForkParams({ ...request, agentSessionId: 'source' })).toMatchObject({ serviceTier });
+      expect(buildTurnStartParams({ ...request, threadId: 'child' })).toMatchObject({ model: 'model-a', effort: 'high', serviceTier });
+      expect(buildThreadSettingsUpdateParams('child', codexThreadSettingsTarget(request))).toMatchObject({ serviceTier });
+    },
+  );
+
   it('builds durable thread/start params with sandbox and config', () => {
     const params = buildThreadStartParams(makeRequest({
       permissionMode: 'bypassPermissions',
@@ -1130,6 +1149,7 @@ describe('Codex app-server request builders', () => {
     });
 
     expect(buildThreadSettingsUpdateParams('thread-1', target)).toEqual({
+      serviceTier: 'default',
       threadId: 'thread-1',
       model: 'gpt-5.4-mini',
       effort: 'high',
@@ -1148,6 +1168,7 @@ describe('Codex app-server request builders', () => {
       permissionMode: 'bypassPermissions',
       thinkingMode: 'none',
     }))).toEqual({
+      serviceTier: 'default',
       threadId: 'thread-1',
       model: 'gpt-5.4-mini',
       approvalPolicy: 'never',
@@ -1212,6 +1233,7 @@ describe('Codex app-server request builders', () => {
       cwd: '/repo',
       model: 'gpt-5.4-codex',
       ephemeral: false,
+      serviceTier: 'default',
       excludeTurns: true,
       path: '/tmp/jsonl.jsonl',
     });
@@ -2342,8 +2364,9 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
     });
+    const createClient = mock(() => fake);
     const provider = createRuntime({
-      createClient: () => fake,
+      createClient,
       materializationTimeoutMs: 20,
       ...runtimeOptions,
     });
@@ -2352,7 +2375,7 @@ describe('CodexAppServerRuntime', () => {
       ...requestOverrides,
       operation: published.operation,
     }));
-    return { fake, provider, published, started };
+    return { fake, createClient, provider, published, started };
   }
 
   function emitThreadSettings(fake, overrides = {}, threadId = 'thread-1') {
@@ -2364,6 +2387,45 @@ describe('CodexAppServerRuntime', () => {
       },
     });
   }
+
+  it('rejects an ineffective premium tier before activation, admission or inference', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const markStarted = mock(async () => {});
+    const onSessionActivated = mock();
+    const request = makeRequest({ speed: 'ultrafast', onSessionActivated,
+      executionAdmission: { signal: new AbortController().signal, markStarted } });
+    await expect(provider.startSession(request)).rejects.toThrow('Ultrafast speed is unavailable');
+    const resume = { ...request, agentSessionId: 'thread-1', nativePath: null };
+    await expect(provider.runTurn(resume)).rejects.toThrow('Ultrafast speed is unavailable');
+    await expect(provider.compact(resume)).rejects.toThrow('Ultrafast speed is unavailable');
+    expect(onSessionActivated).not.toHaveBeenCalled();
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(fake.compactThread).not.toHaveBeenCalled();
+  });
+
+  it('archives only the unpublished fork if Codex did not apply the child tier', async () => {
+    const fake = new FakeClient();
+    fake.request = mock(async () => ({}));
+    const provider = createRuntime({ createClient: () => fake });
+    await expect(provider.forkSession({ sourceSession: { agentSessionId: 'parent', projectPath: '/repo', model: 'model-a' },
+      speed: 'ultrafast' })).rejects.toThrow('Ultrafast speed is unavailable');
+    expect(fake.forkThread.mock.calls[0][0]).toMatchObject({ threadId: 'parent', serviceTier: 'ultrafast' });
+    expect(fake.request).toHaveBeenCalledWith('thread/archive', { threadId: 'thread-1' });
+  });
+
+  it('reopens a retained Standard source with the requested tier before compacting', async () => {
+    const next = new FakeClient({ resumeThread: async () => ({ thread: makeThread(), model: 'gpt-5.4-codex', serviceTier: 'ultrafast' }) });
+    const { fake, createClient, provider, published } = await startSettingsSession();
+    createClient.mockReturnValue(next);
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
+    await published.waitForEvent((event) => event.type === 'run-ended');
+    await provider.compact(makeRequest({ agentSessionId: 'thread-1', speed: 'ultrafast' }));
+    expect(next.resumeThread.mock.calls[0][0]).toMatchObject({ serviceTier: 'ultrafast' });
+    expect(next.compactThread).toHaveBeenCalledWith('thread-1');
+    expect(fake.compactThread).not.toHaveBeenCalled();
+  });
 
   it('starts a turn and waits for the app-server transcript path before resolving', async () => {
     const nativePath = path.join(tmpDir, 'thread.jsonl');
@@ -3311,7 +3373,7 @@ describe('CodexAppServerRuntime', () => {
     let resolveRetryStarted;
     const retryStarted = new Promise((resolve) => { resolveRetryStarted = resolve; });
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt-5.4-codex', modelProvider: 'openai', serviceTier: 'ultrafast', cwd: '/repo' }),
       startTurn: async (params) => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -3325,11 +3387,14 @@ describe('CodexAppServerRuntime', () => {
       capacityRetryDelaysMs: [0, 0, 0],
     });
     const published = collectOperation();
-    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.request = mock(async (method) => ({ data: method === 'model/list'
+      ? [{ model: 'gpt-5.4-codex', serviceTiers: [{ id: 'ultrafast' }] }] : [{ name: 'ultrafast_mode', enabled: true }] }));
+    await provider.startSession(makeRequest({ operation: published.operation, speed: 'ultrafast' }));
+    emitThreadSettings(fake, { serviceTier: 'default' });
 
     emitCapacityFailure(fake, 'turn-1');
 
-    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [] });
+    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [], serviceTierForTurn: 'ultrafast' });
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(failureMessages(published.events)).toEqual([]);
 
@@ -3543,7 +3608,7 @@ describe('CodexAppServerRuntime', () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       emitCapacityFailure(fake, `turn-${attempt + 1}`);
       if (attempt < 3) {
-        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', input: [] });
+        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', input: [], serviceTierForTurn: 'default' });
       }
     }
 
@@ -6000,6 +6065,7 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.updateThreadSettings).toHaveBeenCalledWith({
       threadId: 'thread-1',
+      serviceTier: 'default',
       model: 'gpt-5.4-mini',
       effort: 'high',
       approvalPolicy: 'on-request',
@@ -6043,6 +6109,39 @@ describe('CodexAppServerRuntime', () => {
       .toBe('continued with confirmed settings');
   });
 
+  it.each([['fast', 'priority'], ['ultrafast', 'ultrafast']])('confirms %s only after the matching tier notification', async (speed, tier) => {
+    const { fake, provider, started } = await startSettingsSession();
+    fake.request = mock(async (method) => ({ data: method === 'model/list'
+      ? [{ model: 'gpt-5.4-codex', serviceTiers: [{ id: tier }] }]
+      : [{ name: speed + '_mode', enabled: true }] }));
+    let settled = false;
+    const configuration = { model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'none' };
+    const pending = provider.updateSessionSettings(started.agentSessionId, { ...configuration, speed })
+      .then(() => { settled = true; });
+    await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
+    expect(fake.updateThreadSettings.mock.calls[0][0].serviceTier).toBe(tier);
+    emitThreadSettings(fake, { serviceTier: 'default' });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    emitThreadSettings(fake, { serviceTier: tier });
+    await pending;
+    fake.updateThreadSettings.mockImplementation(async () => {
+      emitThreadSettings(fake, { serviceTier: 'default' });
+      return {};
+    });
+    await provider.updateSessionSettings(started.agentSessionId, { ...configuration, speed: 'standard' });
+    expect(fake.updateThreadSettings.mock.calls[1][0].serviceTier).toBe('default');
+  });
+
+  it('rejects unsupported Fast before changing the loaded session', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    fake.request = mock(async () => ({ data: [{ model: 'gpt-5.4-codex', serviceTiers: [] }] }));
+    await expect(provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex', permissionMode: 'default', thinkingMode: 'none', speed: 'fast',
+    })).rejects.toThrow('Fast speed is unavailable');
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+  });
+
   it('updates a retained idle source while preserving provider-default effort', async () => {
     const { fake, provider, started } = await startSettingsSession({}, {
       thinkingMode: 'none', modelEndpointId: 'endpoint-1',
@@ -6069,6 +6168,7 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.updateThreadSettings).toHaveBeenCalledWith({
       threadId: 'thread-1',
+      serviceTier: 'default',
       model: 'gpt-5.4-codex',
       approvalPolicy: 'on-request',
       approvalsReviewer: 'user',
