@@ -759,7 +759,6 @@
 	);
 	const composerFrameWrapperClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS, 'shadow-none');
-	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 </script>
 
 {#snippet composerSurface()}
@@ -856,7 +855,7 @@
 				disabled={isDisabled || promptTransformPending}
 				isDragActive={composerState.isDragActive}
 				error={attachmentError}
-				class={imageListClass}
+				class="p-2 bg-muted/40 rounded-lg mx-2 mt-2"
 				onRemove={(index) => composerState.removeImage(index)}
 			/>
 

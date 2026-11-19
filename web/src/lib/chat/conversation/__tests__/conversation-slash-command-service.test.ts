@@ -322,6 +322,23 @@ describe('ConversationSlashCommandService', () => {
 		expect(mockCompactChat).not.toHaveBeenCalled();
 	});
 
+	it('preserves new attachments while a fork is waiting for settings', async () => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const chat = deps.sessions.byId['chat-1'];
+		const text = '/fork Continue';
+		deps.composerState.inputText = text;
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({ chatId: chat.id, chat, text, images: [], ownsComposer: true });
+		if (result.kind !== 'handled') throw new Error('Expected a fork command');
+		deps.composerState.images = [new File([], 'attachment.txt')];
+		gate.resolve(true);
+		expect(await result.outcome).toBe('no-op');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+	});
+
 	it('rejects steering when the capability is absent or attachments are present', () => {
 		const { deps, appendLocalNotice } = createDeps(createChat({ agentId: 'codex' }));
 		const service = new ConversationSlashCommandService(deps);

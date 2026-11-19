@@ -93,6 +93,7 @@ export interface ConversationForkSource {
 interface SlashCommandComposerState {
 	inputText: string;
 	images: File[];
+	readonly contentRevision: number;
 	clearAfterSubmit(chatId: string): number;
 	restoreDraftIfRevision(
 		chatId: string,
@@ -171,12 +172,12 @@ export class ConversationSlashCommandService {
 	): Promise<ConversationSubmissionOutcome> {
 		const pending = this.deps.pendingSettings(chat.id);
 		if (!pending) return submit(chat);
-		const text = this.deps.composerState.inputText;
+		const revision = this.deps.composerState.contentRevision;
 		return pending.then((accepted) => {
 			const current = this.deps.sessions.byId[chat.id];
 			if (!accepted || !current || current.agentOwnershipEpoch !== chat.agentOwnershipEpoch
 				|| current.executorId !== chat.executorId || current.agentId !== chat.agentId) return 'rejected';
-			if (ownsComposer && (this.deps.sessions.selectedChatId !== chat.id || this.deps.composerState.inputText !== text)) return 'no-op';
+			if (ownsComposer && (this.deps.sessions.selectedChatId !== chat.id || this.deps.composerState.contentRevision !== revision)) return 'no-op';
 			return submit(current);
 		});
 	}
@@ -260,7 +261,7 @@ export class ConversationSlashCommandService {
 				return {
 					kind: 'handled',
 					outcome: this.#afterSettings(chat, ownsComposer, (current) =>
-					this.submitForkCommand(chatId, current, fork.message, images, ownsComposer)),
+						this.submitForkCommand(chatId, current, fork.message, images, ownsComposer)),
 				};
 			}
 		}
