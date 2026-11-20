@@ -142,6 +142,23 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3]]);
 	});
 
+	it('recognizes cancellation from the latest observation of a long-waiting queue entry', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const input = optimistic('own');
+		const receipt = { clientMessageId: input.clientMessageId, entryId: 'entry', serverInstanceId: 'server', transcriptViewId: 'view' };
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		control.queue.entries = [{ id: receipt.entryId, kind: 'steer', attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
+		overlays.upsertOptimisticInput(input.chatId, input, 3);
+		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
+		control.version += 100;
+		overlays.reconcileQueuedSteers(input.chatId, control);
+		control.version++;
+		control.queue.entries = [];
+		overlays.reconcileQueuedSteers(input.chatId, control);
+		expect(overlays.forChat(input.chatId).optimisticInputs).toEqual([]);
+	});
+
 	it('clears prior notices only when a new optimistic submission begins', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		overlays.appendServerNotice('chat-1', 'error', 'Exit 127');
