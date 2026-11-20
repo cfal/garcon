@@ -27,7 +27,7 @@ describe('jsonError', () => {
 });
 
 describe('jsonErrorFromUnknown', () => {
-  it.each(['INVALID_SETTINGS', 'INVALID_ENDPOINT'])('reports rejected %s input as non-retryable validation rather than a server error', async (code) => {
+  it.each(['INVALID_SETTINGS', 'INVALID_ENDPOINT', 'OPERATION_UNSUPPORTED'])('reports rejected %s input as non-retryable validation rather than a server error', async (code) => {
     const response = jsonErrorFromUnknown(new AgentIntegrationError(code, 'Invalid submitted source', false));
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ success: false, error: 'Invalid submitted source',

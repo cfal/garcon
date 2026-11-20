@@ -1589,8 +1589,6 @@
 	"settings_agents_auth_status_disconnected": "Not connected",
 	"settings_agents_error": "Error: {error}",
 	"settings_cli_updates_heading": "Command-line tools",
-	"settings_cli_update_label": "{agent} command-line tool",
-	"settings_cli_update_title": "CLI version",
 	"settings_cli_update_version_unknown": "Unknown",
 	"settings_cli_update_available": "Update available: {version}",
 	"settings_cli_update_current": "Up to date",

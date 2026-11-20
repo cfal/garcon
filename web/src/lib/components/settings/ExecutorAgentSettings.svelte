@@ -17,7 +17,8 @@
 	const executors = getExecutors();
 	const authExecutorId = $derived(executorId);
 	const settingsAuth = $derived(new SettingsAuthState(catalog.forExecutor(authExecutorId), authExecutorId));
-	const cliUpdates = $derived(new SettingsCliUpdateState(executorId));
+	const NATIVE_AGENT_IDS = ['claude', 'codex'];
+	const cliUpdates = $derived(new SettingsCliUpdateState(executorId, NATIVE_AGENT_IDS));
 	let openByAgent = $state<Record<string, boolean>>({});
 	const authContext = $derived.by(() => {
 		const executor = executors.get(executorId);
@@ -44,7 +45,7 @@
 	<OtherAgentsSection {settingsAuth} />
 {:else}
 	<div class="space-y-3">
-		{#each ['claude', 'codex'] as agentId (agentId)}
+		{#each NATIVE_AGENT_IDS as agentId (agentId)}
 			<AgentCard
 				{agentId}
 				agentName={nativeSourceLabelFor(agentId)}
@@ -85,7 +86,13 @@
 					{m.settings_cli_update_error({ error: cliUpdates.loadError })}
 				</p>
 			{/if}
-			{#each ['claude', 'codex'] as agentId (agentId)}
+			{#if cliUpdates.loading && cliUpdates.agentIds.length === 0}
+				<p role="status" class="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
+					<LoaderIcon class="size-3.5 animate-spin" aria-hidden="true" />
+					{m.settings_cli_update_checking()}
+				</p>
+			{/if}
+			{#each cliUpdates.agentIds as agentId (agentId)}
 				<AgentCliUpdateRow
 					agentName={nativeSourceLabelFor(agentId)}
 					status={cliUpdates.statusFor(agentId)}

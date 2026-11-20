@@ -1,5 +1,7 @@
 // Contract for checking and updating a provider's native CLI on one executor.
 
+import { isRecord } from './json.js';
+
 export const AGENT_CLI_INSTALL_METHODS = [
   'bundled', 'native', 'npm', 'bun', 'pnpm', 'yarn', 'homebrew', 'unmanaged', 'missing',
 ] as const;
@@ -12,6 +14,8 @@ export const AGENT_CLI_UPDATE_RUN_STATES = ['idle', 'running', 'succeeded', 'fai
 export type AgentCliUpdateRunState = typeof AGENT_CLI_UPDATE_RUN_STATES[number];
 
 export const AGENT_CLI_UPDATE_OUTPUT_MAX_CHARS = 10_000;
+// Bounds run messages and per-agent failures that executors and the controller report.
+export const AGENT_CLI_UPDATE_MESSAGE_MAX_CHARS = 500;
 const MAX_TEXT_CHARS = 4_096;
 
 // The most recent update run on this executor. `message` is the latest
@@ -25,6 +29,8 @@ export interface AgentCliUpdateRun {
 }
 
 export interface AgentCliUpdateStatus {
+  // The CLI's product name, such as "Claude Code".
+  readonly cliLabel: string;
   readonly installMethod: AgentCliInstallMethod;
   // Real path of the CLI that Garcon runs, after following symlinks.
   readonly installPath: string | null;
@@ -56,10 +62,6 @@ export const IDLE_AGENT_CLI_UPDATE_RUN: AgentCliUpdateRun = Object.freeze({
   state: 'idle', startedAt: null, finishedAt: null, message: null, output: null,
 });
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isOneOf<T extends string>(values: readonly T[], value: unknown): value is T {
   return typeof value === 'string' && (values as readonly string[]).includes(value);
 }
@@ -76,7 +78,7 @@ function isTimestamp(value: unknown): value is string {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 }
 
-export function parseAgentCliUpdateRun(value: unknown): AgentCliUpdateRun | null {
+function parseAgentCliUpdateRun(value: unknown): AgentCliUpdateRun | null {
   if (!isRecord(value)) return null;
   const { state, startedAt, finishedAt, message, output } = value;
   if (!isOneOf(AGENT_CLI_UPDATE_RUN_STATES, state)) return null;
@@ -88,9 +90,10 @@ export function parseAgentCliUpdateRun(value: unknown): AgentCliUpdateRun | null
 export function parseAgentCliUpdateStatus(value: unknown): AgentCliUpdateStatus | null {
   if (!isRecord(value)) return null;
   const {
-    installMethod, installPath, currentVersion, latestVersion, advisory,
+    cliLabel, installMethod, installPath, currentVersion, latestVersion, advisory,
     updateCommand, canUpdate, message, checkedAt,
   } = value;
+  if (typeof cliLabel !== 'string' || cliLabel.length === 0 || cliLabel.length > 64) return null;
   if (!isOneOf(AGENT_CLI_INSTALL_METHODS, installMethod)) return null;
   if (!isOneOf(AGENT_CLI_VERSION_ADVISORIES, advisory)) return null;
   if (!isNullableText(installPath) || !isNullableText(currentVersion) || !isNullableText(latestVersion)) return null;
@@ -99,7 +102,7 @@ export function parseAgentCliUpdateStatus(value: unknown): AgentCliUpdateStatus 
   const run = parseAgentCliUpdateRun(value.run);
   if (!run) return null;
   return {
-    installMethod, installPath, currentVersion, latestVersion, advisory,
+    cliLabel, installMethod, installPath, currentVersion, latestVersion, advisory,
     updateCommand, canUpdate, message, checkedAt, run,
   };
 }

@@ -1,11 +1,12 @@
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { CliUpdateService } from '@garcon/server-agent-common/cli-update/cli-update-service';
 import { channelLatestVersion } from '@garcon/server-agent-common/cli-update/latest-version';
+import { isRecord } from '@garcon/common/json';
 import type { ClaudeConfig } from '../../config.js';
-import { buildClaudeHostEnvironment } from './endpoint-runtime.js';
+import { claudeConfigHomeDir } from './native-path.js';
+import { buildClaudeProcessEnvironment } from './endpoint-runtime.js';
 import type { ClaudeCliVersionProbe } from './cli-version.js';
 
 const CLAUDE_RELEASES_URL = 'https://downloads.claude.ai/claude-code-releases';
@@ -37,25 +38,14 @@ export function createClaudeCliUpdates(options: {
       },
     },
     target: async () => ({ command: config.binary(), bundled: false }),
-    environment: () => claudeUpdateEnvironment(config),
-    nativeLatestVersion: {
-      key: 'claude-native',
-      lookup: async (signal) => channelLatestVersion(
-        `${CLAUDE_RELEASES_URL}/${await readClaudeReleaseChannel(config)}`,
-        (body) => body.trim(),
-      )(signal),
+    environment: () => buildClaudeProcessEnvironment(config),
+    nativeRelease: async () => {
+      const url = `${CLAUDE_RELEASES_URL}/${await readClaudeReleaseChannel(config)}`;
+      return { key: url, lookup: channelLatestVersion(url, (body) => body.trim()) };
     },
     onUpdated: () => options.versionProbe.invalidate(),
     logger: options.logger,
   });
-}
-
-function claudeUpdateEnvironment(config: ClaudeConfig): Record<string, string> {
-  const environment: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'CLAUDECODE') environment[key] = value;
-  }
-  return { ...environment, ...buildClaudeHostEnvironment(config) };
 }
 
 // `claude update` installs from the `autoUpdatesChannel` setting, `latest` by default.
@@ -63,7 +53,7 @@ export async function readClaudeReleaseChannel(
   config: Pick<ClaudeConfig, 'configHomeDir'>,
   managedSettingsPath: string | undefined = MANAGED_SETTINGS_PATHS[process.platform],
 ): Promise<'latest' | 'stable'> {
-  const userSettings = path.join(config.configHomeDir() ?? path.join(os.homedir(), '.claude'), 'settings.json');
+  const userSettings = path.join(claudeConfigHomeDir({ configHomeDir: config.configHomeDir() ?? undefined }), 'settings.json');
   let channel: 'latest' | 'stable' = 'latest';
   for (const settingsPath of [userSettings, managedSettingsPath]) {
     if (!settingsPath) continue;
@@ -76,9 +66,7 @@ export async function readClaudeReleaseChannel(
 async function readChannelSetting(settingsPath: string): Promise<'latest' | 'stable' | null> {
   try {
     const settings: unknown = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
-    const channel = settings && typeof settings === 'object'
-      ? (settings as { autoUpdatesChannel?: unknown }).autoUpdatesChannel
-      : undefined;
+    const channel = isRecord(settings) ? settings.autoUpdatesChannel : undefined;
     return channel === 'latest' || channel === 'stable' ? channel : null;
   } catch {
     return null;

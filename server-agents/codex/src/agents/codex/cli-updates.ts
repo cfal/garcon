@@ -54,10 +54,10 @@ export function createCodexCliUpdates(options: {
       return { command: resolved.command, bundled: resolved.source === 'bundled' };
     },
     environment: () => effectiveCodexEnvironment(config),
-    nativeLatestVersion: {
+    nativeRelease: async () => ({
       key: CODEX_NATIVE_CHANNEL,
       lookup: channelLatestVersion(CODEX_NATIVE_CHANNEL, parseCodexChannelRelease),
-    },
+    }),
     logger: options.logger,
   });
 }

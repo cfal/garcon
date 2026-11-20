@@ -3,10 +3,9 @@ import { stripVTControlCharacters } from 'node:util';
 export interface BoundedCommandOptions {
   readonly env: Record<string, string>;
   readonly timeoutMs: number;
-  // Bytes kept per stream; output beyond it is dropped, not an error.
+  // Bytes kept from the end of each stream, where failures are reported;
+  // earlier output is dropped, not an error.
   readonly maxOutputBytes: number;
-  readonly cwd?: string;
-  readonly signal?: AbortSignal;
   // Receives each complete output line, stripped of terminal control sequences.
   readonly onLine?: (line: string) => void;
 }
@@ -24,31 +23,33 @@ const MAX_PARTIAL_LINE_CHARS = 4_096;
 // Progress bars redraw with a carriage return or a cursor-to-column-one sequence.
 const REDRAW_PATTERN = /\x1b\[(?:0*1?G|999D)/g;
 
-// Runs a command with no stdin, a deadline, and bounded output. A command that
-// ignores SIGTERM is killed one second later so the deadline holds.
+// Runs a command with no stdin, a deadline, and bounded output. A deadline
+// stops the command's whole process tree, such as the scripts an installer
+// starts, so they release the output pipes; a group that ignores SIGTERM is
+// killed one second later so the deadline holds.
 export async function runBoundedCommand(
   command: readonly [string, ...string[]],
   options: BoundedCommandOptions,
 ): Promise<BoundedCommandResult> {
+  const windows = process.platform === 'win32';
   const child = Bun.spawn([...command], {
-    cwd: options.cwd,
     env: options.env,
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
+    detached: !windows,
   });
   let timedOut = false;
   let killTimer: ReturnType<typeof setTimeout> | null = null;
-  const terminate = () => {
-    if (child.exitCode !== null || child.killed) return;
-    child.kill('SIGTERM');
-    killTimer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
-  };
   const deadline = setTimeout(() => {
     timedOut = true;
-    terminate();
+    if (windows) {
+      Bun.spawn(['taskkill', '/PID', String(child.pid), '/T', '/F'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+      return;
+    }
+    signalGroup(child.pid, 'SIGTERM');
+    killTimer = setTimeout(() => signalGroup(child.pid, 'SIGKILL'), KILL_GRACE_MS);
   }, options.timeoutMs);
-  options.signal?.addEventListener('abort', terminate, { once: true });
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
       collect(child.stdout, options.maxOutputBytes, options.onLine),
@@ -56,7 +57,7 @@ export async function runBoundedCommand(
       child.exited,
     ]);
     return {
-      exitCode: timedOut || options.signal?.aborted ? null : exitCode,
+      exitCode: timedOut ? null : exitCode,
       stdout: stdout.text,
       stderr: stderr.text,
       timedOut,
@@ -65,7 +66,14 @@ export async function runBoundedCommand(
   } finally {
     clearTimeout(deadline);
     if (killTimer) clearTimeout(killTimer);
-    options.signal?.removeEventListener('abort', terminate);
+  }
+}
+
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // The group already exited.
   }
 }
 
@@ -80,26 +88,30 @@ async function collect(
   let truncated = false;
   let partial = '';
   for await (const chunk of stream) {
-    if (bytes < maxBytes) {
-      const kept = chunk.subarray(0, maxBytes - bytes);
-      chunks.push(kept);
-      bytes += kept.byteLength;
-      truncated ||= kept.byteLength < chunk.byteLength;
-    } else {
+    chunks.push(chunk);
+    bytes += chunk.byteLength;
+    while (bytes > maxBytes) {
+      const excess = bytes - maxBytes;
+      const first = chunks[0]!;
+      if (first.byteLength <= excess) chunks.shift();
+      else chunks[0] = first.subarray(excess);
+      bytes -= Math.min(first.byteLength, excess);
       truncated = true;
     }
     if (!onLine) continue;
-    const lines = (partial + decoder.decode(chunk, { stream: true }))
-      .replace(REDRAW_PATTERN, '\r')
-      .split(/\r\n|\r|\n/);
-    partial = lines.pop()!.slice(-MAX_PARTIAL_LINE_CHARS);
-    for (const line of lines) emitLine(line, onLine);
+    // A line ends at the last newline or carriage return; the remainder waits for more output.
+    const text = (partial + decoder.decode(chunk, { stream: true })).replace(REDRAW_PATTERN, '\r');
+    const end = Math.max(text.lastIndexOf('\n'), text.lastIndexOf('\r'));
+    partial = text.slice(end + 1).slice(-MAX_PARTIAL_LINE_CHARS);
+    for (const line of outputLines(text.slice(0, end + 1))) onLine(line);
   }
-  if (onLine) emitLine(partial + decoder.decode(), onLine);
+  if (onLine) for (const line of outputLines(partial + decoder.decode())) onLine(line);
   return { text: Buffer.concat(chunks).toString('utf8'), truncated };
 }
 
-function emitLine(line: string, onLine: (line: string) => void): void {
-  const cleaned = stripVTControlCharacters(line).replace(/\s+/g, ' ').trim();
-  if (cleaned) onLine(cleaned);
+// Splits captured output into display lines, as `onLine` receives them.
+export function outputLines(text: string): string[] {
+  return text.replace(REDRAW_PATTERN, '\r').split(/\r\n|\r|\n/)
+    .map((line) => stripVTControlCharacters(line).replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
 }

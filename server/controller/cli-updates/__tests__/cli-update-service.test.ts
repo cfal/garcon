@@ -6,10 +6,11 @@ import {
   type AgentCliUpdateStatusRequest,
 } from '@garcon/server-agent-interface';
 import { IDLE_AGENT_CLI_UPDATE_RUN, type AgentCliUpdateStatus } from '../../../../common/agent-cli-update.js';
-import { isDomainError } from '../../../common/domain-error.js';
+import { jsonErrorFromUnknown } from '../../../common/http-error.js';
 import { AgentCliUpdateService, type CliUpdateExecutors } from '../cli-update-service.js';
 
 const STATUS: AgentCliUpdateStatus = {
+  cliLabel: 'Claude Code',
   installMethod: 'native',
   installPath: '/home/synthetic/.local/share/claude/versions/2.1.238',
   currentVersion: '2.1.238',
@@ -63,7 +64,17 @@ test('starts an update on the requested agent', async () => {
   expect(starts).toBe(1);
 });
 
-test('maps unknown agents and unsupported installations to domain errors', async () => {
+test('reads only the requested agents', async () => {
+  let codexReads = 0;
+  const service = new AgentCliUpdateService(executors({
+    claude: updates(),
+    codex: updates({ status: async () => { codexReads++; return STATUS; } }),
+  }));
+  expect(Object.keys((await service.statuses('local', { refresh: false, agentIds: ['claude'] })).statuses)).toEqual(['claude']);
+  expect(codexReads).toBe(0);
+});
+
+test('rejects unknown agents and reports refusals with their HTTP status', async () => {
   const service = new AgentCliUpdateService(executors({
     claude: updates({
       startUpdate: async () => {
@@ -71,18 +82,18 @@ test('maps unknown agents and unsupported installations to domain errors', async
       },
     }),
     codex: updates({
-      startUpdate: async () => { throw new AgentCallError('rejected', 'Bundled with Garcon.', 'OPERATION_UNSUPPORTED'); },
+      startUpdate: async () => { throw new AgentCallError('rejected', 'Integration capability unavailable', 'OPERATION_UNSUPPORTED'); },
     }),
     shell: null,
   }));
   for (const [agentId, status, code] of [
     ['missing', 400, 'UNSUPPORTED_AGENT'],
-    ['shell', 400, 'OPERATION_UNSUPPORTED'],
-    ['claude', 409, 'OPERATION_UNSUPPORTED'],
-    ['codex', 409, 'OPERATION_UNSUPPORTED'],
+    ['shell', 422, 'OPERATION_UNSUPPORTED'],
+    ['claude', 422, 'OPERATION_UNSUPPORTED'],
+    ['codex', 501, 'OPERATION_UNSUPPORTED'],
   ] as const) {
-    const error = await service.start('local', agentId).catch((caught: unknown) => caught);
-    expect(isDomainError(error)).toBe(true);
-    expect(error).toMatchObject({ status, code });
+    const response = jsonErrorFromUnknown(await service.start('local', agentId).catch((caught: unknown) => caught));
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ errorCode: code });
   }
 });

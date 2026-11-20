@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import {
+  AGENT_CLI_UPDATE_MESSAGE_MAX_CHARS,
   AGENT_CLI_UPDATE_OUTPUT_MAX_CHARS,
   IDLE_AGENT_CLI_UPDATE_RUN,
   type AgentCliUpdateRun,
@@ -11,8 +12,10 @@ import {
   type AgentCliUpdateStatusRequest,
   type AgentLogger,
 } from '@garcon/server-agent-interface';
-import { runBoundedCommand, type BoundedCommandResult } from './bounded-command.js';
-import { compareCliVersions, parseCliVersion } from './cli-version.js';
+import { outputLines, runBoundedCommand, type BoundedCommandResult } from './bounded-command.js';
+import { probeCliVersion } from './cli-probe.js';
+import { compareCliVersions } from './cli-version.js';
+import { errorMessage } from '../lib/errors.js';
 import {
   resolveCliInstallation,
   type CliInstallation,
@@ -32,29 +35,32 @@ export interface CliUpdateTarget {
   readonly bundled: boolean;
 }
 
+// The release a native installer's own update command installs, which can lag
+// npm. The key identifies the release channel, so a channel change misses the cache.
+export interface NativeReleaseSource {
+  readonly key: string;
+  readonly lookup: LatestVersionLookup;
+}
+
 export interface CliUpdateServiceOptions {
   readonly label: string;
   readonly definition: CliInstallDefinition;
   readonly target: () => Promise<CliUpdateTarget>;
   readonly environment: () => Record<string, string>;
-  // The release the native installer's own update command installs, which can lag npm.
-  readonly nativeLatestVersion: { readonly key: string; readonly lookup: LatestVersionLookup };
+  readonly nativeRelease: () => Promise<NativeReleaseSource>;
   // Runs after an update command exits, so cached facts about the old binary are dropped.
   readonly onUpdated?: () => void;
   readonly logger: AgentLogger;
-  readonly platform?: NodeJS.Platform;
   readonly now?: () => Date;
 }
 
-type InstalledStatus = Omit<AgentCliUpdateStatus, 'run'>;
+type InstalledStatus = Omit<AgentCliUpdateStatus, 'cliLabel' | 'run'>;
 
 // `claude update` downloads about 300 MB without progress output, and killing
 // it mid-download leaves a truncated binary, so the deadline is generous.
 const UPDATE_TIMEOUT_MS = 30 * 60 * 1000;
 const VERSION_PROBE_TIMEOUT_MS = 20_000;
-const VERSION_PROBE_MAX_BYTES = 16 * 1024;
 const PROGRESS_INTERVAL_MS = 1_000;
-const PROGRESS_MAX_CHARS = 200;
 
 // Installers are process-wide: two integrations installed by the same npm
 // prefix or Homebrew must not run their installers at once.
@@ -82,25 +88,25 @@ export class CliUpdateService implements AgentCliUpdates {
   readonly #latestVersions = new LatestVersionCache();
   #run: AgentCliUpdateRun = IDLE_AGENT_CLI_UPDATE_RUN;
   #starting: Promise<void> | null = null;
-  // Reported while a run is active, so a status read does not probe a binary mid-install.
-  #lastStatus: InstalledStatus | null = null;
+  // Taken when a run starts and reported until it finishes, so a status read
+  // does not probe a binary mid-install.
+  #runSnapshot: InstalledStatus | null = null;
 
   constructor(options: CliUpdateServiceOptions) {
     this.#options = options;
   }
 
   async status(request: AgentCliUpdateStatusRequest): Promise<AgentCliUpdateStatus> {
-    if (this.#run.state === 'running' && this.#lastStatus) return { ...this.#lastStatus, run: this.#run };
-    const status = await this.#inspect(request.refresh, request.signal ?? new AbortController().signal);
-    this.#lastStatus = status;
-    return { ...status, run: this.#run };
+    const cliLabel = this.#options.label;
+    if (this.#runSnapshot) return { cliLabel, ...this.#runSnapshot, run: this.#run };
+    const status = await this.#inspect(request.refresh);
+    request.signal?.throwIfAborted();
+    return { cliLabel, ...(this.#runSnapshot ?? status), run: this.#run };
   }
 
   async startUpdate(): Promise<AgentCliUpdateStatus> {
     if (this.#run.state !== 'running') {
-      if (!this.#starting) {
-        this.#starting = this.#begin().finally(() => { this.#starting = null; });
-      }
+      this.#starting ??= this.#begin().finally(() => { this.#starting = null; });
       await this.#starting;
     }
     return this.status({ refresh: false });
@@ -108,34 +114,28 @@ export class CliUpdateService implements AgentCliUpdates {
 
   async #begin(): Promise<void> {
     const env = this.#options.environment();
-    const target = await this.#options.target();
-    if (target.bundled) {
-      throw new AgentIntegrationError(
-        'OPERATION_UNSUPPORTED', `Garcon runs its bundled ${this.#options.label}, which updates with Garcon.`, false,
-      );
-    }
-    const installation = await resolveCliInstallation(this.#options.definition, {
-      command: target.command, env, platform: this.#platform,
-    });
+    const installation = await this.#resolve(env);
     const action = installation.update;
-    if (!action) {
-      throw new AgentIntegrationError('OPERATION_UNSUPPORTED', this.#manualUpdateMessage(installation, null), false);
-    }
+    if (!action) throw new AgentIntegrationError('OPERATION_UNSUPPORTED', this.#manualMessage(installation, null), false);
+    // The run installs the latest release, so the check that starts it bypasses the cache.
+    const snapshot = await this.#inspectInstallation(installation, env, true);
+    this.#runSnapshot = snapshot;
     this.#run = {
       state: 'running', startedAt: this.#timestamp(), finishedAt: null,
       message: 'Checking for the latest version', output: null,
     };
     this.#options.logger.info('CLI update started.', { command: action.command });
-    void this.#execute(installation, action, env).catch((error: unknown) => {
-      this.#finish('failed', error instanceof Error ? error.message : String(error), null);
+    void this.#execute(installation, action, env, snapshot).catch((error: unknown) => {
+      this.#finish('failed', errorMessage(error), null);
     });
   }
 
-  async #execute(installation: CliInstallation, action: CliUpdateAction, env: Record<string, string>): Promise<void> {
-    const signal = new AbortController().signal;
-    const executable = installation.paths!.resolved;
-    const before = await this.#probeVersion(executable, env);
-    const latest = await this.#latestVersion(installation, env, true, signal);
+  async #execute(
+    installation: CliInstallation,
+    action: CliUpdateAction,
+    env: Record<string, string>,
+    { currentVersion: before, latestVersion: latest }: InstalledStatus,
+  ): Promise<void> {
     if (before && latest && (compareCliVersions(before, latest) ?? -1) >= 0) {
       this.#finish('succeeded', `${this.#options.label} ${before} is already the latest version.`, null);
       return;
@@ -165,7 +165,7 @@ export class CliUpdateService implements AgentCliUpdates {
       return;
     }
     this.#progress('Verifying the installed version');
-    const after = await this.#probeVersion(executable, env);
+    const after = await probeCliVersion(installation.paths!.resolved, env, VERSION_PROBE_TIMEOUT_MS);
     if (!after) {
       this.#finish('unchanged', `The update command finished, but ${this.#options.label} did not report its version.`, output);
     } else if (latest ? (compareCliVersions(after, latest) ?? -1) < 0 : after === before) {
@@ -175,85 +175,82 @@ export class CliUpdateService implements AgentCliUpdates {
     }
   }
 
-  async #inspect(refresh: boolean, signal: AbortSignal): Promise<InstalledStatus> {
+  async #inspect(refresh: boolean): Promise<InstalledStatus> {
     const env = this.#options.environment();
-    const target = await this.#options.target();
-    const checkedAt = this.#timestamp();
-    if (target.bundled) {
-      return {
-        installMethod: 'bundled',
-        installPath: await fs.realpath(target.command).catch(() => target.command),
-        currentVersion: await this.#probeVersion(target.command, env),
-        latestVersion: null,
-        advisory: 'unknown',
-        updateCommand: null,
-        canUpdate: false,
-        message: `Garcon runs its bundled ${this.#options.label}, which updates with Garcon.`,
-        checkedAt,
-      };
-    }
-    const installation = await resolveCliInstallation(this.#options.definition, {
-      command: target.command, env, platform: this.#platform,
-    });
-    signal.throwIfAborted();
+    const installation = await this.#resolve(env);
     if (!installation.paths) {
+      const target = await this.#options.target();
       return {
         installMethod: 'missing', installPath: null, currentVersion: null, latestVersion: null, advisory: 'unknown',
-        updateCommand: null, canUpdate: false, checkedAt,
+        updateCommand: null, canUpdate: false, checkedAt: this.#timestamp(),
         message: `${this.#options.label} (${target.command}) was not found on PATH.`,
       };
     }
-    const currentVersion = await this.#probeVersion(installation.paths.resolved, env);
-    const latestVersion = currentVersion ? await this.#latestVersion(installation, env, refresh, signal) : null;
+    return this.#inspectInstallation(installation, env, refresh);
+  }
+
+  async #inspectInstallation(installation: CliInstallation, env: Record<string, string>, refresh: boolean): Promise<InstalledStatus> {
+    const paths = installation.paths!;
+    // The lookup is cached, so starting it before the probe settles costs nothing when the probe fails.
+    const [currentVersion, latest] = await Promise.all([
+      probeCliVersion(paths.resolved, env, VERSION_PROBE_TIMEOUT_MS),
+      this.#latestVersion(installation, env, refresh),
+    ]);
+    const latestVersion = currentVersion ? latest : null;
     const order = currentVersion && latestVersion ? compareCliVersions(currentVersion, latestVersion) : null;
     const advisory = order === null ? 'unknown' : order < 0 ? 'behind-latest' : 'current';
     return {
       installMethod: installation.method,
-      installPath: installation.paths.real,
+      installPath: paths.real,
       currentVersion,
       latestVersion,
       advisory,
       updateCommand: installation.update?.command ?? installation.manualCommand,
       canUpdate: installation.update !== null,
-      message: currentVersion === null
-        ? `${this.#options.label} at ${installation.paths.real} did not report its version.`
-        : advisory === 'behind-latest' && installation.update === null
-          ? this.#manualUpdateMessage(installation, latestVersion)
-          : null,
-      checkedAt,
+      message: installation.method === 'bundled'
+        ? this.#manualMessage(installation, null)
+        : currentVersion === null
+          ? `${this.#options.label} at ${paths.real} did not report its version.`
+          : advisory === 'behind-latest' && installation.update === null
+            ? this.#manualMessage(installation, latestVersion)
+            : null,
+      checkedAt: this.#timestamp(),
     };
   }
 
-  #latestVersion(
-    installation: CliInstallation,
-    env: Record<string, string>,
-    fresh: boolean,
-    signal: AbortSignal,
-  ): Promise<string | null> {
+  // Garcon's bundled executable is reported like an installation it cannot update.
+  async #resolve(env: Record<string, string>): Promise<CliInstallation> {
+    const target = await this.#options.target();
+    if (!target.bundled) {
+      return resolveCliInstallation(this.#options.definition, { command: target.command, env, platform: process.platform });
+    }
+    const real = await fs.realpath(target.command).catch(() => target.command);
+    return {
+      method: 'bundled', paths: { resolved: target.command, real }, update: null, manualCommand: null,
+      latestVersion: { kind: 'none' },
+    };
+  }
+
+  async #latestVersion(installation: CliInstallation, env: Record<string, string>, fresh: boolean): Promise<string | null> {
     const source = installation.latestVersion;
-    const packageName = this.#options.definition.packageName;
-    if (source.kind === 'native') {
-      return this.#latestVersions.get(this.#options.nativeLatestVersion.key, this.#options.nativeLatestVersion.lookup, { fresh, signal });
-    }
-    if (source.kind === 'homebrew') {
-      return this.#latestVersions.get(`homebrew:${source.cask ? 'cask' : 'formula'}:${source.name}`, homebrewLatestVersion(source, env), { fresh, signal });
-    }
-    return this.#latestVersions.get(`npm:${packageName}`, npmLatestVersion(packageName, env), { fresh, signal });
-  }
-
-  async #probeVersion(executable: string, env: Record<string, string>): Promise<string | null> {
-    try {
-      const result = await runBoundedCommand([executable, '--version'], {
-        env, timeoutMs: VERSION_PROBE_TIMEOUT_MS, maxOutputBytes: VERSION_PROBE_MAX_BYTES,
-      });
-      // A failed run's output can belong to a wrapper rather than the CLI.
-      return result.exitCode === 0 ? parseCliVersion(`${result.stdout}\n${result.stderr}`) : null;
-    } catch {
-      return null;
+    switch (source.kind) {
+      case 'none': return null;
+      case 'native': {
+        const release = await this.#options.nativeRelease();
+        return this.#latestVersions.get(release.key, release.lookup, { fresh });
+      }
+      case 'homebrew':
+        return this.#latestVersions.get(`homebrew:${source.cask ? 'cask' : 'formula'}:${source.name}`, homebrewLatestVersion(source, env), { fresh });
+      case 'npm': {
+        const packageName = this.#options.definition.packageName;
+        return this.#latestVersions.get(`npm:${packageName}`, npmLatestVersion(packageName, env), { fresh });
+      }
     }
   }
 
-  #manualUpdateMessage(installation: CliInstallation, latestVersion: string | null): string {
+  // Explains why Garcon does not update this installation in place.
+  #manualMessage(installation: CliInstallation, latestVersion: string | null): string {
+    if (installation.method === 'bundled') return `Garcon runs its bundled ${this.#options.label}, which updates with Garcon.`;
     const path = installation.paths?.real;
     const subject = latestVersion ? `Version ${latestVersion} is out. ` : '';
     const location = path ? `Garcon runs ${path}; update` : 'Update';
@@ -267,26 +264,22 @@ export class CliUpdateService implements AgentCliUpdates {
       const now = Date.now();
       if (now - lastPublishedAt < PROGRESS_INTERVAL_MS) return;
       lastPublishedAt = now;
-      this.#progress(line.length > PROGRESS_MAX_CHARS ? `${line.slice(0, PROGRESS_MAX_CHARS - 1)}…` : line);
+      this.#progress(line);
     };
   }
 
   #progress(message: string): void {
-    if (this.#run.state === 'running') this.#run = { ...this.#run, message };
+    if (this.#run.state === 'running') this.#run = { ...this.#run, message: truncate(message) };
   }
 
   #finish(state: 'succeeded' | 'failed' | 'unchanged', message: string, output: string | null): void {
     this.#run = {
-      state, startedAt: this.#run.startedAt, finishedAt: this.#timestamp(), message,
+      state, startedAt: this.#run.startedAt, finishedAt: this.#timestamp(), message: truncate(message),
       output: output ? output.slice(-AGENT_CLI_UPDATE_OUTPUT_MAX_CHARS) : null,
     };
-    this.#lastStatus = null;
+    this.#runSnapshot = null;
     const log = state === 'failed' ? this.#options.logger.warn : this.#options.logger.info;
-    log.call(this.#options.logger, 'CLI update finished.', { state, message });
-  }
-
-  get #platform(): NodeJS.Platform {
-    return this.#options.platform ?? process.platform;
+    log.call(this.#options.logger, 'CLI update finished.', { state, message: this.#run.message });
   }
 
   #timestamp(): string {
@@ -294,18 +287,26 @@ export class CliUpdateService implements AgentCliUpdates {
   }
 }
 
+function truncate(message: string): string {
+  return message.length > AGENT_CLI_UPDATE_MESSAGE_MAX_CHARS
+    ? `${message.slice(0, AGENT_CLI_UPDATE_MESSAGE_MAX_CHARS - 1)}…`
+    : message;
+}
+
+// Puts stderr last, so trimming the combined output to its budget drops stdout first.
 function combinedOutput(result: BoundedCommandResult): string | null {
-  return [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n\n') || null;
+  return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n\n') || null;
 }
 
 // Prefers the last line naming an error or failure; `claude update` ends a
 // failure with an unrelated hint to run `claude doctor`.
 function failureReason(result: BoundedCommandResult): string {
-  const lines = [result.stderr, result.stdout]
-    .map((text) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
-  for (const streamLines of lines) {
-    const match = streamLines.findLast((line) => /error|fail/i.test(line));
-    if (match) return match;
-  }
-  return lines[0]!.at(-1) ?? lines[1]!.at(-1) ?? 'no output';
+  const stderr = outputLines(result.stderr);
+  const stdout = outputLines(result.stdout);
+  const reason = stderr.findLast((line) => /error|fail/i.test(line))
+    ?? stdout.findLast((line) => /error|fail/i.test(line))
+    ?? stderr.at(-1)
+    ?? stdout.at(-1)
+    ?? 'no output';
+  return truncate(reason);
 }

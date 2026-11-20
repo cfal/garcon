@@ -5,6 +5,7 @@ import AgentCliUpdateRow from '../AgentCliUpdateRow.svelte';
 
 const IDLE = { state: 'idle', startedAt: null, finishedAt: null, message: null, output: null } as const;
 const BEHIND: AgentCliUpdateStatus = {
+	cliLabel: 'Codex CLI',
 	installMethod: 'npm',
 	installPath: '/opt/synthetic/lib/node_modules/@openai/codex/bin/codex.js',
 	currentVersion: '0.169.0',
@@ -26,6 +27,7 @@ function renderRow(status: AgentCliUpdateStatus | undefined, options: { failure?
 describe('AgentCliUpdateRow', () => {
 	it('shows the installed version and starts an available update', async () => {
 		const { onUpdate } = renderRow(BEHIND);
+		expect(screen.getByRole('group', { name: 'Codex CLI' }).textContent).toContain('Codex CLI');
 		expect(screen.getByText('0.169.0')).toBeTruthy();
 		expect(screen.getByText('Update available: 0.170.0')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));

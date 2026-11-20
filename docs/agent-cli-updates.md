@@ -9,7 +9,7 @@ Code's provider maintenance resolver at
 ## Data Flow
 
 ```text
-Settings > Agents -> GET /api/v1/agents/cli-updates?executorId[&refresh=1]
+Settings > Agents -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&agent=<id>...]
                      POST /api/v1/agents/cli-updates { agentId, executorId }
   -> AgentCliUpdateService (controller): one call per integration with the facet
     -> AgentIntegration.cliUpdates on the executor (Local or remote)
@@ -25,6 +25,10 @@ Settings > Agents -> GET /api/v1/agents/cli-updates?executorId[&refresh=1]
   each status with `parseAgentCliUpdateStatus` and never interprets worker paths.
 - A status check that fails for one agent is reported in `failures` for that
   agent only. An unavailable executor fails the request.
+- Starting an update that Garcon cannot run, such as a bundled or unmanaged
+  install, answers 422 `OPERATION_UNSUPPORTED` with the reason.
+- While a run is active, the page polls every two seconds with `agent` set to
+  the running agents, so other CLIs are not probed again.
 
 ## Installation Methods
 
@@ -62,9 +66,12 @@ real path decides who owns it:
   two CLIs in one npm prefix, are serialized within the process.
 - The run first rechecks the latest version and finishes as `succeeded`
   without running the installer when the CLI is already current.
-- The installer runs with no stdin, a 30 minute deadline, and 10,000 bytes of
-  output per stream. Its latest output line is the run's progress message,
-  updated at most once a second.
+- The installer runs with no stdin, a 30 minute deadline, and the last 10,000
+  bytes of each output stream, where failures are reported. A deadline stops
+  its whole process tree. Its latest output line is the run's progress
+  message, updated at most once a second.
+- A status read during a run reports the snapshot taken when the run started,
+  so the binary is not probed mid-install.
 - After the installer exits, the CLI is probed again. The run is `succeeded`
   when the new version reaches the latest release, `unchanged` when it does not
   or cannot be read, and `failed` when the installer exits non-zero or times

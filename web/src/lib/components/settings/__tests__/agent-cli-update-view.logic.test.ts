@@ -3,6 +3,7 @@ import type { AgentCliUpdateStatus } from '$shared/agent-cli-update';
 import { agentCliUpdateView } from '../agent-cli-update-view.js';
 
 const BEHIND: AgentCliUpdateStatus = {
+	cliLabel: 'Codex CLI',
 	installMethod: 'npm',
 	installPath: '/opt/synthetic/lib/node_modules/@openai/codex/bin/codex.js',
 	currentVersion: '0.169.0',

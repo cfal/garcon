@@ -27,19 +27,27 @@
 
 	let copied = $state(false);
 	let showOutput = $state(false);
+	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+	$effect(() => () => {
+		if (copiedTimer) clearTimeout(copiedTimer);
+	});
 	const view = $derived(status ? agentCliUpdateView(status) : null);
+	// A failed check reports no status, so the row falls back to the agent's name.
+	const label = $derived(status?.cliLabel ?? agentName);
 	const busy = $derived(starting || view?.running === true);
 
 	async function copyCommand() {
 		if (!status?.updateCommand) return;
 		copied = await copyToClipboard(status.updateCommand);
-		if (copied) setTimeout(() => (copied = false), 2000);
+		if (copiedTimer) clearTimeout(copiedTimer);
+		copiedTimer = copied ? setTimeout(() => (copied = false), 2000) : null;
 	}
 </script>
 
-<div class="space-y-2 px-4 py-3 text-sm" aria-label={m.settings_cli_update_label({ agent: agentName })} role="group">
+<div class="space-y-2 px-4 py-3 text-sm" aria-label={label} role="group">
 	<div class="flex flex-wrap items-center gap-2">
-		<span class="text-muted-foreground">{m.settings_cli_update_title()}</span>
+		<span class="font-medium text-foreground">{label}</span>
 		{#if status}
 			<span class="font-mono text-foreground" title={status.installPath ?? undefined}>
 				{status.currentVersion ?? m.settings_cli_update_version_unknown()}
@@ -53,8 +61,6 @@
 					{m.settings_cli_update_current()}
 				</Badge>
 			{/if}
-		{:else if !failure}
-			<LoaderIcon class="size-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
 		{/if}
 		{#if view?.action === 'update' || busy}
 			<Button class="ml-auto" variant="outline" size="sm" onclick={onUpdate} disabled={busy}>

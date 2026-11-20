@@ -1,5 +1,6 @@
 import { getAgentCliUpdates, startAgentCliUpdate } from '$lib/api/agents.js';
 import type { AgentCliUpdateStatus } from '$shared/agent-cli-update';
+import { errorMessage } from '$lib/utils/error-message.js';
 
 export interface CliUpdateApi {
 	getAgentCliUpdates: typeof getAgentCliUpdates;
@@ -10,10 +11,11 @@ const DEFAULT_API: CliUpdateApi = { getAgentCliUpdates, startAgentCliUpdate };
 const RUN_POLL_INTERVAL_MS = 2_000;
 
 // Native CLI versions and update runs for the agents on one executor. The
-// executor owns each run, so this state only reads it back and polls while one
-// is running.
+// executor owns each run, so this state only reads it back, polling just the
+// agents whose run is active.
 export class SettingsCliUpdateState {
 	readonly #api: CliUpdateApi;
+	readonly #agentOrder: readonly string[];
 	#lifecycleId = 0;
 	#loadGeneration = 0;
 	#pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -26,16 +28,29 @@ export class SettingsCliUpdateState {
 	checking = $state(false);
 	loadError = $state<string | null>(null);
 
+	// Agents the executor reported, whether their check succeeded or failed,
+	// listed in `agentOrder` and then by ID.
+	readonly agentIds = $derived.by(() => {
+		const ids = new Set([...Object.keys(this.statusByAgent), ...Object.keys(this.failureByAgent)]);
+		const rank = (id: string) => {
+			const index = this.#agentOrder.indexOf(id);
+			return index < 0 ? this.#agentOrder.length : index;
+		};
+		return [...ids].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+	});
+
 	constructor(
 		readonly executorId: string,
+		agentOrder: readonly string[],
 		api: CliUpdateApi = DEFAULT_API,
 	) {
+		this.#agentOrder = agentOrder;
 		this.#api = api;
 	}
 
 	initialize(): () => void {
 		const lifecycleId = ++this.#lifecycleId;
-		void this.#load(false, lifecycleId);
+		void this.#load({ refresh: false }, lifecycleId);
 		return () => {
 			if (this.#lifecycleId === lifecycleId) this.destroy();
 		};
@@ -70,7 +85,7 @@ export class SettingsCliUpdateState {
 		if (this.checking) return;
 		this.checking = true;
 		try {
-			await this.#load(true, this.#lifecycleId);
+			await this.#load({ refresh: true }, this.#lifecycleId);
 		} finally {
 			this.checking = false;
 		}
@@ -94,31 +109,38 @@ export class SettingsCliUpdateState {
 		}
 	}
 
-	async #load(refresh: boolean, lifecycleId: number): Promise<void> {
+	// A read limited to `agentIds` replaces only those agents' entries.
+	async #load(request: { refresh: boolean; agentIds?: readonly string[] }, lifecycleId: number): Promise<void> {
 		const generation = ++this.#loadGeneration;
 		this.loading = true;
 		try {
-			const response = await this.#api.getAgentCliUpdates(this.executorId, { refresh });
+			const response = await this.#api.getAgentCliUpdates(this.executorId, request);
 			if (!this.#isCurrentLoad(generation, lifecycleId)) return;
-			this.statusByAgent = { ...response.statuses };
-			this.failureByAgent = { ...response.failures };
+			const replaced = request.agentIds ?? [...Object.keys(this.statusByAgent), ...Object.keys(this.failureByAgent)];
+			this.statusByAgent = { ...omitAll(this.statusByAgent, replaced), ...response.statuses };
+			this.failureByAgent = { ...omitAll(this.failureByAgent, replaced), ...response.failures };
 			this.loadError = null;
-			this.#schedulePoll(lifecycleId);
 		} catch (error) {
 			if (!this.#isCurrentLoad(generation, lifecycleId)) return;
 			this.loadError = errorMessage(error);
 		} finally {
-			if (this.#isCurrentLoad(generation, lifecycleId)) this.loading = false;
+			if (this.#isCurrentLoad(generation, lifecycleId)) {
+				this.loading = false;
+				// A failed read during a run retries, since the run's outcome is still to come.
+				this.#schedulePoll(lifecycleId);
+			}
 		}
 	}
 
 	#schedulePoll(lifecycleId: number): void {
 		this.#stopPolling();
-		const running = Object.values(this.statusByAgent).some((status) => status.run.state === 'running');
-		if (!running) return;
+		const running = Object.entries(this.statusByAgent)
+			.filter(([, status]) => status.run.state === 'running')
+			.map(([agentId]) => agentId);
+		if (running.length === 0) return;
 		this.#pollTimer = setTimeout(() => {
 			this.#pollTimer = null;
-			if (lifecycleId === this.#lifecycleId) void this.#load(false, lifecycleId);
+			if (lifecycleId === this.#lifecycleId) void this.#load({ refresh: false, agentIds: running }, lifecycleId);
 		}, RUN_POLL_INTERVAL_MS);
 	}
 
@@ -132,13 +154,10 @@ export class SettingsCliUpdateState {
 	}
 }
 
-function omit(record: Record<string, string>, key: string): Record<string, string>;
-function omit(record: Record<string, boolean>, key: string): Record<string, boolean>;
 function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
-	const { [key]: _removed, ...rest } = record;
-	return rest;
+	return omitAll(record, [key]);
 }
 
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+function omitAll<T>(record: Record<string, T>, keys: readonly string[]): Record<string, T> {
+	return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
 }

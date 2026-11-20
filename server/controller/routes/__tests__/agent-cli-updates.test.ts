@@ -5,6 +5,7 @@ import {
   parseAgentCliUpdateStatus,
   type AgentCliUpdateStatus,
 } from '../../../../common/agent-cli-update.js';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { DomainError } from '../../../common/domain-error.js';
 import { createAgentCliUpdateRoutes } from '../agent-cli-updates.js';
 import type { AgentCliUpdateService } from '../../cli-updates/cli-update-service.js';
@@ -13,6 +14,7 @@ const REMOTE_EXECUTOR = '22222222-2222-4222-8222-222222222222';
 const PATH = '/api/v1/agents/cli-updates';
 
 const STATUS: AgentCliUpdateStatus = {
+  cliLabel: 'Codex CLI',
   installMethod: 'npm',
   installPath: '/opt/synthetic/lib/node_modules/@openai/codex/bin/codex.js',
   currentVersion: '0.169.0',
@@ -34,10 +36,10 @@ function routes(overrides: Partial<Pick<AgentCliUpdateService, 'statuses' | 'sta
 }
 
 test('reads statuses for the requested executor and refresh mode', async () => {
-  const calls: Array<[string, boolean]> = [];
+  const calls: Array<[string, boolean, readonly string[] | undefined]> = [];
   const route = routes({
     statuses: async (executorId, options) => {
-      calls.push([executorId, options.refresh]);
+      calls.push([executorId, options.refresh, options.agentIds]);
       return { statuses: { codex: STATUS }, failures: { claude: 'claude was not found' } };
     },
   });
@@ -48,9 +50,9 @@ test('reads statuses for the requested executor and refresh mode', async () => {
   expect(parseAgentCliUpdatesResponse(await response.json())).toEqual({
     statuses: { codex: STATUS }, failures: { claude: 'claude was not found' },
   });
-  const local = new URL(`http://localhost${PATH}`);
+  const local = new URL(`http://localhost${PATH}?agent=claude&agent=codex`);
   await route.GET!(new Request(local), local);
-  expect(calls).toEqual([[REMOTE_EXECUTOR, true], ['local', false]]);
+  expect(calls).toEqual([[REMOTE_EXECUTOR, true, undefined], ['local', false, ['claude', 'codex']]]);
 });
 
 test('starts an update for the agent and executor in the body', async () => {
@@ -71,12 +73,12 @@ test('starts an update for the agent and executor in the body', async () => {
 });
 
 test('maps unsupported updates and unavailable executors to their HTTP status', async () => {
-  const unsupported = routes({ start: async () => { throw new DomainError('OPERATION_UNSUPPORTED', 'Bundled with Garcon.', 409); } });
+  const unsupported = routes({ start: async () => { throw new AgentIntegrationError('OPERATION_UNSUPPORTED', 'Bundled with Garcon.', false); } });
   const url = new URL(`http://localhost${PATH}`);
   const response = await unsupported.POST!(new Request(url, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: 'codex' }),
   }), url);
-  expect(response.status).toBe(409);
+  expect(response.status).toBe(422);
   expect(await response.json()).toMatchObject({ errorCode: 'OPERATION_UNSUPPORTED', error: 'Bundled with Garcon.' });
 
   const unavailable = routes({ statuses: async () => { throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true); } });

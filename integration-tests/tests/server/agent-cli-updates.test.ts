@@ -64,7 +64,7 @@ test(`Claude Code updates through its npm installer on its executor (${execution
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ agentId: 'codex', executorId }),
     });
-    expect(bundled.status).toBe(409);
+    expect(bundled.status).toBe(422);
     expect(await bundled.json() as HttpErrorResponse).toMatchObject({ success: false, errorCode: 'OPERATION_UNSUPPORTED' });
 
     const started = parseAgentCliUpdateStatus(await client.post<AgentCliUpdateStatus>('/api/v1/agents/cli-updates', {

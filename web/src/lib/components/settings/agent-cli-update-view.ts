@@ -1,9 +1,9 @@
 import type { AgentCliUpdateStatus } from '$shared/agent-cli-update';
 
 // What a CLI update row offers: a one-click update, a command to run by hand, or nothing.
-export type AgentCliUpdateAction = 'update' | 'manual' | 'none';
+type AgentCliUpdateAction = 'update' | 'manual' | 'none';
 
-export interface AgentCliUpdateView {
+interface AgentCliUpdateView {
 	readonly updateAvailable: boolean;
 	readonly action: AgentCliUpdateAction;
 	readonly running: boolean;

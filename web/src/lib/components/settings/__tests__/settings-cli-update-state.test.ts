@@ -5,6 +5,7 @@ import { SettingsCliUpdateState, type CliUpdateApi } from '../settings-cli-updat
 const EXECUTOR = '22222222-2222-4222-8222-222222222222';
 const IDLE = { state: 'idle', startedAt: null, finishedAt: null, message: null, output: null } as const;
 const BEHIND: AgentCliUpdateStatus = {
+	cliLabel: 'Claude Code',
 	installMethod: 'native',
 	installPath: '/home/synthetic/.local/share/claude/versions/2.1.238',
 	currentVersion: '2.1.238',
@@ -49,7 +50,7 @@ describe('SettingsCliUpdateState', () => {
 
 	it('loads statuses for its executor and refreshes on an explicit check', async () => {
 		const { api, reads } = createApi([{ statuses: { claude: BEHIND }, failures: { codex: 'codex was not found' } }]);
-		const state = new SettingsCliUpdateState(EXECUTOR, api);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
 		const dispose = state.initialize();
 		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
 		expect(state.failureFor('codex')).toBe('codex was not found');
@@ -65,7 +66,7 @@ describe('SettingsCliUpdateState', () => {
 			{ statuses: { claude: RUNNING }, failures: {} },
 			{ statuses: { claude: SUCCEEDED }, failures: {} },
 		]);
-		const state = new SettingsCliUpdateState(EXECUTOR, api);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
 		state.initialize();
 		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
 		await state.startUpdate('claude');
@@ -79,15 +80,39 @@ describe('SettingsCliUpdateState', () => {
 		expect(state.statusFor('claude')?.run.state).toBe('running');
 		await vi.advanceTimersByTimeAsync(2_000);
 		expect(state.statusFor('claude')).toEqual(SUCCEEDED);
+		expect(api.getAgentCliUpdates).toHaveBeenLastCalledWith(EXECUTOR, { refresh: false, agentIds: ['claude'] });
 		const readsAfterSettle = api.getAgentCliUpdates.mock.calls.length;
 		await vi.advanceTimersByTimeAsync(10_000);
 		expect(api.getAgentCliUpdates.mock.calls.length).toBe(readsAfterSettle);
 	});
 
+	it('keeps polling a running update after a failed read', async () => {
+		const { api } = createApi([
+			{ statuses: { claude: RUNNING }, failures: {} },
+			{ statuses: { claude: SUCCEEDED }, failures: {} },
+		]);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')?.run.state).toBe('running'));
+		api.getAgentCliUpdates.mockRejectedValueOnce(new Error('Executor is reconnecting'));
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(state.loadError).toBe('Executor is reconnecting');
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(state.statusFor('claude')).toEqual(SUCCEEDED);
+		expect(state.loadError).toBeNull();
+	});
+
+	it('lists the agents the executor reported, native agents first', async () => {
+		const { api } = createApi([{ statuses: { zeta: BEHIND, codex: BEHIND }, failures: { claude: 'timed out', alpha: 'missing' } }]);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.agentIds).toEqual(['claude', 'codex', 'alpha', 'zeta']));
+	});
+
 	it('reports a rejected start without changing the status', async () => {
 		const { api } = createApi([{ statuses: { claude: BEHIND }, failures: {} }]);
 		api.startAgentCliUpdate.mockRejectedValueOnce(new Error('Update it with the tool that installed it.'));
-		const state = new SettingsCliUpdateState(EXECUTOR, api);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
 		state.initialize();
 		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
 		await state.startUpdate('claude');
@@ -102,7 +127,7 @@ describe('SettingsCliUpdateState', () => {
 			getAgentCliUpdates: vi.fn(() => new Promise<AgentCliUpdatesResponse>((resolve) => { resolveRead = resolve; })),
 			startAgentCliUpdate: vi.fn(async () => RUNNING),
 		} satisfies CliUpdateApi;
-		const state = new SettingsCliUpdateState(EXECUTOR, api);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
 		const dispose = state.initialize();
 		dispose();
 		resolveRead({ statuses: { claude: RUNNING }, failures: {} });

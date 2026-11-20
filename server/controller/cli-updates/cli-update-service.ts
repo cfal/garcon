@@ -1,12 +1,15 @@
-import { AgentCallError, AgentIntegrationError, type AgentCliUpdates } from '@garcon/server-agent-interface';
-import type { AgentCliUpdateStatus, AgentCliUpdatesResponse } from '../../../common/agent-cli-update.js';
+import type { AgentCliUpdates } from '@garcon/server-agent-interface';
+import {
+  AGENT_CLI_UPDATE_MESSAGE_MAX_CHARS,
+  type AgentCliUpdateStatus,
+  type AgentCliUpdatesResponse,
+} from '../../../common/agent-cli-update.js';
 import { DomainError } from '../../common/domain-error.js';
+import { errorMessage } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 
 const logger = createLogger('cli-updates');
 
-// Keeps a provider's failure text within what the browser contract accepts.
-const MAX_FAILURE_MESSAGE_LENGTH = 500;
 // A status check probes the CLI and may ask its installer for the latest release.
 const STATUS_TIMEOUT_MS = 25_000;
 
@@ -20,8 +23,16 @@ export interface CliUpdateExecutors {
   integrationsFor(executorId: string): { list(): readonly CliUpdateSource[] };
 }
 
+export interface CliUpdateStatusOptions {
+  readonly refresh: boolean;
+  // Limits the read to these agents, as polling a running update does.
+  readonly agentIds?: readonly string[];
+  readonly signal?: AbortSignal;
+}
+
 // Reports and starts native CLI updates for the agents on one executor. The
-// executor owns the run; the controller only relays it.
+// executor owns each run; the controller only relays it. Refusals keep their
+// integration error, which the HTTP layer reports as 422.
 export class AgentCliUpdateService {
   readonly #executors: CliUpdateExecutors;
 
@@ -29,11 +40,14 @@ export class AgentCliUpdateService {
     this.#executors = executors;
   }
 
-  async statuses(executorId: string, options: { readonly refresh: boolean; readonly signal?: AbortSignal }): Promise<AgentCliUpdatesResponse> {
+  async statuses(executorId: string, options: CliUpdateStatusOptions): Promise<AgentCliUpdatesResponse> {
     const timeout = AbortSignal.timeout(STATUS_TIMEOUT_MS);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    const sources = this.#executors.integrationsFor(executorId).list()
-      .flatMap((integration) => integration.cliUpdates ? [{ agentId: integration.descriptor.id, updates: integration.cliUpdates }] : []);
+    const sources = this.#executors.integrationsFor(executorId).list().flatMap((integration) => (
+      integration.cliUpdates && (!options.agentIds || options.agentIds.includes(integration.descriptor.id))
+        ? [{ agentId: integration.descriptor.id, updates: integration.cliUpdates }]
+        : []
+    ));
     const results = await Promise.allSettled(sources.map(({ updates }) => updates.status({ refresh: options.refresh, signal })));
     const statuses: Record<string, AgentCliUpdateStatus> = {};
     const failures: Record<string, string> = {};
@@ -45,7 +59,7 @@ export class AgentCliUpdateService {
       }
       options.signal?.throwIfAborted();
       logger.warn('CLI update status failed.', { agentId, executorId, error: String(result.reason) });
-      failures[agentId] = failureMessage(result.reason);
+      failures[agentId] = errorMessage(result.reason).slice(0, AGENT_CLI_UPDATE_MESSAGE_MAX_CHARS);
     });
     return { statuses, failures };
   }
@@ -55,20 +69,8 @@ export class AgentCliUpdateService {
       .find((candidate) => candidate.descriptor.id === agentId);
     if (!integration) throw new DomainError('UNSUPPORTED_AGENT', `Unknown agent: ${agentId}`, 400);
     if (!integration.cliUpdates) {
-      throw new DomainError('OPERATION_UNSUPPORTED', `${agentId} does not report a native CLI to update.`, 400);
+      throw new DomainError('OPERATION_UNSUPPORTED', `${agentId} does not report a native CLI to update.`, 422);
     }
-    try {
-      return await integration.cliUpdates.startUpdate();
-    } catch (error) {
-      if ((error instanceof AgentIntegrationError || error instanceof AgentCallError) && error.code === 'OPERATION_UNSUPPORTED') {
-        throw new DomainError('OPERATION_UNSUPPORTED', error.message, 409);
-      }
-      throw error;
-    }
+    return integration.cliUpdates.startUpdate();
   }
-}
-
-function failureMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.slice(0, MAX_FAILURE_MESSAGE_LENGTH);
 }

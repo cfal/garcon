@@ -1,8 +1,8 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentCliInstallMethod } from '@garcon/common/agent-cli-update';
-import { runBoundedCommand } from './bounded-command.js';
-import { compareCliVersions, parseCliVersion } from './cli-version.js';
+import { findExecutable, probeCliVersion } from './cli-probe.js';
+import { compareCliVersions } from './cli-version.js';
 
 // Ported from T3 Code's provider maintenance resolver, which classifies an
 // installation by where its executable lives before choosing the installer
@@ -38,6 +38,7 @@ export interface CliUpdateAction {
 }
 
 export type LatestVersionSource =
+  | { readonly kind: 'none' }
   | { readonly kind: 'native' }
   | { readonly kind: 'npm' }
   | { readonly kind: 'homebrew'; readonly brew: string; readonly name: string; readonly cask: boolean };
@@ -58,7 +59,6 @@ export interface CliInstallContext {
 
 const NPM_LATEST: LatestVersionSource = { kind: 'npm' };
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
-const TOOL_PROBE_MAX_BYTES = 64 * 1024;
 
 export async function resolveCliInstallation(
   definition: CliInstallDefinition,
@@ -99,7 +99,8 @@ export async function resolveCliInstallation(
   }
   if (anyPath(isPnpmGlobalPath)) {
     // pnpm 10 skips unapproved install scripts; the approval flag requires 10.4.
-    const pnpmVersion = await probeToolVersion('pnpm', context.env);
+    const pnpm = findExecutable('pnpm', context.env);
+    const pnpmVersion = pnpm ? await probeCliVersion(pnpm, context.env, TOOL_PROBE_TIMEOUT_MS) : null;
     const allowBuild = pnpmVersion && (compareCliVersions(pnpmVersion, '10.4.0') ?? -1) >= 0
       ? [`--allow-build=${packageName}`]
       : [];
@@ -202,23 +203,6 @@ async function resolveCommandPaths(command: string, env: Record<string, string>)
   }
 }
 
-function findExecutable(command: string, env: Record<string, string>): string | null {
-  return Bun.which(command, { PATH: env.PATH ?? env.Path ?? '' });
-}
-
-async function probeToolVersion(tool: string, env: Record<string, string>): Promise<string | null> {
-  const executable = findExecutable(tool, env);
-  if (!executable) return null;
-  try {
-    const result = await runBoundedCommand([executable, '--version'], {
-      env, timeoutMs: TOOL_PROBE_TIMEOUT_MS, maxOutputBytes: TOOL_PROBE_MAX_BYTES,
-    });
-    return result.exitCode === 0 ? parseCliVersion(result.stdout) : null;
-  } catch {
-    return null;
-  }
-}
-
 async function isExecutableFile(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath, fsConstants.X_OK);
@@ -228,7 +212,7 @@ async function isExecutableFile(filePath: string): Promise<boolean> {
   }
 }
 
-export function normalizeCommandPath(commandPath: string): string {
+function normalizeCommandPath(commandPath: string): string {
   return commandPath.replaceAll('\\', '/').toLowerCase();
 }
 

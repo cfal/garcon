@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentCliUpdateStatus } from '@garcon/common/agent-cli-update';
+import { parseAgentCliUpdateStatus, type AgentCliUpdateStatus } from '@garcon/common/agent-cli-update';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { CliUpdateService, type CliUpdateServiceOptions } from '../cli-update-service.js';
 import { createCliUpdateFixture, type CliUpdateFixture, type NpmCli } from './cli-update-fixture.js';
@@ -42,7 +42,7 @@ function service(overrides: Partial<CliUpdateServiceOptions> = {}): CliUpdateSer
     definition: { packageName: PACKAGE, native: { ownsCommandPath: () => false, args: ['update'] } },
     target: async () => ({ command: cli.launcher, bundled: false }),
     environment: () => fixture.env,
-    nativeLatestVersion: { key: 'native', lookup: async () => null },
+    nativeRelease: async () => ({ key: 'native', lookup: async () => null }),
     onUpdated: () => { updated++; },
     logger: silentLogger,
     now: () => new Date('2026-11-20T00:00:00.000Z'),
@@ -64,6 +64,7 @@ test('reports an outdated npm install with the command that updates it', async (
   const npm = await writeNpm({ latest: '2.1.300' });
   const status = await service().status({ refresh: false });
   expect(status).toEqual({
+    cliLabel: 'Synthetic CLI',
     installMethod: 'npm',
     installPath: cli.real,
     currentVersion: '2.1.238',
@@ -166,4 +167,57 @@ test('reports a missing CLI', async () => {
     installMethod: 'missing', currentVersion: null, advisory: 'unknown', canUpdate: false,
     message: 'Synthetic CLI (synthetic-missing-cli) was not found on PATH.',
   });
+});
+
+test('keeps the end of long installer output and names the error it ends with', async () => {
+  const warnings = Array.from({ length: 400 }, (_, index) => `npm warn deprecated synthetic-package-${index}@1.0.0`).join('\n');
+  await fixture.writeScript(path.join(fixture.bin, 'npm'), `
+case "$1" in
+  view) echo '"2.1.300"' ;;
+  install)
+    printf '%s\\n' ${JSON.stringify(warnings)} >&2
+    echo "npm error code EACCES" >&2
+    printf 'progress %.0s' $(seq 1 2000)
+    exit 243 ;;
+esac`);
+  const updates = service();
+  await updates.startUpdate();
+  const status = await settled(updates);
+  expect(status.run).toMatchObject({
+    state: 'failed',
+    message: 'The update command exited with code 243: npm error code EACCES',
+  });
+  expect(status.run.output!.length).toBeLessThanOrEqual(10_000);
+  expect(status.run.output!.endsWith('npm error code EACCES')).toBe(true);
+});
+
+test('bounds a failure message drawn from one long output line', async () => {
+  await fixture.writeScript(path.join(fixture.bin, 'npm'), `
+case "$1" in
+  view) echo '"2.1.300"' ;;
+  install)
+    printf 'error: %s\\n' "$(printf 'x%.0s' $(seq 1 6000))" >&2
+    exit 1 ;;
+esac`);
+  const updates = service();
+  await updates.startUpdate();
+  const status = await settled(updates);
+  expect(status.run.state).toBe('failed');
+  expect(status.run.message!.length).toBeLessThanOrEqual(500);
+  expect(parseAgentCliUpdateStatus(JSON.parse(JSON.stringify(status)))).not.toBeNull();
+});
+
+test('reports the snapshot taken before a run while the installer runs', async () => {
+  await writeNpm({ latest: '2.1.300' });
+  const gate = path.join(fixture.root, 'release-install');
+  const npm = path.join(fixture.bin, 'npm');
+  const original = await readFile(npm, 'utf8');
+  await fixture.writeScript(npm, original.replace('#!/bin/sh\n', '').replace('  install)\n', `  install)\n    while [ ! -f ${JSON.stringify(gate)} ]; do sleep 0.02; done\n`));
+  const updates = service();
+  const started = await updates.startUpdate();
+  expect(started).toMatchObject({ currentVersion: '2.1.238', advisory: 'behind-latest', run: { state: 'running' } });
+  const during = await updates.status({ refresh: false });
+  expect(during).toMatchObject({ currentVersion: '2.1.238', run: { state: 'running' } });
+  await writeFile(gate, 'release');
+  expect((await settled(updates)).run.state).toBe('succeeded');
 });

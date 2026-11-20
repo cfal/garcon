@@ -6,6 +6,7 @@ import { rpcLane } from '../transport/rpc-routing.js';
 import { remoteFixture } from './integration-fixture.js';
 
 const BEHIND: AgentCliUpdateStatus = {
+  cliLabel: 'Claude Code',
   installMethod: 'npm',
   installPath: '/opt/synthetic/lib/node_modules/@anthropic-ai/claude-code/cli.js',
   currentVersion: '2.1.238',

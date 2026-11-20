@@ -6,6 +6,7 @@ import {
 } from '../agent-cli-update.ts';
 
 const STATUS = {
+  cliLabel: 'Claude Code',
   installMethod: 'native',
   installPath: '/home/synthetic/.local/share/claude/versions/2.1.300',
   currentVersion: '2.1.300',

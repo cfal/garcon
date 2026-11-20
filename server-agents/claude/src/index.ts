@@ -39,6 +39,7 @@ import { createClaudeCliUpdates } from './agents/claude/cli-updates.js';
 import {
   buildClaudeEndpointRuntime,
   buildClaudeHostEnvironment,
+  buildClaudeProcessEnvironment,
 } from './agents/claude/endpoint-runtime.js';
 import { ClaudeExecution } from './agents/claude/execution.js';
 import {
@@ -380,13 +381,8 @@ function createClaudeNativeEvidence(options: {
 }
 
 function claudeLoginEnvironment(config: ReturnType<typeof createClaudeConfig>): Record<string, string> {
-  const environment: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'CLAUDECODE') environment[key] = value;
-  }
   return {
-    ...environment,
-    ...buildClaudeHostEnvironment(config),
+    ...buildClaudeProcessEnvironment(config),
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     FORCE_COLOR: '3',

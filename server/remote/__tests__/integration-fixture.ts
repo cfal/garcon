@@ -45,6 +45,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
       pricingAsOf: '2026-10-27',
     }),
     cliStatus: async (_request: AgentCliUpdateStatusRequest): Promise<AgentCliUpdateStatus> => ({
+      cliLabel: 'Test CLI',
       installMethod: 'missing', installPath: null, currentVersion: null, latestVersion: null, advisory: 'unknown',
       updateCommand: null, canUpdate: false, message: null, checkedAt: '2026-11-20T00:00:00.000Z',
       run: IDLE_AGENT_CLI_UPDATE_RUN,
