@@ -36,10 +36,13 @@ export function mergeRowsWithOptimisticInputs(
 ): ChatTranscriptRow[] {
 	if (rows.length === 0) return optimisticInputs.map(optimisticInputToRow);
 
+	// Waiting steers have no ledger position until dispatch. Keep them at the live
+	// tail without moving ordinary in-flight rows away from their original anchors.
+	const tailOrdinal = rows.at(-1)?.ordinal ?? 0;
 	const optimisticRows = optimisticInputs.map((input) => ({
 		row: optimisticInputToRow(input),
-		afterOrdinal: afterOrdinalByClientMessageId.get(input.clientMessageId),
-	}));
+		afterOrdinal: typeof input.delivery === 'object' ? tailOrdinal : afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0,
+	})).sort((a, b) => a.afterOrdinal - b.afterOrdinal);
 	const merged: ChatTranscriptRow[] = [];
 	let messageIndex = 0;
 	let optimisticIndex = 0;
@@ -47,8 +50,7 @@ export function mergeRowsWithOptimisticInputs(
 	while (messageIndex < rows.length && optimisticIndex < optimisticRows.length) {
 		const row = rows[messageIndex];
 		const optimistic = optimisticRows[optimisticIndex];
-		const rowPrecedesOptimistic = optimistic.afterOrdinal !== undefined
-			&& row.ordinal !== undefined
+		const rowPrecedesOptimistic = row.ordinal !== undefined
 			&& row.ordinal <= optimistic.afterOrdinal;
 		if (rowPrecedesOptimistic) {
 			merged.push(row);
