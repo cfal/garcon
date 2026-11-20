@@ -34,11 +34,12 @@ export interface ReconnectWsPort {
 
 export interface ReconnectPanelRegistryPort {
 	readonly transcriptCache: Pick<ChatTranscriptCache,
-		'readAppliedCursor' | 'markValidated' | 'markStaleExcept' | 'trackReplayValidation'>;
+		'readAppliedCursor' | 'markStaleExcept' | 'trackReplayValidation'>;
 	visibleChatIds(): readonly string[];
 	panelsForChat(chatId: string): readonly unknown[];
 	hasInactiveWindow(chatId: string): boolean;
 	markChatStale(chatId: string): void;
+	markChatValidated(chatId: string): void;
 	loadChatSnapshot(chatId: string): Promise<boolean>;
 	invalidateChatSnapshot(chatId: string): void;
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
@@ -202,7 +203,7 @@ export class ChatReconnectCoordinator {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
-			panels.transcriptCache.markValidated(chatId);
+			panels.markChatValidated(chatId);
 		} catch {
 			// Stops replay from buffering live commits during snapshot recovery.
 			panels.abortReconnectReplay(replayToken, chatId);
@@ -364,7 +365,7 @@ export class ChatReconnectCoordinator {
 					if (!validation.isCurrent() || !reachedFrontier) {
 						throw new Error('Transcript replay did not establish continuity');
 					}
-					cache.markValidated(cursor.chatId);
+					this.options.panels.markChatValidated(cursor.chatId);
 					shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
 				} catch {
 					if (replayToken !== null) {
