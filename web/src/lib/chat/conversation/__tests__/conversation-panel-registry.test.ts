@@ -1333,7 +1333,7 @@ describe('ConversationPanelRegistry', () => {
 			content: 'guidance', createdAt: timestamp, delivery: 'pending' });
 		selected.acceptQueuedSteer(chatId, receipt, control);
 		expect(overlays.viewFor('chat-2')).toBeNull();
-		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, queuedAtVersion: null });
+		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: null });
 		cache.replace(chatId, 'view-1', [message(1), { ordinal: 2,
 			message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: receipt.clientMessageId }) }], 2, null);
 		registry.reconcile([presentation('chat-view:window-left', chatId)]);
@@ -1379,6 +1379,33 @@ describe('ConversationPanelRegistry', () => {
 			registry.destroy();
 			cache.flush();
 			vi.useRealTimers();
+		}
+	});
+
+	it.each([false, true])('never resurrects a delivered steer after its echo (echo before reply: %s)', async echoBeforeReply => {
+		const head = deferred<number>();
+		const readHead = vi.fn(() => head.promise);
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: readHead });
+		const chatId = 'chat-1', timestamp = '2026-08-30T00:00:00.000Z';
+		const receipt = { kind: 'delivered' as const, transcriptViewId: 'view-1', clientMessageId: 'own' };
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-2' });
+		seed(cache, chatId);
+		selected.upsertOptimisticUserInput({ chatId, clientMessageId: 'own', content: 'guidance', createdAt: timestamp,
+			delivery: 'pending', placement: 'live-tail' });
+		const echo = () => selected.applyMessages(chatId, receipt.transcriptViewId, [{ ordinal: 2,
+			message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: receipt.clientMessageId }) }], 2, 2);
+		try {
+			if (echoBeforeReply) echo();
+			selected.acceptDeliveredSteer(chatId, receipt);
+			selected.acceptDeliveredSteer(chatId, receipt);
+			expect(readHead).toHaveBeenCalledTimes(echoBeforeReply ? 0 : 1);
+			if (!echoBeforeReply) echo();
+			head.resolve(2);
+			await head.promise;
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		} finally {
+			registry.destroy();
+			cache.flush();
 		}
 	});
 

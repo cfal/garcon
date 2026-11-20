@@ -174,7 +174,9 @@ export async function submitSteerRoute(
 			};
 			joinControl(response.control, control => deps.chatState.acceptQueuedSteer(context.chatId, receipt, control));
 		} else {
-			deps.chatState.markOptimisticUserInputDelivered(context.chatId, submission.clientMessageId);
+			deps.chatState.acceptDeliveredSteer(context.chatId, {
+				kind: 'delivered', clientMessageId: submission.clientMessageId, transcriptViewId,
+			});
 		}
 		return 'accepted';
 	} catch (error) {

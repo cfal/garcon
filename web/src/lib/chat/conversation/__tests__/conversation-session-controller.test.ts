@@ -56,7 +56,7 @@ import type { CommandAcceptedResponse } from '$shared/chat-command-contracts';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { DeliveredSteerReceipt, OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type {
 	ChatQueueState,
 	PendingPermissionRequest,
@@ -470,6 +470,11 @@ function createDeps(chat = createRunningChat()) {
 			);
 		}),
 		acceptQueuedSteer: vi.fn(),
+		acceptDeliveredSteer: vi.fn((chatId: string, receipt: DeliveredSteerReceipt) => {
+			chatState.optimisticUserInputs = chatState.optimisticUserInputs.map(input =>
+				input.chatId === chatId && input.clientMessageId === receipt.clientMessageId
+					? { ...input, delivery: receipt } : input);
+		}),
 		anchorUnconfirmedSteer: vi.fn(),
 		clearOptimisticUserInput: vi.fn((chatId: string, clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
@@ -5312,6 +5317,60 @@ describe('ConversationSessionController', () => {
 				'generation-1:1', ...(echo ? [] : [`optimistic:${id}`]), 'generation-1:2', 'generation-1:3',
 			]);
 			expect(registry.overlayFor('chat-1')!.optimisticInputs).toHaveLength(echo ? 0 : 1);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
+	it.each(['before', 'after'] as const)('recovers an immediately delivered steer whose buffered echo is lost (reply %s snapshot)', async replyOrder => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const lifecycle = new ConversationLifecycleState();
+		const head = deferred<number>();
+		const readHead = vi.fn(() => head.promise);
+		const registry = new ConversationPanelRegistry({
+			cache, overlays: new ConversationTranscriptOverlayStore(), readSteerTranscriptHead: readHead,
+			lifecycle: { forChat: () => lifecycle, remove: () => {} },
+			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+		});
+		const chatId = 'chat-1', transcriptViewId = 'generation-1', timestamp = '2026-01-01T00:00:00.000Z';
+		const output = (ordinal: number): TranscriptMessage => ({ ordinal, message: new AssistantMessage(timestamp, 'output') });
+		cache.replace(chatId, transcriptViewId, [output(1)], 1, null);
+		registry.reconcile([{ chatId, surfaceId: 'chat-view:window-left', windowId: 'window-left',
+			presentation: 'window-left', snapshotAdmission: 'admitted' }]);
+		const panel = registry.panel('chat-view:window-left')!;
+		panel.installInitialSnapshot();
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => chatId });
+		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();
+		mockSteerChat.mockReturnValueOnce(pending.promise);
+		deps.composerState.inputText = '/steer guidance';
+		const submit = new ConversationSessionController({ ...deps, chatState: selected }).submitForChat(chatId);
+		await flushPromises();
+		const id = registry.overlayFor(chatId)!.optimisticInputs[0]!.clientMessageId;
+		const acknowledge = async () => {
+			pending.resolve({ success: true, commandType: 'steer', clientRequestId: 'request', chatId,
+				turnId: 'turn', status: 'accepted', acceptedAt: timestamp });
+			expect(await submit).toBe('accepted');
+		};
+		try {
+			selected.applyMessages(chatId, transcriptViewId, [output(2)], 2, 2);
+			const replay = registry.beginReconnectReplay(chatId, transcriptViewId);
+			selected.applyMessages(chatId, transcriptViewId, [{ ordinal: 3,
+				message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: id }) }], 3, 3);
+			registry.abortReconnectReplay(replay, chatId);
+			if (replyOrder === 'before') await acknowledge();
+			cache.replace(chatId, transcriptViewId, [output(200)], 200, 200);
+			panel.transcript.clearMessages();
+			expect(panel.transcript.installCachedSnapshot(chatId)).toBe('applied');
+			if (replyOrder === 'after') await acknowledge();
+			registry.reconcileQueuedSteers(chatId, null);
+			expect(panel.transcript.visibleRows.at(-1)).toMatchObject({ id: `optimistic:${id}` });
+			expect(panel.transcript.visibleRows.at(-1)).not.toHaveProperty('inputStatus');
+			head.resolve(200);
+			await flushPromises();
+			expect(registry.overlayFor(chatId)!.optimisticInputs).toEqual([]);
+			expect(readHead).toHaveBeenCalledExactlyOnceWith(chatId, transcriptViewId);
 		} finally {
 			registry.destroy();
 			cache.flush();

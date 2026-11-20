@@ -107,7 +107,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		overlays.reconcileQueuedSteers(chatId, control);
 		expect(view.optimisticInputs).toEqual([input]);
 		overlays.reconcileQueuedSteers(chatId, control, receipt);
-		expect(view.optimisticInputs).toEqual([{ ...input, delivery: { ...receipt, queuedAtVersion: control.version }, content: entry.content }]);
+		expect(view.optimisticInputs).toEqual([{ ...input, delivery: { ...receipt, kind: 'queued', queuedAtVersion: control.version }, content: entry.content }]);
 		expect(view.optimisticAfterOrdinals.get(input.clientMessageId)).toBe(7);
 		expect(overlays.reconcileQueuedSteers(chatId, control)?.feedStructureChanged).toBe(false);
 
@@ -128,9 +128,12 @@ describe('ConversationTranscriptOverlayStore', () => {
 		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
 		const input = optimistic(receipt.clientMessageId);
 		const other = optimistic('still-in-flight');
+		const delivered = { ...optimistic('immediate'), delivery: {
+			kind: 'delivered' as const, clientMessageId: 'immediate', transcriptViewId: 'view',
+		} };
 		control.queue.entries = [{ id: receipt.entryId, kind: 'steer', attachments: [], content: input.content,
 			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
-		for (const row of [input, other]) overlays.upsertOptimisticInput(row.chatId, row, 3);
+		for (const row of [input, other, delivered]) overlays.upsertOptimisticInput(row.chatId, row, 3);
 		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
 		if (reason === 'removed') control.queue.entries = [];
 		if (reason === 'restart') control.serverInstanceId = 'new-server';
@@ -138,8 +141,8 @@ describe('ConversationTranscriptOverlayStore', () => {
 		overlays.reconcileQueuedSteers(input.chatId, latest);
 		overlays.reconcileQueuedSteers(input.chatId, latest, receipt);
 		const view = overlays.forChat(input.chatId);
-		expect(view.optimisticInputs).toEqual([other]);
-		expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3]]);
+		expect(view.optimisticInputs).toEqual([other, delivered]);
+		expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3], [delivered.clientMessageId, 3]]);
 	});
 
 	it('recognizes cancellation from the latest observation of a long-waiting queue entry', () => {

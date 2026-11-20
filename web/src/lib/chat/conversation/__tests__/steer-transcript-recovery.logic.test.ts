@@ -1,23 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatTranscriptAppliedCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { OptimisticUserInput, QueuedSteerDelivery } from '$lib/chat/transcript/optimistic-user-input.js';
-import { QueuedSteerTranscriptRecovery } from '../queued-steer-transcript-recovery.js';
+import { SteerTranscriptRecovery } from '../steer-transcript-recovery.js';
 
-function fixture() {
+function fixture(kind: 'queued' | 'delivered' = 'queued') {
 	const delivery: QueuedSteerDelivery = {
-		clientMessageId: 'input', entryId: 'entry', serverInstanceId: 'server',
+		kind: 'queued', clientMessageId: 'input', entryId: 'entry', serverInstanceId: 'server',
 		transcriptViewId: 'view', queuedAtVersion: null,
 	};
 	let inputs: OptimisticUserInput[] = [{
 		chatId: 'chat', clientMessageId: delivery.clientMessageId, content: 'guidance',
-		createdAt: '2026-01-01T00:00:00.000Z', delivery,
+		createdAt: '2026-01-01T00:00:00.000Z',
+		delivery: kind === 'queued' ? delivery : { kind, clientMessageId: delivery.clientMessageId, transcriptViewId: delivery.transcriptViewId },
 	}];
 	const readHead = vi.fn<() => Promise<number | null>>().mockResolvedValue(10);
 	const cursor: ChatTranscriptAppliedCursor = { transcriptViewId: 'view', lastOrdinal: 10, stale: false };
 	const clear = vi.fn((_chatId: string, id: string) => {
 		inputs = inputs.filter(input => input.clientMessageId !== id);
 	});
-	const recovery = new QueuedSteerTranscriptRecovery({
+	const recovery = new SteerTranscriptRecovery({
 		inputs: () => inputs,
 		cursor: () => cursor,
 		clear, readHead,
@@ -27,9 +28,23 @@ function fixture() {
 	}, remove: () => { inputs = []; } };
 }
 
-describe('QueuedSteerTranscriptRecovery', () => {
+describe('SteerTranscriptRecovery', () => {
 	beforeEach(() => vi.useFakeTimers());
 	afterEach(() => vi.useRealTimers());
+
+	it('retries a delivered acknowledgement without treating it as still queued', async () => {
+		const { recovery, readHead, clear, cursor } = fixture('delivered');
+		readHead.mockRejectedValueOnce(new Error('offline'));
+		cursor.stale = true;
+		recovery.observe('chat');
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(readHead).toHaveBeenCalledTimes(2);
+		expect(clear).not.toHaveBeenCalled();
+		cursor.stale = false;
+		recovery.retireCaughtUp('chat');
+		expect(clear).toHaveBeenCalledWith('chat', 'input');
+		recovery.destroy();
+	});
 
 	it.each(['failure', 'unavailable'] as const)('retries a final departure after %s without another control or snapshot', async outcome => {
 		const { recovery, readHead, clear } = fixture();
