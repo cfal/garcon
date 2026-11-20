@@ -23,6 +23,35 @@ describe('Codex scripted per-chat speed', () => {
   beforeAll(async () => { environment = await startScriptedCodexTestEnvironment(); });
   afterAll(async () => { await environment?.dispose(); });
 
+  test('starts premium chats directly and overrides their host default for an empty Standard envelope', async () => {
+    await withIntegrationFixture('codex-speed-start', async (fixture) => {
+      const config = join(fixture.executionDirs.home, '.codex', 'config.toml');
+      const originalConfig = await readFile(config, 'utf8');
+      expect(originalConfig).toContain('service_tier = "ultrafast"');
+      for (const [speed, tier] of [['fast', 'priority'], ['ultrafast', 'ultrafast'], ['standard', undefined]] as const) {
+        const chatId = fixture.newChatId();
+        const marker = `Synthetic ${speed} start`;
+        const before = environment.model.requests().length;
+        environment.model.scriptTurn([codexAssistantMessage(marker)]);
+        const afterIndex = fixture.client.markEvents();
+        const turn = await fixture.client.startChat({
+          ...liveCodexStartRequest({ chatId, projectPath: fixture.executionDirs.project, command: marker }),
+          agentSettings: { ownerId: 'codex', schemaVersion: 1, values: speed === 'standard' ? {} : { speed } },
+        });
+        await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker, afterIndex });
+        expect(environment.model.requests()).toHaveLength(before + 1);
+        const body = environment.model.requests()[before]!.body;
+        expect(body).toMatchObject({ model: codexRequestModel(), reasoning: { effort: LIVE_CODEX_THINKING_MODE } });
+        expect(body.service_tier).toBe(tier);
+      }
+      expect(await readFile(config, 'utf8')).toBe(originalConfig);
+      environment.model.assertSettled();
+    }, {
+      serverEnvironment: environment.serverEnvironment,
+      prepareWorkspace: (directories) => prepareScriptedCodexSpeed(environment, directories),
+    });
+  }, 60_000);
+
   test('routes per-chat speed without changing model, effort or executor config', async () => {
     await withIntegrationFixture('codex-speed', async (fixture) => {
       const config = join(fixture.executionDirs.home, '.codex', 'config.toml');
@@ -30,6 +59,8 @@ describe('Codex scripted per-chat speed', () => {
       const restrictedConfig = `features.ultrafast_mode = false\n${originalConfig}`;
       const fastChat = fixture.newChatId();
       const standardChat = fixture.newChatId();
+      const premiumChild = fixture.newChatId();
+      const standardChild = fixture.newChatId();
       const savedSettings = async (chatId: string) => {
         const { sessions } = await fixture.client.listChats();
         const chat = sessions.find(({ id }) => id === chatId);
@@ -43,6 +74,17 @@ describe('Codex scripted per-chat speed', () => {
         ...liveCodexRunRequest({ chatId, command: 'Continue synthetic speed check.' }),
         agentSettings: await savedSettings(chatId),
       });
+      const recordedSpeeds = async (chatId: string) => {
+        const native = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId, agentId: 'codex' });
+        const path = native.nativeSession?.value.path;
+        if (typeof path !== 'string') throw new Error('Missing synthetic rollout path');
+        const usageState = codexUsageFormat.createState();
+        return (await readFile(path, 'utf8')).split('\n').flatMap((line) => {
+          if (!codexUsageFormat.lineMarkers.some((marker) => line.includes(marker))) return [];
+          const record = codexUsageFormat.parseLine(line, usageState);
+          return record && 'speed' in record ? [record.speed] : [];
+        });
+      };
       const expectTurnTier = async (
         submit: (id: string) => Promise<AgentTurnCommandResponse>, chatId: string, expectedTier: InferenceTier,
       ) => {
@@ -120,7 +162,7 @@ describe('Codex scripted per-chat speed', () => {
       await expectTurnTier(resumeChat, standardChat, undefined);
 
       for (const [sourceChatId, tier] of [[fastChat, 'ultrafast'], [standardChat, undefined]] as const) {
-        const child = fixture.newChatId();
+        const child = sourceChatId === fastChat ? premiumChild : standardChild;
         const beforeFork = environment.model.requests().length;
         await fixture.client.forkChat({ sourceChatId, chatId: child });
         expect(environment.model.requests()).toHaveLength(beforeFork);
@@ -129,6 +171,12 @@ describe('Codex scripted per-chat speed', () => {
       await fixture.restartGarcon();
       expect((await savedSettings(fastChat)).values.speed).toBe('ultrafast');
       await expectTurnTier(resumeChat, fastChat, 'ultrafast');
+      for (const [child, tier] of [[premiumChild, 'ultrafast'], [standardChild, undefined]] as const) {
+        await expectTurnTier(resumeChat, child, tier);
+        const childSpeeds = await recordedSpeeds(child);
+        expect(childSpeeds.at(-1)).toBe(tier ?? 'standard');
+        expect(childSpeeds).not.toContain('unknown');
+      }
 
       await changeSpeed('fast');
       environment.model.scriptTurn([codexAssistantMessage('Synthetic compaction summary.')]);
@@ -140,16 +188,7 @@ describe('Codex scripted per-chat speed', () => {
       const compactTerminal = await fixture.client.waitForTurnTerminal(fastChat, compact.turnId, { afterIndex: compactCursor });
       expect(compactTerminal.type).toBe('agent-run-finished');
       expect(environment.model.requests()[beforeCompact]?.body.service_tier).toBe('priority');
-      const native = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId: fastChat, agentId: 'codex' });
-      const path = native.nativeSession?.value.path;
-      if (typeof path !== 'string') throw new Error('Missing synthetic rollout path');
-      const usageState = codexUsageFormat.createState();
-      const recordedSpeeds = (await readFile(path, 'utf8')).split('\n').flatMap((line) => {
-        if (!codexUsageFormat.lineMarkers.some((marker) => line.includes(marker))) return [];
-        const record = codexUsageFormat.parseLine(line, usageState);
-        return record && 'speed' in record ? [record.speed] : [];
-      });
-      expect(recordedSpeeds).toEqual(['standard', 'fast', 'fast', 'ultrafast', 'ultrafast', 'ultrafast', 'fast']);
+      expect(await recordedSpeeds(fastChat)).toEqual(['standard', 'fast', 'fast', 'ultrafast', 'ultrafast', 'ultrafast', 'fast']);
       await changeSpeed('standard');
       await expectTurnTier(resumeChat, fastChat, undefined);
       expect(await readFile(config, 'utf8')).toBe(originalConfig);
@@ -158,8 +197,9 @@ describe('Codex scripted per-chat speed', () => {
       const beforeRejection = environment.model.requests().length;
       for (const thinkingMode of [undefined, 'none'] as const) {
         const unavailable = await patchSpeed('ultrafast', thinkingMode);
-        expect(unavailable.ok).toBe(false);
-        expect(await unavailable.text()).toContain('Ultrafast speed is unavailable');
+        expect(unavailable.status).toBe(422);
+        expect(await unavailable.json()).toMatchObject({ errorCode: 'INVALID_SETTINGS', retryable: false,
+          error: expect.stringContaining('Ultrafast speed is unavailable') });
       }
       expect((await savedSettings(fastChat)).values.speed).toBe('standard');
       expect(environment.model.requests()).toHaveLength(beforeRejection);
@@ -174,6 +214,15 @@ describe('Codex scripted per-chat speed', () => {
       expect(denial).toMatchObject({
         status: 422, body: { errorCode: 'INVALID_SETTINGS', error: expect.stringContaining('Ultrafast speed is unavailable') },
       });
+      const resumeCursor = fixture.client.markEvents();
+      const rejectedResume = await resumeChat(premiumChild);
+      expect(await fixture.client.waitForTurnTerminal(premiumChild, rejectedResume.turnId, { afterIndex: resumeCursor }))
+        .toMatchObject({ type: 'agent-run-failed', error: expect.stringContaining('Ultrafast speed is unavailable') });
+      const beforeForkRejection = (await fixture.client.listChats()).sessions.map(({ id }) => id).sort();
+      expect(await rejectionOf(fixture.client.forkChat({ sourceChatId: premiumChild, chatId: fixture.newChatId() })))
+        .toMatchObject({ status: 422, body: { errorCode: 'INVALID_SETTINGS',
+          error: expect.stringContaining('Ultrafast speed is unavailable') } });
+      expect((await fixture.client.listChats()).sessions.map(({ id }) => id).sort()).toEqual(beforeForkRejection);
       expect(environment.model.requests()).toHaveLength(beforeRejection);
       environment.model.assertSettled();
     }, {

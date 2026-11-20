@@ -57,6 +57,38 @@ describe('price table keys', () => {
 });
 
 describe('pricing', () => {
+  test.each([
+    ['gpt-6.2-astra', 8, 40, 0.4, 10, 3, 6],
+    ['gpt-6.2-sol', 2, 10, 0.1, 2.5, 3, 6],
+    ['gpt-6-astra', 10, 50, 1, 12.5, 6, 6],
+    ['gpt-6.1-sol', 2, 10, 0.1, 2.5, 6, 6],
+  ] as const)('prices every Ultrafast token category and cache savings for %s', (model, input, output, cached, write, promotional, regular) => {
+    for (const [timestampMs, multiplier] of [
+      [Date.parse('2027-03-01T07:59:59.999Z'), promotional],
+      [Date.parse('2027-03-01T08:00:00Z'), regular],
+    ]) {
+      for (const promptTokens of [272_000, 272_001]) {
+        const long = promptTokens > 272_000;
+        const priced = priceUsageRecord(record(model, {
+          uncachedInputTokens: promptTokens - 200_000, cachedInputTokens: 100_000,
+          cacheWriteTokens: 100_000, outputTokens: 1_000_000, reasoningTokens: 200_000,
+        }, { speed: 'ultrafast', timestampMs, cacheWrite1hTokens: 40_000 }))!;
+        const promptMultiplier = multiplier * (long ? 2 : 1);
+        const categories = {
+          input: (promptTokens - 200_000) / 1_000_000 * input * promptMultiplier,
+          cacheRead: 0.1 * cached * promptMultiplier,
+          cacheWrite: 0.1 * write * promptMultiplier,
+          output: output * multiplier * (long ? 1.5 : 1),
+        };
+        for (const [category, cost] of Object.entries(categories)) {
+          expect(priced.categoryCostUsd[category as keyof typeof categories]).toBeCloseTo(cost, 10);
+        }
+        expect(priced.costUsd).toBeCloseTo(Object.values(categories).reduce((sum, cost) => sum + cost, 0), 10);
+        expect(priced.cacheSavingsUsd).toBeCloseTo(0.1 * (input - cached) * promptMultiplier, 10);
+      }
+    }
+  });
+
   test('keeps a response with ambiguous speed unpriced even for a known model', () => {
     expect(priceUsageRecord(record('gpt-6.2-sol', { outputTokens: 100 }, { speed: 'unknown' }))).toBeNull();
   });

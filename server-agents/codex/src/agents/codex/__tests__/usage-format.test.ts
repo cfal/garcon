@@ -18,10 +18,10 @@ function isMalformed(line: string, state: CodexUsageState): boolean {
 const SESSION_ID = '00000000-0000-4000-8000-0000000000c1';
 const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10-01T05:17:41.289Z') =>
   JSON.stringify({ type: 'session_meta', timestamp, payload: { id: SESSION_ID, ...payload } });
-const turnContext = (model = 'gpt-6-sol', turnId?: string) =>
-  JSON.stringify({ type: 'turn_context', timestamp: '2026-10-01T05:17:42.694Z', payload: { model, turn_id: turnId } });
-const threadSettings = (serviceTier: string, model = 'gpt-6-sol') =>
-  JSON.stringify({ type: 'event_msg', timestamp: '2026-10-01T05:17:43.000Z', payload: { type: 'thread_settings_applied', thread_settings: { model, service_tier: serviceTier } } });
+const turnContext = (model = 'gpt-6-sol', turnId?: string, timestamp = '2026-10-01T05:17:42.694Z') =>
+  JSON.stringify({ type: 'turn_context', timestamp, payload: { model, turn_id: turnId } });
+const threadSettings = (serviceTier: string, model = 'gpt-6-sol', timestamp = '2026-10-01T05:17:43.000Z') =>
+  JSON.stringify({ type: 'event_msg', timestamp, payload: { type: 'thread_settings_applied', thread_settings: { model, service_tier: serviceTier } } });
 const turnStarted = (id: string, type = 'task_started', timestamp = '2026-10-01T05:17:42Z') =>
   JSON.stringify({ type: 'event_msg', timestamp, payload: { type, turn_id: id } });
 
@@ -90,15 +90,18 @@ describe('Codex usage lines', () => {
   test('estimates the first request at admission and keeps the completion date for reporting', () => {
     const state = createCodexUsageState();
     parseCodexUsageLine(turnStarted('turn-1', 'task_started', '2027-03-01T07:59:50Z'), state);
-    parseCodexUsageLine(turnContext('gpt-6.2-astra', 'turn-1'), state);
-    parseCodexUsageLine(threadSettings('ultrafast', 'gpt-6.2-astra'), state);
+    parseCodexUsageLine(turnContext('gpt-6.2-astra', 'turn-1', '2027-03-01T08:00:00Z'), state);
+    parseCodexUsageLine(threadSettings('ultrafast', 'gpt-6.2-astra', '2027-03-01T08:00:00.500Z'), state);
     const completed = '2027-03-01T08:00:01Z';
     const sample = (id: string, at: string) => usageRecordLine(id, counters(0, 1_000_000), at);
     const copy = codexUsageFormat.cloneState(state);
     const first = parseCodexUsageLine(sample('first', completed), state)!;
     expect(first.timestampMs).toBe(Date.parse(completed));
+    expect(first.requestStartEstimateMs).toBe(Date.parse('2027-03-01T07:59:50Z'));
     expect(priceUsageRecord(first)?.costUsd).toBe(120);
-    expect(priceUsageRecord(parseCodexUsageLine(sample('second', '2027-03-01T08:00:05Z'), state)!)?.costUsd).toBe(240);
+    const second = parseCodexUsageLine(sample('second', '2027-03-01T08:00:05Z'), state)!;
+    expect(second.requestStartEstimateMs).toBe(Date.parse(completed));
+    expect(priceUsageRecord(second)?.costUsd).toBe(240);
     expect(priceUsageRecord(parseCodexUsageLine(sample('first', completed), copy)!)?.costUsd).toBe(120);
   });
 
@@ -112,6 +115,16 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(usageRecordLine('resp_ultrafast', counters(120, 10), undefined, 'turn-2'), state)?.speed).toBe('ultrafast');
     const late = parseCodexUsageLine(usageRecordLine('late_response', counters(10, 3), undefined, 'turn-1'), state);
     expect(late).toMatchObject({ speed: 'unknown', totals: { outputTokens: 3 } });
+  });
+
+  test('counts an unrecognized native tier without pricing it as Standard', () => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(threadSettings('synthetic-unknown-tier'), state);
+    parseCodexUsageLine(turnStarted('turn-1'), state);
+    parseCodexUsageLine(turnContext('gpt-6-sol', 'turn-1'), state);
+    const record = parseCodexUsageLine(usageRecordLine('unknown-tier', counters(100, 10)), state)!;
+    expect(record).toMatchObject({ speed: 'unknown', totals: { uncachedInputTokens: 100, outputTokens: 10 } });
+    expect(priceUsageRecord(record)).toBeNull();
   });
 
   test('attribute requests to the session and model from earlier context lines', () => {
