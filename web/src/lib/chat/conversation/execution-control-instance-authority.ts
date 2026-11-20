@@ -13,6 +13,7 @@ export type ExecutionControlInstanceDecision =
 export class ExecutionControlInstanceAuthority {
 	#currentInstanceId: string | null = null;
 	#confirmedSocketInstanceId: string | null = null;
+	#authorityRevision = 0;
 	readonly #supersededInstanceIds = new Set<string>();
 
 	markSocketDisconnected(): void {
@@ -25,6 +26,11 @@ export class ExecutionControlInstanceAuthority {
 
 	get confirmedSocketInstanceId(): string | null { return this.#confirmedSocketInstanceId; }
 
+	captureResponseFence(): (serverInstanceId: string) => boolean {
+		const revision = this.#authorityRevision;
+		return serverInstanceId => serverInstanceId === this.#currentInstanceId || revision === this.#authorityRevision;
+	}
+
 	shouldDeferSteerAcknowledgement(submittingSocket: string | null, acknowledgedInstance: string): boolean {
 		// A delayed HTTP reply cannot order two unseen processes across a disconnect.
 		return this.#currentInstanceId !== null && acknowledgedInstance !== this.#currentInstanceId
@@ -33,6 +39,7 @@ export class ExecutionControlInstanceAuthority {
 	}
 
 	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {
+		if (this.#confirmedSocketInstanceId !== serverInstanceId) this.#authorityRevision += 1;
 		this.#confirmedSocketInstanceId = serverInstanceId;
 		if (this.#currentInstanceId === serverInstanceId) return { kind: 'current' };
 		return this.#replaceCurrent(serverInstanceId);
@@ -53,6 +60,7 @@ export class ExecutionControlInstanceAuthority {
 	}
 
 	#replaceCurrent(serverInstanceId: string): ExecutionControlInstanceAcceptance {
+		this.#authorityRevision += 1;
 		if (this.#currentInstanceId !== null) {
 			this.#supersededInstanceIds.add(this.#currentInstanceId);
 		}

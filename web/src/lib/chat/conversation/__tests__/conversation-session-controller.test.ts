@@ -69,7 +69,7 @@ import {
 	type LoadingStatus,
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types.js';
-import { ConversationUiState } from '../conversation-ui-state.svelte.js';
+import { ConversationUiState, type ExecutionResponseReceiver } from '../conversation-ui-state.svelte.js';
 import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 
@@ -485,6 +485,7 @@ function createDeps(chat = createRunningChat()) {
 		},
 	};
 	const conversationUi = {
+		captureExecutionResponse: (): ExecutionResponseReceiver => conversationUi,
 		pendingPermissionRequests: [] as PendingPermissionRequest[],
 		previousPermissionMode: null as PermissionMode | null,
 		clearPendingPermissionRequests: vi.fn(() => {
@@ -5279,9 +5280,10 @@ describe('ConversationSessionController', () => {
 	it.each([false, true])('anchors an unconfirmed steer without resurrecting an applied echo (echo: %s)', async echo => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
 		const cache = new ChatTranscriptCache({ limit: 100 });
+		const lifecycle = new ConversationLifecycleState();
 		const registry = new ConversationPanelRegistry({
 			cache, overlays: new ConversationTranscriptOverlayStore(),
-			lifecycle: { forChat: () => deps.lifecycle, remove: () => {} },
+			lifecycle: { forChat: () => lifecycle, remove: () => {} },
 			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => 'chat-view:window-left',
 		});
 		const timestamp = '2026-01-01T00:00:00.000Z';

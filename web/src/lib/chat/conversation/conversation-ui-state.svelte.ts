@@ -35,6 +35,9 @@ interface QueuedSteerAcknowledgement {
 }
 type JoinSteerControl = (control: ChatExecutionControlState, join: QueuedSteerAcknowledgement['join']) => void;
 
+export type ExecutionResponseReceiver = Pick<ConversationUiPort,
+	'setExecutionControlFromLiveUpdate' | 'setExecutionControlFromRefresh' | 'setTransientFeedFromSnapshot'>;
+
 export interface ConversationUiPort {
 	readonly pendingPermissionRequests: PendingPermissionRequest[];
 	pendingViewChat: PendingViewChat | null;
@@ -60,6 +63,7 @@ export interface ConversationUiPort {
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean;
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
 	captureSteerControlJoin(chatId: string): JoinSteerControl;
+	captureExecutionResponse(): ExecutionResponseReceiver;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
 	removeExecutionControl(chatId: string): void;
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void;
@@ -244,6 +248,20 @@ export class ConversationUiState implements ConversationUiPort {
 			if (this.executionControlAuthority.shouldDeferSteerAcknowledgement(submittedInstance, control.serverInstanceId)) {
 				this.#unconfirmedSteers.add(ack);
 			} else this.#joinSteer(ack);
+		};
+	}
+
+	captureExecutionResponse(): ExecutionResponseReceiver {
+		const accepts = this.executionControlAuthority.captureResponseFence();
+		return {
+			setExecutionControlFromLiveUpdate: (chatId, control) => {
+				if (accepts(control.serverInstanceId)) this.setExecutionControlFromLiveUpdate(chatId, control);
+			},
+			setExecutionControlFromRefresh: (chatId, control) => {
+				if (accepts(control.serverInstanceId)) this.setExecutionControlFromRefresh(chatId, control);
+			},
+			setTransientFeedFromSnapshot: snapshot => accepts(snapshot.serverInstanceId)
+				? this.setTransientFeedFromSnapshot(snapshot) : { kind: 'stale' },
 		};
 	}
 

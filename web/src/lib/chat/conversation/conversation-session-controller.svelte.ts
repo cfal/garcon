@@ -404,6 +404,7 @@ export class ConversationSessionController {
 			this.#requestBottomRestore(chatId);
 		}
 
+		const executionResponse = deps.conversationUi.captureExecutionResponse();
 		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
 		const loadOptions: ChatLoadMessagesOptions = {
 			minimumLimit: minimumMessageLimit,
@@ -436,7 +437,7 @@ export class ConversationSessionController {
 			initialSnapshot.transcript.availability === 'available' &&
 			initialSnapshot.transcript.transcriptViewId === loadedCursor?.transcriptViewId
 		) {
-			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
+			executionResponse.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
 		}
 	}
 
@@ -786,16 +787,16 @@ export class ConversationSessionController {
 	}
 
 	handleAbortForChat(chatId: string): Promise<void> {
-		const { conversationUi } = this.deps;
+		const response = this.deps.conversationUi.captureExecutionResponse();
 		return this.#requestTurnStop(chatId, stopChat, (targetChatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
+			response.setExecutionControlFromLiveUpdate(targetChatId, result.control);
 		});
 	}
 
 	handleInterruptAndSendForChat(chatId: string): Promise<void> {
-		const { conversationUi } = this.deps;
+		const response = this.deps.conversationUi.captureExecutionResponse();
 		return this.#requestTurnStop(chatId, interruptAndSendChat, (targetChatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
+			response.setExecutionControlFromLiveUpdate(targetChatId, result.control);
 		});
 	}
 
