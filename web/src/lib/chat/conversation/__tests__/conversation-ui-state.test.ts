@@ -129,6 +129,25 @@ describe('ConversationUiState', () => {
 		expect(ui.getExecutionControl('chat')).toBeNull();
 	});
 
+	it('does not let a delayed intermediate acknowledgement clear a later process while the socket is down', () => {
+		const changed = vi.fn();
+		const ui = new ConversationUiState(changed);
+		ui.confirmExecutionControlSocketInstance('first');
+		const delayed = ui.captureSteerControlJoin('chat');
+		ui.markExecutionControlSocketDisconnected();
+		const current = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { serverInstanceId: 'third' });
+		ui.setExecutionControlFromRefresh('chat', current);
+		const bindCurrent = vi.fn(), bindDelayed = vi.fn();
+		ui.captureSteerControlJoin('chat')(current, bindCurrent);
+		changed.mockClear();
+		delayed(makeControl(makeQueue(), { serverInstanceId: 'second' }), bindDelayed);
+		expect(ui.getExecutionControl('chat')).toEqual(current);
+		expect(changed).not.toHaveBeenCalled();
+		ui.confirmExecutionControlSocketInstance('third');
+		expect(bindCurrent.mock.calls).toEqual([[current]]);
+		expect(bindDelayed.mock.calls).toEqual([[null]]);
+	});
+
 	it('does not wait for an unseen old HTTP instance when the socket was confirmed during submission', () => {
 		const ui = new ConversationUiState();
 		const join = ui.captureSteerControlJoin('chat');

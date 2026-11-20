@@ -241,8 +241,7 @@ export class ConversationUiState implements ConversationUiPort {
 		const submittedInstance = this.executionControlAuthority.confirmedSocketInstanceId;
 		return (control, join) => {
 			const ack = { chatId, control, join };
-			// HTTP can reach a restarted server before the submitting socket disconnects.
-			if (this.executionControlAuthority.isPossibleSuccessor(submittedInstance, control.serverInstanceId)) {
+			if (this.executionControlAuthority.shouldDeferSteerAcknowledgement(submittedInstance, control.serverInstanceId)) {
 				this.#unconfirmedSteers.add(ack);
 			} else this.#joinSteer(ack);
 		};
