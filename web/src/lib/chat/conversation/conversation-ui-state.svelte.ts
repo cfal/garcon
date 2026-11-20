@@ -66,6 +66,7 @@ export interface ConversationUiPort {
 	captureSteerControlJoin(chatId: string): JoinSteerControl;
 	captureExecutionResponse(): ExecutionResponseReceiver;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
+	captureExecutionControlRemoval(chatId: string): () => boolean;
 	removeExecutionControl(chatId: string): void;
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void;
 	activateTransientFeed(chatId: string | null): void;
@@ -331,6 +332,19 @@ export class ConversationUiState implements ConversationUiPort {
 		}
 		if (decision.kind === 'replace') this.#clearExecutionControls();
 		return false;
+	}
+
+	captureExecutionControlRemoval(chatId: string): () => boolean {
+		const control = this.getExecutionControl(chatId);
+		const capturedAt = performance.now();
+		return () => {
+			if (this.getExecutionControl(chatId) !== control) return false;
+			for (const ack of this.#unconfirmedSteers) {
+				if (ack.chatId === chatId && ack.receivedAt >= capturedAt) return false;
+			}
+			this.removeExecutionControl(chatId);
+			return true;
+		};
 	}
 
 	removeExecutionControl(chatId: string): void {

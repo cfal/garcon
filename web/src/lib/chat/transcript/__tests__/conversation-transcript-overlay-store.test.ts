@@ -158,7 +158,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(view.optimisticAfterOrdinals.size).toBe(0);
 	});
 
-	it.each(['removed', 'restart', 'pruned'] as const)('drops only the queued row when its entry is %s', reason => {
+	it.each(['removed', 'restart', 'control cleared'] as const)('reconciles only the queued row when its entry is %s', reason => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		const receipt = { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId: 'view' };
 		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
@@ -173,12 +173,17 @@ describe('ConversationTranscriptOverlayStore', () => {
 		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
 		if (reason === 'removed') control.queue.entries = [];
 		if (reason === 'restart') control.serverInstanceId = 'new-server';
-		const latest = reason === 'pruned' ? null : control;
+		const latest = reason === 'control cleared' ? null : control;
 		overlays.reconcileQueuedSteers(input.chatId, latest);
 		overlays.reconcileQueuedSteers(input.chatId, latest, receipt);
 		const view = overlays.forChat(input.chatId);
-		expect(view.optimisticInputs).toEqual([other, delivered]);
-		expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3], [delivered.clientMessageId, 3]]);
+		if (reason === 'removed') {
+			expect(view.optimisticInputs).toEqual([other, delivered]);
+			expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3], [delivered.clientMessageId, 3]]);
+		} else {
+			expect(view.optimisticInputs).toEqual([{ ...input, delivery: { ...receipt, kind: 'queued', queuedAtVersion: null } }, other, delivered]);
+			expect([...view.optimisticAfterOrdinals]).toEqual([[input.clientMessageId, 3], [other.clientMessageId, 3], [delivered.clientMessageId, 3]]);
+		}
 	});
 
 	it('recognizes cancellation from the latest observation of a long-waiting queue entry', () => {

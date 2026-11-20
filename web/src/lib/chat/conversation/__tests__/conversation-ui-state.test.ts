@@ -218,7 +218,7 @@ describe('ConversationUiState', () => {
 			ui.confirmExecutionControlSocketInstance(confirmedInstance, 30);
 			if (confirmedInstance === ack.serverInstanceId) {
 				expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: ack.version });
-			} else expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+			} else expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: null });
 		} finally {
 			clock.mockRestore();
 		}
