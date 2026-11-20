@@ -3,6 +3,7 @@ import type { ChatTranscriptAppliedCursor } from '$lib/chat/transcript/chat-tran
 import type { OptimisticUserInput, QueuedSteerDelivery } from '$lib/chat/transcript/optimistic-user-input.js';
 
 type ReadHead = (chatId: string, transcriptViewId: string) => Promise<number | null>;
+const RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000];
 
 async function readTranscriptHead(chatId: string, transcriptViewId: string): Promise<number | null> {
 	const page = await getChatMessages({ chatId, transcriptViewId, limit: 1 }, { cache: 'no-store' });
@@ -11,7 +12,9 @@ async function readTranscriptHead(chatId: string, transcriptViewId: string): Pro
 
 /** A head read started after queue departure bounds the echo, even outside the recovery page. */
 export class QueuedSteerTranscriptRecovery {
-	#heads = new WeakMap<QueuedSteerDelivery, number | 'reading'>();
+	#heads = new WeakMap<QueuedSteerDelivery, number | 'pending'>();
+	#retryTimers = new Set<ReturnType<typeof setTimeout>>();
+	#destroyed = false;
 
 	constructor(private readonly options: {
 		inputs(chatId: string): readonly OptimisticUserInput[];
@@ -21,10 +24,11 @@ export class QueuedSteerTranscriptRecovery {
 	}) {}
 
 	observe(chatId: string): void {
+		if (this.#destroyed) return;
 		const reads = new Map<string, QueuedSteerDelivery[]>();
 		for (const { delivery } of this.options.inputs(chatId)) {
 			if (typeof delivery !== 'object' || delivery.queuedAtVersion !== null || this.#heads.has(delivery)) continue;
-			this.#heads.set(delivery, 'reading');
+			this.#heads.set(delivery, 'pending');
 			const cohort = reads.get(delivery.transcriptViewId);
 			if (cohort) cohort.push(delivery);
 			else reads.set(delivery.transcriptViewId, [delivery]);
@@ -45,20 +49,39 @@ export class QueuedSteerTranscriptRecovery {
 		}
 	}
 
-	async #read(chatId: string, viewId: string, cohort: QueuedSteerDelivery[]): Promise<void> {
+	#currentCohort(chatId: string, cohort: QueuedSteerDelivery[]): QueuedSteerDelivery[] {
+		if (this.#destroyed) return [];
+		const current = new Set(this.options.inputs(chatId).map(input => input.delivery));
+		return cohort.filter(delivery => current.has(delivery) && this.#heads.get(delivery) === 'pending');
+	}
+
+	async #read(chatId: string, viewId: string, cohort: QueuedSteerDelivery[], retryIndex = 0): Promise<void> {
+		cohort = this.#currentCohort(chatId, cohort);
+		if (!cohort.length) return;
 		let head: number | null = null;
 		try {
 			head = await (this.options.readHead ?? readTranscriptHead)(chatId, viewId);
 		} catch {
-			// An unavailable read proves nothing. The next control or snapshot retries it.
+			// An unavailable read proves nothing, even if the chat has gone quiet.
 		}
-		for (const delivery of cohort) {
-			if (!this.#heads.has(delivery)) continue;
-			if (head !== null) this.#heads.set(delivery, head);
-			else this.#heads.delete(delivery);
+		cohort = this.#currentCohort(chatId, cohort);
+		if (!cohort.length) return;
+		if (head !== null) {
+			for (const delivery of cohort) this.#heads.set(delivery, head);
+			this.retireCaughtUp(chatId);
+			return;
 		}
-		if (head !== null) this.retireCaughtUp(chatId);
+		const timer = setTimeout(() => {
+			this.#retryTimers.delete(timer);
+			void this.#read(chatId, viewId, cohort, Math.min(retryIndex + 1, RETRY_DELAYS.length - 1));
+		}, RETRY_DELAYS[retryIndex]);
+		this.#retryTimers.add(timer);
 	}
 
-	destroy(): void { this.#heads = new WeakMap(); }
+	destroy(): void {
+		this.#destroyed = true;
+		for (const timer of this.#retryTimers) clearTimeout(timer);
+		this.#retryTimers.clear();
+		this.#heads = new WeakMap();
+	}
 }

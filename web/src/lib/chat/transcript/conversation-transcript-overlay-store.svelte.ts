@@ -197,7 +197,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 				removedOrdinals.delete(input.clientMessageId);
 				continue;
 			}
-			const queuedAtVersion = content === undefined ? null : previous?.queuedAtVersion ?? control.version;
+			const queuedAtVersion = content === undefined ? null : control.version;
 			const delivery = previous?.queuedAtVersion === queuedAtVersion ? previous : { ...binding, queuedAtVersion };
 			const text = content ?? input.content;
 			next.push(delivery === input.delivery && text === input.content ? input : { ...input, content: text, delivery });
