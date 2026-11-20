@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { isMalformedUsage, type UsageRecord } from '@garcon/server-agent-common/usage/usage-record';
+import { priceUsageRecord } from '@garcon/server-agent-common/usage/usage-pricing';
 import { codexUsageFormat, createCodexUsageState, parseCodexUsageLine as parseLine, type CodexUsageState } from '../usage-format.js';
 
 // Parses a line that must not be malformed.
@@ -19,8 +20,10 @@ const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10
   JSON.stringify({ type: 'session_meta', timestamp, payload: { id: SESSION_ID, ...payload } });
 const turnContext = (model = 'gpt-6-sol', turnId?: string) =>
   JSON.stringify({ type: 'turn_context', timestamp: '2026-10-01T05:17:42.694Z', payload: { model, turn_id: turnId } });
-const threadSettings = (serviceTier: string) =>
-  JSON.stringify({ type: 'event_msg', timestamp: '2026-10-01T05:17:43.000Z', payload: { type: 'thread_settings_applied', thread_settings: { model: 'gpt-6-sol', service_tier: serviceTier } } });
+const threadSettings = (serviceTier: string, model = 'gpt-6-sol') =>
+  JSON.stringify({ type: 'event_msg', timestamp: '2026-10-01T05:17:43.000Z', payload: { type: 'thread_settings_applied', thread_settings: { model, service_tier: serviceTier } } });
+const turnStarted = (id: string, type = 'task_started', timestamp = '2026-10-01T05:17:42Z') =>
+  JSON.stringify({ type: 'event_msg', timestamp, payload: { type, turn_id: id } });
 
 function counters(input: number, output: number, extra: Partial<Record<string, number>> = {}) {
   return {
@@ -55,6 +58,50 @@ function started(): CodexUsageState {
 }
 
 describe('Codex usage lines', () => {
+  test.each(['task_started', 'turn_started'])('%s freezes the tier before context, including early compaction', (type) => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(turnContext('gpt-6-sol', 'previous'), state);
+    parseCodexUsageLine(threadSettings('priority'), state);
+    const start = turnStarted('turn-1', type);
+    expect(codexUsageFormat.lineMarkers.some((marker) => start.includes(marker))).toBe(true);
+    parseCodexUsageLine(start, state);
+    parseCodexUsageLine(threadSettings('ultrafast'), state);
+    const compact = parseCodexUsageLine(usageRecordLine('compact', counters(0, 1_000_000)), state)!;
+    expect(priceUsageRecord(compact)?.costUsd).toBe(20);
+    parseCodexUsageLine(turnContext('gpt-6-sol', 'turn-1'), state);
+    expect(parseCodexUsageLine(usageRecordLine('ordinary', counters(100, 10)), state)?.speed).toBe('fast');
+  });
+
+  test('does not guess the initial tier from an edit before the first context, or the compactor across a model switch', () => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(turnStarted('turn-1'), state);
+    parseCodexUsageLine(threadSettings('ultrafast', 'gpt-6.2-astra'), state);
+    parseCodexUsageLine(turnContext('gpt-6.2-astra', 'turn-1'), state);
+    expect(parseCodexUsageLine(usageRecordLine('first', counters(1, 1)), state)?.speed).toBe('unknown');
+    parseCodexUsageLine(threadSettings('priority', 'gpt-6.2-sol'), state);
+    parseCodexUsageLine(turnStarted('turn-2'), state);
+    const compact = parseCodexUsageLine(usageRecordLine('compact', counters(10, 3), undefined, 'turn-2'), state)!;
+    expect(compact.totals.outputTokens).toBe(3);
+    expect(priceUsageRecord(compact)).toBeNull();
+    parseCodexUsageLine(turnContext('gpt-6.2-sol', 'turn-2'), state);
+    expect(parseCodexUsageLine(usageRecordLine('next', counters(1, 1), undefined, 'turn-2'), state)?.model).toBe('gpt-6.2-sol');
+  });
+
+  test('estimates the first request at admission and keeps the completion date for reporting', () => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(turnStarted('turn-1', 'task_started', '2027-03-01T07:59:50Z'), state);
+    parseCodexUsageLine(turnContext('gpt-6.2-astra', 'turn-1'), state);
+    parseCodexUsageLine(threadSettings('ultrafast', 'gpt-6.2-astra'), state);
+    const completed = '2027-03-01T08:00:01Z';
+    const sample = (id: string, at: string) => usageRecordLine(id, counters(0, 1_000_000), at);
+    const copy = codexUsageFormat.cloneState(state);
+    const first = parseCodexUsageLine(sample('first', completed), state)!;
+    expect(first.timestampMs).toBe(Date.parse(completed));
+    expect(priceUsageRecord(first)?.costUsd).toBe(120);
+    expect(priceUsageRecord(parseCodexUsageLine(sample('second', '2027-03-01T08:00:05Z'), state)!)?.costUsd).toBe(240);
+    expect(priceUsageRecord(parseCodexUsageLine(sample('first', completed), copy)!)?.costUsd).toBe(120);
+  });
+
   test('attributes a response to the speed at turn start, not a selection made during inference', () => {
     const state = createCodexUsageState();
     parseCodexUsageLine(turnContext('gpt-6-sol', 'turn-1'), state);

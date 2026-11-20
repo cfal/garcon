@@ -5,6 +5,8 @@ export type UsageSpeed = 'standard' | 'fast' | 'ultrafast' | 'flex' | 'unknown';
 /** One billed model request read from a native transcript. */
 export interface UsageRecord {
   readonly timestampMs: number;
+  // Dispatch-time estimate for time-dependent rates, not the date of the usage bucket.
+  readonly requestStartEstimateMs?: number;
   readonly model: string;
   readonly sessionId: string;
   readonly totals: UsageTokenTotals;

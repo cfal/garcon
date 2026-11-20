@@ -47,11 +47,11 @@ function speedMultiplier(price: ModelPrice, speed: Exclude<UsageSpeed, 'unknown'
 }
 
 /** Returns null when the rate is unknown. Reasoning tokens are already part of output. */
-export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed' | 'timestampMs'>): PricedUsage | null {
+export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed' | 'timestampMs' | 'requestStartEstimateMs'>): PricedUsage | null {
   if (record.speed === 'unknown') return null;
   const price = lookupModelPrice(record.model);
   if (!price) return null;
-  const multiplier = speedMultiplier(price, record.speed, record.timestampMs);
+  const multiplier = speedMultiplier(price, record.speed, record.requestStartEstimateMs ?? record.timestampMs);
   if (multiplier === null) return null;
   const { uncachedInputTokens, cachedInputTokens, cacheWriteTokens, outputTokens } = record.totals;
   const promptTokens = uncachedInputTokens + cachedInputTokens + cacheWriteTokens;

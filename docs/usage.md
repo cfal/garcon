@@ -68,9 +68,10 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   rollout has records, only records are billed, keyed by `response_id`, and
   `token_count` only reports context size. Records with no response id or
   usage, or with no known model, are malformed. Records with a matching turn ID
-  use that turn's speed, not a speed selected while its response was in flight.
-  If the record names a different turn than the current context, its tokens
-  still count but the cost is unknown.
+  use the speed at turn start, including compaction billed before `turn_context`.
+  Live edits do not reprice the active turn. When the record names a different turn,
+  the initial tier is ambiguous, or early compaction could have used either side of
+  a model switch, tokens still count but the cost is unknown.
   The rollout does not record every one-turn override or the actual billed tier.
 - Rollouts written before records existed bill `token_count` events, which
   take their model from the latest `turn_context` and their tier from the
@@ -97,7 +98,9 @@ cache-read rates, one-hour cache writes, fast mode, and Haiku 5.5's long-prompt
 tier. OpenAI rates follow LiteLLM's published table, including priority
 processing, flex processing, and the 272K-token long-context tier. Ultrafast estimates use
 [OpenAI’s published API rates](https://developers.openai.com/api/docs/pricing) for the model,
-including the GPT-6.2 promotional rate at the time of the request. Ultrafast usage without a
+including the GPT-6.2 promotional rate. Codex does not persist individual request start times;
+the estimate uses turn start for the first response and the preceding response's completion
+for later requests in that turn. Usage days still use the recorded completion time. Ultrafast usage without a
 published rate counts toward tokens but is reported as unpriced. Model names are matched after
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens
