@@ -39,6 +39,11 @@ const PROVIDER_STYLES: Readonly<Record<string, AgentProviderStyle>> = {
 		pillClass: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
 		accentColor: 'var(--color-provider-pi-foreground)',
 	},
+	antigravity: {
+		pillClass:
+			'border-provider-antigravity-border bg-provider-antigravity-bg text-provider-antigravity-foreground',
+		accentColor: 'var(--color-provider-antigravity-foreground)',
+	},
 };
 
 /** The provider styling for an agent, or null for agents without a provider identity. */

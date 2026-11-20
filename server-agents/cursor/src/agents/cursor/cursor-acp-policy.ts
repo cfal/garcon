@@ -1,8 +1,8 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { CursorConfig } from '../../config.js';
-import type { AcpAgentPolicy } from '../shared/acp-agent-runtime.js';
-import type { AcpResumeRequest, AcpStartRequest } from '../shared/runtime-types.js';
+import type { AcpAgentPolicy } from '@garcon/server-agent-common/acp/agent-runtime';
+import type { AcpResumeRequest, AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { configureCursorAcpSession, cursorAcpModeForPermissionMode } from './cursor-acp-model-config.js';
 import { createCursorAcpNativePath } from './cursor-native-path.js';
 
@@ -35,7 +35,9 @@ export function createCursorAcpPolicy(config: CursorConfig, logger?: AgentLogger
     newSessionModelConfig: false,
     promptModelConfig: false,
     promptModeConfig: false,
-    configureSession: (context) => configureCursorAcpSession(context, logger),
+    configureSession: async (context) => ({
+      configOptions: await configureCursorAcpSession(context, logger),
+    }),
     buildPrompt: promptForRequest,
     buildEnv(request) {
       const apiKey = config.apiKey();

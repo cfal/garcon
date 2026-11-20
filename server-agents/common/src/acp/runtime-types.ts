@@ -1,6 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
+import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 
 export interface AcpExecutionAdmission {
   readonly signal: AbortSignal;

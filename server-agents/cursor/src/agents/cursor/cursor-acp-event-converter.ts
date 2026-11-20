@@ -24,7 +24,7 @@ import {
   type AcpCustomRequest,
   type AcpEventConverter,
   type AcpSessionUpdateContext,
-} from '../shared/acp-event-converter.js';
+} from '@garcon/server-agent-common/acp/event-converter';
 
 const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
 const MAX_TOOL_SNAPSHOTS_PER_SESSION = 512;

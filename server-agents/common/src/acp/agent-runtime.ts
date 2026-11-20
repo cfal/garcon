@@ -1,17 +1,15 @@
 import crypto from 'node:crypto';
 import {
   ErrorMessage,
-  UnknownToolUseMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
+import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import {
   runtimeRows,
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
-} from '@garcon/server-agent-common/execution/runtime-events';
-import { normalizeToolInput } from '@garcon/server-agent-common/shared/normalize-util';
+} from '../execution/runtime-events.js';
 import {
   assertAcpExecutionOpen,
   markAcpExecutionStarted,
@@ -23,35 +21,35 @@ import {
 } from './runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
-import { AcpCapabilityCache } from '../../acp/capability-cache.js';
-import { AcpClient } from '../../acp/client.js';
-import { isRecoverableLoadFailure } from '../../acp/errors.js';
+import { AcpCapabilityCache } from './capability-cache.js';
+import { AcpClient } from './client.js';
 import type {
   AcpInitializeParams,
   AcpJsonRpcId,
   AcpSessionConfigOption,
+  AcpSessionModelState,
   AcpSessionRequestPermission,
   AcpSessionUpdateNotification,
-} from '../../acp/protocol.js';
-import type { AcpAdvertisedCapabilities, ReconnectStrategy } from '../../acp/reconnect-policy.js';
-import { reconnectOrder } from '../../acp/reconnect-policy.js';
-import { AcpTransport } from '../../acp/transport.js';
-import type { AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
-import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+} from './protocol.js';
+import type { AcpAdvertisedCapabilities, ReconnectStrategy } from './reconnect-policy.js';
+import { reconnectAcpSession, reconnectOrder } from './reconnect-policy.js';
+import { AcpTransport } from './transport.js';
+import type { AcpEventConverter, AcpSessionUpdateContext } from './event-converter.js';
+import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import {
   abortStrategy,
   asObject,
   asString,
-  autoApproveOptionId,
+  autoApproveChoice,
   buildEnvFallback,
   buildPromptFallback,
+  fallbackPermissionToolUse,
   humanizeError,
   isAutoApproveMode,
   isJsonRpcId,
   permissionCancelledOutcome,
-  permissionOptionId,
-  permissionOutcome,
-} from './acp-runtime-helpers.js';
+  permissionChoiceOutcome,
+} from './runtime-helpers.js';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -79,6 +77,7 @@ interface AcpAgentRuntimeSession {
   sourceTurn: AcpTurnContext | null;
   permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
+  models?: AcpSessionModelState;
   startedAt: string;
   lastActivityAt: number;
 }
@@ -94,7 +93,11 @@ interface AcpTurnContext {
   aborted: boolean;
   sourceActive: boolean;
   sourceRetired: boolean;
+  readonly settled: PromiseWithResolvers<void>;
 }
+
+// How long a cancelled prompt may take to settle before the next turn replaces its process.
+const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 10_000;
 
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
 
@@ -103,6 +106,13 @@ export interface AcpSessionConfigurationContext {
   sessionId: string;
   request: AcpStartRequest | AcpResumeRequest;
   configOptions?: AcpSessionConfigOption[];
+  models?: AcpSessionModelState;
+}
+
+// The session state a configuration pass changed; omitted fields keep their value.
+export interface AcpSessionStatePatch {
+  configOptions?: AcpSessionConfigOption[];
+  models?: AcpSessionModelState;
 }
 
 export interface AcpAgentPolicy {
@@ -110,12 +120,12 @@ export interface AcpAgentPolicy {
   command: string | (() => string);
   args?: string[];
   abortStrategy?: AcpAbortStrategy;
-  authenticateMethodId?: string;
+  authenticateMethodId?: string | (() => string);
   mcpServers?: unknown[];
   binaryVersion?: string;
   reconnectAllowNewSession?: boolean;
   clientCapabilities?: AcpInitializeParams['clientCapabilities'];
-  configureSession?: (context: AcpSessionConfigurationContext) => Promise<AcpSessionConfigOption[] | void>;
+  configureSession?: (context: AcpSessionConfigurationContext) => Promise<AcpSessionStatePatch | void>;
   newSessionModelConfig?: boolean;
   promptModelConfig?: boolean;
   promptModeConfig?: boolean;
@@ -131,6 +141,7 @@ export interface AcpAgentRuntimeOptions {
   capabilityCache?: AcpCapabilityCache;
   createTransport?: () => AcpTransport;
   logger?: AgentLogger;
+  cancelSettleTimeoutMs?: number;
 }
 
 const SILENT_LOGGER: AgentLogger = {
@@ -146,6 +157,7 @@ export class AcpAgentRuntime {
   #capabilityCache: AcpCapabilityCache;
   #createTransport: () => AcpTransport;
   #logger: AgentLogger;
+  #cancelSettleTimeoutMs: number;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
@@ -161,6 +173,7 @@ export class AcpAgentRuntime {
     this.#capabilityCache = options.capabilityCache ?? new AcpCapabilityCache();
     this.#createTransport = options.createTransport ?? (() => new AcpTransport());
     this.#logger = options.logger ?? SILENT_LOGGER;
+    this.#cancelSettleTimeoutMs = options.cancelSettleTimeoutMs ?? DEFAULT_CANCEL_SETTLE_TIMEOUT_MS;
   }
 
   async startSession(request: AcpStartRequest): Promise<AcpStartedSession> {
@@ -204,6 +217,7 @@ export class AcpAgentRuntime {
       sourceTurn: null,
       permissionMode: request.permissionMode,
       configOptions: created.configOptions,
+      models: created.models,
       startedAt: now,
       lastActivityAt: Date.now(),
     };
@@ -243,11 +257,32 @@ export class AcpAgentRuntime {
 
   async runTurn(request: AcpResumeRequest): Promise<void> {
     assertAcpExecutionOpen(request);
-    const session = await this.#sessionForTurn(request);
+    let session = await this.#sessionForTurn(request);
+    const cancelled = session.activeTurn;
+    if (cancelled?.running && cancelled.aborted) {
+      await this.#settleCancelledTurn(cancelled);
+      assertAcpExecutionOpen(request);
+      if (session.retired) session = await this.#sessionForTurn(request);
+    }
     if (session.activeTurn?.running) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
     await this.#runPrompt(session, request);
+  }
+
+  // A cooperative cancel settles when the agent answers the open prompt; an
+  // agent that never does loses its process, and the next turn reconnects.
+  async #settleCancelledTurn(turn: AcpTurnContext): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.#cancelSettleTimeoutMs);
+    });
+    try {
+      await Promise.race([turn.settled.promise, timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (turn.running) this.#retireSession(turn.session, 'aborted');
   }
 
   async prepareProjectPathUpdate(request: AcpProjectPathUpdateRequest): Promise<void> {
@@ -291,7 +326,15 @@ export class AcpAgentRuntime {
     turn.aborted = true;
     session.state = 'aborted';
     this.#cancelPermissionsForTurn(turn, 'aborted');
-    void session.client.cancelSession({ sessionId: session.remoteSessionId }).catch(() => {});
+    try {
+      session.client.cancelSession({ sessionId: session.remoteSessionId });
+    } catch (error) {
+      this.#logger.warn('ACP cancel could not be delivered.', {
+        agentId: this.#policy.agentId,
+        sessionId: session.id,
+        error: humanizeError(error),
+      });
+    }
     return true;
   }
 
@@ -358,7 +401,9 @@ export class AcpAgentRuntime {
         clientCapabilities: this.#policy.clientCapabilities ?? {},
         mcpServers: this.#policy.mcpServers ?? [],
       },
-      authenticateMethodId: this.#policy.authenticateMethodId,
+      authenticateMethodId: typeof this.#policy.authenticateMethodId === 'function'
+        ? this.#policy.authenticateMethodId()
+        : this.#policy.authenticateMethodId,
     });
     try {
       await client.connect({
@@ -421,50 +466,18 @@ export class AcpAgentRuntime {
     request: AcpResumeRequest,
     order: ReconnectStrategy[],
   ): Promise<boolean> {
-    for (const strategy of order) {
-      if (strategy === 'resume') {
-        try {
-          const loaded = await session.client.resumeSession({
-            sessionId: session.remoteSessionId,
-            cwd: request.projectPath,
-            mcpServers: this.#policy.mcpServers,
-          });
-          session.configOptions = loaded.configOptions;
-          return true;
-        } catch (error) {
-          if (isRecoverableLoadFailure(error)) continue;
-          throw error;
-        }
-      }
-
-      if (strategy === 'load') {
-        try {
-          const loaded = await session.client.loadSession({
-            sessionId: session.remoteSessionId,
-            cwd: request.projectPath,
-            mcpServers: this.#policy.mcpServers,
-          });
-          session.configOptions = loaded.configOptions;
-          return true;
-        } catch (error) {
-          if (isRecoverableLoadFailure(error)) continue;
-          throw error;
-        }
-      }
-
-      if (strategy === 'new' && this.#policy.reconnectAllowNewSession) {
-        const model = this.#newSessionModelForRequest(request);
-        const created = await session.client.newSession({
-          cwd: request.projectPath,
-          mcpServers: this.#policy.mcpServers,
-          ...(model ? { model } : {}),
-        });
-        session.remoteSessionId = created.sessionId;
-        session.configOptions = created.configOptions;
-        return true;
-      }
-    }
-    return false;
+    const restored = await reconnectAcpSession(session.client, {
+      sessionId: session.remoteSessionId,
+      cwd: request.projectPath,
+      mcpServers: this.#policy.mcpServers,
+      allowNewSession: this.#policy.reconnectAllowNewSession === true,
+      newSessionModel: this.#newSessionModelForRequest(request),
+    }, order);
+    if (!restored) return false;
+    session.remoteSessionId = restored.sessionId;
+    session.configOptions = restored.configOptions;
+    session.models = restored.models;
+    return true;
   }
 
   async #runPrompt(
@@ -498,7 +511,13 @@ export class AcpAgentRuntime {
         onExecutionStarted?.();
       });
       await promptRequest;
-      success = !turn.aborted;
+      const reportedFailure = this.#converter.takeTurnFailure?.(session.id) ?? null;
+      if (reportedFailure && !turn.aborted) {
+        shouldThrow = true;
+        failureMessage = reportedFailure;
+      } else {
+        success = !turn.aborted;
+      }
     } catch (error) {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (turn.aborted) {
@@ -564,6 +583,7 @@ export class AcpAgentRuntime {
       aborted: false,
       sourceActive: false,
       sourceRetired: false,
+      settled: Promise.withResolvers<void>(),
     };
   }
 
@@ -668,48 +688,25 @@ export class AcpAgentRuntime {
     if (isAutoApproveMode(turn.permissionMode)) {
       session.client.respond(
         requestId,
-        permissionOutcome(permissionOptionId(options, autoApproveOptionId(turn.permissionMode))),
+        permissionChoiceOutcome(options, autoApproveChoice(turn.permissionMode)),
       );
       return;
     }
 
     const permissionOccurrenceId = crypto.randomUUID();
     const toolCall = asObject(params.toolCall);
-    const toolId = asString(toolCall.toolCallId ?? toolCall.callId ?? toolCall.id)
-      ?? permissionOccurrenceId;
     const context = this.#sessionUpdateContext(turn);
-    const convertedRequestedTool = this.#converter.permissionToolUse?.(toolCall, context) ?? null;
-    const rawName = asString(toolCall.toolName ?? toolCall.tool_name ?? toolCall.kind ?? toolCall.title ?? toolCall.name) ?? 'Permission';
-    const rawInput = toolCall.rawInput ?? toolCall.raw_input ?? toolCall.input ?? toolCall.args;
-    const fallbackInput = normalizeToolInput(rawInput);
-    if (Object.keys(fallbackInput).length === 0) {
-      if (Array.isArray(toolCall.locations) && toolCall.locations.length > 0) {
-        fallbackInput.locations = toolCall.locations;
-      }
-      if (Array.isArray(toolCall.content) && toolCall.content.length > 0) {
-        fallbackInput.content = toolCall.content;
-      }
-      const title = asString(toolCall.title);
-      if (title) fallbackInput.title = title;
-    }
-    const requestedTool = convertedRequestedTool
-      ?? new UnknownToolUseMessage(
-        context.timestamp,
-        toolId,
-        rawName,
-        fallbackInput,
-      );
+    const requestedTool = this.#converter.permissionToolUse?.(toolCall, context)
+      ?? fallbackPermissionToolUse(toolCall, permissionOccurrenceId, context.timestamp);
 
     const pending = this.#registerPendingPermission(
       turn,
       permissionOccurrenceId,
       requestId,
-      (decision) => {
-        const fallback = decision.allow
-          ? (decision.alwaysAllow ? 'allow-always' : 'allow-once')
-          : 'reject-once';
-        return permissionOutcome(permissionOptionId(options, fallback));
-      },
+      (decision) => permissionChoiceOutcome(
+        options,
+        decision.allow ? (decision.alwaysAllow ? 'allow-always' : 'allow-once') : 'reject',
+      ),
       permissionCancelledOutcome,
     );
     this.#publishTurnEvent(turn, {
@@ -816,6 +813,7 @@ export class AcpAgentRuntime {
     turn.running = false;
     const session = turn.session;
     if (session.activeTurn === turn) session.activeTurn = null;
+    turn.settled.resolve();
   }
 
   #emitFlushedMessages(turn: AcpTurnContext): ChatMessage[] {
@@ -890,7 +888,10 @@ export class AcpAgentRuntime {
       this.#completeTurn(turn);
       this.#retireTurnSource(turn, reason);
     }
-    if (this.#sessions.get(session.id) === session) this.#sessions.delete(session.id);
+    if (this.#sessions.get(session.id) === session) {
+      this.#sessions.delete(session.id);
+      this.#converter.releaseSession?.(session.id);
+    }
     session.client.close();
   }
 
@@ -913,10 +914,10 @@ export class AcpAgentRuntime {
       sessionId: session.remoteSessionId,
       request,
       configOptions: session.configOptions,
+      models: session.models,
     });
-    if (configured) {
-      session.configOptions = configured;
-    }
+    if (configured?.configOptions) session.configOptions = configured.configOptions;
+    if (configured?.models) session.models = configured.models;
   }
 
   #buildPrompt(request: AcpStartRequest | AcpResumeRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {

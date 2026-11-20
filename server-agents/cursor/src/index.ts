@@ -20,11 +20,11 @@ import {
   createNativeHistoryImport,
 } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCursorConfig } from './config.js';
-import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
+import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
 import { getCursorAuthStatus } from './agents/cursor/cursor-auth.js';
 import { CursorAcpEventConverter } from './agents/cursor/cursor-acp-event-converter.js';
-import { CursorExecution } from './agents/cursor/execution.js';
+import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
 import { CursorTranscriptNotFoundError } from './agents/cursor/history-loader.js';
 import { getCursorModels } from './agents/cursor/cursor-models.js';
 import {
@@ -115,7 +115,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    const providerExecution = new CursorExecution(runtime, nativeSessions);
+    const providerExecution = new AcpExecution(runtime, nativeSessions);
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration) => (
         providerExecution.applySessionConfiguration(agentSessionId, configuration)

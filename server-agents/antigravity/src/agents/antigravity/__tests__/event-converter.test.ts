@@ -1,0 +1,175 @@
+import { describe, expect, it } from 'bun:test';
+import {
+  AntigravityAcpEventConverter,
+  antigravityExecutorError,
+} from '../antigravity-acp-event-converter.ts';
+
+const SESSION = 'session-1';
+const context = { chatId: 'chat-1', sessionId: SESSION, timestamp: '2026-01-01T00:00:00.000Z' };
+
+function update(payload: Record<string, unknown>) {
+  return { sessionId: SESSION, update: payload };
+}
+
+function toolCall(id: string, name: string, kind: string, rawInput: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+  return update({ sessionUpdate: 'tool_call', toolCallId: id, name, args: rawInput, status: 'in_progress', kind, title: name, rawInput, ...extra });
+}
+
+function plain(messages: readonly object[]) {
+  return messages.map((message) => {
+    const { timestamp: _timestamp, ...rest } = message as Record<string, unknown>;
+    return rest;
+  });
+}
+
+describe('AntigravityAcpEventConverter', () => {
+  it('buffers text and thinking until a tool call or the end of the turn', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Considering.' } }), context)).toEqual([]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Running ' } }), context)).toEqual([]);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'it.' } }), context);
+
+    const atTool = converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', {
+      CommandLine: 'echo synthetic',
+      toolSummary: 'Echo text',
+      WaitMsBeforeAsync: 5000,
+    }), context);
+    expect(plain(atTool)).toEqual([
+      { type: 'thinking', content: 'Considering.' },
+      { type: 'assistant-message', content: 'Running it.' },
+      { type: 'bash-tool-use', toolId: 'tool-1', command: 'echo synthetic', description: 'Echo text' },
+    ]);
+
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' } }), context);
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([
+      { type: 'assistant-message', content: 'Done.' },
+    ]);
+  });
+
+  it('emits a tool row once and normalizes command output', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const input = { CommandLine: 'echo synthetic', WaitMsBeforeAsync: 5000 };
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', input), context);
+
+    expect(converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', name: 'run_command', status: 'pending', rawInput: input,
+    }), context)).toEqual([]);
+    const output = 'Created At: 2026-01-01T00:00:00Z\nCompleted At: 2026-01-01T00:00:01Z\nCommand exited with code 0.\n\nCommand output:\nsynthetic\n';
+    const completed = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tool-1',
+      name: 'run_command',
+      status: 'completed',
+      kind: 'execute',
+      rawInput: input,
+      rawOutput: { output, exit_code: 0 },
+      content: [{ type: 'content', content: { type: 'text', text: output } }],
+    }), context);
+
+    expect(plain(completed)).toEqual([{
+      type: 'tool-result',
+      toolId: 'tool-1',
+      content: { raw: 'Command exited with code 0.\n\nCommand output:\nsynthetic\n' },
+      isError: false,
+    }]);
+  });
+
+  it('maps native file, search, and subagent tools to shared tool types', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = [
+      toolCall('read', 'read_file', 'read', { Path: '/work/notes.txt', StartLine: 3, EndLine: 9 }),
+      toolCall('write', 'write_file', 'edit', { Path: '/work/new.txt', Content: 'hello\n' }),
+      toolCall('edit', 'edit_file', 'edit', { Path: '/work/notes.txt', Target: 'alpha', Replacement: 'beta' }),
+      toolCall('search', 'search_web', 'search', { query: 'synthetic query' }),
+      toolCall('task', 'invoke_subagent', 'other', { Role: 'reviewer', Prompt: 'Review it.', Model: 'gemini-test' }),
+      toolCall('mcp', 'mcp_docs_lookup', 'other', { server: 'docs', tool: 'lookup', arguments: { term: 'x' } }),
+      toolCall('ask', 'ask_question', 'other', { questions: [{ question: 'Pick one?', options: ['A', 'B'] }] }),
+      toolCall('future', 'future_tool', 'other', { value: 1 }),
+    ].flatMap((row) => converter.fromSessionUpdate(row, context));
+
+    expect(plain(rows)).toEqual([
+      { type: 'read-tool-use', toolId: 'read', filePath: '/work/notes.txt', offset: 3, limit: undefined, endLine: 9 },
+      { type: 'write-tool-use', toolId: 'write', filePath: '/work/new.txt', content: 'hello\n' },
+      { type: 'edit-tool-use', toolId: 'edit', filePath: '/work/notes.txt', oldString: 'alpha', newString: 'beta', changes: undefined },
+      { type: 'web-search-tool-use', toolId: 'search', query: 'synthetic query' },
+      { type: 'task-tool-use', toolId: 'task', subagentType: 'reviewer', description: 'reviewer', prompt: 'Review it.', model: 'gemini-test', resume: undefined },
+      { type: 'mcp-tool-use', toolId: 'mcp', server: 'docs', tool: 'lookup', input: { term: 'x' } },
+      {
+        type: 'external-tool-use',
+        toolId: 'ask',
+        name: 'ask_question',
+        input: { questions: [{ question: 'Pick one?', options: ['A', 'B'] }] },
+        namespace: 'antigravity',
+      },
+      { type: 'unknown-tool-use', toolId: 'future', rawName: 'future_tool', input: { value: 1 } },
+    ]);
+  });
+
+  it('reports failed tools as errors', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const input = { CommandLine: 'echo denied' };
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', input), context);
+
+    const failed = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tool-1',
+      name: 'run_command',
+      status: 'failed',
+      rawInput: input,
+      rawOutput: { output: '' },
+      content: [{ type: 'content', content: { type: 'text', text: '' } }],
+    }), context);
+    expect(plain(failed)).toEqual([
+      { type: 'tool-result', toolId: 'tool-1', content: { status: 'failed' }, isError: true },
+    ]);
+  });
+
+  it('emits the tool row first when a terminal update is the first frame for a call', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tool-1',
+      name: 'read_file',
+      status: 'completed',
+      rawInput: { Path: '/work/notes.txt' },
+    }), context);
+    expect(plain(rows).map((row) => row.type)).toEqual(['read-tool-use', 'tool-result']);
+  });
+
+  it('turns the in-band executor error into a turn failure instead of assistant text', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: '\n⚠ agent executor error: generating and executing: Error 400, Message: API key not valid., Status: INVALID_ARGUMENT\n' },
+    }), context);
+
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
+    expect(converter.takeTurnFailure(SESSION)).toBe(
+      'Antigravity agent executor error: generating and executing: Error 400, Message: API key not valid., Status: INVALID_ARGUMENT',
+    );
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
+  it('drops state for released sessions', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Pending.' } }), context);
+    converter.releaseSession(SESSION);
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
+  });
+});
+
+describe('antigravityExecutorError', () => {
+  it('matches only the complete marker chunk', () => {
+    expect(antigravityExecutorError('agent executor error: quoted by the model')).toBeNull();
+    expect(antigravityExecutorError('Note: ⚠ agent executor error: inline')).toBeNull();
+    expect(antigravityExecutorError('\n⚠ agent executor error: Error 429\n')).toBe('Antigravity agent executor error: Error 429');
+  });
+});

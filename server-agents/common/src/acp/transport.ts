@@ -7,7 +7,7 @@ interface WritableProcessStdin {
   end?(): unknown;
 }
 
-interface AcpProcess {
+export interface AcpProcess {
   stdin?: WritableProcessStdin | null;
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;

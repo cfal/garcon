@@ -1,6 +1,6 @@
 # Docker
 
-Garcon's official container image is `ghcr.io/cfal/garcon:main`. It includes `garcon-cli` on PATH, Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. The same image runs a controller by default or an executor with an explicit command. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
+Garcon's official container image is `ghcr.io/cfal/garcon:main`. It includes `garcon-cli` on PATH, Claude Code, Codex, Cursor Agent, Google Antigravity (`agy`), OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. The same image runs a controller by default or an executor with an explicit command. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
 
 ## Start From GHCR
 
@@ -177,6 +177,7 @@ Compose uses named volumes for credentials, configuration, and native history. T
 | `codex-home` | `/home/garcon/.codex` | Codex credentials and native history |
 | `cursor-home` | `/home/garcon/.cursor` | Cursor credentials and native history |
 | `factory-home` | `/home/garcon/.factory` | Factory credentials and native history |
+| `gemini-home` | `/home/garcon/.gemini` | Antigravity settings, sign-in, and native history |
 | `pi-home` | `/home/garcon/.pi` | Pi credentials, settings, and native history |
 | `opencode-data` | `/home/garcon/.local/share/opencode` | OpenCode credentials and session database |
 | `opencode-state` | `/home/garcon/.local/state/opencode` | OpenCode runtime state |
@@ -189,7 +190,7 @@ Normal builds may reuse cached agent-installer layers. Run `docker compose build
 
 ## Agent And Git Setup
 
-Claude and Codex login can be started from Settings. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
+Claude, Codex, and Antigravity login can be started from Settings. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
 
 ```bash
 docker compose exec garcon bash -l

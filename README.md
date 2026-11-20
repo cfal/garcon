@@ -6,7 +6,7 @@
 <p align="center"><strong>Run the agents. See the work. Ship the change.</strong></p>
 
 <p align="center">
-  Garcon is a self-hosted visual workspace for coding agents. Run Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi side by side, coordinate their work, and move from prompt to reviewed commit without leaving the browser.
+  Garcon is a self-hosted visual workspace for coding agents. Run Claude Code, Codex, Cursor Agent, Google Antigravity, OpenCode, Amp, Factory Droid, and Pi side by side, coordinate their work, and move from prompt to reviewed commit without leaving the browser.
 </p>
 
 <p align="center">
@@ -330,7 +330,7 @@ Garcon keeps that development loop coherent:
 
 ## Works With
 
-**Coding agents:** Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi.
+**Coding agents:** Claude Code, Codex, Cursor Agent, Google Antigravity, OpenCode, Amp, Factory Droid, and Pi.
 
 **Direct model access:** Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions compatible endpoints.
 

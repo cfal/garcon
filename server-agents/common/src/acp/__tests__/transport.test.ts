@@ -1,62 +1,50 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { AcpTransport } from '../transport.ts';
+import { AcpTransport, type AcpProcess } from '../transport.ts';
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+interface FakeAcpProcess {
+  readonly process: AcpProcess & {
+    readonly stdin: { readonly write: ReturnType<typeof mock> };
+    readonly kill: ReturnType<typeof mock>;
+  };
+  readonly stdout: ReadableStreamDefaultController<Uint8Array>;
+  exit(code: number): void;
 }
 
-function createProcess() {
-  const stdout = new ReadableStream({
+function createProcess(): FakeAcpProcess {
+  let stdoutController!: ReadableStreamDefaultController<Uint8Array>;
+  const stdout = new ReadableStream<Uint8Array>({
     start(controller) {
-      createProcess.stdoutController = controller;
+      stdoutController = controller;
     },
   });
-  const stderr = new ReadableStream({
-    start(controller) {
-      createProcess.stderrController = controller;
-    },
-  });
-  const exited = deferred();
+  const stderr = new ReadableStream<Uint8Array>();
+  const exited = Promise.withResolvers<number>();
   const process = {
-    stdin: {
-      write: mock(() => undefined),
-    },
+    stdin: { write: mock(() => undefined) },
     stdout,
     stderr,
     exited: exited.promise,
     kill: mock(() => {
       exited.resolve(143);
     }),
-  };
-  return {
-    process,
-    stdout: createProcess.stdoutController,
-    stderr: createProcess.stderrController,
-    exit: exited.resolve,
-  };
+  } satisfies AcpProcess;
+  return { process, stdout: stdoutController, exit: exited.resolve };
 }
 
-createProcess.stdoutController = null;
-createProcess.stderrController = null;
-
-function writeStdout(controller, message) {
+function writeStdout(controller: ReadableStreamDefaultController<Uint8Array>, message: unknown): void {
   controller.enqueue(new TextEncoder().encode(`${JSON.stringify(message)}\n`));
+}
+
+async function connectedTransport(proc: FakeAcpProcess, requestTimeoutMs: number): Promise<AcpTransport> {
+  const transport = new AcpTransport({ spawn: () => proc.process, requestTimeoutMs });
+  await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+  return transport;
 }
 
 describe('AcpTransport', () => {
   it('resolves requests and clears their timeout', async () => {
     const proc = createProcess();
-    const transport = new AcpTransport({
-      spawn: () => proc.process,
-      requestTimeoutMs: 50,
-    });
-    await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+    const transport = await connectedTransport(proc, 50);
 
     const result = transport.request('echo');
     writeStdout(proc.stdout, { jsonrpc: '2.0', id: 1, result: { ok: true } });
@@ -68,11 +56,7 @@ describe('AcpTransport', () => {
 
   it('reports a request as sent only after the transport writes it', async () => {
     const proc = createProcess();
-    const transport = new AcpTransport({
-      spawn: () => proc.process,
-      requestTimeoutMs: 50,
-    });
-    await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+    const transport = await connectedTransport(proc, 50);
     const onSent = mock();
 
     const result = transport.request('echo', undefined, onSent);
@@ -83,22 +67,14 @@ describe('AcpTransport', () => {
 
   it('rejects requests on timeout', async () => {
     const proc = createProcess();
-    const transport = new AcpTransport({
-      spawn: () => proc.process,
-      requestTimeoutMs: 5,
-    });
-    await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+    const transport = await connectedTransport(proc, 5);
 
     await expect(transport.request('slow')).rejects.toThrow('ACP request timed out after 5ms: slow');
   });
 
   it('rejects pending requests when closed', async () => {
     const proc = createProcess();
-    const transport = new AcpTransport({
-      spawn: () => proc.process,
-      requestTimeoutMs: 1000,
-    });
-    await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+    const transport = await connectedTransport(proc, 1000);
 
     const pending = transport.request('slow');
     transport.close();
@@ -109,15 +85,22 @@ describe('AcpTransport', () => {
 
   it('rejects pending requests when the process exits', async () => {
     const proc = createProcess();
-    const transport = new AcpTransport({
-      spawn: () => proc.process,
-      requestTimeoutMs: 1000,
-    });
-    await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+    const transport = await connectedTransport(proc, 1000);
 
     const pending = transport.request('slow');
     proc.exit(7);
 
     await expect(pending).rejects.toThrow('ACP transport process exited with code 7');
+  });
+
+  it('writes notifications without an id', async () => {
+    const proc = createProcess();
+    const transport = await connectedTransport(proc, 1000);
+
+    transport.notify('session/cancel', { sessionId: 'session-1' });
+
+    expect(proc.process.stdin.write).toHaveBeenCalledWith(
+      `${JSON.stringify({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 'session-1' } })}\n`,
+    );
   });
 });

@@ -62,10 +62,16 @@ export interface AcpSessionConfigOptionsResult {
   configOptions?: AcpSessionConfigOption[];
 }
 
+// The unstable ACP model selector; agents that support it accept `session/set_model`.
+export interface AcpSessionModelState {
+  currentModelId?: string;
+  availableModels?: Array<{ modelId: string; name?: string; description?: string }>;
+}
+
 export interface AcpSessionNewResult {
   sessionId: string;
   modes?: unknown;
-  models?: unknown;
+  models?: AcpSessionModelState;
   configOptions?: AcpSessionConfigOption[];
 }
 
@@ -76,7 +82,7 @@ export interface AcpSessionPromptResult {
 
 export interface AcpSessionLoadResult {
   modes?: unknown;
-  models?: unknown;
+  models?: AcpSessionModelState;
   configOptions?: AcpSessionConfigOption[];
 }
 

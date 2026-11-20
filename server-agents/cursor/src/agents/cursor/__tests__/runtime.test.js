@@ -6,8 +6,8 @@ import {
   CursorCreatePlanToolUseMessage,
   ErrorMessage,
 } from '@garcon/common/chat-types';
-import { AcpTransport } from '../../../acp/transport.js';
-import { AcpAgentRuntime } from '../../shared/acp-agent-runtime.js';
+import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
+import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { CursorAcpEventConverter } from '../cursor-acp-event-converter.js';
 import { createCursorAcpPolicy } from '../cursor-acp-policy.js';
 import { runSingleQuery } from '../run-single-query.js';
@@ -1081,6 +1081,10 @@ describe('Cursor ACP runtime', () => {
       params: {
         sessionId: 'cursor-session',
         toolCall: { toolCallId: 'tool-1', toolName: 'Bash', rawInput: { command: 'echo hello' } },
+        options: [
+          { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+        ],
       },
     });
     const permissionResponse = await acp.waitForWrite((message) => message.id === 'permission-single' && message.result);

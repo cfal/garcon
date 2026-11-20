@@ -1,6 +1,6 @@
-import type { AcpSessionConfigOption } from '../../acp/protocol.js';
+import type { AcpSessionConfigOption } from '@garcon/server-agent-common/acp/protocol';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { AcpSessionConfigurationContext } from '../shared/acp-agent-runtime.js';
+import type { AcpSessionConfigurationContext } from '@garcon/server-agent-common/acp/agent-runtime';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
