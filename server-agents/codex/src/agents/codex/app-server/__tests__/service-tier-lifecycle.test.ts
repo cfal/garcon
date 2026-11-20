@@ -9,12 +9,6 @@ import { CodexAppServerClient } from '../client.js';
 import type { CodexTurn, ThreadSettingsUpdatedNotification, ThreadStartResponse } from '../protocol.js';
 import { CodexAppServerRuntime } from '../runtime.js';
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((settle) => { resolve = settle; });
-  return { promise, resolve };
-}
-
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -37,7 +31,7 @@ async function startedSession() {
     reasoningEffort: 'low',
   } satisfies ThreadStartResponse;
   const events: AgentRuntimeEvent[] = [];
-  const terminal = deferred();
+  const terminal = Promise.withResolvers<void>();
   const request = {
     chatId: 'chat-1', command: 'Synthetic prompt', projectPath: directory, model: response.model,
     modelEndpointId: null, permissionMode: 'default', thinkingMode: 'low', speed: 'ultrafast',
@@ -128,8 +122,8 @@ describe('Codex premium route lifecycle', () => {
 
   it('fences a late successful retry discovery after explicit source release', async () => {
     const { runtime, request, first, events, failCapacity } = await startedSession();
-    const checking = deferred();
-    const reply = deferred();
+    const checking = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<void>();
     const discover = first.discovery.getMockImplementation()!;
     first.discovery.mockImplementation(async (method) => { checking.resolve(); await reply.promise; return discover(method); });
     failCapacity();
@@ -164,8 +158,8 @@ describe('Codex premium route lifecycle', () => {
     'confirms %s using the %s echo, not a wrong tier or an unrelated turn reply', async (speed, echo) => {
       const { runtime, request, first } = await startedSession();
       first.finish();
-      const turnStarted = deferred();
-      const turnReply = deferred();
+      const turnStarted = Promise.withResolvers<void>();
+      const turnReply = Promise.withResolvers<void>();
       const start = first.startTurn.getMockImplementation()!;
       first.startTurn.mockImplementation(async (params) => {
         const result = await start(params);
@@ -174,7 +168,7 @@ describe('Codex premium route lifecycle', () => {
         return result;
       });
       const resumed = runtime.runTurn({ ...request, agentSessionId: 'thread-1', operation: { ...request.operation, runId: 'run-2' } });
-      const applying = deferred();
+      const applying = Promise.withResolvers<void>();
       first.update.mockImplementation(async () => { applying.resolve(); return {}; });
       let update: Promise<void> | undefined;
       try {

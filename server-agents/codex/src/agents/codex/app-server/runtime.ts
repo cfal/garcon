@@ -928,8 +928,11 @@ export class CodexAppServerRuntime {
             await this.#checkLoadedTier(retained, request.model, tier);
           } catch (error) {
             // Only an idle writer can be reopened for a fresh effective-tier check.
-            if (!isTerminalSessionStatus(retained.status) || !(error instanceof AgentIntegrationError)
-              || !error.retryable || (error.code !== 'TIMEOUT' && error.code !== 'UNAVAILABLE')) throw error;
+            const canReopen = isTerminalSessionStatus(retained.status)
+              && error instanceof AgentIntegrationError
+              && error.retryable
+              && (error.code === 'TIMEOUT' || error.code === 'UNAVAILABLE');
+            if (!canReopen) throw error;
             tierVerified = false;
           }
           await retained.threadSettingsUpdateChain;
@@ -938,7 +941,9 @@ export class CodexAppServerRuntime {
           retained.configurationReservations -= 1;
         }
       }
-      if (tierVerified && canReactivate(retained)) return { session: this.#reactivateSession(retained, request, operation), buffered: false };
+      if (tierVerified && canReactivate(retained)) {
+        return { session: this.#reactivateSession(retained, request, operation), buffered: false };
+      }
       // A changed selection can use a fresh resume; a displaced or busy writer cannot.
       if (this.#latestSourceByChat.get(request.chatId) !== retained
         || !isTerminalSessionStatus(retained.status) || retained.pendingThreadSettings) {

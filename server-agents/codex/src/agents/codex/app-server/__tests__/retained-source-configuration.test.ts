@@ -7,11 +7,7 @@ import { CodexAppServerClient } from '../client.js';
 import type { CodexTurn, ThreadSettingsUpdatedNotification, ThreadStartResponse } from '../protocol.js';
 import { CodexAppServerRuntime } from '../runtime.js';
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((settle) => { resolve = settle; });
-  return { promise, resolve };
-}
+type ConfigurationAction = 'turn' | 'compaction' | 'settings' | 'deferred validation';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -71,8 +67,8 @@ async function idleSource() {
   });
   complete();
 
-  const discoveryStarted = deferred();
-  const discovery = deferred();
+  const discoveryStarted = Promise.withResolvers<void>();
+  const discovery = Promise.withResolvers<void>();
   const catalog = { data: [{ model: request.model, serviceTiers: [{ id: 'ultrafast' }] }] };
   const feature = { name: 'ultrafast_mode', enabled: true };
   const readCatalog = mock(async (method: string): Promise<unknown> => {
@@ -87,8 +83,16 @@ async function idleSource() {
   spyOn(client, 'request').mockImplementation(async <T>(method: string) => await readCatalog(method) as T);
   const resume = { ...request, agentSessionId: response.thread.id,
     operation: { ...request.operation, runId: 'run-2' } };
+  function configure(action: ConfigurationAction): Promise<unknown> {
+    switch (action) {
+      case 'turn': return runtime.runTurn(resume);
+      case 'compaction': return runtime.compact(resume);
+      case 'settings': return runtime.updateSessionSettings(resume.agentSessionId, request);
+      case 'deferred validation': return runtime.validateDeferredSpeed(resume.agentSessionId, request.model, request.speed);
+    }
+  }
   return { runtime, client, request, resume, startTurn, compact, shutdown, complete,
-    discovery, discoveryStarted, readCatalog, feature, catalog };
+    configure, discovery, discoveryStarted, readCatalog, feature, catalog };
 }
 
 async function expectReclaimed(shutdown: () => unknown) {
@@ -104,12 +108,8 @@ describe('retained Codex source configuration lifetime', () => {
   it.each(['turn', 'compaction', 'settings', 'deferred validation'] as const)(
     'keeps the source alive through %s discovery, then permits idle reclamation', async (action) => {
       const fixture = await idleSource();
-      const { runtime, request, resume, discoveryStarted, discovery, shutdown } = fixture;
-      const operation = action === 'turn' ? runtime.runTurn(resume)
-        : action === 'compaction' ? runtime.compact(resume)
-        : action === 'settings' ? runtime.updateSessionSettings(resume.agentSessionId, request)
-        : runtime.validateDeferredSpeed(resume.agentSessionId, request.model, request.speed);
-      const settled = operation.then(() => null, (error: unknown) => error);
+      const { runtime, discoveryStarted, discovery, shutdown } = fixture;
+      const settled = fixture.configure(action).then(() => null, (error: unknown) => error);
       try {
         await discoveryStarted.promise;
         runtime.startPurgeTimer();
@@ -130,8 +130,8 @@ describe('retained Codex source configuration lifetime', () => {
 
   it.each(['settings', 'reactivation'] as const)('retains the source during %s until the confirmed settings RPC settles', async (action) => {
     const { runtime, client, request, resume, discovery, discoveryStarted, shutdown, startTurn, complete } = await idleSource();
-    const reply = deferred();
-    const confirmed = deferred();
+    const reply = Promise.withResolvers<void>();
+    const confirmed = Promise.withResolvers<void>();
     spyOn(client, 'updateThreadSettings').mockImplementation(async (params) => {
       client.emit('notification', {
         method: 'thread/settings/updated',
@@ -174,9 +174,9 @@ describe('retained Codex source configuration lifetime', () => {
 
   it('keeps overlapping validations reserved independently', async () => {
     const { runtime, request, resume, readCatalog, catalog, feature, shutdown } = await idleSource();
-    const first = deferred();
-    const second = deferred();
-    const bothStarted = deferred();
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const bothStarted = Promise.withResolvers<void>();
     let reads = 0;
     readCatalog.mockImplementation(async (method) => {
       if (method !== 'model/list') return { data: [feature] };
@@ -207,11 +207,8 @@ describe('retained Codex source configuration lifetime', () => {
 
   it.each(['turn', 'settings', 'deferred validation'] as const)(
     'does not prevent explicit source release during %s discovery', async (action) => {
-      const { runtime, request, resume, discoveryStarted, discovery, shutdown, startTurn } = await idleSource();
-      const operation = action === 'turn' ? runtime.runTurn(resume)
-        : action === 'settings' ? runtime.updateSessionSettings(resume.agentSessionId, request)
-        : runtime.validateDeferredSpeed(resume.agentSessionId, request.model, request.speed);
-      const settled = operation.then(() => null, (error: unknown) => error);
+      const { runtime, request, resume, configure, discoveryStarted, discovery, shutdown, startTurn } = await idleSource();
+      const settled = configure(action).then(() => null, (error: unknown) => error);
       try {
         await discoveryStarted.promise;
         await runtime.releaseSession(request.chatId, resume.agentSessionId);
@@ -228,12 +225,9 @@ describe('retained Codex source configuration lifetime', () => {
 
   it.each(['turn', 'settings', 'deferred validation'] as const)(
     'releases the reservation after %s discovery rejects', async (action) => {
-      const { runtime, request, resume, discoveryStarted, discovery, feature, shutdown } = await idleSource();
+      const { runtime, configure, discoveryStarted, discovery, feature, shutdown } = await idleSource();
       feature.enabled = false;
-      const operation = action === 'turn' ? runtime.runTurn(resume)
-        : action === 'settings' ? runtime.updateSessionSettings(resume.agentSessionId, request)
-        : runtime.validateDeferredSpeed(resume.agentSessionId, request.model, request.speed);
-      const settled = operation.then(() => null, (error: unknown) => error);
+      const settled = configure(action).then(() => null, (error: unknown) => error);
       try {
         await discoveryStarted.promise;
         runtime.startPurgeTimer();
