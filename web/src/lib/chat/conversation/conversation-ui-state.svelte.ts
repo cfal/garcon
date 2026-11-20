@@ -242,10 +242,9 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	captureSteerControlJoin(chatId: string): JoinSteerControl {
-		const submittedInstance = this.executionControlAuthority.confirmedSocketInstanceId;
 		return (control, join) => {
 			const ack = { chatId, control, join };
-			if (this.executionControlAuthority.shouldDeferSteerAcknowledgement(submittedInstance, control.serverInstanceId)) {
+			if (this.executionControlAuthority.shouldDeferSteerAcknowledgement(control.serverInstanceId)) {
 				this.#unconfirmedSteers.add(ack);
 			} else this.#joinSteer(ack);
 		};
