@@ -25,13 +25,37 @@ test('the speed picker persists per chat and rolls back a rejected tier', async 
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${integration.garcon.baseUrl}/chat/${first}`);
       const picker = (speed: string) => page.getByRole('button', { name: `Selected speed: ${speed}`, exact: true });
-      const chooseUltrafast = async () => {
-        await picker('Standard').click();
+      const chooseSpeed = async (from: string, to: string) => {
+        await picker(from).click();
         await browserExpect(page.getByRole('menuitemradio')).toHaveCount(3);
-        await page.getByRole('menuitemradio', { name: /^Ultrafast/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${to}`) }).click();
       };
-      await chooseUltrafast();
+      const committed = Promise.withResolvers<void>();
+      const releaseReply = Promise.withResolvers<void>();
+      await page.route('**/api/v1/chats/execution-settings', async (route) => {
+        const response = await route.fetch();
+        committed.resolve();
+        await releaseReply.promise;
+        await route.fulfill({ response });
+      }, { times: 1 });
+      try {
+        await chooseSpeed('Standard', 'Fast');
+        await committed.promise;
+        await chooseSpeed('Fast', 'Ultrafast');
+        await page.locator(`[data-sidebar-virtual-row="${first}"] button`).first().click({ button: 'right' });
+        await page.getByRole('menuitem', { name: 'Fork', exact: true }).click();
+        await browserExpect(page.getByText('Forking chat...', { exact: true })).toBeVisible();
+        const pending = (await client.listChats()).sessions;
+        expect(pending).toHaveLength(2);
+        expect(pending.find(({ id }) => id === first)?.agentSettings.values.speed).toBe('fast');
+      } finally {
+        releaseReply.resolve();
+      }
+      await browserExpect.poll(async () => (await client.listChats()).sessions.length).toBe(3);
+      const forked = (await client.listChats()).sessions.find(({ id }) => id !== first && id !== second);
+      expect(forked?.agentSettings.values.speed).toBe('ultrafast');
       await browserExpect.poll(async () => (await client.listChats()).sessions.find(({ id }) => id === first)?.agentSettings.values.speed).toBe('ultrafast');
+      await page.goto(`${integration.garcon.baseUrl}/chat/${first}`);
       await page.reload();
       await browserExpect(picker('Ultrafast')).toBeVisible();
       const editor = page.locator('[data-composer]:visible textarea');
@@ -50,7 +74,7 @@ test('the speed picker persists per chat and rolls back a rejected tier', async 
           await route.continue();
         }, { times: 1 });
         try {
-          await chooseUltrafast();
+          await chooseSpeed('Standard', 'Ultrafast');
           await received.promise;
           await page.locator(`[data-sidebar-virtual-row="${second}"] button`).first().click({ button: 'right' });
           await page.getByRole('menuitem', { name: 'Fork', exact: true }).click();
@@ -61,7 +85,7 @@ test('the speed picker persists per chat and rolls back a rejected tier', async 
         await browserExpect(page.getByText(/Ultrafast speed is unavailable/)).toBeVisible();
         await browserExpect(picker('Standard')).toBeVisible();
         await browserExpect(page.getByText('Forking chat...', { exact: true })).toHaveCount(0);
-        expect((await client.listChats()).sessions).toHaveLength(2);
+        expect((await client.listChats()).sessions).toHaveLength(3);
       });
       expect((await client.listChats()).sessions.find(({ id }) => id === second)?.agentSettings.values.speed ?? 'standard').toBe('standard');
       expect(environment.model.requests()).toHaveLength(2);

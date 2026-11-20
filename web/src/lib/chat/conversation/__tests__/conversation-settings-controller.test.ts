@@ -385,7 +385,26 @@ describe('ConversationSettingsController', () => {
 		expect(sessions.patchChat).toHaveBeenLastCalledWith('chat-1', { agentSettings: latest });
 	});
 
-	it.each(['model', 'permission', 'thinking'] as const)(
+	it('keeps pending settings and the rollback baseline when the conversation controller is replaced', async () => {
+		const first = deferred<ExecutionSettingsPatchResponse>();
+		const second = deferred<ExecutionSettingsPatchResponse>();
+		vi.mocked(updateExecutionSettings).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+		const { controller, options, sessions, agentState } = createHarness();
+		controller.handleAgentSettingChange(effort, 'high');
+		const waiting = sessions.settingsMutations.pendingFor('chat-1');
+		new ConversationSettingsController(options).handleAgentSettingChange(effort, 'low');
+		expect(updateExecutionSettings).toHaveBeenCalledOnce();
+		const confirmed = { ...chat().agentSettings, values: { effort: 'high' } };
+		first.resolve({ success: true, chatId: 'chat-1', agentSettings: confirmed });
+		await vi.waitFor(() => expect(updateExecutionSettings).toHaveBeenCalledTimes(2));
+		second.reject(new Error('Synthetic latest rejection'));
+		expect(await waiting).toBe(false);
+		expect(sessions.selectedChat.agentSettings).toEqual(confirmed);
+		expect(agentState.agentSettings).toEqual(confirmed);
+		expect(sessions.settingsMutations.pendingFor('chat-1')).toBeNull();
+	});
+
+	it.each(['model', 'permission', 'thinking', 'agentSettings'] as const)(
 		'keeps a late %s failure out of another chat composer',
 		async (setting) => {
 			const pending = deferred<never>();
@@ -395,10 +414,13 @@ describe('ConversationSettingsController', () => {
 			if (setting === 'model') controller.handleModelChange('sonnet');
 			if (setting === 'permission') controller.handlePermissionModeChange('plan');
 			if (setting === 'thinking') controller.handleThinkingModeChange('high');
+			if (setting === 'agentSettings') controller.handleAgentSettingChange(effort, 'high');
 			sessions.selectedChatId = 'chat-2';
 			agentState.model = 'other-model';
 			agentState.permissionMode = 'bypassPermissions';
 			agentState.thinkingMode = 'medium';
+			const otherSettings = { ownerId: 'codex', schemaVersion: 1, values: { speed: 'ultrafast' } };
+			agentState.agentSettings = otherSettings;
 			pending.reject(new Error('Synthetic rejection'));
 			await pending.promise.catch(() => undefined);
 			await sessions.settingsMutations.pendingFor('chat-1');
@@ -406,6 +428,7 @@ describe('ConversationSettingsController', () => {
 				model: 'other-model',
 				permissionMode: 'bypassPermissions',
 				thinkingMode: 'medium',
+				agentSettings: otherSettings,
 			});
 			expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 				'chat-1',
