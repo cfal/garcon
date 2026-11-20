@@ -130,6 +130,45 @@ describe('ActiveTranscriptState', () => {
 	afterEach(() => vi.restoreAllMocks());
 
 	it.each([
+		{ target: 'initial', shared: false }, { target: 'row', shared: false },
+		{ target: 'initial', shared: true }, { target: 'row', shared: true },
+	] as const)('retires echoes during $target navigation before returning to an echo-less latest page (shared: $shared)', async ({ target, shared }) => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chat = new ActiveTranscriptState(cache, shared ? overlays.forChat('chat-1') : null, {
+			onRecoveredMessages: (chatId, messages) => { overlays.clearEchoedInputs(chatId, messages); },
+		});
+		const latest = assistantEntries(951, 1000);
+		chat.replaceGeneration('chat-1', 'generation-1', latest, {
+			lastOrdinal: 1000, pageOldestOrdinal: 951, nextBeforeOrdinal: 951, hasMore: true,
+		});
+		const pending = optimisticInput({ placement: 'live-tail' });
+		if (shared) overlays.upsertOptimisticInput('chat-1', pending, 1000);
+		else chat.upsertOptimisticUserInput(pending);
+		const echo = entry(1, user('guidance', { clientMessageId: pending.clientMessageId }));
+		vi.mocked(getChatMessages).mockImplementation(async request => ({
+			chatId: 'chat-1', limit: request.limit ?? 50,
+			...page({ messages: [echo, ...assistantEntries(2, 50)], lastOrdinal: 1000 }),
+		}));
+		try {
+			await expect(target === 'initial' ? chat.navigateToWindow('chat-1', 'initial') : chat.navigateToRow(
+				{ chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 1 }, new AbortController().signal, () => true,
+			)).resolves.toBe('loaded');
+			expect(chat.entries).toContainEqual(echo);
+			expect(chat.optimisticUserInputs).toEqual([]);
+			vi.mocked(getChatMessages).mockImplementation(async request => ({
+				chatId: 'chat-1', limit: request.limit ?? 50,
+				...page({ messages: latest, lastOrdinal: 1000, hasMore: true }),
+			}));
+			await expect(chat.navigateToWindow('chat-1', 'latest')).resolves.toBe('loaded');
+			expect(chat.visibleOptimisticInputs).toEqual([]);
+		} finally {
+			chat.clearMessages();
+			cache.flush();
+		}
+	});
+
+	it.each([
 		{ direction: 'earlier', shared: false }, { direction: 'later', shared: false },
 		{ direction: 'earlier', shared: true }, { direction: 'later', shared: true },
 	] as const)('retires an optimistic echo from an applied $direction page (shared: $shared)', async ({ direction, shared }) => {

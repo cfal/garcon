@@ -884,6 +884,8 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		if (this.hasLaterMessages) this.isUserScrolledUp = true;
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
+		if (!this.usesSharedOverlay) this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		if (this.activeChatId) this.options.onRecoveredMessages?.(this.activeChatId, page.messages);
 		this.feedMutations.record('replacement');
 	}
 
