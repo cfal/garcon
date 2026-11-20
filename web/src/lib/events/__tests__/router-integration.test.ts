@@ -838,7 +838,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('does not restore a transient snapshot from a replaced server instance', async () => {
+	it('does not restore a delayed transient snapshot from an unseen intermediate server instance', async () => {
 		let resolveSnapshot!: (snapshot: ChatSnapshotResponse) => void;
 		const pendingSnapshot = new Promise<ChatSnapshotResponse>((resolve) => {
 			resolveSnapshot = resolve;
@@ -877,11 +877,12 @@ describe('event router integration', () => {
 			...chatSnapshot('generation-current'),
 			transientFeed: {
 				...transientFeed('generation-current', 2),
-				serverInstanceId: 'server-old',
+				serverInstanceId: 'server-intermediate',
 			},
 		});
 		await pendingSnapshot;
-		await vi.waitFor(() => expect(applySnapshot).toHaveBeenCalledTimes(3));
+		await Promise.resolve();
+		expect(applySnapshot).toHaveBeenCalledTimes(2);
 
 		expect(stores.conversationUi.getTransientFeed('chat-a')).toMatchObject({
 			serverInstanceId: 'server-new',

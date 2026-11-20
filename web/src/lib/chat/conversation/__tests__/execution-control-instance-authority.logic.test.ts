@@ -2,6 +2,28 @@ import { describe, expect, it } from 'vitest';
 import { ExecutionControlInstanceAuthority } from '../execution-control-instance-authority.js';
 
 describe('ExecutionControlInstanceAuthority', () => {
+	it('fences delayed unseen responses while accepting the current process and fresh fallback requests', () => {
+		const authority = new ExecutionControlInstanceAuthority();
+		authority.confirmSocketInstance('first');
+		const oldResponse = authority.captureResponseFence();
+		authority.markSocketDisconnected();
+		authority.classifyNonAuthoritativeInstance('third');
+		expect(oldResponse('second')).toBe(false);
+		expect(oldResponse('third')).toBe(true);
+		expect(authority.captureResponseFence()('fourth')).toBe(true);
+	});
+
+	it('does not revive a response fence when the same socket identity is reauthorized', () => {
+		const authority = new ExecutionControlInstanceAuthority();
+		authority.confirmSocketInstance('first');
+		const oldResponse = authority.captureResponseFence();
+		authority.markSocketDisconnected();
+		authority.confirmSocketInstance('first');
+		authority.markSocketDisconnected();
+		expect(oldResponse('second')).toBe(false);
+		expect(oldResponse('first')).toBe(true);
+	});
+
 	it('treats live input as provisional until the current socket confirms it', () => {
 		const authority = new ExecutionControlInstanceAuthority();
 

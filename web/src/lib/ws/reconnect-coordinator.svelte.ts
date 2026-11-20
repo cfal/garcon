@@ -61,6 +61,7 @@ export type ReconnectConversationUiState = Pick<
 	| 'executionControlChatIds'
 	| 'removeExecutionControl'
 	| 'setExecutionControlFromRefresh'
+	| 'captureExecutionResponse'
 	| 'markExecutionControlSocketDisconnected'
 	| 'confirmExecutionControlSocketInstance'
 	| 'setTransientFeedFromSnapshot'
@@ -297,10 +298,11 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #refreshControl(chatId: string, expectedEpoch?: number): Promise<void> {
+		const response = this.options.conversationUi.captureExecutionResponse();
 		try {
 			const result = await (this.options.getExecutionControl ?? getChatExecutionControl)(chatId);
 			if (expectedEpoch !== undefined && expectedEpoch !== this.#reconnectEpoch) return;
-			this.options.conversationUi.setExecutionControlFromRefresh(chatId, result.control);
+			response.setExecutionControlFromRefresh(chatId, result.control);
 		} catch {
 			// Later queue broadcasts will converge the visible queue state.
 		}

@@ -113,6 +113,7 @@ type SessionConversationUiState = Pick<
 	| 'getExecutionControl'
 	| 'setExecutionControlFromLiveUpdate'
 	| 'captureSteerControlJoin'
+	| 'captureExecutionResponse'
 	| 'setExecutionControlFromRefresh'
 	| 'isExecutionControlSocketInstanceConfirmed'
 	| 'setPendingPermissionRequests'

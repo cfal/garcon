@@ -242,6 +242,11 @@ function createReconnectDeps(
 		},
 	};
 	const conversationUi = {
+		captureExecutionResponse: (): ReturnType<ConversationUiState['captureExecutionResponse']> => ({
+			setExecutionControlFromLiveUpdate: vi.fn(),
+			setExecutionControlFromRefresh: conversationUi.setExecutionControlFromRefresh,
+			setTransientFeedFromSnapshot: conversationUi.setTransientFeedFromSnapshot,
+		}),
 		executionControlChatIds: options.controlChatIds ?? [],
 		removeExecutionControl: vi.fn(),
 		setExecutionControlFromRefresh: vi.fn(),

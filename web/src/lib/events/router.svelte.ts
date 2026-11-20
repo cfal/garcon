@@ -299,10 +299,11 @@ function buildDispatch(
 		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
 		const previousTranscriptViewId =
 			stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
+		const response = stores.conversationUi.captureExecutionResponse();
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
 				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
-				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+				const result = response.setTransientFeedFromSnapshot(snapshot.transientFeed);
 				if (result.kind !== 'applied') return;
 				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
 				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);

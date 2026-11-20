@@ -98,6 +98,23 @@ function makeTransientFeed(chatId: string): ChatTransientFeedSnapshot {
 }
 
 describe('ConversationUiState', () => {
+	it('fences delayed HTTP transient snapshots against newer execution authority', () => {
+		const changed = vi.fn();
+		const ui = new ConversationUiState(changed);
+		ui.confirmExecutionControlSocketInstance('first');
+		const response = ui.captureExecutionResponse();
+		ui.markExecutionControlSocketDisconnected();
+		const current = makeControl(makeQueue(), { serverInstanceId: 'third', version: 2 });
+		ui.setExecutionControlFromRefresh('chat', current);
+		changed.mockClear();
+		expect(response.setTransientFeedFromSnapshot({ ...makeTransientFeed('chat'), serverInstanceId: 'second' })).toEqual({ kind: 'stale' });
+		expect(ui.getExecutionControl('chat')).toEqual(current);
+		expect(changed).not.toHaveBeenCalled();
+		response.setExecutionControlFromLiveUpdate('chat', { ...current, version: 3 });
+		response.setExecutionControlFromRefresh('chat', current);
+		expect(ui.getExecutionControl('chat')?.version).toBe(3);
+	});
+
 	it('waits for a successor process to confirm its queued steer without accepting a retired acknowledgement', () => {
 		const ui = new ConversationUiState();
 		const previous = makeControl(makeQueue(), { serverInstanceId: 'previous', version: 9 });

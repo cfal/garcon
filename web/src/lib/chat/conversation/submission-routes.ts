@@ -102,6 +102,7 @@ export async function submitQueueRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
+	const response = deps.conversationUi.captureExecutionResponse();
 	// Clears before awaiting the network so typing during the request survives.
 	const clearedRevision = clearOwnedComposer(deps, context);
 	if (clearedRevision !== null) queue.recordComposerClear(context.chatId, clearedRevision);
@@ -117,7 +118,7 @@ export async function submitQueueRoute(
 	});
 	try {
 		const result = await submission.submit();
-		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
+		response.setExecutionControlFromLiveUpdate(context.chatId, result.control);
 		deps.chatState.clearResendExclusions();
 		return 'accepted';
 	} catch (error) {
