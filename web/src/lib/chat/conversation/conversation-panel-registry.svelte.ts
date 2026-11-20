@@ -28,7 +28,7 @@ import {
 	type ConversationTranscriptOverlayMutation,
 } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage, TranscriptPage } from '$shared/chat-view';
 import type { ChatViewSurfaceId, WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 import type {
@@ -669,6 +669,19 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.options.cache.remove(chatId);
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.clearMessages();
 		return true;
+	}
+
+	captureNativeReload(chatId: string): (page: TranscriptPage) => void {
+		const previousViewId = this.options.cache.readAppliedCursor(chatId)?.transcriptViewId
+			?? this.panelsForChat(chatId)[0]?.transcript.transcriptViewId ?? '';
+		return page => {
+			// A broadcast may have installed this view and newer commits before the reply.
+			if (this.options.cache.readAppliedCursor(chatId)?.transcriptViewId === page.transcriptViewId) return;
+			if (!this.resetForViewReplacement(chatId, previousViewId)) return;
+			this.options.cache.replaceFromPage(chatId, page);
+			for (const panel of this.panelsForChat(chatId)) panel.transcript.installCachedSnapshot(chatId);
+			this.markChatValidated(chatId);
+		};
 	}
 
 	removeChat(chatId: string): void {
