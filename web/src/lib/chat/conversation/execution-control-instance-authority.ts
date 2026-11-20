@@ -25,9 +25,11 @@ export class ExecutionControlInstanceAuthority {
 
 	get confirmedSocketInstanceId(): string | null { return this.#confirmedSocketInstanceId; }
 
-	isPossibleSuccessor(submittedInstance: string | null, acknowledgedInstance: string): boolean {
-		return submittedInstance !== null && this.isSocketInstanceConfirmed(submittedInstance)
-			&& acknowledgedInstance !== submittedInstance && !this.#supersededInstanceIds.has(acknowledgedInstance);
+	shouldDeferSteerAcknowledgement(submittingSocket: string | null, acknowledgedInstance: string): boolean {
+		// A delayed HTTP reply cannot order two unseen processes across a disconnect.
+		return this.#currentInstanceId !== null && acknowledgedInstance !== this.#currentInstanceId
+			&& !this.#supersededInstanceIds.has(acknowledgedInstance)
+			&& (this.#confirmedSocketInstanceId === null || this.#confirmedSocketInstanceId === submittingSocket);
 	}
 
 	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {
