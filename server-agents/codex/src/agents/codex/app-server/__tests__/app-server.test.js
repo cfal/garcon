@@ -2425,7 +2425,7 @@ describe('CodexAppServerRuntime', () => {
       : [{ name: 'ultrafast_mode', enabled }] };
   }
 
-  it('refuses retained premium execution when current workspace policy no longer allows it', async () => {
+  it('refuses a denied retained tier but reopens an idle thread when discovery is inconclusive', async () => {
     const { fake, createClient, provider, published } = await startUltrafastSession();
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
     await published.waitForEvent((event) => event.type === 'run-ended');
@@ -2434,6 +2434,13 @@ describe('CodexAppServerRuntime', () => {
       .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
     expect(createClient).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    fake.request.mockRejectedValue(new Error('Temporary catalog failure'));
+    const next = new FakeClient({ resumeThread: async () => ({ thread: makeThread(), model: 'gpt-5.4-codex', serviceTier: 'ultrafast' }) });
+    createClient.mockReturnValue(next);
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', speed: 'ultrafast' }));
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(next.resumeThread.mock.calls[0][0].serviceTier).toBe('ultrafast');
+    expect(next.startTurn.mock.calls[0][0].serviceTier).toBe('ultrafast');
   });
 
   it('finishes a concurrent native settings change before reopening an admitted premium turn', async () => {

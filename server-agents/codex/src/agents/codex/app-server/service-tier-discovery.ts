@@ -40,7 +40,14 @@ export async function assertLoadedTierAvailable(
     for (let page = 0; page < 10; page++) {
       const remaining = Math.ceil(deadline - performance.now());
       if (remaining <= 0) throw new AgentIntegrationError('TIMEOUT', `Codex ${method} timed out during speed discovery`, true);
-      const result = await client.request(method, { ...params, cursor, limit: 100 }, remaining);
+      let result: unknown;
+      try {
+        result = await client.request(method, { ...params, cursor, limit: 100 }, remaining);
+      } catch (error) {
+        if (error instanceof AgentIntegrationError) throw error;
+        // Native errors can contain executor configuration, paths or credentials.
+        throw new AgentIntegrationError('UNAVAILABLE', `Codex ${method} could not verify speed; check the executor configuration and retry.`, true);
+      }
       if (!isRecord(result) || !Array.isArray(result.data)) throw incompleteDiscovery(method);
       for (const row of result.data) {
         if (!isRecord(row) || typeof row[key] !== 'string') throw incompleteDiscovery(method);
