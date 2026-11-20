@@ -194,16 +194,15 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			const content = sameInstance ? entries.get(binding.entryId) : undefined;
 			// Each public queue version can add at most one dispatch. Across a larger
 			// gap, a missing receipt cannot distinguish cancellation from eviction.
-			const knownRemoval = content === undefined && !dispatched.has(binding.entryId)
+			const knownRemoval = sameInstance && content === undefined && !dispatched.has(binding.entryId)
 				&& previous?.queuedAtVersion != null && control !== null
 				&& control.version - previous.queuedAtVersion <= MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES;
-			// A departed input may already be durable in the unchanged transcript view.
-			const instanceRemoved = !sameInstance && previous?.queuedAtVersion !== null;
-			if (!this.#pendingEchoOrdinals.has(input.clientMessageId) && (instanceRemoved || knownRemoval)) {
+			if (!this.#pendingEchoOrdinals.has(input.clientMessageId) && knownRemoval) {
 				removedOrdinals ??= new Map(this.#optimisticAfterOrdinals);
 				removedOrdinals.delete(input.clientMessageId);
 				continue;
 			}
+			// Instance loss cannot prove whether an unobserved dispatch committed the input.
 			const queuedAtVersion = content === undefined ? null : control?.version ?? null;
 			const delivery = previous?.queuedAtVersion === queuedAtVersion ? previous : { ...binding, kind: 'queued' as const, queuedAtVersion };
 			const text = content ?? input.content;

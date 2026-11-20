@@ -249,6 +249,10 @@ function createReconnectDeps(
 		}),
 		executionControlChatIds: options.controlChatIds ?? [],
 		removeExecutionControl: vi.fn(),
+		captureExecutionControlRemoval: (chatId: string) => () => {
+			conversationUi.removeExecutionControl(chatId);
+			return true;
+		},
 		setExecutionControlFromRefresh: vi.fn(),
 		markExecutionControlSocketDisconnected: vi.fn(),
 		confirmExecutionControlSocketInstance: vi.fn(() => true),
@@ -1062,6 +1066,77 @@ describe('ChatReconnectCoordinator', () => {
 			clock.mockReturnValue(30);
 			conversationUi.confirmExecutionControlSocketInstance('successor', 30);
 			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(delivery);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it.each(['first', 'successor'])('keeps a newer %s ACK across a same-instance reconnect not-found result', async ackInstance => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		try {
+			const overlays = new ConversationTranscriptOverlayStore();
+			const conversationUi = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
+			const chatId = 'chat-1', clientMessageId = 'own';
+			conversationUi.confirmExecutionControlSocketInstance('first', 10);
+			const deps = createReconnectDeps();
+			const response = deferred<Record<string, unknown>>();
+			deps.ws.sendRequest.mockReturnValueOnce(response.promise);
+			const getExecutionControl = vi.fn(async (): Promise<{ control: ChatExecutionControlState }> => { throw new Error('reconnecting'); });
+			const coordinator = new ChatReconnectCoordinator({ ...deps, conversationUi, getExecutionControl });
+			await coordinator.handleConnectionState(false);
+			const reconnect = coordinator.handleConnectionState(true);
+			clock.mockReturnValue(20);
+			overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
+				createdAt: TS, delivery: 'pending', placement: 'live-tail' }, 1);
+			const current = controlState(true, ackInstance);
+			const receipt = { clientMessageId, entryId: 'queued-1', serverInstanceId: ackInstance, transcriptViewId: 'view' };
+			conversationUi.captureSteerControlJoin(chatId)(current, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
+			response.resolve({ ...reconnectStateResponse([], [], {}, 'first'), controlResults: [{ chatId, outcome: 'not-found' }] });
+			await reconnect;
+			const delivery = { ...receipt, kind: 'queued', queuedAtVersion: current.version };
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(ackInstance === 'first' ? delivery : 'pending');
+			expect(conversationUi.getExecutionControl(chatId)).toEqual(ackInstance === 'first' ? current : null);
+			expect(getExecutionControl).toHaveBeenCalledWith(chatId);
+			clock.mockReturnValue(30);
+			conversationUi.markExecutionControlSocketDisconnected();
+			conversationUi.confirmExecutionControlSocketInstance(ackInstance, 30);
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(delivery);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it('fences an unseen replay transient feed after a successor HTTP control binds a steer', async () => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		try {
+			const overlays = new ConversationTranscriptOverlayStore();
+			const conversationUi = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
+			const chatId = 'chat-1', clientMessageId = 'own';
+			const deps = createReconnectDeps();
+			deps.ws.sendRequest.mockResolvedValueOnce(reconnectStateResponse([], [chatId], { [chatId]: controlState(false, 'first') }, 'first'));
+			const current = controlState(true, 'successor');
+			const getExecutionControl = vi.fn(async () => ({ control: current }));
+			const coordinator = new ChatReconnectCoordinator({ ...deps, conversationUi, getExecutionControl });
+			await coordinator.handleConnectionState(true);
+			await coordinator.handleConnectionState(false);
+			const query = deferred<Record<string, unknown>>(), replay = deferred<Record<string, unknown>>();
+			deps.ws.sendRequest.mockImplementation(request => 'type' in request && request.type === 'reconnect-state-query' ? query.promise : replay.promise);
+			clock.mockReturnValue(15);
+			const reconnect = coordinator.handleConnectionState(true);
+			clock.mockReturnValue(20);
+			conversationUi.captureExecutionResponse().setExecutionControlFromRefresh(chatId, current);
+			overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
+				createdAt: TS, delivery: 'pending', placement: 'live-tail' }, 1);
+			const receipt = { clientMessageId, entryId: 'queued-1', serverInstanceId: 'successor', transcriptViewId: 'view' };
+			conversationUi.captureSteerControlJoin(chatId)(current, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
+			query.resolve(reconnectStateResponse([], [chatId], { [chatId]: controlState(false, 'unseen') }, 'unseen'));
+			await flushUntil(() => getExecutionControl.mock.calls.length > 0);
+			replay.resolve({ ...deltaResponse(chatId, 'generation-selected'),
+				transientFeed: { ...transientFeed(chatId, 'generation-selected'), serverInstanceId: 'unseen' } });
+			await reconnect;
+			expect(conversationUi.getExecutionControl(chatId)).toEqual(current);
+			expect(conversationUi.getTransientFeed(chatId)).toBeNull();
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: current.version });
 		} finally {
 			clock.mockRestore();
 		}

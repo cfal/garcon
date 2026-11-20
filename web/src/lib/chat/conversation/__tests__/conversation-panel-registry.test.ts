@@ -1619,7 +1619,7 @@ describe('ConversationPanelRegistry', () => {
 		}
 	});
 
-	it('preserves a departed steer through restart until aborted replay recovery catches up', async () => {
+	it.each(['observed dispatch', 'missed dispatch', 'lost queue'] as const)('preserves a steer through restart until recovery catches up (%s)', async outcome => {
 		const head = deferred<number>();
 		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
 		const ui = new ConversationUiState((chatId, control) => registry.reconcileQueuedSteers(chatId, control));
@@ -1637,9 +1637,9 @@ describe('ConversationPanelRegistry', () => {
 		}));
 		try {
 			const replay = registry.beginReconnectReplay(chatId, transcriptViewId);
-			registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
+			if (outcome !== 'lost queue') registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
 				messages: [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: 'own' }) }] });
-			ui.setExecutionControlFromLiveUpdate(chatId, { ...control, version: control.version + 1, queue: { ...control.queue,
+			if (outcome === 'observed dispatch') ui.setExecutionControlFromLiveUpdate(chatId, { ...control, version: control.version + 1, queue: { ...control.queue,
 				entries: [], recentlyDispatched: [{ entryId: 'entry', revision: 1, dispatchedAt: timestamp }] } });
 			registry.abortReconnectReplay(replay, chatId);
 			ui.markExecutionControlSocketDisconnected();

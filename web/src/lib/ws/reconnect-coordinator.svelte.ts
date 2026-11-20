@@ -59,12 +59,11 @@ export interface ReconnectPanelRegistryPort {
 export type ReconnectConversationUiState = Pick<
 	ConversationUiPort,
 	| 'executionControlChatIds'
-	| 'removeExecutionControl'
+	| 'captureExecutionControlRemoval'
 	| 'setExecutionControlFromRefresh'
 	| 'captureExecutionResponse'
 	| 'markExecutionControlSocketDisconnected'
 	| 'confirmExecutionControlSocketInstance'
-	| 'setTransientFeedFromSnapshot'
 >;
 
 export interface ChatReconnectCoordinatorOptions {
@@ -260,6 +259,7 @@ export class ChatReconnectCoordinator {
 	): Promise<{ controlRefresh: Promise<void> }> {
 		try {
 			const probeStartedAt = performance.now();
+			const removals = new Map(controlChatIds.map(chatId => [chatId, this.options.conversationUi.captureExecutionControlRemoval(chatId)]));
 			const raw = await this.options.ws.sendRequest({
 				type: 'reconnect-state-query',
 				controlChatIds,
@@ -281,7 +281,7 @@ export class ChatReconnectCoordinator {
 				if (result.outcome === 'snapshot') {
 					this.options.conversationUi.setExecutionControlFromRefresh(result.chatId, result.control);
 				} else if (result.outcome === 'not-found') {
-					this.options.conversationUi.removeExecutionControl(result.chatId);
+					if (!removals.get(result.chatId)?.()) unavailableChatIds.push(result.chatId);
 				} else {
 					unavailableChatIds.push(result.chatId);
 				}
@@ -479,6 +479,7 @@ export class ChatReconnectCoordinator {
 		let afterOrdinal = input.afterOrdinal;
 		let throughOrdinal: number | undefined;
 		while (input.isCurrent()) {
+			const response = this.options.conversationUi.captureExecutionResponse();
 			const message = await this.#subscribe(
 				input.chatId,
 				input.transcriptViewId,
@@ -503,7 +504,7 @@ export class ChatReconnectCoordinator {
 			const applied = await input.apply(message);
 			if (applied === false) throw new Error('Transcript replay page could not be applied');
 			if (!input.isCurrent()) return null;
-			this.options.conversationUi.setTransientFeedFromSnapshot(message.transientFeed);
+			response.setTransientFeedFromSnapshot(message.transientFeed);
 			if (!message.hasMore) return message;
 			afterOrdinal = message.nextAfterOrdinal;
 		}
