@@ -229,6 +229,12 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		this.options.panels.reconcileQueuedSteers(chatId, control, receipt);
 	}
 
+	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void {
+		const input = this.options.panels.overlayFor(chatId)?.optimisticInputs.find(input => input.clientMessageId === clientMessageId);
+		if (input?.delivery !== 'pending' || input.placement !== 'live-tail') return;
+		this.options.panels.upsertOptimisticInput(chatId, { ...input, placement: undefined });
+	}
+
 	clearOptimisticUserInput(chatId: string, clientMessageId: string): void {
 		this.options.panels.clearOptimisticInput(chatId, clientMessageId);
 	}

@@ -181,6 +181,8 @@ export async function submitSteerRoute(
 		if (!outcomeUnknown) {
 			deps.chatState.clearOptimisticUserInput(context.chatId, submission.clientMessageId);
 			restoreSteerComposer(deps, context, clearedComposerRevision);
+		} else {
+			deps.chatState.anchorUnconfirmedSteer(context.chatId, submission.clientMessageId);
 		}
 		deps.chatState.appendLocalNoticeForChat(
 			context.chatId,
