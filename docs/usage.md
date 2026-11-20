@@ -97,10 +97,8 @@ plans. Anthropic rates follow the official pricing page, including per-model
 cache-read rates, one-hour cache writes, fast mode, and Haiku 5.5's long-prompt
 tier. OpenAI rates follow LiteLLM's published table, including priority
 processing, flex processing, and the 272K-token long-context tier. Ultrafast estimates use
-[OpenAI’s published API rates](https://developers.openai.com/api/docs/pricing) for the model,
-including the GPT-6.2 promotional rate. Codex does not persist individual request start times;
-the estimate uses turn start for the first response and the preceding response's completion
-for later requests in that turn. Usage days still use the recorded completion time. Ultrafast usage without a
+[OpenAI’s published regular API rates](https://developers.openai.com/api/docs/pricing) for the model,
+excluding promotional discounts. Usage days use the recorded completion time. Ultrafast usage without a
 published rate counts toward tokens but is reported as unpriced. Model names are matched after
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens

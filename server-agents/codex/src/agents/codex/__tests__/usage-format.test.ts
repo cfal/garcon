@@ -18,12 +18,12 @@ function isMalformed(line: string, state: CodexUsageState): boolean {
 const SESSION_ID = '00000000-0000-4000-8000-0000000000c1';
 const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10-01T05:17:41.289Z') =>
   JSON.stringify({ type: 'session_meta', timestamp, payload: { id: SESSION_ID, ...payload } });
-const turnContext = (model = 'gpt-6-sol', turnId?: string, timestamp = '2026-10-01T05:17:42.694Z') =>
-  JSON.stringify({ type: 'turn_context', timestamp, payload: { model, turn_id: turnId } });
-const threadSettings = (serviceTier: string, model = 'gpt-6-sol', timestamp = '2026-10-01T05:17:43.000Z') =>
-  JSON.stringify({ type: 'event_msg', timestamp, payload: { type: 'thread_settings_applied', thread_settings: { model, service_tier: serviceTier } } });
-const turnStarted = (id: string, type = 'task_started', timestamp = '2026-10-01T05:17:42Z') =>
-  JSON.stringify({ type: 'event_msg', timestamp, payload: { type, turn_id: id } });
+const turnContext = (model = 'gpt-6-sol', turnId?: string) =>
+  JSON.stringify({ type: 'turn_context', timestamp: '2026-10-01T05:17:42.694Z', payload: { model, turn_id: turnId } });
+const threadSettings = (serviceTier: string, model = 'gpt-6-sol') =>
+  JSON.stringify({ type: 'event_msg', timestamp: '2026-10-01T05:17:43.000Z', payload: { type: 'thread_settings_applied', thread_settings: { model, service_tier: serviceTier } } });
+const turnStarted = (id: string, type = 'task_started') =>
+  JSON.stringify({ type: 'event_msg', timestamp: '2026-10-01T05:17:42Z', payload: { type, turn_id: id } });
 
 function counters(input: number, output: number, extra: Partial<Record<string, number>> = {}) {
   return {
@@ -87,22 +87,22 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(usageRecordLine('next', counters(1, 1), undefined, 'turn-2'), state)?.model).toBe('gpt-6.2-sol');
   });
 
-  test('estimates the first request at admission and keeps the completion date for reporting', () => {
+  test('keeps turn context and tier independent when cloning a partial scan', () => {
     const state = createCodexUsageState();
-    parseCodexUsageLine(turnStarted('turn-1', 'task_started', '2027-03-01T07:59:50Z'), state);
-    parseCodexUsageLine(turnContext('gpt-6.2-astra', 'turn-1', '2027-03-01T08:00:00Z'), state);
-    parseCodexUsageLine(threadSettings('ultrafast', 'gpt-6.2-astra', '2027-03-01T08:00:00.500Z'), state);
-    const completed = '2027-03-01T08:00:01Z';
-    const sample = (id: string, at: string) => usageRecordLine(id, counters(0, 1_000_000), at);
+    parseCodexUsageLine(turnStarted('turn-1'), state);
     const copy = codexUsageFormat.cloneState(state);
-    const first = parseCodexUsageLine(sample('first', completed), state)!;
-    expect(first.timestampMs).toBe(Date.parse(completed));
-    expect(first.requestStartEstimateMs).toBe(Date.parse('2027-03-01T07:59:50Z'));
-    expect(priceUsageRecord(first)?.costUsd).toBe(120);
-    const second = parseCodexUsageLine(sample('second', '2027-03-01T08:00:05Z'), state)!;
-    expect(second.requestStartEstimateMs).toBe(Date.parse(completed));
-    expect(priceUsageRecord(second)?.costUsd).toBe(240);
-    expect(priceUsageRecord(parseCodexUsageLine(sample('first', completed), copy)!)?.costUsd).toBe(120);
+    parseCodexUsageLine(turnContext('gpt-6.2-astra', 'turn-1'), state);
+    parseCodexUsageLine(threadSettings('ultrafast', 'gpt-6.2-astra'), state);
+    parseCodexUsageLine(turnContext('gpt-6.2-sol', 'turn-1'), copy);
+    parseCodexUsageLine(threadSettings('priority', 'gpt-6.2-sol'), copy);
+    const completed = '2026-10-01T05:17:49.900Z';
+    const sample = usageRecordLine('response', counters(100, 10), completed);
+    expect(parseCodexUsageLine(sample, state)).toMatchObject({
+      model: 'gpt-6.2-astra', speed: 'ultrafast', timestampMs: Date.parse(completed),
+    });
+    expect(parseCodexUsageLine(sample, copy)).toMatchObject({
+      model: 'gpt-6.2-sol', speed: 'fast', timestampMs: Date.parse(completed),
+    });
   });
 
   test('attributes a response to the speed at turn start, not a selection made during inference', () => {

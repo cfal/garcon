@@ -37,7 +37,6 @@ interface UsageTurn {
   model: string;
   speed: UsageSpeed | null;
   hasContext: boolean;
-  nextRequestAtMs: number | null;
 }
 
 /**
@@ -188,13 +187,10 @@ function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string
     || typeof responseId !== 'string' || responseId.length === 0) {
     return { malformed: true, timestampMs };
   }
-  const requestStartEstimateMs = turn?.nextRequestAtMs;
-  if (turn) turn.nextRequestAtMs = timestampMs;
   if (usage.input_tokens + usage.output_tokens === 0) return null;
   let speed = state.threadSpeed;
   if (state.turn) speed = turn?.speed ?? 'unknown';
-  const record = usageRecord(state.sessionId, model, timestampMs, usage, speed, `codex-response:${responseId}`);
-  return requestStartEstimateMs == null ? record : { ...record, requestStartEstimateMs };
+  return usageRecord(state.sessionId, model, timestampMs, usage, speed, `codex-response:${responseId}`);
 }
 
 export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | MalformedUsage | null {
@@ -226,8 +222,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     // Pre-context compaction on a model switch can use either the old model or its replacement.
     const modelChanged = state.model && state.threadModel && state.model !== state.threadModel;
     state.turn = { id: payload.turn_id, speed: state.threadSpeed, hasContext: false,
-      model: modelChanged ? 'unknown' : state.threadModel ?? state.model,
-      nextRequestAtMs: parseTimestampMs(entry.timestamp) };
+      model: modelChanged ? 'unknown' : state.threadModel ?? state.model };
     return null;
   }
   if (entry.type === 'turn_context') {
@@ -238,8 +233,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
       state.turn.model = state.model;
       state.turn.hasContext = true;
     } else {
-      state.turn = { id: payload.turn_id, model: state.model, speed: state.threadSpeed, hasContext: true,
-        nextRequestAtMs: parseTimestampMs(entry.timestamp) };
+      state.turn = { id: payload.turn_id, model: state.model, speed: state.threadSpeed, hasContext: true };
     }
     return null;
   }

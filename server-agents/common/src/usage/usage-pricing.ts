@@ -37,21 +37,21 @@ export function lookupModelPrice(model: string): ModelPrice | null {
   return price;
 }
 
-function speedMultiplier(price: ModelPrice, speed: Exclude<UsageSpeed, 'unknown'>, timestampMs: number): number | null {
+function speedMultiplier(price: ModelPrice, speed: Exclude<UsageSpeed, 'unknown'>): number | null {
   switch (speed) {
     case 'fast': return price.fastMultiplier ?? 1;
     case 'flex': return price.flexMultiplier ?? 1;
-    case 'ultrafast': return price.ultrafastMultiplier?.(timestampMs) ?? null;
+    case 'ultrafast': return price.ultrafastMultiplier ?? null;
     default: return 1;
   }
 }
 
 /** Returns null when the rate is unknown. Reasoning tokens are already part of output. */
-export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed' | 'timestampMs' | 'requestStartEstimateMs'>): PricedUsage | null {
+export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed'>): PricedUsage | null {
   if (record.speed === 'unknown') return null;
   const price = lookupModelPrice(record.model);
   if (!price) return null;
-  const multiplier = speedMultiplier(price, record.speed, record.requestStartEstimateMs ?? record.timestampMs);
+  const multiplier = speedMultiplier(price, record.speed);
   if (multiplier === null) return null;
   const { uncachedInputTokens, cachedInputTokens, cacheWriteTokens, outputTokens } = record.totals;
   const promptTokens = uncachedInputTokens + cachedInputTokens + cacheWriteTokens;
