@@ -383,9 +383,11 @@ describe('WsConnection', () => {
 	it('sends application heartbeats and accepts matching pongs', async () => {
 		const connection = new WsConnection();
 		const snapshotSources: Array<string | undefined> = [];
+		const requestStarts: Array<number | undefined> = [];
 		connection.addMessageConsumer((data, context) => {
 			if (data.type === 'ws-pong') {
 				snapshotSources.push(context.processingSnapshotSource);
+				requestStarts.push(context.requestStartedAt);
 			}
 			return false;
 		});
@@ -400,6 +402,9 @@ describe('WsConnection', () => {
 		expect(ping).toMatchObject({ type: 'ws-ping' });
 		expect(typeof ping.clientRequestId).toBe('string');
 		expect(typeof ping.sentAt).toBe('number');
+		expect(ping).not.toHaveProperty('requestStartedAt');
+		const requestStartedAt = performance.now();
+		await vi.advanceTimersByTimeAsync(1_000);
 
 		socket.message({
 			type: 'ws-pong',
@@ -414,6 +419,7 @@ describe('WsConnection', () => {
 		expect(connection.isConnected).toBe(true);
 		expect(mockSockets).toHaveLength(1);
 		expect(snapshotSources).toEqual(['heartbeat']);
+		expect(requestStarts).toEqual([requestStartedAt]);
 
 		connection.disconnect();
 	});

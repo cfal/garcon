@@ -72,6 +72,8 @@ export type ChatProcessingSnapshotSource =
 
 export interface WsMessageContext {
 	readonly processingSnapshotSource?: ChatProcessingSnapshotSource;
+	/** Monotonic request start retained locally, not echoed from the wire. */
+	readonly requestStartedAt?: number;
 }
 
 export type WsMessageConsumer = (
@@ -582,7 +584,7 @@ export class WsConnection {
 		const raw = await this.#sendRequest<Record<string, unknown>>(
 			{ type: 'ws-ping', sentAt: Date.now() },
 			timeoutMs,
-			{ processingSnapshotSource: source },
+			{ processingSnapshotSource: source, requestStartedAt: performance.now() },
 			null,
 		).response;
 		const parsed = parseServerWsMessage(raw);

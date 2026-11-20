@@ -1,7 +1,27 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ExecutionControlInstanceAuthority } from '../execution-control-instance-authority.js';
 
 describe('ExecutionControlInstanceAuthority', () => {
+	it('requires a later probe to replace an instance observed during the query', () => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		try {
+			const authority = new ExecutionControlInstanceAuthority();
+			authority.confirmSocketInstance('first', 10);
+			authority.markSocketDisconnected();
+			clock.mockReturnValue(20);
+			authority.classifyNonAuthoritativeInstance('second');
+			expect(authority.confirmSocketInstance('first', 10)).toBeNull();
+			expect(authority.confirmSocketInstance('first', 20)).toBeNull();
+			expect(authority.isSocketInstanceConfirmed('first')).toBe(false);
+			expect(authority.classifyNonAuthoritativeInstance('second')).toEqual({ kind: 'current' });
+			expect(authority.confirmSocketInstance('second', 10)).toEqual({ kind: 'current' });
+			clock.mockReturnValue(30);
+			expect(authority.confirmSocketInstance('first', 30)).toEqual({ kind: 'replace' });
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it('fences delayed unseen responses while accepting the current process and fresh fallback requests', () => {
 		const authority = new ExecutionControlInstanceAuthority();
 		authority.confirmSocketInstance('first');

@@ -32,6 +32,7 @@ interface QueuedSteerAcknowledgement {
 	chatId: string;
 	control: ChatExecutionControlState;
 	join: (control: ChatExecutionControlState | null) => void;
+	receivedAt: number;
 }
 type JoinSteerControl = (control: ChatExecutionControlState, join: QueuedSteerAcknowledgement['join']) => void;
 
@@ -59,7 +60,7 @@ export interface ConversationUiPort {
 	finishPlanModeForChat(chatId: string): PermissionMode | null;
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
 	markExecutionControlSocketDisconnected(): void;
-	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
+	confirmExecutionControlSocketInstance(serverInstanceId: string, probeStartedAt?: number): boolean;
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean;
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
 	captureSteerControlJoin(chatId: string): JoinSteerControl;
@@ -217,9 +218,9 @@ export class ConversationUiState implements ConversationUiPort {
 		this.executionControlAuthority.markSocketDisconnected();
 	}
 
-	confirmExecutionControlSocketInstance(serverInstanceId: string): void {
-		const alreadyConfirmed = this.executionControlAuthority.isSocketInstanceConfirmed(serverInstanceId);
-		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId);
+	confirmExecutionControlSocketInstance(serverInstanceId: string, probeStartedAt?: number): boolean {
+		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId, probeStartedAt);
+		if (!decision) return false;
 		if (decision.kind === 'replace') {
 			this.#clearExecutionControls();
 			this.transientFeedByChatId = {};
@@ -228,13 +229,14 @@ export class ConversationUiState implements ConversationUiPort {
 			this.unassignedPendingPermissionRequests = [];
 			this.unassignedPreviousPermissionMode = null;
 		}
-		if (!alreadyConfirmed) {
-			this.#joinConfirmedSteers(serverInstanceId);
-			for (const ack of this.#unconfirmedSteers) {
-				this.#unconfirmedSteers.delete(ack);
-				ack.join(null);
-			}
+		this.#joinConfirmedSteers(serverInstanceId);
+		for (const ack of this.#unconfirmedSteers) {
+			// Only a probe begun after the ACK proves that another process outlived it.
+			if (probeStartedAt === undefined || ack.receivedAt >= probeStartedAt) continue;
+			this.#unconfirmedSteers.delete(ack);
+			ack.join(null);
 		}
+		return true;
 	}
 
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean {
@@ -243,7 +245,7 @@ export class ConversationUiState implements ConversationUiPort {
 
 	captureSteerControlJoin(chatId: string): JoinSteerControl {
 		return (control, join) => {
-			const ack = { chatId, control, join };
+			const ack = { chatId, control, join, receivedAt: performance.now() };
 			if (this.executionControlAuthority.shouldDeferSteerAcknowledgement(control.serverInstanceId)) {
 				this.#unconfirmedSteers.add(ack);
 			} else this.#joinSteer(ack);

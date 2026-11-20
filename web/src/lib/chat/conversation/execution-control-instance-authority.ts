@@ -14,6 +14,7 @@ export class ExecutionControlInstanceAuthority {
 	#currentInstanceId: string | null = null;
 	#confirmedSocketInstanceId: string | null = null;
 	#authorityRevision = 0;
+	#instanceObservedAt = -Infinity;
 	readonly #supersededInstanceIds = new Set<string>();
 
 	markSocketDisconnected(): void {
@@ -35,7 +36,10 @@ export class ExecutionControlInstanceAuthority {
 			&& !this.#supersededInstanceIds.has(acknowledgedInstance);
 	}
 
-	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {
+	confirmSocketInstance(serverInstanceId: string, probeStartedAt?: number): ExecutionControlInstanceAcceptance | null {
+		// An older probe cannot order a process observed while its response was in flight.
+		if (serverInstanceId !== this.#currentInstanceId && probeStartedAt !== undefined
+			&& probeStartedAt <= this.#instanceObservedAt) return null;
 		if (this.#confirmedSocketInstanceId !== serverInstanceId) this.#authorityRevision += 1;
 		this.#confirmedSocketInstanceId = serverInstanceId;
 		if (this.#currentInstanceId === serverInstanceId) return { kind: 'current' };
@@ -58,6 +62,7 @@ export class ExecutionControlInstanceAuthority {
 
 	#replaceCurrent(serverInstanceId: string): ExecutionControlInstanceAcceptance {
 		this.#authorityRevision += 1;
+		this.#instanceObservedAt = performance.now();
 		if (this.#currentInstanceId !== null) {
 			this.#supersededInstanceIds.add(this.#currentInstanceId);
 		}

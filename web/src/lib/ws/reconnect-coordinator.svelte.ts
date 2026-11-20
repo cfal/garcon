@@ -104,11 +104,11 @@ export class ChatReconnectCoordinator {
 
 	mount(): void {
 		$effect(() =>
-			this.options.ws.addMessageConsumer((data) => {
-				if (data.type !== 'ws-pong') return false;
+			this.options.ws.addMessageConsumer((data, context) => {
+				if (data.type !== 'ws-pong' || context.requestStartedAt === undefined) return false;
 				const message = parseServerWsMessage(data);
 				if (!(message instanceof WsPongMessage)) return false;
-				this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId);
+				this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId, context.requestStartedAt);
 				return false;
 			}),
 		);
@@ -259,6 +259,7 @@ export class ChatReconnectCoordinator {
 		epoch: number,
 	): Promise<{ controlRefresh: Promise<void> }> {
 		try {
+			const probeStartedAt = performance.now();
 			const raw = await this.options.ws.sendRequest({
 				type: 'reconnect-state-query',
 				controlChatIds,
@@ -267,7 +268,9 @@ export class ChatReconnectCoordinator {
 			if (!(message instanceof ReconnectStateMessage) || epoch !== this.#reconnectEpoch) {
 				throw new Error('Unexpected reconnect-state response');
 			}
-			this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId);
+			if (!this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId, probeStartedAt)) {
+				throw new Error('Reconnect authority changed during the query');
+			}
 
 			const requestedChatIds = new Set(controlChatIds);
 			const returnedChatIds = new Set<string>();
