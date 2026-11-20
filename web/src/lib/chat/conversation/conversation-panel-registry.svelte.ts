@@ -36,6 +36,7 @@ import type {
 	ChatSurfaceTransferPort,
 } from '$lib/workspace/chat-surface-transfer.js';
 import type { WorkspacePublication } from '$lib/workspace/workspace-commit.js';
+import { QueuedSteerTranscriptRecovery } from './queued-steer-transcript-recovery.js';
 
 export interface ConversationPanelDescriptor extends VisibleChatPresentation {
 	readonly snapshotAdmission: ConversationPanelSnapshotAdmission;
@@ -120,10 +121,12 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#onSnapshotResendCandidates: NonNullable<ActiveTranscriptStateOptions['onSnapshotResendCandidates']> = (chatId, candidates, frontier) => {
 		this.publishSnapshotResendCandidates(chatId, candidates, frontier);
 	};
-	readonly clearSnapshotEchoes = (chatId: string, messages: readonly TranscriptMessage[]): void => {
+	readonly observeRecoveredMessages = (chatId: string, messages: readonly TranscriptMessage[]): void => {
 		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages);
 		if (mutation) this.#applyOverlayMutation(chatId, mutation);
+		this.#steerRecovery.observe(chatId);
 	};
+	readonly #steerRecovery: QueuedSteerTranscriptRecovery;
 	#recoverTranscript = async (chatId: string, viewId: string): Promise<void> => {
 		if (this.resetForViewReplacement(chatId, viewId)) {
 			await this.loadChatSnapshot(chatId, { purpose: 'activation' });
@@ -146,6 +149,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			getComposerAnchorSurfaceId(): ChatViewSurfaceId | null;
 			getSelectedChatId(): string | null;
 			retainInactiveWindows?: () => boolean;
+			readSteerTranscriptHead?: (chatId: string, transcriptViewId: string) => Promise<number | null>;
 			combineMessages?: boolean;
 			loadTranscriptSnapshot?: (
 				transcript: ActiveTranscriptState,
@@ -153,7 +157,14 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				options: ChatLoadMessagesOptions,
 			) => Promise<void>;
 		},
-	) {}
+	) {
+		this.#steerRecovery = new QueuedSteerTranscriptRecovery({
+			inputs: chatId => options.overlays.viewFor(chatId)?.optimisticInputs ?? [],
+			cursor: chatId => options.cache.readAppliedCursor(chatId),
+			clear: (chatId, id) => this.clearOptimisticInput(chatId, id),
+			readHead: options.readSteerTranscriptHead,
+		});
+	}
 
 	get transcriptCache(): ChatTranscriptCache {
 		return this.options.cache;
@@ -289,7 +300,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.overlays,
 				{
 					onSnapshotResendCandidates: this.#onSnapshotResendCandidates,
-					onSnapshotMessages: this.clearSnapshotEchoes,
+					onSnapshotMessages: this.observeRecoveredMessages,
 					combineMessages: this.options.combineMessages,
 					recoverTranscript: this.#recoverTranscript,
 				},
@@ -555,6 +566,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 		}
 		this.#inactiveWindows.applySharedCommit(commit, overlayMutation);
+		this.#steerRecovery.retireCaughtUp(batch.chatId);
 		return { kind: 'applied', localRecoverySurfaceIds };
 	}
 
@@ -599,6 +611,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	reconcileQueuedSteers(chatId: string, control: ChatExecutionControlState | null, receipt?: QueuedSteerReceipt): void {
 		const mutation = this.options.overlays.reconcileQueuedSteers(chatId, control, receipt);
 		if (mutation) this.#applyOverlayMutation(chatId, mutation);
+		this.#steerRecovery.observe(chatId);
 	}
 
 	excludeResendCandidate(chatId: string, ordinal: number): void {
@@ -699,6 +712,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	destroy(): void {
+		this.#steerRecovery.destroy();
 		this.#inactiveWindows.clear();
 		this.abortReconnectReplays();
 		for (const panel of this.#panels.values()) panel.destroy();

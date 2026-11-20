@@ -5071,6 +5071,7 @@ describe('ConversationSessionController', () => {
 		const steerRequest = mockSteerChat.mock.calls[0][0];
 		expect(deps.chatState.acceptQueuedSteer).toHaveBeenCalledWith({
 			clientMessageId: steerRequest.clientMessageId, entryId: 'entry-steer',
+			transcriptViewId: steerRequest.transcriptViewId,
 			serverInstanceId: control.serverInstanceId,
 		}, newer);
 		expect(deps.chatState.clearOptimisticUserInput).not.toHaveBeenCalled();

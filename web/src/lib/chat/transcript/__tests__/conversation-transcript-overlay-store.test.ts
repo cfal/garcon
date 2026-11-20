@@ -96,7 +96,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 	it('follows only its own queued steer across edits and dispatch before echo', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		const chatId = 'chat-1';
-		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'server-1' };
+		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'server-1', transcriptViewId: 'view' };
 		const input = optimistic(receipt.clientMessageId);
 		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
 		const entry = { id: receipt.entryId, content: 'edited guidance', kind: 'steer' as const,
@@ -107,7 +107,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		overlays.reconcileQueuedSteers(chatId, control);
 		expect(view.optimisticInputs).toEqual([input]);
 		overlays.reconcileQueuedSteers(chatId, control, receipt);
-		expect(view.optimisticInputs).toEqual([{ ...input, delivery: receipt, content: entry.content }]);
+		expect(view.optimisticInputs).toEqual([{ ...input, delivery: { ...receipt, queuedAtVersion: control.version }, content: entry.content }]);
 		expect(view.optimisticAfterOrdinals.get(input.clientMessageId)).toBe(7);
 		expect(overlays.reconcileQueuedSteers(chatId, control)?.feedStructureChanged).toBe(false);
 
@@ -124,7 +124,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 
 	it.each(['removed', 'restart', 'pruned'] as const)('drops only the queued row when its entry is %s', reason => {
 		const overlays = new ConversationTranscriptOverlayStore();
-		const receipt = { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server' };
+		const receipt = { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId: 'view' };
 		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
 		const input = optimistic(receipt.clientMessageId);
 		const other = optimistic('still-in-flight');

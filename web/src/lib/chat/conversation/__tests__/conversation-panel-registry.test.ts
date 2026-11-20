@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
+import { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '$shared/queue-state';
 import type {
 	ActiveTranscriptState,
 	ChatLoadMessagesOptions,
@@ -47,6 +48,7 @@ function presentation(
 function fixture(
 	options: {
 		maxHiddenEntries?: number;
+		readSteerTranscriptHead?: (chatId: string, viewId: string) => Promise<number | null>;
 		loadTranscriptSnapshot?: (
 			transcript: import('$lib/chat/transcript/active-transcript-state.svelte.js').ActiveTranscriptState,
 			chatId: string,
@@ -85,6 +87,7 @@ function fixture(
 		getSelectedChatId: options.getSelectedChatId ?? (() => null),
 		retainInactiveWindows: options.retainInactiveWindows,
 		loadTranscriptSnapshot: options.loadTranscriptSnapshot,
+		readSteerTranscriptHead: options.readSteerTranscriptHead,
 	});
 	return { cache, overlays, lifecycles, registry };
 }
@@ -1320,10 +1323,10 @@ describe('ConversationPanelRegistry', () => {
 	});
 
 	it('retires a background steer when a recovery snapshot supplies its missed echo', () => {
-		const { cache, registry, overlays } = fixture();
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: async () => null });
 		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-2' });
 		const chatId = 'chat-1';
-		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'instance-1' };
+		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'instance-1', transcriptViewId: 'view-1' };
 		const timestamp = '2026-08-30T00:00:00.000Z';
 		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
 		control.queue.recentlyDispatched = [{ entryId: receipt.entryId, revision: 1, dispatchedAt: timestamp }];
@@ -1332,7 +1335,7 @@ describe('ConversationPanelRegistry', () => {
 			content: 'guidance', createdAt: timestamp, delivery: 'pending' });
 		selected.acceptQueuedSteer(receipt, control);
 		expect(overlays.viewFor('chat-2')).toBeNull();
-		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(receipt);
+		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, queuedAtVersion: null });
 		cache.replace(chatId, 'view-1', [message(1), { ordinal: 2,
 			message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: receipt.clientMessageId }) }], 2, null);
 		registry.reconcile([presentation('chat-view:window-left', chatId)]);
@@ -1354,13 +1357,78 @@ describe('ConversationPanelRegistry', () => {
 			registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: id, content: id, createdAt: timestamp, delivery: 'pending' });
 			if (id === 'in-flight') continue;
 			control.queue.entries.push({ kind: 'steer', id, content: id, revision: 1, attachments: [], createdAt: timestamp, updatedAt: timestamp });
-			registry.reconcileQueuedSteers(chatId, control, { entryId: id, clientMessageId: id, serverInstanceId: 'instance' });
+			registry.reconcileQueuedSteers(chatId, control, { entryId: id, clientMessageId: id, serverInstanceId: 'instance', transcriptViewId: 'view-1' });
 		}
 		const rowIds = () => panel.transcript.visibleRows.map(row => row.id);
 		expect(rowIds()).toEqual(['view-1:1', 'optimistic:first', 'optimistic:second', 'optimistic:in-flight']);
 		registry.applyCommittedBatch({ chatId, transcriptViewId: 'view-1', firstOrdinal: 2, lastOrdinal: 3,
 			messages: [message(2), message(3)], resendCandidates: [], noticeRevision: 0 });
 		expect(rowIds()).toEqual(['view-1:1', 'optimistic:in-flight', 'view-1:2', 'view-1:3', 'optimistic:first', 'optimistic:second']);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each(['control first', 'snapshot first'] as const)('retires a missed steer outside the recovery page (%s)', async order => {
+		const head = deferred<number>();
+		const readHead = vi.fn(() => head.promise);
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: readHead });
+		const chatId = 'chat-1', transcriptViewId = 'view-1';
+		const timestamp = '2026-08-30T00:00:00.000Z';
+		const receipt = { entryId: 'steer', clientMessageId: 'input', serverInstanceId: 'server', transcriptViewId };
+		const control = emptyChatExecutionControlState('server');
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', chatId)]);
+		const panel = registry.panel('chat-view:window-left')!;
+		const snapshot = (ordinal: number) => {
+			cache.replace(chatId, transcriptViewId, [message(ordinal)], ordinal, ordinal);
+			expect(panel.transcript.installCachedSnapshot(chatId)).toBe('applied');
+		};
+		const rows = () => overlays.forChat(chatId).optimisticInputs.map(input => input.clientMessageId);
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'input', content: 'guidance', createdAt: timestamp, delivery: 'pending' });
+		control.version = 1;
+		control.queue.entries = [{ id: 'steer', kind: 'steer', content: 'guidance', attachments: [], revision: 1, createdAt: timestamp, updatedAt: timestamp }];
+		registry.reconcileQueuedSteers(chatId, control, receipt);
+		if (order === 'snapshot first') snapshot(200);
+		control.version++;
+		control.queue.entries = [];
+		control.queue.recentlyDispatched = [{ entryId: 'steer', revision: 1, dispatchedAt: timestamp }];
+		registry.reconcileQueuedSteers(chatId, control);
+		if (order === 'control first') snapshot(2); // Read before dispatch, installed afterwards.
+		expect(rows()).toEqual(['input']);
+		expect(readHead).toHaveBeenCalledWith(chatId, transcriptViewId);
+		head.resolve(199);
+		await head.promise;
+		if (order === 'control first') {
+			expect(rows()).toEqual(['input']);
+			snapshot(200);
+		}
+		expect(rows()).toEqual([]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps a steer whose dispatch receipt was evicted until replay reaches its echo', async () => {
+		const readHead = vi.fn(async () => 100);
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: readHead });
+		const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
+		const receipt = { entryId: 'own', clientMessageId: 'input', serverInstanceId: 'server', transcriptViewId };
+		const control = emptyChatExecutionControlState('server');
+		seed(cache);
+		control.version = 1;
+		control.queue.entries = [{ id: 'own', kind: 'steer', content: 'guidance', attachments: [], revision: 1, createdAt: timestamp, updatedAt: timestamp }];
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'input', content: 'guidance', createdAt: timestamp, delivery: 'pending' });
+		registry.reconcileQueuedSteers(chatId, control, receipt);
+		control.queue.entries = [];
+		for (const entryId of ['own', ...Array.from({ length: MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES }, (_, i) => `later-${i}`)]) {
+			control.version++;
+			control.queue.recentlyDispatched = [...control.queue.recentlyDispatched, { entryId, revision: 1, dispatchedAt: timestamp }].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
+		}
+		registry.reconcileQueuedSteers(chatId, control);
+		await Promise.resolve();
+		expect(overlays.forChat(chatId).optimisticInputs).toHaveLength(1);
+		registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
+			messages: [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: 'input' }) }] });
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
 		registry.destroy();
 		cache.flush();
 	});

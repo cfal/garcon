@@ -195,6 +195,7 @@
 				lastOrdinal,
 			});
 			if (applied.status !== 'applied') return false;
+			conversationPanels.observeRecoveredMessages(chatId, messages);
 			applyChatMessageBatchActivity(
 				sessions,
 				chatId,
