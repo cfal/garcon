@@ -33,7 +33,7 @@ import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../../common/chat-modes.js';
-import type { ParentChatRef } from '../../../common/chat-parentage.js';
+import type { ChatRelationships } from '../../../common/chat-parentage.js';
 import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../../common/handoff-timeouts.js';
 import type { JsonObject } from '../../../common/json.js';
 import { parseSelfHandoffRunCommandRequest } from '../../../common/self-handoff-contracts.js';
@@ -77,7 +77,7 @@ function isRequestTimeoutServer(value: unknown): value is RequestTimeoutServer {
 
 function acceptedTurnResponse(
   result: CommandAcceptedResponse,
-  parentChat: ParentChatRef | null,
+  chat: ChatRelationships | null,
   request: Request,
 ): Response {
   if (!result.chatId || !result.turnId) {
@@ -86,9 +86,13 @@ function acceptedTurnResponse(
   const receipt = new URL('turn-receipt', request.url);
   receipt.search = new URLSearchParams({ chatId: result.chatId, turnId: result.turnId }).toString();
   return Response.json(
-    { ...result, parentChat },
+    { ...result, ...chatRelationships(chat) },
     { status: 202, headers: { Location: receipt.pathname + receipt.search } },
   );
+}
+
+function chatRelationships(chat: ChatRelationships | null | undefined) {
+  return { parentChatId: chat?.parentChatId ?? null, lineage: chat?.lineage ?? null };
 }
 
 function validatedCommandAttachments(value: unknown) {
@@ -131,7 +135,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       const input = parseCommandRequest(parseStartChatCommandRequest, body);
       const images = validatedCommandAttachments(input.images);
       const result = await commands.submitStart({ ...input, images });
-      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null, request);
+      return acceptedTurnResponse(result, result.chat, request);
     } catch (error: unknown) {
       if (error instanceof ModelSelectionError) {
         return jsonError((error as Error).message, 422);
@@ -171,7 +175,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       }
       const result = await commands.submitRun({ ...input, images });
 
-      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null, request);
+      return acceptedTurnResponse(result, result.chat ?? registry.getChat(input.chatId), request);
     } catch (error: unknown) {
       return handoffOrRunErrorResponse(error);
     }
@@ -307,7 +311,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       const result = await commands.submitSteer(input);
       return Response.json({
         ...result,
-        parentChat: registry.getChat(input.chatId)?.parentChat ?? null,
+        ...chatRelationships(registry.getChat(input.chatId)),
       }, { status: 202 });
     } catch (error: unknown) {
       return commandHttpError(error);
@@ -371,7 +375,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       const result = await commands.submitStop(input);
       return Response.json({
         ...result,
-        parentChat: registry.getChat(input.chatId)?.parentChat ?? null,
+        ...chatRelationships(registry.getChat(input.chatId)),
       });
     } catch (error: unknown) {
       return commandHttpError(error);

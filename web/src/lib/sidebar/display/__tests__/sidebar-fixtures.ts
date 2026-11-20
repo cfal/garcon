@@ -7,7 +7,8 @@ export function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): Ch
 	return {
 		id,
 		title: id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/app',
 		executorId: 'local',
 		orderGroup: 'normal',
@@ -38,7 +39,7 @@ export function delegated(
 	parent: string,
 	overrides: Partial<ChatSessionRecord> = {},
 ): ChatSessionRecord {
-	return chat(id, { parentChat: { chatId: parent, relation: 'delegation' }, ...overrides });
+	return chat(id, { parentChatId: parent, lineage: null, ...overrides });
 }
 
 export function projectionInput(

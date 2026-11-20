@@ -791,7 +791,7 @@ describe('KeyboardShortcuts', () => {
 		expect(onLocalKeydown).not.toHaveBeenCalled();
 	});
 
-	it('keeps composing Escape inside a modal editor', () => {
+	it.each([{ isComposing: true }, { keyCode: 229 }])('keeps composing Escape inside a modal editor (%j)', (composition) => {
 		const onTransientEscape = vi.fn();
 		const onLocalKeydown = vi.fn();
 		render(KeyboardShortcutsHost, {
@@ -809,7 +809,9 @@ describe('KeyboardShortcuts', () => {
 			bubbles: true,
 			cancelable: true,
 		});
-		Object.defineProperty(escape, 'isComposing', { value: true });
+		for (const [key, value] of Object.entries(composition)) {
+			Object.defineProperty(escape, key, { value });
+		}
 
 		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(escape);
 

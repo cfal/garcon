@@ -99,6 +99,7 @@ import { composeInputPrompt, readResendCandidates } from './input-composition.js
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
 import { readAnchorPage, type AnchorScanInput, type AnchorScanResult } from './anchor-page.js';
 import { readRawPage } from './raw-page.js';
+import { measureLedgerTransaction } from './write-timings.js';
 
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const PREVIEW_EDGE_ROWS = 32;
@@ -210,7 +211,8 @@ export class TranscriptLedgerStore {
       await this.#staging.insertRows(chatId, viewId, rows, generation);
       promoted = this.#write(chatId, (entry) => {
         if (entry.current) return null;
-        runTransaction(entry.db, () => promoteStagingView(entry.db, viewId));
+        measureLedgerTransaction('ledger seed promotion', { chatId, viewId }, entry.db,
+          () => promoteStagingView(entry.db, viewId));
         entry.current = { viewId, status: 'current', createdAt, contentStartOrdinal: input.contentStartOrdinal };
         entry.nextOrdinal = rows.length + 1;
         return entry.current;
@@ -708,7 +710,7 @@ export class TranscriptLedgerStore {
       const staging = viewRecord(entry.db, stagingViewId, 'staging');
       if (!staging) throw new LedgerSchemaError('Transcript staging view is missing');
       const stagingNextOrdinal = nextOrdinal(entry.db, stagingViewId);
-      runTransaction(entry.db, () => {
+      measureLedgerTransaction('ledger replacement promotion', { chatId, viewId: stagingViewId }, entry.db, () => {
         const demoted = entry.db.query(
           "UPDATE transcript_views SET status = 'staging' WHERE status = 'current' AND view_id = ?",
         ).run(expectedCurrentViewId);

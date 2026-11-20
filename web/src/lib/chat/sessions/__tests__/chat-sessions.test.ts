@@ -27,7 +27,8 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }
@@ -190,32 +191,29 @@ describe('ChatSessionsStore', () => {
 
 	it('preserves identity for structurally equal parent references', () => {
 		const store = new ChatSessionsStore();
-		const parentChat = {
-			chatId: '1783725900000000',
-			relation: 'fork' as const,
+		const lineage = {
+			sourceChatId: '1783725900000000',
+			kind: 'fork' as const,
 			transcriptViewId: 'view-parent',
 			ordinal: 7,
 		};
 
-		store.upsertFromServer([makeServerSession({ id: 'a', parentChat })]);
+		store.upsertFromServer([makeServerSession({ id: 'a', lineage })]);
 		const ref = store.byId['a'];
 
-		store.upsertFromServer([makeServerSession({ id: 'a', parentChat: { ...parentChat } })]);
+		store.upsertFromServer([makeServerSession({ id: 'a', lineage: { ...lineage } })]);
 
 		expect(store.byId['a']).toBe(ref);
 	});
 
 	it('preserves identity for structurally equal delegation references', () => {
 		const store = new ChatSessionsStore();
-		const parentChat = {
-			chatId: '1783725900000000',
-			relation: 'delegation' as const,
-		};
+		const parentChatId = '1783725900000000';
 
-		store.upsertFromServer([makeServerSession({ id: 'a', parentChat })]);
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChatId })]);
 		const ref = store.byId['a'];
 
-		store.upsertFromServer([makeServerSession({ id: 'a', parentChat: { ...parentChat } })]);
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChatId })]);
 
 		expect(store.byId['a']).toBe(ref);
 	});
@@ -225,9 +223,10 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([
 			makeServerSession({
 				id: 'a',
-				parentChat: {
-					chatId: '1783725900000000',
-					relation: 'fork',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: '1783725900000000',
+					kind: 'fork',
 					transcriptViewId: 'view-parent',
 					ordinal: 7,
 				},
@@ -238,15 +237,13 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([
 			makeServerSession({
 				id: 'a',
-				parentChat: { chatId: '1783725900000000', relation: 'delegation' },
+				parentChatId: '1783725900000000',
+				lineage: null,
 			}),
 		]);
 
 		expect(store.byId['a']).not.toBe(ref);
-		expect(store.byId['a']?.parentChat).toEqual({
-			chatId: '1783725900000000',
-			relation: 'delegation',
-		});
+		expect(store.byId['a']?.parentChatId).toEqual('1783725900000000');
 	});
 
 	it('replaces a record when its parent reference changes', () => {
@@ -254,9 +251,10 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([
 			makeServerSession({
 				id: 'a',
-				parentChat: {
-					chatId: '1783725900000000',
-					relation: 'fork',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: '1783725900000000',
+					kind: 'fork',
 					transcriptViewId: 'view-parent',
 					ordinal: 7,
 				},
@@ -267,9 +265,10 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([
 			makeServerSession({
 				id: 'a',
-				parentChat: {
-					chatId: '1783725900000000',
-					relation: 'fork',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: '1783725900000000',
+					kind: 'fork',
 					transcriptViewId: 'view-parent',
 					ordinal: 8,
 				},
@@ -277,12 +276,12 @@ describe('ChatSessionsStore', () => {
 		]);
 
 		expect(store.byId['a']).not.toBe(ref);
-		const parentChat = store.byId['a']?.parentChat;
-		expect(parentChat?.relation).toBe('fork');
-		if (parentChat?.relation !== 'fork') {
+		const lineage = store.byId['a']?.lineage;
+		expect(lineage?.kind).toBe('fork');
+		if (lineage?.kind !== 'fork') {
 			throw new Error('Expected fork parentage after the watermark changed.');
 		}
-		expect(parentChat.ordinal).toBe(8);
+		expect(lineage.ordinal).toBe(8);
 	});
 
 	it('replaces record when fields change', () => {
@@ -317,7 +316,8 @@ describe('ChatSessionsStore', () => {
 		});
 
 		expect(store.byId['draft-1']?.status).toBe('draft');
-		expect(store.byId['draft-1']?.parentChat).toBeNull();
+		expect(store.byId['draft-1']?.parentChatId).toBeNull();
+		expect(store.byId['draft-1']?.lineage).toBeNull();
 		expect(store.byId['draft-1']?.title).toBe('Hello');
 		expect(store.startupByChatId['draft-1']).toBeTruthy();
 		expect(store.selectedChatId).toBe('draft-1');

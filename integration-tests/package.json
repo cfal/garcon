@@ -10,6 +10,7 @@
     "test:e2e": "bun test --max-concurrency=1 --timeout=60000 tests/e2e",
     "test:chromium": "bun ../scripts/run-test-files.js 'tests/chromium/*.test.ts' --max-concurrency=1 --timeout=120000",
     "test:webkit": "bun ../scripts/run-test-files.js 'tests/webkit/*.test.ts' --max-concurrency=1 --timeout=120000",
+    "test:bombadil": "bun test --max-concurrency=1 --timeout=180000 tests/bombadil",
     "test:search-gate": "bun test --max-concurrency=1 --timeout=900000 tests/search-gate/transcript-search-v9-scale-gate.test.ts",
     "test:search-endurance": "bun test --max-concurrency=1 --timeout=2400000 tests/search-gate/transcript-search-v9-endurance.test.ts",
     "test:live": "bun run test:live:claude && bun run test:live:codex && bun run test:live:opencode",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "2.1.325",
+    "@antithesishq/bombadil": "0.7.10",
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@openai/codex": "0.169.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

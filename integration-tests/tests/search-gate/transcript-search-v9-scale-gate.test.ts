@@ -132,7 +132,8 @@ function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
 function sidebarChat(chatId: string): Record<string, unknown> {
   return {
     id: chatId,
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     projectPath: '/workspace/search-gate',
     effectiveProjectKey: '/workspace/search-gate',
     projectIdentityState: 'available',
@@ -266,7 +267,13 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
     expect(during!.status).toBe(200);
     expect(during!.elapsedMs).toBeLessThan(FIRST_SEARCH_BUDGET_MS);
     expect(during!.body.results.length).toBeGreaterThanOrEqual(1);
-    expect(during!.body.index.pendingChatCount).toBeGreaterThan(0);
+    // Held Worker tests cover partial populations; this request may also observe convergence.
+    const coverage = during!.body.index;
+    expect(coverage.indexedChatCount).toBeGreaterThanOrEqual(1);
+    expect(coverage.failedChatCount).toBe(0);
+    expect(coverage.unsupportedChatCount).toBe(0);
+    expect(coverage.indexedChatCount + coverage.pendingChatCount + coverage.unindexedChatCount)
+      .toBe(initial.resync!.totalChats);
 
     for (let probe = 0; probe < 5; probe += 1) {
       const runtime = await fixture.client.timedGet('/api/v1/chats/search/status');

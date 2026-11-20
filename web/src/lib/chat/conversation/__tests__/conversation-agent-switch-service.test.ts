@@ -38,7 +38,8 @@ function harness() {
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 	};
 	const agentState: ConversationAgentSwitchDeps['agentState'] = {
 		...model,

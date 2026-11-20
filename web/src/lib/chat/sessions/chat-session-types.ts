@@ -4,7 +4,7 @@ import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
-import type { ParentChatRef } from '$shared/chat-parentage';
+import type { ChatLineage } from '$shared/chat-parentage';
 import type { ChatProcessingPhase } from '$shared/chat-types';
 import type { ChatActivityStatus } from '$shared/chat-activity';
 
@@ -34,7 +34,8 @@ export interface NewChatConfig extends ChatStartupConfig {
 export interface ChatSessionRecord {
 	executorId?: string | null;
 	id: string;
-	parentChat: ParentChatRef | null;
+	parentChatId: string | null;
+	lineage: ChatLineage | null;
 	projectPath: string;
 	orderGroup: ChatOrderGroup | null;
 	title: string;

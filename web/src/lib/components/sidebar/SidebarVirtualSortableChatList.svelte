@@ -10,9 +10,11 @@
 	import SidebarExecutorHeaderRow from './SidebarExecutorHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
+	import SidebarTreeGuides from './SidebarTreeGuides.svelte';
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		computeSidebarSeparatorItems,
+		sidebarDisplayRows,
 		DEFAULT_CHAT_ROW_OVERSCAN,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
@@ -132,6 +134,7 @@
 	let draggingChatId = $state<string | null>(null);
 	let dragScopeKey: string | null = null;
 	let listEl = $state<HTMLElement | null>(null);
+	let listWidth = $state(0);
 	let lastValidDrop: SidebarDropInstruction | null = null;
 	let touchDrag: {
 		identifier: number;
@@ -217,8 +220,9 @@
 	const virtual = new SidebarVirtualChatListController();
 	let virtualSnapshot = $derived(virtual.snapshot);
 	let virtualItems = $derived(virtual.items(virtualSnapshot, rows));
+	const displayRows = $derived(sidebarDisplayRows(rows, displayOptions.chatItemLayout));
 	// Matches rows by identity while the geometry effect catches up with regrouping.
-	const rowsByKey = $derived(new Map(rows.map((row, index) => [row.key, { row, index }])));
+	const rowsByKey = $derived(new Map(displayRows.map((row, index) => [row.key, { row, index }])));
 	const renderedItems = $derived.by(() => {
 		return virtualItems.flatMap((virtualItem) => {
 			const match = rowsByKey.get(virtualItem.key);
@@ -233,7 +237,7 @@
 			? []
 			: computeSidebarSeparatorItems(
 					renderedItems.map(({ virtualItem }) => virtualItem),
-					rows,
+					displayRows,
 					separatorLineHeight,
 					separatorPixelRatio,
 				),
@@ -843,6 +847,7 @@
 
 <div
 	bind:this={listEl}
+	bind:clientWidth={listWidth}
 	class="relative min-h-full"
 	style={`height:${totalHeight}px;`}
 	data-sidebar-virtual-list
@@ -944,6 +949,14 @@
 						onSortChatOrder={displayOptions.sortMode === 'manual' && !reorder.busy
 							? onSortChatOrder
 							: undefined}
+					/>
+				{/if}
+				{#if row.tree && displayOptions.chatItemLayout === 'single-line'}
+					<SidebarTreeGuides
+						{row}
+						guide={row.tree}
+						contentHeight={virtualItem.size}
+						width={listWidth}
 					/>
 				{/if}
 				{#if virtualItem.index === indicatorIndex}

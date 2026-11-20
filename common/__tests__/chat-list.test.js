@@ -8,7 +8,8 @@ function response() {
   return {
     sessions: [{
       id: CHAT_ID,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       agentId: 'codex',
       agentOwnershipEpoch: 'epoch-1',
       model: 'gpt-5.4',
@@ -65,6 +66,38 @@ describe('chat list contract', () => {
   });
   it('parses every field needed for filtering, joining, and resume admission', () => {
     expect(parseChatListResponse(response())).toEqual(response());
+  });
+
+  it('keeps delegation independent from fork and handoff lineage', () => {
+    for (const kind of ['fork', 'handoff']) {
+      const value = response();
+      value.sessions[0].parentChatId = '1785337200123457';
+      value.sessions[0].lineage = {
+        sourceChatId: '1785337200123458', kind, transcriptViewId: 'source-view', ordinal: 42,
+      };
+      expect(parseChatListResponse(value)).toEqual(value);
+    }
+  });
+
+  it('rejects missing, malformed, self-referencing and legacy relationships', () => {
+    const lineage = {
+      sourceChatId: '1785337200123458', kind: 'fork', transcriptViewId: 'source-view', ordinal: 0,
+    };
+    for (const patch of [
+      { parentChatId: undefined }, { lineage: undefined }, { parentChatId: 'invalid' },
+      { parentChatId: CHAT_ID }, { lineage: { ...lineage, sourceChatId: CHAT_ID } },
+      { lineage: { ...lineage, ordinal: -1 } }, { lineage: { ...lineage, kind: 'delegation' } },
+      { parentChat: null }, { parentChat: { chatId: lineage.sourceChatId, relation: 'delegation' } },
+    ]) {
+      const value = response();
+      Object.assign(value.sessions[0], patch);
+      expect(() => parseChatListResponse(value)).toThrow();
+    }
+    for (const field of ['parentChatId', 'lineage']) {
+      const value = response();
+      delete value.sessions[0][field];
+      expect(() => parseChatListResponse(value)).toThrow(field);
+    }
   });
 
   it('preserves persisted timestamp strings for tolerant downstream ordering', () => {

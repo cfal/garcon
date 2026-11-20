@@ -84,7 +84,8 @@ function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): Ch
 		tags: [],
 		firstMessage: `Chat ${index} first`,
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -221,6 +222,11 @@ beforeEach(() => {
 			value: () => [],
 		});
 	}
+	vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		return this.hasAttribute('data-sidebar-virtual-list') || isSidebarViewport(this) ? 320 : 0;
+	});
 	vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
 		this: HTMLElement,
 	) {
@@ -2595,6 +2601,174 @@ describe('SidebarVirtualSortableChatList', () => {
 			}
 		},
 	);
+
+	it.each(['single-line', 'compact', 'detailed'] as const)(
+		'decorates delegation without changing standalone markup or row sizes in %s layout',
+		async (layout) => {
+			const chats = [chat('plain'), chat('parent'), delegated('child', 'parent')];
+			const view = render(SidebarChatListHost, {
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: false },
+			});
+			const plain = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="plain"]')!;
+			const content = plain.querySelector('.chat-item-root')!;
+			const markup = content.outerHTML;
+			const height = plain.parentElement!.style.height;
+			expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			expect(content.isConnected).toBe(true);
+			expect(content.outerHTML).toBe(markup);
+			expect(plain.parentElement!.style.height).toBe(height);
+			expect(plain.parentElement!.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(plain.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
+			expect(child.parentElement!.style.height).toBe(height);
+			expect(child.querySelector<HTMLElement>('.chat-item-root button')!.style.paddingLeft).toBe(
+				layout === 'single-line' ? '24px' : '12px',
+			);
+			if (layout === 'single-line') {
+				const overlay = child.parentElement!.querySelector('[data-sidebar-tree-guides]')!;
+				expect(overlay.getAttribute('aria-hidden')).toBe('true');
+				expect(overlay.classList.contains('pointer-events-none')).toBe(true);
+				expect(
+					overlay.querySelector<HTMLElement>('[data-sidebar-tree-incoming="end"]')!.style.height,
+				).toBe('21px');
+				expect(overlay.querySelector<HTMLElement>('[data-sidebar-tree-arm]')!.style.top).toBe(
+					'20px',
+				);
+				expect(child.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			} else {
+				expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+				const arrow = child.querySelector('[data-sidebar-delegation-arrow]')!;
+				expect(arrow.textContent).toBe('\u21b3');
+				expect(arrow.getAttribute('aria-hidden')).toBe('true');
+				expect(arrow.classList.contains('pointer-events-none')).toBe(true);
+				expect(arrow.closest('[data-slot="chat-summary-header"]')).not.toBeNull();
+				expect(arrow.parentElement!.firstElementChild).toBe(arrow);
+			}
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: false },
+			});
+			expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			expect(content.isConnected).toBe(true);
+			expect(content.outerHTML).toBe(markup);
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
+		'uses display depth for %s separators and structural depth for branch drops',
+		async (layout) => {
+			vi.useFakeTimers();
+			render(SidebarChatListHost, {
+				chats: [chat('parent'), delegated('child', 'parent'), chat('peer')],
+				isMobile: true,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			const parent = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="parent"]')!;
+			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
+			const peer = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="peer"]')!;
+			expect(
+				document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="chat:child"]')!
+					.style.left,
+			).toBe('12px');
+			vi.spyOn(document, 'elementFromPoint').mockReturnValue(parent);
+			await fireEvent.touchStart(peer, {
+				touches: [touchAt(1, 20, 44)],
+				changedTouches: [touchAt(1, 20, 44)],
+			});
+			vi.advanceTimersByTime(370);
+			await tick();
+			await fireEvent.touchMove(window, {
+				touches: [touchAt(1, 20, 80)],
+				changedTouches: [touchAt(1, 20, 80)],
+			});
+			vi.advanceTimersByTime(17);
+			await tick();
+			const indicator = document.querySelector('[data-sidebar-branch-drop-indicator]')!;
+			expect(indicator).not.toBeNull();
+			expect(indicator.parentElement).toBe(child.closest('[data-sidebar-virtual-item]'));
+			expect(indicator.classList.contains('bottom-0')).toBe(true);
+			await fireEvent.touchCancel(window, { touches: [], changedTouches: [touchAt(1, 20, 80)] });
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
+		'prefixes %s titles by delegation depth, not grouping depth',
+		(layout) => {
+			render(SidebarChatListHost, {
+				chats: [
+					chat('parent'),
+					delegated('child', 'parent', { projectPath: '/other' }),
+					delegated('grandchild', 'child', { projectPath: '/other' }),
+				],
+				displayOptions: {
+					chatItemLayout: layout,
+					nestDelegatedChats: true,
+					groupingFields: [{ field: 'project', enabled: true }],
+				},
+			});
+			for (const [id, prefix] of [
+				['child', '\u21b3'],
+				['grandchild', '\u21b3\u21b3'],
+			]) {
+				const row = document.querySelector(`[data-sidebar-virtual-row="${id}"]`)!;
+				expect(row.querySelector('[data-sidebar-delegation-arrow]')!.textContent).toBe(prefix);
+				expect(row.querySelector<HTMLElement>('.chat-item-root button')!.style.paddingLeft).toBe(
+					'36px',
+				);
+			}
+		},
+	);
+
+	it('switches delegation decoration without remounting chat content', async () => {
+		const chats = [chat('parent'), delegated('child', 'parent')];
+		const view = render(SidebarChatListHost, {
+			chats,
+			displayOptions: { nestDelegatedChats: true },
+		});
+		const child = document.querySelector('[data-sidebar-virtual-row="child"] .chat-item-root')!;
+		for (const layout of ['compact', 'detailed', 'single-line'] as const) {
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			expect(child.isConnected).toBe(true);
+			expect(document.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(
+				layout === 'single-line' ? 1 : 0,
+			);
+			expect(document.querySelectorAll('[data-sidebar-delegation-arrow]')).toHaveLength(
+				layout === 'single-line' ? 0 : 1,
+			);
+		}
+	});
+
+	it('retains tree continuations when parents are unmounted by virtualization', async () => {
+		const chats = [
+			chat('root'),
+			delegated('parent', 'root'),
+			...Array.from({ length: 500 }, (_, index) => delegated(`child-${index}`, 'parent')),
+			delegated('tail', 'root'),
+		];
+		const rows = buildSidebarRowModel(projectionInput(chats)).rows;
+		render(SidebarVirtualSortableChatListHost, { rows, rowHeight });
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		viewport.scrollTop = rowHeight * 250;
+		await fireEvent.scroll(viewport);
+		await tick();
+		expect(screen.queryByText('parent')).toBeNull();
+		expect(screen.queryByText('root')).toBeNull();
+		const child = screen.getByText('child-249').closest('[data-sidebar-virtual-item]')!;
+		expect(child.querySelector('[data-sidebar-tree-incoming="tee"]')).not.toBeNull();
+		expect(child.querySelector('[data-sidebar-tree-continuation="0"]')).not.toBeNull();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(document.querySelectorAll('[data-sidebar-tree-guides]').length).toBeLessThan(40);
+	});
 
 	it('keeps inherited delegated rows virtualized', () => {
 		const chats = [

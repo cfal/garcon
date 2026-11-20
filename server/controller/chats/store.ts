@@ -19,10 +19,7 @@ import {
 import type { JsonObject, JsonValue } from '../../../common/json.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import { parseChatId, type ChatId } from '../../../common/chat-id.js';
-import {
-  parseParentChatRef,
-  type ParentChatRef,
-} from '../../../common/chat-parentage.js';
+import type { ChatLineage } from '../../../common/chat-parentage.js';
 import type { AgentName } from "../agents/session-types.js";
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
@@ -40,12 +37,14 @@ import {
   normalizeRegistryModes,
   parseCarryOverSegmentRefs,
   parsePendingPreambleBoundary,
-  requireNewParentChat,
+  requireChatLineage,
+  requireParentChatId,
 } from './registry-entry-codec.js';
 import { writeJsonFileAtomic, AtomicJsonWriteError } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 import { errorMessage } from '../../common/errors.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import { DomainError } from '../../common/domain-error.js';
 import { createLogger } from '../../common/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../../common/ws-events.js';
 import { normalizeTags } from '../../../common/tags.js';
@@ -145,7 +144,8 @@ export interface NewChatRegistryEntry {
   // Every creation path writes an explicit already-resolved selection; there is
   // no persisted "inherit defaults" mode.
   preambleSelection: ChatPreambleSelection;
-  parentChat: ParentChatRef | null;
+  parentChatId: string | null;
+  lineage: ChatLineage | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -174,6 +174,7 @@ interface ChatRegistryEvents {
   'chat-read-updated': Parameters<ChatReadUpdatedCallback>;
   'chat-project-path-updated': Parameters<ChatProjectPathUpdatedCallback>;
   'chat-tags-updated': Parameters<ChatTagsUpdatedCallback>;
+  'chat-parent-updated': [chatId: string];
 }
 
 export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
@@ -190,6 +191,7 @@ export interface IChatRegistry {
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
   updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
   updateChatPhased(id: string, patch: ChatRegistryPatch): Promise<PhasedChatUpdateResult | null>;
+  setDelegationParentPhased(id: string, parentChatId: string | null): Promise<PhasedChatUpdateResult | null>;
   updateObservedProjectPath(id: string, update: ChatProjectPathUpdatedPayload): Promise<PhasedChatUpdateResult | null>;
   installAgentOwnership(id: string, target: {
     executorId?: string | null;
@@ -213,6 +215,7 @@ export interface IChatRegistry {
   onChatReadUpdated(cb: ChatReadUpdatedCallback): void;
   onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void;
   onChatTagsUpdated(cb: ChatTagsUpdatedCallback): void;
+  onChatParentUpdated(cb: (chatId: string) => void): void;
 }
 
 
@@ -261,6 +264,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   }
   #emitChatTagsUpdated(id: string): void { this.emit('chat-tags-updated', id); }
   onChatTagsUpdated(cb: ChatTagsUpdatedCallback): void { this.on('chat-tags-updated', cb); }
+  onChatParentUpdated(cb: (chatId: string) => void): void { this.on('chat-parent-updated', cb); }
 
   #sessionsFilePath(): string {
     return path.join(this.#workspaceDir, 'chats.json');
@@ -376,7 +380,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     carryOverMigrationQuarantine = null,
     pendingPreambleBoundary = null,
     preambleSelection,
-    parentChat,
+    parentChatId,
+    lineage,
   }: NewChatRegistryEntry): boolean {
     const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
@@ -401,7 +406,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       pendingPreambleBoundary: normalizedPreambleBoundary,
       preambleSelection: normalizedPreambleSelection,
     });
-    const normalizedParentChat = requireNewParentChat(parentChat, chatId);
+    const normalizedParentChatId = requireParentChatId(parentChatId, chatId);
+    const normalizedLineage = requireChatLineage(lineage, chatId);
     assertSeedReceiptBinding({
       agentSessionId,
       nativeSeedReceipt: normalizedReceipt,
@@ -433,7 +439,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
             revision: normalizedPreambleSelection.revision,
             orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
           },
-          parentChat: normalizedParentChat,
+          parentChatId: normalizedParentChatId,
+          lineage: normalizedLineage,
         };
         this.#advanceChatMutationRevision(chatId);
         this.#emitChatAdded(chatId);
@@ -595,12 +602,45 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   async updateObservedProjectPath(id: string, update: ChatProjectPathUpdatedPayload): Promise<PhasedChatUpdateResult | null> {
     if (update.chatId !== id) throw new Error(`Project path update identity mismatch: ${id}`);
-    const result = await this.#updateChatPhased(id, {}, update.projectPath);
+    const result = await this.#updateChatPhased(id, {}, { observedProjectPath: update.projectPath });
     if (result?.durability === 'durable') this.#publishProjectPathUpdate(update);
     return result;
   }
 
-  async #updateChatPhased(id: string, patch: ChatRegistryPatch, observedProjectPath?: string): Promise<PhasedChatUpdateResult | null> {
+  async setDelegationParentPhased(id: string, parentChatId: string | null): Promise<PhasedChatUpdateResult | null> {
+    parseChatId(id);
+    if (parentChatId !== null) parseChatId(parentChatId);
+    return this.#updateChatPhased(id, {}, { delegation: { parentChatId } });
+  }
+
+  #delegationParent(id: string, existing: ChatRegistryEntry, parentChatId: string | null): string | null {
+    if (existing.parentChatId === parentChatId) return existing.parentChatId;
+    if (parentChatId === null) return null;
+    const sessions = this.getRegistry().sessions;
+    if (!Object.hasOwn(sessions, parentChatId)) {
+      throw new DomainError('PARENT_CHAT_NOT_FOUND', 'Parent chat not found', 404);
+    }
+    // Validation shares the registry write mutex: disjoint endpoint locks cannot prevent longer cycles.
+    const visited = new Set([id]);
+    let ancestor: string | null = parentChatId;
+    while (ancestor !== null) {
+      if (visited.has(ancestor)) {
+        throw new DomainError('CHAT_PARENT_CYCLE', 'The parent relationship would contain a cycle', 409);
+      }
+      visited.add(ancestor);
+      ancestor = sessions[ancestor]?.parentChatId ?? null;
+    }
+    return parentChatId;
+  }
+
+  async #updateChatPhased(
+    id: string,
+    patch: ChatRegistryPatch,
+    { observedProjectPath, delegation }: {
+      observedProjectPath?: string;
+      delegation?: { parentChatId: string | null };
+    } = {},
+  ): Promise<PhasedChatUpdateResult | null> {
     const target = this.#sessionsFilePath();
     return this.#registryWriteLock.runExclusive(target, async () => {
       const registry = this.getRegistry();
@@ -614,6 +654,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       const normalizedPatch = {
         ...this.#normalizeChatPatch(id, existing, patch),
         ...(observedProjectPath !== undefined ? { projectPath: observedProjectPath } : {}),
+        ...(delegation ? { parentChatId: this.#delegationParent(id, existing, delegation.parentChatId) } : {}),
       };
       const candidateEntry = { ...existing, ...normalizedPatch };
       assertPreambleBoundaryBinding(candidateEntry);
@@ -668,6 +709,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       if (changed && 'tags' in normalizedPatch && !isDeepStrictEqual(current.tags, previousTags)) {
         this.#emitChatTagsUpdated(id);
       }
+      if (changed && delegation) this.emit('chat-parent-updated', id);
       return {
         entry: { id, ...cloneRegistryEntry(candidateRegistry.sessions[id]!) },
         durability,
@@ -876,7 +918,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
   return {
     ...entry,
-    // Deeply frozen fields (parentChat, carryOverSegments) are safe to share; every
+    // Deeply frozen fields (lineage, carryOverSegments) are safe to share; every
     // other nested field must be copied here so callers cannot mutate registry
     // state through a handed-out entry. New entry fields declare themselves by
     // landing in one of these two groups.

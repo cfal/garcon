@@ -18,6 +18,8 @@ export const CLAUDE_MODELS = {
 };
 
 export const GPT_6_ASTRA_MODEL = 'gpt-6-astra';
+export const GPT_6_2_SOL_MODEL = 'gpt-6.2-sol';
+export const GPT_6_2_ASTRA_MODEL = 'gpt-6.2-astra';
 export const GPT_6_1_SOL_MODEL = 'gpt-6.1-sol';
 export const GPT_6_1_TERRA_MODEL = 'gpt-6.1-terra';
 export const GPT_6_SOL_MODEL = 'gpt-6-sol';
@@ -28,7 +30,8 @@ function matchesModelValue(model: string | undefined, value: string): boolean {
 }
 
 export function isCodexSolModel(model: string | undefined): boolean {
-  return matchesModelValue(model, GPT_6_1_SOL_MODEL)
+  return matchesModelValue(model, GPT_6_2_SOL_MODEL)
+    || matchesModelValue(model, GPT_6_1_SOL_MODEL)
     || matchesModelValue(model, GPT_6_SOL_MODEL)
     || matchesModelValue(model, 'gpt-5.6-sol');
 }
@@ -36,6 +39,8 @@ export function isCodexSolModel(model: string | undefined): boolean {
 export const CODEX_MODELS = {
   OPTIONS: [
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
+    { value: GPT_6_2_SOL_MODEL, label: 'GPT-6.2-Sol', supportsImages: true },
+    { value: GPT_6_2_ASTRA_MODEL, label: 'GPT-6.2-Astra', supportsImages: true },
     { value: GPT_6_ASTRA_MODEL, label: 'GPT-6-Astra', supportsImages: true },
     { value: GPT_6_1_SOL_MODEL, label: 'GPT-6.1-Sol', supportsImages: true },
     { value: GPT_6_1_TERRA_MODEL, label: 'GPT-6.1-Terra', supportsImages: true },

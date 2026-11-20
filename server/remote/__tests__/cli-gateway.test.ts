@@ -13,6 +13,7 @@ import { DomainError } from '../../common/domain-error.js';
 import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { createChatParentRoutes } from '../../controller/routes/chat-parent.js';
 import { CLI_ENVELOPE_BYTES, cliRequestBytes, cliRoute } from '../transport/cli-protocol.js';
 import { parseAgentRunCommandRequest, parseSteerCommandRequest } from '../../../common/chat-command-contracts.js';
 import { asyncQuestionReplyText } from '../../../common/async-user-questions.js';
@@ -82,6 +83,25 @@ test('private role descriptors prove a live endpoint and never expose the contro
   await expect(f.discover()).resolves.toMatchObject({ instanceId: 'controller' });
   await f.gateway.dispose();
   await expect(stat(f.gateway.runtimeFile)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+test('forwards the parent setter unchanged and preserves permission and controller fences', async () => {
+  const requests: unknown[] = [];
+  const chatId = '1783725900000200';
+  const parentChatId = '1783725900000201';
+  const f = await fixture(createChatParentRoutes({ set: async (input) => {
+    requests.push(input);
+    return { success: true, chatId: input.chatId, parentChatId: input.parentChatId, changed: true };
+  } }));
+  const client = new GarconClient(await f.discover());
+  await expect(client.setChatParent({ chatId, parentChatId })).resolves.toMatchObject({ parentChatId });
+  expect(requests).toEqual([{ chatId, parentChatId }]);
+  f.deny();
+  await expect(client.setChatParent({ chatId, parentChatId: null })).rejects.toMatchObject({ errorCode: 'CLI_ACCESS_DENIED' });
+  expect(requests).toHaveLength(1);
+  f.replace('replacement');
+  await expect(client.setChatParent({ chatId, parentChatId: null })).rejects.toThrow();
+  expect(requests).toHaveLength(1);
 });
 
 test('preserves transcript overload responses through the executor gateway', async () => {

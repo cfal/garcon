@@ -18,6 +18,9 @@ import {
 } from '@garcon/common/chat-types';
 import { convertAmpMessageToChatMessages, getAssistantContent, getUserText, type AmpCliMessage } from './amp-message.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { ProcessExitFence, type TerminationTimings } from '@garcon/server-agent-common/lifecycle/process-exit-fence';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { exitCodeAfterInputFailure } from '@garcon/server-agent-common/lifecycle/process-input-failure';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
 import {
@@ -28,6 +31,7 @@ import {
   type AmpStartedSession,
 } from './runtime-types.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import { captureSingleQueryInputFailure } from '@garcon/server-agent-common/shared/single-query-input';
 import { buildAmpUserInput } from './amp-stream-input.js';
 import {
   type AgentLogger,
@@ -65,6 +69,7 @@ interface AmpTurnContext {
   readonly hiddenToolUseIds: Set<string>;
   resolve: (() => void) | null;
   process: ReturnType<typeof Bun.spawn> | null;
+  termination: Promise<boolean> | null;
 }
 
 interface AmpPendingInputEcho {
@@ -108,17 +113,11 @@ async function runAmpCommand(
     signal,
   });
 
-  if (input != null) {
-    const stdin = proc.stdin;
-    if (!stdin || typeof stdin === 'number') throw new Error('Amp process stdin is unavailable');
-    stdin.write(input);
-    stdin.end();
-  }
-
-  const [stdout, stderr, exitCode] = await Promise.all([
+  const [stdout, stderr, exitCode, inputFailure] = await Promise.all([
     readAmpStdout(proc),
     proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
     proc.exited,
+    captureSingleQueryInputFailure(proc.stdin, input, 'Amp'),
   ]);
   signal?.throwIfAborted();
 
@@ -126,6 +125,7 @@ async function runAmpCommand(
     const details = (stderr || stdout || '').trim();
     throw new Error(`Amp command failed with code ${exitCode}${details ? `: ${details}` : ''}`);
   }
+  if (inputFailure) throw inputFailure.error;
 
   return stdout;
 }
@@ -322,6 +322,7 @@ function createTurn(operation: AgentRuntimeOperation): AmpTurnContext {
     hiddenToolUseIds: new Set(),
     resolve: null,
     process: null,
+    termination: null,
   };
 }
 
@@ -343,6 +344,7 @@ function buildContinueArgs(
 class AmpCliRuntime {
   readonly #config: AmpConfig;
   readonly #logger: AgentLogger;
+  readonly #exits: ProcessExitFence;
   #runningSessions = new Map<string, AmpSession>();
   #steerTargets = new WeakMap<AgentSteerTarget, {
     readonly session: AmpSession;
@@ -355,9 +357,10 @@ class AmpCliRuntime {
     purge: (_id, session) => this.#retireSession(session),
   });
 
-  constructor(options: { config?: AmpConfig; logger?: AgentLogger } = {}) {
+  constructor(options: { config?: AmpConfig; logger?: AgentLogger; terminationTimings?: TerminationTimings } = {}) {
     this.#config = options.config ?? DEFAULT_CONFIG;
     this.#logger = options.logger ?? SILENT_LOGGER;
+    this.#exits = new ProcessExitFence(options.terminationTimings);
   }
 
   #routeMessage(session: AmpSession, turn: AmpTurnContext, msg: AmpCliMessage): void {
@@ -465,7 +468,7 @@ class AmpCliRuntime {
       }
     } finally {
       const exitCode = await proc.exited;
-      if (!turn.completed) {
+      if (!turn.completed && !turn.termination) {
         if (!turn.aborted) {
           this.#failTurn(session, turn, `Amp process exited before result (code ${exitCode})`);
         } else {
@@ -506,7 +509,7 @@ class AmpCliRuntime {
   }
 
   #finishTurn(session: AmpSession, turn: AmpTurnContext): void {
-    if (turn.completed) return;
+    if (turn.completed || turn.termination) return;
     this.#completeTurn(session, turn);
     this.#publishTurnEvent(session, turn, {
       type: 'run-ended',
@@ -518,7 +521,7 @@ class AmpCliRuntime {
   }
 
   #failTurn(session: AmpSession, turn: AmpTurnContext, message: string): void {
-    if (turn.completed) return;
+    if (turn.completed || turn.termination) return;
     this.#completeTurn(session, turn);
     this.#publishTurnEvent(session, turn, {
       type: 'run-ended',
@@ -538,7 +541,11 @@ class AmpCliRuntime {
     if (turn.stdinClosed) return;
     turn.stdinClosed = true;
     const stdin = turn.process?.stdin;
-    if (stdin && typeof stdin !== 'number') stdin.end();
+    if (stdin && typeof stdin !== 'number') {
+      void Promise.resolve(stdin.end()).catch(error => {
+        this.#logger.warn('Amp stdin close failed.', { error: errorMessage(error) });
+      });
+    }
   }
 
   #settlePendingEchoes(turn: AmpTurnContext, result: AgentSteerResult): void {
@@ -563,14 +570,15 @@ class AmpCliRuntime {
     } catch { /* stream closed */ }
   }
 
-  #spawnAmp(
+  async #spawnAmp(
     session: AmpSession,
     turn: AmpTurnContext,
     cwd: string,
     args: string[],
     prompt: string,
     attachments: readonly AgentAttachment[] = [],
-  ): ReturnType<typeof Bun.spawn> {
+    signal?: AbortSignal,
+  ): Promise<void> {
     const ampBinary = this.#config.binary();
 
     this.#logger.info('Spawning Amp.', { binary: ampBinary, arguments: args });
@@ -585,28 +593,40 @@ class AmpCliRuntime {
     turn.process = proc;
     session.sources.add(turn);
 
-    turn.pendingInputEchoes.push({ text: prompt });
-    this.#writeInput(
-      turn,
-      buildAmpUserInput(prompt, crypto.randomUUID(), attachments),
-    );
-
-    this.#readStdout(session, proc, turn);
-    this.#pipeStderr(session.id, proc);
-
-    proc.exited.then(exitCode => {
-      this.#logger.info('Amp process exited.', { sessionId: session.id, exitCode });
+    void this.#readStdout(session, proc, turn).catch(error => {
+      this.#logger.error('Amp stdout settlement failed.', { error: errorMessage(error) });
     });
-
-    return proc;
+    void this.#pipeStderr(session.id, proc);
+    void proc.exited.then(exitCode => {
+      this.#logger.info('Amp process exited.', { sessionId: session.id, exitCode });
+    }).catch(error => {
+      this.#logger.warn('Amp exit observation failed.', { error: errorMessage(error) });
+    });
+    const abort = () => { void this.#terminate(session, turn); };
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      signal?.throwIfAborted();
+      turn.pendingInputEchoes.push({ text: prompt });
+      await this.#writeInput(turn, buildAmpUserInput(prompt, crypto.randomUUID(), attachments));
+      signal?.throwIfAborted();
+    } catch (error) {
+      if (turn.aborted || signal?.aborted) throw error;
+      const exitCode = await exitCodeAfterInputFailure(proc);
+      if (!turn.aborted && !signal?.aborted && exitCode !== null) {
+        throw new Error(`Amp process exited while receiving its prompt (code ${exitCode})`, { cause: error });
+      }
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+    }
   }
 
-  #writeInput(turn: AmpTurnContext, input: string): void {
+  async #writeInput(turn: AmpTurnContext, input: string): Promise<void> {
     const stdin = turn.process?.stdin;
     if (!stdin || typeof stdin === 'number' || turn.stdinClosed) {
       throw new Error('Amp process stdin is unavailable');
     }
-    stdin.write(input);
+    await stdin.write(input);
   }
 
   #rollbackTurnLaunch(
@@ -617,11 +637,7 @@ class AmpCliRuntime {
     turn.aborted = true;
     turn.sourceRetired = true;
     session.lastActivityAt = Date.now();
-    const proc = turn.process;
-    turn.process = null;
-    if (proc && !proc.killed) proc.kill();
-    session.sources.delete(turn);
-    this.#completeTurn(session, turn);
+    void this.#terminate(session, turn);
     if (removeSession && this.#runningSessions.get(session.id) === session) {
       this.#runningSessions.delete(session.id);
     }
@@ -680,9 +696,7 @@ class AmpCliRuntime {
         outcome: 'unknown',
         message: 'Amp session was retired before steering was acknowledged',
       });
-      if (turn.process && !turn.process.killed) turn.process.kill();
-      turn.process = null;
-      if (!turn.completed) this.#completeTurn(session, turn);
+      void this.#terminate(session, turn);
     }
     session.sources.clear();
     if (this.#runningSessions.get(session.id) === session) {
@@ -713,8 +727,13 @@ class AmpCliRuntime {
     const args = buildContinueArgs(threadId, model);
 
     try {
+      this.#runningSessions.set(threadId, session);
       if (request.executionAdmission) await markAmpExecutionStarted(request);
-      this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
+      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments, request.executionAdmission?.signal);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, true);
       if (!request.executionAdmission?.signal.aborted) {
@@ -729,7 +748,6 @@ class AmpCliRuntime {
       throw err;
     }
     this.#retireSupersededChatSessions(session);
-    this.#runningSessions.set(threadId, session);
     this.#publishTurnEvent(session, turn, { type: 'steerable' });
 
     return started;
@@ -747,6 +765,9 @@ class AmpCliRuntime {
     } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
+    await this.#exits.wait(threadId, request.executionAdmission?.signal);
+    assertAmpExecutionOpen(request);
+    this.#exits.assertClear(threadId);
 
     let session = this.#runningSessions.get(threadId);
     if (!session) {
@@ -768,7 +789,11 @@ class AmpCliRuntime {
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
-      this.#spawnAmp(session, turn, projectPath, args, command, request.attachments);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
+      await this.#spawnAmp(session, turn, projectPath, args, command, request.attachments, request.executionAdmission?.signal);
+      assertAmpExecutionOpen(request);
+      if (turn.aborted) throw new Error('Amp session was retired before launch');
     } catch (err) {
       this.#rollbackTurnLaunch(session, turn, false);
       if (!request.executionAdmission?.signal.aborted) {
@@ -837,7 +862,7 @@ class AmpCliRuntime {
         turn.pendingInputEchoes.push(pendingEcho);
       });
       try {
-        this.#writeInput(
+        await this.#writeInput(
           turn,
           buildAmpUserInput(request.input, request.clientMessageId, [], true),
         );
@@ -887,7 +912,7 @@ class AmpCliRuntime {
     return null;
   }
 
-  abort(agentSessionId: string): boolean {
+  async abort(agentSessionId: string): Promise<boolean> {
     const session = this.#runningSessions.get(agentSessionId);
     const turn = session?.activeTurn;
     if (!session || !turn?.process) return false;
@@ -898,9 +923,29 @@ class AmpCliRuntime {
       outcome: 'unknown',
       message: 'Amp turn was interrupted before steering was acknowledged',
     });
-    turn.process.kill();
-    this.#completeTurn(session, turn);
-    return true;
+    return this.#terminate(session, turn);
+  }
+
+  #terminate(session: AmpSession, turn: AmpTurnContext): Promise<boolean> {
+    if (turn.termination) return turn.termination;
+    turn.aborted = true;
+    const settle = () => {
+      turn.sourceRetired = true;
+      turn.process = null;
+      session.sources.delete(turn);
+      this.#completeTurn(session, turn);
+    };
+    if (!turn.process) {
+      settle();
+      return Promise.resolve(true);
+    }
+    turn.termination = this.#exits.terminate(session.id, turn.process, settle).then(exited => {
+      if (!exited) {
+        this.#logger.error('Amp process exit unconfirmed after SIGKILL.', { sessionId: session.id });
+      }
+      return exited;
+    });
+    return turn.termination;
   }
 
   isRunning(agentSessionId: string): boolean {

@@ -691,6 +691,12 @@ export function wireServerEvents({
       broadcast(new ChatListRefreshRequestedMessage('tags-updated', chatId));
     });
   });
+  chatRegistry.onChatParentUpdated((chatId) => {
+    scheduleChatTask(chatId, 'chat parent invalidation', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatListRefreshRequestedMessage('parent-updated', chatId));
+    });
+  });
 
   queue.onExecutionControlUpdated((chatId, controlState) => {
     broadcast(

@@ -290,7 +290,8 @@
 	const selectedChat = $derived<ChatSessionRecord>({
 		executorId: selectedExecutorId,
 		id: selectedChatId,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath,
 		orderGroup: 'normal',
 		title: selectedChatId,

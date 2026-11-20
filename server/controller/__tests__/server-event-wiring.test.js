@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies, localIntegrationDirectory } from "./safety-dependencies.js";
 import { resolveFileMentionsInCommand } from "../../runtime/projects/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -217,6 +218,7 @@ function createFixture(overrides = {}) {
     onChatReadUpdated: mock((callback) => { chats.read = callback; }),
     onChatProjectPathUpdated: mock((callback) => { chats.path = callback; }),
     onChatTagsUpdated: mock((callback) => { chats.tags = callback; }),
+    onChatParentUpdated: mock((callback) => { chats.parent = callback; }),
     ...overrides.chatRegistry,
   };
   const settingsStore = {
@@ -416,10 +418,10 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
       abort: async () => true,
     },
   };
-  const agents = new AgentRegistry({
+  const agents = new AgentRegistry({ ...controllerSafetyDependencies(),
     resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
-    integrations: { require: () => integration, get: () => integration, list: () => [integration] },
+    executors: localIntegrationDirectory({ require: () => integration, get: () => integration, list: () => [integration] }),
     endpointResolver: {
       describePrevious(input) { return this.resolveSelection(input); },
       resolveSelection: () => ({ model: 'model-a', apiProviderId: null, endpointId: null, protocol: null, isLocal: false }),
@@ -432,7 +434,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
   const execution = new ChatExecutionCoordinator(agents, options.inputTranscript?.(agents) ?? {
     admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
-  }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+  }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
     projectAdmission: { assertAvailable: async () => undefined }, isControlInputViewCurrent: () => true,
     attachmentAdmission: { assertSupported: () => undefined },
     ...options.coordinator,
@@ -949,7 +951,7 @@ describe('server event wiring', () => {
       admitInput: async () => ({ inserted: true }),
       hasMatchingInput: async () => false,
       admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
-    }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+    }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
       projectAdmission: { assertAvailable: async () => undefined },
       attachmentAdmission: { assertSupported: () => undefined },
       isControlInputViewCurrent: () => true,
@@ -1661,6 +1663,21 @@ describe('server event wiring', () => {
       chatId: 'chat-1',
     }]);
     expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('orders parent invalidation after pending transcript publication and skips deleted chats', async () => {
+    const fixture = createFixture();
+    fixture.agent.transcript(providerCommit());
+    fixture.chats.parent('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published.map((event) => event.type)).toEqual([
+      'chat-messages', 'chat-list-refresh-requested',
+    ]);
+    expect(fixture.published.at(-1)).toMatchObject({ reason: 'parent-updated', chatId: 'chat-1' });
+    fixture.removeChat();
+    fixture.chats.parent('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published).toHaveLength(2);
   });
 
   it('orders settings invalidation after pending transcript publication and skips deleted chats', async () => {

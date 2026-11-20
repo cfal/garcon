@@ -28,7 +28,13 @@ test('restores both scroll axes of a deep Chat Map across repeated renderer rele
         const id = ids[index]!;
         registry.sessions[id] = {
           ...registry.sessions[id]!,
-          parentChat: { relation: 'delegation', chatId: ids[index - 1]! },
+          parentChatId: null,
+          lineage: {
+            sourceChatId: ids[index - 1]!,
+            kind: 'fork',
+            transcriptViewId: `synthetic-view-${index - 1}`,
+            ordinal: 0,
+          },
         };
       }
       await writeFile(path, JSON.stringify(registry));

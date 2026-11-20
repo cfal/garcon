@@ -738,6 +738,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	upsertServerChat(entry: ChatListEntry): void {
 		this.#mergeServerEntry(entry, false);
+		void this.quietRefreshChats();
 	}
 
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {

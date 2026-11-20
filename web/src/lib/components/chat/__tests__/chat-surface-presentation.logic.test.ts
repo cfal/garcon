@@ -5,7 +5,8 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 function chat(status: ChatSessionRecord['status']): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Chat',

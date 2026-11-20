@@ -3,6 +3,7 @@ import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { createForkedChat } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
+import { controllerSafetyDependencies } from '../../__tests__/safety-dependencies.js';
 import { BashToolUseMessage, PermissionRequestMessage } from '../../../../common/chat-types.js';
 
 export function createRouteCommandLedger() {
@@ -63,6 +64,7 @@ export function createRouteCommandService({
     }),
   };
   return new ChatCommandService({
+    chatMutationLock: controllerSafetyDependencies().chatMutationLock,
     inspectProject: inspectProjectDirectory,
     chats: registry,
     queue,

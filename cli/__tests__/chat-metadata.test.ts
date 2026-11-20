@@ -8,6 +8,7 @@ import {
   runChatOrderMutation,
   runRename,
   runSetTags,
+  runSetParent,
   type ChatMetadataClient,
 } from '../chat-metadata.js';
 import type { CliOutput } from '../output.js';
@@ -63,10 +64,23 @@ function client(): ChatMetadataClient & {
     async setChatTags(request) {
       return { success: true, chatId: request.chatId, tags: request.tags, changed: false };
     },
+    async setChatParent(request) {
+      return { success: true, chatId: request.chatId,
+        parentChatId: request.parentChatId,
+        changed: true };
+    },
   };
 }
 
 describe('chat metadata commands', () => {
+  test('prints parent identity and explicit clear in plain and JSON output', async () => {
+    const api = client();
+    const output = captureOutput();
+    await runSetParent({ ...connection, kind: 'set-parent', chatId: CHAT_ID, parentChatId: null, json: false }, api, output);
+    expect(output.results[0]).toBe(`chat id: ${CHAT_ID}\nparent chat id: none\nchanged: yes`);
+    await runSetParent({ ...connection, kind: 'set-parent', chatId: CHAT_ID, parentChatId: '1785337200123457', json: true }, api, output);
+    expect(JSON.parse(output.results[1]!)).toMatchObject({ parentChatId: '1785337200123457' });
+  });
   test('repeated lifecycle commands submit the same desired state', async () => {
     const api = client();
     const output = captureOutput();

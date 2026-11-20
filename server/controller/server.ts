@@ -17,6 +17,7 @@ import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring 
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
 import { ChatRegistry } from './chats/store.js';
+import { ChatParentMutationService } from './chats/chat-parent-mutation-service.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
 import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
@@ -143,6 +144,8 @@ import {
 } from './migrations/index.js';
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
+import { splitChatRelationships } from './migrations/chat-relationships-split.js';
+import { installUnhandledRejectionPolicy } from '../common/unhandled-rejection-policy.js';
 
 const logger = createLogger('server');
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -152,9 +155,7 @@ type ServeOptionsWithConnectionLimit = Parameters<
 };
 
 export async function startServer(): Promise<void> {
-  process.on('unhandledRejection', (err: unknown) => {
-    logger.error('unhandled rejection (non-fatal):', errorMessage(err));
-  });
+  const stopRejectionPolicy = installUnhandledRejectionPolicy(logger);
 
   let workspaceLease: WorkspaceLease | null = null;
   try {
@@ -175,6 +176,7 @@ export async function startServer(): Promise<void> {
       logger.info(`Carryover migration rollback ${result}. The server was not started.`);
       await workspaceLease.release();
       workspaceLease = null;
+      stopRejectionPolicy();
       return;
     }
     // Rollback recovery answers to the migration marker, not the workspace
@@ -241,7 +243,7 @@ export async function startServer(): Promise<void> {
       }
     });
     const integrationRegistry = executors.localIntegrations;
-    const directory = new AgentDirectory(integrationRegistry, executors);
+    const directory = new AgentDirectory(executors);
     const { inspectProject, resolveFileMentions } = executors;
     const projectBasePath = executors.localInfo.projectBasePath;
     const resolveTicketProject = createTicketProjectResolver((executorId) => executors.projectService(executorId));
@@ -276,6 +278,8 @@ export async function startServer(): Promise<void> {
     await workspaceMigrations.run('fork-ordinal-cleanup', () => removeLegacyForkOrdinals(workspaceDir));
     await providerPolicy.initialize(workspaceMigrations);
     providerAccess = access;
+    await workspaceMigrations.checkpointThrough('provider-assignments');
+    await workspaceMigrations.run('chat-relationships-split', () => splitChatRelationships(workspaceDir));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
@@ -329,10 +333,9 @@ export async function startServer(): Promise<void> {
     });
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
-    // A resumed rollback restores the source workspace version before the
-    // ladder opens, so its re-migration skips this the way a first migration
-    // does and keeps its rollback window.
-    if (workspaceMigrations.initialVersion >= 5) {
+    // Only a completed earlier boot closes the rollback window; a migration
+    // checkpoint or resumed rollback must retain the first-boot backups.
+    if (workspaceMigrations.initialVersion >= 5 && !workspaceMigrations.resumedFromCheckpoint) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
     const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);
@@ -439,7 +442,6 @@ export async function startServer(): Promise<void> {
       },
       resolveFileMentions,
       registry: chatRegistry,
-      integrations: integrationRegistry,
       executors: executors,
       endpointResolver,
       getCarryOverRevision: (entry) => carryOver.revision(
@@ -796,6 +798,7 @@ export async function startServer(): Promise<void> {
       preambles,
       chatPreambleSelection,
       ...chatBoardRuntime,
+      chatParents: new ChatParentMutationService({ registry: chatRegistry, chatMutationLock }),
       tickets,
       terminals: terminalManager,
       searchIndex: chatSearch,
@@ -978,6 +981,7 @@ export async function startServer(): Promise<void> {
         }
         workspaceLease = null;
       }
+      stopRejectionPolicy();
       process.exit(shutdownExitCode({ abortTimedOut, cleanupFailed }));
     };
     process.on('SIGTERM', shutdown);
@@ -990,6 +994,7 @@ export async function startServer(): Promise<void> {
       logger.warn('Failed to release workspace lease:', errorMessage(releaseError));
     });
     logger.error('Failed to start server:', error);
+    stopRejectionPolicy();
     process.exit(1);
   }
 }

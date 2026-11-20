@@ -17,6 +17,7 @@ import { IntegrationRegistry } from '../../../runtime/agents/integration-registr
 import { AgentEventBus } from '../event-bus.js';
 import { AgentRuntimeRouter } from '../runtime-router.js';
 import { DomainError } from '../../../common/domain-error.js';
+import { interactiveDeadline } from '../../../common/interactive-deadline.js';
 
 const FIRST = '22222222-2222-4222-8222-222222222222';
 const SECOND = '33333333-3333-4333-8333-333333333333';
@@ -43,7 +44,7 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     knownIntegration: ({ executorId, agentId }) => registries.get(executorId)?.get(agentId) ?? null,
     requireIntegration({ executorId, agentId }) { return this.integrationsFor(executorId).require(agentId); },
   } satisfies ExecutionIntegrationDirectory;
-  const directory = new AgentDirectory(registries.get('local')!, executors);
+  const directory = new AgentDirectory(executors);
   const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(join(root, 'ledger')), { serverInstanceId: 'synthetic-server' });
   cleanups.push(async () => { ledger.close(); });
   const adoption = new TranscriptAdoptionService({
@@ -52,7 +53,8 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
   for (const [index, executorId] of chatExecutors.entries()) {
     chats.addChat({
       id: CHAT_IDS[index]!, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root,
-      parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
+      parentChatId: null,
+      lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
     });
     ledger.initializeChat(CHAT_IDS[index]!);
   }
@@ -119,7 +121,7 @@ test('an offline known integration without native forking needs only retained co
     sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
   })).toBeNull();
   f.registries.set(FIRST, new IntegrationRegistry({ instances: [{ ...f.providers[1]!.integration,
-    forking: { fork: mock(async () => ({ kind: 'unmaterialized' })), discard: mock(async () => undefined) },
+    forking: { fork: mock(async () => ({ kind: 'unmaterialized' as const })), discard: mock(async () => undefined) },
   }] }));
   await expect(f.router.forkAgentSession({ sourceSession: f.chats.getChat(CHAT_IDS[1]!)!,
     sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
@@ -204,11 +206,11 @@ test('a permission reply remains actionable while its executor is reconnecting',
     runId, permissionOccurrenceId: occurrence,
   };
   f.ready.delete(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control))
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, interactiveDeadline()))
     .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
   expect(respond).not.toHaveBeenCalled();
   f.ready.add(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control)).resolves.toBeUndefined();
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, interactiveDeadline())).resolves.toBeUndefined();
   expect(respond).toHaveBeenCalledTimes(1);
   expect(f.ledger.currentRows(chatId).filter(row => row.kind === 'permission-resolved')).toHaveLength(1);
 });

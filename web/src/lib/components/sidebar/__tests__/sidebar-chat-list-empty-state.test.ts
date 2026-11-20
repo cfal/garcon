@@ -29,7 +29,8 @@ function makeChat(index: number): ChatSessionRecord {
 		lastMessage: `Chat ${index} preview`,
 		tags: [],
 		firstMessage: `Chat ${index} first`,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentOwnershipEpoch: null,
 	};
 }

@@ -19,6 +19,8 @@ import type {
 	SidebarRowModel,
 	SidebarVirtualRow,
 	SidebarVirtualChatRow,
+	SidebarTreeGuide,
+	SidebarTreeScope,
 } from './sidebar-virtual-chat-list';
 
 const sections: SidebarChatSection[] = [
@@ -36,6 +38,7 @@ export interface SidebarRowModelInput {
 	orders: SidebarChatOrderMap;
 	groupingFields: readonly SidebarGroupingSelection[];
 	nestDelegatedChats: boolean;
+	separateArchivedBranches?: boolean;
 	currentTime: Date;
 	inactivityDuration: SidebarInactivityDuration;
 	sortMode: SidebarSortMode;
@@ -113,6 +116,7 @@ interface ScopeTask {
 	parentId: string | null;
 	ids: string[];
 	depth: number;
+	tree?: SidebarTreeScope;
 	path: SidebarGroupPath;
 	inheritedFields: readonly SidebarGroupingField[];
 	executorGrouped: boolean;
@@ -123,9 +127,22 @@ type ProjectionTask =
 	| { kind: 'header'; row: Exclude<SidebarVirtualRow, SidebarVirtualChatRow> }
 	| { kind: 'chat'; row: SidebarVirtualChatRow };
 
+function childTreeScope(
+	parentDepth: number,
+	delegationDepth: number,
+	parent?: SidebarTreeGuide,
+): SidebarTreeScope {
+	let continuations = parent?.continuations ?? null;
+	// Shared tails keep deep projections linear; terminal ancestors need no rail.
+	if (parent && !parent.isLastChild) {
+		continuations = { depth: parent.parentDepth, outer: continuations };
+	}
+	return { parentDepth, delegationDepth, continuations };
+}
+
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
-	const forest = buildSidebarDelegationForest(input.allChats, input.nestDelegatedChats);
+	const forest = buildSidebarDelegationForest(input.allChats, input);
 	const matches = input.matchingChatIds ?? new Set(byId.keys());
 	const filtered = input.matchingChatIds !== undefined;
 	const matchCounts = new Map<string, number>();
@@ -244,6 +261,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					parentId: row.chat.id,
 					ids: children.filter(hasMatches),
 					depth: row.depth + 1,
+					tree: childTreeScope(row.depth, (row.tree?.delegationDepth ?? 0) + 1, row.tree),
 					path: [],
 					inheritedFields,
 					executorGrouped: false,
@@ -270,9 +288,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				ids.push(id);
 				partitions.set(value, ids);
 			}
-			for (const value of [...partitions.keys()]
-				.sort((a, b) => compareGroups(field, a, b))
-				.reverse()) {
+			const values = [...partitions.keys()].sort((a, b) => compareGroups(field, a, b));
+			for (let index = values.length - 1; index >= 0; index--) {
+				const value = values[index];
 				const ids = partitions.get(value)!;
 				const path = [...task.path, [field, value] as const];
 				const key = sidebarGroupCollapseKey(task.parentId, path);
@@ -293,6 +311,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				const common = {
 					key,
 					depth: task.depth,
+					tree: task.tree ? { ...task.tree, isLastChild: index === values.length - 1 } : undefined,
 					count: ids.reduce((sum, id) => sum + (matchCounts.get(id) ?? 0), 0),
 					containsChat,
 					isCollapsed,
@@ -318,6 +337,10 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 						ids,
 						path,
 						depth: task.depth + 1,
+						// Root grouping headers do not start delegated tree guides.
+						tree: row.tree
+							? childTreeScope(row.depth, row.tree.delegationDepth, row.tree)
+							: undefined,
 						executorGrouped: task.executorGrouped || field === 'executor',
 					});
 				tasks.push({ kind: 'header', row });
@@ -341,12 +364,19 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				type: 'chat',
 				key: `chat:${id}`,
 				depth: task.depth,
+				tree: task.tree ? { ...task.tree, isLastChild: index === ordered.length - 1 } : undefined,
 				chat,
 				list,
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
 				executorGrouped: task.executorGrouped,
-				reorderScopeKey: JSON.stringify([input.nestDelegatedChats, task.parentId, list, task.path]),
+				reorderScopeKey: JSON.stringify([
+					input.nestDelegatedChats,
+					input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
+					task.parentId,
+					list,
+					task.path,
+				]),
 				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
 				contextOnly,
 				section: task.path.find(([field]) => field === 'activity')?.[1] as

@@ -29,6 +29,7 @@ describe('LocalSettingsStore', () => {
 		store.set('chatListDock', 'right');
 		store.setSidebarDisplay({
 			...draft,
+			sidebarSeparateArchivedBranches: true,
 			sidebarGroupingFields: [
 				{ field: 'status', enabled: false },
 				{ field: 'project', enabled: true },
@@ -42,6 +43,7 @@ describe('LocalSettingsStore', () => {
 		expect(restored.snapshot()).toMatchObject({
 			sidebarSortMode: 'manual',
 			sidebarNestDelegatedChats: false,
+			sidebarSeparateArchivedBranches: true,
 			chatListDock: 'right',
 			sidebarInactivityDuration: '1-week',
 			sidebarGroupNestedProjectPaths: true,
@@ -54,6 +56,32 @@ describe('LocalSettingsStore', () => {
 			{ field: 'executor', enabled: false },
 			{ field: 'activity', enabled: false },
 		]);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([undefined, null, 'true', 1, {}, false])(
+		'defaults archive separation off for %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ sidebarSeparateArchivedBranches: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.sidebarSeparateArchivedBranches).toBe(false);
+			expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.separateArchivedBranches).toBe(false);
+			store.destroy();
+		},
+	);
+
+	it.each([false, true])('persists archive separation independently of nesting (%s)', (enabled) => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarSeparateArchivedBranches', enabled);
+		store.set('sidebarNestDelegatedChats', false);
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarSeparateArchivedBranches).toBe(enabled);
+		restored.set('sidebarNestDelegatedChats', true);
+		expect(restored.sidebarSeparateArchivedBranches).toBe(enabled);
 		store.destroy();
 		restored.destroy();
 	});

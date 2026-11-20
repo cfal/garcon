@@ -32,6 +32,7 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 				executorOrder: executors.executors.map((executor) => executor.id),
 				groupingFields: localSettings.sidebarGroupingFields,
 				nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
+				separateArchivedBranches: localSettings.sidebarSeparateArchivedBranches,
 				currentTime: minuteClock.currentTime,
 				inactivityDuration: localSettings.sidebarInactivityDuration,
 				sortMode: localSettings.sidebarSortMode,

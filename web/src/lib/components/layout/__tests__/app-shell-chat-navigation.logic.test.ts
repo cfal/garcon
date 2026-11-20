@@ -13,7 +13,8 @@ function chat(
 ): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/repo',
 		orderGroup: 'normal',
 		title: id,
@@ -80,7 +81,7 @@ describe('resolveAdjacentChatId', () => {
 		const chats = [
 			chat('before'),
 			chat('parent'),
-			{ ...chat('child'), parentChat: { chatId: 'parent', relation: 'delegation' as const } },
+			{ ...chat('child'), parentChatId: 'parent', lineage: null },
 			chat('after'),
 		];
 		const { rowModel } = buildSidebarChatListProjection({

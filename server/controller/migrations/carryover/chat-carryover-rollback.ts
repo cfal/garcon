@@ -22,7 +22,6 @@ import {
   type CarryOverMigrationMarker,
 } from './carryover-migration-files.js';
 import { readChatRegistryVersion } from './legacy-chat-registry-v3.js';
-import { CHAT_REGISTRY_VERSION } from '../../chats/registry-contracts.js';
 
 export async function rollbackLegacyCarryOverMigration(
   workspaceDir: string,
@@ -131,7 +130,7 @@ function parseMigratedRegistrySessions(
   } catch {
     throw new Error('Current chat registry does not match the migration or its backup');
   }
-  if (!isRecord(value) || value.version !== CHAT_REGISTRY_VERSION || !isRecord(value.sessions)) {
+  if (!isRecord(value) || (value.version !== 5 && value.version !== 6) || !isRecord(value.sessions)) {
     throw new Error('Current chat registry does not match the migration or its backup');
   }
   const sessions: Record<string, Readonly<Record<string, unknown>>> = {};

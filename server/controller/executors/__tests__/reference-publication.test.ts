@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,9 +41,9 @@ async function fixture() {
   await preambles.init();
   await schedules.init();
   cleanup.push(() => chats.flush());
-  chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null });
+  chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null });
   await chats.flush();
-  const ownership = new AgentOwnershipJournal({
+  const ownership = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
     workspaceDir: root, registry: chats, retainExecutorReferences,
     integrations: { get: () => null, require: () => { throw new Error('No provider needed'); } },
     ledger: { deleteChat: () => {} },
@@ -207,7 +208,7 @@ test('chat creation rechecks configuration at synchronous registry publication',
   const gate = gateRename('executors.json');
   const deleting = manager.remove(executor.id);
   await gate.entered;
-  const entry = { id: '1767225600000001', executorId: executor.id, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null };
+  const entry = { id: '1767225600000001', executorId: executor.id, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null };
   expect(() => chats.addChat(entry)).toThrow('This executor is being changed');
   expect(chats.getChat(entry.id)).toBeNull();
   chats.addChat({ ...entry, executorId: undefined });
@@ -219,7 +220,7 @@ test('chat creation rechecks configuration at synchronous registry publication',
 async function addRemoteChat(chats: ChatRegistry, root: string, executorId: string, withSettings = false) {
   const id = '1767225600000001';
   chats.addChat({
-    id, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null,
+    id, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChatId: null, lineage: null,
     agentSettingsById: withSettings ? { test: { ownerId: 'test', schemaVersion: 1, values: {} } } : {},
   });
   await chats.flush();
@@ -280,7 +281,7 @@ test.each([false, true])('deletion inherits an unknown persisted chat executor (
   const id = await addRemoteChat(persisted, root, executorId, withSettings);
   const chats = new ChatRegistry(root, { retainExecutorReferences: manager.retainReferences, saveDelayMs: 60_000 });
   await chats.init();
-  const ownership = new AgentOwnershipJournal({
+  const ownership = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
     workspaceDir: root, registry: chats, retainExecutorReferences: manager.retainReferences,
     integrations: { get: () => null, require: () => { throw new Error('No provider needed'); } },
     ledger: { deleteChat: () => {} },
@@ -315,7 +316,7 @@ test('handoff inherits the persisted source executor but validates the new targe
   const id = await addRemoteChat(persisted, root, unknown);
   const chats = new ChatRegistry(root, { retainExecutorReferences: manager.retainReferences });
   await chats.init();
-  const ownership = new AgentOwnershipJournal({
+  const ownership = new AgentOwnershipJournal({ ...controllerSafetyDependencies(),
     workspaceDir: root, registry: chats, retainExecutorReferences: manager.retainReferences,
     integrations: { get: () => null, require: () => { throw new Error('No provider needed'); } },
     ledger: { deleteChat: () => {} },

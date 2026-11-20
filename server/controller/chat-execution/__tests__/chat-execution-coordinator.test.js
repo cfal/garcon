@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
@@ -85,10 +86,10 @@ function createFixture(overrides = {}) {
     overrides.chatExists ?? (() => true),
     overrides.controlRepository
       ?? new InMemoryChatExecutionControlRepository('server-instance-test'),
-    {
+    { ...controllerSafetyDependencies(),
       projectAdmission,
       attachmentAdmission,
-      canDispatch: overrides.canDispatch,
+      canDispatch: overrides.canDispatch ?? (() => true),
       executionPolicy: overrides.executionPolicy,
       workingDirectorySettlement: overrides.workingDirectorySettlement,
       unsettledQueueReceiptKeys: () => new Set(),

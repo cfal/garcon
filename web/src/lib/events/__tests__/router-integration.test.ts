@@ -46,7 +46,8 @@ function executionControl(serverInstanceId: string, version: number, content: st
 function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-a',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/repo',
 		orderGroup: 'normal',
 		title: 'Chat A',
@@ -244,6 +245,7 @@ describe('event router integration', () => {
 	it.each([
 		['archive-toggled', 'chat-b'],
 		['execution-settings-updated', 'chat-b'],
+		['parent-updated', 'chat-b'],
 		['metadata-repaired', null],
 	])(
 		'routes %s globally through normalize + filter + handler', (reason, chatId) => {

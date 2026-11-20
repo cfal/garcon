@@ -41,7 +41,8 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		tags: ['ops', 'prod', 'urgent'],
 		firstMessage: 'First message',
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }

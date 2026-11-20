@@ -1,0 +1,25 @@
+name: Code Health
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  change-guards:
+    runs-on: ubuntu-latest
+    env:
+      REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+      REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Require protocol review
+        run: bun scripts/protocol-review-gate.ts "$REVIEW_BASE" "$REVIEW_HEAD"
+      - name: Ratchet backend test debt
+        run: bun scripts/test-debt-gate.ts "$REVIEW_BASE" "$REVIEW_HEAD"

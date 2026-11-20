@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies, localIntegrationDirectory } from "../../__tests__/safety-dependencies.js";
 import { resolveFileMentionsInCommand } from "../../../runtime/projects/file-mentions.ts";
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
@@ -43,7 +44,8 @@ describe('AgentRegistry session cache', () => {
         test: { ownerId: 'test', schemaVersion: 1, values: {} },
       },
       preambleSelection: { revision: 0, orderedPreambleIds: [] },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
     });
     ledger = new TranscriptLedgerService(
       new TranscriptLedgerStore(path.join(root, 'transcript-ledgers')),
@@ -68,10 +70,10 @@ describe('AgentRegistry session cache', () => {
       list: () => [],
     },
   ) {
-    return new AgentRegistry({
+    return new AgentRegistry({ ...controllerSafetyDependencies(),
     resolveFileMentions: resolveFileMentionsInCommand,
       registry: chats,
-      integrations,
+      executors: localIntegrationDirectory(integrations),
       endpointResolver: {},
       getCarryOverRevision: () => 'carry-1',
       ledger,

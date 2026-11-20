@@ -7,7 +7,8 @@ import { PromptComposerProjectState } from '../prompt-composer-project-state.sve
 function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/project-a',
 		orderGroup: 'normal',
 		title: 'Chat',

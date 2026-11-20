@@ -322,9 +322,10 @@ export async function createForkedChat({
         revision: 0,
         orderedPreambleIds: [...sourceSession.preambleSelection.orderedPreambleIds],
       },
-      parentChat: {
-        chatId: sourceChatId,
-        relation: 'fork',
+      parentChatId: null,
+      lineage: {
+        sourceChatId,
+        kind: 'fork',
         transcriptViewId: selectedWatermark.viewId,
         ordinal: selectedWatermark.ordinal,
       },

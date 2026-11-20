@@ -94,7 +94,8 @@
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Running chat',

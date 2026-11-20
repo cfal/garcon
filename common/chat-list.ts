@@ -3,7 +3,7 @@ import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import { isPermissionMode, isThinkingMode } from './chat-modes.js';
 import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from './agent-integration.js';
 import { CHAT_PROCESSING_PHASES, type ChatProcessingPhase } from './chat-types.js';
-import { parseParentChatRef, type ParentChatRef } from './chat-parentage.js';
+import { parseChatLineage, type ChatLineage } from './chat-parentage.js';
 import { parseChatId } from './chat-id.js';
 import { isRecord } from './json.js';
 import { isExecutorId } from './executors.js';
@@ -12,7 +12,8 @@ import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity.j
 export interface ChatListEntry {
   id: string;
   executorId?: string | null;
-  parentChat: ParentChatRef | null;
+  parentChatId: string | null;
+  lineage: ChatLineage | null;
   agentId: string;
   agentOwnershipEpoch: string;
   model: string | null;
@@ -87,10 +88,13 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   if (!isRecord(value)) fail(`sessions[${index}]`);
   const field = (name: string) => `sessions[${index}].${name}`;
   if (!validChatId(value.id)) fail(field('id'));
-  let parentChat: ParentChatRef | null = null;
-  if (value.parentChat !== null) {
-    parentChat = parseParentChatRef(value.parentChat);
-    if (!parentChat) fail(field('parentChat'));
+  if ('parentChat' in value) fail(field('parentChat is no longer supported'));
+  const parentChatId = value.parentChatId;
+  if (parentChatId !== null && (!validChatId(parentChatId) || parentChatId === value.id)) fail(field('parentChatId'));
+  let lineage: ChatLineage | null = null;
+  if (value.lineage !== null) {
+    lineage = parseChatLineage(value.lineage);
+    if (!lineage || lineage.sourceChatId === value.id) fail(field('lineage'));
   }
   const agentId = nonEmptyString(value.agentId, field('agentId'));
   const executorId = value.executorId;
@@ -151,7 +155,8 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   return {
     id: value.id,
     ...(executorId === undefined ? {} : { executorId }),
-    parentChat,
+    parentChatId,
+    lineage,
     agentId,
     agentOwnershipEpoch,
     model,

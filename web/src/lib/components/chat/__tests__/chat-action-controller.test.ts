@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -27,6 +27,7 @@ vi.mock('$lib/api/chats', () => ({
 	setChatArchived: vi.fn(),
 	togglePinned: vi.fn(),
 	updateChatProjectPath: vi.fn(),
+	setChatParent: vi.fn(),
 }));
 
 vi.mock('$shared/client-chat-id', () => ({
@@ -57,7 +58,8 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		status: 'running',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch:
 			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
@@ -86,7 +88,8 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch:
 			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
@@ -196,6 +199,26 @@ beforeEach(() => {
 });
 
 describe('ChatActionController', () => {
+	it('refreshes a parent edit without retargeting or patching the roster from its acknowledgement', async () => {
+		const harness = createHarness();
+		const saved = Promise.withResolvers<Awaited<ReturnType<typeof chatsApi.setChatParent>>>();
+		vi.mocked(chatsApi.setChatParent).mockReturnValueOnce(saved.promise);
+		const pending = harness.controller.setParent('chat-1', 'parent');
+		harness.setSelectedChatId('other');
+		saved.resolve({ success: true, chatId: 'chat-1', parentChatId: 'parent', changed: true });
+		await pending;
+		expect(chatsApi.setChatParent).toHaveBeenCalledWith({ chatId: 'chat-1', parentChatId: 'parent' });
+		expect(harness.callbacks.onQuietRefresh).toHaveBeenCalledOnce();
+		expect(harness.callbacks.onUpsertServerChat).not.toHaveBeenCalled();
+		expect(harness.callbacks.requestComposerFocus).not.toHaveBeenCalled();
+	});
+
+	it('refreshes unknown parent outcomes without hiding the original error', async () => {
+		const { controller, callbacks } = createHarness();
+		vi.mocked(chatsApi.setChatParent).mockRejectedValueOnce(new ApiMutationOutcomeUnknownError('Unconfirmed'));
+		await expect(controller.setParent('chat-1', null)).rejects.toThrow('Unconfirmed');
+		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
+	});
 	it('reports a failed pin without refreshing or recentering', async () => {
 		const { controller, callbacks } = createHarness();
 		vi.mocked(chatsApi.togglePinned).mockRejectedValueOnce(new Error('Pin failed'));

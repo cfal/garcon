@@ -1,23 +1,22 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
+import type { ChatLineage } from '$shared/chat-parentage';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte';
 import * as m from '$lib/paraglide/messages.js';
 import ChatMapPanel from '../ChatMapPanel.svelte';
 
 afterEach(cleanup);
 
-function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentChatRef {
-	return relation === 'delegation'
-		? { chatId, relation }
-		: { chatId, relation, transcriptViewId: `view-${chatId}`, ordinal: 4 };
+function parent(sourceChatId: string, kind: ChatLineage['kind'] = 'fork'): ChatLineage {
+	return { sourceChatId, kind, transcriptViewId: `view-${sourceChatId}`, ordinal: 1 };
 }
 
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: `Chat ${id}`,
@@ -60,7 +59,7 @@ function renderPanel(
 
 describe('ChatMapPanel', () => {
 	it('keeps hidden topology dormant and reconciles once when shown', async () => {
-		const initial = [chat('parent'), chat('child', { parentChat: parent('parent') })];
+		const initial = [chat('parent'), chat('child', { lineage: parent('parent') })];
 		const { controller, rerender } = renderPanel(initial);
 		controller.collapseAll(['chat:parent']);
 		await rerender({ visible: false });
@@ -73,7 +72,7 @@ describe('ChatMapPanel', () => {
 	});
 
 	it('reclaims hidden branches and restores scroll, query, and collapsed nodes', async () => {
-		const chats = [chat('parent'), chat('child', { parentChat: parent('parent') })];
+		const chats = [chat('parent'), chat('child', { lineage: parent('parent') })];
 		const view = renderPanel(chats);
 		view.controller.collapseAll(['chat:parent']);
 		view.controller.setQuery('parent');
@@ -95,7 +94,7 @@ describe('ChatMapPanel', () => {
 				chat('parent', { title: 'Parent work' }),
 				chat('child', {
 					title: 'Child work',
-					parentChat: parent('parent'),
+					lineage: parent('parent'),
 					model: 'opus',
 					projectPath: '/workspace/very/long/project',
 					isProcessing: true,
@@ -105,7 +104,7 @@ describe('ChatMapPanel', () => {
 				}),
 				chat('delegate', {
 					title: 'Delegated review',
-					parentChat: parent('child', 'delegation'),
+					parentChatId: 'child',
 					agentId: 'codex',
 				}),
 			],
@@ -120,13 +119,13 @@ describe('ChatMapPanel', () => {
 		expect(childLink.getAttribute('href')).toBe('/chat/child');
 		expect(childLink.getAttribute('aria-current')).toBe('page');
 		expect(childLink.closest('li')?.parentElement?.closest('li')).toBe(parentLink.closest('li'));
-		expect(delegateLink.closest('li')?.parentElement?.closest('li')).toBe(childLink.closest('li'));
+		expect(delegateLink.closest('li')?.parentElement).toBe(map);
 		expect(within(childLink).getByText(m.chat_map_relation_fork()).classList).toContain(
 			'text-foreground',
 		);
 		expect(within(childLink).getByText('claude').classList).toContain('text-foreground');
 		expect(within(childLink).getByText('opus')).toBeTruthy();
-		expect(within(delegateLink).getByText(m.chat_map_relation_delegation())).toBeTruthy();
+		expect(within(delegateLink).queryByText(m.chat_map_relation_fork())).toBeNull();
 		expect(within(childLink).getByText(m.chat_map_status_processing())).toBeTruthy();
 		expect(within(childLink).getByText(m.chat_map_status_unread())).toBeTruthy();
 		expect(within(childLink).getByText(m.chat_map_status_archived())).toBeTruthy();
@@ -137,13 +136,13 @@ describe('ChatMapPanel', () => {
 		expect(screen.getByText(m.chat_map_chat_count({ count: 3 })).classList).toContain(
 			'text-foreground',
 		);
-		expect(screen.getByText(m.chat_map_root_count({ count: 1 })).classList).toContain(
+		expect(screen.getByText(m.chat_map_root_count({ count: 2 })).classList).toContain(
 			'text-foreground',
 		);
 	});
 
 	it('collapses and expands a branch with accessible disclosure state', async () => {
-		renderPanel([chat('parent'), chat('child', { parentChat: parent('parent') })]);
+		renderPanel([chat('parent'), chat('child', { lineage: parent('parent') })]);
 		expect(
 			screen.getByRole('button', { name: m.chat_map_expand_all() }).getAttribute('aria-label'),
 		).toBe(m.chat_map_expand_all());
@@ -169,9 +168,9 @@ describe('ChatMapPanel', () => {
 	it('prunes stale collapse keys when the rendered topology changes', async () => {
 		const initialChats = [
 			chat('parent'),
-			chat('child', { parentChat: parent('parent') }),
+			chat('child', { lineage: parent('parent') }),
 			chat('other'),
-			chat('other-child', { parentChat: parent('other') }),
+			chat('other-child', { lineage: parent('other') }),
 		];
 		const { controller, rerender } = renderPanel(initialChats);
 		controller.collapseAll(['chat:parent', 'chat:other']);
@@ -184,8 +183,8 @@ describe('ChatMapPanel', () => {
 	it('searches metadata, preserves ancestors as context, and reports zero results', async () => {
 		const { container } = renderPanel([
 			chat('root', { title: 'Root context' }),
-			chat('match', { title: 'Target work', parentChat: parent('root') }),
-			chat('other', { title: 'Other work', parentChat: parent('root') }),
+			chat('match', { title: 'Target work', lineage: parent('root') }),
+			chat('other', { title: 'Other work', lineage: parent('root') }),
 		]);
 		const search = screen.getByRole('searchbox', { name: m.chat_map_search_label() });
 
@@ -200,14 +199,17 @@ describe('ChatMapPanel', () => {
 		expect(screen.getByText(m.chat_map_no_results_title())).toBeTruthy();
 	});
 
-	it('renders shared unavailable-parent and cycle warnings', () => {
+	it('renders shared unavailable-source and cycle warnings', () => {
 		const { container } = renderPanel([
-			chat('dangling-a', { parentChat: parent('gone') }),
-			chat('dangling-b', { parentChat: parent('gone', 'handoff') }),
-			chat('cycle', { parentChat: parent('cycle') }),
+			chat('dangling-a', { lineage: parent('gone') }),
+			chat('dangling-b', { lineage: parent('gone', 'handoff') }),
+			chat('cycle', { lineage: parent('cycle') }),
 		]);
 
 		expect(container.querySelectorAll('[data-chat-map-missing-parent="gone"]')).toHaveLength(1);
+		expect(screen.getByText('Source unavailable')).toBeTruthy();
+		expect(screen.getByText('Referenced source gone is not available.')).toBeTruthy();
+		expect(screen.getByText('1 unavailable sources')).toBeTruthy();
 		expect(screen.getAllByText(m.chat_map_cycle_warning()).length).toBeGreaterThan(0);
 		expect(screen.getByText(m.chat_map_relation_handoff())).toBeTruthy();
 	});

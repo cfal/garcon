@@ -73,6 +73,12 @@ export class RemoteSettingsStore {
 		await untrack(() => this.#runInBackground(() => this.refresh()));
 	}
 
+	/** Starts a fresh read after any request that may predate the caller's intent. */
+	async refreshLatest(): Promise<RemoteSettingsSnapshot> {
+		await this.#loadPromise?.catch(() => undefined);
+		return this.refresh();
+	}
+
 	async update(patch: UpdateRemoteSettingsInput): Promise<RemoteSettingsSnapshot> {
 		this.error = null;
 		const response = await updateRemoteSettings(patch);

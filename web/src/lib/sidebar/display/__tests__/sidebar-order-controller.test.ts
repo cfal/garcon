@@ -66,6 +66,110 @@ function fixture() {
 }
 
 describe('SidebarOrderController', () => {
+	it.each([false, true])(
+		'invalidates existing gestures and requests on archive separation changes (%s)',
+		(separateArchivedBranches) => {
+			const f = fixture();
+			f.input = { ...f.input, separateArchivedBranches };
+			const request = f.move('c', 'a')!;
+			expect(request).not.toBeNull();
+			f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
+			f.controller.preview({
+				list: 'normal',
+				sourceChatId: 'c',
+				targetChatId: 'a',
+				closestEdge: 'top',
+			});
+			f.input = { ...f.input, separateArchivedBranches: !separateArchivedBranches };
+			expect(f.controller.dragPresentationChanged).toBe(true);
+			expect(f.controller.orders.normal).toEqual(f.input.orders.normal);
+			expect(f.controller.finish('normal')).toBeNull();
+			f.controller.submit(request);
+			expect(f.write).not.toHaveBeenCalled();
+		},
+	);
+
+	it('ignores archive separation changes while nesting is disabled', () => {
+		const f = fixture();
+		f.input = { ...f.input, nestDelegatedChats: false };
+		f.controller.begin('normal', 'c', { ids: ['a', 'b', 'c'] });
+		f.controller.preview({
+			list: 'normal',
+			sourceChatId: 'c',
+			targetChatId: 'a',
+			closestEdge: 'top',
+		});
+		f.input = { ...f.input, separateArchivedBranches: true };
+		expect(f.controller.dragPresentationChanged).toBe(false);
+		expect(f.controller.finish('normal')).not.toBeNull();
+	});
+
+	it('moves a separated archived branch among archive roots without moving descendants', async () => {
+		const f = fixture();
+		f.input = projectionInput(
+			[
+				chat('parent'),
+				delegated('archive', 'parent', { isArchived: true }),
+				delegated('live', 'archive'),
+				chat('peer', { isArchived: true }),
+			],
+			{ separateArchivedBranches: true },
+		);
+		const request = f.move('peer', 'archive')!;
+		expect(request).not.toBeNull();
+		f.refresh.mockResolvedValue(false);
+		f.controller.submit(request);
+		await vi.waitFor(() => expect(f.controller.recoveryRequired).toBe(true));
+		expect(f.write).toHaveBeenCalledExactlyOnceWith({
+			chatId: 'peer',
+			placement: { kind: 'relative', referenceChatId: 'archive', position: 'before' },
+		});
+		expect(f.controller.orders.normal).toEqual(['parent', 'live']);
+		expect(f.controller.projection.rowModel.visibleChatIds).toEqual([
+			'parent',
+			'peer',
+			'archive',
+			'live',
+		]);
+	});
+
+	it('rejoins a restored branch after an optimistic archive rolls back', () => {
+		const f = fixture();
+		const chats = [
+			chat('parent'),
+			delegated('child', 'parent'),
+			delegated('grandchild', 'child'),
+			chat('other'),
+		];
+		f.input = projectionInput(chats, { separateArchivedBranches: true });
+		expect(f.controller.projection.rowModel.visibleChatIds).toEqual([
+			'parent',
+			'child',
+			'grandchild',
+			'other',
+		]);
+		f.input = projectionInput(
+			chats.map((chat) => (chat.id === 'child' ? { ...chat, isArchived: true } : chat)),
+			{
+				separateArchivedBranches: true,
+				isChatOptimisticallyArchived: (id) => id === 'child',
+			},
+		);
+		expect(f.controller.projection.rowModel.visibleChatIds).toEqual([
+			'parent',
+			'other',
+			'child',
+			'grandchild',
+		]);
+		f.input = projectionInput(chats, { separateArchivedBranches: true });
+		expect(f.controller.projection.rowModel.visibleChatIds).toEqual([
+			'parent',
+			'child',
+			'grandchild',
+			'other',
+		]);
+	});
+
 	it('resolves adjacent actions from live peers without consuming a pointer drag', () => {
 		const f = fixture();
 		const request = () => f.controller.moveAdjacent({ list: 'normal', chatId: 'c', offset: -1 });

@@ -1,6 +1,6 @@
 import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
-import { effectiveExecutorId, LOCAL_EXECUTOR_ID, type AgentExecutionTarget } from '../../../common/executors.js';
+import { effectiveExecutorId, type AgentExecutionTarget } from '../../../common/executors.js';
 import { DomainError } from '../../common/domain-error.js';
 
 export interface ExecutionIntegrationDirectory {
@@ -12,33 +12,29 @@ export interface ExecutionIntegrationDirectory {
 
 export class AgentDirectory {
   constructor(
-    private readonly integrations: IntegrationRegistry,
-    private readonly executors?: ExecutionIntegrationDirectory,
-  ) {}
+    private readonly executors: ExecutionIntegrationDirectory,
+  ) {
+    if (!executors) throw new Error('AgentDirectory requires an executor directory');
+  }
 
   has(agentId: string, executorId?: string | null): boolean {
     return this.get(agentId, executorId) !== null;
   }
 
   get(agentId: string, executorId?: string | null): AgentIntegration | null {
-    if (this.executors) return this.executors.knownIntegration({ agentId, executorId: effectiveExecutorId(executorId) });
-    return effectiveExecutorId(executorId) === LOCAL_EXECUTOR_ID ? this.integrations.get(agentId) : null;
+    return this.executors.knownIntegration({ agentId, executorId: effectiveExecutorId(executorId) });
   }
 
   require(agentId: string, executorId?: string | null): AgentIntegration {
-    if (this.executors) return this.executors.requireIntegration({ agentId, executorId: effectiveExecutorId(executorId) });
-    if (effectiveExecutorId(executorId) !== LOCAL_EXECUTOR_ID) throw executorUnavailable();
-    return this.integrations.require(agentId);
+    return this.executors.requireIntegration({ agentId, executorId: effectiveExecutorId(executorId) });
   }
 
   list(executorId?: string | null): readonly AgentIntegration[] {
-    if (this.executors) return this.executors.integrationsFor(effectiveExecutorId(executorId)).list();
-    if (effectiveExecutorId(executorId) !== LOCAL_EXECUTOR_ID) throw executorUnavailable();
-    return this.integrations.list();
+    return this.executors.integrationsFor(effectiveExecutorId(executorId)).list();
   }
 
   isReady(executorId?: string | null): boolean {
-    return this.executors?.isReady(effectiveExecutorId(executorId)) ?? effectiveExecutorId(executorId) === LOCAL_EXECUTOR_ID;
+    return this.executors.isReady(effectiveExecutorId(executorId));
   }
 
   // Inventory lookups cannot distinguish an unsupported agent from an executor that has

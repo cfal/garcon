@@ -213,9 +213,10 @@ export class SelfHandoffCommands {
           revision: 0,
           orderedPreambleIds: [...source.preambleSelection.orderedPreambleIds],
         },
-        parentChat: {
-          chatId: input.sourceChatId,
-          relation: 'handoff',
+        parentChatId: null,
+        lineage: {
+          sourceChatId: input.sourceChatId,
+          kind: 'handoff',
           transcriptViewId: watermark.viewId,
           ordinal: watermark.ordinal,
         },

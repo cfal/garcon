@@ -241,13 +241,9 @@ export class ClaudeProcessTransport<Message> {
   }
 
   async #retire(): Promise<void> {
-    await this.#writeTail;
     const stdin = this.process.stdin as import('bun').FileSink & { end?: () => void };
-    try {
-      stdin?.end?.();
-    } catch {
-      // Signal escalation below remains authoritative when stdin cannot close.
-    }
+    // Closes after queued writes without allowing stdin backpressure to delay escalation.
+    void this.#writeTail.then(() => stdin?.end?.()).catch(() => undefined);
     if (await waitForExit(this.process, PROCESS_EXIT_GRACE_MS)) return;
 
     if (!this.process.killed) this.process.kill();
