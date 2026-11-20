@@ -50,6 +50,7 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
 }
 
 test.each([
+  ['INVALID_SETTINGS', 422, false],
   ['SESSION_BUSY', 409, true],
   ['UNAVAILABLE', 503, true],
   ['TIMEOUT', 504, true],

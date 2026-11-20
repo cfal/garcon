@@ -394,7 +394,7 @@ describe('ConversationSettingsController', () => {
 		const waiting = sessions.settingsMutations.pendingFor('chat-1');
 		new ConversationSettingsController(options).handleAgentSettingChange(effort, 'low');
 		expect(updateExecutionSettings).toHaveBeenCalledOnce();
-		const confirmed = { ...chat().agentSettings, values: { effort: 'high' } };
+		const confirmed = { ...chat().agentSettings, values: { effort: 'high', thinking: 'enabled' } };
 		first.resolve({ success: true, chatId: 'chat-1', agentSettings: confirmed });
 		await vi.waitFor(() => expect(updateExecutionSettings).toHaveBeenCalledTimes(2));
 		second.reject(new Error('Synthetic latest rejection'));

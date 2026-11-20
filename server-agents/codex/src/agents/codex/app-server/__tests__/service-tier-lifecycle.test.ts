@@ -190,6 +190,14 @@ describe('Codex premium route lifecycle', () => {
         await update;
         expect(first.update).toHaveBeenCalledWith(expect.objectContaining({ serviceTier: speed === 'fast' ? 'priority' : 'ultrafast' }));
         expect(settled).toBe(true);
+        turnReply.resolve();
+        await resumed;
+        first.update.mockImplementation(async () => {
+          first.confirm({ serviceTier: echo, effort: 'medium' });
+          return {};
+        });
+        await runtime.updateSessionSettings('thread-1', { ...request, speed, thinkingMode: 'medium' });
+        expect(first.update).toHaveBeenCalledTimes(1);
       } finally {
         turnReply.resolve();
         first.confirm({ serviceTier: echo, effort: 'medium' });

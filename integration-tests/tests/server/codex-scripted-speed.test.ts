@@ -100,14 +100,14 @@ describe('Codex scripted per-chat speed', () => {
         expect(body).toMatchObject({ model: codexRequestModel(), reasoning: { effort: LIVE_CODEX_THINKING_MODE } });
         expect(body.service_tier).toBe(expectedTier);
       };
-      const patchSpeed = (speed: Speed, thinkingMode?: ExecutionSettingsPatchRequest['thinkingMode']) =>
+      const patchSpeed = (chatId: string, speed: Speed, thinkingMode?: ExecutionSettingsPatchRequest['thinkingMode']) =>
         fixture.client.fetch('/api/v1/chats/execution-settings', {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ chatId: fastChat, thinkingMode, agentSettingsPatch: { speed } } satisfies ExecutionSettingsPatchRequest),
+          body: JSON.stringify({ chatId, thinkingMode, agentSettingsPatch: { speed } } satisfies ExecutionSettingsPatchRequest),
         });
-      const changeSpeed = async (speed: Speed) => {
-        const response = await patchSpeed(speed);
+      const changeSpeed = async (chatId: string, speed: Speed) => {
+        const response = await patchSpeed(chatId, speed);
         expect({ status: response.status, body: await response.json() }).toMatchObject({
           status: 200, body: { success: true, agentSettings: { values: { speed } } },
         });
@@ -120,7 +120,7 @@ describe('Codex scripted per-chat speed', () => {
       const originalSettings = await savedSettings(fastChat);
       await writeFile(config, 'invalid = [\n');
       try {
-        const failed = await patchSpeed('fast');
+        const failed = await patchSpeed(fastChat, 'fast');
         expect(failed.status).toBe(503);
         expect(await failed.json()).toMatchObject({ errorCode: 'UNAVAILABLE', retryable: true,
           error: expect.stringContaining('could not verify speed') });
@@ -128,7 +128,7 @@ describe('Codex scripted per-chat speed', () => {
       } finally {
         await writeFile(config, restrictedConfig);
       }
-      await changeSpeed('fast');
+      await changeSpeed(fastChat, 'fast');
       expect(environment.model.requests()).toHaveLength(beforeChange);
       await expectTurnTier(resumeChat, fastChat, 'priority');
       await expectTurnTier(resumeChat, standardChat, undefined);
@@ -147,7 +147,7 @@ describe('Codex scripted per-chat speed', () => {
         // Feature discovery reloads this file, but the active thread still filters with its original config.
         expect(await readFile(config, 'utf8')).toBe(restrictedConfig);
         await writeFile(config, originalConfig);
-        await changeSpeed('ultrafast');
+        await changeSpeed(fastChat, 'ultrafast');
       } finally {
         held.release();
       }
@@ -171,14 +171,15 @@ describe('Codex scripted per-chat speed', () => {
       await fixture.restartGarcon();
       expect((await savedSettings(fastChat)).values.speed).toBe('ultrafast');
       await expectTurnTier(resumeChat, fastChat, 'ultrafast');
-      for (const [child, tier] of [[premiumChild, 'ultrafast'], [standardChild, undefined]] as const) {
+      await changeSpeed(standardChild, 'fast');
+      for (const [child, tier] of [[premiumChild, 'ultrafast'], [standardChild, 'priority']] as const) {
         await expectTurnTier(resumeChat, child, tier);
         const childSpeeds = await recordedSpeeds(child);
-        expect(childSpeeds.at(-1)).toBe(tier ?? 'standard');
+        expect(childSpeeds.at(-1)).toBe(tier === 'priority' ? 'fast' : 'ultrafast');
         expect(childSpeeds).not.toContain('unknown');
       }
 
-      await changeSpeed('fast');
+      await changeSpeed(fastChat, 'fast');
       environment.model.scriptTurn([codexAssistantMessage('Synthetic compaction summary.')]);
       const beforeCompact = environment.model.requests().length;
       const compactCursor = fixture.client.markEvents();
@@ -189,14 +190,14 @@ describe('Codex scripted per-chat speed', () => {
       expect(compactTerminal.type).toBe('agent-run-finished');
       expect(environment.model.requests()[beforeCompact]?.body.service_tier).toBe('priority');
       expect(await recordedSpeeds(fastChat)).toEqual(['standard', 'fast', 'fast', 'ultrafast', 'ultrafast', 'ultrafast', 'fast']);
-      await changeSpeed('standard');
+      await changeSpeed(fastChat, 'standard');
       await expectTurnTier(resumeChat, fastChat, undefined);
       expect(await readFile(config, 'utf8')).toBe(originalConfig);
 
       await fixture.client.patch('/api/v1/chats/model', { chatId: fastChat, model: STANDARD_ONLY_MODEL });
       const beforeRejection = environment.model.requests().length;
       for (const thinkingMode of [undefined, 'none'] as const) {
-        const unavailable = await patchSpeed('ultrafast', thinkingMode);
+        const unavailable = await patchSpeed(fastChat, 'ultrafast', thinkingMode);
         expect(unavailable.status).toBe(422);
         expect(await unavailable.json()).toMatchObject({ errorCode: 'INVALID_SETTINGS', retryable: false,
           error: expect.stringContaining('Ultrafast speed is unavailable') });
