@@ -36,6 +36,7 @@ import {
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import {
 	AssistantMessage,
+	UserMessage,
 	BashToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
@@ -470,6 +471,7 @@ function createDeps(chat = createRunningChat()) {
 			);
 		}),
 		acceptQueuedSteer: vi.fn(),
+		anchorUnconfirmedSteer: vi.fn(),
 		clearOptimisticUserInput: vi.fn((chatId: string, clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
 				(input) => input.chatId !== chatId || input.clientMessageId !== clientMessageId,
@@ -5274,6 +5276,46 @@ describe('ConversationSessionController', () => {
 			noticeType: 'error',
 			content: 'Steering could not be confirmed. Check the conversation before sending it again.',
 		});
+	});
+
+	it.each([false, true])('anchors an unconfirmed steer without resurrecting an applied echo (echo: %s)', async echo => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const registry = new ConversationPanelRegistry({
+			cache, overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => deps.lifecycle, remove: () => {} },
+			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+		});
+		const timestamp = '2026-01-01T00:00:00.000Z';
+		const output = (ordinal: number): TranscriptMessage => ({ ordinal, message: new AssistantMessage(timestamp, 'output') });
+		cache.replace('chat-1', 'generation-1', [output(1)], 1, null);
+		registry.reconcile([{ chatId: 'chat-1', surfaceId: 'chat-view:window-left', windowId: 'window-left',
+			presentation: 'window-left', snapshotAdmission: 'admitted' }]);
+		const panel = registry.panel('chat-view:window-left')!;
+		panel.installInitialSnapshot();
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-1' });
+		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();
+		mockSteerChat.mockImplementation(() => pending.promise);
+		deps.composerState.inputText = '/steer guidance';
+		const submit = new ConversationSessionController({ ...deps, chatState: selected }).submitForChat('chat-1');
+		await flushPromises();
+		const id = registry.overlayFor('chat-1')!.optimisticInputs[0]!.clientMessageId;
+		try {
+			registry.applyCommittedBatch({ chatId: 'chat-1', transcriptViewId: 'generation-1', firstOrdinal: 2, lastOrdinal: 2,
+				messages: [echo ? { ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: id }) } : output(2)],
+				resendCandidates: [], noticeRevision: 0 });
+			pending.reject(new ApiError(500, 'unconfirmed', 'STEER_OUTCOME_UNKNOWN'));
+			await submit;
+			registry.applyCommittedBatch({ chatId: 'chat-1', transcriptViewId: 'generation-1', firstOrdinal: 3, lastOrdinal: 3,
+				messages: [output(3)], resendCandidates: [], noticeRevision: 0 });
+			expect(panel.transcript.visibleRows.filter(row => row.kind === 'message').map(row => row.id)).toEqual([
+				'generation-1:1', ...(echo ? [] : [`optimistic:${id}`]), 'generation-1:2', 'generation-1:3',
+			]);
+			expect(registry.overlayFor('chat-1')!.optimisticInputs).toHaveLength(echo ? 0 : 1);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
 	});
 
 	it('rejects steer without guidance but lets the endpoint decide stale processing state', async () => {

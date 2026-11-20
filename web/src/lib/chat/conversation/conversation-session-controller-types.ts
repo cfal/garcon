@@ -36,6 +36,7 @@ type SessionTranscriptState = Pick<
 > & {
 	transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor'>;
 	acceptQueuedSteer(chatId: string, receipt: QueuedSteerReceipt, control: ChatExecutionControlState | null): void;
+	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
 	getKnownHeadForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
