@@ -33,6 +33,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		isUnread: true,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
@@ -192,7 +193,7 @@ describe('shared sidebar chat row', () => {
 		expect(title.parentElement?.className).toContain('gap-1.5');
 		expect(screen.getByText('Unread').className).toContain('sr-only');
 		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
-		expect(processingIndicator?.className).toContain('shrink-0');
+		expect(processingIndicator?.parentElement?.className).toContain('shrink-0');
 		expect(processingIndicator?.parentElement?.parentElement).toBe(title.parentElement);
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-slot"]')).toBeNull();
 		expect(title.closest('button')?.className).not.toContain('border-l-status-processing');
@@ -343,12 +344,13 @@ describe('shared sidebar chat row', () => {
 		);
 		expect(document.querySelector('[data-slot="sidebar-chat-state-badge"]')).toBeNull();
 		const titleRowChildren = Array.from(title.parentElement?.children ?? []);
-		expect(titleRowChildren).toHaveLength(2);
-		expect(titleRowChildren[0]).toBe(title);
-		expect(titleRowChildren[1]).toBe(timestampBadge);
+		expect(titleRowChildren).toHaveLength(3);
+		expect(titleRowChildren[0].getAttribute('data-slot')).toBe('sidebar-chat-status');
+		expect(titleRowChildren[1]).toBe(title);
+		expect(titleRowChildren[2]).toBe(timestampBadge);
 	});
 
-	it('shows the processing indicator instead of the timestamp badge in single-line mode', () => {
+	it('shows a leading processing indicator beside the timestamp in single-line mode', () => {
 		render(SidebarChatItemHost, {
 			session: createChat({ isUnread: false, isProcessing: true }),
 			displayOptions: {
@@ -364,11 +366,14 @@ describe('shared sidebar chat row', () => {
 			'[data-slot="sidebar-chat-processing-indicator"]',
 		);
 		expect(processingIndicator).toBeTruthy();
-		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeNull();
-		expect(processingIndicator?.parentElement?.className).toContain('ml-auto');
-		expect(processingIndicator?.parentElement?.className).toContain('pr-0.5');
-		expect(processingIndicator?.parentElement?.className).toContain('group-hover:opacity-0');
-		expect(processingIndicator?.parentElement?.className).toContain('group-focus-within:opacity-0');
+		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
+		expect(processingIndicator?.parentElement?.nextElementSibling).toBe(
+			screen.getByText('Shared row chat'),
+		);
+		expect(processingIndicator?.parentElement?.className).not.toContain('group-hover:opacity-0');
+		expect(processingIndicator?.parentElement?.className).not.toContain(
+			'group-focus-within:opacity-0',
+		);
 		const processingLabel = screen.getByText('Chat is processing');
 		expect(processingLabel.className).toContain('sr-only');
 		expect(processingIndicator?.contains(processingLabel)).toBe(false);
@@ -750,7 +755,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
-		expect(screen.queryByText('3h ago')).toBeNull();
+		expect(screen.getByText('3h ago')).toBeTruthy();
 		const searchPreview = screen.getByText('Latest preview text');
 		expect(searchPreview.className).not.toContain('mt-');
 		expect(searchPreview.className).not.toContain('mb-');

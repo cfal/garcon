@@ -4,6 +4,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
 	import ChatProcessingIndicator from './ChatProcessingIndicator.svelte';
+	import SidebarChatStatusIndicator from '../sidebar/SidebarChatStatusIndicator.svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn';
@@ -45,6 +46,15 @@
 	}: ChatSummaryProps = $props();
 
 	let isSidebar = $derived(variant === 'sidebar');
+	let sidebarActivityStatus: ChatSessionRecord['activityStatus'] = $derived(
+		session.isProcessing
+			? session.activityStatus === 'pending-user-action'
+				? 'pending-user-action'
+				: 'working'
+			: session.activityStatus === 'complete' || session.activityStatus === 'error'
+				? session.activityStatus
+				: null,
+	);
 	let isUnread = $derived(session.isUnread && !(suppressUnread ?? isSelected));
 	let isSingleLine = $derived(chatItemLayout === 'single-line');
 	let isDetailed = $derived(chatItemLayout === 'detailed');
@@ -86,7 +96,9 @@
 	<div
 		class={cn(
 			'text-[13px] italic',
-			isSidebar ? 'truncate' : 'mb-1 mt-0.5 line-clamp-2 min-h-[2.4em] whitespace-pre-wrap break-words',
+			isSidebar
+				? 'truncate'
+				: 'mb-1 mt-0.5 line-clamp-2 min-h-[2.4em] whitespace-pre-wrap break-words',
 			isUnread ? 'font-semibold' : 'font-normal',
 			selectedForeground ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
 		)}
@@ -110,6 +122,9 @@
 		data-slot="chat-summary-header"
 	>
 		{@render titlePrefix?.()}
+		{#if isSidebar}
+			<SidebarChatStatusIndicator status={sidebarActivityStatus} />
+		{/if}
 		<span
 			class={cn(titleClass, isUnread ? 'font-bold' : isSidebar ? 'font-normal' : 'font-medium')}
 			title={chatName}
@@ -128,15 +143,12 @@
 				label={m.chat_window_processing()}
 				dotSlot="chat-board-processing-indicator"
 			/>
-		{:else if session.isProcessing}
+		{:else if !isSidebar && session.isProcessing}
 			<span class={cn('flex items-center justify-end pr-0.5', headerStatusClass)}>
 				<ChatProcessingIndicator
 					phase={session.processingPhase ?? 'running'}
 					label={m.chat_window_processing()}
-					dotClass={isSidebar ? 'sidebar-processing-indicator' : undefined}
-					dotSlot={isSidebar
-						? 'sidebar-chat-processing-indicator'
-						: 'chat-board-processing-indicator'}
+					dotSlot="chat-board-processing-indicator"
 				/>
 			</span>
 		{:else if formattedTimestamp}

@@ -23,6 +23,7 @@ import {
 } from './chat-transient-feed.js';
 import { normalizeTags } from './tags.js';
 import { isExecutorId } from './executors.js';
+import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity.js';
 
 export const CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 10;
 export const CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT = 200;
@@ -43,6 +44,7 @@ export interface ChatSnapshotChat {
   projectPath: string;
   tags: string[];
   canReloadFromNativeHistory: boolean;
+  activityStatus: ChatActivityStatus | null;
   activity: {
     createdAt: string | null;
     lastActivityAt: string | null;
@@ -150,11 +152,15 @@ function parseChat(value: unknown): ChatSnapshotChat {
 
   const activity = record(raw.activity, 'chat.activity');
   const executorId = raw.executorId;
+  if (raw.activityStatus !== null && !isChatActivityStatus(raw.activityStatus)) {
+    fail('chat.activityStatus is invalid');
+  }
   if (executorId != null && !isExecutorId(executorId)) fail('chat.executorId is invalid');
   return {
     id,
     ...(executorId === undefined ? {} : { executorId }),
     title: requiredString(raw.title, 'chat.title'),
+    activityStatus: raw.activityStatus as ChatActivityStatus | null,
     agentId: requiredString(raw.agentId, 'chat.agentId'),
     agentOwnershipEpoch: requiredString(
       raw.agentOwnershipEpoch,

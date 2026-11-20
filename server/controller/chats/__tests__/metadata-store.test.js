@@ -76,6 +76,117 @@ describe('metadata-store', () => {
   });
 
   describe('extractPreviewText uses full message content', () => {
+    it('serves run outcomes from memory through transcript unavailability', () => {
+      let available = true;
+      const viewId = mock(() => {
+        if (!available) throw new Error('Synthetic corrupt ledger');
+        return 'view-1';
+      });
+      const index = new MetadataIndex(mockRegistry, {
+        ...mockAgents, getExistingTranscriptViewId: viewId,
+      }, mockCarryOver);
+      expect(index.getRunOutcome(chatId)).toBeNull();
+      expect(viewId).not.toHaveBeenCalled();
+      index.updateRunOutcome(chatId, 'view-1', 'finished');
+      expect(viewId).toHaveBeenCalledTimes(1);
+      available = false;
+      expect(index.getRunOutcome(chatId)).toBe('finished');
+      index.invalidateTranscriptView(chatId);
+      expect(index.getRunOutcome(chatId)).toBeNull();
+      expect(viewId).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains a pre-run failure before startup repair validates a cold preview', async () => {
+      const metadataPath = path.join(tmpDir, 'cold-activity.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({ cold: { firstMessage: 'Synthetic input' } })));
+      const registry = makeRegistry({ cold: session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        metadataPath, readRunOutcome: async () => 'finished',
+      });
+      await index.init();
+      expect(index.getChatMetadata('cold')).toBeNull();
+      expect(index.recordFailedAttempt(index.captureFailureAttempt('cold', 'pre-run-attempt'))).toBe(true);
+      expect(index.getRunOutcome('cold')).toBe('failed');
+      await index.repair();
+      expect(index.getChatMetadata('cold')).not.toBeNull();
+      expect(index.getRunOutcome('cold')).toBe('failed');
+      index.clearRunOutcome('cold');
+      await index.repair();
+      expect(index.getRunOutcome('cold')).toBeNull();
+      await index.close();
+      await index.flush();
+    });
+
+    it('reconstructs a successful terminal after failed working-directory settlement without changing its live result', async () => {
+      const metadataPath = path.join(tmpDir, 'successful-terminal.json');
+      const registry = makeRegistry({ completed: session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, { metadataPath });
+      index.addNewChatMetadata('completed', 'Synthetic input');
+      index.updateRunOutcome('completed', 'view-1', 'finished', 'successful-run');
+      expect(index.recordFailedAttempt(index.captureFailureAttempt('completed', 'successful-run'))).toBe(false);
+      expect(index.getRunOutcome('completed')).toBe('finished');
+      await index.flush();
+      const restarted = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        metadataPath, readRunOutcome: async () => 'finished',
+      });
+      await restarted.init();
+      await restarted.repair();
+      expect(restarted.getRunOutcome('completed')).toBe(index.getRunOutcome('completed'));
+      await restarted.close();
+      await restarted.flush();
+      await index.close();
+    });
+
+    it('retains a completed result through output and clears it for the next input', () => {
+      metadata.updateRunOutcome(chatId, 'view-1', 'finished');
+      expect(metadata.getRunOutcome(chatId)).toBe('finished');
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [{
+        type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'Late output',
+      }]);
+      expect(metadata.getRunOutcome(chatId)).toBe('finished');
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [{
+        type: 'user-message', timestamp: '2026-01-03T00:00:00Z', content: 'New input',
+      }]);
+      expect(metadata.getRunOutcome(chatId)).toBeNull();
+      metadata.updateRunOutcome(chatId, 'old-view', 'failed');
+      expect(metadata.getRunOutcome(chatId)).toBeNull();
+    });
+
+    it('fences a startup outcome repair against a newer live result', async () => {
+      const entered = Promise.withResolvers();
+      const read = Promise.withResolvers();
+      const registry = makeRegistry({ repairing: session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        readRunOutcome: async () => { entered.resolve(); return read.promise; },
+      });
+      index.addNewChatMetadata('repairing', 'Generic input');
+      const repair = index.repair();
+      await entered.promise;
+      index.updateRunOutcome('repairing', 'view-1', 'failed');
+      read.resolve('finished');
+      await repair;
+      expect(index.getRunOutcome('repairing')).toBe('failed');
+    });
+
+    it('keeps runtime outcomes out of persistence and reconstructs them from the ledger source', async () => {
+      const metadataPath = path.join(tmpDir, 'activity-metadata.json');
+      const registry = makeRegistry({ 'runtime-chat': session() });
+      const index = new MetadataIndex(registry, mockAgents, mockCarryOver, { metadataPath });
+      index.addNewChatMetadata('runtime-chat', 'Generic input');
+      index.updateRunOutcome('runtime-chat', 'view-1', 'failed');
+      await index.flush();
+      const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+      expect(saved.chats['runtime-chat']).not.toHaveProperty('lastRunOutcome');
+      const restarted = new MetadataIndex(registry, mockAgents, mockCarryOver, {
+        metadataPath, readRunOutcome: async () => 'finished',
+      });
+      await restarted.init();
+      await restarted.repair();
+      expect(restarted.getRunOutcome('runtime-chat')).toBe('finished');
+      await restarted.close();
+      await restarted.flush();
+      await index.close();
+    });
     it('keeps full multiline content from assistant-message', () => {
       metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'first line\nsecond line\nthird' },

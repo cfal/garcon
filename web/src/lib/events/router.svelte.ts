@@ -21,6 +21,7 @@ import {
 	ChatSessionDeletedWsMessage,
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
+	ChatActivityUpdatedMessage,
 } from '$shared/ws-events';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
@@ -397,6 +398,11 @@ function buildDispatch(
 
 		'chat-title-updated': (msg) => {
 			if (msg instanceof ChatTitleUpdatedMessage) handleChatTitle(msg, sidebarCtx);
+		},
+		'chat-activity-updated': (msg) => {
+			if (msg instanceof ChatActivityUpdatedMessage) {
+				stores.sessions.patchChat(msg.chatId, { activityStatus: msg.activityStatus });
+			}
 		},
 		'chat-project-path-updated': (msg) => {
 			if (msg instanceof ChatProjectPathUpdatedMessage)

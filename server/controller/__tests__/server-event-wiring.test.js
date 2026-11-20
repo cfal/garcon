@@ -7,6 +7,9 @@ import path from 'node:path';
 import { AssistantMessage, BashToolUseMessage, CommandResultMessage } from '../../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import { ChatActivityOutcomes } from '../chats/chat-activity-outcomes.js';
+import { MetadataIndex } from '../chats/metadata-store.js';
+import { ChatListProjector } from '../chats/chat-list-projector.js';
 import { ProjectUnavailableError } from '../../common/domain-error.ts';
 import { wireSearchSourceAvailability, wireServerEvents } from '../server-event-wiring.js';
 import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
@@ -175,6 +178,7 @@ function createFixture(overrides = {}) {
   const agentRegistry = {
     onTranscriptCommitted: mock((callback) => { agent.transcript = callback; }),
     onPermissionRetired: mock((callback) => { agent.permissionRetired = callback; }),
+    onPermissionActionabilityChanged: mock((callback) => { agent.permissionActionability = callback; }),
     onSessionCreated: mock((callback) => { agent.session = callback; }),
     onRunSteerable: mock((callback) => { agent.steerable = callback; }),
     onFinished: mock((callback) => { agent.finished = callback; }),
@@ -189,6 +193,8 @@ function createFixture(overrides = {}) {
   const queueService = overrides.queueService ?? {
     onExecutionControlUpdated: mock((callback) => { queue.control = callback; }),
     onProcessingInvalidated: mock((callback) => { queue.processing = callback; }),
+    onInputAccepted: mock((callback) => { queue.accepted = callback; }),
+    onTurnStarted: mock((callback) => { queue.started = callback; }),
     onSessionStopped: mock((callback) => { queue.stopped = callback; }),
     onTurnFailed: mock((callback) => { queue.failed = callback; }),
     onProjectUnavailable: mock((callback) => { queue.projectUnavailable = callback; }),
@@ -221,10 +227,19 @@ function createFixture(overrides = {}) {
     onRemoteSettingsChanged: mock((callback) => { settings.remote = callback; }),
     ...overrides.settings,
   };
+  const outcomes = new ChatActivityOutcomes(() => 'view-1');
   const metadata = {
+    getChatMetadata: mock(() => null),
+    getRunOutcome: (chatId) => outcomes.get(chatId),
+    captureFailureAttempt: (chatId, runId) => outcomes.captureFailure(chatId, runId),
+    beginRunAttempt: (chatId, runId) => outcomes.begin(chatId, runId),
+    recordFailedAttempt: attempt => outcomes.fail(attempt),
+    recordCommittedOutcome: (attempt, viewId, outcome) => outcomes.commit(attempt, viewId, outcome),
+    clearRunOutcome: (chatId, runId) => outcomes.clear(chatId, runId),
+    updateRunOutcome: (chatId, viewId, outcome, runId) => outcomes.update(chatId, viewId, outcome, runId),
     repair: mock(async () => {}),
     updateFromAppendedMessages: mock(() => undefined),
-    invalidateTranscriptView: mock(() => undefined),
+    invalidateTranscriptView: mock(chatId => outcomes.delete(chatId)),
     replaceFromTranscriptView: mock(() => undefined),
     ...overrides.metadata,
   };
@@ -439,6 +454,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     agentRegistry: {
       onTranscriptCommitted: (callback) => agents.onTranscriptCommitted(callback),
       onPermissionRetired: (callback) => agents.onPermissionRetired(callback),
+      onPermissionActionabilityChanged: (callback) => agents.onPermissionActionabilityChanged(callback),
       onSessionCreated: (callback) => agents.onSessionCreated(callback),
       onFinished: (callback) => agents.onFinished(callback),
       onFailed: (callback) => agents.onFailed(callback),
@@ -1066,7 +1082,9 @@ describe('server event wiring', () => {
     expect(fixture.published.map((message) => message.type)).toEqual([
       'chat-messages',
       'chat-messages',
+      'chat-activity-updated',
       'chat-processing-updated',
+      'chat-activity-updated',
       'agent-run-finished',
     ]);
     expect(fixture.published[0]).toMatchObject({
@@ -1075,7 +1093,7 @@ describe('server event wiring', () => {
       lastOrdinal: 2,
       messages: [{ ordinal: 2, message: { content: 'answer' } }],
     });
-    expect(fixture.published[3]).toMatchObject({
+    expect(fixture.published[5]).toMatchObject({
       type: 'agent-run-finished',
       outcome: 'finished',
     });
@@ -1085,6 +1103,46 @@ describe('server event wiring', () => {
       'finished',
       {},
     );
+  });
+
+  it('publishes working, actionable permission, resumed work and settled results in the queued fanout', async () => {
+    let phase = 'running';
+    const fixture = createFixture({
+      processing: { phase: () => phase },
+    });
+    const latestStatus = () => fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus;
+    fixture.queue.processing('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('working');
+    const permission = {
+      type: 'permission', chatId: 'chat-1', viewId: 'view-1', runId: 'turn-1',
+      row: { kind: 'permission-requested', ordinal: 3, at, providerMeta: null,
+        lifecycle: { kind: 'requested', permissionOccurrenceId: 'occurrence-1',
+          requestedTool: new BashToolUseMessage(at, 'tool-1', 'pwd'), options: [] } },
+    };
+    fixture.agent.transcript(permission);
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('pending-user-action');
+    const control = { chatId: 'chat-1', viewId: 'view-1', runId: 'turn-1', permissionOccurrenceId: 'occurrence-1' };
+    fixture.agent.permissionActionability({ control, actionability: 'claimed' });
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('working');
+    fixture.agent.permissionActionability({ control, actionability: 'actionable' });
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('pending-user-action');
+    fixture.agent.transcript({ ...permission, row: { ...permission.row, ordinal: 4,
+      kind: 'permission-resolved', lifecycle: { kind: 'resolved', permissionOccurrenceId: 'occurrence-1', decision: { allow: true } } } });
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('working');
+    phase = null;
+    fixture.agent.transcript(terminalCommit('failed'));
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('error');
+    fixture.agent.transcript(terminalCommit('finished'));
+    await fixture.wiring.waitForIdle();
+    expect(latestStatus()).toBe('complete');
+    expect(fixture.published.findIndex(message => message.type === 'chat-messages'))
+      .toBeLessThan(fixture.published.findIndex(message => message.activityStatus === 'pending-user-action'));
   });
 
   it('fails a successful process receipt when cwd settlement fails without publishing success', async () => {
@@ -1136,10 +1194,12 @@ describe('server event wiring', () => {
       await Promise.resolve();
       await fixture.wiring.waitForIdle();
       expect(fixture.published.map(message => message.type)).toEqual([
-        'chat-messages', 'chat-transient-feed-mutation', 'chat-transient-feed-mutation',
+        'chat-messages', 'chat-transient-feed-mutation', 'chat-activity-updated',
+        'chat-activity-updated', 'chat-transient-feed-mutation', 'chat-activity-updated',
       ]);
       expect(fixture.published[1]).toMatchObject({ transientRevision: 1, mutation: { kind: 'upsert' } });
-      expect(fixture.published[2]).toMatchObject({
+      expect(fixture.published[3]).toMatchObject({ activityStatus: null });
+      expect(fixture.published[4]).toMatchObject({
         serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: view.viewId,
         transientRevision: 2, mutation: { kind: 'remove', permissionOccurrenceId: occurrence },
       });
@@ -1246,6 +1306,154 @@ describe('server event wiring', () => {
     expect(fixture.published.filter(message => message.type === 'agent-run-failed')).toHaveLength(2);
   });
 
+  it.each(['agent', 'queue'])('shows a %s startup failure without requiring validated metadata or a ledger terminal', async source => {
+    const fixture = createFixture();
+    expect(fixture.metadata.getChatMetadata('chat-1')).toBeNull();
+    if (source === 'agent') fixture.agent.failed('chat-1', 'Synthetic startup failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic startup failure', turn);
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBe('failed');
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1))
+      .toEqual({ type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: 'error' });
+    expect(fixture.published.some(message => message.type === 'chat-messages')).toBe(false);
+  });
+
+  it.each(['agent', 'queue'])('publishes a %s pre-run failure through list, snapshot and WebSocket while startup repair is held', async source => {
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const entry = {
+      agentId: 'test', agentSessionId: null, agentOwnershipEpoch: 'epoch-1',
+      projectPath: '/synthetic/project', carryOverSegments: [], tags: [],
+      agentSettingsById: {},
+      permissionMode: 'default', thinkingMode: 'none',
+    };
+    const registry = {
+      listChatIds: () => ['blocker', '1783725900000900'], getChat: () => entry,
+      hasChat: () => true, onChatRemoved: () => undefined,
+    };
+    const index = new MetadataIndex(registry, {
+      getExistingTranscriptViewId: () => 'view-1',
+      getExistingTranscriptPreview: () => ({ preview: { firstMessage: 'Synthetic input' } }),
+    }, { revision: () => 'carry-1' }, {
+      readRunOutcome: async chatId => {
+        if (chatId === 'blocker') { entered.resolve(); await release.promise; }
+        return 'finished';
+      },
+    });
+    await index.init();
+    const fixture = createFixture({ metadata: {
+      getChatMetadata: chatId => index.getChatMetadata(chatId),
+      getRunOutcome: chatId => index.getRunOutcome(chatId),
+      beginRunAttempt: (chatId, runId) => index.beginRunAttempt(chatId, runId),
+      captureFailureAttempt: (chatId, runId) => index.captureFailureAttempt(chatId, runId),
+      recordFailedAttempt: attempt => index.recordFailedAttempt(attempt),
+      repair: () => index.repair(),
+    } });
+    const projector = new ChatListProjector({
+      registry, metadata: index, processing: { phase: () => null },
+      transientFeeds: { hasPendingUserAction: () => false }, canReloadFromNativeHistory: () => false,
+      settings: { getPinnedChatIds: () => [], getNormalChatIds: () => ['1783725900000900'],
+        getArchivedChatIds: () => [], getChatName: () => null },
+    });
+    const repair = fixture.wiring.repairChatMetadata();
+    try {
+      await entered.promise;
+      expect(index.getChatMetadata('1783725900000900')).toBeNull();
+      fixture.queue.started('1783725900000900', turn.turnId);
+      if (source === 'agent') await fixture.agent.failed('1783725900000900', 'Synthetic pre-run failure', 'INTERNAL_ERROR', turn);
+      else fixture.queue.failed('1783725900000900', 'Synthetic pre-run failure', turn);
+      await fixture.wiring.waitForIdle();
+      expect(projector.buildOne('1783725900000900').activityStatus).toBe('error');
+      expect(projector.buildSummary('1783725900000900').chat.activityStatus).toBe('error');
+      expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBe('error');
+      release.resolve();
+      await repair;
+      expect(projector.buildOne('1783725900000900').activityStatus).toBe('error');
+      expect(projector.buildSummary('1783725900000900').chat.activityStatus).toBe('error');
+    } finally {
+      release.resolve();
+      await repair;
+      await index.close();
+    }
+  });
+
+  it.each(['agent', 'queue'].flatMap(source => ['successor', 'working', 'replacement', 'accepted-input'].map(change => [source, change])))
+  ('fences a late %s failure against %s after command settlement waits', async (source, change) => {
+    const entered = Promise.withResolvers();
+    const settlement = Promise.withResolvers();
+    let phase = null;
+    const fixture = createFixture({
+      processing: { phase: () => phase },
+      commandLedger: { settleTerminal: async () => { entered.resolve(); await settlement.promise; } },
+    });
+    if (source === 'agent') fixture.agent.failed('chat-1', 'Synthetic old failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic old failure', turn);
+    await entered.promise;
+    if (change === 'working') phase = 'running';
+    else if (change === 'accepted-input') fixture.queue.accepted('chat-1');
+    else if (change === 'replacement') fixture.metadata.invalidateTranscriptView('chat-1');
+    else fixture.metadata.updateRunOutcome('chat-1', 'view-1', 'finished', 'turn-2');
+    settlement.resolve();
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBe(change === 'successor' ? 'finished' : null);
+    expect(fixture.published.some(message => message.activityStatus === 'error')).toBe(false);
+  });
+
+  it('clears the previous failure when input is accepted while processing stays idle', async () => {
+    const fixture = createFixture();
+    await fixture.agent.failed('chat-1', 'Synthetic old failure', 'INTERNAL_ERROR', turn);
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBe('failed');
+    fixture.queue.accepted('chat-1');
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBeNull();
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBeNull();
+  });
+
+  it.each(['agent', 'queue'])('records a %s failure for a run that executed while later input was queued', async source => {
+    const fixture = createFixture();
+    fixture.queue.started('chat-1', turn.turnId);
+    fixture.queue.accepted('chat-1');
+    if (source === 'agent') await fixture.agent.failed('chat-1', 'Synthetic failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic failure', turn);
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBe('failed');
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBe('error');
+  });
+
+  it.each(['agent', 'queue'])('rejects a %s failure for a run superseded by a later start', async source => {
+    const fixture = createFixture();
+    fixture.queue.started('chat-1', turn.turnId);
+    fixture.queue.started('chat-1', 'turn-2');
+    if (source === 'agent') await fixture.agent.failed('chat-1', 'Synthetic stale failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic stale failure', turn);
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBeNull();
+    expect(fixture.published.some(message => message.activityStatus === 'error')).toBe(false);
+  });
+
+  it.each(['finished', 'failed'])('fences queued %s terminal publication after newer input acceptance', async outcome => {
+    const fixture = createFixture();
+    fixture.queue.started('chat-1', turn.turnId);
+    fixture.agent.transcript(terminalCommit(outcome));
+    fixture.queue.accepted('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBeNull();
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBeNull();
+  });
+
+  it('preserves a successful ledger terminal when working-directory settlement fails', async () => {
+    const fixture = createFixture({ queue: {
+      onAgentTurnTerminal: async () => ({ kind: 'failed', message: 'Synthetic cwd settlement failure' }),
+    } });
+    fixture.agent.transcript(terminalCommit('finished'));
+    await fixture.agent.finished('chat-1', 0, turn, 'finished');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBe('finished');
+    expect(fixture.published.some(message => message.type === 'agent-run-failed')).toBe(true);
+    expect(fixture.published.some(message => message.activityStatus === 'error')).toBe(false);
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBe('complete');
+  });
+
   it('offers queued steers to a run once it can take steering input', async () => {
     const fixture = createFixture();
 
@@ -1324,7 +1532,7 @@ describe('server event wiring', () => {
       type: 'chat-transcript-replaced',
       previousTranscriptViewId: 'view-1',
       transcriptViewId: 'view-2',
-    })]);
+    }), { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: null }]);
   });
 
   it('broadcasts a view replacement before rows from the replacement producer', async () => {
@@ -1367,6 +1575,7 @@ describe('server event wiring', () => {
         previousTranscriptViewId: 'view-1',
         transcriptViewId: 'view-2',
       }),
+      { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: null },
       expect.objectContaining({
         type: 'chat-messages',
         transcriptViewId: 'view-2',
@@ -1408,6 +1617,7 @@ describe('server event wiring', () => {
         intent: 'stop',
       },
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'stopping' },
+      { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: 'working' },
     ]);
   });
 
@@ -1418,7 +1628,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
     expect(fixture.commandLedger.markInterruptedWithoutRunTerminal).toHaveBeenCalledWith('chat-1', 'reserved-start', 'user-stop');
     expect(fixture.published.map((event) => event.type))
-      .toEqual(['chat-messages', 'chat-session-stopped', 'chat-processing-updated']);
+      .toEqual(['chat-messages', 'chat-session-stopped', 'chat-processing-updated', 'chat-activity-updated']);
   });
 
   it('repairs an idle processing phase before publishing an already-idle Stop', async () => {
@@ -1429,6 +1639,7 @@ describe('server event wiring', () => {
 
     expect(fixture.published).toMatchObject([
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
+      { type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: null },
       {
         type: 'chat-session-stopped',
         chatId: 'chat-1',

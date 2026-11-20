@@ -1,5 +1,46 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
+Chat-list activity amendment: list entries and chat snapshots carry nullable
+`activityStatus` (`working`, `complete`, `error`, or `pending-user-action`). This
+is presentation only and never an execution-admission predicate. Working uses
+the existing processing projection. Pending action requires both processing
+and an actionable control in the controller's ephemeral transient feed; settled,
+retired, replaced, and restarted controls cannot keep a yellow indicator alive.
+Idle success and failure derive from the latest ledger `run-ended`; interrupted
+or unfinished input has no completion indicator. New accepted input clears the
+previous result at queue or direct admission, including inputs waiting in a
+paused queue. A process-only outcome owner remains independent of preview
+validation, so a pre-run failure is visible even while startup repair is pending.
+Captured transcript-view and attempt-generation identities fence delayed failure
+settlement and repair; a committed terminal for that run takes precedence over
+later preparation or working-directory settlement errors. A late failure cannot
+replace a successor's result. Run outcomes are excluded from persisted metadata;
+startup and replacement reconstruct ledger-backed results without recovering
+failed execution attempts. Claimed permission controls become non-actionable
+immediately and return only after definite non-dispatch while their original
+view, run, and occurrence remain valid. List hydration merges per-chat activity
+events received during that request instead of retrying the whole list; deletions
+during the request also fence stale list entries.
+Startup and replacement repair use one lazy read-only ledger-activity TaskWorker
+to inspect ledger kinds, provider message discriminators and terminal outcomes.
+SQLite JSON inspection, including a single large provider payload, stays off the
+controller loop; only the captured database path, view and high watermark cross
+to the Worker, and only the small outcome returns. The Worker uses a read
+transaction and a newest-first cursor. The store rechecks its captured lifetime
+and view before returning; metadata publication additionally fences the captured
+entry. Closing the ledger retires the Worker. Compiled builds embed its entrypoint.
+Closing or deleting one chat aborts its pending activity work and advances the
+existing chat-generation fence, so a late read cannot reopen deleted storage.
+Genuine SQLite or malformed-row failures retain the ledger's read/write failure
+fence while that captured view remains current; cancellation, capacity failures
+and retired operations do not fence healthy storage.
+Ordinary list reads remain memory-only. Typed `chat-activity-updated` broadcasts
+use the existing per-chat task queue after committed transcript fanout; processing
+and actionable-control transitions update background chats without publishing an
+extra status event for every streamed content batch. This controller/browser
+contract preserves native-history authority. The executor protocol revision
+also changes because CLI list and snapshot replies cross its existing gateway.
+
 Ledger-only Clear amendment: the confirmed, controller-owned `/clear` action is
 an additional explicit view-replacement path. Earlier Reload-only statements
 remain applicable to native-history replacement, not this ledger-only action.
