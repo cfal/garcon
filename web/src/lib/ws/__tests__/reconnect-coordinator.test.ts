@@ -262,7 +262,6 @@ function createReconnectDeps(
 				const cursor = backgroundApplied.get(chatId);
 				return cursor ? { ...cursor, stale: true } : null;
 			}),
-			markValidated: chatState.transcriptCache.markValidated,
 			markStaleExcept: vi.fn<ChatTranscriptCache['markStaleExcept']>(),
 			trackReplayValidation: vi.fn<ChatTranscriptCache['trackReplayValidation']>(() => ({ isCurrent: () => true, release: vi.fn() })),
 		},
@@ -272,6 +271,7 @@ function createReconnectDeps(
 		discardFullscreenHiddenPanels: vi.fn(),
 		invalidateChatSnapshot: vi.fn(),
 		markChatStale: vi.fn((chatId: string) => chatState.transcriptCache.markStale(chatId)),
+		markChatValidated: vi.fn((chatId: string) => chatState.transcriptCache.markValidated(chatId)),
 		loadChatSnapshot: vi.fn(async (chatId: string) => {
 			await chatState.loadMessages(chatId);
 			return true;
@@ -373,6 +373,7 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.panels.panelsForChat,
 		deps.panels.hasInactiveWindow,
 		deps.panels.markChatStale,
+		deps.panels.markChatValidated,
 		deps.panels.loadChatSnapshot,
 		deps.panels.beginReconnectReplay,
 		deps.panels.applyReconnectReplayPage,
@@ -405,7 +406,7 @@ async function reconnectAfterFirstConnection(
 	await coordinator.handleConnectionState(true);
 }
 
-function snapshotRecoveryFixture(messageCount: number) {
+function snapshotRecoveryFixture(messageCount: number, readSteerTranscriptHead?: () => Promise<number | null>) {
 	const messages = Array.from({ length: messageCount }, (_, index) => ({
 		ordinal: index + 1,
 		message: new AssistantMessage(TS, `row-${index + 1}`),
@@ -417,6 +418,7 @@ function snapshotRecoveryFixture(messageCount: number) {
 		lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
 		getSelectedChatId: () => 'chat-1',
 		getComposerAnchorSurfaceId: () => 'chat-view:window-one',
+		readSteerTranscriptHead,
 	});
 	const descriptor = {
 		surfaceId: 'chat-view:window-one', chatId: 'chat-1',
@@ -439,6 +441,48 @@ function snapshotRecoveryFixture(messageCount: number) {
 }
 
 describe('ChatReconnectCoordinator', () => {
+	it.each(['rendered', 'background'] as const)('retires a departed steer after a zero-row %s replay validates the sampled head', async location => {
+		localStorage.clear();
+		const head = deferred<number>();
+		const replay = deferred<Record<string, unknown>>();
+		const { cache, panels, descriptor, page } = snapshotRecoveryFixture(1, () => head.promise);
+		cache.replaceFromPage('chat-1', page(1));
+		const deps = createReconnectDeps();
+		deps.getBackgroundCursors.mockReturnValue([{ chatId: 'chat-1', transcriptViewId: 'generation-selected', lastOrdinal: 1 }]);
+		deps.ws.sendRequest.mockImplementation(async request => 'chatId' in request ? replay.promise : reconnectStateResponse());
+		try {
+			if (location === 'rendered') {
+				panels.reconcile([descriptor]);
+				panels.panel(descriptor.surfaceId)!.installInitialSnapshot();
+			}
+			const coordinator = new ChatReconnectCoordinator({ ...deps, panels });
+			await coordinator.handleConnectionState(true);
+			await coordinator.handleConnectionState(false);
+			const reconnect = coordinator.handleConnectionState(true);
+			await flushUntil(() => deps.ws.sendRequest.mock.calls.some(([request]) => 'chatId' in request));
+			panels.upsertOptimisticInput('chat-1', {
+				chatId: 'chat-1', clientMessageId: 'own', content: 'guidance', createdAt: TS,
+				delivery: 'pending', placement: 'live-tail',
+			});
+			panels.reconcileQueuedSteers('chat-1', controlState(false), {
+				clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server-instance-test',
+				transcriptViewId: 'generation-selected',
+			});
+			head.resolve(1);
+			await head.promise;
+			expect(cache.readAppliedCursor('chat-1')?.stale).toBe(true);
+			expect(panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(1);
+			replay.resolve(deltaResponse('chat-1', 'generation-selected', [], 1));
+			await reconnect;
+			expect(cache.readAppliedCursor('chat-1')?.stale).toBe(false);
+			expect(panels.overlayFor('chat-1')?.optimisticInputs).toEqual([]);
+		} finally {
+			panels.destroy();
+			cache.flush();
+			localStorage.clear();
+		}
+	});
+
 	it.each([
 		{ cached: false, rejects: false }, { cached: true, rejects: false },
 		{ cached: false, rejects: true }, { cached: true, rejects: true },
@@ -2243,7 +2287,7 @@ describe('ChatReconnectCoordinator', () => {
 			deps.panels.transcriptCache.readAppliedCursor.mockImplementation((chatId) =>
 				cache.readAppliedCursor(chatId),
 			);
-			deps.panels.transcriptCache.markValidated.mockImplementation((chatId: string) =>
+			deps.panels.markChatValidated.mockImplementation((chatId: string) =>
 				cache.markValidated(chatId),
 			);
 			deps.panels.markChatStale.mockImplementation((chatId) => cache.markStale(chatId));

@@ -686,6 +686,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.options.lifecycle.remove(chatId);
 	}
 
+	markChatValidated(chatId: string): void {
+		this.options.cache.markValidated(chatId);
+		this.#steerRecovery.observe(chatId);
+	}
+
 	markChatStale(chatId: string): void {
 		this.#discardHiddenPanels(chatId);
 		this.#inactiveWindows.removeChat(chatId);
