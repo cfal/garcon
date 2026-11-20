@@ -531,6 +531,9 @@ function createDeps(chat = createRunningChat()) {
 		}),
 		getExecutionControl: vi.fn((): ChatExecutionControlState | null => null),
 		setExecutionControlFromLiveUpdate: vi.fn(() => true),
+		captureSteerControlJoin: vi.fn((_chatId: string) => (_control: ChatExecutionControlState, join: (control: ChatExecutionControlState | null) => void): void => {
+			join(conversationUi.getExecutionControl());
+		}),
 		setExecutionControlFromRefresh: vi.fn(() => true),
 		isExecutionControlSocketInstanceConfirmed: vi.fn(() => true),
 	};
@@ -5075,10 +5078,7 @@ describe('ConversationSessionController', () => {
 			serverInstanceId: control.serverInstanceId,
 		}, newer);
 		expect(deps.chatState.clearOptimisticUserInput).not.toHaveBeenCalled();
-		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
-			'chat-1',
-			control,
-		);
+		expect(deps.conversationUi.captureSteerControlJoin).toHaveBeenCalledWith('chat-1');
 		expect(deps.composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
 		expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
 	});

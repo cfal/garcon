@@ -28,6 +28,13 @@ export interface ExecutionControlPruningOptions {
 	getActiveChatIds: () => ReadonlySet<string>;
 }
 
+interface QueuedSteerAcknowledgement {
+	chatId: string;
+	control: ChatExecutionControlState;
+	join: (control: ChatExecutionControlState | null) => void;
+}
+type JoinSteerControl = (control: ChatExecutionControlState, join: QueuedSteerAcknowledgement['join']) => void;
+
 export interface ConversationUiPort {
 	readonly pendingPermissionRequests: PendingPermissionRequest[];
 	pendingViewChat: PendingViewChat | null;
@@ -52,6 +59,7 @@ export interface ConversationUiPort {
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean;
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
+	captureSteerControlJoin(chatId: string): JoinSteerControl;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
 	removeExecutionControl(chatId: string): void;
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void;
@@ -74,6 +82,7 @@ export class ConversationUiState implements ConversationUiPort {
 	private unassignedPreviousPermissionMode = $state<PermissionMode | null>(null);
 	private activeTransientChatId = $state<string | null>(null);
 	private readonly executionControlAuthority = new ExecutionControlInstanceAuthority();
+	readonly #unconfirmedSteers = new Set<QueuedSteerAcknowledgement>();
 
 	constructor(private readonly onExecutionControlChanged?: (
 		chatId: string, control: ChatExecutionControlState | null,
@@ -205,6 +214,7 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void {
+		const alreadyConfirmed = this.executionControlAuthority.isSocketInstanceConfirmed(serverInstanceId);
 		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId);
 		if (decision.kind === 'replace') {
 			this.#clearExecutionControls();
@@ -214,10 +224,41 @@ export class ConversationUiState implements ConversationUiPort {
 			this.unassignedPendingPermissionRequests = [];
 			this.unassignedPreviousPermissionMode = null;
 		}
+		if (!alreadyConfirmed) {
+			this.#joinConfirmedSteers(serverInstanceId);
+			for (const ack of this.#unconfirmedSteers) {
+				this.#unconfirmedSteers.delete(ack);
+				ack.join(null);
+			}
+		}
 	}
 
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean {
 		return this.executionControlAuthority.isSocketInstanceConfirmed(serverInstanceId);
+	}
+
+	captureSteerControlJoin(chatId: string): JoinSteerControl {
+		const submittedInstance = this.executionControlAuthority.confirmedSocketInstanceId;
+		return (control, join) => {
+			const ack = { chatId, control, join };
+			// HTTP can reach a restarted server before the submitting socket disconnects.
+			if (this.executionControlAuthority.isPossibleSuccessor(submittedInstance, control.serverInstanceId)) {
+				this.#unconfirmedSteers.add(ack);
+			} else this.#joinSteer(ack);
+		};
+	}
+
+	#joinSteer({ chatId, control, join }: QueuedSteerAcknowledgement): void {
+		this.setExecutionControlFromLiveUpdate(chatId, control);
+		const current = this.getExecutionControl(chatId);
+		join(current?.serverInstanceId === control.serverInstanceId ? current : null);
+	}
+
+	#joinConfirmedSteers(serverInstanceId: string): void {
+		if (!this.#unconfirmedSteers.size) return;
+		const ready = [...this.#unconfirmedSteers].filter(ack => ack.control.serverInstanceId === serverInstanceId);
+		for (const ack of ready) this.#unconfirmedSteers.delete(ack);
+		for (const ack of ready) this.#joinSteer(ack);
 	}
 
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void {
@@ -243,6 +284,7 @@ export class ConversationUiState implements ConversationUiPort {
 	#installExecutionControl(chatId: string, control: ChatExecutionControlState): void {
 		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
 		this.onExecutionControlChanged?.(chatId, control);
+		this.#joinConfirmedSteers(control.serverInstanceId);
 	}
 
 	#clearExecutionControls(): void {
@@ -274,6 +316,7 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	removeExecutionControl(chatId: string): void {
+		this.#discardUnconfirmedSteers(id => id === chatId);
 		if (!(chatId in this.executionControlByChatId)) return;
 		const nextControlByChatId = { ...this.executionControlByChatId };
 		delete nextControlByChatId[chatId];
@@ -282,6 +325,7 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void {
+		this.#discardUnconfirmedSteers(id => !activeChatIds.has(id));
 		const staleIds = Object.keys(this.executionControlByChatId).filter(
 			(chatId) => !activeChatIds.has(chatId),
 		);
@@ -293,6 +337,14 @@ export class ConversationUiState implements ConversationUiPort {
 		}
 		this.executionControlByChatId = nextControlByChatId;
 		for (const chatId of staleIds) this.onExecutionControlChanged?.(chatId, null);
+	}
+
+	#discardUnconfirmedSteers(discard: (chatId: string) => boolean): void {
+		for (const ack of this.#unconfirmedSteers) {
+			if (!discard(ack.chatId)) continue;
+			this.#unconfirmedSteers.delete(ack);
+			ack.join(null);
+		}
 	}
 
 	activateTransientFeed(chatId: string | null): void {
@@ -350,6 +402,7 @@ export class ConversationUiState implements ConversationUiPort {
 		if (decision.kind === 'reject') return false;
 		if (decision.kind === 'replace') {
 			this.#clearExecutionControls();
+			this.#joinConfirmedSteers(serverInstanceId);
 			this.transientFeedByChatId = {};
 			this.pendingPermissionRequestsByChatId = {};
 			this.previousPermissionModeByChatId = {};

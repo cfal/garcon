@@ -149,6 +149,7 @@ export async function submitSteerRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const transcriptViewId = requireTranscriptView(deps, context.chatId);
+	const joinControl = deps.conversationUi.captureSteerControlJoin(context.chatId);
 	const submission = acceptedInputs.steer({
 		chatId: context.chatId,
 		transcriptViewId,
@@ -163,14 +164,13 @@ export async function submitSteerRoute(
 	try {
 		const response = await submission.submit();
 		if (response.delivery === 'queued') {
-			deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, response.control);
-			// A socket edit, removal, or restart can overtake the HTTP acknowledgement.
-			deps.chatState.acceptQueuedSteer({
+			const receipt = {
 				clientMessageId: submission.clientMessageId,
 				transcriptViewId,
 				serverInstanceId: response.control.serverInstanceId,
 				entryId: response.entryId,
-			}, deps.conversationUi.getExecutionControl(context.chatId));
+			};
+			joinControl(response.control, control => deps.chatState.acceptQueuedSteer(receipt, control));
 		} else {
 			deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		}

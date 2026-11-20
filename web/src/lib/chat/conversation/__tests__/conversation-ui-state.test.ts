@@ -98,6 +98,59 @@ function makeTransientFeed(chatId: string): ChatTransientFeedSnapshot {
 }
 
 describe('ConversationUiState', () => {
+	it('waits for a successor process to confirm its queued steer without accepting a retired acknowledgement', () => {
+		const ui = new ConversationUiState();
+		const previous = makeControl(makeQueue(), { serverInstanceId: 'previous', version: 9 });
+		const successor = makeControl(makeQueue(), { serverInstanceId: 'successor', version: 2 });
+		const bind = vi.fn();
+		ui.confirmExecutionControlSocketInstance('previous');
+		ui.setExecutionControlFromLiveUpdate('chat', previous);
+		const join = ui.captureSteerControlJoin('chat');
+		join(successor, bind);
+		ui.confirmExecutionControlSocketInstance('previous');
+		expect(bind).not.toHaveBeenCalled();
+		expect(ui.getExecutionControl('chat')).toEqual(previous);
+		ui.markExecutionControlSocketDisconnected();
+		ui.confirmExecutionControlSocketInstance('successor');
+		expect(bind.mock.calls).toEqual([[successor]]);
+		join(previous, bind);
+		expect(bind.mock.calls).toEqual([[successor], [null]]);
+		expect(ui.getExecutionControl('chat')).toEqual(successor);
+	});
+
+	it('drops a deferred acknowledgement on chat removal instead of reinstalling its queue', () => {
+		const ui = new ConversationUiState();
+		ui.confirmExecutionControlSocketInstance('previous');
+		const bind = vi.fn();
+		ui.captureSteerControlJoin('chat')(makeControl(), bind);
+		ui.pruneExecutionControls(new Set());
+		ui.confirmExecutionControlSocketInstance('server-instance-test');
+		expect(bind.mock.calls).toEqual([[null]]);
+		expect(ui.getExecutionControl('chat')).toBeNull();
+	});
+
+	it('does not wait for an unseen old HTTP instance when the socket was confirmed during submission', () => {
+		const ui = new ConversationUiState();
+		const join = ui.captureSteerControlJoin('chat');
+		const bind = vi.fn();
+		ui.confirmExecutionControlSocketInstance('new');
+		join(makeControl(), bind);
+		expect(bind.mock.calls).toEqual([[null]]);
+	});
+
+	it('keeps a newer control that establishes the replacement before socket confirmation', () => {
+		const ui = new ConversationUiState();
+		ui.confirmExecutionControlSocketInstance('previous');
+		const ack = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { version: 1 });
+		const removed = makeControl(makeQueue(), { version: 2 });
+		const bind = vi.fn();
+		ui.captureSteerControlJoin('chat')(ack, bind);
+		ui.markExecutionControlSocketDisconnected();
+		ui.setExecutionControlFromRefresh('chat', removed);
+		ui.confirmExecutionControlSocketInstance(ack.serverInstanceId);
+		expect(bind.mock.calls).toEqual([[removed]]);
+		expect(ui.getExecutionControl('chat')).toEqual(removed);
+	});
 	it('notifies queue projections only for accepted controls and authoritative removal', () => {
 		const changed = vi.fn();
 		const ui = new ConversationUiState(changed);
