@@ -122,7 +122,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.publishSnapshotResendCandidates(chatId, candidates, frontier);
 	};
 	readonly observeRecoveredMessages = (chatId: string, messages: readonly TranscriptMessage[]): void => {
-		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages);
+		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages, this.#overlayRetirementOrdinal(chatId));
 		if (mutation) this.#applyOverlayMutation(chatId, mutation);
 		this.#steerRecovery.observe(chatId);
 	};
@@ -160,7 +160,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	) {
 		this.#steerRecovery = new SteerTranscriptRecovery({
 			inputs: chatId => options.overlays.viewFor(chatId)?.optimisticInputs ?? [],
-			cursor: chatId => options.cache.readAppliedCursor(chatId),
+			cursor: chatId => {
+				const cursor = options.cache.readAppliedCursor(chatId);
+				return cursor && { ...cursor, lastOrdinal: Math.min(cursor.lastOrdinal, this.#overlayRetirementOrdinal(chatId)) };
+			},
 			clear: (chatId, id) => this.clearOptimisticInput(chatId, id),
 			readHead: options.readSteerTranscriptHead,
 		});
@@ -327,6 +330,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			});
 		}
 		this.#mounted = mounted;
+		for (const chatId of new Set([...previous.values()].map(item => item.chatId))) {
+			this.observeRecoveredMessages(chatId, []);
+		}
 		for (const chatId of admittedChatIds) {
 			void this.loadChatSnapshot(chatId).catch(() => {
 				this.options.cache.markStale(chatId);
@@ -551,7 +557,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (pending) pending.refreshRequired = true;
 			return { kind: 'chat-recovery-required', outcome };
 		}
-		const overlayMutation = this.options.overlays.applyCommittedBatch(batch);
+		const overlayMutation = this.options.overlays.applyCommittedBatch(batch, this.#overlayRetirementOrdinal(batch.chatId));
 		const commit: SharedTranscriptCommit = { ...batch, outcome, overlayMutation };
 		const localRecoverySurfaceIds: ChatViewSurfaceId[] = [];
 		for (const panel of this.#panels.values()) {
@@ -566,7 +572,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 		}
 		this.#inactiveWindows.applySharedCommit(commit, overlayMutation);
-		this.#steerRecovery.retireCaughtUp(batch.chatId);
+		this.observeRecoveredMessages(batch.chatId, []);
 		return { kind: 'applied', localRecoverySurfaceIds };
 	}
 
@@ -755,6 +761,17 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (panel.chatId === chatId) panel.transcript.applySharedOverlayMutation(mutation);
 		}
 		this.#inactiveWindows.applyOverlayMutation(chatId, mutation);
+	}
+
+	#overlayRetirementOrdinal(chatId: string): number {
+		const viewId = this.options.cache.readAppliedCursor(chatId)?.transcriptViewId;
+		let throughOrdinal = Infinity;
+		for (const panel of this.#panels.values()) {
+			if (panel.chatId !== chatId || panel.transcript.hasLaterMessages) continue;
+			if (panel.transcript.transcriptViewId !== viewId) return 0;
+			throughOrdinal = Math.min(throughOrdinal, panel.transcript.loadedThroughOrdinal, panel.transcript.lastOrdinal);
+		}
+		return throughOrdinal;
 	}
 
 	#reserveIncomingWindow(

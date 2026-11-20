@@ -1538,6 +1538,81 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it.each(['snapshot', 'omitted-echo snapshot', 'aborted snapshot', 'unmount'] as const)(
+		'keeps a buffered steer represented in every panel until %s catches up', async completion => {
+			const head = deferred<number>();
+			const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
+			const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
+			const left = presentation('chat-view:window-left', chatId), right = presentation('chat-view:window-right', chatId);
+			seed(cache);
+			registry.reconcile([left, right]);
+			const live = registry.panel(left.surfaceId)!.transcript, loading = registry.panel(right.surfaceId)!.transcript;
+			live.installCachedSnapshot(chatId);
+			loading.installCachedSnapshot(chatId);
+			registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance', createdAt: timestamp,
+				delivery: 'pending', placement: 'live-tail' });
+			const control = emptyChatExecutionControlState('server');
+			control.queue.entries = [{ id: 'entry', kind: 'steer', content: 'guidance', attachments: [], revision: 1,
+				createdAt: timestamp, updatedAt: timestamp }];
+			registry.reconcileQueuedSteers(chatId, control, { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId });
+			const epoch = loading.beginSnapshotLoad();
+			try {
+				registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
+					messages: [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: 'own' }) }] });
+				control.version++;
+				control.queue.entries = [];
+				control.queue.recentlyDispatched = [{ entryId: 'entry', revision: 1, dispatchedAt: timestamp }];
+				registry.reconcileQueuedSteers(chatId, control);
+				head.resolve(2);
+				await head.promise;
+				expect(live.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
+				expect(loading.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'optimistic:own']);
+				if (completion === 'unmount') registry.reconcile([left]);
+				else if (completion === 'aborted snapshot') {
+					loading.abortSnapshotLoad(epoch);
+					loading.installCachedSnapshot(chatId);
+				} else {
+					const ordinal = completion === 'snapshot' ? 1 : 200;
+					loading.setFromPage(chatId, { transcriptViewId, messages: [message(ordinal)], lastOrdinal: ordinal,
+						pageOldestOrdinal: ordinal, pageNewestOrdinal: ordinal, nextBeforeOrdinal: ordinal > 1 ? ordinal : null,
+						hasMore: ordinal > 1 }, epoch);
+				}
+				expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+				if (completion === 'snapshot' || completion === 'aborted snapshot') {
+					expect(loading.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
+				}
+			} finally {
+				registry.destroy();
+				cache.flush();
+			}
+		},
+	);
+
+	it('holds head-based retirement until a snapshot-buffering panel reaches the sampled head', async () => {
+		const head = deferred<number>();
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
+		const chatId = 'chat-1', transcriptViewId = 'view-1';
+		const panel = mountAttachedPanel(cache, registry, presentation('chat-view:window-left', chatId));
+		panel.installInitialSnapshot();
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance', createdAt: '2026-08-30T00:00:00.000Z',
+			delivery: 'pending', placement: 'live-tail' });
+		registry.acceptDeliveredSteer(chatId, { kind: 'delivered', clientMessageId: 'own', transcriptViewId });
+		const epoch = panel.transcript.beginSnapshotLoad();
+		try {
+			cache.replace(chatId, transcriptViewId, [message(200)], 200, 200);
+			registry.markChatValidated(chatId);
+			head.resolve(199);
+			await head.promise;
+			expect(panel.transcript.visibleRows.at(-1)?.id).toBe('optimistic:own');
+			panel.transcript.setFromPage(chatId, { transcriptViewId, messages: [message(200)], lastOrdinal: 200,
+				pageOldestOrdinal: 200, pageNewestOrdinal: 200, nextBeforeOrdinal: 200, hasMore: true }, epoch);
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
 	it('keeps an admitted steer visible through queue clear while its echo is buffered for replay', () => {
 		const { cache, registry, overlays } = fixture();
 		const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
