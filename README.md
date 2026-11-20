@@ -260,6 +260,10 @@ Follow these rules when asked to install or host Garcon:
 - Verify the result: `curl -fsS http://127.0.0.1:8080/api/v1/auth/status` returns JSON, the log shows no startup error, and after killing the server process the service brings it back with the same chats.
 - Give the user the status, log, stop, start, and remove commands from the recipe.
 
+### Steering a running chat
+
+Send guidance with `/steer` or the Ctrl+Enter steering shortcut. In the tab that sent it, the bubble shows **Sending** while submission is unresolved. **Waiting to steer** means the server queued the guidance, not that the agent received it. Edit or remove it in the queue tray while it waits. When the committed message reaches the tab, it replaces the bubble without a waiting indicator. Reloading the tab drops the local bubble; restarting the server clears the queue. Local and remote executors behave the same way.
+
 ### Using Garcon from an agent
 
 The [garcon-skills](https://github.com/cfal/garcon-skills) package and the [CLI](#automate-and-delegate) let agents start, monitor, message, and delegate to other Garcon chats, schedule prompts, and manage tickets.
