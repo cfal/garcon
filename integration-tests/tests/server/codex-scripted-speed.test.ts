@@ -5,10 +5,12 @@ import type {
   AgentTurnCommandResponse, CommandAcceptedResponse, CompactCommandRequest, ExecutionSettingsPatchRequest,
 } from '../../../common/chat-command-contracts.js';
 import { generationModelTestConfigurationKey, type GenerationModelTestResponse } from '../../../common/generation-test-contracts.js';
+import { codexUsageFormat } from '../../../server-agents/codex/src/agents/codex/usage-format.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { codexRequestModel, LIVE_CODEX_THINKING_MODE, liveCodexRunRequest, liveCodexStartRequest } from '../../support/live-codex.js';
 import { startScriptedCodexTestEnvironment, type ScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { prepareScriptedCodexSpeed, STANDARD_ONLY_MODEL } from '../../support/scripted-codex-speed.js';
@@ -26,7 +28,6 @@ describe('Codex scripted per-chat speed', () => {
       const config = join(fixture.executionDirs.home, '.codex', 'config.toml');
       const originalConfig = await readFile(config, 'utf8');
       const restrictedConfig = `features.ultrafast_mode = false\n${originalConfig}`;
-      await writeFile(config, restrictedConfig);
       const fastChat = fixture.newChatId();
       const standardChat = fixture.newChatId();
       const savedSettings = async (chatId: string) => {
@@ -70,9 +71,21 @@ describe('Codex scripted per-chat speed', () => {
         });
       };
 
-      await expectTurnTier(startChat, fastChat, undefined);
       await expectTurnTier(startChat, standardChat, undefined);
+      await writeFile(config, restrictedConfig);
+      await expectTurnTier(startChat, fastChat, undefined);
       const beforeChange = environment.model.requests().length;
+      const originalSettings = await savedSettings(fastChat);
+      await writeFile(config, 'invalid = [\n');
+      try {
+        const failed = await patchSpeed('fast');
+        expect(failed.status).toBe(503);
+        expect(await failed.json()).toMatchObject({ errorCode: 'UNAVAILABLE', retryable: true,
+          error: expect.stringContaining('could not verify speed') });
+        expect(await savedSettings(fastChat)).toEqual(originalSettings);
+      } finally {
+        await writeFile(config, restrictedConfig);
+      }
       await changeSpeed('fast');
       expect(environment.model.requests()).toHaveLength(beforeChange);
       await expectTurnTier(resumeChat, fastChat, 'priority');
@@ -127,6 +140,16 @@ describe('Codex scripted per-chat speed', () => {
       const compactTerminal = await fixture.client.waitForTurnTerminal(fastChat, compact.turnId, { afterIndex: compactCursor });
       expect(compactTerminal.type).toBe('agent-run-finished');
       expect(environment.model.requests()[beforeCompact]?.body.service_tier).toBe('priority');
+      const native = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId: fastChat, agentId: 'codex' });
+      const path = native.nativeSession?.value.path;
+      if (typeof path !== 'string') throw new Error('Missing synthetic rollout path');
+      const usageState = codexUsageFormat.createState();
+      const recordedSpeeds = (await readFile(path, 'utf8')).split('\n').flatMap((line) => {
+        if (!codexUsageFormat.lineMarkers.some((marker) => line.includes(marker))) return [];
+        const record = codexUsageFormat.parseLine(line, usageState);
+        return record && 'speed' in record ? [record.speed] : [];
+      });
+      expect(recordedSpeeds).toEqual(['standard', 'fast', 'fast', 'ultrafast', 'ultrafast', 'ultrafast', 'fast']);
       await changeSpeed('standard');
       await expectTurnTier(resumeChat, fastChat, undefined);
       expect(await readFile(config, 'utf8')).toBe(originalConfig);
