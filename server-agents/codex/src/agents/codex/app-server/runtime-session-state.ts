@@ -87,6 +87,8 @@ export interface RunningCodexSession {
   confirmedThreadSettings: CodexConfirmedThreadSettings;
   pendingThreadSettings: ThreadSettingsWaiter | null;
   threadSettingsUpdateChain: Promise<void>;
+  // Prevents idle reclamation during configuration work, without delaying explicit source retirement.
+  configurationReservations: number;
   configurationFenced: boolean;
   // Wall-clock stamp taken when the session finishes while its source stays
   // retained; drives the idle reclamation sweep for retained writers.

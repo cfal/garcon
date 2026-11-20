@@ -534,8 +534,13 @@ export class CodexAppServerRuntime {
   async validateDeferredSpeed(threadId: string, model: string, speed: CodexSpeed): Promise<void> {
     const session = this.#sourceForThread(threadId);
     if (!session || speed === 'standard') return;
-    await this.#checkLoadedTier(session, model, codexServiceTier(speed));
-    this.#assertSettingsSourceCurrent(session);
+    session.configurationReservations += 1;
+    try {
+      await this.#checkLoadedTier(session, model, codexServiceTier(speed));
+      this.#assertSettingsSourceCurrent(session);
+    } finally {
+      session.configurationReservations -= 1;
+    }
   }
 
   #checkLoadedTier(session: RunningCodexSession, model: string, tier: CodexServiceTier): Promise<void> {
@@ -555,9 +560,10 @@ export class CodexAppServerRuntime {
     const session = this.#sourceForThread(agentSessionId);
     if (!session) return Promise.resolve();
     const target = codexThreadSettingsTarget(configuration);
+    session.configurationReservations += 1;
     const update = session.threadSettingsUpdateChain.then(() => (
       this.#applyThreadSettings(session, target)
-    ));
+    )).finally(() => { session.configurationReservations -= 1; });
     session.threadSettingsUpdateChain = update.catch(() => undefined);
     return update;
   }
@@ -832,6 +838,7 @@ export class CodexAppServerRuntime {
       confirmedThreadSettings,
       pendingThreadSettings: null,
       threadSettingsUpdateChain: Promise.resolve(),
+      configurationReservations: 0,
       configurationFenced: false,
     };
     const previousSources = new Set([
@@ -915,16 +922,21 @@ export class CodexAppServerRuntime {
     if (retained && canReactivate(retained)) {
       let tierVerified = true;
       if (tier !== 'default') {
+        retained.configurationReservations += 1;
         try {
-          await this.#checkLoadedTier(retained, request.model, tier);
-        } catch (error) {
-          // Only an idle writer can be reopened for a fresh effective-tier check.
-          if (!isTerminalSessionStatus(retained.status) || !(error instanceof AgentIntegrationError)
-            || !error.retryable || (error.code !== 'TIMEOUT' && error.code !== 'UNAVAILABLE')) throw error;
-          tierVerified = false;
+          try {
+            await this.#checkLoadedTier(retained, request.model, tier);
+          } catch (error) {
+            // Only an idle writer can be reopened for a fresh effective-tier check.
+            if (!isTerminalSessionStatus(retained.status) || !(error instanceof AgentIntegrationError)
+              || !error.retryable || (error.code !== 'TIMEOUT' && error.code !== 'UNAVAILABLE')) throw error;
+            tierVerified = false;
+          }
+          await retained.threadSettingsUpdateChain;
+          assertCodexExecutionOpen(request);
+        } finally {
+          retained.configurationReservations -= 1;
         }
-        await retained.threadSettingsUpdateChain;
-        assertCodexExecutionOpen(request);
       }
       if (tierVerified && canReactivate(retained)) return { session: this.#reactivateSession(retained, request, operation), buffered: false };
       // A changed selection can use a fresh resume; a displaced or busy writer cannot.
