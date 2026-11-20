@@ -17,6 +17,7 @@ import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 import type { OptimisticUserInput } from '../optimistic-user-input.js';
 import { mergeRowsWithOptimisticInputs } from '../transcript-row-projection.js';
+import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
@@ -127,6 +128,39 @@ describe('ActiveTranscriptState', () => {
 	});
 
 	afterEach(() => vi.restoreAllMocks());
+
+	it.each([
+		{ direction: 'earlier', shared: false }, { direction: 'later', shared: false },
+		{ direction: 'earlier', shared: true }, { direction: 'later', shared: true },
+	] as const)('retires an optimistic echo from an applied $direction page (shared: $shared)', async ({ direction, shared }) => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const overlays = new ConversationTranscriptOverlayStore();
+		const observe = vi.fn((chatId: string, messages: readonly TranscriptMessage[]) => {
+			overlays.clearEchoedInputs(chatId, messages);
+		});
+		const chat = new ActiveTranscriptState(cache, shared ? overlays.forChat('chat-1') : null, { onRecoveredMessages: observe });
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(2, assistant('response'))], {
+			lastOrdinal: 3, pageOldestOrdinal: 2, pageNewestOrdinal: 2, nextBeforeOrdinal: 2, hasMore: true,
+		});
+		chat.hasLaterMessages = true;
+		if (shared) overlays.upsertOptimisticInput('chat-1', optimisticInput(), 3);
+		else chat.upsertOptimisticUserInput(optimisticInput());
+		observe.mockClear();
+		const echo = entry(direction === 'earlier' ? 1 : 3, user('guidance', { clientMessageId: 'msg-1' }));
+		vi.mocked(getChatMessages).mockImplementation(async request => ({
+			chatId: 'chat-1', limit: request.limit ?? 50,
+			...page({ messages: [echo], lastOrdinal: 3, hasMore: direction === 'later' }),
+		}));
+		try {
+			await expect(direction === 'earlier' ? chat.loadEarlierPage('chat-1') : chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+			expect(chat.entries).toContainEqual(echo);
+			expect(observe).toHaveBeenCalledWith('chat-1', [echo]);
+			expect(chat.optimisticUserInputs).toEqual([]);
+		} finally {
+			chat.clearMessages();
+			cache.flush();
+		}
+	});
 
 	it('reuses message projections until their transcript changes', () => {
 		const chat = new ActiveTranscriptState();
