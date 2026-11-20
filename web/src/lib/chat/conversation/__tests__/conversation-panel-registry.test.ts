@@ -1259,7 +1259,7 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('purges optimistic input ownership when its chat is discarded', () => {
+	it('does not restore a discarded optimistic input when its reply arrives', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
@@ -1274,17 +1274,16 @@ describe('ConversationPanelRegistry', () => {
 			createdAt: '2026-08-30T00:00:00.000Z',
 			delivery: 'pending',
 		});
-		const markDelivered = vi.spyOn(registry, 'markOptimisticInputDelivered');
-
+		registry.resetForViewReplacement('chat-1', 'view-1');
 		selected.discardChat('chat-1');
-		selected.markOptimisticUserInputDelivered('input-1');
+		selected.markOptimisticUserInputDelivered('chat-1', 'input-1');
 
-		expect(markDelivered).not.toHaveBeenCalled();
+		expect(registry.overlayFor('chat-1')?.optimisticInputs).toEqual([]);
 		registry.destroy();
 		cache.flush();
 	});
 
-	it('purges optimistic input ownership when its committed echo arrives', () => {
+	it('does not restore an optimistic input when its reply arrives after its echo', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
@@ -1313,11 +1312,9 @@ describe('ConversationPanelRegistry', () => {
 			2,
 			2,
 		);
-		const markDelivered = vi.spyOn(registry, 'markOptimisticInputDelivered');
+		selected.markOptimisticUserInputDelivered('chat-1', 'input-1');
 
-		selected.markOptimisticUserInputDelivered('input-1');
-
-		expect(markDelivered).not.toHaveBeenCalled();
+		expect(registry.overlayFor('chat-1')?.optimisticInputs).toEqual([]);
 		registry.destroy();
 		cache.flush();
 	});
@@ -1333,13 +1330,40 @@ describe('ConversationPanelRegistry', () => {
 		seed(cache, chatId);
 		selected.upsertOptimisticUserInput({ chatId, clientMessageId: receipt.clientMessageId,
 			content: 'guidance', createdAt: timestamp, delivery: 'pending' });
-		selected.acceptQueuedSteer(receipt, control);
+		selected.acceptQueuedSteer(chatId, receipt, control);
 		expect(overlays.viewFor('chat-2')).toBeNull();
 		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, queuedAtVersion: null });
 		cache.replace(chatId, 'view-1', [message(1), { ordinal: 2,
 			message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: receipt.clientMessageId }) }], 2, null);
 		registry.reconcile([presentation('chat-view:window-left', chatId)]);
 		registry.panel('chat-view:window-left')!.installInitialSnapshot();
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('binds a late steer reply after a buffered echo is discarded and the recovery page omits it', async () => {
+		const head = deferred<number>();
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
+		const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
+		const receipt = { transcriptViewId, clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server' };
+		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => 'chat-2' });
+		seed(cache, chatId);
+		selected.upsertOptimisticUserInput({ chatId, clientMessageId: 'own', content: 'guidance', createdAt: timestamp,
+			delivery: 'pending', placement: 'live-tail' });
+		const replay = registry.beginReconnectReplay(chatId, transcriptViewId);
+		selected.applyMessages(chatId, transcriptViewId, [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined,
+			{ clientMessageId: receipt.clientMessageId }) }], 2, 2);
+		registry.abortReconnectReplay(replay, chatId);
+		cache.replace(chatId, transcriptViewId, [message(200)], 200, 200);
+		registry.reconcile([presentation('chat-view:window-left', chatId)]);
+		registry.panel('chat-view:window-left')!.installInitialSnapshot();
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		control.queue.recentlyDispatched = [{ entryId: receipt.entryId, revision: 1, dispatchedAt: timestamp }];
+		selected.acceptQueuedSteer(chatId, receipt, control);
+		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toMatchObject(receipt);
+		head.resolve(200);
+		await head.promise;
 		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
 		registry.destroy();
 		cache.flush();
