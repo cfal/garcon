@@ -1,8 +1,18 @@
 import type { ChatSessionRecord } from './chat-session-types.js';
 import type { ChatSessionsPort } from './chat-sessions-contract.js';
 
-export type ChatSettingsPatch = Partial<Pick<ChatSessionRecord,
-	'model' | 'apiProviderId' | 'modelEndpointId' | 'modelProtocol' | 'permissionMode' | 'thinkingMode' | 'agentSettings'>>;
+export type ChatSettingsPatch = Partial<
+	Pick<
+		ChatSessionRecord,
+		| 'model'
+		| 'apiProviderId'
+		| 'modelEndpointId'
+		| 'modelProtocol'
+		| 'permissionMode'
+		| 'thinkingMode'
+		| 'agentSettings'
+	>
+>;
 export type ChatSetting = 'model' | 'permissionMode' | 'thinkingMode' | 'agentSettings';
 
 interface SettingMutation {
@@ -12,7 +22,9 @@ interface SettingMutation {
 }
 
 function readPatch(chat: ChatSessionRecord, fields: ChatSettingsPatch): ChatSettingsPatch {
-	return Object.fromEntries(Object.keys(fields).map((key) => [key, chat[key as keyof ChatSettingsPatch]]));
+	return Object.fromEntries(
+		Object.keys(fields).map((key) => [key, chat[key as keyof ChatSettingsPatch]]),
+	);
 }
 
 /** Owns outstanding settings writes by chat, independently of the mounted composer. */
@@ -26,17 +38,24 @@ export class ChatSettingsMutations {
 
 	async #settle(chatId: string): Promise<boolean> {
 		let accepted = true;
-		let pending: Promise<boolean> | undefined;
-		while ((pending = this.#requests.get(chatId))) accepted = await pending;
-		return accepted;
+		while (true) {
+			const pending = this.#requests.get(chatId);
+			if (!pending) return accepted;
+			accepted = await pending;
+		}
 	}
 
-	change(chatId: string, setting: ChatSetting, patch: ChatSettingsPatch, options: {
-		sessions: Pick<ChatSessionsPort, 'byId' | 'quietRefreshChats'>;
-		request: (epoch: string | undefined) => Promise<ChatSettingsPatch>;
-		apply: (patch: ChatSettingsPatch) => void;
-		onFailure: (error: unknown) => void;
-	}): void {
+	change(
+		chatId: string,
+		setting: ChatSetting,
+		patch: ChatSettingsPatch,
+		options: {
+			sessions: Pick<ChatSessionsPort, 'byId' | 'quietRefreshChats'>;
+			request: (epoch: string | undefined) => Promise<ChatSettingsPatch>;
+			apply: (patch: ChatSettingsPatch) => void;
+			onFailure: (error: unknown) => void;
+		},
+	): void {
 		const { sessions, request, apply, onFailure } = options;
 		const chat = sessions.byId[chatId];
 		if (!chat) return;
@@ -44,11 +63,15 @@ export class ChatSettingsMutations {
 		const epoch = chat.agentOwnershipEpoch ?? undefined;
 		const previous = this.#mutations.get(key);
 		const token = Symbol(key);
-		const mutation = previous && previous.epoch === epoch ? previous : { epoch, confirmed: readPatch(chat, patch), latest: token };
+		const mutation =
+			previous && previous.epoch === epoch
+				? previous
+				: { epoch, confirmed: readPatch(chat, patch), latest: token };
 		mutation.latest = token;
 		this.#mutations.set(key, mutation);
-		const latest = () => this.#mutations.get(key) === mutation && mutation.latest === token;
-		const isCurrent = () => latest() && !!sessions.byId[chatId] && sessions.byId[chatId].agentOwnershipEpoch === epoch;
+		const isLatest = () => this.#mutations.get(key) === mutation && mutation.latest === token;
+		const isCurrent = () =>
+			isLatest() && !!sessions.byId[chatId] && sessions.byId[chatId].agentOwnershipEpoch === epoch;
 		apply(patch);
 
 		const run = async () => {
@@ -71,7 +94,7 @@ export class ChatSettingsMutations {
 						if (isCurrent()) apply(readPatch(sessions.byId[chatId], patch));
 					}
 				} finally {
-					if (latest()) this.#mutations.delete(key);
+					if (isLatest()) this.#mutations.delete(key);
 				}
 			}
 		};
