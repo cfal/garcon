@@ -51,6 +51,42 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(overlays.viewFor('chat-1')?.notices).toHaveLength(1);
 	});
 
+	it('retains observed echoes until presentation catches up, even after queue controls disappear', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chatId = 'chat-1';
+		const control = emptyChatExecutionControlState('server');
+		const input = optimistic('own');
+		control.queue.entries = [{ id: 'entry', kind: 'steer', attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
+		overlays.upsertOptimisticInput(chatId, input, 1);
+		overlays.reconcileQueuedSteers(chatId, control, {
+			clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId: 'view',
+		});
+		overlays.clearEchoedInputs(chatId, [echoed('own', 2), echoed('not-local', 3)], 1);
+		overlays.reconcileQueuedSteers(chatId, null);
+		expect(overlays.forChat(chatId).optimisticInputs).toHaveLength(1);
+		overlays.upsertOptimisticInput(chatId, optimistic('later'), 1);
+		overlays.clearEchoedInputs(chatId, [], 2);
+		expect(overlays.forChat(chatId).optimisticInputs.map(input => input.clientMessageId)).toEqual(['later']);
+		expect(overlays.forChat(chatId).optimisticAfterOrdinals.get('later')).toBe(2);
+		overlays.upsertOptimisticInput(chatId, optimistic('not-local'), 3);
+		overlays.clearEchoedInputs(chatId, [], 3);
+		expect(overlays.forChat(chatId).optimisticInputs).toHaveLength(2);
+	});
+
+	it.each(['clear', 'replacement', 'prune'] as const)('drops retained echo evidence on %s', cleanup => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chatId = 'chat-1', input = optimistic('own');
+		overlays.upsertOptimisticInput(chatId, input, 1);
+		overlays.clearEchoedInputs(chatId, [echoed('own', 2)], 1);
+		if (cleanup === 'clear') overlays.clearOptimisticInput(chatId, 'own');
+		else if (cleanup === 'replacement') overlays.resetForTranscriptReplacement(chatId);
+		else overlays.prune(new Set());
+		overlays.upsertOptimisticInput(chatId, input, 1);
+		overlays.clearEchoedInputs(chatId, [], 2);
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([input]);
+	});
+
 	it('returns one stable chat-qualified view', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		const first = overlays.forChat('chat-1');

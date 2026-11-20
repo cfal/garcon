@@ -46,6 +46,8 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	#notices = $state<OverlayNotice[]>([]);
 	#noticeRevision = $state(0);
 	#optimisticInputs = $state<OptimisticUserInput[]>([]);
+	// Echoes can reach the shared cache before a snapshot-buffering panel displays them.
+	#pendingEchoOrdinals = new Map<string, number>();
 	#optimisticAfterOrdinals = $state.raw<ReadonlyMap<string, number>>(new Map());
 	#resendCandidates = $state<ResendCandidate[]>([]);
 	#excludedResendOrdinals = $state<number[]>([]);
@@ -158,6 +160,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			(input) => input.clientMessageId !== clientMessageId,
 		);
 		if (next.length === this.#optimisticInputs.length) return feedMutation(false);
+		this.#pendingEchoOrdinals.delete(clientMessageId);
 		const ordinals = new Map(this.#optimisticAfterOrdinals);
 		ordinals.delete(clientMessageId);
 		this.#optimisticAfterOrdinals = ordinals;
@@ -176,7 +179,8 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		const next: OptimisticUserInput[] = [];
 		let removedOrdinals: Map<string, number> | undefined;
 		for (const input of this.#optimisticInputs) {
-			if ((receipt && receipt.clientMessageId !== input.clientMessageId)
+			if (this.#pendingEchoOrdinals.has(input.clientMessageId)
+				|| (receipt && receipt.clientMessageId !== input.clientMessageId)
 				|| (typeof input.delivery === 'object' && input.delivery.kind === 'delivered')) {
 				next.push(input);
 				continue;
@@ -246,7 +250,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return feedMutation(false);
 	}
 
-	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
+	applyCommittedBatch(batch: CommittedOverlayBatch, throughOrdinal = Infinity): ConversationTranscriptOverlayMutation {
 		let feedStructureChanged = false;
 		const notices = this.#notices.filter((notice) => notice.revision > batch.noticeRevision);
 		if (notices.length !== this.#notices.length) {
@@ -254,22 +258,27 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			feedStructureChanged = true;
 		}
 
-		const echoes = this.clearEchoedInputs(batch.messages);
+		const echoes = this.clearEchoedInputs(batch.messages, throughOrdinal);
 		this.publishSnapshotResendCandidates(batch.resendCandidates, batch);
 		return feedMutation(feedStructureChanged || echoes.feedStructureChanged);
 	}
 
-	clearEchoedInputs(messages: readonly TranscriptMessage[]): ConversationTranscriptOverlayMutation {
+	clearEchoedInputs(messages: readonly TranscriptMessage[], throughOrdinal = Infinity): ConversationTranscriptOverlayMutation {
 		if (!this.#optimisticInputs.length) return feedMutation(false);
 		const echoed = echoedClientMessageOrdinals(messages);
-		if (echoed.size > 0) {
+		for (const input of this.#optimisticInputs) {
+			const ordinal = echoed.get(input.clientMessageId);
+			if (ordinal !== undefined) this.#pendingEchoOrdinals.set(input.clientMessageId, ordinal);
+		}
+		if (this.#pendingEchoOrdinals.size > 0) {
 			const ordinals = new Map(this.#optimisticAfterOrdinals);
 			const remaining: OptimisticUserInput[] = [];
 			let latestPriorEchoOrdinal: number | undefined;
 			for (const input of this.#optimisticInputs) {
-				const echoOrdinal = echoed.get(input.clientMessageId);
-				if (echoOrdinal !== undefined) {
+				const echoOrdinal = this.#pendingEchoOrdinals.get(input.clientMessageId);
+				if (echoOrdinal !== undefined && echoOrdinal <= throughOrdinal) {
 					latestPriorEchoOrdinal = Math.max(latestPriorEchoOrdinal ?? 0, echoOrdinal);
+					this.#pendingEchoOrdinals.delete(input.clientMessageId);
 					ordinals.delete(input.clientMessageId);
 					continue;
 				}
@@ -308,6 +317,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		// The revision counter stays monotonic across replacements so a revision
 		// captured before the reset cannot clear notices appended after it.
 		this.#optimisticInputs = [];
+		this.#pendingEchoOrdinals.clear();
 		this.#optimisticAfterOrdinals = new Map();
 		this.#resendCandidates = [];
 		this.#excludedResendOrdinals = [];
@@ -376,8 +386,8 @@ export class ConversationTranscriptOverlayStore {
 		return this.#entries.get(chatId)?.reconcileQueuedSteers(control, receipt) ?? null;
 	}
 
-	clearEchoedInputs(chatId: string, messages: readonly TranscriptMessage[]) {
-		return this.#entries.get(chatId)?.clearEchoedInputs(messages) ?? null;
+	clearEchoedInputs(chatId: string, messages: readonly TranscriptMessage[], throughOrdinal = Infinity) {
+		return this.#entries.get(chatId)?.clearEchoedInputs(messages, throughOrdinal) ?? null;
 	}
 
 	replaceResendCandidates(
@@ -395,8 +405,8 @@ export class ConversationTranscriptOverlayStore {
 		return this.#entry(chatId).clearResendExclusions();
 	}
 
-	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
-		return this.#entry(batch.chatId).applyCommittedBatch(batch);
+	applyCommittedBatch(batch: CommittedOverlayBatch, throughOrdinal = Infinity): ConversationTranscriptOverlayMutation {
+		return this.#entry(batch.chatId).applyCommittedBatch(batch, throughOrdinal);
 	}
 
 	publishSnapshotResendCandidates(

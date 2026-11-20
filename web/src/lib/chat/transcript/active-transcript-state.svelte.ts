@@ -359,6 +359,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 				this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
 			}
 			this.setResendCandidates(resendCandidates);
+			this.options.onRecoveredMessages?.(chatId, messages);
 			return 'applied';
 		}
 		const previousEntryCount = this.entries.length;
@@ -404,6 +405,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
 		}
 		this.setResendCandidates(resendCandidates);
+		this.options.onRecoveredMessages?.(chatId, messages);
 		return 'applied';
 	}
 
