@@ -15,6 +15,8 @@ export interface ChatTranscriptRow {
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
 function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
+	const inputStatus: InputStatus | undefined = input.delivery === 'pending' ? 'sending'
+		: typeof input.delivery === 'object' && input.delivery.kind === 'queued' ? 'waiting-to-steer' : undefined;
 	return {
 		kind: 'message',
 		id: `optimistic:${input.clientMessageId}`,
@@ -23,9 +25,7 @@ function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 			...(input.contentMode ? { contentMode: input.contentMode } : {}),
 			...(input.contentFormat ? { contentFormat: input.contentFormat } : {}),
 		}),
-		...(input.delivery === 'delivered' ? {} : {
-			inputStatus: input.delivery === 'pending' ? 'sending' : 'waiting-to-steer',
-		}),
+		...(inputStatus ? { inputStatus } : {}),
 	};
 }
 

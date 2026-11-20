@@ -15,7 +15,7 @@ import {
 	InactiveTranscriptWindowStore,
 	type InactiveTranscriptWindow,
 } from '$lib/chat/transcript/inactive-transcript-window-store.js';
-import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { DeliveredSteerReceipt, OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
@@ -36,7 +36,7 @@ import type {
 	ChatSurfaceTransferPort,
 } from '$lib/workspace/chat-surface-transfer.js';
 import type { WorkspacePublication } from '$lib/workspace/workspace-commit.js';
-import { QueuedSteerTranscriptRecovery } from './queued-steer-transcript-recovery.js';
+import { SteerTranscriptRecovery } from './steer-transcript-recovery.js';
 
 export interface ConversationPanelDescriptor extends VisibleChatPresentation {
 	readonly snapshotAdmission: ConversationPanelSnapshotAdmission;
@@ -126,7 +126,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		if (mutation) this.#applyOverlayMutation(chatId, mutation);
 		this.#steerRecovery.observe(chatId);
 	};
-	readonly #steerRecovery: QueuedSteerTranscriptRecovery;
+	readonly #steerRecovery: SteerTranscriptRecovery;
 	#recoverTranscript = async (chatId: string, viewId: string): Promise<void> => {
 		if (this.resetForViewReplacement(chatId, viewId)) {
 			await this.loadChatSnapshot(chatId, { purpose: 'activation' });
@@ -158,7 +158,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			) => Promise<void>;
 		},
 	) {
-		this.#steerRecovery = new QueuedSteerTranscriptRecovery({
+		this.#steerRecovery = new SteerTranscriptRecovery({
 			inputs: chatId => options.overlays.viewFor(chatId)?.optimisticInputs ?? [],
 			cursor: chatId => options.cache.readAppliedCursor(chatId),
 			clear: (chatId, id) => this.clearOptimisticInput(chatId, id),
@@ -600,6 +600,13 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const mutation = this.options.overlays.markOptimisticInputDelivered(chatId, clientMessageId);
 		if (!mutation) return;
 		this.#applyOverlayMutation(chatId, mutation);
+	}
+
+	acceptDeliveredSteer(chatId: string, receipt: DeliveredSteerReceipt): void {
+		const input = this.overlayFor(chatId)?.optimisticInputs.find(input => input.clientMessageId === receipt.clientMessageId);
+		if (input?.delivery !== 'pending') return;
+		this.upsertOptimisticInput(chatId, { ...input, delivery: receipt });
+		this.#steerRecovery.observe(chatId);
 	}
 
 	clearOptimisticInput(chatId: string, clientMessageId: string): void {

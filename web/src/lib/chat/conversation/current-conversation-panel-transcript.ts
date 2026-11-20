@@ -9,7 +9,7 @@ import {
 	type ChatRestoreResult,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { DeliveredSteerReceipt, OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
@@ -227,6 +227,10 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 
 	acceptQueuedSteer(chatId: string, receipt: QueuedSteerReceipt, control: ChatExecutionControlState | null): void {
 		this.options.panels.reconcileQueuedSteers(chatId, control, receipt);
+	}
+
+	acceptDeliveredSteer(chatId: string, receipt: DeliveredSteerReceipt): void {
+		this.options.panels.acceptDeliveredSteer(chatId, receipt);
 	}
 
 	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void {

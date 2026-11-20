@@ -1,6 +1,6 @@
 import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatTranscriptAppliedCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-import type { OptimisticUserInput, QueuedSteerDelivery } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { OptimisticUserInput, SteerDelivery } from '$lib/chat/transcript/optimistic-user-input.js';
 
 type ReadHead = (chatId: string, transcriptViewId: string) => Promise<number | null>;
 const RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000];
@@ -10,9 +10,9 @@ async function readTranscriptHead(chatId: string, transcriptViewId: string): Pro
 	return page.lastOrdinal ?? null;
 }
 
-/** A head read started after queue departure bounds the echo, even outside the recovery page. */
-export class QueuedSteerTranscriptRecovery {
-	#heads = new WeakMap<QueuedSteerDelivery, number | 'pending'>();
+/** A head read after queue departure or delivery acknowledgement bounds even an off-page echo. */
+export class SteerTranscriptRecovery {
+	#heads = new WeakMap<SteerDelivery, number | 'pending'>();
 	#retryTimers = new Set<ReturnType<typeof setTimeout>>();
 	#destroyed = false;
 
@@ -25,9 +25,10 @@ export class QueuedSteerTranscriptRecovery {
 
 	observe(chatId: string): void {
 		if (this.#destroyed) return;
-		const reads = new Map<string, QueuedSteerDelivery[]>();
+		const reads = new Map<string, SteerDelivery[]>();
 		for (const { delivery } of this.options.inputs(chatId)) {
-			if (typeof delivery !== 'object' || delivery.queuedAtVersion !== null || this.#heads.has(delivery)) continue;
+			if (typeof delivery !== 'object' || this.#heads.has(delivery)
+				|| (delivery.kind === 'queued' && delivery.queuedAtVersion !== null)) continue;
 			this.#heads.set(delivery, 'pending');
 			const cohort = reads.get(delivery.transcriptViewId);
 			if (cohort) cohort.push(delivery);
@@ -53,13 +54,13 @@ export class QueuedSteerTranscriptRecovery {
 		}
 	}
 
-	#currentCohort(chatId: string, cohort: QueuedSteerDelivery[]): QueuedSteerDelivery[] {
+	#currentCohort(chatId: string, cohort: SteerDelivery[]): SteerDelivery[] {
 		if (this.#destroyed) return [];
 		const current = new Set(this.options.inputs(chatId).map(input => input.delivery));
 		return cohort.filter(delivery => current.has(delivery) && this.#heads.get(delivery) === 'pending');
 	}
 
-	async #read(chatId: string, viewId: string, cohort: QueuedSteerDelivery[], retryIndex = 0): Promise<void> {
+	async #read(chatId: string, viewId: string, cohort: SteerDelivery[], retryIndex = 0): Promise<void> {
 		cohort = this.#currentCohort(chatId, cohort);
 		if (!cohort.length) return;
 		let head: number | null = null;

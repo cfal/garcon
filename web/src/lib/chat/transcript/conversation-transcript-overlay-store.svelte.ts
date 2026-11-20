@@ -169,14 +169,15 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		control: ChatExecutionControlState | null,
 		receipt?: QueuedSteerReceipt,
 	): ConversationTranscriptOverlayMutation {
-		if (!this.#optimisticInputs.some(input => typeof input.delivery === 'object'
+		if (!this.#optimisticInputs.some(input => (typeof input.delivery === 'object' && input.delivery.kind === 'queued')
 			|| input.clientMessageId === receipt?.clientMessageId)) return feedMutation(false);
 		const entries = new Map(control?.queue.entries.map(entry => [entry.id, entry.content]));
 		const dispatched = new Set(control?.queue.recentlyDispatched.map(entry => entry.entryId));
 		const next: OptimisticUserInput[] = [];
 		let removedOrdinals: Map<string, number> | undefined;
 		for (const input of this.#optimisticInputs) {
-			if (receipt && receipt.clientMessageId !== input.clientMessageId) {
+			if ((receipt && receipt.clientMessageId !== input.clientMessageId)
+				|| (typeof input.delivery === 'object' && input.delivery.kind === 'delivered')) {
 				next.push(input);
 				continue;
 			}
@@ -198,7 +199,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 				continue;
 			}
 			const queuedAtVersion = content === undefined ? null : control.version;
-			const delivery = previous?.queuedAtVersion === queuedAtVersion ? previous : { ...binding, queuedAtVersion };
+			const delivery = previous?.queuedAtVersion === queuedAtVersion ? previous : { ...binding, kind: 'queued' as const, queuedAtVersion };
 			const text = content ?? input.content;
 			next.push(delivery === input.delivery && text === input.content ? input : { ...input, content: text, delivery });
 		}
