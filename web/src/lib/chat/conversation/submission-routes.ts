@@ -171,15 +171,15 @@ export async function submitSteerRoute(
 				serverInstanceId: response.control.serverInstanceId,
 				entryId: response.entryId,
 			};
-			joinControl(response.control, control => deps.chatState.acceptQueuedSteer(receipt, control));
+			joinControl(response.control, control => deps.chatState.acceptQueuedSteer(context.chatId, receipt, control));
 		} else {
-			deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+			deps.chatState.markOptimisticUserInputDelivered(context.chatId, submission.clientMessageId);
 		}
 		return 'accepted';
 	} catch (error) {
 		const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
 		if (!outcomeUnknown) {
-			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
+			deps.chatState.clearOptimisticUserInput(context.chatId, submission.clientMessageId);
 			restoreSteerComposer(deps, context, clearedComposerRevision);
 		}
 		deps.chatState.appendLocalNoticeForChat(
@@ -264,7 +264,7 @@ export async function submitDraftRoute(
 	deps.startupCoordinator.beginLocalStartup(chatId);
 	try {
 		const response = await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+		deps.chatState.markOptimisticUserInputDelivered(context.chatId, submission.clientMessageId);
 		deps.sessions.applyStartEntry(response.chat);
 		if (response.status === 'accepted') deps.lifecycle.beginTurn(chatId);
 		else deps.startupCoordinator.completeStartup(chatId);
@@ -310,7 +310,7 @@ export async function submitRunRoute(
 	);
 	try {
 		const response = await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+		deps.chatState.markOptimisticUserInputDelivered(context.chatId, submission.clientMessageId);
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
 		if (response.tagMutation) {

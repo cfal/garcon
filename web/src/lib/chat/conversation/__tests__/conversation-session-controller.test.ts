@@ -461,17 +461,17 @@ function createDeps(chat = createRunningChat()) {
 			}
 			chatState.optimisticUserInputs = [...chatState.optimisticUserInputs, input];
 		}),
-		markOptimisticUserInputDelivered: vi.fn((clientMessageId: string) => {
+		markOptimisticUserInputDelivered: vi.fn((chatId: string, clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.map((input) =>
-				input.clientMessageId === clientMessageId
+				input.chatId === chatId && input.clientMessageId === clientMessageId
 					? { ...input, delivery: 'delivered' as const }
 					: input,
 			);
 		}),
 		acceptQueuedSteer: vi.fn(),
-		clearOptimisticUserInput: vi.fn((clientMessageId: string) => {
+		clearOptimisticUserInput: vi.fn((chatId: string, clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
-				(input) => input.clientMessageId !== clientMessageId,
+				(input) => input.chatId !== chatId || input.clientMessageId !== clientMessageId,
 			);
 		}),
 		transcriptCache: {
@@ -5073,7 +5073,7 @@ describe('ConversationSessionController', () => {
 
 		expect(outcome).toBe('accepted');
 		const steerRequest = mockSteerChat.mock.calls[0][0];
-		expect(deps.chatState.acceptQueuedSteer).toHaveBeenCalledWith({
+		expect(deps.chatState.acceptQueuedSteer).toHaveBeenCalledWith('chat-1', {
 			clientMessageId: steerRequest.clientMessageId, entryId: 'entry-steer',
 			transcriptViewId: steerRequest.transcriptViewId,
 			serverInstanceId: control.serverInstanceId,

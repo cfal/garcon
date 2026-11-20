@@ -35,7 +35,7 @@ type SessionTranscriptState = Pick<
 	| 'clearResendExclusions'
 > & {
 	transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor'>;
-	acceptQueuedSteer(receipt: QueuedSteerReceipt, control: ChatExecutionControlState | null): void;
+	acceptQueuedSteer(chatId: string, receipt: QueuedSteerReceipt, control: ChatExecutionControlState | null): void;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
 	getKnownHeadForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;

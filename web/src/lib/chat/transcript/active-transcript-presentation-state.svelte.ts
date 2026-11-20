@@ -213,14 +213,14 @@ export class ActiveTranscriptPresentationState {
 		this.optimisticInputs.upsert(input, this.lastOrdinal);
 	}
 
-	markOptimisticUserInputDelivered(clientMessageId: string): void {
+	markOptimisticUserInputDelivered(chatId: string, clientMessageId: string): void {
 		if (this.#sharedOverlay) return;
-		this.optimisticInputs.markDelivered(clientMessageId);
+		this.optimisticInputs.markDelivered(chatId, clientMessageId);
 	}
 
-	clearOptimisticUserInput(clientMessageId: string): void {
+	clearOptimisticUserInput(chatId: string, clientMessageId: string): void {
 		if (this.#sharedOverlay) return;
-		this.optimisticInputs.clear(clientMessageId);
+		this.optimisticInputs.clear(chatId, clientMessageId);
 	}
 
 	revealEarlierLoadedRows(): boolean {

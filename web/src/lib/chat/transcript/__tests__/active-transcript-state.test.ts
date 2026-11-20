@@ -1495,7 +1495,7 @@ describe('ActiveTranscriptState', () => {
 		const pendingRow = () => chat.visibleRows.find((row) => row.id === 'optimistic:msg-1');
 		expect(pendingRow()).toMatchObject({ inputStatus: 'sending' });
 
-		chat.markOptimisticUserInputDelivered('msg-1');
+		chat.markOptimisticUserInputDelivered('chat-1', 'msg-1');
 
 		expect(pendingRow()).not.toHaveProperty('inputStatus');
 	});
@@ -3904,7 +3904,7 @@ describe('ActiveTranscriptState', () => {
 		},
 		{
 			name: 'clear',
-			mutate: (chat: ActiveTranscriptState) => chat.clearOptimisticUserInput('msg-1'),
+			mutate: (chat: ActiveTranscriptState) => chat.clearOptimisticUserInput('chat-1', 'msg-1'),
 			expected: [],
 		},
 	])(
