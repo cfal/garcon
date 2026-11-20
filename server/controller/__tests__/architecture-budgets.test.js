@@ -31,7 +31,7 @@ const MAX_LINES = 1000;
 // without a pending-question registry or another scheduler.
 // Sidebar activity status adds input-acceptance and turn-start notifications; outcome
 // tracking stays in chat metadata.
-const EXECUTION_FOOTPRINT_BUDGET = 9345;
+const EXECUTION_FOOTPRINT_BUDGET = 9346;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

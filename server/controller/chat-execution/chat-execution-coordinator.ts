@@ -118,7 +118,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
     controls: ChatExecutionControlRepository,
-    options: ChatExecutionCoordinatorOptions & { selectionAdmissionLock?: KeyedPromiseLock },
+    options: ChatExecutionCoordinatorOptions & { selectionAdmissionLock: KeyedPromiseLock },
   ) {
     super();
     if (!turnRunner) throw new Error('ChatExecutionCoordinator requires an agent turn runner');
@@ -136,13 +136,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
     const unsettledQueueReceiptKeys = options.unsettledQueueReceiptKeys ?? (() => new Set());
     const appendControlReceipt = options.appendControlReceipt ?? (() => undefined);
-    const selectionAdmissionLock = options.selectionAdmissionLock ?? new KeyedPromiseLock();
+    if (!options.selectionAdmissionLock || typeof options.canDispatch !== 'function') throw new Error('ChatExecutionCoordinator requires shared selection admission and dispatch policy');
+    const selectionAdmissionLock = options.selectionAdmissionLock;
     this.#turnRunner = turnRunner;
     this.#executionPolicy = options.executionPolicy ?? (() => 'conversation');
     this.#workingDirectorySettlement = options.workingDirectorySettlement;
     this.#getDrainOptions = getDrainOptions;
     this.#chatExists = chatExists;
-    this.#canDispatch = options.canDispatch ?? (() => true);
+    this.#canDispatch = options.canDispatch;
     this.#projectAdmission = options.projectAdmission;
     this.#acceptedInputTranscript = new AcceptedInputTranscript(inputTranscript);
     this.#controlOperations = new ChatExecutionControlOperations(controls, {
