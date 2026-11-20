@@ -1342,6 +1342,29 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('keeps waiting steers at the live tail while the current turn publishes rows', () => {
+		const { cache, registry } = fixture();
+		const chatId = 'chat-1';
+		const timestamp = '2026-08-30T00:00:00.000Z';
+		const panel = mountAttachedPanel(cache, registry, presentation('chat-view:window-left', chatId));
+		panel.installInitialSnapshot();
+		const control = emptyChatExecutionControlState('instance');
+		control.queue.pause = { kind: 'manual', id: 'pause', pausedAt: timestamp };
+		for (const id of ['first', 'second', 'in-flight']) {
+			registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: id, content: id, createdAt: timestamp, delivery: 'pending' });
+			if (id === 'in-flight') continue;
+			control.queue.entries.push({ kind: 'steer', id, content: id, revision: 1, attachments: [], createdAt: timestamp, updatedAt: timestamp });
+			registry.reconcileQueuedSteers(chatId, control, { entryId: id, clientMessageId: id, serverInstanceId: 'instance' });
+		}
+		const rowIds = () => panel.transcript.visibleRows.map(row => row.id);
+		expect(rowIds()).toEqual(['view-1:1', 'optimistic:first', 'optimistic:second', 'optimistic:in-flight']);
+		registry.applyCommittedBatch({ chatId, transcriptViewId: 'view-1', firstOrdinal: 2, lastOrdinal: 3,
+			messages: [message(2), message(3)], resendCandidates: [], noticeRevision: 0 });
+		expect(rowIds()).toEqual(['view-1:1', 'optimistic:in-flight', 'view-1:2', 'view-1:3', 'optimistic:first', 'optimistic:second']);
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('captures a panel target before presentation teardown and consumes it on restore', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
