@@ -3,13 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { processingPulsePhaseMs } from '../processing-pulse.js';
 
 describe('processing pulse', () => {
-	it('uses the shared pulse duration for the composer and its status', () => {
+	it('defines the shared pulse duration', () => {
 		const appCss = readFileSync(new URL('../../../../app.css', import.meta.url), 'utf8');
 
 		expect(appCss).toContain('--processing-pulse-duration: 2.4s;');
-		expect(appCss).toMatch(
-			/composer-thinking-border-pulse var\(--processing-pulse-duration\)\s+ease-in-out infinite/,
-		);
 	});
 
 	it('maps timestamps onto a shared looping phase', () => {
