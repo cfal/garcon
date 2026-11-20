@@ -156,9 +156,10 @@ export async function submitSteerRoute(
 		content: context.content,
 		whenTurnUnavailable: 'queue',
 	});
-	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode, context.contentFormat),
-	);
+	deps.chatState.upsertOptimisticUserInput({
+		...optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode, context.contentFormat),
+		placement: 'live-tail',
+	});
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {

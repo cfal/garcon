@@ -36,12 +36,11 @@ export function mergeRowsWithOptimisticInputs(
 ): ChatTranscriptRow[] {
 	if (rows.length === 0) return optimisticInputs.map(optimisticInputToRow);
 
-	// Waiting steers have no ledger position until dispatch. Keep them at the live
-	// tail without moving ordinary in-flight rows away from their original anchors.
+	// Steers can span ongoing output before either the acknowledgement or the echo.
 	const tailOrdinal = rows.at(-1)?.ordinal ?? 0;
 	const optimisticRows = optimisticInputs.map((input) => ({
 		row: optimisticInputToRow(input),
-		afterOrdinal: typeof input.delivery === 'object' ? tailOrdinal : afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0,
+		afterOrdinal: input.placement === 'live-tail' ? tailOrdinal : afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0,
 	})).sort((a, b) => a.afterOrdinal - b.afterOrdinal);
 	const merged: ChatTranscriptRow[] = [];
 	let messageIndex = 0;

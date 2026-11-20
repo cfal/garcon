@@ -22,5 +22,6 @@ export interface OptimisticUserInput {
 	readonly contentFormat?: 'plain' | 'markdown';
 	readonly createdAt: string;
 	readonly images?: ChatImage[];
+	readonly placement?: 'live-tail';
 	readonly delivery: 'pending' | 'delivered' | QueuedSteerDelivery;
 }
