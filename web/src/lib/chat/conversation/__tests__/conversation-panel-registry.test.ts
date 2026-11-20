@@ -3,6 +3,8 @@ import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '$shared/queue-state';
+import { clearQueue, consumeQueueSteer, createQueuedSteer, reservePendingSteer } from '../../../../../../server/controller/chat-execution/chat-execution-control-transitions.js';
+import { emptyStoredChatExecutionControl, toClientChatExecutionControlState } from '../../../../../../server/controller/chat-execution/control-state.js';
 import type {
 	ActiveTranscriptState,
 	ChatLoadMessagesOptions,
@@ -1534,6 +1536,40 @@ describe('ConversationPanelRegistry', () => {
 		expect(rows()).toEqual([]);
 		registry.destroy();
 		cache.flush();
+	});
+
+	it('keeps an admitted steer visible through queue clear while its echo is buffered for replay', () => {
+		const { cache, registry, overlays } = fixture();
+		const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
+		const context = { now: timestamp, newId: () => 'entry', unsettledQueueReceiptKeys: () => new Set<string>() };
+		const receipt = { entryId: 'entry', clientMessageId: 'input', serverInstanceId: 'server', transcriptViewId };
+		const panel = mountAttachedPanel(cache, registry, presentation('chat-view:window-left', chatId));
+		panel.installInitialSnapshot();
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'input', content: 'guidance', createdAt: timestamp,
+			delivery: 'pending', placement: 'live-tail' });
+		const queued = createQueuedSteer(emptyStoredChatExecutionControl('server'), { content: 'guidance' }, context).next;
+		registry.reconcileQueuedSteers(chatId, toClientChatExecutionControlState(queued), receipt);
+		const reserved = reservePendingSteer(queued, { entryId: 'entry', expectedRevision: 1, expectedReorderRevision: 0 }, context).next;
+		registry.reconcileQueuedSteers(chatId, toClientChatExecutionControlState(reserved));
+		const replay = registry.beginReconnectReplay(chatId, transcriptViewId);
+		try {
+			registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
+				messages: [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: 'input' }) }] });
+			const clear = clearQueue(reserved, context);
+			registry.reconcileQueuedSteers(chatId, toClientChatExecutionControlState(clear.next));
+			expect(overlays.forChat(chatId).optimisticInputs).toHaveLength(1);
+			expect(panel.transcript.visibleRows.at(-1)).toMatchObject({ id: 'optimistic:input', inputStatus: 'waiting-to-steer' });
+			expect(clear.outcome).toMatchObject({ status: 'rejected', rejection: { code: 'QUEUE_ENTRY_IN_FLIGHT' } });
+			const dispatched = consumeQueueSteer(reserved, 'entry', context).next;
+			registry.reconcileQueuedSteers(chatId, toClientChatExecutionControlState(dispatched));
+			expect(overlays.forChat(chatId).optimisticInputs).toHaveLength(1);
+			expect(registry.finishReconnectReplay(replay, chatId)).toBe('applied');
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+			expect(panel.transcript.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
 	});
 
 	it('keeps a steer whose dispatch receipt was evicted until replay reaches its echo', async () => {
