@@ -1,6 +1,7 @@
 import { SvelteMap } from 'svelte/reactivity';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
+import { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '$shared/queue-state';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
 import type { OptimisticUserInput, QueuedSteerReceipt } from './optimistic-user-input.js';
 import { echoedClientMessageOrdinals } from './transcript-row-projection.js';
@@ -175,19 +176,29 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		const next: OptimisticUserInput[] = [];
 		let removedOrdinals: Map<string, number> | undefined;
 		for (const input of this.#optimisticInputs) {
-			const delivery = receipt?.clientMessageId === input.clientMessageId ? receipt : input.delivery;
-			if (typeof delivery === 'string') {
+			if (receipt && receipt.clientMessageId !== input.clientMessageId) {
 				next.push(input);
 				continue;
 			}
-			const content = entries.get(delivery.entryId);
-			// A dispatch update can reach the browser before the committed echo.
-			if (delivery.serverInstanceId !== control?.serverInstanceId
-				|| (content === undefined && !dispatched.has(delivery.entryId))) {
+			const previous = typeof input.delivery === 'object' ? input.delivery : null;
+			const binding = previous ?? receipt;
+			if (!binding) {
+				next.push(input);
+				continue;
+			}
+			const content = entries.get(binding.entryId);
+			// Each public queue version can add at most one dispatch. Across a larger
+			// gap, a missing receipt cannot distinguish cancellation from eviction.
+			const knownRemoval = content === undefined && !dispatched.has(binding.entryId)
+				&& previous?.queuedAtVersion != null && control !== null
+				&& control.version - previous.queuedAtVersion <= MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES;
+			if (binding.serverInstanceId !== control?.serverInstanceId || knownRemoval) {
 				removedOrdinals ??= new Map(this.#optimisticAfterOrdinals);
 				removedOrdinals.delete(input.clientMessageId);
 				continue;
 			}
+			const queuedAtVersion = content === undefined ? null : previous?.queuedAtVersion ?? control.version;
+			const delivery = previous?.queuedAtVersion === queuedAtVersion ? previous : { ...binding, queuedAtVersion };
 			const text = content ?? input.content;
 			next.push(delivery === input.delivery && text === input.content ? input : { ...input, content: text, delivery });
 		}

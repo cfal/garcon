@@ -148,9 +148,10 @@ export async function submitSteerRoute(
 	acceptedInputs: AcceptedInputSubmissionService,
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
+	const transcriptViewId = requireTranscriptView(deps, context.chatId);
 	const submission = acceptedInputs.steer({
 		chatId: context.chatId,
-		transcriptViewId: requireTranscriptView(deps, context.chatId),
+		transcriptViewId,
 		content: context.content,
 		whenTurnUnavailable: 'queue',
 	});
@@ -166,6 +167,7 @@ export async function submitSteerRoute(
 			// A socket edit, removal, or restart can overtake the HTTP acknowledgement.
 			deps.chatState.acceptQueuedSteer({
 				clientMessageId: submission.clientMessageId,
+				transcriptViewId,
 				serverInstanceId: response.control.serverInstanceId,
 				entryId: response.entryId,
 			}, deps.conversationUi.getExecutionControl(context.chatId));
