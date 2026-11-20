@@ -396,6 +396,7 @@ test("Control-Enter steers the composer while ordinary queued work remains pause
         await browserExpect(tray.getByRole("button", { name: "Resume queue", exact: true })).toBeVisible();
         const composer = page.getByPlaceholder("Reply...", { exact: true });
         await composer.fill("Synthetic shortcut guidance.");
+        await browserExpect(page.getByRole("button", { name: "Queue message", exact: true })).toBeEnabled();
         const submitted = page.waitForResponse((response) =>
           response.url().endsWith("/api/v1/chats/steer") && response.request().method() === "POST",
         );
