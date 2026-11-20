@@ -111,6 +111,7 @@ type SessionConversationUiState = Pick<
 	| 'activateTransientFeed'
 	| 'getExecutionControl'
 	| 'setExecutionControlFromLiveUpdate'
+	| 'captureSteerControlJoin'
 	| 'setExecutionControlFromRefresh'
 	| 'isExecutionControlSocketInstanceConfirmed'
 	| 'setPendingPermissionRequests'
