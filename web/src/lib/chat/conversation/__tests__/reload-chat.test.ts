@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	reloadChatFromNative,
 	type ChatReloadOptions,
 	type ChatReloadPort,
 } from '$lib/chat/conversation/reload-chat.js';
-import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
+import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import { getChatMessages } from '$lib/api/chats.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { WsRequestProgress } from '$lib/ws/connection.svelte.js';
@@ -16,6 +19,21 @@ vi.mock('$lib/api/chats.js', () => ({
 }));
 
 const TS = '2024-01-01T00:00:00.000Z';
+const cleanups: (() => void)[] = [];
+
+function fixture() {
+	const cache = new ChatTranscriptCache({ limit: 100 });
+	const lifecycle = new ConversationLifecycleState();
+	const panels = new ConversationPanelRegistry({
+		cache, overlays: new ConversationTranscriptOverlayStore(),
+		lifecycle: { forChat: () => lifecycle, remove: () => {} },
+		getComposerAnchorSurfaceId: () => 'chat-view:window-main', getSelectedChatId: () => 'chat-1',
+	});
+	panels.reconcile([{ chatId: 'chat-1', surfaceId: 'chat-view:window-main', windowId: 'window-main',
+		presentation: 'window-main', snapshotAdmission: 'admitted' }]);
+	cleanups.push(() => { panels.destroy(); cache.flush(); });
+	return { panels, chat: panels.panel('chat-view:window-main')!.transcript };
+}
 
 function wsWithResponse(response: Record<string, unknown> | Promise<Record<string, unknown>>) {
 	const requests: WsRequestProgress[] = [];
@@ -34,6 +52,7 @@ function options(overrides: Partial<ChatReloadOptions> = {}): ChatReloadOptions 
 }
 
 describe('reloadChatFromNative', () => {
+	afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 	beforeEach(() => {
 		localStorage.clear();
 		vi.mocked(getChatMessages).mockReset();
@@ -77,9 +96,9 @@ describe('reloadChatFromNative', () => {
 				{ ordinal: 2, message: new AssistantMessage(TS, 'two') },
 			],
 		});
-		const chat = new ActiveTranscriptState();
+		const { chat, panels } = fixture();
 
-		await expect(reloadChatFromNative(ws, chat, 'chat-1', options())).resolves.toBe('reloaded');
+		await expect(reloadChatFromNative(ws, panels, 'chat-1', options())).resolves.toBe('reloaded');
 
 		expect(ws.sendProgressRequest).toHaveBeenCalledWith(
 			{ type: 'chat-reload', chatId: 'chat-1' },
@@ -127,10 +146,30 @@ describe('reloadChatFromNative', () => {
 		});
 
 		await expect(
-			reloadChatFromNative(ws, new ActiveTranscriptState(), 'chat-1', options()),
+			reloadChatFromNative(ws, fixture().panels, 'chat-1', options()),
 		).rejects.toThrow(
 			'Unexpected chat reload response',
 		);
+	});
+
+	it.each(['generation-2', 'generation-3'])('preserves newer inputs when %s is installed before the reload reply', async viewId => {
+		const { chat, panels } = fixture();
+		chat.replaceGeneration('chat-1', 'generation-1', [], {
+			lastOrdinal: 0, pageOldestOrdinal: 0, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const response = Promise.withResolvers<Record<string, unknown>>();
+		const reloading = reloadChatFromNative(wsWithResponse(response.promise), panels, 'chat-1', options());
+		panels.handleViewReplacement('chat-1');
+		chat.replaceGeneration('chat-1', viewId, [{ ordinal: 1, message: new AssistantMessage(TS, 'newer') }], {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		panels.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'new-input',
+			content: 'new guidance', createdAt: TS, delivery: 'pending', placement: 'live-tail' });
+		response.resolve({ type: 'chat-reloaded', clientRequestId: 'req-1', chatId: 'chat-1', transcriptViewId: 'generation-2',
+			lastOrdinal: 0, pageOldestOrdinal: 0, pageNewestOrdinal: 0, nextBeforeOrdinal: null, hasMore: false, messages: [] });
+		await expect(reloading).resolves.toBe('reloaded');
+		expect(chat.getCursor()).toEqual({ transcriptViewId: viewId, lastOrdinal: 1 });
+		expect(chat.optimisticUserInputs.map(input => input.clientMessageId)).toEqual(['new-input']);
 	});
 
 	it('keeps the current transcript when replacement page metadata is malformed', async () => {
@@ -151,7 +190,7 @@ describe('reloadChatFromNative', () => {
 				},
 			],
 		});
-		const chat = new ActiveTranscriptState();
+		const { chat, panels } = fixture();
 		chat.replaceGeneration('chat-1', 'generation-1', [
 			{ ordinal: 1, message: new AssistantMessage(TS, 'current') },
 		], {
@@ -162,7 +201,7 @@ describe('reloadChatFromNative', () => {
 			hasMore: false,
 		});
 
-		await expect(reloadChatFromNative(ws, chat, 'chat-1', options())).rejects.toThrow(
+		await expect(reloadChatFromNative(ws, panels, 'chat-1', options())).rejects.toThrow(
 			'Unexpected chat reload response',
 		);
 		expect(chat.transcriptViewId).toBe('generation-1');
@@ -177,7 +216,7 @@ describe('reloadChatFromNative', () => {
 		const onProgress = vi.fn();
 		const reloading = reloadChatFromNative(
 			ws,
-			new ActiveTranscriptState(),
+			fixture().panels,
 			'chat-1',
 			options({ onProgress }),
 		);
@@ -214,10 +253,10 @@ describe('reloadChatFromNative', () => {
 		const response = Promise.withResolvers<Record<string, unknown>>();
 		const ws = wsWithResponse(response.promise);
 		const cancellation = new AbortController();
-		const chat = new ActiveTranscriptState();
+		const { chat, panels } = fixture();
 		const reloading = reloadChatFromNative(
 			ws,
-			chat,
+			panels,
 			'chat-1',
 			options({ signal: cancellation.signal }),
 		);
@@ -240,10 +279,10 @@ describe('reloadChatFromNative', () => {
 		const response = Promise.withResolvers<Record<string, unknown>>();
 		const ws = wsWithResponse(response.promise);
 		const cancellation = new AbortController();
-		const chat = new ActiveTranscriptState();
+		const { chat, panels } = fixture();
 		const reloading = reloadChatFromNative(
 			ws,
-			chat,
+			panels,
 			'chat-1',
 			options({ signal: cancellation.signal }),
 		);

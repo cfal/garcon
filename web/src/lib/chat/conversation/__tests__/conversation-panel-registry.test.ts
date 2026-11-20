@@ -20,6 +20,7 @@ import {
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+import { reloadChatFromNative, type ChatReloadPort } from '../reload-chat.js';
 import {
 	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	type ChatViewSurfaceId,
@@ -1340,6 +1341,45 @@ describe('ConversationPanelRegistry', () => {
 		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
 		registry.destroy();
 		cache.flush();
+	});
+
+	it('retires old-view steers and their recovery retry when the native reload reply beats fanout', async () => {
+		vi.useFakeTimers();
+		const readHead = vi.fn(async () => { throw new Error('unavailable'); });
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: readHead });
+		const chatId = 'chat-1', timestamp = '2026-08-30T00:00:00.000Z';
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', chatId), presentation('chat-view:window-right', chatId)]);
+		for (const panel of registry.panelsForChat(chatId)) panel.installInitialSnapshot();
+		const receipt = { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId: 'view-1' };
+		const control = emptyChatExecutionControlState('server');
+		control.queue.recentlyDispatched = [{ entryId: 'entry', revision: 1, dispatchedAt: timestamp }];
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance', createdAt: timestamp,
+			delivery: 'pending', placement: 'live-tail' });
+		registry.reconcileQueuedSteers(chatId, control, receipt);
+		await vi.advanceTimersByTimeAsync(0);
+		const ws = {
+			sendMessage: () => true,
+			sendProgressRequest: () => ({ clientRequestId: 'reload', response: Promise.resolve({
+				type: 'chat-reloaded', clientRequestId: 'reload', chatId, transcriptViewId: 'view-2',
+				lastOrdinal: 3, pageOldestOrdinal: 3, pageNewestOrdinal: 3, nextBeforeOrdinal: 3, hasMore: true,
+				messages: [{ ordinal: 3, message: { type: 'assistant-message', timestamp, content: 'imported response' } }],
+			}) }),
+		} satisfies ChatReloadPort;
+		try {
+			await reloadChatFromNative(ws, registry, chatId, {
+				signal: new AbortController().signal, onProgress: () => {},
+			});
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ transcriptViewId: 'view-2', stale: false });
+			expect(registry.panelsForChat(chatId).map(panel => panel.transcript.transcriptViewId)).toEqual(['view-2', 'view-2']);
+			await vi.advanceTimersByTimeAsync(20_000);
+			expect(readHead).toHaveBeenCalledTimes(1);
+		} finally {
+			registry.destroy();
+			cache.flush();
+			vi.useRealTimers();
+		}
 	});
 
 	it('binds a late steer reply after a buffered echo is discarded and the recovery page omits it', async () => {
