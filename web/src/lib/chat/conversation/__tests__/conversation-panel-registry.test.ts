@@ -1345,7 +1345,7 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('keeps waiting steers at the live tail while the current turn publishes rows', () => {
+	it('keeps submitting and acknowledged steers at the live tail while ordinary sends keep their anchors', () => {
 		const { cache, registry } = fixture();
 		const chatId = 'chat-1';
 		const timestamp = '2026-08-30T00:00:00.000Z';
@@ -1354,8 +1354,9 @@ describe('ConversationPanelRegistry', () => {
 		const control = emptyChatExecutionControlState('instance');
 		control.queue.pause = { kind: 'manual', id: 'pause', pausedAt: timestamp };
 		for (const id of ['first', 'second', 'in-flight']) {
-			registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: id, content: id, createdAt: timestamp, delivery: 'pending' });
-			if (id === 'in-flight') continue;
+			registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: id, content: id, createdAt: timestamp, delivery: 'pending',
+				...(id !== 'in-flight' ? { placement: 'live-tail' as const } : {}) });
+			if (id !== 'first') continue;
 			control.queue.entries.push({ kind: 'steer', id, content: id, revision: 1, attachments: [], createdAt: timestamp, updatedAt: timestamp });
 			registry.reconcileQueuedSteers(chatId, control, { entryId: id, clientMessageId: id, serverInstanceId: 'instance', transcriptViewId: 'view-1' });
 		}
@@ -1364,6 +1365,14 @@ describe('ConversationPanelRegistry', () => {
 		registry.applyCommittedBatch({ chatId, transcriptViewId: 'view-1', firstOrdinal: 2, lastOrdinal: 3,
 			messages: [message(2), message(3)], resendCandidates: [], noticeRevision: 0 });
 		expect(rowIds()).toEqual(['view-1:1', 'optimistic:in-flight', 'view-1:2', 'view-1:3', 'optimistic:first', 'optimistic:second']);
+		const messages = Array.from({ length: 102 }, (_, i) => message(i + 4));
+		registry.applyCommittedBatch({ chatId, transcriptViewId: 'view-1', firstOrdinal: 4, lastOrdinal: 105,
+			messages, resendCandidates: [], noticeRevision: 0 });
+		expect(panel.transcript.visibleRows.slice(-2)).toMatchObject([
+			{ id: 'optimistic:first', inputStatus: 'waiting-to-steer' }, { id: 'optimistic:second', inputStatus: 'sending' },
+		]);
+		registry.markOptimisticInputDelivered(chatId, 'second');
+		expect(rowIds().at(-1)).toBe('optimistic:second');
 		registry.destroy();
 		cache.flush();
 	});

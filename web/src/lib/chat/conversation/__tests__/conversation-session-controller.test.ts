@@ -5032,6 +5032,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.optimisticUserInputs[0]).toMatchObject({
 			clientMessageId: steerRequest.clientMessageId,
 			content: 'Focus on the failing contract test',
+			placement: 'live-tail',
 		});
 		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 		expect(deps.conversationUi.getExecutionControl).not.toHaveBeenCalled();
