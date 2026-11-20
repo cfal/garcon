@@ -8,6 +8,7 @@ test.each([
   [new AgentIntegrationError('TIMEOUT', 'Discovery timed out', true), 504],
   [new AgentIntegrationError('TIMEOUT', 'Settings not confirmed', false), 504],
   [new AgentCallError('unknown', 'Dispatch unconfirmed'), 503],
+  [new AgentCallError('unknown', 'Dispatch unconfirmed', 'SESSION_BUSY'), 503],
 ] as const)('preserves command failure and retry policy: %s', async (error, status) => {
   const response = commandHttpError(error);
   expect(response.status).toBe(status);
