@@ -74,31 +74,28 @@ function action(overrides = {}) {
 }
 
 describe('ChatTransientFeedStore', () => {
-  it('hides claimed controls and restores only the same live permission on abandonment', () => {
+  it('keeps claimed controls visible while withholding pending user action until abandonment', () => {
     const feed = new ChatTransientFeedStore('server-1');
     feed.apply(permissionEvent());
     const original = feed.validateAction(action());
+    const before = feed.currentSnapshot(CHAT_ID);
     const control = {
       chatId: CHAT_ID, viewId: 'view-1', runId: 'run-1', permissionOccurrenceId: 'occurrence-one',
     };
     const claim = { control, actionability: 'claimed' };
-    expect(feed.applyPermissionActionability(claim)).toMatchObject({
-      kind: 'mutation', value: { transientRevision: 2, mutation: { kind: 'remove' } },
-    });
+    expect(feed.applyPermissionActionability(claim)).toBe(true);
     expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
-    expect(feed.currentSnapshot(CHAT_ID).rows).toEqual([]);
-    expect(() => feed.validateAction(action())).toThrow(TransientControlActionError);
-    expect(feed.applyPermissionActionability(claim)).toEqual({ kind: 'unchanged' });
+    expect(feed.currentSnapshot(CHAT_ID)).toEqual(before);
+    expect(feed.validateAction(action())).toBe(original);
+    expect(feed.applyPermissionActionability(claim)).toBe(false);
     for (const stale of [{ viewId: 'old-view' }, { runId: 'old-run' }, { chatId: 'other-chat' }]) {
       expect(feed.applyPermissionActionability({
         control: { ...control, ...stale }, actionability: 'actionable',
-      })).toEqual({ kind: 'unchanged' });
+      })).toBe(false);
     }
-    expect(feed.applyPermissionActionability({ control, actionability: 'actionable' })).toMatchObject({
-      kind: 'mutation', value: { transientRevision: 3, mutation: { kind: 'upsert', row: original } },
-    });
+    expect(feed.applyPermissionActionability({ control, actionability: 'actionable' })).toBe(true);
     expect(feed.hasPendingUserAction(CHAT_ID)).toBe(true);
-    expect(feed.validateAction(action())).toBe(original);
+    expect(feed.currentSnapshot(CHAT_ID)).toEqual(before);
   });
 
   for (const retire of [
@@ -116,7 +113,7 @@ describe('ChatTransientFeedStore', () => {
       };
       feed.applyPermissionActionability({ control, actionability: 'claimed' });
       retire(feed, control);
-      expect(feed.applyPermissionActionability({ control, actionability: 'actionable' })).toEqual({ kind: 'unchanged' });
+      expect(feed.applyPermissionActionability({ control, actionability: 'actionable' })).toBe(false);
       expect(feed.hasPendingUserAction(CHAT_ID)).toBe(false);
     });
   }

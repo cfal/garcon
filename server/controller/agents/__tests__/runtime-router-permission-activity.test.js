@@ -24,8 +24,8 @@ describe('permission response activity', () => {
       const response = fixture.resolve();
       await fixture.started.promise;
       expect(fixture.activity()).toBe('working');
-      expect(fixture.feed.currentSnapshot('chat-1').rows).toEqual([]);
-      expect(() => fixture.feed.validateAction(control)).toThrow();
+      expect(fixture.feed.currentSnapshot('chat-1').rows).toHaveLength(1);
+      expect(fixture.feed.validateAction(control).permissionOccurrenceId).toBe(OCCURRENCE_ID);
       await expect(fixture.resolve()).rejects.toBeInstanceOf(PermissionNotActionableError);
       fixture.release.resolve();
       await response;

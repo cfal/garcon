@@ -1195,10 +1195,11 @@ describe('server event wiring', () => {
       await fixture.wiring.waitForIdle();
       expect(fixture.published.map(message => message.type)).toEqual([
         'chat-messages', 'chat-transient-feed-mutation', 'chat-activity-updated',
-        'chat-transient-feed-mutation', 'chat-activity-updated',
+        'chat-activity-updated', 'chat-transient-feed-mutation', 'chat-activity-updated',
       ]);
       expect(fixture.published[1]).toMatchObject({ transientRevision: 1, mutation: { kind: 'upsert' } });
-      expect(fixture.published[3]).toMatchObject({
+      expect(fixture.published[3]).toMatchObject({ activityStatus: null });
+      expect(fixture.published[4]).toMatchObject({
         serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: view.viewId,
         transientRevision: 2, mutation: { kind: 'remove', permissionOccurrenceId: occurrence },
       });
@@ -1408,12 +1409,23 @@ describe('server event wiring', () => {
     expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBeNull();
   });
 
-  it.each(['agent', 'queue'])('rejects a delayed %s failure callback after a newer queued input was accepted', async source => {
+  it.each(['agent', 'queue'])('records a %s failure for a run that executed while later input was queued', async source => {
     const fixture = createFixture();
     fixture.queue.started('chat-1', turn.turnId);
     fixture.queue.accepted('chat-1');
-    if (source === 'agent') await fixture.agent.failed('chat-1', 'Synthetic delayed failure', 'INTERNAL_ERROR', turn);
-    else fixture.queue.failed('chat-1', 'Synthetic delayed failure', turn);
+    if (source === 'agent') await fixture.agent.failed('chat-1', 'Synthetic failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic failure', turn);
+    await fixture.wiring.waitForIdle();
+    expect(fixture.metadata.getRunOutcome('chat-1')).toBe('failed');
+    expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBe('error');
+  });
+
+  it.each(['agent', 'queue'])('rejects a %s failure for a run superseded by a later start', async source => {
+    const fixture = createFixture();
+    fixture.queue.started('chat-1', turn.turnId);
+    fixture.queue.started('chat-1', 'turn-2');
+    if (source === 'agent') await fixture.agent.failed('chat-1', 'Synthetic stale failure', 'INTERNAL_ERROR', turn);
+    else fixture.queue.failed('chat-1', 'Synthetic stale failure', turn);
     await fixture.wiring.waitForIdle();
     expect(fixture.metadata.getRunOutcome('chat-1')).toBeNull();
     expect(fixture.published.some(message => message.activityStatus === 'error')).toBe(false);

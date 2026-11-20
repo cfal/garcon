@@ -438,7 +438,10 @@ export function wireServerEvents({
     publishTransientFeedMutation(transientFeeds.retirePermission(control));
   });
   agentRegistry.onPermissionActionabilityChanged(event => {
-    publishTransientFeedMutation(transientFeeds.applyPermissionActionability(event));
+    if (!transientFeeds.applyPermissionActionability(event)) return;
+    void scheduleChatTask(event.control.chatId, 'permission actionability activity publication', () => {
+      broadcastActivity(event.control.chatId);
+    });
   });
   agentRegistry.onTranscriptCommitted(async (event) => {
     const terminalAttempt = event.type === 'run-ended'
@@ -722,7 +725,6 @@ export function wireServerEvents({
     publishProcessing(chatId);
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
-    if (!chatExists(chatId)) return;
     const failedAttempt = metadata.captureFailureAttempt(chatId, options.turnId);
     scheduleChatTask(chatId, 'queued turn failure handling', () =>
       handleQueueFailure(chatId, queueErrorMessage, options, failedAttempt));

@@ -14,9 +14,11 @@ export interface ActivityFailureAttempt {
 }
 
 // Keeps process-only results independent of preview validation and fences delayed settlement.
+// A failure is fenced by the state observed when it was reported, so input accepted while
+// its run was still executing does not discard that run's own result.
 export class ChatActivityOutcomes {
   readonly #byChat = new Map<string, ActivityOutcome>();
-  readonly #attempts = new Map<string, ActivityFailureAttempt>();
+  readonly #startedRuns = new Map<string, string>();
 
   constructor(private readonly currentView: (chatId: string) => string | null) {}
 
@@ -38,19 +40,19 @@ export class ChatActivityOutcomes {
     this.#byChat.set(chatId, {
       ...(previous?.viewId === viewId ? previous : { viewId, outcome: null }), live: true,
     });
-    const attempt = this.capture(chatId, runId);
-    if (attempt) this.#attempts.set(chatId, attempt);
+    this.#startedRuns.set(chatId, runId);
   }
 
+  // Rejects reports for a run superseded by a later start.
   captureFailure(chatId: string, runId?: string): ActivityFailureAttempt | null {
-    const attempt = this.#attempts.get(chatId);
-    if (attempt && runId) return attempt.runId === runId ? attempt : null;
+    const started = this.#startedRuns.get(chatId);
+    if (runId && started !== undefined && started !== runId) return null;
     return this.capture(chatId, runId);
   }
 
   delete(chatId: string): void {
     this.#byChat.delete(chatId);
-    this.#attempts.delete(chatId);
+    this.#startedRuns.delete(chatId);
   }
 
   capture(chatId: string, runId?: string): ActivityFailureAttempt | null {
