@@ -74,6 +74,10 @@ Starting with v0.4.0, [GitHub releases](https://github.com/cfal/garcon/releases)
 2. Open **Settings**. Coding agents use their existing CLI login; sign in from the agent's settings page if it shows **Not connected**. Add API endpoints under **Providers**.
 3. Start a chat and pick a project folder under your `--project-base-dir`.
 
+### Steering a running chat
+
+Send guidance with `/steer` or the Ctrl+Enter steering shortcut. In the tab that sent it, the bubble shows **Sending** while submission is unresolved. **Waiting to steer** means the server queued the guidance, not that the agent received it. Edit or remove it in the queue tray while it waits. When the committed message reaches the tab, it replaces the bubble without a waiting indicator. Reloading the tab drops the local bubble; restarting the server clears the queue. Local and remote executors behave the same way.
+
 ## Where Things Live
 
 | What                | Default                          | Override                                            |
@@ -259,10 +263,6 @@ Follow these rules when asked to install or host Garcon:
 - For a requested custom domain, follow the [Cloudflare Tunnel guide](docs/cloudflare-tunnel.md) and use `bun run setup:tunnel`. Finish local account setup first, retain authentication, and confirm the hostname before publishing DNS. The tunnel and Garcon have separate startup controls.
 - Verify the result: `curl -fsS http://127.0.0.1:8080/api/v1/auth/status` returns JSON, the log shows no startup error, and after killing the server process the service brings it back with the same chats.
 - Give the user the status, log, stop, start, and remove commands from the recipe.
-
-### Steering a running chat
-
-Send guidance with `/steer` or the Ctrl+Enter steering shortcut. In the tab that sent it, the bubble shows **Sending** while submission is unresolved. **Waiting to steer** means the server queued the guidance, not that the agent received it. Edit or remove it in the queue tray while it waits. When the committed message reaches the tab, it replaces the bubble without a waiting indicator. Reloading the tab drops the local bubble; restarting the server clears the queue. Local and remote executors behave the same way.
 
 ### Using Garcon from an agent
 
