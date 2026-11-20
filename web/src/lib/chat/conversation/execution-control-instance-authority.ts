@@ -24,18 +24,15 @@ export class ExecutionControlInstanceAuthority {
 		return this.#confirmedSocketInstanceId === serverInstanceId;
 	}
 
-	get confirmedSocketInstanceId(): string | null { return this.#confirmedSocketInstanceId; }
-
 	captureResponseFence(): (serverInstanceId: string) => boolean {
 		const revision = this.#authorityRevision;
 		return serverInstanceId => serverInstanceId === this.#currentInstanceId || revision === this.#authorityRevision;
 	}
 
-	shouldDeferSteerAcknowledgement(submittingSocket: string | null, acknowledgedInstance: string): boolean {
-		// A delayed HTTP reply cannot order two unseen processes across a disconnect.
+	shouldDeferSteerAcknowledgement(acknowledgedInstance: string): boolean {
+		// A socket confirmed during submission cannot order an unseen HTTP process.
 		return this.#currentInstanceId !== null && acknowledgedInstance !== this.#currentInstanceId
-			&& !this.#supersededInstanceIds.has(acknowledgedInstance)
-			&& (this.#confirmedSocketInstanceId === null || this.#confirmedSocketInstanceId === submittingSocket);
+			&& !this.#supersededInstanceIds.has(acknowledgedInstance);
 	}
 
 	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {

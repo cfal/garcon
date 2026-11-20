@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type {
 	ChatExecutionControlState,
 	ChatQueueState,
@@ -165,13 +166,27 @@ describe('ConversationUiState', () => {
 		expect(bindDelayed.mock.calls).toEqual([[null]]);
 	});
 
-	it('does not wait for an unseen old HTTP instance when the socket was confirmed during submission', () => {
-		const ui = new ConversationUiState();
-		const join = ui.captureSteerControlJoin('chat');
-		const bind = vi.fn();
-		ui.confirmExecutionControlSocketInstance('new');
-		join(makeControl(), bind);
-		expect(bind.mock.calls).toEqual([[null]]);
+	it.each(['first', 'intermediate'])('defers an unseen queued ACK when %s confirms during submission', confirmedInstance => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const ui = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
+		const chatId = 'chat', clientMessageId = 'own';
+		ui.confirmExecutionControlSocketInstance('first');
+		ui.markExecutionControlSocketDisconnected();
+		const join = ui.captureSteerControlJoin(chatId);
+		overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
+			createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending', placement: 'live-tail' }, 1);
+		ui.confirmExecutionControlSocketInstance(confirmedInstance);
+		const current = makeControl(makeQueue(), { serverInstanceId: confirmedInstance });
+		ui.setExecutionControlFromLiveUpdate(chatId, current);
+		const ack = makeControl(makeQueue({ entries: [makeEntry('entry', 'guidance')] }), { serverInstanceId: 'successor' });
+		const receipt = { clientMessageId, entryId: 'entry', serverInstanceId: ack.serverInstanceId, transcriptViewId: 'view' };
+		join(ack, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
+		expect(ui.getExecutionControl(chatId)).toEqual(current);
+		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toBe('pending');
+		ui.markExecutionControlSocketDisconnected();
+		ui.confirmExecutionControlSocketInstance(ack.serverInstanceId);
+		expect(ui.getExecutionControl(chatId)).toEqual(ack);
+		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: ack.version });
 	});
 
 	it('keeps a newer control that establishes the replacement before socket confirmation', () => {
