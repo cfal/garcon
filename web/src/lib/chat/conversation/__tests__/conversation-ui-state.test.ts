@@ -161,7 +161,7 @@ describe('ConversationUiState', () => {
 		delayed(makeControl(makeQueue(), { serverInstanceId: 'second' }), bindDelayed);
 		expect(ui.getExecutionControl('chat')).toEqual(current);
 		expect(changed).not.toHaveBeenCalled();
-		ui.confirmExecutionControlSocketInstance('third');
+		ui.confirmExecutionControlSocketInstance('third', performance.now() + 1);
 		expect(bindCurrent.mock.calls).toEqual([[current]]);
 		expect(bindDelayed.mock.calls).toEqual([[null]]);
 	});
@@ -187,6 +187,41 @@ describe('ConversationUiState', () => {
 		ui.confirmExecutionControlSocketInstance(ack.serverInstanceId);
 		expect(ui.getExecutionControl(chatId)).toEqual(ack);
 		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: ack.version });
+	});
+
+	it.each([
+		{ ackFirst: true, confirmedInstance: 'successor' },
+		{ ackFirst: true, confirmedInstance: 'first' },
+		{ ackFirst: false, confirmedInstance: 'successor' },
+		{ ackFirst: false, confirmedInstance: 'first' },
+	])('settles deferred ACKs only with a later probe: %j', ({ ackFirst, confirmedInstance }) => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		try {
+			const overlays = new ConversationTranscriptOverlayStore();
+			const ui = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
+			const chatId = 'chat', clientMessageId = 'own';
+			ui.confirmExecutionControlSocketInstance('first', 10);
+			ui.markExecutionControlSocketDisconnected();
+			const join = ui.captureSteerControlJoin(chatId);
+			overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
+				createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending', placement: 'live-tail' }, 1);
+			const oldProbeStartedAt = performance.now();
+			if (!ackFirst) ui.confirmExecutionControlSocketInstance('first', oldProbeStartedAt);
+			clock.mockReturnValue(20);
+			const ack = makeControl(makeQueue({ entries: [makeEntry('entry', 'guidance')] }), { serverInstanceId: 'successor' });
+			const receipt = { clientMessageId, entryId: 'entry', serverInstanceId: ack.serverInstanceId, transcriptViewId: 'view' };
+			join(ack, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
+			if (ackFirst) ui.confirmExecutionControlSocketInstance('first', oldProbeStartedAt);
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toBe('pending');
+			ui.confirmExecutionControlSocketInstance('first', 20);
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toBe('pending');
+			ui.confirmExecutionControlSocketInstance(confirmedInstance, 30);
+			if (confirmedInstance === ack.serverInstanceId) {
+				expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: ack.version });
+			} else expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		} finally {
+			clock.mockRestore();
+		}
 	});
 
 	it('keeps a newer control that establishes the replacement before socket confirmation', () => {

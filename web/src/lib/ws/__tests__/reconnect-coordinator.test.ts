@@ -251,7 +251,7 @@ function createReconnectDeps(
 		removeExecutionControl: vi.fn(),
 		setExecutionControlFromRefresh: vi.fn(),
 		markExecutionControlSocketDisconnected: vi.fn(),
-		confirmExecutionControlSocketInstance: vi.fn(),
+		confirmExecutionControlSocketInstance: vi.fn(() => true),
 		setTransientFeedFromSnapshot: vi.fn(),
 	};
 	const addMessageConsumer = vi.fn<(consumer: WsMessageConsumer) => () => void>(() => vi.fn());
@@ -920,7 +920,7 @@ describe('ChatReconnectCoordinator', () => {
 		cache.flush();
 	});
 
-	it('confirms identified pongs and unregisters the authority consumer on cleanup', async () => {
+	it('confirms only correlated identified pongs and unregisters the authority consumer on cleanup', async () => {
 		const deps = createReconnectDeps();
 		deps.ws.isConnected = false;
 		const view = render(ReconnectCoordinatorTestHost, { options: deps });
@@ -937,9 +937,13 @@ describe('ChatReconnectCoordinator', () => {
 					serverTime: TS,
 					processing: { outcome: 'snapshot', chats: [] },
 				},
-				{},
+				{ requestStartedAt: 1 },
 			),
 		).toBe(false);
+		expect(deps.conversationUi.confirmExecutionControlSocketInstance).not.toHaveBeenCalled();
+
+		consumer({ type: 'ws-pong', clientRequestId: 'unmatched', sentAt: 1, serverTime: TS,
+			serverInstanceId: 'unmatched-server', processing: { outcome: 'snapshot', chats: [] } }, {});
 		expect(deps.conversationUi.confirmExecutionControlSocketInstance).not.toHaveBeenCalled();
 
 		expect(
@@ -952,11 +956,12 @@ describe('ChatReconnectCoordinator', () => {
 					serverInstanceId: 'server-b',
 					processing: { outcome: 'snapshot', chats: [] },
 				},
-				{},
+				{ requestStartedAt: 2 },
 			),
 		).toBe(false);
 		expect(deps.conversationUi.confirmExecutionControlSocketInstance).toHaveBeenCalledWith(
 			'server-b',
+			2,
 		);
 
 		const removeConsumer = deps.ws.addMessageConsumer.mock.results[0]?.value;
@@ -985,7 +990,7 @@ describe('ChatReconnectCoordinator', () => {
 				serverInstanceId: 'server-c',
 				processing: { outcome: 'snapshot', chats: [] },
 			},
-			{},
+			{ requestStartedAt: performance.now() + 1 },
 		);
 
 		expect(conversationUi.getExecutionControl('chat-1')).toBeNull();
@@ -1014,11 +1019,52 @@ describe('ChatReconnectCoordinator', () => {
 		);
 		expect(deps.conversationUi.confirmExecutionControlSocketInstance).toHaveBeenCalledWith(
 			'server-instance-test',
+			expect.any(Number),
 		);
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalledOnce();
 		expect(deps.ws.sendRequest).not.toHaveBeenCalledWith(
 			expect.objectContaining({ type: 'chat-subscribe' }),
 		);
+	});
+
+	it.each(['snapshot', 'not-found'])('keeps a bound steer across an older reconnect %s response', async outcome => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		try {
+			const overlays = new ConversationTranscriptOverlayStore();
+			const conversationUi = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
+			const chatId = 'chat-1', clientMessageId = 'own';
+			conversationUi.confirmExecutionControlSocketInstance('previous', 10);
+			const deps = createReconnectDeps();
+			const response = deferred<Record<string, unknown>>();
+			deps.ws.sendRequest.mockReturnValueOnce(response.promise);
+			const current = controlState(true, 'successor');
+			const getExecutionControl = vi.fn(async () => ({ control: current }));
+			const coordinator = new ChatReconnectCoordinator({ ...deps, conversationUi, getExecutionControl });
+			await coordinator.handleConnectionState(false);
+			const reconnect = coordinator.handleConnectionState(true);
+			clock.mockReturnValue(20);
+			overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
+				createdAt: TS, delivery: 'pending', placement: 'live-tail' }, 1);
+			const receipt = { clientMessageId, entryId: 'queued-1', serverInstanceId: 'successor', transcriptViewId: 'view' };
+			conversationUi.captureSteerControlJoin(chatId)(current, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
+			conversationUi.captureExecutionResponse().setExecutionControlFromRefresh(chatId, current);
+			const delivery = { ...receipt, kind: 'queued', queuedAtVersion: current.version };
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(delivery);
+			response.resolve({
+				...reconnectStateResponse([], [], {}, 'previous'),
+				controlResults: [{ chatId, outcome, ...(outcome === 'snapshot' ? { control: controlState(false, 'previous') } : {}) }],
+			});
+			await reconnect;
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(delivery);
+			expect(conversationUi.getExecutionControl(chatId)).toEqual(current);
+			expect(conversationUi.isExecutionControlSocketInstanceConfirmed('previous')).toBe(false);
+			expect(getExecutionControl).toHaveBeenCalledWith(chatId);
+			clock.mockReturnValue(30);
+			conversationUi.confirmExecutionControlSocketInstance('successor', 30);
+			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual(delivery);
+		} finally {
+			clock.mockRestore();
+		}
 	});
 
 	it('keeps reconnect control-state reconciliation usable when chat-list refresh fails', async () => {
