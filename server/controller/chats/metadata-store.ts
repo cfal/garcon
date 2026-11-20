@@ -13,7 +13,7 @@ import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { isRecord } from '../../../common/json.js';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import type { ChatRunOutcome } from '../../../common/chat-activity.js';
-import { ChatActivityOutcomes, type ActivityFailureAttempt } from './chat-activity-outcomes.js';
+import { ChatActivityOutcomes, type ActivityOutcomeAttempt } from './chat-activity-outcomes.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -76,7 +76,7 @@ export class MetadataIndex {
   readonly #outcomes: ChatActivityOutcomes;
   #metadataByChatId = new Map<string, ChatMetadata>();
   #validatedChatIds = new Set<string>();
-  #registry: IChatRegistry;
+  #registry: Pick<IChatRegistry, 'listChatIds' | 'getChat' | 'onChatRemoved'>;
   #transcripts: MetadataTranscriptSource;
   #carryOver: MetadataCarryOverSource;
   #initialized = false;
@@ -89,7 +89,7 @@ export class MetadataIndex {
   readonly #readRunOutcome: MetadataIndexOptions['readRunOutcome'];
 
   constructor(
-    registry: IChatRegistry,
+    registry: Pick<IChatRegistry, 'listChatIds' | 'getChat' | 'onChatRemoved'>,
     transcripts: MetadataTranscriptSource,
     carryOver: MetadataCarryOverSource,
     options: MetadataIndexOptions = {},
@@ -100,7 +100,15 @@ export class MetadataIndex {
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
     this.#readRunOutcome = options.readRunOutcome;
-    this.#outcomes = new ChatActivityOutcomes(chatId => this.#transcripts.getExistingTranscriptViewId(chatId));
+    this.#outcomes = new ChatActivityOutcomes(chatId => {
+      try {
+        return this.#transcripts.getExistingTranscriptViewId(chatId);
+      } catch (error) {
+        // Optional activity cannot interrupt admission or mandatory failure settlement.
+        logger.warn(`metadata: activity view unavailable for ${chatId}:`, errorMessage(error));
+        return null;
+      }
+    });
   }
 
   async init(): Promise<void> {
@@ -109,7 +117,7 @@ export class MetadataIndex {
       this.#registry.onChatRemoved((chatId) => {
         this.#metadataByChatId.delete(String(chatId));
         this.#validatedChatIds.delete(String(chatId));
-        this.#outcomes.delete(String(chatId));
+        this.deleteChatActivity(String(chatId));
         this.#scheduleSave();
       });
     }
@@ -122,7 +130,7 @@ export class MetadataIndex {
 
   repair(): Promise<void> {
     if (this.#closed) return Promise.resolve();
-    this.#repairPromise ??= this.#repairFromTranscriptPreviews().finally(() => {
+    this.#repairPromise ??= this.#repairFromTranscripts().finally(() => {
       this.#repairPromise = null;
     });
     return this.#repairPromise;
@@ -140,7 +148,7 @@ export class MetadataIndex {
 
   invalidateTranscriptView(chatId: string): void {
     this.#validatedChatIds.delete(String(chatId));
-    this.#outcomes.delete(String(chatId));
+    this.#outcomes.invalidateView(String(chatId));
   }
 
   listAllChatMetadata(): Map<string, ChatMetadata> {
@@ -160,9 +168,6 @@ export class MetadataIndex {
   ): void {
     const key = String(chatId);
     if (this.#transcripts.getExistingTranscriptViewId(key) !== transcriptViewId) return;
-    if (appendedMessages.some(message => message.type === 'user-message') && this.getRunOutcome(key) !== null) {
-      this.clearRunOutcome(key);
-    }
     const cached = this.#metadataByChatId.get(key);
     let current = cached?.transcriptViewId === transcriptViewId ? cached : null;
     if (cached && !this.#validatedChatIds.has(key)) {
@@ -205,20 +210,39 @@ export class MetadataIndex {
     this.#outcomes.begin(chatId, runId);
   }
 
-  captureFailureAttempt(chatId: string, runId?: string): ActivityFailureAttempt | null {
+  deleteChatActivity(chatId: string): void {
+    this.#outcomes.delete(chatId);
+  }
+
+  captureFailureAttempt(chatId: string, runId?: string): ActivityOutcomeAttempt | null {
     return this.#outcomes.captureFailure(chatId, runId);
   }
 
-  recordFailedAttempt(attempt: ActivityFailureAttempt | null): boolean {
+  recordFailedAttempt(attempt: ActivityOutcomeAttempt | null): boolean {
     return this.#outcomes.fail(attempt);
   }
 
-  recordCommittedOutcome(attempt: ActivityFailureAttempt | null, viewId: string, outcome: ChatRunOutcome): boolean {
-    return this.#outcomes.commit(attempt, viewId, outcome);
+  captureCommittedOutcome(chatId: string, viewId: string, runId: string): ActivityOutcomeAttempt | null {
+    return this.#outcomes.captureTerminal(chatId, viewId, runId);
   }
 
-  updateRunOutcome(chatId: string, transcriptViewId: string, outcome: ChatRunOutcome, runId?: string): boolean {
-    return this.#outcomes.update(chatId, transcriptViewId, outcome, runId);
+  recordCommittedOutcome(attempt: ActivityOutcomeAttempt | null, outcome: ChatRunOutcome): boolean {
+    return this.#outcomes.commit(attempt, outcome);
+  }
+
+  // Separates optional IO from publication on the per-chat lifecycle queue.
+  async prepareRunOutcomeRepair(chatId: string): Promise<(() => boolean) | null> {
+    if (this.#closed || !this.#readRunOutcome || !this.#registry.getChat(chatId)) return null;
+    const attempt = this.#outcomes.captureRepair(chatId);
+    if (!attempt) return null;
+    try {
+      const outcome = await this.#readRunOutcome(chatId, attempt.state.viewId);
+      return () => !this.#closed && this.#registry.getChat(chatId) !== null
+        && this.#outcomes.restore(attempt, outcome);
+    } catch (error) {
+      logger.warn(`metadata: failed to repair run outcome for ${chatId}:`, errorMessage(error));
+      return null;
+    }
   }
 
   // Recomputes the cached preview from the complete replacement view.
@@ -262,7 +286,6 @@ export class MetadataIndex {
     });
     this.#validatedChatIds.add(key);
     this.#scheduleSave();
-    await this.#repairRunOutcome(key);
   }
 
   addNewChatMetadata(chatId: string, firstMessage: string): void {
@@ -295,31 +318,23 @@ export class MetadataIndex {
     await this.#savePromise;
   }
 
-  async #repairFromTranscriptPreviews(): Promise<void> {
-    for (const chatId of this.#registry.listChatIds()) {
+  async #repairFromTranscripts(): Promise<void> {
+    const chatIds = this.#registry.listChatIds();
+    for (const chatId of chatIds) {
       // Timers cannot interrupt synchronous SQLite/JSON work. Yield between bounded reads.
       await Bun.sleep(0);
       if (this.#closed) break;
       const session = this.#registry.getChat(chatId);
       if (!session) continue;
       this.#repairChatMetadata(chatId, session);
-      await this.#repairRunOutcome(chatId);
     }
-  }
-
-  async #repairRunOutcome(chatId: string): Promise<void> {
-    const current = this.getChatMetadata(chatId);
-    if (!this.#readRunOutcome || !current?.transcriptViewId) return;
-    const attempt = this.#outcomes.capture(chatId);
-    if (!attempt) return;
-    try {
-      const outcome = await this.#readRunOutcome(chatId, current.transcriptViewId);
-      if (this.#closed || this.getChatMetadata(chatId) !== current
-        || !this.#outcomes.isCurrent(attempt)
-        || this.#transcripts.getExistingTranscriptViewId(chatId) !== current.transcriptViewId) return;
-      this.#outcomes.restore(attempt, outcome);
-    } catch (error) {
-      logger.warn(`metadata: failed to repair run outcome for ${chatId}:`, errorMessage(error));
+    // Bounded preview repair for later chats never waits on a long activity scan.
+    for (const chatId of chatIds) {
+      await Bun.sleep(0);
+      if (this.#closed) break;
+      if (!this.#registry.getChat(chatId)) continue;
+      const apply = await this.prepareRunOutcomeRepair(chatId);
+      apply?.();
     }
   }
 
