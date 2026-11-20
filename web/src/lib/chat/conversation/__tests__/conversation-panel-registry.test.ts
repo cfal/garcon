@@ -15,6 +15,7 @@ import {
 } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
+import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import {
 	ConversationPanelRegistry,
 	type ConversationPanelDescriptor,
@@ -1538,7 +1539,7 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it.each(['snapshot', 'omitted-echo snapshot', 'aborted snapshot', 'unmount'] as const)(
+	it.each(['snapshot', 'omitted-echo snapshot', 'aborted snapshot', 'unmount', 'hidden discard'] as const)(
 		'keeps a buffered steer represented in every panel until %s catches up', async completion => {
 			const head = deferred<number>();
 			const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
@@ -1568,7 +1569,10 @@ describe('ConversationPanelRegistry', () => {
 				expect(live.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
 				expect(loading.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'optimistic:own']);
 				if (completion === 'unmount') registry.reconcile([left]);
-				else if (completion === 'aborted snapshot') {
+				else if (completion === 'hidden discard') {
+					registry.prepareForReconcile([left]);
+					registry.discardFullscreenHiddenPanels();
+				} else if (completion === 'aborted snapshot') {
 					loading.abortSnapshotLoad(epoch);
 					loading.installCachedSnapshot(chatId);
 				} else {
@@ -1587,6 +1591,71 @@ describe('ConversationPanelRegistry', () => {
 			}
 		},
 	);
+
+	it('accepts a queued acknowledgement after its echo reaches a snapshot-buffering panel', () => {
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: async () => null });
+		const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
+		const panel = mountAttachedPanel(cache, registry, presentation('chat-view:window-left', chatId));
+		panel.installInitialSnapshot();
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance', createdAt: timestamp,
+			delivery: 'pending', placement: 'live-tail' });
+		const epoch = panel.transcript.beginSnapshotLoad();
+		try {
+			registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
+				messages: [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: 'own' }) }] });
+			const control = emptyChatExecutionControlState('server');
+			control.queue.recentlyDispatched = [{ entryId: 'entry', revision: 1, dispatchedAt: timestamp }];
+			registry.reconcileQueuedSteers(chatId, control, {
+				clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId,
+			});
+			expect(panel.transcript.visibleRows.at(-1)).toMatchObject({ id: 'optimistic:own', inputStatus: 'waiting-to-steer' });
+			panel.transcript.setFromPage(chatId, { transcriptViewId, messages: [message(1)], lastOrdinal: 1,
+				pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false }, epoch);
+			expect(panel.transcript.visibleRows.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
+	it('preserves a departed steer through restart until aborted replay recovery catches up', async () => {
+		const head = deferred<number>();
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
+		const ui = new ConversationUiState((chatId, control) => registry.reconcileQueuedSteers(chatId, control));
+		const chatId = 'chat-1', transcriptViewId = 'view-1', timestamp = '2026-08-30T00:00:00.000Z';
+		const panel = mountAttachedPanel(cache, registry, presentation('chat-view:window-left', chatId));
+		panel.installInitialSnapshot();
+		ui.confirmExecutionControlSocketInstance('server');
+		const control = emptyChatExecutionControlState('server');
+		control.queue.entries = [{ id: 'entry', kind: 'steer', content: 'guidance', attachments: [], revision: 1,
+			createdAt: timestamp, updatedAt: timestamp }];
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance', createdAt: timestamp,
+			delivery: 'pending', placement: 'live-tail' });
+		ui.captureSteerControlJoin(chatId)(control, current => registry.reconcileQueuedSteers(chatId, current, {
+			clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server', transcriptViewId,
+		}));
+		try {
+			const replay = registry.beginReconnectReplay(chatId, transcriptViewId);
+			registry.applyCommittedBatch({ chatId, transcriptViewId, firstOrdinal: 2, lastOrdinal: 2, noticeRevision: 0, resendCandidates: [],
+				messages: [{ ordinal: 2, message: new UserMessage(timestamp, 'guidance', undefined, { clientMessageId: 'own' }) }] });
+			ui.setExecutionControlFromLiveUpdate(chatId, { ...control, version: control.version + 1, queue: { ...control.queue,
+				entries: [], recentlyDispatched: [{ entryId: 'entry', revision: 1, dispatchedAt: timestamp }] } });
+			registry.abortReconnectReplay(replay, chatId);
+			ui.markExecutionControlSocketDisconnected();
+			ui.confirmExecutionControlSocketInstance('new-server');
+			ui.setExecutionControlFromLiveUpdate(chatId, emptyChatExecutionControlState('new-server'));
+			head.resolve(200);
+			await head.promise;
+			expect(panel.transcript.visibleRows.at(-1)?.id).toBe('optimistic:own');
+			cache.replace(chatId, transcriptViewId, [message(200)], 200, 200);
+			panel.transcript.installCachedSnapshot(chatId);
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
 
 	it('holds head-based retirement until a snapshot-buffering panel reaches the sampled head', async () => {
 		const head = deferred<number>();

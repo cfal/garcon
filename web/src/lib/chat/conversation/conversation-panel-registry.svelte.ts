@@ -728,18 +728,19 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	#discardHiddenPanels(chatId?: string): void {
-		let removed = false;
+		const removedChatIds = new Set<string>();
 		for (const [surfaceId, panel] of this.#panels) {
 			if (panel.isPresentationVisible || (chatId !== undefined && panel.chatId !== chatId)) continue;
 			this.#restoreTargets.set(surfaceId, { chatId: panel.chatId, target: panel.captureRestoreTarget() });
 			panel.destroy();
 			this.#panels.delete(surfaceId);
 			this.options.cache.markStale(panel.chatId);
-			removed = true;
+			removedChatIds.add(panel.chatId);
 		}
-		if (!removed) return;
+		if (!removedChatIds.size) return;
 		this.#mounted = this.#mounted.filter(item => this.#panels.has(item.surfaceId));
 		this.options.cache.setMountedChatIds(this.#mounted.map(item => item.chatId));
+		for (const removedChatId of removedChatIds) this.observeRecoveredMessages(removedChatId, []);
 	}
 
 	destroy(): void {
