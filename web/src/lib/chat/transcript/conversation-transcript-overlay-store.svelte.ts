@@ -179,8 +179,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		const next: OptimisticUserInput[] = [];
 		let removedOrdinals: Map<string, number> | undefined;
 		for (const input of this.#optimisticInputs) {
-			if (this.#pendingEchoOrdinals.has(input.clientMessageId)
-				|| (receipt && receipt.clientMessageId !== input.clientMessageId)
+			if ((receipt && receipt.clientMessageId !== input.clientMessageId)
 				|| (typeof input.delivery === 'object' && input.delivery.kind === 'delivered')) {
 				next.push(input);
 				continue;
@@ -191,18 +190,21 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 				next.push(input);
 				continue;
 			}
-			const content = entries.get(binding.entryId);
+			const sameInstance = binding.serverInstanceId === control?.serverInstanceId;
+			const content = sameInstance ? entries.get(binding.entryId) : undefined;
 			// Each public queue version can add at most one dispatch. Across a larger
 			// gap, a missing receipt cannot distinguish cancellation from eviction.
 			const knownRemoval = content === undefined && !dispatched.has(binding.entryId)
 				&& previous?.queuedAtVersion != null && control !== null
 				&& control.version - previous.queuedAtVersion <= MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES;
-			if (binding.serverInstanceId !== control?.serverInstanceId || knownRemoval) {
+			// A departed input may already be durable in the unchanged transcript view.
+			const instanceRemoved = !sameInstance && previous?.queuedAtVersion !== null;
+			if (!this.#pendingEchoOrdinals.has(input.clientMessageId) && (instanceRemoved || knownRemoval)) {
 				removedOrdinals ??= new Map(this.#optimisticAfterOrdinals);
 				removedOrdinals.delete(input.clientMessageId);
 				continue;
 			}
-			const queuedAtVersion = content === undefined ? null : control.version;
+			const queuedAtVersion = content === undefined ? null : control?.version ?? null;
 			const delivery = previous?.queuedAtVersion === queuedAtVersion ? previous : { ...binding, kind: 'queued' as const, queuedAtVersion };
 			const text = content ?? input.content;
 			next.push(delivery === input.delivery && text === input.content ? input : { ...input, content: text, delivery });
