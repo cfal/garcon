@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatTranscriptAppliedCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { OptimisticUserInput, QueuedSteerDelivery } from '$lib/chat/transcript/optimistic-user-input.js';
 import { QueuedSteerTranscriptRecovery } from '../queued-steer-transcript-recovery.js';
 
@@ -12,15 +13,16 @@ function fixture() {
 		createdAt: '2026-01-01T00:00:00.000Z', delivery,
 	}];
 	const readHead = vi.fn<() => Promise<number | null>>().mockResolvedValue(10);
+	const cursor: ChatTranscriptAppliedCursor = { transcriptViewId: 'view', lastOrdinal: 10, stale: false };
 	const clear = vi.fn((_chatId: string, id: string) => {
 		inputs = inputs.filter(input => input.clientMessageId !== id);
 	});
 	const recovery = new QueuedSteerTranscriptRecovery({
 		inputs: () => inputs,
-		cursor: () => ({ transcriptViewId: 'view', lastOrdinal: 10, stale: false }),
+		cursor: () => cursor,
 		clear, readHead,
 	});
-	return { recovery, readHead, clear, requeue: () => {
+	return { recovery, readHead, clear, cursor, requeue: () => {
 		inputs = inputs.map(input => ({ ...input, delivery: { ...delivery, queuedAtVersion: 10 } }));
 	}, remove: () => { inputs = []; } };
 }
@@ -81,5 +83,23 @@ describe('QueuedSteerTranscriptRecovery', () => {
 		await vi.advanceTimersByTimeAsync(60_000);
 		expect(readHead).toHaveBeenCalledTimes(1);
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('retires replaced-view receipts only after validation and stops their retries', async () => {
+		const { recovery, readHead, clear, cursor } = fixture();
+		readHead.mockRejectedValue(new Error('view replaced'));
+		recovery.observe('chat');
+		await vi.advanceTimersByTimeAsync(0);
+		cursor.transcriptViewId = 'replacement';
+		cursor.stale = true;
+		recovery.retireCaughtUp('chat');
+		expect(clear).not.toHaveBeenCalled();
+		cursor.stale = false;
+		recovery.retireCaughtUp('chat');
+		expect(clear).toHaveBeenCalledWith('chat', 'input');
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(readHead).toHaveBeenCalledTimes(1);
+		expect(vi.getTimerCount()).toBe(0);
+		recovery.destroy();
 	});
 });

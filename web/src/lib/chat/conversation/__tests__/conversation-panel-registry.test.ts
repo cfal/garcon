@@ -1409,6 +1409,35 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('retires an old-view receipt when recovery discovers a replacement without its fanout', async () => {
+		const head = deferred<number>();
+		const { cache, registry, overlays } = fixture({ readSteerTranscriptHead: () => head.promise });
+		const chatId = 'chat-1', timestamp = '2026-08-30T00:00:00.000Z';
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', chatId)]);
+		const panel = registry.panel('chat-view:window-left')!;
+		panel.installInitialSnapshot();
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance',
+			createdAt: timestamp, delivery: 'pending', placement: 'live-tail' });
+		const control = emptyChatExecutionControlState('server');
+		control.queue.recentlyDispatched = [{ entryId: 'entry', revision: 1, dispatchedAt: timestamp }];
+		registry.reconcileQueuedSteers(chatId, control, {
+			entryId: 'entry', clientMessageId: 'own', serverInstanceId: 'server', transcriptViewId: 'view-1',
+		});
+		try {
+			registry.markChatStale(chatId);
+			cache.replace(chatId, 'view-2', [message(3)], 3, 3);
+			panel.transcript.installCachedSnapshot(chatId);
+			expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+			head.resolve(1);
+			await head.promise;
+			expect(panel.transcript.transcriptViewId).toBe('view-2');
+		} finally {
+			registry.destroy();
+			cache.flush();
+		}
+	});
+
 	it('keeps submitting and acknowledged steers at the live tail while ordinary sends keep their anchors', () => {
 		const { cache, registry } = fixture();
 		const chatId = 'chat-1';

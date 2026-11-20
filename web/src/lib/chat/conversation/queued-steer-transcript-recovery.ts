@@ -43,7 +43,11 @@ export class QueuedSteerTranscriptRecovery {
 		const cursor = this.options.cursor(chatId);
 		if (!cursor || cursor.stale) return;
 		for (const { delivery } of inputs) {
-			if (typeof delivery !== 'object' || delivery.transcriptViewId !== cursor.transcriptViewId) continue;
+			if (typeof delivery !== 'object') continue;
+			if (delivery.transcriptViewId !== cursor.transcriptViewId) {
+				this.options.clear(chatId, delivery.clientMessageId);
+				continue;
+			}
 			const head = this.#heads.get(delivery);
 			if (typeof head === 'number' && cursor.lastOrdinal >= head) this.options.clear(chatId, delivery.clientMessageId);
 		}
