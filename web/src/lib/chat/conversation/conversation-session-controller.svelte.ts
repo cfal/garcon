@@ -109,7 +109,7 @@ export class ConversationSessionController {
 			{
 				...deps,
 				refetchTranscript: (chatId) => this.#loadChat(chatId),
-				pendingSettings: (id) => this.#settings.hasPending(id) ? this.#settings.settlePending(id) : null,
+				pendingSettings: (id) => deps.sessions.settingsMutations.pendingFor(id),
 				confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
 			},
 			this.#acceptedInputs,
@@ -209,8 +209,8 @@ export class ConversationSessionController {
 		if (!admission) throw new Error(m.chat_notice_handoff_requires_idle());
 		const request = { chatId, handoff, clientRequestId: createClientCommandId() };
 		try {
-			if (this.#settings.hasPending(chatId) && !(await this.#settings.settlePending(chatId)))
-				return;
+			const pendingSettings = this.deps.sessions.settingsMutations.pendingFor(chatId);
+			if (pendingSettings && !(await pendingSettings)) return;
 			const response = await handoffChat(request);
 			const current = this.deps.sessions.byId[chatId];
 			if (current?.agentOwnershipEpoch === handoff.expectedAgentOwnershipEpoch) {
@@ -642,7 +642,8 @@ export class ConversationSessionController {
 		}
 
 		try {
-			if (this.#settings.hasPending(chatId) && !(await this.#settings.settlePending(chatId))) {
+			const pendingSettings = deps.sessions.settingsMutations.pendingFor(chatId);
+			if (pendingSettings && !(await pendingSettings)) {
 				this.#restorePreflightSubmission(
 					chatId,
 					previousText,

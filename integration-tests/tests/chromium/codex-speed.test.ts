@@ -42,9 +42,26 @@ test('the speed picker persists per chat and rolls back a rejected tier', async 
         expect(Math.abs((await editor.boundingBox())!.y - startY)).toBeLessThan(2);
       }
       await withExpectedConsoleErrors([/Failed to load resource: the server responded with a status of 422 .*/], async () => {
-        await chooseUltrafast();
+        const received = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        await page.route('**/api/v1/chats/execution-settings', async (route) => {
+          received.resolve();
+          await release.promise;
+          await route.continue();
+        }, { times: 1 });
+        try {
+          await chooseUltrafast();
+          await received.promise;
+          await page.locator(`[data-sidebar-virtual-row="${second}"] button`).first().click({ button: 'right' });
+          await page.getByRole('menuitem', { name: 'Fork', exact: true }).click();
+          await browserExpect(page.getByText('Forking chat...', { exact: true })).toBeVisible();
+        } finally {
+          release.resolve();
+        }
         await browserExpect(page.getByText(/Ultrafast speed is unavailable/)).toBeVisible();
         await browserExpect(picker('Standard')).toBeVisible();
+        await browserExpect(page.getByText('Forking chat...', { exact: true })).toHaveCount(0);
+        expect((await client.listChats()).sessions).toHaveLength(2);
       });
       expect((await client.listChats()).sessions.find(({ id }) => id === second)?.agentSettings.values.speed ?? 'standard').toBe('standard');
       expect(environment.model.requests()).toHaveLength(2);

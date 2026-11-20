@@ -16,6 +16,7 @@ import {
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { ChatTitleController } from './chat-title-controller.js';
+import { ChatSettingsMutations } from './chat-settings-mutations.js';
 import { ChatSelectionWriter } from './chat-selection-writer.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import * as m from '$lib/paraglide/messages.js';
@@ -67,6 +68,7 @@ import {
 } from './chat-session-records.js';
 
 export class ChatSessionsStore implements ChatSessionsPort {
+	readonly settingsMutations = new ChatSettingsMutations();
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
 	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);

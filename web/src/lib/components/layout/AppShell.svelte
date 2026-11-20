@@ -135,6 +135,7 @@
 			return sessions.selectedChatId;
 		},
 		projectPathRevision: (chatId) => sessions.projectPathRevision(chatId),
+		pendingSettings: (id) => sessions.settingsMutations.pendingFor(id),
 		onQuietRefresh: quietRefresh,
 		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
 		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),

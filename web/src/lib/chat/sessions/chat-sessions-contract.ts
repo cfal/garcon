@@ -1,3 +1,4 @@
+import type { ChatSettingsMutations } from './chat-settings-mutations.js';
 import type {
 	applyChatTagDelta,
 	deleteChat,
@@ -63,6 +64,7 @@ export function isChatTagRefreshRequired(
 }
 
 export interface ChatSessionsPort {
+	readonly settingsMutations: Pick<ChatSettingsMutations, 'change' | 'pendingFor'>;
 	byId: Record<string, ChatSessionRecord>;
 	order: string[];
 	readonly chatListStatus: ChatListLoadStatus;
