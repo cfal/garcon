@@ -35,6 +35,7 @@ import {
   runSingleQuery,
 } from './agents/claude/claude-cli.js';
 import { ClaudeCliVersionProbe } from './agents/claude/cli-version.js';
+import { createClaudeCliUpdates } from './agents/claude/cli-updates.js';
 import {
   buildClaudeEndpointRuntime,
   buildClaudeHostEnvironment,
@@ -95,6 +96,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
+  readonly cliUpdates: NonNullable<AgentIntegration['cliUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -198,6 +200,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       format: claudeUsageFormat,
       roots: () => [claudeProjectsDir({ configHomeDir: config.configHomeDir() ?? undefined })],
     });
+    this.cliUpdates = createClaudeCliUpdates({ config, versionProbe, logger });
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,

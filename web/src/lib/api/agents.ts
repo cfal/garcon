@@ -9,6 +9,12 @@ import type {
 	AgentAuthLoginStatus,
 	AgentDeviceAuthInfo,
 } from '$shared/agent-auth';
+import {
+	parseAgentCliUpdatesResponse,
+	parseAgentCliUpdateStatus,
+	type AgentCliUpdatesResponse,
+	type AgentCliUpdateStatus,
+} from '$shared/agent-cli-update';
 
 export type AgentName = AgentId;
 
@@ -69,4 +75,24 @@ export async function getAgentAuthLoginStatus(
 	return apiGet<AgentAuthLoginStatus>(
 		`/api/v1/agents/auth/login?agent=${encodeURIComponent(agent)}&executorId=${encodeURIComponent(effectiveExecutorId(executorId))}${sessionQuery}`,
 	);
+}
+
+export async function getAgentCliUpdates(
+	executorId: string,
+	options: { readonly refresh: boolean },
+): Promise<AgentCliUpdatesResponse> {
+	const refresh = options.refresh ? '&refresh=1' : '';
+	const response = parseAgentCliUpdatesResponse(
+		await apiGet<unknown>(`/api/v1/agents/cli-updates?executorId=${encodeURIComponent(effectiveExecutorId(executorId))}${refresh}`),
+	);
+	if (!response) throw new Error('The server returned an invalid CLI update status.');
+	return response;
+}
+
+export async function startAgentCliUpdate(agent: AgentName, executorId: string): Promise<AgentCliUpdateStatus> {
+	const status = parseAgentCliUpdateStatus(
+		await apiPost<unknown>('/api/v1/agents/cli-updates', { agentId: agent, executorId: effectiveExecutorId(executorId) }),
+	);
+	if (!status) throw new Error('The server returned an invalid CLI update status.');
+	return status;
 }

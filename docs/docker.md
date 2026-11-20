@@ -185,7 +185,7 @@ Compose uses named volumes for credentials, configuration, and native history. T
 
 OpenCode cache remains ephemeral. Its data and state volumes mount the actual XDG paths directly; Docker does not need the single-disk symlink indirection used by VM setups.
 
-Normal builds may reuse cached agent-installer layers. Run `docker compose build --no-cache` before `docker compose up -d` when refreshing those CLIs. Agent binaries remain outside the state volumes, so rebuilding does not delete credentials or history. `docker compose down` preserves volumes; `docker compose down -v` permanently deletes them.
+Normal builds may reuse cached agent-installer layers. Run `docker compose build --no-cache` before `docker compose up -d` when refreshing those CLIs. An in-app [Claude Code update](agent-cli-updates.md) lasts only until the container is recreated. Agent binaries remain outside the state volumes, so rebuilding does not delete credentials or history. `docker compose down` preserves volumes; `docker compose down -v` permanently deletes them.
 
 ## Agent And Git Setup
 
