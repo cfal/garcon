@@ -26,7 +26,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	) {
 		this.transcriptCache = options.panels.transcriptCache;
 		this.#fallback = new ActiveTranscriptState(this.transcriptCache, null, {
-			onSnapshotMessages: options.panels.observeRecoveredMessages,
+			onRecoveredMessages: options.panels.observeRecoveredMessages,
 			onSnapshotResendCandidates: (chatId, candidates, frontier) => {
 				options.panels.publishSnapshotResendCandidates(chatId, candidates, frontier);
 			},

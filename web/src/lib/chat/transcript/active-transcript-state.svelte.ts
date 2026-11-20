@@ -78,7 +78,7 @@ type PageApplyResult = MessageApplyResult | 'stale';
 
 export interface ActiveTranscriptStateOptions {
 	combineMessages?: boolean;
-	onSnapshotMessages?: (chatId: string, messages: readonly TranscriptMessage[]) => void;
+	onRecoveredMessages?: (chatId: string, messages: readonly TranscriptMessage[]) => void;
 	recoverTranscript?: (chatId: string, transcriptViewId: string) => Promise<void>;
 	onSnapshotResendCandidates?: (
 		chatId: string,
@@ -124,7 +124,9 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			onHistoryUnavailable: (chatId, historyState) => {
 				this.#setUnavailableHistory(chatId, historyState);
 			},
-			onPageApplied: (direction) => {
+			onPageApplied: (direction, messages) => {
+				if (!this.usesSharedOverlay) this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
+				if (this.activeChatId) this.options.onRecoveredMessages?.(this.activeChatId, messages);
 				this.rememberExpandedVisibleWindow();
 				this.feedMutations.record(
 					direction === 'earlier' ? 'history-earlier' : 'history-later',
@@ -566,7 +568,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			? countTranscriptAnchors(this.entries, page.nextBeforeOrdinal ?? 1) : 0;
 		if (installMode === 'replace') this.#invalidatePageLoad();
 		this.#snapshots.installWindow(chatId, page, installMode);
-		this.options.onSnapshotMessages?.(chatId, page.messages);
+		this.options.onRecoveredMessages?.(chatId, page.messages);
 		if (requiredInstallMode === 'replace') this.#windowSelectionRevision += 1;
 		if (page.resendCandidates !== undefined) {
 			this.#snapshots.publishResendCandidates(chatId, page.resendCandidates, anchorSnapshot?.page ?? page);

@@ -300,7 +300,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.overlays,
 				{
 					onSnapshotResendCandidates: this.#onSnapshotResendCandidates,
-					onSnapshotMessages: this.observeRecoveredMessages,
+					onRecoveredMessages: this.observeRecoveredMessages,
 					combineMessages: this.options.combineMessages,
 					recoverTranscript: this.#recoverTranscript,
 				},

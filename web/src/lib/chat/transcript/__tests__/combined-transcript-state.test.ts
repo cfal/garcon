@@ -201,6 +201,24 @@ afterEach(() => {
 });
 
 describe('combined transcript intervals', () => {
+	it.each(['earlier', 'later'] as const)('retires a shared optimistic echo supplied by %s anchor paging', async direction => {
+		const { registry, overlays, mount } = panelFixture();
+		mount('left');
+		const transcript = registry.panel('chat-view:window-left')!.transcript;
+		transcript.replaceGeneration(chatId, viewId, [assistant(2)], {
+			lastOrdinal: 3, pageOldestOrdinal: 2, pageNewestOrdinal: 2, nextBeforeOrdinal: 2, hasMore: true,
+		});
+		transcript.hasLaterMessages = true;
+		const echo = { ordinal: direction === 'earlier' ? 1 : 3,
+			message: new UserMessage(time, 'guidance', undefined, { clientMessageId: 'own' }) };
+		installHistory([direction === 'earlier' ? echo : input(1), assistant(2), direction === 'later' ? echo : input(3)]);
+		registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'guidance',
+			createdAt: time, delivery: 'pending', placement: 'live-tail' });
+		await expect(direction === 'earlier' ? transcript.loadEarlierPage(chatId) : transcript.loadLaterPage(chatId)).resolves.toBe('loaded');
+		expect(transcript.entries).toContainEqual(echo);
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+	});
+
 	it.each([
 		['snapshot', null],
 		['earlier', 652],
