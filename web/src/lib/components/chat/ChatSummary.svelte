@@ -3,8 +3,7 @@
 	import Network from '@lucide/svelte/icons/network';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
-	import ChatProcessingIndicator from './ChatProcessingIndicator.svelte';
-	import SidebarChatStatusIndicator from '../sidebar/SidebarChatStatusIndicator.svelte';
+	import ChatActivityIndicator, { type ChatIndicatorStatus } from './ChatActivityIndicator.svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn';
@@ -46,15 +45,12 @@
 	}: ChatSummaryProps = $props();
 
 	let isSidebar = $derived(variant === 'sidebar');
-	let sidebarActivityStatus: ChatSessionRecord['activityStatus'] = $derived(
-		session.isProcessing
-			? session.activityStatus === 'pending-user-action'
-				? 'pending-user-action'
-				: 'working'
-			: session.activityStatus === 'complete' || session.activityStatus === 'error'
-				? session.activityStatus
-				: null,
-	);
+	let sidebarIndicatorStatus = $derived.by<ChatIndicatorStatus | null>(() => {
+		if (!isSidebar) return null;
+		const { isProcessing, activityStatus } = session;
+		if (isProcessing) return activityStatus === 'pending-user-action' ? activityStatus : 'working';
+		return activityStatus === 'error' ? activityStatus : null;
+	});
 	let isUnread = $derived(session.isUnread && !(suppressUnread ?? isSelected));
 	let isSingleLine = $derived(chatItemLayout === 'single-line');
 	let isDetailed = $derived(chatItemLayout === 'detailed');
@@ -66,9 +62,16 @@
 	let formattedTimestamp = $derived(
 		showTimestamp ? formatRelativeTimestamp(activityTimestamp, currentTime) : null,
 	);
+	let headerTimestamp = $derived(
+		!session.isProcessing && (isSidebar || isSingleLine) ? formattedTimestamp : null,
+	);
 	let selectedForeground = $derived(isSidebar && isSelected);
 	let titleClass = $derived(
-		isSidebar ? 'min-w-0 truncate' : 'min-w-0 line-clamp-2 whitespace-normal break-words',
+		cn(
+			'min-w-0',
+			isSidebar ? 'truncate font-normal' : 'line-clamp-2 whitespace-normal break-words font-medium',
+			isUnread && 'font-bold',
+		),
 	);
 	let headerStatusClass = $derived(
 		cn(
@@ -122,13 +125,7 @@
 		data-slot="chat-summary-header"
 	>
 		{@render titlePrefix?.()}
-		{#if isSidebar}
-			<SidebarChatStatusIndicator status={sidebarActivityStatus} />
-		{/if}
-		<span
-			class={cn(titleClass, isUnread ? 'font-bold' : isSidebar ? 'font-normal' : 'font-medium')}
-			title={chatName}
-		>
+		<span class={titleClass} title={chatName}>
 			{chatName}
 		</span>
 		{#if isUnread}
@@ -137,33 +134,39 @@
 			</span>
 		{/if}
 		{@render titleBadge?.()}
-		{#if !isSidebar && !isSingleLine}
-			<ChatProcessingIndicator
-				phase={session.isProcessing ? (session.processingPhase ?? 'running') : null}
-				label={m.chat_window_processing()}
-				dotSlot="chat-board-processing-indicator"
-			/>
-		{:else if !isSidebar && session.isProcessing}
-			<span class={cn('flex items-center justify-end pr-0.5', headerStatusClass)}>
-				<ChatProcessingIndicator
-					phase={session.processingPhase ?? 'running'}
-					label={m.chat_window_processing()}
-					dotSlot="chat-board-processing-indicator"
-				/>
-			</span>
-		{:else if formattedTimestamp}
+		{#if !isSidebar && session.isProcessing}
 			<span
-				class={cn(
-					'whitespace-nowrap text-[11px] leading-4 tabular-nums',
-					headerStatusClass,
-					selectedForeground
-						? 'text-sidebar-chat-item-selected-foreground/75'
-						: 'text-muted-foreground',
-				)}
-				title={formattedTimestamp.tooltip}
-				data-slot="sidebar-chat-timestamp-badge"
+				class={isSingleLine
+					? cn('flex items-center justify-end pr-0.5', headerStatusClass)
+					: 'inline-flex'}
 			>
-				{formattedTimestamp.label}
+				<span class="sr-only">{m.chat_window_processing()}</span>
+				<span
+					class="size-2 shrink-0 rounded-full bg-status-processing"
+					data-phase={session.processingPhase ?? 'running'}
+					data-slot="chat-board-processing-indicator"
+					aria-hidden="true"
+				></span>
+			</span>
+		{:else if sidebarIndicatorStatus || headerTimestamp}
+			<span class={cn('inline-flex items-center gap-1.5', headerStatusClass)}>
+				{#if headerTimestamp}
+					<span
+						class={cn(
+							'whitespace-nowrap text-[11px] leading-4 tabular-nums',
+							selectedForeground
+								? 'text-sidebar-chat-item-selected-foreground/75'
+								: 'text-muted-foreground',
+						)}
+						title={headerTimestamp.tooltip}
+						data-slot="sidebar-chat-timestamp-badge"
+					>
+						{headerTimestamp.label}
+					</span>
+				{/if}
+				{#if sidebarIndicatorStatus}
+					<ChatActivityIndicator status={sidebarIndicatorStatus} />
+				{/if}
 			</span>
 		{/if}
 	</div>

@@ -58,10 +58,4 @@ describe('workspace window theme tokens', () => {
 		expect(dark).toContain('--workspace-window-tab-selected-inactive: 0 0% 12%;');
 		expect(dark).not.toContain('workspace-window-focus');
 	});
-
-	it('animates workspace activity only when reduced motion is not requested', () => {
-		expect(appCss).toMatch(
-			/@media \(prefers-reduced-motion: no-preference\) \{\s*\.sidebar-processing-indicator,\s*\.workspace-chat-processing-indicator \{\s*animation: sidebar-processing-pulse var\(--processing-pulse-duration\) ease-in-out infinite;/,
-		);
-	});
 });

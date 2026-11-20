@@ -3015,13 +3015,13 @@ describe('Chromium workspace windows', () => {
           },
         );
         const processingIndicator = fixture.page.locator(
-          `[id="${chatWindowId}-tab-${chatSurfaceId}"] [data-slot="workspace-chat-processing-indicator"]`,
+          `[id="${chatWindowId}-tab-${chatSurfaceId}"] [data-slot="chat-activity-indicator"]`,
         );
         await processingIndicator.waitFor({ state: 'visible' });
         expect(
           await fixture.page
             .locator(
-              `[data-window-tab-measure-id="${chatSurfaceId}"] [data-slot="workspace-chat-processing-indicator"]`,
+              `[data-window-tab-measure-id="${chatSurfaceId}"] [data-slot="chat-activity-indicator"]`,
             )
             .count(),
         ).toBe(0);
