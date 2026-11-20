@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, type Locator, type Page } from 'playwright';
+import { expect as browserExpect } from 'playwright/test';
 import type { PersistedWorkspaceLayoutV2 } from '../../../common/workspace-layout.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import {
@@ -2980,6 +2981,7 @@ describe('Chromium workspace windows', () => {
     await withChromiumFixture(
       'workspace-window-processing-indicator',
       async (fixture, markPhase) => {
+        await fixture.context.addInitScript(seedLocalSettings, { reduceMotion: true });
         await createGitFixture(fixture.integration.dirs.project);
         const content = 'workspace-window-processing';
         const held = fixture.integration.fakeProviders.openAi.holdNext({
@@ -2996,6 +2998,13 @@ describe('Chromium workspace windows', () => {
         });
         await held.received;
         await openChat(fixture, chatId);
+        const sidebarSpinner = fixture.page.locator(
+          `[data-sidebar-virtual-row="${chatId}"] .chat-processing-spinner`,
+        );
+        const sidebarIcon = sidebarSpinner.locator('svg');
+        await browserExpect(sidebarIcon).toHaveCSS('width', '12px');
+        await browserExpect(sidebarIcon).toHaveCSS('height', '12px');
+        await browserExpect(sidebarSpinner).toHaveCSS('animation-name', 'none');
         const chatWindowId = await fixture.page
           .locator('[data-workspace-window-current="true"]')
           .getAttribute('data-workspace-window-id');
@@ -3004,32 +3013,25 @@ describe('Chromium workspace windows', () => {
 
         markPhase('opening an inactive Chat tab');
         await openWindowTab(fixture.page, chatWindowId, 'Open Compare');
-        await fixture.page.waitForFunction(
-          ({ expectedWindowId, expectedSurfaceId }) =>
-            document
-              .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
-              ?.getAttribute('data-workspace-window-active-surface') === expectedSurfaceId,
-          {
-            expectedWindowId: chatWindowId,
-            expectedSurfaceId: 'singleton:git-compare',
-          },
-        );
-        const processingIndicator = fixture.page.locator(
-          `[id="${chatWindowId}-tab-${chatSurfaceId}"] [data-slot="chat-activity-indicator"]`,
-        );
-        await processingIndicator.waitFor({ state: 'visible' });
-        expect(
-          await fixture.page
-            .locator(
-              `[data-window-tab-measure-id="${chatSurfaceId}"] [data-slot="chat-activity-indicator"]`,
-            )
-            .count(),
-        ).toBe(0);
+        await browserExpect(fixture.page.locator(`[data-workspace-window-id="${chatWindowId}"]`))
+          .toHaveAttribute('data-workspace-window-active-surface', 'singleton:git-compare');
+        const chatTab = fixture.page.locator(`[id="${chatWindowId}-tab-${chatSurfaceId}"]`);
+        const processingIndicator = chatTab.locator('[data-slot="chat-activity-indicator"]');
+        const spinner = processingIndicator.locator('.chat-processing-spinner');
+        await browserExpect(spinner).toBeVisible();
+        const spinnerWidth = await spinner.locator('svg').evaluate((icon) => getComputedStyle(icon).width);
+        await browserExpect(spinner).toHaveCSS('animation-name', 'spin');
+        await fixture.page.emulateMedia({ reducedMotion: 'reduce' });
+        await browserExpect(spinner).toHaveCSS('animation-name', 'none');
+        const measurementTab = fixture.page.locator(`[data-window-tab-measure-id="${chatSurfaceId}"]`);
+        await browserExpect(measurementTab.locator('[data-slot="chat-activity-indicator"]'))
+          .toHaveCount(0);
 
         markPhase('restoring the Chat icon');
         held.releaseEcho();
         await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId);
-        await processingIndicator.waitFor({ state: 'detached' });
+        await browserExpect(processingIndicator).toHaveCount(0);
+        await browserExpect(chatTab.locator('.lucide-message-square')).toHaveCSS('width', spinnerWidth);
         fixture.assertNoBrowserErrors();
       },
     );
