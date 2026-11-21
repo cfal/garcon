@@ -65,6 +65,7 @@ test.each([
   ['policy_capacity_unavailable', 'policyCapacityUnavailable',
     'Policy-restricted capacity is unavailable. Please try again later.'],
   ['inference_hook_denied', 'inferenceHookDenied', 'Synthetic inference hook denied this request.'],
+  ['bio_policy', 'bioPolicy', 'Synthetic bio policy denied this request.'],
 ] as const)('preserves terminal %s failures through native pagination and restart', async (code, errorInfo, message) => {
   const environment = await startScriptedCodexTestEnvironment();
   try {
