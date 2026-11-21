@@ -29,11 +29,11 @@ test('an incompatible handshake closes the CLI before connect rejects', async ()
       }
     `], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }),
   });
-  let exitCode: number | null = null;
-  client.once('exit', (code: number) => { exitCode = code; });
+  const exitCodes: number[] = [];
+  client.on('exit', (code: number) => { exitCodes.push(code); });
   try {
     await expect(client.connect()).rejects.toThrow('0.171.0');
-    expect(exitCode).toBe(0);
+    expect(exitCodes).toEqual([0]);
   } finally {
     await client.shutdown();
   }
