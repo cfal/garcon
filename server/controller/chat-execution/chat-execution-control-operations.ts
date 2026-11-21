@@ -344,21 +344,20 @@ export class ChatExecutionControlOperations {
       if (transition.outcome.status === 'rejected') {
         throw transitionError(transition.outcome.rejection, current);
       }
-      if (!transition.outcome.value) return Promise.resolve(null);
-      const admission = admit(transition.outcome.value);
+      const input = transition.outcome.value;
+      if (!input) return Promise.resolve(null);
+      const admission = admit(input);
       if (admission === 'discarded') {
         // A rejected input leaves the queue without a transcript echo or a dispatch receipt.
         transition.next.recentlyDispatched = current.recentlyDispatched;
       }
       const control = this.#commitNow(chatId, transition.next, transition.publicChanged);
-      const committed = { value: transition.outcome.value, control };
-      if (committed.value.kind === 'control') {
-        this.#logControlMutation('dequeue', chatId, committed.value.entry, committed.control);
+      if (input.kind === 'control') {
+        this.#logControlMutation('dequeue', chatId, input.entry, control);
       } else {
-        const entry = committed.value.entry;
-        this.#logMutation('pop', chatId, entry.id, committed.control, entry.revision);
+        this.#logMutation('pop', chatId, input.entry.id, control, input.entry.revision);
       }
-      return Promise.resolve({ input: committed.value, control: committed.control, inserted: admission === 'inserted' });
+      return Promise.resolve({ input, control, inserted: admission === 'inserted' });
     });
   }
 
