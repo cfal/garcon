@@ -1,6 +1,6 @@
 # Google Antigravity Agent
 
-Status: implemented, 2026-11-20. Garcon hosts Google's Antigravity CLI (`agy`) as the `antigravity` agent through the Agent Client Protocol (ACP). The behavior below was verified against `agy` 1.5.13 (linux_amd64, SHA-512 `014b3738...c68f`) driven by a scripted Gemini model during development.
+Status: implemented, 2026-11-20. Garcon hosts Google's Antigravity CLI (`agy`) as the `antigravity` agent through the Agent Client Protocol (ACP). The behavior below was verified against `agy` 1.5.13 (linux_amd64, SHA-512 `014b3738...c68f`) driven by a scripted Gemini model.
 
 Gemini models remain separately reachable without an agent through the `gemini` API-provider preset (`common/api-provider-templates.ts`). This document covers only the agent.
 
@@ -113,11 +113,12 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 
 ## Testing
 
-Antigravity is a best-effort provider like Cursor: unit coverage only, with no scripted-model tier.
-
 - **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, and tool and result normalization. They also cover executor-error detection and the login environment. A runtime suite drives the shared ACP runtime against a fake agent that speaks agy's wire shapes. It covers agent-defined permission option IDs, cancellation (prompt, late, and ignored), in-band executor errors, and resume in a new process.
 - **Shared ACP tests** in `server-agents/common/src/acp/__tests__` cover permission-option selection by kind and the cancel notification.
-- **Manual verification** when bumping agy: agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method, so a local server that answers `POST /v1beta/models/<model>:streamGenerateContent?alt=sse` can drive the real CLI without a Google account. Requests without tool declarations are auxiliary: title generation and web-search grounding. agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`. It rejects calls that miss required schema fields without emitting a tool call; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Its own rules auto-approve some commands, such as `touch`.
+- **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, the Gemini sibling of `FakeClaudeModel` and `FakeCodexModel`, in all three execution lanes with an isolated `HOME`. agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method and streams `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`. Requests without tool declarations are auxiliary (title generation, web-search grounding) and get a canned reply outside the script. The suite covers catalog discovery, command approval and denial, file edits in accept-edits mode, and model switching on resume. It also covers Stop, upstream API errors, and resume after a server restart.
+  - agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`, so tool IDs are deterministic.
+  - Scripted calls must satisfy agy's tool schema; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Otherwise the CLI rejects them without emitting a tool call. agy's own rules also auto-approve some commands, such as `touch`.
+  - `ANTIGRAVITY_BIN` supplies the binary. `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. The suite is skipped when `ANTIGRAVITY_BIN` is unset.
 
 ## Comparison With t3code
 
@@ -127,7 +128,7 @@ Antigravity is a best-effort provider like Cursor: unit coverage only, with no s
 | Google sign-in | `agy acp --login` code paste; loopback replay for `oauth-business` | Code paste for the default account; other methods via the CLI |
 | API key / Vertex | Per-instance secret and settings file | Executor environment |
 | Account isolation | Private `GEMINI_HOME` per provider instance | User's native `agy` home (one account per executor) |
-| CLI install | Managed, checksummed download with version leases | User-installed `agy` on the executor |
+| CLI install | Managed, checksummed download with version leases | User-installed `agy` on the executor; pinned download for tests |
 | Models | `session/new` config options, probed per model for thinking levels | `agy models` flattened IDs |
 | Permission modes | default, auto, plan via `/plan`; full access by policy | default, accept-edits, plan; bypass by policy |
 | Steering mid-turn | Yes (second `session/prompt`) | No (queued as the next turn) |
