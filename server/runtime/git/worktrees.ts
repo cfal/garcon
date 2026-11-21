@@ -238,30 +238,30 @@ export function createWorktreeOperations(
     baseRef,
     worktreePath,
     branch,
+    newBranch,
     detach,
   }: CreateWorktreeOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     if (baseRef) await assertExistingCommitRef(projectPath, baseRef, "base");
-    if (branch) await assertSafeBranchName(projectPath, branch, "branch name");
+    const name = newBranch ?? branch;
+    if (name) await assertSafeBranchName(projectPath, name, "branch name");
 
     const args: string[] = ["worktree", "add"];
     if (detach) {
       args.push("--detach", worktreePath);
       if (baseRef) args.push(baseRef);
-    } else if (branch) {
-      // Check if the branch already exists to avoid `-b` failure.
-      const branchExists = await runGit(
+    } else if (name) {
+      const reuseBranch = !newBranch && await runGit(
         projectPath,
-        ["rev-parse", "--verify", `refs/heads/${branch}`],
+        ["rev-parse", "--verify", `refs/heads/${name}`],
         readOnlyGitOptions(),
       )
         .then(() => true)
         .catch(() => false);
-      if (branchExists) {
-        // Checkout existing branch into the new worktree path.
-        args.push(worktreePath, branch);
+      if (reuseBranch) {
+        args.push(worktreePath, name);
       } else {
-        args.push("--no-track", "-b", branch, worktreePath);
+        args.push("--no-track", "-b", name, worktreePath);
         if (baseRef) args.push(baseRef);
       }
     } else {

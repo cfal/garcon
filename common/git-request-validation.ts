@@ -49,7 +49,7 @@ export const GIT_REQUEST_FIELDS = {
   createStash: ['message', 'includeUntracked'], applyStash: ['stashRef', 'expectedHash'],
   popStash: ['stashRef', 'expectedHash'], dropStash: ['stashRef', 'expectedHash'],
   getFileHistory: ['file', 'limit'], getBlame: ['file', 'ref', 'limit'], getGraph: ['limit'],
-  createWorktree: ['worktreePath', 'branch', 'baseRef', 'detach'], removeWorktree: ['worktreePath', 'force'],
+  createWorktree: ['worktreePath', 'branch', 'newBranch', 'baseRef', 'detach'], removeWorktree: ['worktreePath', 'force'],
   commitIndex: ['message'], stagePaths: ['paths', 'mode'], revertCommit: ['commit'], collectCommitMessageContext: ['files'],
 } as const satisfies Record<GitMethod, readonly string[]>;
 
@@ -115,7 +115,10 @@ export function validateGitRequest<K extends GitMethod>(method: K, request: unkn
     case 'checkout': if (!path(v.ref) || !optional(v.refKind, x => oneOf(x, ['local-branch', 'remote-branch', 'tag', 'other']))) fail(); break;
     case 'createBranch': if (!path(v.branch)) fail(); break;
     case 'revertCommit': case 'getCommitSnapshot': if (!path(v.commit)) fail(); break;
-    case 'createWorktree': case 'removeWorktree': if (!path(v.worktreePath)) fail(); break;
+    case 'createWorktree':
+      if (!path(v.worktreePath) || v.newBranch !== undefined && (!path(v.newBranch) || v.branch !== undefined || v.detach)) fail();
+      break;
+    case 'removeWorktree': if (!path(v.worktreePath)) fail(); break;
     case 'applyStash': case 'popStash': case 'dropStash': if (!path(v.stashRef) || !hash(v.expectedHash)) fail(); break;
     case 'getWorkbenchSnapshot': if (!oneOf(v.mode, ['working', 'staged']) || !integer(v.context, 50)) fail(); break;
     case 'getReviewDocumentFileBodies':

@@ -1,37 +1,14 @@
 // Automatic chat title generation. Runs a one-shot LLM query to
 // produce a concise title from the first user prompt, then persists
 // via setSessionName (which emits 'session-name-changed' for broadcast).
-import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from '../settings/generation-config-source.ts';
-import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
-import type { ApiProtocol } from '../../../common/api-providers.js';
+import { resolveTitleModelQuery, type TitleModelAgents } from '../settings/title-model.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage } from '../../common/errors.js';
 import { DomainError } from '../../common/domain-error.js';
-import type { ThinkingMode } from '../../../common/chat-modes.js';
-import { isRecord } from '../../../common/json.js';
-import {
-  createGenerationRequestSignal,
-  GENERATION_PROVIDER_TIMEOUT_MS,
-} from '../settings/generation-limits.js';
 import type { RecentTitleIconSource } from './recent-title-icons.js';
 
 const logger = createLogger('chats:title-generator');
 const TITLE_GENERATION_SOURCE_MAX_CHARS = 32_000;
-
-interface TitleGenerationAgents extends GenerationDiscoveryAgents {
-  runSingleQuery(prompt: string, options: {
-    executorId?: string | null;
-    agentId: string;
-    model: string;
-    permissionMode: 'default';
-    thinkingMode: ThinkingMode;
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-    modelProtocol?: ApiProtocol | null;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-  }): Promise<string>;
-}
 
 interface TitleGenerationSettings {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
@@ -43,7 +20,7 @@ interface TitleGenerationSettings {
 interface MaybeGenerateChatTitleInput {
   chatId: string;
   firstPrompt: string;
-  agents: TitleGenerationAgents;
+  agents: TitleModelAgents;
   settings: TitleGenerationSettings;
   recentTitleIcons: RecentTitleIconSource;
   signal?: AbortSignal;
@@ -53,7 +30,7 @@ interface GenerateChatTitleFromMessageInput {
   chatId: string;
   message: string;
   messageSeq?: number;
-  agents: TitleGenerationAgents;
+  agents: TitleModelAgents;
   settings: TitleGenerationSettings;
   recentTitleIcons: RecentTitleIconSource;
   signal?: AbortSignal;
@@ -62,7 +39,7 @@ interface GenerateChatTitleFromMessageInput {
 interface RunTitleGenerationInput {
   chatId: string;
   sourceText: string;
-  agents: TitleGenerationAgents;
+  agents: TitleModelAgents;
   settings: TitleGenerationSettings;
   recentTitleIcons: RecentTitleIconSource;
   requireEnabled: boolean;
@@ -132,20 +109,6 @@ function normalizeTitle(text: unknown): string {
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-function generationSettingsWithoutEnabled(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const { enabled: _enabled, ...rest } = value;
-  return rest;
-}
-
-function hasExplicitGenerationTarget(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return typeof value.agentId === 'string'
-    || typeof value.model === 'string'
-    || typeof value.apiProviderId === 'string'
-    || typeof value.modelEndpointId === 'string';
-}
-
 function titleGenerationUnavailable(): TitleGenerationError {
   return new TitleGenerationError(
     'TITLE_GENERATION_UNAVAILABLE',
@@ -168,41 +131,17 @@ async function runTitleGeneration({
 }: RunTitleGenerationInput): Promise<GenerateChatTitleResult | null> {
   const normalizedSource = (sourceText?.trim() ?? '').slice(0, TITLE_GENERATION_SOURCE_MAX_CHARS);
   if (!normalizedSource) return null;
-  const generationSignal = createGenerationRequestSignal(signal);
-
   try {
     const ui = await settings.getUiSettings();
-    const persisted = ui?.chatTitle;
-    const generationContext = await resolveGenerationContextForSelection(
-      agents,
-      persisted,
-      generationSignal,
-    );
-    const cfg = resolveEffectiveGenerationConfig({
-      persisted: requireEnabled ? persisted : generationSettingsWithoutEnabled(persisted),
-      ...generationContext,
-    });
-
-    if (requireEnabled && !cfg.enabled) return null;
-    if (!requireEnabled && !cfg.enabled && !hasExplicitGenerationTarget(persisted)) {
+    const query = await resolveTitleModelQuery(agents, ui?.chatTitle, requireEnabled ? 'automatic' : 'on-demand', signal);
+    if (!query) {
+      if (requireEnabled) return null;
       throw titleGenerationUnavailable();
     }
-    if (!cfg.agentId || !cfg.model) throw titleGenerationUnavailable();
     if (skipExistingTitle && settings.getChatName(chatId)) return null;
 
     const prompt = buildTitleGenerationPrompt(normalizedSource, recentTitleIcons);
-    const titleRaw = await agents.runSingleQuery(prompt, {
-      executorId: cfg.executorId,
-      agentId: cfg.agentId,
-      model: cfg.model,
-      permissionMode: 'default',
-      thinkingMode: cfg.thinkingMode,
-      apiProviderId: cfg.apiProviderId,
-      modelEndpointId: cfg.modelEndpointId,
-      modelProtocol: cfg.modelProtocol,
-      timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
-      signal: generationSignal,
-    });
+    const titleRaw = await agents.runSingleQuery(prompt, query);
 
     const title = normalizeTitle(titleRaw);
     if (!title) {

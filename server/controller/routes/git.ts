@@ -1,7 +1,8 @@
 import { createGitRouteService, type GitServiceResolver } from './git-executor-service.js';
 import { createGitGenerationRoute } from './git-generation.js';
+import { createGitNameRoute } from './git-name.js';
 import { gitJsonBody, gitQuery, validContextLines, validPositiveLimit } from './git-request-fields.js';
-import { isGitDocumentRef } from '../../../common/git-request-validation.js';
+import { isGitDocumentRef, validateGitRequest } from '../../../common/git-request-validation.js';
 import { GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import {
   GIT_DIFF_LIMITS,
@@ -522,24 +523,10 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
 
   async function postCreateWorktree(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const baseRef = typeof input.baseRef === 'string' ? input.baseRef : undefined;
-      const worktreePath = nonEmptyString(input.worktreePath);
-      const branch = typeof input.branch === 'string' ? input.branch : undefined;
-      const detach = input.detach === true;
-
-      if (!project || !worktreePath) {
-        return gitRouteError('Missing required parameters: project and worktreePath.', 400);
-      }
-
-      return git.createWorktree({ executorId: asJsonBody(body).executorId, signal: request.signal,
-        projectPath: project,
-        baseRef,
-        worktreePath,
-        branch,
-        detach,
-      });
+      const { project, executorId, ...fields } = body;
+      const input = { ...fields, projectPath: project };
+      validateGitRequest('createWorktree', input);
+      return git.createWorktree({ ...input, executorId, signal: request.signal });
     });
   }
 
@@ -767,6 +754,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       POST: gitJsonBody('getCommitSnapshot', postCommitSnapshot),
     },
     ...createGitComparisonRoutes(git),
+    '/api/v1/git/generate-name': { POST: createGitNameRoute(agents, settings) },
     '/api/v1/git/generate-commit-message': {
       POST: createGitGenerationRoute(agents, settings, resolveGit),
     },

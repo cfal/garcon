@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withIntegrationFixture } from "../../support/integration-fixture.js";
+import { initializeFixtureRepository } from "../../support/git-fixture.js";
 
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const child = Bun.spawn(["git", ...args], {
@@ -115,6 +116,23 @@ describe("Git worktree HTTP API", () => {
         source: "worktree",
         isMissing: true,
       });
+    }, { projectRoots: 'separate' });
+  });
+
+  test("suggestions require fresh branches; typed names can reuse local branches", async () => {
+    await withIntegrationFixture("git-worktree-create", async (fixture) => {
+      const projectPath = fixture.executionDirs.project;
+      await initializeFixtureRepository(projectPath);
+      const create = (options: { branch?: string; newBranch?: string; worktreePath: string }) =>
+        fixture.client.fetch('/api/v1/git/worktrees/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ executorId: fixture.client.executorId, project: projectPath, ...options }),
+        });
+      const suggestedPath = join(projectPath, 'suggested');
+      await runGit(projectPath, ['branch', 'unused-local']);
+      expect((await create({ worktreePath: suggestedPath, newBranch: 'unused-local' })).ok).toBe(false);
+      expect((await create({ worktreePath: suggestedPath, newBranch: 'fresh-name' })).ok).toBe(true);
+      expect((await create({ worktreePath: join(projectPath, 'manual'), branch: 'unused-local' })).ok).toBe(true);
     }, { projectRoots: 'separate' });
   });
 });

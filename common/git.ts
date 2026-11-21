@@ -745,6 +745,8 @@ export interface CreateWorktreeOptions extends ProjectOptions {
   baseRef?: string;
   worktreePath: string;
   branch?: string;
+  /** Requires a fresh branch; unlike branch, never checks out an existing ref. */
+  newBranch?: string;
   detach?: boolean;
 }
 
