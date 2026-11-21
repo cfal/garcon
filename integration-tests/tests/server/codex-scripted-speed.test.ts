@@ -167,11 +167,12 @@ describe('Codex scripted per-chat speed', () => {
       expect((await savedSettings(fastChat)).values.speed).toBe('ultrafast');
       await expectTurnTier(resumeChat, fastChat, 'ultrafast');
       await changeSpeed(standardChild, 'fast');
-      for (const [child, tier] of [[premiumChild, 'ultrafast'], [standardChild, 'priority']] as const) {
+      for (const [child, tier, expectedSpeeds] of [
+        [premiumChild, 'ultrafast', ['ultrafast', 'ultrafast']],
+        [standardChild, 'priority', ['standard', 'fast']],
+      ] satisfies [string, InferenceTier, Speed[]][]) {
         await expectTurnTier(resumeChat, child, tier);
-        const childSpeeds = await recordedSpeeds(child);
-        expect(childSpeeds.at(-1)).toBe(tier === 'priority' ? 'fast' : 'ultrafast');
-        expect(childSpeeds).not.toContain('unknown');
+        expect(await recordedSpeeds(child)).toEqual(expectedSpeeds);
       }
 
       await changeSpeed(fastChat, 'fast');
