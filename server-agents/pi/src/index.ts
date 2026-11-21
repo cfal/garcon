@@ -18,7 +18,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec, type PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
+import { runIsolatedSingleQuery, singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
 import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
@@ -30,9 +30,12 @@ import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { createPiNativeActivityProbe } from './agents/pi/native-activity.js';
 import { createPiConfig, type PiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
+import { loadPiChatMessages } from './agents/pi/history-loader.js';
 import { LazyPiRuntime } from './agents/pi/lazy-runtime.js';
 import { getPiAuthStatus } from './agents/pi/pi-auth.js';
+import { runSingleQuery } from './agents/pi/pi-cli.js';
 import { PiModelCatalogService } from './agents/pi/pi-models.js';
+import { findPiSessionFileBySessionId } from './agents/pi/pi-session-paths.js';
 
 const PI_DESCRIPTOR = {
   id: 'pi',
@@ -137,24 +140,11 @@ export default class PiAgentIntegration implements AgentIntegration {
       },
     };
     this.singleQuery = {
-      async run(request) {
-        request.signal.throwIfAborted();
-        try {
-          const { runSingleQuery } = await import('./agents/pi/pi-cli.js');
-          return await withSingleQueryDirectory(request.signal, (directory) => runSingleQuery(request.prompt, {
-            model: request.model,
-            ...singleQueryRuntimeOptions(request),
-            projectPath: directory,
-          }, config));
-        } catch (error) {
-          if (error instanceof AgentIntegrationError) throw error;
-          throw new AgentIntegrationError(
-            'PROVIDER_FAILURE',
-            error instanceof Error ? error.message : String(error),
-            false,
-          );
-        }
-      },
+      run: (request) => runIsolatedSingleQuery(request, (directory) => runSingleQuery(request.prompt, {
+        model: request.model,
+        ...singleQueryRuntimeOptions(request),
+        projectPath: directory,
+      }, config)),
     };
     this.steering = createAgentSteering(producer, {
       captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
@@ -163,7 +153,7 @@ export default class PiAgentIntegration implements AgentIntegration {
     this.lifecycle = createIntegrationLifecycle({
       start: () => {
         models.start();
-        return runtime.startPurgeTimer();
+        runtime.startPurgeTimer();
       },
       stop: async () => {
         const stopped = await Promise.allSettled([models.stop(), runtime.shutdown()]);
@@ -192,7 +182,6 @@ async function resolvePiHistoryPath(
 ): Promise<string | null> {
   if (nativePath && !isArtificialNativePath(nativePath)) return nativePath;
   if (!agentSessionId) return null;
-  const { findPiSessionFileBySessionId } = await import('./agents/pi/pi-session-paths.js');
   return findPiSessionFileBySessionId(agentSessionId, projectPath, config);
 }
 
@@ -226,16 +215,13 @@ function createPiNativeEvidence(
           false,
         );
       }
-      const history = await import('./agents/pi/history-loader.js');
-      return { messages: await history.loadPiChatMessages(nativePath) };
+      return { messages: await loadPiChatMessages(nativePath) };
     },
     async loadLegacy({ chat, signal }) {
       signal.throwIfAborted();
       try {
-        const reference = piReference(chat, nativeSessions);
-        const history = await import('./agents/pi/history-loader.js');
-        const nativePath = await resolvePiHistoryPath(reference, config);
-        return { messages: nativePath ? await history.loadPiChatMessages(nativePath) : [] };
+        const nativePath = await resolvePiHistoryPath(piReference(chat, nativeSessions), config);
+        return { messages: nativePath ? await loadPiChatMessages(nativePath) : [] };
       } catch (error) {
         if (hasNodeErrorCode(error, 'ENOENT')) {
           return { messages: [] };
