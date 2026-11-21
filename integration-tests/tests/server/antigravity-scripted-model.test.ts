@@ -15,6 +15,7 @@ import {
   ANTIGRAVITY_TEST_ALTERNATE_MODEL,
   ANTIGRAVITY_TEST_MODEL,
   antigravityAgentSessionId,
+  antigravityUpdaterSpawns,
   scriptedAntigravityRunRequest,
   scriptedAntigravityStartRequest,
   startScriptedAntigravityTestEnvironment,
@@ -60,6 +61,9 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(antigravity.models.find((model) => model.value === ANTIGRAVITY_TEST_MODEL)?.label)
         .toBe('Gemini 3.1 Pro (Low)');
       expect(antigravity.authLoginSupported).toBe(true);
+      // agy honors only AGY_CLI_DISABLE_AUTO_UPDATE=true; any other value lets
+      // `agy models` start the updater, which replaced the pinned binary.
+      expect(await antigravityUpdaterSpawns(fixture.executionDirs)).toBe(0);
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
@@ -136,6 +140,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(assistantContents(transcript)).toEqual([firstReply, secondReply]);
       // agy reports the switch to the model as a settings change on the next request.
       expect(testEnvironment.model.requests().at(-1)?.lastUserText).toContain('Gemini 3.1 Pro (High)');
+      expect(await antigravityUpdaterSpawns(fixture.executionDirs)).toBe(0);
       testEnvironment.model.assertSettled();
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);

@@ -1,8 +1,9 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
-import type {
-  AcpAgentPolicy,
-  AcpSessionConfigurationContext,
+import {
+  explicitAcpModel,
+  type AcpAgentPolicy,
+  type AcpSessionConfigurationContext,
 } from '@garcon/server-agent-common/acp/policy';
 import type { AcpResumeRequest, AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
@@ -55,7 +56,7 @@ export async function configureAntigravitySession(
     context.client,
     context.sessionId,
     context.models,
-    requestedAntigravityModel(context.request.model) ?? context.agentDefaultModelId,
+    explicitAcpModel(context.request.model) ?? context.agentDefaultModelId,
   );
   if (models) context.applyState({ models });
 
@@ -66,11 +67,6 @@ export async function configureAntigravitySession(
     antigravityModeForPermissionMode(context.request.permissionMode),
   );
   if (configOptions) context.applyState({ configOptions });
-}
-
-// Garcon names the agent's default as an empty model or `default`.
-export function requestedAntigravityModel(model: string | undefined): string | undefined {
-  return !model || model === 'default' ? undefined : model;
 }
 
 // Returns the updated model state, or undefined when the session already uses

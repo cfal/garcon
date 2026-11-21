@@ -49,7 +49,8 @@ const ANTIGRAVITY_DESCRIPTOR = {
   supportsImages: true,
   // agy keeps the working directory recorded with the conversation and ignores
   // the cwd that session/resume passes, so a moved chat would keep working in
-  // its old directory. Verified against agy 1.5.13 by the scripted tier.
+  // its old directory. Verified against agy 1.5.13; the scripted tier asserts
+  // that Garcon refuses the move.
   supportsProjectPathUpdate: false,
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: [],

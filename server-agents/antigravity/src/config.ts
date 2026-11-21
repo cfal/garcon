@@ -72,5 +72,6 @@ export function antigravityChildEnvironment(
   // can succeed on a credential other than the configured one.
   const { GEMINI_API_KEY: _ambient, ...env } = process.env;
   const apiKey = authMethodOrNull(config) === 'gemini-api-key' ? config.apiKey() : null;
-  return { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: '1', ...(apiKey ? { GEMINI_API_KEY: apiKey } : {}), ...overrides };
+  // agy reads only `true`; with `1` it still spawns its updater (verified on 1.5.13).
+  return { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', ...(apiKey ? { GEMINI_API_KEY: apiKey } : {}), ...overrides };
 }

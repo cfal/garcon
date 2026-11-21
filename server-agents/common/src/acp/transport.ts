@@ -58,6 +58,7 @@ export class AcpTransport extends EventEmitter {
   #pending = new Map<AcpJsonRpcId, PendingRequest>();
   #spawn: NonNullable<AcpTransportOptions['spawn']>;
   #requestTimeoutMs: number;
+  #exitCode: number | null = null;
 
   constructor(options: AcpTransportOptions = {}) {
     super();
@@ -67,6 +68,7 @@ export class AcpTransport extends EventEmitter {
 
   async connect(spec: AcpSpawnSpec): Promise<void> {
     if (this.#process) return;
+    this.#exitCode = null;
     this.#process = this.#spawn(spec.command, spec.args, {
       cwd: spec.cwd,
       env: spec.env,
@@ -150,7 +152,17 @@ export class AcpTransport extends EventEmitter {
     return () => this.off('stderr', cb);
   }
 
+  // A listener attached after the process exited still hears of it, so a
+  // watcher added after the last awaited reply cannot miss a death.
   onExit(cb: (exitCode: number) => void): () => void {
+    const exitCode = this.#exitCode;
+    if (exitCode !== null) {
+      let detached = false;
+      queueMicrotask(() => {
+        if (!detached) cb(exitCode);
+      });
+      return () => { detached = true; };
+    }
     this.on('exit', cb);
     return () => this.off('exit', cb);
   }
@@ -233,6 +245,7 @@ export class AcpTransport extends EventEmitter {
 
   async #watchExit(exited: Promise<number>): Promise<void> {
     const exitCode = await exited;
+    this.#exitCode = exitCode;
     this.#process = null;
     const error = new Error(`ACP transport process exited with code ${exitCode}`);
     this.#rejectAllPending(error);

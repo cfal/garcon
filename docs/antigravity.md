@@ -38,7 +38,7 @@ Native storage cannot back a file-level fork the way Claude's JSONL does:
 
 Each Garcon session owns one `agy acp` child process, started in the chat's project directory. The executor's ambient `PATH`, `HOME`, and Antigravity configuration apply, so the agent uses the same sign-in, settings, skills, and conversation store as the user's interactive `agy`. This matches how Claude, Codex, and Cursor use their native homes.
 
-The binary resolves from `GARCON_ANTIGRAVITY_BINARY`, then `agy` on `PATH`. Garcon sets `AGY_CLI_DISABLE_AUTO_UPDATE=1` on its children so the CLI's background updater cannot replace a binary that running sessions use.
+The binary resolves from `GARCON_ANTIGRAVITY_BINARY`, then `agy` on `PATH`. Garcon sets `AGY_CLI_DISABLE_AUTO_UPDATE=true` on its children so the CLI's background updater cannot replace a binary that running sessions use. agy accepts only `true`: with `1`, even `agy models` spawns the updater and replaces the binary (verified on 1.5.13, which updated itself to 1.5.14).
 
 ACP calls:
 

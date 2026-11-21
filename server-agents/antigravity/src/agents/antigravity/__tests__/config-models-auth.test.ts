@@ -183,7 +183,7 @@ describe('Antigravity login', () => {
       const env = antigravityLoginEnvironment({ apiKey: () => 'synthetic-key', authMethod: () => 'gemini-api-key' });
       expect(env.DISPLAY).toBeUndefined();
       expect(env.WAYLAND_DISPLAY).toBeUndefined();
-      expect(env.AGY_CLI_DISABLE_AUTO_UPDATE).toBe('1');
+      expect(env.AGY_CLI_DISABLE_AUTO_UPDATE).toBe('true');
       expect(env.GEMINI_API_KEY).toBe('synthetic-key');
     } finally {
       for (const [key, value] of Object.entries(previous)) {

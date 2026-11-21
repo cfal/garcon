@@ -103,6 +103,16 @@ describe('AcpTransport', () => {
     await expect(pending).rejects.toThrow('ACP transport process exited with code 7');
   });
 
+  it('tells a listener attached after the process exited about the exit', async () => {
+    const proc = createProcess();
+    const transport = await connectedTransport(proc, 1000);
+    proc.exit(9);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const heard = await new Promise<number>((resolve) => transport.onExit(resolve));
+    expect(heard).toBe(9);
+  });
+
   it('writes notifications without an id', async () => {
     const proc = createProcess();
     const transport = await connectedTransport(proc, 1000);

@@ -52,9 +52,16 @@ export interface AcpAgentPolicy {
 
 type AcpRequest = AcpStartRequest | AcpResumeRequest;
 
+// Garcon names the agent's default as an empty model or `default`; returns the
+// explicitly requested model otherwise.
+export function explicitAcpModel(model: string | undefined): string | undefined {
+  return !model || model === 'default' ? undefined : model;
+}
+
 function mappedModel(policy: AcpAgentPolicy, model: string): string | undefined {
-  if (!model || model === 'default') return undefined;
-  return policy.mapModel ? policy.mapModel(model) : model;
+  const explicit = explicitAcpModel(model);
+  if (!explicit) return undefined;
+  return policy.mapModel ? policy.mapModel(explicit) : explicit;
 }
 
 export function newSessionModelFor(policy: AcpAgentPolicy, request: AcpRequest): string | undefined {

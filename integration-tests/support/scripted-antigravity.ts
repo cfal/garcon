@@ -7,7 +7,7 @@
 // ANTIGRAVITY_BIN names the pinned binary installed by
 // `bun scripts/install-antigravity-cli.ts`; suites skip when it is unset.
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
@@ -38,6 +38,22 @@ export interface ScriptedAntigravityTestEnvironment {
   readonly serverEnvironment: Record<string, string>;
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
   dispose(): void;
+}
+
+// agy logs this line whenever it starts its background self-updater, which
+// would replace the binary that running sessions use.
+const UPDATER_SPAWN_LOG = 'Spawned background update process';
+
+// Each agy run writes its own log under `log/`.
+export async function antigravityUpdaterSpawns(directories: IntegrationDirectories): Promise<number> {
+  const logDir = join(directories.home, '.gemini', 'antigravity-cli', 'log');
+  const names = await readdir(logDir).catch(() => [] as string[]);
+  let spawns = 0;
+  for (const name of names) {
+    const text = await Bun.file(join(logDir, name)).text();
+    spawns += text.split('\n').filter((line) => line.includes(UPDATER_SPAWN_LOG)).length;
+  }
+  return spawns;
 }
 
 export function startScriptedAntigravityTestEnvironment(): ScriptedAntigravityTestEnvironment {
