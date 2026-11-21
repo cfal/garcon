@@ -23,7 +23,7 @@ Common options and environment variables:
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
 - `GARCON_TERMINAL_SHELL`: shell used by terminal sessions.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: native CLI overrides.
-- `GARCON_CODEX_CLI`: Codex CLI override. By default Garcon runs the native binary from its bundled `@openai/codex` platform package, then falls back to `codex` on `PATH`.
+- `GARCON_CODEX_CLI`: Codex executable on this executor, including device login. Defaults to `codex` on the service's `PATH` (`codex.exe` on Windows). App-server requires Codex 0.171.0 or newer.
 - `GARCON_CURSOR_BINARY`: Cursor Agent CLI override.
 - `CURSOR_API_KEY`: Cursor Agent API key for native sessions.
 - `GARCON_ANTIGRAVITY_BINARY`: Antigravity CLI (`agy`) override; defaults to `agy` on `PATH`.

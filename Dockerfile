@@ -67,8 +67,9 @@ FROM base AS runtime
 ARG GARCON_UID=1000
 ARG GARCON_GID=1000
 ARG OPENCODE_VERSION=1.19.5
+ARG CODEX_VERSION=0.171.0
 
-RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" && npm cache clean --force
+RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" "@openai/codex@${CODEX_VERSION}" && npm cache clean --force
 RUN set -eu; \
     if [ "${GARCON_UID}" -eq 0 ]; then \
       echo "GARCON_UID must identify a non-root user" >&2; \
@@ -153,9 +154,7 @@ COPY --from=build /app/web/build/ web/build/
 COPY --from=build /app/cli/ cli/
 COPY --chmod=755 docker/garcon-cli /usr/local/bin/garcon-cli
 
-RUN test -x /app/server-agents/codex/node_modules/.bin/codex && \
-    test -x /app/server-agents/pi/node_modules/.bin/pi && \
-    ln -s /app/server-agents/codex/node_modules/.bin/codex /usr/local/bin/codex && \
+RUN test -x /app/server-agents/pi/node_modules/.bin/pi && \
     ln -s /app/server-agents/pi/node_modules/.bin/pi /usr/local/bin/pi && \
     printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/garcon-path.sh
 

@@ -2,13 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
+import { CodexAppServerClient, CodexAppServerRpcError } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
+import { CODEX_BINARY } from '../../support/live-codex.js';
 
-describe('bundled Codex history API compatibility', () => {
+describe('pinned Codex history API compatibility', () => {
   it('recognizes paginated turn and item list methods', async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), 'garcon-codex-handshake-')));
     const client = new CodexAppServerClient({
-      env: { CODEX_HOME: home, HOME: home },
+      env: { GARCON_CODEX_CLI: CODEX_BINARY, CODEX_HOME: home, HOME: home },
       shutdownGraceMs: 100,
     });
     try {
@@ -32,6 +33,7 @@ describe('bundled Codex history API compatibility', () => {
         failure = error;
       }
       expect(failure).toBeInstanceOf(CodexAppServerRpcError);
+      if (!(failure instanceof CodexAppServerRpcError)) throw new Error('Expected a Codex RPC failure');
       expect(failure.code).not.toBe(-32601);
 
       failure = undefined;
@@ -45,6 +47,7 @@ describe('bundled Codex history API compatibility', () => {
         failure = error;
       }
       expect(failure).toBeInstanceOf(CodexAppServerRpcError);
+      if (!(failure instanceof CodexAppServerRpcError)) throw new Error('Expected a Codex RPC failure');
       expect(failure.message).not.toMatch(/^method not found$/i);
     } finally {
       try {

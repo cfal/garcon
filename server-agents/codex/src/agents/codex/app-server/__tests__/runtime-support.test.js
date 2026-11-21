@@ -17,4 +17,11 @@ describe('Codex provider admission errors', () => {
     const error = new CodexAppServerRpcError('Network timeout', -32600, { type: 'futureProviderError' });
     expect(humanizeCodexAppServerError(error)).toBe('Codex could not connect to the API. Check your network connection.');
   });
+
+  it('suggests the executor override for a missing binary, not a missing model', () => {
+    for (const message of ['Executable not found in $PATH: "codex"', 'spawn codex.exe ENOENT']) {
+      expect(humanizeCodexAppServerError(new Error(message))).toContain('GARCON_CODEX_CLI');
+    }
+    expect(humanizeCodexAppServerError(new Error('Model not found'))).toContain('model not available');
+  });
 });

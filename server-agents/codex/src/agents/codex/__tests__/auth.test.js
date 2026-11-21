@@ -8,7 +8,7 @@ import {
   getCodexAuthStatus,
   resolveCodexExecAuthStatus,
 } from '../codex-auth.js';
-import { bundledCodexCliPath } from '../app-server/cli.js';
+import { resolveCodexCli } from '../app-server/cli.js';
 
 function createFakeProc({ stdout = '', stderr = '', exitCode = 0 }) {
   return {
@@ -77,7 +77,7 @@ describe('getCodexAuthStatus', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [command, options] = spawnMock.mock.calls[0];
-    expect(command[0]).toBe(bundledCodexCliPath());
+    expect(command[0]).toBe(resolveCodexCli().command);
     expect(command.slice(1)).toEqual(['login', 'status']);
     expect(options.stdin).toBe('ignore');
     expect(options.stdout).toBe('pipe');

@@ -41,8 +41,8 @@ export function humanizeCodexAppServerError(error: unknown): string {
       }
     }
   }
-  if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
-    return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';
+  if (/executable not found|spawn.*ENOENT|ENOENT.*(?:spawn|codex)/i.test(raw)) {
+    return 'Codex CLI was not found on this executor. Put Codex on the service PATH or set GARCON_CODEX_CLI to its executable (codex.exe on Windows).';
   }
   if (/authentication|unauthorized|401|api.?key/i.test(raw)) {
     return 'Codex authentication failed. Run "codex" in your terminal to sign in.';

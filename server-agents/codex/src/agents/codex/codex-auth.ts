@@ -83,7 +83,7 @@ async function runCodexLoginStatus(
   await fs.mkdir(config.home(), { recursive: true });
   signal.throwIfAborted();
   const env = effectiveCodexEnvironment(config);
-  const resolved = await resolveCodexCli({ env });
+  const resolved = resolveCodexCli(env);
   signal.throwIfAborted();
   const proc = Bun.spawn([resolved.command, 'login', 'status'], {
     stdin: 'ignore',

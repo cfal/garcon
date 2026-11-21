@@ -120,7 +120,6 @@
         "@garcon/common": "workspace:*",
         "@garcon/server-agent-common": "workspace:*",
         "@garcon/server-agent-interface": "workspace:*",
-        "@openai/codex": "0.171.0",
         "acorn": "^8.19.0",
         "bun-pty": "^0.5.1",
         "shell-quote": "^1.12.0",
@@ -705,20 +704,6 @@
     "@mermaid-js/parser": ["@mermaid-js/parser@2.0.1", "", { "dependencies": { "@chevrotain/types": "~13.2.0" } }, "sha512-j37dj/h6p6pots1L7pLPPNuABEEu9WP4OYg9pW1g+nYG331j0+3canE9OagtYdytYvdSAMG+2fKU5cxep6LgjA=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.6", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg=="],
-
-    "@openai/codex": ["@openai/codex@0.171.0", "", { "optionalDependencies": { "@openai/codex-darwin-arm64": "npm:@openai/codex@0.171.0-darwin-arm64", "@openai/codex-darwin-x64": "npm:@openai/codex@0.171.0-darwin-x64", "@openai/codex-linux-arm64": "npm:@openai/codex@0.171.0-linux-arm64", "@openai/codex-linux-x64": "npm:@openai/codex@0.171.0-linux-x64", "@openai/codex-win32-arm64": "npm:@openai/codex@0.171.0-win32-arm64", "@openai/codex-win32-x64": "npm:@openai/codex@0.171.0-win32-x64" }, "bin": { "codex": "bin/codex.js" } }, "sha512-1IOFzL2Xg86tLdw6kDo3GoKbkQENgQi7TI6rlEvN132R7ngSw7SNOIQoTcnKzSZZ8kf9N9GynCweSoaFbqk2Eg=="],
-
-    "@openai/codex-darwin-arm64": ["@openai/codex@0.171.0-darwin-arm64", "", { "os": "darwin", "cpu": "arm64" }, "sha512-hIYTkRUpuYpkVfTq4cpby0PXqhAVcIgE7f6FoyY1lt2RyARj3GXS1Can/dIYUBItVhXzhb98HYHZNzCX74QRlQ=="],
-
-    "@openai/codex-darwin-x64": ["@openai/codex@0.171.0-darwin-x64", "", { "os": "darwin", "cpu": "x64" }, "sha512-pwN5uNEKx/mZjwBEf/6CKq6SJMfJS5kruV3sJQAk7ebIPvC58Ote3CicIxETDZtjLj35rNv3PLPd7mHCg6hGPw=="],
-
-    "@openai/codex-linux-arm64": ["@openai/codex@0.171.0-linux-arm64", "", { "os": "linux", "cpu": "arm64" }, "sha512-9z17t4bbUJ9UCIb49O4PoA+ki+45q3rd8nZ8PeH6sYnlKkBld/Xpo/OS3h3Ti954+foshX4o7k5TCU8N7zzqQA=="],
-
-    "@openai/codex-linux-x64": ["@openai/codex@0.171.0-linux-x64", "", { "os": "linux", "cpu": "x64" }, "sha512-l66NZkQgdk2C3pbcfULDz42yEUB581MVA6I+Y43Wp4OIqEy73HCdmZ0GTjeAHY2ycuH4N00d9VsLrwT1jxshTw=="],
-
-    "@openai/codex-win32-arm64": ["@openai/codex@0.171.0-win32-arm64", "", { "os": "win32", "cpu": "arm64" }, "sha512-kkavDHtAkkNaYtO7eBw4IdBbE/PsWP+Ezp9JXcr/mBu/Cc7EevzFVIVC3sZYvWsF9xuvyjIUv9CKeN0LU0+N9Q=="],
-
-    "@openai/codex-win32-x64": ["@openai/codex@0.171.0-win32-x64", "", { "os": "win32", "cpu": "x64" }, "sha512-HKWBK25tLQxdEg6svw0CrBf+v0bQhRyF8EBVdNqeRxErqpfFa/dfSar6r3sJt6tyPqozOtgz2BH8B2G3n/+gnQ=="],
 
     "@opencode-ai/sdk": ["@opencode-ai/sdk@1.19.5", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-+bqu8gHiwmq96T9q5G34uLNHWCInIMsrE3hytCNHj1cVaxjY0AGJyNCT1rkeeZwgPU7A5TMTNwN+0XxCO2vqDg=="],
 

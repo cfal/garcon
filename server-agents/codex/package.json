@@ -13,7 +13,6 @@
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
-    "@openai/codex": "0.171.0",
     "acorn": "^8.19.0",
     "bun-pty": "^0.5.1",
     "shell-quote": "^1.12.0"

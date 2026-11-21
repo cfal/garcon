@@ -2,11 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { parseChatMessage } from '@garcon/common/chat-types';
-import { resolveCodexCli } from '../cli.ts';
-import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
-import { convertCodexAppServerItem } from '../converter.ts';
-import { parseThreadItemsListResponse, parseThreadTurnsListResponse, type CodexThreadItem } from '../protocol.ts';
+import { parseChatMessage } from '../../../common/chat-types.js';
+import { CODEX_BINARY } from '../../support/live-codex.js';
+import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../../../server-agents/codex/src/agents/codex/app-server/approvals.js';
+import { convertCodexAppServerItem } from '../../../server-agents/codex/src/agents/codex/app-server/converter.js';
+import { parseThreadItemsListResponse, parseThreadTurnsListResponse, type CodexThreadItem } from '../../../server-agents/codex/src/agents/codex/app-server/protocol.js';
 
 interface SchemaNode {
   $ref?: string;
@@ -46,17 +46,15 @@ const itemFields: Record<string, Record<string, unknown>> = {
   contextCompaction: {},
 } satisfies Record<CodexThreadItem['type'], Record<string, unknown>>;
 
-describe('bundled Codex experimental schema compatibility', () => {
+describe('pinned external Codex experimental schema compatibility', () => {
   let directory: string;
   let definitions: Record<string, SchemaNode>;
   let approvalDefinitions: Record<string, SchemaNode>;
 
   beforeAll(async () => {
     directory = await mkdtemp(join(homedir(), '.garcon-codex-schema-'));
-    const cli = await resolveCodexCli({ env: {} });
-    expect(cli.source).toBe('bundled');
     const child = Bun.spawn([
-      cli.command, 'app-server', 'generate-json-schema', '--experimental', '--out', directory,
+      CODEX_BINARY, 'app-server', 'generate-json-schema', '--experimental', '--out', directory,
     ], {
       env: { ...process.env, HOME: directory, CODEX_HOME: directory },
       stdout: 'ignore', stderr: 'pipe',

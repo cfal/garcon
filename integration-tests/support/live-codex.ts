@@ -19,7 +19,7 @@ const SCRIPTED_CODEX_MODEL = 'integration-codex-model';
 export const LIVE_CODEX_THINKING_MODE = 'low';
 export type CodexTestToolMode = 'direct' | 'code_mode' | 'code_mode_only';
 
-const CODEX_BINARY = fileURLToPath(
+export const CODEX_BINARY = fileURLToPath(
   new URL('../node_modules/.bin/codex', import.meta.url),
 );
 const CODEX_AGENT_SETTINGS: AgentSettingsEnvelope = {

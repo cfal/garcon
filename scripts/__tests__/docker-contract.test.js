@@ -8,7 +8,7 @@ const provisionedAgents = {
   amp: 'https://ampcode.com/install.sh',
   antigravity: 'https://antigravity.google/cli/install.sh',
   claude: 'https://claude.ai/install.sh',
-  codex: '/app/server-agents/codex/node_modules/.bin/codex',
+  codex: '"@openai/codex@${CODEX_VERSION}"',
   cursor: 'https://cursor.com/install',
   factory: 'https://app.factory.ai/cli',
   opencode: 'npm install -g "opencode-ai@${OPENCODE_VERSION}"',
@@ -154,7 +154,7 @@ describe('Docker contract', () => {
     expect(dockerfile).toContain(`ARG OPENCODE_VERSION=${openCodeVersion}`);
     expect(opencodeAgentPackage.dependencies['@opencode-ai/sdk']).toBe(openCodeVersion);
     expect(opencodeSupervisor).toContain(`export const PINNED_OPENCODE_VERSION = '${openCodeVersion}';`);
-    expect(dockerfile).not.toContain('@openai/codex');
+    expect(dockerfile).toContain(`ARG CODEX_VERSION=${integrationPackage.devDependencies['@openai/codex']}`);
     expect(dockerfile).not.toContain('pi-coding-agent');
     expect(dockerfile).not.toContain('opencode-ai@latest');
   });

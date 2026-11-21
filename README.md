@@ -235,7 +235,7 @@ Stopping only the server process makes the loop restart it within about 10 secon
 ## Windows Notes
 
 - The default config folder is `%USERPROFILE%\.garcon`. Garcon ignores `HOME` on Windows, so Git Bash, PowerShell, and scheduled tasks share one folder. Set `GARCON_CONFIG_DIR` only to use a different location.
-- Codex runs from the native `codex.exe` bundled with Garcon. Set `GARCON_CODEX_CLI` only to use a different Codex build.
+- Install Codex CLI 0.171.0 or newer on each executor that uses it. Put the native `codex.exe` on the service's `PATH` or set `GARCON_CODEX_CLI` to its absolute path, particularly if your shell normally launches an npm shim.
 - Always run Garcon as the same non-administrator user. A copy started as administrator can leave files in the config folder that a normal-user copy cannot open.
 
 ## Troubleshooting

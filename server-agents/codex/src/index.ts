@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { resolveCodexCli } from './agents/codex/app-server/cli.js';
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
@@ -71,6 +72,7 @@ const CODEX_DESCRIPTOR = {
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: ['openai-compatible'],
   configuration: [
+    { key: 'GARCON_CODEX_CLI', source: 'environment', description: 'Codex CLI executable.' },
     { key: 'OPENAI_API_KEY', source: 'environment', description: 'OpenAI API key.' },
     { key: 'CODEX_API_KEY', source: 'environment', description: 'Codex exec API key.' },
     { key: 'OPENAI_BASE_URL', source: 'environment', description: 'OpenAI API base URL.' },
@@ -135,7 +137,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       skillDiscovery,
     });
     const login = new CliLoginController({
-      command: () => ['codex', 'login', '--device-auth'],
+      command: () => [resolveCodexCli().command, 'login', '--device-auth'],
       mode: 'device-code',
       logger,
       cwd: os.homedir(),

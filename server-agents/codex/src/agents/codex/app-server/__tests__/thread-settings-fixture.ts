@@ -80,7 +80,7 @@ async function startFixtureSession(
     const client = new CodexAppServerClient();
     let turn: CodexTurn;
     spyOn(client, 'connect').mockResolvedValue({
-      userAgent: 'codex', codexHome: directory, platformFamily: 'unix', platformOs: 'linux',
+      userAgent: 'garcon/0.171.0', codexHome: directory, platformFamily: 'unix', platformOs: 'linux',
     });
     const shutdown = spyOn(client, 'shutdown').mockResolvedValue();
     spyOn(client, 'startThread').mockResolvedValue(response);
