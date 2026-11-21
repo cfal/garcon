@@ -51,6 +51,7 @@ import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
 } from '../ledger/service.js';
+import { dispatchFailureCertainty } from '../ledger/dispatch-failure.js';
 import {
   dispatchFailureDetail,
   executionSetupFailure,
@@ -501,9 +502,8 @@ export class AgentRuntimeRouter {
     this.#pendingAbortRuns.delete(runKey(chatId, runId));
     if (error instanceof AgentCallError && error.outcome === 'unknown') return;
     this.#bindings.forgetRun(runId);
-    this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error),
-      notInvoked || error instanceof AgentCallError && error.outcome === 'not-dispatched' ? 'not-started'
-        : error instanceof AgentCallError && error.outcome === 'rejected' ? 'definite' : 'unknown');
+    const certainty = notInvoked ? 'not-started' : dispatchFailureCertainty(error);
+    this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error), certainty);
   }
 
   abortSession(chatId: string, expectedTurnId?: string): Promise<boolean> {

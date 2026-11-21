@@ -4,6 +4,7 @@ import { createWorkflowRunner } from '../automation-runner.js';
 const key = { serverInstanceId: 'test', chatId: 'reserved', turnId: 'turn', clientRequestId: 'request' };
 for (const [started, published, expected] of [
   [{ kind: 'not-started', code: 'API_PROVIDER_CONFIGURATION_CHANGED', inputPublished: false }, false, 'failed'],
+  [{ kind: 'not-started', code: 'EXECUTOR_UNAVAILABLE', inputPublished: false }, false, 'unavailable'],
   [{ kind: 'not-started', code: 'EXECUTOR_UNAVAILABLE', inputPublished: true }, true, 'unknown'],
   [{ kind: 'unknown', reason: 'Unconfirmed admission' }, false, 'unknown'],
   [{ kind: 'published' }, true, 'unknown'],

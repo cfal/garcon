@@ -12,6 +12,7 @@ import { createLogger } from '../../common/log.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatExecutionService } from '../chat-execution/types.js';
 import type { TranscriptCommitEvent, TranscriptViewId } from '../ledger/contracts.js';
+import { dispatchFailureCertainty } from '../ledger/dispatch-failure.js';
 import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.js';
 import { CommandValidationError, type CommandSupport, type NormalizedChatStart } from '../commands/command-support.js';
 import type { CommandLedgerRecord } from '../commands/command-ledger.js';
@@ -118,7 +119,7 @@ export class AutomationService implements AutomationExecutionPort {
         key, record: reservation.record, cancellation,
         admission: { signal: cancellation.signal, providerRevision, assertEligible,
           assertPreambles: pinAutomationPreambles(selection.eligible), inputPublished: false,
-          dispatchFailed: error => { entry.dispatchFailure = failureCertainty(error); } },
+          dispatchFailed: error => { entry.dispatchFailure = dispatchFailureCertainty(error); } },
         signals: onSignal ? new LiveSignals(this.support.deps.transcripts, key,
           () => this.#entries.get(chatId) === entry && !entry.cancellation.signal.aborted
             && !entry.stopRequested && entry.phase === 'published' && entry.terminal?.failureCertainty !== 'unknown', onSignal) : null,
@@ -355,9 +356,4 @@ function errorCode(error: unknown, fallback: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Managed turn could not start.';
-}
-
-function failureCertainty(error: unknown): ExecutionFailureCertainty {
-  if (!(error instanceof AgentCallError)) return 'unknown';
-  return error.outcome === 'not-dispatched' ? 'not-started' : error.outcome === 'rejected' ? 'definite' : 'unknown';
 }

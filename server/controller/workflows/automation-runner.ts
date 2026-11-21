@@ -117,12 +117,19 @@ export function createWorkflowRunner(automation: AutomationExecutionPort, files:
           throw error;
         }
         const started = await turn.start();
-        if (started.kind === 'unknown') return { kind: 'unknown', reason: started.reason };
-        if (started.kind === 'published' || started.inputPublished) callbacks.confirmChat();
-        if (started.kind === 'not-started') return {
-          kind: started.inputPublished ? 'unknown' : offline(started.code) ? 'unavailable' : 'failed', reason: started.code,
-        };
-        return terminal(await automation.waitForTerminal(turn.key, callbacks.signal), request.kind === 'command');
+        switch (started.kind) {
+          case 'unknown':
+            return { kind: 'unknown', reason: started.reason };
+          case 'not-started':
+            if (started.inputPublished) {
+              callbacks.confirmChat();
+              return { kind: 'unknown', reason: started.code };
+            }
+            return { kind: offline(started.code) ? 'unavailable' : 'failed', reason: started.code };
+          case 'published':
+            callbacks.confirmChat();
+            return terminal(await automation.waitForTerminal(turn.key, callbacks.signal), request.kind === 'command');
+        }
       } finally {
         turn.release();
       }
