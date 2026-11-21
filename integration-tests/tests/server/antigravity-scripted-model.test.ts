@@ -353,6 +353,35 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
+
+  test('generates a title on the selected executor without publishing the one-shot reply to the chat', async () => {
+    const { model } = requireEnvironment();
+    const reply = marker('CHAT_REPLY');
+    const title = marker('GENERATED_TITLE');
+    model.scriptTurn([geminiText(reply)]);
+    model.scriptTurn([geminiText(title)]);
+
+    await withIntegrationFixture('antigravity-scripted-title', async (fixture) => {
+      await fixture.client.updateSettings({ ui: { chatTitle: {
+        executorId: fixture.client.executorId, enabled: false, agentId: 'antigravity', model: 'default',
+        apiProviderId: null, modelEndpointId: null, modelProtocol: null, thinkingMode: 'none',
+      } } });
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'Discuss the sample project.',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+      const sessionId = await antigravityAgentSessionId(fixture, chatId);
+
+      const generated = await fixture.client.generateChatTitle({ chatId, message: 'Discuss the sample project.' });
+      expect(generated.success).toBe(true);
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)?.title).toContain(title);
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([reply]);
+      expect(await antigravityAgentSessionId(fixture, chatId)).toBe(sessionId);
+      model.assertSettled();
+    }, withScriptedAntigravity());
+  }, TURN_TIMEOUT_MS);
 });
 
 // The edit test passes the execution project path through the prompt, since the
