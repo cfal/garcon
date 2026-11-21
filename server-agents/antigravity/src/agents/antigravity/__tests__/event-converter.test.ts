@@ -358,15 +358,28 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'error', content: 'Antigravity agent executor error: Error 429' }]);
   });
 
-  it('treats tool progress after a marker chunk as continued work', () => {
+  it('keeps the failure when only a late update for an earlier call follows it', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
     converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'sleep 1' }), context);
     converter.fromSessionUpdate(update({
-      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Note:\n⚠ agent executor error: quoted\n' },
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: Error 429\n' },
     }), context);
-    converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress' }), context);
-    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+    converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'failed' }), context);
+    expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429');
+  });
+
+  it('gives a waiting row the arguments its permission request carried', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+    }), context);
+    converter.permissionToolUse({ toolCallId: 'tool-1', kind: 'execute', rawInput: { CommandLine: 'echo permitted' } }, context);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: { output: 'permitted' },
+    }), context);
+    expect(plain(rows)[0]).toEqual({ type: 'bash-tool-use', toolId: 'tool-1', command: 'echo permitted', description: undefined });
   });
 
   it('flushes text before a call whose row waits for arguments', () => {

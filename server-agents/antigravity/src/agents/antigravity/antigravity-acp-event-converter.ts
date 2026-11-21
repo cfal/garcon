@@ -25,7 +25,7 @@ const EXECUTOR_ERROR = 'agent executor error: ';
 // Bounds each per-session tool collection; the oldest entry is evicted first.
 const MAX_TOOL_ENTRIES_PER_SESSION = 512;
 
-function evictOldest(entries: Set<string> | Map<string, string>): void {
+function evictOldest(entries: Set<string> | Map<string, unknown>): void {
   if (entries.size <= MAX_TOOL_ENTRIES_PER_SESSION) return;
   const oldest = entries.keys().next().value;
   if (oldest !== undefined) entries.delete(oldest);
@@ -41,6 +41,9 @@ interface SessionState {
   readonly completedToolIds: Set<string>;
   // Tool names by call ID; terminal updates need the name to normalize output.
   readonly toolNames: Map<string, string>;
+  // Arguments seen on any frame of a call, including its permission request,
+  // for a row that waited on a frame without them.
+  readonly toolInputs: Map<string, Record<string, unknown>>;
 }
 
 // Upstream model failures (bad key, quota, HTTP errors) do not fail the ACP
@@ -89,8 +92,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   ): ToolUseChatMessage | null {
     const call = antigravityToolCall(toolCall);
     if (!call) return null;
+    const session = this.#sessionFor(context.sessionId);
+    this.#rememberCall(session, call);
     // The request may omit the name an earlier frame of the same call carried.
-    const name = call.name ?? this.#sessions.get(context.sessionId)?.toolNames.get(call.toolCallId) ?? null;
+    const name = call.name ?? session.toolNames.get(call.toolCallId) ?? null;
     return convertAntigravityToolUse(context.timestamp, { ...call, name });
   }
 
@@ -155,9 +160,12 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   ): ChatMessage[] {
     const parsed = antigravityToolCall(update);
     if (!parsed) return [];
-    // A later frame without a name must not replace the name the call started with.
-    if (parsed.name) this.#rememberToolName(session, parsed.toolCallId, parsed.name);
-    const call = { ...parsed, name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null };
+    this.#rememberCall(session, parsed);
+    const call = {
+      ...parsed,
+      name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null,
+      input: Object.keys(parsed.input).length > 0 ? parsed.input : session.toolInputs.get(parsed.toolCallId) ?? {},
+    };
     if (session.emittedToolIds.has(call.toolCallId)) return [];
     // Text before the call is flushed even while its row waits for arguments,
     // so later text cannot move ahead of the tool row.
@@ -190,9 +198,16 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     evictOldest(ids);
   }
 
-  #rememberToolName(session: SessionState, toolCallId: string, name: string): void {
-    session.toolNames.set(toolCallId, name);
-    evictOldest(session.toolNames);
+  // A later frame without a name or arguments must not replace what the call started with.
+  #rememberCall(session: SessionState, call: { readonly toolCallId: string; readonly name: string | null; readonly input: Record<string, unknown> }): void {
+    if (call.name) {
+      session.toolNames.set(call.toolCallId, call.name);
+      evictOldest(session.toolNames);
+    }
+    if (Object.keys(call.input).length > 0) {
+      session.toolInputs.set(call.toolCallId, call.input);
+      evictOldest(session.toolInputs);
+    }
   }
 
   #flush(session: SessionState, timestamp: string): ChatMessage[] {
@@ -216,6 +231,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       emittedToolIds: new Set(),
       completedToolIds: new Set(),
       toolNames: new Map(),
+      toolInputs: new Map(),
     };
     this.#sessions.set(sessionId, created);
     return created;

@@ -27,7 +27,7 @@ export interface AntigravityToolCall {
 }
 
 // Tool arguments arrive in PascalCase from 1.5 and snake_case from older builds
-// (t3code apps/server/src/provider/acp/AntigravityProtocol.ts:444-512 at be91767).
+// (https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/provider/acp/AntigravityProtocol.ts#L444-L512).
 function field(input: Record<string, unknown>, ...names: string[]): unknown {
   for (const name of names) {
     if (input[name] !== undefined) return input[name];

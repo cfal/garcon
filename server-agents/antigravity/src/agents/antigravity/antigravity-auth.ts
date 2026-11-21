@@ -88,8 +88,8 @@ export function antigravityLoginCommand(config: AntigravityConfig): CliLoginComm
 }
 
 // Without a display the CLI prints its sign-in link instead of opening a browser
-// (t3code apps/server/src/provider/Drivers/AntigravityDriver.ts:402-474 at be91767).
-export function antigravityLoginEnvironment(config: Pick<AntigravityConfig, 'apiKey'>): Record<string, string> {
+// (https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/provider/Drivers/AntigravityDriver.ts#L402-L474).
+export function antigravityLoginEnvironment(config: Pick<AntigravityConfig, 'apiKey' | 'authMethod'>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(antigravityChildEnvironment(config))) {
     if (value !== undefined && key !== 'DISPLAY' && key !== 'WAYLAND_DISPLAY') env[key] = value;

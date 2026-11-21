@@ -47,6 +47,14 @@ export function resolveAuthMethod(
   return hasApiKey ? 'gemini-api-key' : 'oauth-personal';
 }
 
+function usesApiKey(config: Pick<AntigravityConfig, 'authMethod'>): boolean {
+  try {
+    return config.authMethod() === 'gemini-api-key';
+  } catch {
+    return false;
+  }
+}
+
 function isAntigravityAuthMethod(value: string): value is AntigravityAuthMethod {
   return (ANTIGRAVITY_AUTH_METHODS as readonly string[]).includes(value);
 }
@@ -55,9 +63,12 @@ function isAntigravityAuthMethod(value: string): value is AntigravityAuthMethod 
 // use. The key comes from the integration's environment reader, the same source
 // auth status and the auth method use, rather than whatever process.env holds.
 export function antigravityChildEnvironment(
-  config: Pick<AntigravityConfig, 'apiKey'>,
+  config: Pick<AntigravityConfig, 'apiKey' | 'authMethod'>,
   overrides: Readonly<Record<string, string>> = {},
 ): Record<string, string | undefined> {
-  const apiKey = config.apiKey();
-  return { ...process.env, AGY_CLI_DISABLE_AUTO_UPDATE: '1', ...(apiKey ? { GEMINI_API_KEY: apiKey } : {}), ...overrides };
+  // Only the API-key method sees a key, so neither sessions nor the status probe
+  // can succeed on a credential other than the configured one.
+  const { GEMINI_API_KEY: _ambient, ...env } = process.env;
+  const apiKey = usesApiKey(config) ? config.apiKey() : null;
+  return { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: '1', ...(apiKey ? { GEMINI_API_KEY: apiKey } : {}), ...overrides };
 }

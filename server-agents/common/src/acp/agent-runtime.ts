@@ -300,6 +300,7 @@ export class AcpAgentRuntime {
     if (!turn?.running) {
       if (!session.pendingTurn) return false;
       session.pendingTurn.aborted = true;
+      session.state = 'aborted';
       // A hung configure call is bounded like an unanswered cancel.
       this.#armCancelSettleTimeout(session.pendingTurn);
       return true;
@@ -339,7 +340,7 @@ export class AcpAgentRuntime {
       .filter((session) => this.#isBusy(session))
       .map((session) => ({
         id: session.id,
-        status: session.activeTurn?.running ? session.state : 'running',
+        status: session.activeTurn?.running || session.state === 'aborted' ? session.state : 'running',
         startedAt: session.startedAt,
       }));
   }

@@ -603,6 +603,7 @@ describe('Antigravity ACP runtime', () => {
     await waitFor(() => agent.requests('session/set_config_option').length === 1);
     expect(runtime.getRunningSessions()).toEqual([expect.objectContaining({ id: started.agentSessionId, status: 'running' })]);
     expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.getRunningSessions()).toEqual([expect.objectContaining({ id: started.agentSessionId, status: 'aborted' })]);
     gate.resolve();
     await turn;
 
@@ -793,7 +794,7 @@ describe('Antigravity ACP runtime', () => {
   });
 
   it('passes the configured Gemini API key to the agent process', () => {
-    const policy = createAntigravityAcpPolicy({ ...CONFIG, apiKey: () => 'synthetic-key', hasApiKey: () => true });
+    const policy = createAntigravityAcpPolicy({ ...CONFIG, apiKey: () => 'synthetic-key', hasApiKey: () => true, authMethod: () => 'gemini-api-key' });
     expect(policy.buildEnv?.({ ...harness().request(), envOverrides: {} })?.GEMINI_API_KEY).toBe('synthetic-key');
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
-import { createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
+import { antigravityChildEnvironment, createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
 import {
   antigravityLoginEnvironment,
   getAntigravityAuthStatus,
@@ -150,7 +150,7 @@ describe('Antigravity login', () => {
     process.env.DISPLAY = ':0';
     process.env.WAYLAND_DISPLAY = 'wayland-0';
     try {
-      const env = antigravityLoginEnvironment({ apiKey: () => 'synthetic-key' });
+      const env = antigravityLoginEnvironment({ apiKey: () => 'synthetic-key', authMethod: () => 'gemini-api-key' });
       expect(env.DISPLAY).toBeUndefined();
       expect(env.WAYLAND_DISPLAY).toBeUndefined();
       expect(env.AGY_CLI_DISABLE_AUTO_UPDATE).toBe('1');
@@ -160,6 +160,18 @@ describe('Antigravity login', () => {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+    }
+  });
+
+  it('gives agy a Gemini key only under the API-key method', () => {
+    const previous = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = 'ambient-key';
+    try {
+      expect(antigravityChildEnvironment({ apiKey: () => 'configured-key', authMethod: () => 'gemini-api-key' }).GEMINI_API_KEY).toBe('configured-key');
+      expect(antigravityChildEnvironment({ apiKey: () => 'configured-key', authMethod: () => 'oauth-personal' }).GEMINI_API_KEY).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previous;
     }
   });
 

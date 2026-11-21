@@ -6,7 +6,7 @@ Gemini models remain separately reachable without an agent through the `gemini` 
 
 ## Reference
 
-[t3code](https://github.com/pingdotgg/t3code) ships an Antigravity driver at [be91767](https://github.com/pingdotgg/t3code/tree/be9176761ce2f6597013678b4538c772ae507400). Its findings that Garcon reuses are cited inline as `t3code:<path>:<line>`. Garcon does not copy its per-instance private profiles, managed CLI downloads, or quota scraping; see [Comparison With t3code](#comparison-with-t3code).
+[t3code](https://github.com/pingdotgg/t3code) ships an Antigravity driver at [be91767](https://github.com/pingdotgg/t3code/tree/be9176761ce2f6597013678b4538c772ae507400). Its findings that Garcon reuses are cited inline as permalinks at that commit. Garcon does not copy its per-instance private profiles, managed CLI downloads, or quota scraping; see [Comparison With t3code](#comparison-with-t3code).
 
 ## Ownership
 
@@ -47,7 +47,7 @@ ACP calls:
 | `initialize` | Protocol version 1 and no `fs`/`terminal` client capabilities, so the CLI reads and edits files itself and streams edits back as diffs. |
 | `authenticate` | Always sent, with the configured method (see [Authentication](#authentication)). |
 | `session/new` | Starts a chat. The result carries `models.availableModels`, `models.currentModelId`, and the `mode` config option. |
-| `session/resume` | Reopens a session after process loss without replaying history (t3code:apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts:237). The CLI advertises `sessionCapabilities.resume`, so the shared reconnect order already prefers it. |
+| `session/resume` | Reopens a session after process loss without replaying history ([t3code AntigravityAdapterV2.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts#L237)). The CLI advertises `sessionCapabilities.resume`, so the shared reconnect order already prefers it. |
 | `session/set_model` | Selects a model before a prompt when the request differs from the session's current model. |
 | `session/set_config_option` (`mode`) | Applies the mapped permission mode before a prompt when it differs. |
 | `session/prompt` | Text, plus inline base64 `image` blocks; `promptCapabilities.image` is true. |
@@ -68,14 +68,14 @@ Upstream model failures (invalid key, quota, HTTP 4xx/5xx) do not fail the ACP p
 - It opens the chunk or is the chunk's last line.
 - It is the turn's final output.
 
-Any later message, thought, or tool call means the chunk was ordinary text that quoted the marker. A recognized failure is published as an `ErrorMessage` instead of assistant text, and the turn is reported as a provider failure. t3code reaches the same outcome by reading error steps from the CLI's SQLite store (t3code:apps/server/src/provider/acp/AntigravityTurnOutcome.ts:16-31). Garcon matches the wire marker instead, because the ledger, not native storage, is its serving authority.
+Any later message, thought, or tool call means the chunk was ordinary text that quoted the marker. A recognized failure is published as an `ErrorMessage` instead of assistant text, and the turn is reported as a provider failure. t3code reaches the same outcome by reading error steps from the CLI's SQLite store ([t3code AntigravityTurnOutcome.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/provider/acp/AntigravityTurnOutcome.ts#L16-L31)). Garcon matches the wire marker instead, because the ledger, not native storage, is its serving authority.
 
 ## Authentication
 
 The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. Otherwise it is `gemini-api-key` when `GEMINI_API_KEY` is set, and `oauth-personal` when it is not. The accepted values are the CLI's advertised methods: `oauth-personal`, `oauth-business`, `gemini-api-key`, and `agent-platform`.
 
 - **Google account (`oauth-personal`):** uses credentials the CLI cached from an interactive `agy` or `agy acp --login`. When none are cached, `authenticate` fails fast with the CLI's actionable "Run `agy acp --login`..." message, which surfaces as the run error.
-- **In-app sign-in:** `auth.launchLogin` runs `agy acp --login` through the shared `CliLoginController` in `browser-code` mode, with `DISPLAY` and `WAYLAND_DISPLAY` removed so the CLI prints its Google link instead of opening a browser (t3code:apps/server/src/provider/Drivers/AntigravityDriver.ts:402-474). The user opens the link, then pastes the code or the final URL, which is written to the CLI's stdin. Exit code 0 means the credentials are stored. This works when the executor is headless or remote, and was verified on Linux. A macOS executor may also open its own browser, since removing the display variables does not stop LaunchServices; the printed link and code still complete the sign-in. While a sign-in is running, auth status reports "Sign-in in progress" without probing the CLI.
+- **In-app sign-in:** `auth.launchLogin` runs `agy acp --login` through the shared `CliLoginController` in `browser-code` mode, with `DISPLAY` and `WAYLAND_DISPLAY` removed so the CLI prints its Google link instead of opening a browser ([t3code AntigravityDriver.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/provider/Drivers/AntigravityDriver.ts#L402-L474)). The user opens the link, then pastes the code or the final URL, which is written to the CLI's stdin. Exit code 0 means the credentials are stored. This works when the executor is headless or remote, and was verified on Linux. A macOS executor may also open its own browser, since removing the display variables does not stop LaunchServices; the printed link and code still complete the sign-in. While a sign-in is running, auth status does not probe the CLI. It repeats the last probed status, or "Sign-in in progress" if there is none.
 - **Credential storage:** the CLI stores Google sign-in in the OS keyring (Secret Service over D-Bus on Linux). On a headless executor without a running Secret Service, Antigravity's documented fix is to start a session bus (`export $(dbus-launch)`) before `agy` runs. The Docker image persists `~/.gemini` so CLI settings and history survive container recreation.
 - **Gemini API key / Agent Platform:** the key and Google Cloud variables pass to the child through the inherited environment. Antigravity documents that `agy models` needs `"modelProvider": "gemini"` in `~/.gemini/antigravity-cli/settings.json` for API-key accounts. Without that setting, model discovery returns no models and chats use the CLI's default model.
 
