@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { withIntegrationFixture } from "../../support/integration-fixture.js";
 import { initializeFixtureRepository, runFixtureGit } from "../../support/git-fixture.js";
+import { rejectionOf } from "../../support/promise-assertions.js";
 
 async function getJson<T>(client: GarconTestClient, endpoint: string): Promise<T> {
   const response = await client.fetch(endpoint);
@@ -84,6 +85,27 @@ describe("Git worktree HTTP API", () => {
         isMissing: true,
       });
     }, { projectRoots: 'separate' });
+  });
+
+  test("distinguishes missing paths from conflicting branch options", async () => {
+    await withIntegrationFixture("git-worktree-create-validation", async ({ client, executionDirs }) => {
+      const project = executionDirs.project;
+      const worktreePath = join(project, 'linked');
+      const reject = (fields: Record<string, unknown>) => rejectionOf(
+        client.post('/api/v1/git/worktrees/create', { executorId: client.executorId, ...fields }),
+      );
+      for (const fields of [{ project }, { worktreePath }]) {
+        expect(await reject(fields)).toMatchObject({
+          status: 400,
+          body: { errorCode: 'VALIDATION_FAILED', error: 'Missing required parameters: project and worktreePath.' },
+        });
+      }
+      for (const conflict of [{ branch: 'existing' }, { detach: true }]) {
+        expect(await reject({ project, worktreePath, newBranch: 'fresh-name', ...conflict })).toMatchObject({
+          status: 400, body: { errorCode: 'GIT_INVALID_INPUT' },
+        });
+      }
+    });
   });
 
   test("suggestions require fresh branches; typed names can reuse local branches", async () => {

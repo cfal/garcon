@@ -524,6 +524,9 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function postCreateWorktree(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const { project, executorId, ...fields } = body;
+      if (!isNonEmptyString(project) || !isNonEmptyString(fields.worktreePath)) {
+        return gitRouteError('Missing required parameters: project and worktreePath.');
+      }
       const input = { ...fields, projectPath: project };
       validateGitRequest('createWorktree', input);
       return git.createWorktree({ ...input, executorId, signal: request.signal });
