@@ -919,7 +919,11 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const existing = this.#stopTasks.get(chatId);
     if (existing) return existing;
     const interruptedTurn = this.#ownership.attempt(chatId)?.identity();
-    const task = this.#performStop(chatId, expectedTurnId).then((outcome) => {
+    const task = interruptAgentTurn({
+      ownership: this.#ownership,
+      abortSession: id => expectedTurnId === undefined ? this.#turnRunner.abortSession(id) : this.#turnRunner.abortSession(id, expectedTurnId),
+      retire: (id, attempt, reason) => this.#retireAttempt(id, attempt, reason),
+    }, chatId).then((outcome) => {
       this.emit('session-stopped', chatId, outcome, intent, interruptedTurn);
       return outcome;
     }).finally(() => {
@@ -981,22 +985,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     } catch (error) {
       this.#rollbackDeletion(chatId);
       throw error;
-    }
-  }
-
-  async #performStop(chatId: string, expectedTurnId?: string): Promise<ChatStopOutcome> {
-    try {
-      return await interruptAgentTurn({
-        ownership: this.#ownership,
-        abortSession: id => this.#turnRunner.abortSession(id, expectedTurnId),
-        retire: (id, attempt, reason) => this.#retireAttempt(id, attempt, reason),
-      }, chatId);
-    } catch (error) {
-      logger.warn('queue: provider interrupt failed', {
-        chatId,
-        errorType: error instanceof Error ? error.name : typeof error,
-      });
-      return 'failed';
     }
   }
 

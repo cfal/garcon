@@ -752,15 +752,14 @@ export class TranscriptLedgerService {
           runId: this.#activeRuns.get(chatId) ?? null,
           committedRows: committed,
         });
-        if (committed.length > 0) {
-          const origin = event.originRunId;
-          const liveRows = origin && this.#activeRuns.get(chatId) === origin
-            ? publication.unmodifiedAssistantIndices.map(index => committed[index]).filter(row => row.kind === 'provider-row') : [];
-          this.#notify({
-            type: 'rows', chatId, viewId, rows: committed,
-            ...(origin && liveRows.length > 0 ? { liveAssistantRows: { runId: origin, rows: liveRows } } : {}),
-          });
-        }
+        if (committed.length === 0) return;
+        const origin = event.originRunId;
+        const liveRows = origin && this.#activeRuns.get(chatId) === origin
+          ? publication.unmodifiedAssistantIndices.map(index => committed[index]).filter(row => row.kind === 'provider-row') : [];
+        this.#notify({
+          type: 'rows', chatId, viewId, rows: committed,
+          ...(origin && liveRows.length > 0 ? { liveAssistantRows: { runId: origin, rows: liveRows } } : {}),
+        });
         return;
       }
       case 'notice': {
