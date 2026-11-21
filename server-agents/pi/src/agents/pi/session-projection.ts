@@ -20,8 +20,26 @@ export async function projectPiHistory(
   entries: readonly PiSessionEntry[],
   steps: EventLoopSteps,
 ): Promise<ProjectedSessionEntry[]> {
+  const context = await activeContextEntries(entries, steps);
+  const edits = new Map<string, PiSessionEntry>();
+  await steps.forEach(context, (entry) => {
+    if (entry.type === 'context_edit' && typeof entry.targetId === 'string') edits.set(entry.targetId, entry);
+  });
+
+  const projected: ProjectedSessionEntry[] = [];
+  await steps.forEach(context, (sourceEntry) => {
+    const edit = typeof sourceEntry.id === 'string' ? edits.get(sourceEntry.id) : undefined;
+    const isOlderCompaction = sourceEntry.type === 'compaction' && sourceEntry !== context[0];
+    projected.push({ sourceEntry, messages: isOlderCompaction ? [] : projectEntry(sourceEntry, edit) });
+  });
+  return projected;
+}
+
+async function activeContextEntries(entries: readonly PiSessionEntry[], steps: EventLoopSteps): Promise<PiSessionEntry[]> {
   const byId = new Map<string, PiSessionEntry>();
-  await steps.forEach(entries, (entry) => { if (typeof entry.id === 'string') byId.set(entry.id, entry); });
+  await steps.forEach(entries, (entry) => {
+    if (typeof entry.id === 'string') byId.set(entry.id, entry);
+  });
 
   const reversePath: PiSessionEntry[] = [];
   const visited = new Set<PiSessionEntry>();
@@ -48,36 +66,22 @@ export async function projectPiHistory(
   }
 
   const compaction = path[compactionIndex];
-  const context: PiSessionEntry[] = [];
-  if (compaction?.type === 'compaction') {
-    context.push(compaction);
-    let keeping = false;
-    for (let index = 0; index < path.length; index += 1) {
-      const entry = path[index]!;
-      if (index < compactionIndex) {
-        if (entry.id === compaction.firstKeptEntryId) keeping = true;
-        if (keeping && !(entry.type === 'message' && isRecord(entry.message) && entry.message.role === 'system')) context.push(entry);
-      } else if (index > compactionIndex) {
-        context.push(entry);
-      }
-      if (steps.due) await steps.next();
-    }
-  } else {
-    await steps.forEach(path, (entry) => { context.push(entry); });
-  }
+  if (!compaction) return path;
 
-  const edits = new Map<string, PiSessionEntry>();
-  await steps.forEach(context, (entry) => {
-    if (entry.type === 'context_edit' && typeof entry.targetId === 'string') edits.set(entry.targetId, entry);
-  });
-  const projected: ProjectedSessionEntry[] = [];
-  await steps.forEach(context, (sourceEntry) => {
-    const messages = sourceEntry.type === 'compaction' && projected.length > 0
-      ? []
-      : projectEntry(sourceEntry, typeof sourceEntry.id === 'string' ? edits.get(sourceEntry.id) : undefined);
-    projected.push({ sourceEntry, messages });
-  });
-  return projected;
+  const context = [compaction];
+  let retaining = false;
+  for (let index = 0; index < path.length; index += 1) {
+    const entry = path[index]!;
+    if (index < compactionIndex) {
+      if (entry.id === compaction.firstKeptEntryId) retaining = true;
+      const isSystemMessage = entry.type === 'message' && isRecord(entry.message) && entry.message.role === 'system';
+      if (retaining && !isSystemMessage) context.push(entry);
+    } else if (index > compactionIndex) {
+      context.push(entry);
+    }
+    if (steps.due) await steps.next();
+  }
+  return context;
 }
 
 function projectEntry(

@@ -8,7 +8,8 @@ import type { PiConfig } from '../../config.js';
 
 // Pi accepts MSYS, WSL, and Cygwin drive spellings but leaves UNC paths intact.
 export function nativePiWindowsPath(value: string): string {
-  const drive = !value.includes('\\') && /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(value);
+  if (value.includes('\\')) return value;
+  const drive = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(value);
   return drive ? `${drive[1]!.toUpperCase()}:\\${(drive[2] ?? '').replaceAll('/', '\\')}` : value;
 }
 
@@ -61,18 +62,21 @@ export async function findPiSessionFileBySessionId(
 ): Promise<string | null> {
   if (!sessionId || !projectPath) return null;
   const home = config.homeDirectory();
-  projectPath = resolvePiPath(projectPath, process.cwd(), home);
-  const agentDir = resolvePiPath(config.agentDirectoryOverride() ?? path.join(home, '.pi', 'agent'), projectPath, home);
+  const projectDir = resolvePiPath(projectPath, process.cwd(), home);
+  const agentDir = resolvePiPath(config.agentDirectoryOverride() ?? path.join(home, '.pi', 'agent'), projectDir, home);
   const configured = config.sessionDirectoryOverride()
-    ?? await sessionDirSetting(path.join(projectPath, '.pi', 'settings.json'))
+    ?? await sessionDirSetting(path.join(projectDir, '.pi', 'settings.json'))
     ?? await sessionDirSetting(path.join(agentDir, 'settings.json'));
   const sessionsRoot = path.join(agentDir, 'sessions');
-  const local = `--${projectPath.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
+  const local = `--${projectDir.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
   const localDir = path.join(sessionsRoot, local);
   if (configured) {
-    const directory = resolvePiPath(configured, projectPath, home);
-    return findInDirectory(directory, sessionId, (cwd) => samePiPath(directory, localDir)
-      || (typeof cwd === 'string' && cwd.length > 0 && samePiPath(resolvePiPath(cwd, process.cwd(), home), projectPath)));
+    const directory = resolvePiPath(configured, projectDir, home);
+    if (samePiPath(directory, localDir)) return findInDirectory(directory, sessionId);
+    return findInDirectory(directory, sessionId, (cwd) => {
+      if (typeof cwd !== 'string' || !cwd) return false;
+      return samePiPath(resolvePiPath(cwd, process.cwd(), home), projectDir);
+    });
   }
   const nearby = await findInDirectory(localDir, sessionId);
   if (nearby) return nearby;

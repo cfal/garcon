@@ -50,7 +50,7 @@ import {
   type PiStartedSession,
   type PiStartRequest,
 } from './runtime-types.js';
-import { canonicalExistingPiSessionPath } from './pi-session-paths.js';
+import { canonicalExistingPiSessionPath, findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { convertPiMessage, piFinalResponse } from './message-converter.js';
 import { terminatePiProcess } from './pi-process-lifecycle.js';
 import type {
@@ -401,7 +401,6 @@ export class PiRpcRuntime {
       const nativePath = await canonicalExistingPiSessionPath(request.nativePath);
       if (nativePath) return nativePath;
     }
-    const { findPiSessionFileBySessionId } = await import('./pi-session-paths.js');
     const found = await findPiSessionFileBySessionId(
       request.agentSessionId,
       request.projectPath,

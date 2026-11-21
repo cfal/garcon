@@ -16,9 +16,7 @@ export function createPiConfig(environment: AgentEnvironmentReader): PiConfig {
       ?? readEnvironment(environment, 'PI_BINARY')
       ?? 'pi',
     agentDirectoryOverride: () => readEnvironment(environment, 'PI_CODING_AGENT_DIR'),
-    sessionDirectoryOverride: () => (
-      readEnvironment(environment, 'PI_CODING_AGENT_SESSION_DIR') ?? null
-    ),
+    sessionDirectoryOverride: () => readEnvironment(environment, 'PI_CODING_AGENT_SESSION_DIR'),
     homeDirectory: () => process.platform === 'win32' ? os.homedir() : readEnvironment(environment, 'HOME') ?? os.homedir(),
     isTestEnvironment: () => readEnvironment(environment, 'NODE_ENV') === 'test',
   });

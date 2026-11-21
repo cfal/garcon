@@ -1,4 +1,7 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { mkdtempDisposable } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentHost } from '@garcon/server-agent-interface';
 import { LazyPiRuntime } from '../agents/pi/lazy-runtime.js';
 import { PiModelCatalogService } from '../agents/pi/pi-models.js';
@@ -104,5 +107,27 @@ describe('PiAgentIntegration', () => {
       },
       signal,
     })).resolves.toEqual(nativeSession);
+  });
+
+  it('keeps an unresolved native ID for binding without treating it as a transcript on Reload', async () => {
+    await using directory = await mkdtempDisposable(join(tmpdir(), 'pi-unresolved-'));
+    const integration = new PiAgentIntegration({
+      ...createHost(),
+      environment: { get: (key) => key === 'PI_CODING_AGENT_SESSION_DIR' ? directory.path : undefined },
+    });
+    const request = {
+      chat: {
+        chatId: 'chat-1', agentId: 'pi', agentSessionId: 'session-1', projectPath: directory.path,
+        model: 'provider/model', nativeSession: null, carryOverRevision: '', nativeSeedReceipt: null,
+        settings: integration.settings.defaults(),
+      },
+      signal: new AbortController().signal,
+    };
+    expect(await integration.nativeSessions.resolveNativeSession(request)).toEqual({
+      ownerId: 'pi', schemaVersion: 1, value: { path: '!pi:session-1', agentSessionId: 'session-1' },
+    });
+    expect(await integration.nativeSessions.describeSource(request)).toEqual({ kind: 'provider-reference', value: 'session-1' });
+    await expect(Array.fromAsync(integration.nativeHistoryImport.load(request))).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+    expect(await Array.fromAsync(integration.legacyHistoryImport.load(request))).toEqual([]);
   });
 });
