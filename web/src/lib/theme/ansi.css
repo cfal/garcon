@@ -117,7 +117,9 @@
 			color: inherit;
 			background: transparent;
 		}
-		[data-slot='workspace-chat-processing-indicator-dot'],
+		.chat-processing-spinner {
+			color: inherit;
+		}
 		[data-workspace-tab-drop-position] {
 			background: currentColor;
 		}

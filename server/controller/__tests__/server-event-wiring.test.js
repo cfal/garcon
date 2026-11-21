@@ -1,10 +1,10 @@
 import { controllerSafetyDependencies, localIntegrationDirectory } from "./safety-dependencies.js";
 import { resolveFileMentionsInCommand } from "../../runtime/projects/file-mentions.ts";
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, BashToolUseMessage, CommandResultMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, BashToolUseMessage, CommandResultMessage, UserMessage } from '../../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { ChatActivityOutcomes } from '../chats/chat-activity-outcomes.js';
@@ -227,22 +227,17 @@ function createFixture(overrides = {}) {
     onRemoteSettingsChanged: mock((callback) => { settings.remote = callback; }),
     ...overrides.settings,
   };
-  const outcomes = new ChatActivityOutcomes(() => 'view-1');
-  const metadata = {
-    getChatMetadata: mock(() => null),
-    getRunOutcome: (chatId) => outcomes.get(chatId),
-    captureFailureAttempt: (chatId, runId) => outcomes.captureFailure(chatId, runId),
-    beginRunAttempt: (chatId, runId) => outcomes.begin(chatId, runId),
-    recordFailedAttempt: attempt => outcomes.fail(attempt),
-    recordCommittedOutcome: (attempt, viewId, outcome) => outcomes.commit(attempt, viewId, outcome),
-    clearRunOutcome: (chatId, runId) => outcomes.clear(chatId, runId),
-    updateRunOutcome: (chatId, viewId, outcome, runId) => outcomes.update(chatId, viewId, outcome, runId),
-    repair: mock(async () => {}),
-    updateFromAppendedMessages: mock(() => undefined),
-    invalidateTranscriptView: mock(chatId => outcomes.delete(chatId)),
-    replaceFromTranscriptView: mock(() => undefined),
-    ...overrides.metadata,
-  };
+  const metadata = overrides.metadataInstance ?? new MetadataIndex(chatRegistry, {
+    getExistingTranscriptViewId: () => 'view-1',
+    getExistingTranscriptPreview: () => null,
+  }, { revision: () => '' });
+  spyOn(metadata, 'updateFromAppendedMessages');
+  spyOn(metadata, 'invalidateTranscriptView');
+  if (!overrides.metadataInstance) {
+    metadata.repair = mock(async () => {});
+    metadata.replaceFromTranscriptView = mock(() => undefined);
+  }
+  Object.assign(metadata, overrides.metadata);
   const commandLedger = overrides.commandLedgerInstance ?? {
     getTurnRecord: mock(async (_chatId, turnId) => (
       turnId === 'turn-1' ? { payload: { clientMessageId: 'message-1' } } : null
@@ -366,15 +361,15 @@ function providerCommit(content = 'answer') {
   };
 }
 
-function terminalCommit(outcome = 'finished') {
+function terminalCommit(outcome = 'finished', { runId = 'turn-1', ordinal = 3 } = {}) {
   return {
     type: 'run-ended',
     chatId: 'chat-1',
     viewId: 'view-1',
-    runId: 'turn-1',
+    runId,
     row: {
       kind: 'run-ended',
-      ordinal: 3,
+      ordinal,
       at,
       providerMeta: null,
       outcome,
@@ -474,6 +469,160 @@ function observeTelegram({ agents, execution }, directory, send, enabled = true)
 }
 
 describe('server event wiring', () => {
+  it('queues recovered activity behind replacement transcript fanout', async () => {
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const index = new MetadataIndex({
+      listChatIds: () => ['chat-1'], getChat: () => ({}), onChatRemoved: () => {},
+    }, {
+      getExistingTranscriptViewId: () => 'view-2', getExistingTranscriptPreview: () => null,
+    }, { revision: () => '' }, { readRunOutcome: async () => 'failed' });
+    const fixture = createFixture({
+      metadataInstance: index,
+      currentTranscriptMessagePages: async function* () {
+        entered.resolve();
+        await release.promise;
+        yield [new UserMessage(at, 'Synthetic replacement input')];
+      },
+    });
+    try {
+      fixture.agent.transcript({
+        type: 'view-replaced', chatId: 'chat-1', previousViewId: 'view-1',
+        view: { viewId: 'view-2', status: 'current', createdAt: at, contentStartOrdinal: 1 },
+      });
+      await entered.promise;
+      expect(index.getRunOutcome('chat-1')).toBeNull();
+      expect(fixture.published).toEqual([]);
+      release.resolve();
+      await fixture.wiring.waitForIdle();
+      expect(fixture.published[0].type).toBe('chat-transcript-replaced');
+      expect(fixture.published.at(-1)).toEqual({
+        type: 'chat-activity-updated', chatId: 'chat-1', activityStatus: 'error',
+      });
+      expect(index.getRunOutcome('chat-1')).toBe('failed');
+    } finally {
+      release.resolve();
+      await fixture.wiring.waitForIdle();
+      await index.close();
+    }
+  });
+
+  it.each(['finished', 'failed'])('settles a %s turn while replacement activity recovery is held', async outcome => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'replacement-activity-'));
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    let fixture;
+    const index = new MetadataIndex({
+      listChatIds: () => ['chat-1'], getChat: () => ({}), onChatRemoved: () => {},
+    }, {
+      getExistingTranscriptViewId: () => fixture.transcripts.currentView('chat-1')?.viewId ?? null,
+      getExistingTranscriptPreview: () => null,
+    }, { revision: () => '' }, {
+      readRunOutcome: async () => { entered.resolve(); return release.promise; },
+    });
+    fixture = createExecutionFixture(directory, async () => fixture.transcripts.currentView('chat-1'), undefined, {
+      wiring: { metadataInstance: index },
+      beforeWiring({ execution, transcripts }) {
+        transcripts.subscribeRunEndedCommitted((chatId, runId) => execution.markRunTerminalCommitted(chatId, runId));
+      },
+    });
+    const { execution, agents, ledger, transcripts } = fixture;
+    try {
+      const previous = transcripts.currentView('chat-1');
+      const staged = await transcripts.stageView('chat-1', [], 1);
+      transcripts.replaceCurrentView('chat-1', previous.viewId, staged.viewId);
+      await entered.promise;
+      const startedTurn = { commandType: 'chat-start', clientRequestId: 'request-1', turnId: 'turn-1' };
+      const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+      await execution.scheduleDirectInput({
+        command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+        content: 'Synthetic task', options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+        dispatch: executionAdmission => agents.startSession('chat-1', 'Synthetic task', { ...startedTurn, executionAdmission }),
+      });
+      await execution.waitForDispatches();
+      fixture.sink.publish({ type: 'run-ended', runId: startedTurn.turnId, outcome });
+      const terminal = await ledger.waitForTurnTerminal('chat-1', startedTurn.turnId, AbortSignal.timeout(1_000));
+      expect(terminal.publicTerminalAt).toBeTruthy();
+      expect(execution.ownsExecution('chat-1')).toBe(false);
+      expect(index.getRunOutcome('chat-1')).toBe(outcome);
+      const events = fixture.published;
+      const replacement = events.findIndex(event => event.type === 'chat-transcript-replaced');
+      const messages = events.findIndex(event => event.type === 'chat-messages' && event.turnId === startedTurn.turnId);
+      const finished = events.findIndex(event => event.type === `agent-run-${outcome}`);
+      expect(replacement).toBeGreaterThanOrEqual(0);
+      expect(messages).toBeGreaterThan(replacement);
+      expect(finished).toBeGreaterThan(messages);
+      const successor = execution.reserveDirectTurn('chat-1', { turnId: 'turn-2' });
+      await execution.releaseDirectTurn(successor);
+      release.resolve(outcome === 'finished' ? 'failed' : 'finished');
+      await fixture.wiring.waitForIdle();
+      expect(index.getRunOutcome('chat-1')).toBe(outcome);
+    } finally {
+      release.resolve(null);
+      await fixture.wiring.waitForIdle();
+      execution.beginShutdown();
+      transcripts.close();
+      await index.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('forgets activity for failed starts that never registered a chat', async () => {
+    const registry = { listChatIds: () => [], getChat: () => null, hasChat: () => false, onChatRemoved: () => {} };
+    const index = new MetadataIndex(registry, {
+      getExistingTranscriptViewId: () => null, getExistingTranscriptPreview: () => null,
+    }, { revision: () => '' });
+    const execution = new ChatExecutionCoordinator({ isChatRunning: () => false }, {
+      hasMatchingInput: () => false, admitInput: async () => ({ inserted: true }),
+      admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
+    }, () => ({}), () => false, new InMemoryChatExecutionControlRepository('synthetic-server'), {
+      ...controllerSafetyDependencies(), projectAdmission: { assertAvailable: async () => {} },
+      attachmentAdmission: { assertSupported() {} },
+    });
+    const fixture = createFixture({ queueService: execution, chatRegistry: registry, metadataInstance: index });
+    const forget = spyOn(ChatActivityOutcomes.prototype, 'delete');
+    try {
+      const ledger = new CommandLedger();
+      for (let i = 0; i < 3; i++) {
+        const chatId = `absent-${i}`;
+        const startedTurn = { commandType: 'chat-start', clientRequestId: `request-${i}`, turnId: `turn-${i}` };
+        const accepted = await ledger.accept({ ...startedTurn, chatId, payload: {} });
+        await expect(execution.scheduleDirectInput({
+          command: { key: accepted.record.key, ...startedTurn, chatId }, content: 'Synthetic input',
+          options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+          preparation: {
+            operation: 'chat-start',
+            prepare: async () => { throw new Error('Synthetic pre-registration cancellation'); },
+            compensate: async () => {},
+          },
+        })).rejects.toThrow('Synthetic pre-registration cancellation');
+        expect(execution.ownsExecution(chatId)).toBe(false);
+      }
+      expect(forget.mock.calls).toEqual([['absent-0'], ['absent-1'], ['absent-2']]);
+    } finally {
+      forget.mockRestore();
+      execution.beginShutdown();
+      await fixture.wiring.waitForIdle();
+      await index.close();
+    }
+  });
+
+  it('retains pre-adoption run authority when an existing chat settles', async () => {
+    let viewId = null;
+    const index = new MetadataIndex({
+      listChatIds: () => ['chat-1'], getChat: () => ({}), onChatRemoved: () => {},
+    }, {
+      getExistingTranscriptViewId: () => viewId, getExistingTranscriptPreview: () => null,
+    }, { revision: () => '' });
+    const fixture = createFixture({ metadataInstance: index });
+    fixture.queue.started('chat-1', 'turn-1');
+    fixture.queue.settled('chat-1', { turnId: 'turn-1' });
+    viewId = 'view-1';
+    expect(index.captureFailureAttempt('chat-1', 'older-turn')).toBeNull();
+    expect(index.recordFailedAttempt(index.captureFailureAttempt('chat-1', 'turn-1'))).toBe(true);
+    await index.close();
+  });
+
   it('keeps Stop behind transcript fanout with multiple synchronous observers', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'stop-observer-wiring-'));
     const fixture = createExecutionFixture(directory, undefined, () => undefined, {
@@ -1135,12 +1284,31 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
     expect(latestStatus()).toBe('working');
     phase = null;
-    fixture.agent.transcript(terminalCommit('failed'));
-    await fixture.wiring.waitForIdle();
-    expect(latestStatus()).toBe('error');
-    fixture.agent.transcript(terminalCommit('finished'));
+    fixture.agent.transcript(terminalCommit('finished', { ordinal: 5 }));
     await fixture.wiring.waitForIdle();
     expect(latestStatus()).toBe('complete');
+    const cases = [
+      {
+        runId: 'turn-failed', inputOrdinal: 6, terminalOrdinal: 7, outcome: 'failed', status: 'error',
+        input: { kind: 'user-input', detail: {
+          message: new UserMessage(at, 'Synthetic input'), attachments: [], clientMessageId: null, steer: false,
+        } },
+      },
+      {
+        runId: 'turn-finished', inputOrdinal: 8, terminalOrdinal: 9, outcome: 'finished', status: 'complete',
+        input: { kind: 'provider-row', message: new UserMessage(at, 'Synthetic input') },
+      },
+    ];
+    for (const { runId, inputOrdinal, terminalOrdinal, outcome, status, input } of cases) {
+      fixture.queue.started('chat-1', runId);
+      fixture.agent.transcript({ type: 'rows', chatId: 'chat-1', viewId: 'view-1', rows: [{
+        ...input, ordinal: inputOrdinal, at, providerMeta: null,
+      }] });
+      expect(fixture.metadata.getRunOutcome('chat-1')).toBeNull();
+      fixture.agent.transcript(terminalCommit(outcome, { runId, ordinal: terminalOrdinal }));
+      await fixture.wiring.waitForIdle();
+      expect(latestStatus()).toBe(status);
+    }
     expect(fixture.published.findIndex(message => message.type === 'chat-messages'))
       .toBeLessThan(fixture.published.findIndex(message => message.activityStatus === 'pending-user-action'));
   });
@@ -1341,14 +1509,7 @@ describe('server event wiring', () => {
       },
     });
     await index.init();
-    const fixture = createFixture({ metadata: {
-      getChatMetadata: chatId => index.getChatMetadata(chatId),
-      getRunOutcome: chatId => index.getRunOutcome(chatId),
-      beginRunAttempt: (chatId, runId) => index.beginRunAttempt(chatId, runId),
-      captureFailureAttempt: (chatId, runId) => index.captureFailureAttempt(chatId, runId),
-      recordFailedAttempt: attempt => index.recordFailedAttempt(attempt),
-      repair: () => index.repair(),
-    } });
+    const fixture = createFixture({ metadataInstance: index });
     const projector = new ChatListProjector({
       registry, metadata: index, processing: { phase: () => null },
       transientFeeds: { hasPendingUserAction: () => false }, canReloadFromNativeHistory: () => false,
@@ -1358,7 +1519,7 @@ describe('server event wiring', () => {
     const repair = fixture.wiring.repairChatMetadata();
     try {
       await entered.promise;
-      expect(index.getChatMetadata('1783725900000900')).toBeNull();
+      expect(index.getChatMetadata('1783725900000900')).not.toBeNull();
       fixture.queue.started('1783725900000900', turn.turnId);
       if (source === 'agent') await fixture.agent.failed('1783725900000900', 'Synthetic pre-run failure', 'INTERNAL_ERROR', turn);
       else fixture.queue.failed('1783725900000900', 'Synthetic pre-run failure', turn);
@@ -1392,7 +1553,10 @@ describe('server event wiring', () => {
     if (change === 'working') phase = 'running';
     else if (change === 'accepted-input') fixture.queue.accepted('chat-1');
     else if (change === 'replacement') fixture.metadata.invalidateTranscriptView('chat-1');
-    else fixture.metadata.updateRunOutcome('chat-1', 'view-1', 'finished', 'turn-2');
+    else {
+      fixture.queue.started('chat-1', 'turn-2');
+      await fixture.agent.transcript(terminalCommit('finished', { runId: 'turn-2' }));
+    }
     settlement.resolve();
     await fixture.wiring.waitForIdle();
     expect(fixture.metadata.getRunOutcome('chat-1')).toBe(change === 'successor' ? 'finished' : null);
@@ -1436,6 +1600,8 @@ describe('server event wiring', () => {
     fixture.queue.started('chat-1', turn.turnId);
     fixture.agent.transcript(terminalCommit(outcome));
     fixture.queue.accepted('chat-1');
+    await fixture.wiring.waitForIdle();
+    fixture.queue.failed('chat-1', 'Synthetic delayed launch failure', turn);
     await fixture.wiring.waitForIdle();
     expect(fixture.metadata.getRunOutcome('chat-1')).toBeNull();
     expect(fixture.published.filter(message => message.type === 'chat-activity-updated').at(-1)?.activityStatus).toBeNull();

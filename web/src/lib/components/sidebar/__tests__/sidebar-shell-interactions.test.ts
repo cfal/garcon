@@ -505,11 +505,8 @@ describe('sidebar search dialog flow', () => {
 		expect(document.querySelector('[data-slot="sidebar"]')?.className).toContain(
 			'sidebar-reduce-motion',
 		);
-		const processingIndicator = document.querySelector(
-			'[data-slot="sidebar-chat-processing-indicator"]',
-		);
-		expect(processingIndicator).toBeTruthy();
-		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
+		const processingIndicator = screen.getByTitle('Chat is processing');
+		expect(processingIndicator.closest('.sidebar-reduce-motion')).toBeTruthy();
 	});
 });
 

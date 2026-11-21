@@ -16,7 +16,7 @@ import type { ChatRegistry } from './chats/store.js';
 import type { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import type { AppliedTransientFeedEvent, ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
-import type { ActivityFailureAttempt } from './chats/chat-activity-outcomes.js';
+import type { ActivityOutcomeAttempt } from './chats/chat-activity-outcomes.js';
 import type { ShareStore } from './chats/shares/store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
@@ -182,18 +182,25 @@ export function wireServerEvents({
     task: () => Promise<void> | void,
   ): Promise<void> {
     const previous = chatTaskTails.get(chatId) ?? Promise.resolve();
-    const current = previous.then(() => withActivity(`chat task ${activity}`, task)).catch((error) => {
+    const current = trackChatTask(activity, previous.then(() => withActivity(`chat task ${activity}`, task)));
+    chatTaskTails.set(chatId, current);
+    void current.then(() => {
+      if (chatTaskTails.get(chatId) === current) chatTaskTails.delete(chatId);
+    });
+    return current;
+  }
+
+  function trackChatTask(activity: string, task: Promise<void>): Promise<void> {
+    const current = task.catch((error) => {
       logger.warn(`server-events: ${activity} failed:`, errorMessage(error));
       if (!hasChatTaskError) {
         hasChatTaskError = true;
         firstChatTaskError = error;
       }
     });
-    chatTaskTails.set(chatId, current);
     activeChatTasks.add(current);
     void current.then(() => {
       activeChatTasks.delete(current);
-      if (chatTaskTails.get(chatId) === current) chatTaskTails.delete(chatId);
     });
     return current;
   }
@@ -310,7 +317,7 @@ export function wireServerEvents({
     chatId: string,
     message: string,
     turnMetadata: TurnEventMetadata | undefined,
-    failedAttempt: ActivityFailureAttempt | null,
+    failedAttempt: ActivityOutcomeAttempt | null,
   ): void {
     if (processing.phase(chatId) === null && metadata.recordFailedAttempt(failedAttempt)) {
       broadcastActivity(chatId);
@@ -379,7 +386,7 @@ export function wireServerEvents({
     chatId: string,
     queueErrorMessage: string,
     options: TurnEventMetadata,
-    failedAttempt: ActivityFailureAttempt | null,
+    failedAttempt: ActivityOutcomeAttempt | null,
   ): Promise<void> {
     broadcastProcessing(chatId, processing.phase(chatId));
     if (!markTurnFailure(chatId, options)) return;
@@ -444,16 +451,29 @@ export function wireServerEvents({
     });
   });
   agentRegistry.onTranscriptCommitted(async (event) => {
+    // Input invalidation precedes terminal capture, not its delayed preview fanout.
+    if (event.type === 'rows' && event.rows.some(row => row.kind === 'user-input'
+      || (row.kind === 'provider-row' && row.message.type === 'user-message'))) {
+      metadata.clearRunOutcome(event.chatId);
+    }
     const terminalAttempt = event.type === 'run-ended'
-      ? metadata.captureFailureAttempt(event.chatId, event.runId) : null;
+      ? metadata.captureCommittedOutcome(event.chatId, event.viewId, event.runId) : null;
     if (event.type === 'view-replaced') metadata.invalidateTranscriptView(event.chatId);
     transcriptFanout(event);
     if (event.type === 'run-ended' || event.type === 'view-replaced') {
       scheduleChatTask(event.chatId, 'chat activity publication', () => {
         if (!chatExists(event.chatId)) return;
-        if (event.type === 'run-ended') metadata.recordCommittedOutcome(terminalAttempt, event.viewId, event.row.outcome);
+        if (event.type === 'run-ended') metadata.recordCommittedOutcome(terminalAttempt, event.row.outcome);
         broadcastActivity(event.chatId);
       });
+    }
+    if (event.type === 'view-replaced') {
+      void trackChatTask('chat activity recovery', metadata.prepareRunOutcomeRepair(event.chatId).then(apply => {
+        if (!apply) return;
+        return scheduleChatTask(event.chatId, 'chat activity repair publication', () => {
+          if (chatExists(event.chatId) && apply()) broadcastActivity(event.chatId);
+        });
+      }));
     }
     // A committed Preambles-updated notice invalidates the per-chat selection
     // cache. Scheduling here, immediately after the fanout has enqueued the
@@ -739,6 +759,7 @@ export function wireServerEvents({
     });
   });
   queue.onTurnSettled((chatId, turn) => {
+    if (!chatExists(chatId)) metadata.deleteChatActivity(chatId);
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
   executors.onChanged(() => broadcast(new ExecutorsChangedMessage(executors.list())));

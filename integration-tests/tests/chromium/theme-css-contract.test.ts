@@ -9,6 +9,7 @@ import { buildThinkingOptions } from "../../../web/src/lib/chat/composer/compose
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
+const PROCESSING_SPINNER = '<span class="chat-processing-spinner text-status-processing-foreground"></span>';
 const THINKING_OPTIONS = buildThinkingOptions(["xhigh", "max", "ultra"]);
 const DIFF_SYNTAX_CLASSES = [
   "cm-code-keyword",
@@ -288,10 +289,12 @@ describe("compiled theme CSS", () => {
           </div>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
           <div id="dark-utility" class="bg-transparent dark:bg-card"></div>
-          <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
-          <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
-          <div data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
-          <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
+          <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg">${PROCESSING_SPINNER}</div>
+          <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg">${PROCESSING_SPINNER}</div>
+          <div data-workspace-window-tabs>
+            <div role="tab" aria-selected="true" data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected">${PROCESSING_SPINNER}</div>
+          </div>
+          <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive">${PROCESSING_SPINNER}</div>
           <div id="scrollbar" style="width:100px;height:40px;overflow:scroll;scrollbar-gutter:stable"><div style="height:80px"></div></div>
           <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble">
             <span id="user-bubble-text">Selected message text</span>
@@ -428,13 +431,11 @@ describe("compiled theme CSS", () => {
               "[data-processing-surface]",
             ),
           ].map((surface) => {
-            const indicator = surface.querySelector<HTMLElement>(
-              ".sidebar-processing-indicator, .workspace-chat-processing-indicator",
-            );
+            const indicator = surface.querySelector(".chat-processing-spinner");
             if (!indicator) throw new Error("Missing processing indicator");
             return {
               name: surface.dataset.processingSurface,
-              indicator: getComputedStyle(indicator).backgroundColor,
+              indicator: getComputedStyle(indicator).color,
               surface: getComputedStyle(surface).backgroundColor,
             };
           });

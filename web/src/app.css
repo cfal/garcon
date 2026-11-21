@@ -106,7 +106,6 @@
 	--color-sidebar-chat-item-hover-bg: hsl(var(--sidebar-chat-item-hover-bg));
 	--color-sidebar-chat-item-selected-bg: hsl(var(--sidebar-chat-item-selected-bg));
 	--color-sidebar-chat-item-selected-foreground: hsl(var(--sidebar-chat-item-selected-foreground));
-	--color-sidebar-chat-complete: hsl(var(--sidebar-chat-complete));
 	--color-sidebar-chat-error: hsl(var(--sidebar-chat-error));
 	--color-sidebar-badge-pinned-bg: hsl(var(--sidebar-badge-pinned-bg));
 	--color-sidebar-badge-pinned-foreground: hsl(var(--sidebar-badge-pinned-foreground));
@@ -253,7 +252,6 @@
 }
 
 :root {
-	--sidebar-chat-complete: 142 76% 36%;
 	--sidebar-chat-error: 0 84% 50%;
 	--chat-board-shadow: 0 1px 2px color-mix(in oklab, hsl(var(--foreground)) 10%, transparent);
 	--safe-area-inset-top: env(safe-area-inset-top);
@@ -269,7 +267,6 @@
 }
 
 .dark {
-	--sidebar-chat-complete: 142 72% 45%;
 	--sidebar-chat-error: 0 84% 60%;
 }
 
@@ -758,24 +755,12 @@
 	}
 }
 
-@keyframes sidebar-processing-pulse {
-	0%,
-	100% {
-		opacity: 0.4;
-	}
-
-	50% {
-		opacity: 1;
-	}
-}
-
 @media (prefers-reduced-motion: no-preference) {
-	.sidebar-processing-indicator,
-	.workspace-chat-processing-indicator {
-		animation: sidebar-processing-pulse var(--processing-pulse-duration) ease-in-out infinite;
+	.chat-processing-spinner {
+		animation: var(--animate-spin);
 	}
 
-	.sidebar-reduce-motion .sidebar-processing-indicator {
+	.sidebar-reduce-motion .chat-processing-spinner {
 		animation: none;
 	}
 }

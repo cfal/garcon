@@ -24,6 +24,10 @@ function previewResult(preview) {
   return { preview };
 }
 
+function commitOutcome(index, chatId, viewId, outcome, runId = 'run-1') {
+  index.recordCommittedOutcome(index.captureCommittedOutcome(chatId, viewId, runId), outcome);
+}
+
 async function* messagePages(messages) {
   for (let offset = 0; offset < messages.length; offset += 2) yield messages.slice(offset, offset + 2);
 }
@@ -87,13 +91,13 @@ describe('metadata-store', () => {
       }, mockCarryOver);
       expect(index.getRunOutcome(chatId)).toBeNull();
       expect(viewId).not.toHaveBeenCalled();
-      index.updateRunOutcome(chatId, 'view-1', 'finished');
-      expect(viewId).toHaveBeenCalledTimes(1);
+      commitOutcome(index, chatId, 'view-1', 'finished');
+      viewId.mockClear();
       available = false;
       expect(index.getRunOutcome(chatId)).toBe('finished');
       index.invalidateTranscriptView(chatId);
       expect(index.getRunOutcome(chatId)).toBeNull();
-      expect(viewId).toHaveBeenCalledTimes(1);
+      expect(viewId).not.toHaveBeenCalled();
     });
 
     it('retains a pre-run failure before startup repair validates a cold preview', async () => {
@@ -122,7 +126,7 @@ describe('metadata-store', () => {
       const registry = makeRegistry({ completed: session() });
       const index = new MetadataIndex(registry, mockAgents, mockCarryOver, { metadataPath });
       index.addNewChatMetadata('completed', 'Synthetic input');
-      index.updateRunOutcome('completed', 'view-1', 'finished', 'successful-run');
+      commitOutcome(index, 'completed', 'view-1', 'finished', 'successful-run');
       expect(index.recordFailedAttempt(index.captureFailureAttempt('completed', 'successful-run'))).toBe(false);
       expect(index.getRunOutcome('completed')).toBe('finished');
       await index.flush();
@@ -137,18 +141,16 @@ describe('metadata-store', () => {
       await index.close();
     });
 
-    it('retains a completed result through output and clears it for the next input', () => {
-      metadata.updateRunOutcome(chatId, 'view-1', 'finished');
+    it('retains a completed result through output until new input is accepted', () => {
+      commitOutcome(metadata, chatId, 'view-1', 'finished');
       expect(metadata.getRunOutcome(chatId)).toBe('finished');
       metadata.updateFromAppendedMessages(chatId, 'view-1', [{
         type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'Late output',
       }]);
       expect(metadata.getRunOutcome(chatId)).toBe('finished');
-      metadata.updateFromAppendedMessages(chatId, 'view-1', [{
-        type: 'user-message', timestamp: '2026-01-03T00:00:00Z', content: 'New input',
-      }]);
+      metadata.clearRunOutcome(chatId);
       expect(metadata.getRunOutcome(chatId)).toBeNull();
-      metadata.updateRunOutcome(chatId, 'old-view', 'failed');
+      commitOutcome(metadata, chatId, 'old-view', 'failed');
       expect(metadata.getRunOutcome(chatId)).toBeNull();
     });
 
@@ -162,7 +164,7 @@ describe('metadata-store', () => {
       index.addNewChatMetadata('repairing', 'Generic input');
       const repair = index.repair();
       await entered.promise;
-      index.updateRunOutcome('repairing', 'view-1', 'failed');
+      commitOutcome(index, 'repairing', 'view-1', 'failed');
       read.resolve('finished');
       await repair;
       expect(index.getRunOutcome('repairing')).toBe('failed');
@@ -173,7 +175,7 @@ describe('metadata-store', () => {
       const registry = makeRegistry({ 'runtime-chat': session() });
       const index = new MetadataIndex(registry, mockAgents, mockCarryOver, { metadataPath });
       index.addNewChatMetadata('runtime-chat', 'Generic input');
-      index.updateRunOutcome('runtime-chat', 'view-1', 'failed');
+      commitOutcome(index, 'runtime-chat', 'view-1', 'failed');
       await index.flush();
       const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
       expect(saved.chats['runtime-chat']).not.toHaveProperty('lastRunOutcome');

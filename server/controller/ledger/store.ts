@@ -638,7 +638,10 @@ export class TranscriptLedgerStore {
       });
     } catch (error) {
       const code = error instanceof Error ? (error as Error & { code?: unknown }).code : null;
-      if (code !== UNDECODABLE_LEDGER_ROW && !(typeof code === 'string' && code.startsWith('SQLITE_'))) throw error;
+      // A secondary reader's contention or resource failure does not make the ledger corrupt.
+      const corrupt = typeof code === 'string'
+        && (code === 'SQLITE_NOTADB' || code === 'SQLITE_CORRUPT' || code.startsWith('SQLITE_CORRUPT_'));
+      if (code !== UNDECODABLE_LEDGER_ROW && !corrupt) throw error;
       assertReadCurrent();
       return this.#read(chatId, () => { throw error; });
     }
