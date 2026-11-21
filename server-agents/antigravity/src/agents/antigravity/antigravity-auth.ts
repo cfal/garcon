@@ -15,24 +15,26 @@ import { sharedProbe, waitUnlessAborted } from '@garcon/server-agent-common/shar
 
 const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
 
-const inFlightAuthentication = new Map<string, Promise<void>>();
-
-// Runs the ACP authenticate call every session makes. It runs without a display,
-// so an OAuth method reports a missing sign-in instead of opening a browser.
-// Concurrent status checks share one probe, bounded by its request timeout.
-export function probeAntigravityAuthentication(config: AntigravityConfig): Promise<void> {
-  const binary = config.binary();
-  const method = config.authMethod();
-  return sharedProbe(inFlightAuthentication, JSON.stringify([binary, method]), () => authenticateOnce(binary, method, config));
+// A completed login replaces both maps. Older callers can finish without
+// publishing their credential snapshot into a new caller's probe.
+export function createAntigravityProbes(config: AntigravityConfig) {
+  const authentication = new Map<string, Promise<void>>();
+  const models = new Map<string, Promise<AntigravityCliResult>>();
+  return {
+    authenticate: () => sharedProbe(authentication, JSON.stringify([config.binary(), config.authMethod()]),
+      () => authenticateOnce(config)),
+    runModels: () => sharedProbe(models, JSON.stringify([config.binary(), config.authMethod(), config.apiKey()]),
+      () => runAntigravityModels(config)),
+  };
 }
 
-async function authenticateOnce(binary: string, method: string, config: AntigravityConfig): Promise<void> {
+async function authenticateOnce(config: AntigravityConfig): Promise<void> {
   const client = new AcpClient(new AcpTransport({ requestTimeoutMs: AUTHENTICATE_PROBE_TIMEOUT_MS }), {
     initialize: garconInitializeParams(),
-    authenticateMethodId: method,
+    authenticateMethodId: config.authMethod(),
   });
   try {
-    await client.connect({ command: binary, args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config) });
+    await client.connect({ command: config.binary(), args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config) });
   } finally {
     client.close();
   }
@@ -56,7 +58,7 @@ export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
   {
     runModels = runAntigravityModels,
-    authenticate = probeAntigravityAuthentication,
+    authenticate = authenticateOnce,
     headlessAuthenticate = process.platform === 'linux',
     signal,
     signInRunning = false,
@@ -69,12 +71,7 @@ export async function getAntigravityAuthStatus(
     // fall back to another credential the CLI happens to hold. A Google sign-in
     // cannot change an API-key setup, so none is offered for it.
     const method = config.authMethod();
-    if (!Bun.which(config.binary())) {
-      return {
-        authenticated: false, canReauth: false, label: '', source: 'none',
-        detail: 'Antigravity CLI not found on this executor. Install agy or set GARCON_ANTIGRAVITY_BINARY.',
-      };
-    }
+    config.binary();
     if (method === 'gemini-api-key') {
       return config.hasApiKey()
         ? { authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' }
@@ -83,14 +80,12 @@ export async function getAntigravityAuthStatus(
     if (signInRunning) {
       return lastProbed ?? { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
     }
-    // In-app sign-in (`agy acp --login`) stores a personal Google login, which
-    // `agy models` proves usable. `agy models` accepts any credential the CLI
-    // holds, so an enterprise method instead asks agy to authenticate with it
-    // where that cannot open a browser, and falls back to `agy models` elsewhere.
+    // Model listing accepts any cached credential. Prefer the same method
+    // check as a real session wherever it cannot open a browser.
     const canReauth = method === 'oauth-personal';
-    if (!canReauth && headlessAuthenticate) {
+    if (headlessAuthenticate) {
       await waitUnlessAborted(authenticate(config), signal);
-      return { authenticated: true, canReauth: false, label: method, source: 'cli' };
+      return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
     }
     const result = await waitUnlessAborted(runModels(config), signal);
     if (result.exitCode === 0) {
@@ -109,7 +104,8 @@ export async function getAntigravityAuthStatus(
       authenticated: false,
       // A failed probe or invalid setting is not fixed by a personal sign-in
       // unless that is the configured method.
-      canReauth: authMethodOrNull(config) === 'oauth-personal',
+      canReauth: !(error instanceof AgentIntegrationError && error.code === 'BINARY_NOT_FOUND')
+        && authMethodOrNull(config) === 'oauth-personal',
       label: '',
       source: 'none',
       detail: error instanceof Error ? error.message : String(error),

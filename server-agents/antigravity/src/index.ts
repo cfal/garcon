@@ -1,7 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PERMISSION_MODE_VALUES } from '@garcon/common/chat-modes';
-import type { AgentAuthStatus } from '@garcon/common/agent-execution';
 import {
   type AgentChatReference,
   type AgentHost,
@@ -10,7 +9,6 @@ import {
 } from '@garcon/server-agent-interface';
 import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
-import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
@@ -29,13 +27,7 @@ import {
   createAntigravityAcpPolicy,
   createAntigravityNativePath,
 } from './agents/antigravity/antigravity-acp-policy.js';
-import {
-  antigravityLoginCommand,
-  antigravityLoginEnvironment,
-  getAntigravityAuthStatus,
-  validateAntigravityLoginCode,
-} from './agents/antigravity/antigravity-auth.js';
-import { createAntigravityCatalog } from './agents/antigravity/antigravity-models.js';
+import { createAntigravityAccount } from './agents/antigravity/antigravity-account.js';
 import { runAntigravitySingleQuery } from './agents/antigravity/run-single-query.js';
 
 const ANTIGRAVITY_DESCRIPTOR = {
@@ -110,13 +102,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
       converter: new AntigravityAcpEventConverter(),
       logger,
     });
-    const login = new CliLoginController({
-      command: () => antigravityLoginCommand(config),
-      mode: 'browser-code',
-      logger,
-      environment: () => antigravityLoginEnvironment(config),
-      validateCode: validateAntigravityLoginCode,
-    });
+    const account = createAntigravityAccount(config, logger);
 
     this.settings = createVersionedSettings({
       ownerId: ANTIGRAVITY_AGENT_ID,
@@ -135,20 +121,9 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
     this.producers = producer.producers;
     this.permissions = producer.permissions;
     this.nativeSessions = createAntigravityNativeSessions(nativeSessions, runtime);
-    this.catalog = createAntigravityCatalog(config, logger);
+    this.catalog = account.catalog;
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
-    let lastProbed: AgentAuthStatus | null = null;
-    this.auth = {
-      async status(signal) {
-        const signInRunning = login.status().state === 'running';
-        const status = await getAntigravityAuthStatus(config, { signal, signInRunning, lastProbed });
-        if (!signInRunning) lastProbed = status;
-        return status;
-      },
-      launchLogin: () => login.launch(),
-      completeLogin: (sessionId, code) => login.complete(sessionId, code),
-      loginStatus: async (expectedSessionId) => login.status(expectedSessionId),
-    };
+    this.auth = account.auth;
     this.singleQuery = {
       run: (request) => runIsolatedSingleQuery(request, (directory) => runAntigravitySingleQuery(
         request.prompt,
@@ -159,7 +134,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
-        login.stop();
+        account.stop();
         runtime.shutdown();
       },
     });

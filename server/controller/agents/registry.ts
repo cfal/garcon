@@ -547,7 +547,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         const availability = await integration.readiness.status(new AbortController().signal);
         return [integration.descriptor.id, { ...availability, nativeReady: availability.ready, endpointReady: false }];
       }
-      const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
+      const status = auth[integration.descriptor.id] as AgentAuthStatus | undefined;
       const nativeReady = status?.authenticated === true;
       const endpointReady = integration.endpoints !== null
         && this.#catalog.hasEndpointModels(integration.descriptor.id, executorId);
@@ -559,7 +559,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           ? 'At least one compatible API provider endpoint is configured.'
           : nativeReady
             ? 'Native agent authentication is available.'
-            : 'No native authentication or compatible API provider endpoint is configured.',
+            : status?.detail?.trim() || 'No native authentication or compatible API provider endpoint is configured.',
       }];
     })));
   }

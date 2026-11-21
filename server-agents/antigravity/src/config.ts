@@ -22,7 +22,14 @@ export function createAntigravityConfig(environment: AgentEnvironmentReader): An
   const apiKey = () => readEnvironment(environment, 'GEMINI_API_KEY');
   const hasApiKey = () => apiKey() !== null;
   return Object.freeze({
-    binary: () => readEnvironment(environment, 'GARCON_ANTIGRAVITY_BINARY') ?? 'agy',
+    binary: () => {
+      const command = readEnvironment(environment, 'GARCON_ANTIGRAVITY_BINARY') ?? 'agy';
+      // ACP runs in the chat project, never resolve a relative binary against it.
+      const path = Bun.which(command, { cwd: process.cwd(), PATH: process.env.PATH });
+      if (path) return path;
+      throw new AgentIntegrationError('BINARY_NOT_FOUND',
+        'Antigravity CLI not found on this executor. Install agy or set GARCON_ANTIGRAVITY_BINARY.', false);
+    },
     apiKey,
     hasApiKey,
     authMethod: () => resolveAuthMethod(

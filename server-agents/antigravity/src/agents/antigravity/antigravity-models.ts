@@ -2,7 +2,7 @@ import type { AgentModelOption } from '@garcon/common/agents';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
-import { sharedProbe, waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
+import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
 const MODELS_TIMEOUT_MS = 10_000;
 
@@ -12,18 +12,8 @@ export interface AntigravityCliResult {
   readonly exitCode: number | null;
 }
 
-const inFlightModels = new Map<string, Promise<AntigravityCliResult>>();
-
-// `agy models` is the CLI's signed-in check as well as its catalog; unlike
-// `session/new`, it leaves no empty conversation in the user's history. Auth
-// status and catalog discovery run together, so concurrent callers share one
-// process.
 export function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
-  const binary = config.binary();
-  // Shared only by callers that would run the identical probe.
-  const env = antigravityChildEnvironment(config);
-  const key = JSON.stringify([binary, env.GEMINI_API_KEY ?? null]);
-  return sharedProbe(inFlightModels, key, () => spawnAntigravityModels(binary, env));
+  return spawnAntigravityModels(config.binary(), antigravityChildEnvironment(config));
 }
 
 async function spawnAntigravityModels(
@@ -100,30 +90,28 @@ export function antigravityCliFailure(result: AntigravityCliResult): string {
     || `agy models exited with code ${result.exitCode ?? 'unknown'}`;
 }
 
-export function createAntigravityCatalog(config: AntigravityConfig, logger: AgentLogger) {
+export function createAntigravityCatalog(runModels: () => Promise<AntigravityCliResult>, logger: AgentLogger) {
+  const nativeDefault = { value: 'default', label: 'Default', supportsImages: true };
   return createModelCatalog({
     logger,
     defaultModel: 'default',
-    fallbackModels: [{ value: 'default', label: 'Default', supportsImages: true }],
+    fallbackModels: [],
     requiresStrictModelDiscovery: false,
     // Disposable generation sessions remain in agy's native history.
     generation: null,
-    discover: ({ signal }) => waitUnlessAborted(getAntigravityModels(config, logger), signal),
+    discover: async ({ signal }) => [nativeDefault, ...await waitUnlessAborted(getAntigravityModels(), signal)],
   });
-}
 
-async function getAntigravityModels(
-  config: AntigravityConfig,
-  logger: AgentLogger,
-): Promise<AgentModelOption[]> {
-  try {
-    const result = await runAntigravityModels(config);
-    if (result.exitCode === 0) return parseAntigravityModels(result.stdout);
-    logger.warn('Antigravity model discovery failed', { error: antigravityCliFailure(result) });
-  } catch (error) {
-    logger.warn('Antigravity model discovery failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
+  async function getAntigravityModels(): Promise<AgentModelOption[]> {
+    try {
+      const result = await runModels();
+      if (result.exitCode === 0) return parseAntigravityModels(result.stdout);
+      logger.warn('Antigravity model discovery failed', { error: antigravityCliFailure(result) });
+    } catch (error) {
+      logger.warn('Antigravity model discovery failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return [];
   }
-  return [];
 }

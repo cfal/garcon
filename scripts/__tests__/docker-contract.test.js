@@ -153,6 +153,8 @@ describe('Docker contract', () => {
     const env = Bun.YAML.parse(composeFile).services.garcon.environment;
     expect(env.GEMINI_API_KEY).toBeNull();
     expect(env.GARCON_ANTIGRAVITY_AUTH_METHOD).toBeNull();
+    expect(env.GOOGLE_CLOUD_PROJECT).toBeNull();
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeNull();
   });
 
   test('keeps coupled CLI versions aligned with the integration tier', () => {
