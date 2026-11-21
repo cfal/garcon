@@ -25,9 +25,9 @@ interface SessionState {
   assistantText: string;
   thinkingText: string;
   failure: string | null;
-  readonly emittedToolIds: Set<string>;
   // Tool rows already published; kept across turns because a stopped turn's
   // late terminal update can arrive after the next turn begins.
+  readonly emittedToolIds: Set<string>;
   // Tool names by call ID; terminal updates need the name to normalize output.
   readonly toolNames: Map<string, string>;
 }
@@ -35,10 +35,11 @@ interface SessionState {
 // Upstream model failures (bad key, quota, HTTP errors) do not fail the ACP
 // prompt: agy streams one complete chunk carrying this marker, then ends the
 // turn with `end_turn`. Verified against agy 1.5.13. Text the chunk carries
-// before the marker stays assistant output.
+// before the marker stays assistant output. The marker must be the chunk's last
+// line, so prose that merely quotes it mid-reply is not taken for a failure.
 export function splitExecutorError(text: string): { readonly text: string; readonly failure: string | null } {
-  const index = text.indexOf(WARNING_MARKER + EXECUTOR_ERROR);
-  if (index < 0) return { text, failure: null };
+  const index = text.lastIndexOf(WARNING_MARKER + EXECUTOR_ERROR);
+  if (index < 0 || text.slice(index + 1).trimEnd().includes('\n')) return { text, failure: null };
   return {
     text: text.slice(0, index),
     failure: `Antigravity ${text.slice(index + WARNING_MARKER.length).trim()}`,
@@ -102,7 +103,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
         session.thinkingText += chunkText(update.content);
         return [];
       case 'tool_call':
-        return this.#toolCall(session, update, context.timestamp);
+        return this.#toolCall(session, update, context.timestamp, false);
       case 'tool_call_update':
         return this.#toolCallUpdate(session, update, context.timestamp);
       default:
@@ -110,8 +111,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     }
   }
 
+  // A retired session's final flush must not recreate state the runtime released.
   endTurn(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[] {
-    return this.#flush(this.#sessionFor(sessionId), context.timestamp);
+    const session = this.#sessions.get(sessionId);
+    return session ? this.#flush(session, context.timestamp) : [];
   }
 
   releaseSession(sessionId: string): void {
@@ -125,13 +128,23 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     return failure;
   }
 
-  #toolCall(session: SessionState, update: Record<string, unknown>, timestamp: string): ChatMessage[] {
-    const call = antigravityToolCall(update);
-    if (!call) return [];
+  // A call's row waits for its arguments when the first frame carries none, so a
+  // later frame can still give it its shared tool type; a terminal frame emits
+  // it regardless.
+  #toolCall(
+    session: SessionState,
+    update: Record<string, unknown>,
+    timestamp: string,
+    terminal: boolean,
+  ): ChatMessage[] {
+    const parsed = antigravityToolCall(update);
+    if (!parsed) return [];
     // A later frame without a name must not replace the name the call started with.
-    if (call.name) this.#rememberToolName(session, call.toolCallId, call.name);
+    if (parsed.name) this.#rememberToolName(session, parsed.toolCallId, parsed.name);
+    const call = { ...parsed, name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null };
+    if (session.emittedToolIds.has(call.toolCallId)) return [];
+    if (!terminal && Object.keys(call.input).length === 0) return [];
     const messages = this.#flush(session, timestamp);
-    if (session.emittedToolIds.has(call.toolCallId)) return messages;
     session.emittedToolIds.add(call.toolCallId);
     if (session.emittedToolIds.size > MAX_TOOL_NAMES_PER_SESSION) {
       const oldest = session.emittedToolIds.values().next().value;
@@ -143,11 +156,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
 
   #toolCallUpdate(session: SessionState, update: Record<string, unknown>, timestamp: string): ChatMessage[] {
     const status = asString(update.status);
-    if (status !== 'completed' && status !== 'failed') return [];
+    if (status !== 'completed' && status !== 'failed') return this.#toolCall(session, update, timestamp, false);
     const toolCallId = asString(update.toolCallId);
     if (!toolCallId) return [];
     // A terminal update can be the first frame for a call, so its tool row comes first.
-    const messages = this.#toolCall(session, update, timestamp);
+    const messages = this.#toolCall(session, update, timestamp, true);
     const name = asString(update.name) ?? session.toolNames.get(toolCallId) ?? '';
     session.toolNames.delete(toolCallId);
     const text = antigravityToolResultText(name, toolResultText(update));

@@ -40,7 +40,6 @@ import {
   abortStrategy,
   asObject,
   asString,
-  autoApproveChoice,
   buildEnvFallback,
   buildPromptFallback,
   fallbackPermissionToolUse,
@@ -75,6 +74,9 @@ interface AcpAgentRuntimeSession {
   retired: boolean;
   activeTurn: AcpTurnContext | null;
   sourceTurn: AcpTurnContext | null;
+  // Set from admission until the prompt is sent, so a concurrent turn cannot
+  // pass the running check while this one is still being configured.
+  turnStarting: boolean;
   permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
@@ -219,6 +221,7 @@ export class AcpAgentRuntime {
       retired: false,
       activeTurn: null,
       sourceTurn: null,
+      turnStarting: false,
       permissionMode: request.permissionMode,
       configOptions: created.configOptions,
       models: created.models,
@@ -268,10 +271,15 @@ export class AcpAgentRuntime {
       assertAcpExecutionOpen(request);
       if (session.retired) session = await this.#sessionForTurn(request);
     }
-    if (session.activeTurn?.running) {
+    if (session.activeTurn?.running || session.turnStarting) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
-    await this.#runPrompt(session, request);
+    session.turnStarting = true;
+    try {
+      await this.#runPrompt(session, request);
+    } finally {
+      session.turnStarting = false;
+    }
   }
 
   // A cooperative cancel settles when the agent answers the open prompt. An
@@ -451,6 +459,7 @@ export class AcpAgentRuntime {
       retired: false,
       activeTurn: null,
       sourceTurn: null,
+      turnStarting: false,
       permissionMode: request.permissionMode,
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
@@ -690,11 +699,17 @@ export class AcpAgentRuntime {
     const options = (Array.isArray(params.options) ? params.options : [])
       .map((option) => asObject(option));
 
+    // A cooperative cancel keeps the turn routable until the prompt settles;
+    // nothing the agent asks for after Stop may run.
+    if (turn.aborted) {
+      session.client.respond(requestId, permissionCancelledOutcome());
+      return;
+    }
+
+    // Auto-approval is Garcon's policy for this turn, so it never writes a
+    // persistent grant into the agent's own configuration.
     if (isAutoApproveMode(turn.permissionMode, this.#policy)) {
-      session.client.respond(
-        requestId,
-        permissionChoiceOutcome(options, autoApproveChoice(turn.permissionMode)),
-      );
+      session.client.respond(requestId, permissionChoiceOutcome(options, 'allow-once'));
       return;
     }
 
@@ -741,6 +756,10 @@ export class AcpAgentRuntime {
       params,
     }, context) ?? null;
     if (!converted) return false;
+    if (turn.aborted) {
+      turn.session.client.respond(requestId, converted.responseForCancellation('aborted'));
+      return true;
+    }
 
     const pending = this.#registerPendingPermission(
       turn,

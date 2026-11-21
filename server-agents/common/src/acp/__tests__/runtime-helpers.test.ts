@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { autoApproveChoice, isAutoApproveMode, permissionChoiceOutcome } from '../runtime-helpers.ts';
+import { isAutoApproveMode, permissionChoiceOutcome } from '../runtime-helpers.ts';
 import type { AcpAgentPolicy } from '../agent-runtime.ts';
 
 const ANTIGRAVITY_OPTIONS = [
@@ -73,13 +73,5 @@ describe('isAutoApproveMode', () => {
     expect(isAutoApproveMode('bypassPermissions', native)).toBe(true);
     expect(isAutoApproveMode('acceptEdits', standard)).toBe(true);
     expect(isAutoApproveMode('default', standard)).toBe(false);
-  });
-});
-
-describe('autoApproveChoice', () => {
-  it('grants persistently only under full bypass', () => {
-    expect(autoApproveChoice('bypassPermissions')).toBe('allow-always');
-    expect(autoApproveChoice('acceptEdits')).toBe('allow-once');
-    expect(autoApproveChoice('manualBypass')).toBe('allow-once');
   });
 });

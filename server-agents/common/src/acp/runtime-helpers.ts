@@ -35,10 +35,6 @@ export function isAutoApproveMode(mode: PermissionMode, policy: AcpAgentPolicy):
 
 export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'reject';
 
-export function autoApproveChoice(mode: PermissionMode): AcpPermissionChoice {
-  return mode === 'bypassPermissions' ? 'allow-always' : 'allow-once';
-}
-
 export function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
   return typeof value === 'number' || typeof value === 'string';
 }

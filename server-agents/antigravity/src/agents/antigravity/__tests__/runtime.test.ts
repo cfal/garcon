@@ -29,6 +29,11 @@ const MODE_OPTION = {
   options: [{ value: 'default' }, { value: 'accept-edits' }, { value: 'plan' }],
 };
 
+const PERMISSION_OPTIONS = [
+  { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+  { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+];
+
 // Speaks the agy 1.5 ACP shapes the runtime depends on: agent-defined
 // permission option ids, `session/cancel` as a notification, and upstream
 // failures reported as a message chunk followed by `end_turn`.
@@ -44,6 +49,8 @@ class FakeAntigravityAgent {
   // Whether `session/resume` reports the session's config options.
   resumeReportsOptions = true;
   modeOptions: Array<{ value: string }> = MODE_OPTION.options;
+  // Whether `session/set_config_option` replies with the session's options.
+  configReplyReportsOptions = true;
 
   // Each spawn is a fresh process; later frames go to the newest one.
   process(): AcpProcess {
@@ -69,18 +76,15 @@ class FakeAntigravityAgent {
     this.#send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId, update } });
   }
 
-  requestPermission(sessionId: string, toolCallId: string): void {
+  requestPermission(sessionId: string, toolCallId: string, options = PERMISSION_OPTIONS, id = 'permission-1'): void {
     this.#send({
       jsonrpc: '2.0',
-      id: 'permission-1',
+      id,
       method: 'session/request_permission',
       params: {
         sessionId,
         toolCall: { toolCallId, name: 'run_command', kind: 'execute', status: 'pending', rawInput: { CommandLine: 'echo synthetic' } },
-        options: [
-          { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
-          { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
-        ],
+        options,
       },
     });
   }
@@ -120,7 +124,7 @@ class FakeAntigravityAgent {
         }
         return reply(this.resumeReportsOptions ? { models: MODELS, configOptions: [MODE_OPTION] } : { models: MODELS });
       case 'session/set_config_option':
-        return reply({ configOptions: [{ ...MODE_OPTION, currentValue: params.value }] });
+        return reply(this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, currentValue: params.value }] } : {});
       case 'session/prompt':
         this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
         return this.#script(this, String(params.sessionId));
@@ -360,6 +364,65 @@ describe('Antigravity ACP runtime', () => {
       'Antigravity does not offer the plan mode for this session.',
     );
     expect(agent.requests('session/prompt')).toEqual([]);
+  });
+
+  it('cancels permission requests that arrive after Stop instead of approving them', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt(() => {});
+    agent.cancelReply = 'deferred';
+    const started = await runtime.startSession(request({ permissionMode: 'bypassPermissions' }));
+
+    runtime.abort(started.agentSessionId);
+    agent.requestPermission(started.agentSessionId, 'tool-late');
+    await waitFor(() => agent.received.some((message) => message.id === 'permission-1'));
+
+    expect(agent.received.find((message) => message.id === 'permission-1')?.result).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect(events.some((event) => event.type === 'permission')).toBe(false);
+  });
+
+  it('approves once in bypass even when a persistent grant is offered', async () => {
+    const { agent, runtime, request } = harness();
+    agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1', [
+      { optionId: 'always', name: 'Always', kind: 'allow_always' },
+      { optionId: 'once', name: 'Once', kind: 'allow_once' },
+      { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+    ]));
+
+    await runtime.startSession(request({ permissionMode: 'bypassPermissions' }));
+    await waitFor(() => agent.received.some((message) => message.id === 'permission-1'));
+    expect(agent.received.find((message) => message.id === 'permission-1')?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'once' },
+    });
+    runtime.shutdown();
+  });
+
+  it('switches back to a mode when the config reply omitted the options', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.configReplyReportsOptions = false;
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request({ permissionMode: 'plan' }));
+    await waitFor(() => runEnded(events).length === 1);
+
+    await runtime.runTurn({ ...request({ permissionMode: 'default' }), agentSessionId: started.agentSessionId });
+
+    expect(agent.requests('session/set_config_option').map((message) => (message.params as { value: string }).value))
+      .toEqual(['plan', 'default']);
+    runtime.shutdown();
+  });
+
+  it('rejects a second turn that starts while the first is still being configured', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+
+    const first = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    const second = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+
+    await expect(second).rejects.toThrow('is already running');
+    await first;
+    expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
   });
 
   it('fails the run when agy reports an executor error in-band', async () => {

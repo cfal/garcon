@@ -65,26 +65,20 @@ describe('parseAntigravityModels', () => {
 
 describe('getAntigravityAuthStatus', () => {
   it('reports an API key as environment authentication without spawning the CLI', async () => {
-    const status = await getAntigravityAuthStatus(
-      config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }),
-      () => { throw new Error('must not run'); },
-    );
+    const status = await getAntigravityAuthStatus(config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
     expect(status).toEqual({ authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' });
   });
 
   it('reports an invalid auth-method setting instead of throwing', async () => {
     const status = await getAntigravityAuthStatus(config({
       authMethod: () => resolveAuthMethod('password', false),
-    }), () => { throw new Error('must not run'); });
+    }), { runModels: () => { throw new Error('must not run'); } });
     expect(status).toMatchObject({ authenticated: false, source: 'none' });
     expect(status.detail).toContain('GARCON_ANTIGRAVITY_AUTH_METHOD must be one of');
   });
 
   it('reports the configured API-key method as signed out without a key', async () => {
-    const status = await getAntigravityAuthStatus(
-      config({ authMethod: () => 'gemini-api-key' }),
-      () => { throw new Error('must not run'); },
-    );
+    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
     expect(status).toEqual({
       authenticated: false, canReauth: true, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.',
     });
@@ -92,20 +86,28 @@ describe('getAntigravityAuthStatus', () => {
 
   it('stops waiting on the shared probe when the caller aborts', async () => {
     const controller = new AbortController();
-    const pending = getAntigravityAuthStatus(config(), () => new Promise(() => {}), controller.signal);
+    const pending = getAntigravityAuthStatus(config(), { runModels: () => new Promise(() => {}), signal: controller.signal });
     controller.abort(new Error('caller left'));
     await expect(pending).rejects.toThrow('caller left');
   });
 
+  it('does not probe the CLI while an in-app sign-in is running', async () => {
+    const status = await getAntigravityAuthStatus(config(), {
+      runModels: () => { throw new Error('must not run'); },
+      signInRunning: true,
+    });
+    expect(status).toMatchObject({ authenticated: false, detail: 'Sign-in in progress.' });
+  });
+
   it('uses the CLI model listing as the signed-in check', async () => {
-    const signedIn = await getAntigravityAuthStatus(config(), async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }));
+    const signedIn = await getAntigravityAuthStatus(config(), { runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }) });
     expect(signedIn).toMatchObject({ authenticated: true, source: 'cli' });
 
-    const signedOut = await getAntigravityAuthStatus(config(), async () => ({
+    const signedOut = await getAntigravityAuthStatus(config(), { runModels: async () => ({
       stdout: '',
       stderr: 'Error: Please sign in to view available models.',
       exitCode: 1,
-    }));
+    }) });
     expect(signedOut).toEqual({
       authenticated: false,
       canReauth: true,

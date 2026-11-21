@@ -246,6 +246,37 @@ describe('AntigravityAcpEventConverter', () => {
     }]);
   });
 
+  it('waits for arguments before choosing a tool type', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    expect(converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+    }), context)).toEqual([]);
+
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress', kind: 'execute', rawInput: { CommandLine: 'echo late' },
+    }), context);
+    expect(plain(rows)).toEqual([{ type: 'bash-tool-use', toolId: 'tool-1', command: 'echo late', description: undefined }]);
+  });
+
+  it('ignores the marker when the model quotes it mid-reply', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'agy prints\n⚠ agent executor error: <detail>\nwhen a request fails.' },
+    }), context);
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
+  it('does not recreate state for a session released before its final flush', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.releaseSession(SESSION);
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

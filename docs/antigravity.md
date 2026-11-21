@@ -87,7 +87,14 @@ Permission modes:
 | `plan` | `plan` | Requests go to the user. |
 | `manualBypass`, `bypassPermissions` | `default` | Requests are auto-approved. |
 
-Permission options are chosen by their ACP `kind` (`allow_once`, `allow_always`, `reject_once`, `reject_always`), not by option ID. Antigravity's option IDs are `allow` and `deny`. The shared runtime previously fell back to the first option when an ID was missing, which would have turned Deny into Allow.
+The shared runtime chooses permission options by their ACP `kind` (`allow_once`, `allow_always`, `reject_once`, `reject_always`), not by option ID. Antigravity's option IDs are `allow` and `deny`. The runtime used to fall back to the first option when an ID was missing, which would have turned Deny into Allow.
+
+The selection rules:
+
+- A one-time choice never falls back to a persistent grant or a persistent deny rule. When nothing safe matches, the runtime answers `cancelled`.
+- Untyped options match conventional IDs (`allow`, `deny`, `allow-once`, `reject-once`), never a typed option of another kind.
+- Auto-approval is Garcon's policy for the turn, so bypass modes answer with the one-time option.
+- After Stop, any permission request that arrives before the cancelled prompt settles is answered `cancelled`.
 
 ## One-Shot Queries
 

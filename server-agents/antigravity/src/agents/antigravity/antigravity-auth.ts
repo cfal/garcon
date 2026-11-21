@@ -19,11 +19,21 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): P
   });
 }
 
+export interface AntigravityAuthStatusOptions {
+  readonly runModels?: (config: AntigravityConfig) => Promise<AntigravityCliResult>;
+  readonly signal?: AbortSignal;
+  // Settings polls status while an in-app sign-in waits for its code. The CLI
+  // cannot become signed in until that sign-in exits, so no probe runs.
+  readonly signInRunning?: boolean;
+}
+
 export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
-  runModels: (config: AntigravityConfig) => Promise<AntigravityCliResult> = runAntigravityModels,
-  signal?: AbortSignal,
+  { runModels = runAntigravityModels, signal, signInRunning = false }: AntigravityAuthStatusOptions = {},
 ): Promise<AgentAuthStatus> {
+  if (signInRunning) {
+    return { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
+  }
   try {
     // Sessions authenticate with the configured method only, so status must not
     // fall back to another credential the CLI happens to hold.

@@ -50,19 +50,8 @@ export async function configureAntigravitySession(
   context: AcpSessionConfigurationContext,
 ): Promise<AcpSessionStatePatch> {
   const patch: AcpSessionStatePatch = {};
-  const model = context.request.model;
-  if (model && model !== context.models?.currentModelId) {
-    const available = context.models?.availableModels ?? [];
-    if (available.length > 0 && !available.some((entry) => entry.modelId === model)) {
-      throw new AgentIntegrationError(
-        'PROVIDER_FAILURE',
-        `Antigravity model ${model} is not available for this account.`,
-        false,
-      );
-    }
-    await context.client.setSessionModel({ sessionId: context.sessionId, modelId: model });
-    patch.models = { ...context.models, currentModelId: model };
-  }
+  const models = await applyAntigravityModel(context.client, context.sessionId, context.models, context.request.model);
+  if (models) patch.models = models;
 
   const configOptions = await applyAntigravityMode(
     context.client,
@@ -72,6 +61,27 @@ export async function configureAntigravitySession(
   );
   if (configOptions) patch.configOptions = configOptions;
   return patch;
+}
+
+// Returns the updated model state, or undefined when the session already uses
+// the model or the request names none.
+export async function applyAntigravityModel(
+  client: Pick<AcpSessionConfigurationContext['client'], 'setSessionModel'>,
+  sessionId: string,
+  models: AcpSessionConfigurationContext['models'],
+  model: string | undefined,
+): Promise<AcpSessionConfigurationContext['models'] | undefined> {
+  if (!model || model === models?.currentModelId) return undefined;
+  const available = models?.availableModels ?? [];
+  if (available.length > 0 && !available.some((entry) => entry.modelId === model)) {
+    throw new AgentIntegrationError(
+      'PROVIDER_FAILURE',
+      `Antigravity model ${model} is not available for this account.`,
+      false,
+    );
+  }
+  await client.setSessionModel({ sessionId, modelId: model });
+  return { ...models, currentModelId: model };
 }
 
 // Unknown options (a resume that returned none) still get the mode, since a
@@ -94,7 +104,11 @@ export async function applyAntigravityMode(
   }
   if (modeOption?.currentValue === mode) return undefined;
   const result = await client.setSessionConfigOption({ sessionId, configId: 'mode', value: mode });
-  return result.configOptions;
+  // A reply without options must still move the cached mode, or a later turn
+  // would skip switching back to a mode the cache wrongly reports as current.
+  return result.configOptions ?? configOptions?.map((option) => (
+    option.id === 'mode' ? { ...option, currentValue: mode } : option
+  ));
 }
 
 export function createAntigravityNativePath(agentSessionId: string): string | null {
