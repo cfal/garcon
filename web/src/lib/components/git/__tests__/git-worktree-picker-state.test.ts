@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import {
 	filterAndSortWorktrees,
-	findRepositoryWorktreePath,
 	GitWorktreePickerState,
 	isWorktreeSortOrder,
 } from '../git-worktree-picker-state.svelte.js';
@@ -31,9 +30,6 @@ function pickerFor(getWorktrees: () => GitWorktreeItem[]): GitWorktreePickerStat
 		},
 		get locale() {
 			return 'en';
-		},
-		get repositoryWorktreePath() {
-			return findRepositoryWorktreePath(getWorktrees());
 		},
 	});
 }
@@ -125,17 +121,6 @@ describe('filterAndSortWorktrees', () => {
 });
 
 describe('GitWorktreePickerState', () => {
-	it('preserves exact repository roots and explicit worktree destinations', () => {
-		const picker = pickerFor(() => [worktree('main', null, { isMain: true, path: '/repo ' })]);
-		picker.branchName = 'feature';
-		expect(picker.repositoryWorktreePath).toBe('/repo ');
-		expect(picker.effectivePath).toBe('/repo /.worktrees/feature');
-		picker.pathOverride = '/repo /.worktrees/explicit ';
-		expect(picker.effectivePath).toBe('/repo /.worktrees/explicit ');
-		picker.pathOverride = '   ';
-		expect(picker.effectivePath).toBe('/repo /.worktrees/feature');
-	});
-
 	it('defaults to recent order and navigates only visible selectable worktrees', () => {
 		const items = [
 			worktree('old', '2026-07-13T10:00:00.000Z'),
@@ -197,71 +182,6 @@ describe('GitWorktreePickerState', () => {
 		expect(picker.visibleWorktrees.map((item) => item.name)).toEqual(['hidden-missing']);
 		expect(picker.selectedWorktree).toBeNull();
 		expect(picker.selectedIndex).toBe(-1);
-	});
-
-	it('preserves the existing create form derivation and reset behavior', () => {
-		const picker = pickerFor(() => [
-			worktree('repo', null, { path: '/workspace/repo', isMain: true }),
-		]);
-		picker.showCreateForm = true;
-		picker.branchName = 'feature/search';
-		picker.showAdvanced = true;
-		picker.pathOverride = '/tmp/search';
-		picker.baseRefOverride = 'main';
-
-		expect(picker.derivedPath).toBe('/workspace/repo/.worktrees/feature-search');
-		expect(picker.effectivePath).toBe('/tmp/search');
-		expect(picker.canCreate).toBe(true);
-
-		picker.resetCreateForm();
-		expect(picker.showCreateForm).toBe(false);
-		expect(picker.branchName).toBe('');
-		expect(picker.showAdvanced).toBe(false);
-		expect(picker.pathOverride).toBe('');
-		expect(picker.baseRefOverride).toBe('');
-	});
-
-	it('uses the repository worktree instead of nesting under the current linked worktree', () => {
-		const picker = pickerFor(() => [
-			worktree('repo', null, { path: '/repo', isMain: true }),
-			worktree('example', null, {
-				path: '/repo/.worktrees/example',
-				isCurrent: true,
-			}),
-		]);
-		picker.branchName = 'example2';
-
-		expect(picker.repositoryWorktreePath).toBe('/repo');
-		expect(picker.derivedPath).toBe('/repo/.worktrees/example2');
-	});
-
-	it('does not invent a default creation root without repository worktree metadata', () => {
-		const picker = pickerFor(() => [
-			worktree('example', null, {
-				path: '/repo/.worktrees/example',
-				isCurrent: true,
-			}),
-		]);
-		picker.branchName = 'example2';
-
-		expect(picker.repositoryWorktreePath).toBe('');
-		expect(picker.derivedPath).toBe('');
-		expect(picker.canCreate).toBe(false);
-
-		picker.pathOverride = '/tmp/example2';
-		expect(picker.canCreate).toBe(true);
-	});
-
-	it('derives the default path when repository worktree metadata finishes loading', () => {
-		let items: GitWorktreeItem[] = [];
-		const picker = pickerFor(() => items);
-		picker.branchName = 'example2';
-		expect(picker.derivedPath).toBe('');
-
-		items = [worktree('repo', null, { path: '/repo', isMain: true })];
-
-		expect(picker.repositoryWorktreePath).toBe('/repo');
-		expect(picker.derivedPath).toBe('/repo/.worktrees/example2');
 	});
 
 	it('accepts only supported sort order values', () => {

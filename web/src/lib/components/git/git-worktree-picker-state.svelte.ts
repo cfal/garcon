@@ -1,6 +1,5 @@
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import { canonicalIsoTimestamp } from '$lib/utils/iso-timestamp.js';
-import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
 
 export type WorktreeSortOrder =
 	| 'alphabetical-ascending'
@@ -20,7 +19,6 @@ export function isWorktreeSortOrder(value: string): value is WorktreeSortOrder {
 interface GitWorktreePickerStateOptions {
 	get worktrees(): GitWorktreeItem[];
 	get locale(): string;
-	get repositoryWorktreePath(): string;
 }
 
 export function worktreeDisplayName(worktree: GitWorktreeItem): string {
@@ -34,10 +32,6 @@ function worktreePathBasename(worktreePath: string): string {
 function timestampValue(value: string | null | undefined): number | null {
 	const timestamp = canonicalIsoTimestamp(value);
 	return timestamp ? Date.parse(timestamp) : null;
-}
-
-export function findRepositoryWorktreePath(worktrees: readonly GitWorktreeItem[]): string {
-	return worktrees.find((worktree) => worktree.isMain)?.path ?? '';
 }
 
 export function filterAndSortWorktrees(
@@ -94,11 +88,6 @@ export class GitWorktreePickerState {
 	filterQuery = $state('');
 	sortOrder = $state<WorktreeSortOrder>('last-modified');
 	selectedPath = $state<string | null>(null);
-	showCreateForm = $state(false);
-	branchName = $state('');
-	showAdvanced = $state(false);
-	pathOverride = $state('');
-	baseRefOverride = $state('');
 
 	#visibleWorktrees = $derived.by(() =>
 		filterAndSortWorktrees(
@@ -128,16 +117,8 @@ export class GitWorktreePickerState {
 		this.#options = options;
 	}
 
-	get worktrees(): GitWorktreeItem[] {
-		return this.#options.worktrees;
-	}
-
 	get visibleWorktrees(): GitWorktreeItem[] {
 		return this.#visibleWorktrees;
-	}
-
-	get selectableVisibleWorktrees(): GitWorktreeItem[] {
-		return this.#selectableVisibleWorktrees;
 	}
 
 	get selectedWorktree(): GitWorktreeItem | null {
@@ -153,27 +134,11 @@ export class GitWorktreePickerState {
 	}
 
 	get totalCount(): number {
-		return this.worktrees.length;
+		return this.#options.worktrees.length;
 	}
 
 	get visibleCount(): number {
 		return this.visibleWorktrees.length;
-	}
-
-	get repositoryWorktreePath(): string {
-		return this.#options.repositoryWorktreePath;
-	}
-
-	get derivedPath(): string {
-		return deriveWorktreePath(this.repositoryWorktreePath, this.branchName);
-	}
-
-	get effectivePath(): string {
-		return this.pathOverride.trim() ? this.pathOverride : this.derivedPath;
-	}
-
-	get canCreate(): boolean {
-		return Boolean(this.branchName.trim() && this.effectivePath);
 	}
 
 	setSortOrder(value: string): void {
@@ -192,19 +157,11 @@ export class GitWorktreePickerState {
 	}
 
 	moveSelection(delta: -1 | 1): void {
-		const selectable = this.selectableVisibleWorktrees;
+		const selectable = this.#selectableVisibleWorktrees;
 		if (selectable.length === 0) return;
 		const selectedPath = this.selectedWorktree?.path;
 		const selectedIndex = selectable.findIndex((worktree) => worktree.path === selectedPath);
 		const nextIndex = Math.min(Math.max(selectedIndex + delta, 0), selectable.length - 1);
 		this.selectedPath = selectable[nextIndex]?.path ?? null;
-	}
-
-	resetCreateForm(): void {
-		this.showCreateForm = false;
-		this.branchName = '';
-		this.showAdvanced = false;
-		this.pathOverride = '';
-		this.baseRefOverride = '';
 	}
 }

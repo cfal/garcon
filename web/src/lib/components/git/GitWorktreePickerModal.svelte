@@ -26,10 +26,7 @@
 	import { getOptionalTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import GitWorktreePickerList from './GitWorktreePickerList.svelte';
-	import {
-		findRepositoryWorktreePath,
-		GitWorktreePickerState,
-	} from './git-worktree-picker-state.svelte.js';
+	import { GitWorktreePickerState } from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
 		worktrees: GitWorktreeItem[];
@@ -56,8 +53,6 @@
 		onRefresh,
 		onClose,
 	}: Props = $props();
-	let repositoryWorktreePath = $derived(findRepositoryWorktreePath(worktrees));
-
 	const picker = new GitWorktreePickerState({
 		get worktrees() {
 			return worktrees;
@@ -65,23 +60,26 @@
 		get locale() {
 			return getLocale();
 		},
-		get repositoryWorktreePath() {
-			return repositoryWorktreePath;
-		},
 	});
 	const componentId = $props.id();
 	const listboxId = `${componentId}-worktrees`;
 	const transientLayers = getOptionalTransientLayers();
 	let filterInputRef: HTMLInputElement | null = $state(null);
-	let createTarget = $state('');
-	let createOpen = $derived(picker.showCreateForm && createTarget === contextKey);
+	let createTarget = $state<string | null>(null);
+	let showAdvanced = $state(false);
+	const createOpen = $derived(createTarget === contextKey);
+	const dialogHeight = $derived.by(() => {
+		if (!createOpen) return 'h-[min(36rem,calc(var(--app-height)-1rem))]';
+		if (showAdvanced) return 'h-[min(26rem,calc(var(--app-height)-1rem))]';
+		return 'h-[min(22rem,calc(var(--app-height)-1rem))]';
+	});
 	$effect(() => {
-		if (picker.showCreateForm && createTarget !== contextKey) picker.resetCreateForm();
+		if (createTarget !== null && createTarget !== contextKey) createTarget = null;
 	});
 	let activeOptionId = $state<string | undefined>();
 
 	function handleDialogKeydown(event: KeyboardEvent): void {
-		if (event.key !== 'Escape' || !picker.showCreateForm) return;
+		if (event.key !== 'Escape' || createTarget === null) return;
 		event.preventDefault();
 		event.stopPropagation();
 		backToList();
@@ -103,7 +101,7 @@
 	}
 
 	function handleFilterKeydown(event: KeyboardEvent): void {
-		if (isLoading || picker.showCreateForm || event.isComposing || event.keyCode === 229) return;
+		if (isLoading || createTarget !== null || event.isComposing || event.keyCode === 229) return;
 		if (event.key === 'ArrowDown') {
 			event.preventDefault();
 			picker.moveSelection(1);
@@ -122,7 +120,7 @@
 
 	function backToList(): void {
 		if (isCreating) return;
-		picker.resetCreateForm();
+		createTarget = null;
 		if (errorMessage) onRefresh();
 		void tick().then(() => filterInputRef?.focus());
 	}
@@ -134,8 +132,8 @@
 
 	function openCreateForm(): void {
 		if (isLoading || isCreating) return;
+		showAdvanced = false;
 		createTarget = contextKey;
-		picker.showCreateForm = true;
 	}
 </script>
 
@@ -153,11 +151,7 @@
 			event.preventDefault();
 			queueMicrotask(() => filterInputRef?.focus());
 		}}
-		class={`top-[var(--app-viewport-center-y)] w-[calc(100vw-1rem)] max-w-lg overflow-hidden rounded-lg border border-border bg-popover p-0 shadow-2xl sm:w-full ${
-			!createOpen ? 'h-[min(36rem,calc(var(--app-height)-1rem))]'
-				: picker.showAdvanced ? 'h-[min(26rem,calc(var(--app-height)-1rem))]'
-				: 'h-[min(22rem,calc(var(--app-height)-1rem))]'
-		}`}
+		class="top-[var(--app-viewport-center-y)] w-[calc(100vw-1rem)] max-w-lg overflow-hidden rounded-lg border border-border bg-popover p-0 shadow-2xl sm:w-full {dialogHeight}"
 	>
 		<div class="flex h-full min-h-0 min-w-0 flex-col">
 			<div class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
@@ -266,7 +260,7 @@
 				<GitWorktreePickerList
 					{listboxId}
 					worktrees={picker.visibleWorktrees}
-					totalWorktreeCount={worktrees.length}
+					totalWorktreeCount={picker.totalCount}
 					selectedIndex={picker.selectedIndex}
 					selectedPath={picker.selectedWorktree?.path}
 					{isLoading}
@@ -304,7 +298,8 @@
 			{#if createOpen}
 				<div class="flex min-h-0 flex-1 flex-col" use:createFormLayer>
 					<GitWorktreeCreateForm
-						{picker}
+						{worktrees}
+						bind:showAdvanced
 						{contextKey}
 						{description}
 						{isCreating}

@@ -32,10 +32,14 @@
 	let request: AbortController | null = null;
 	let error = $state('');
 
+	function setPendingRequest(pending: AbortController | null) {
+		request = pending;
+		generating = pending !== null;
+	}
+
 	function cancel() {
 		request?.abort();
-		request = null;
-		generating = false;
+		setPendingRequest(null);
 		error = '';
 	}
 
@@ -52,8 +56,7 @@
 		const target = contextKey;
 		const task = description;
 		const abort = new AbortController();
-		request = abort;
-		generating = true;
+		setPendingRequest(abort);
 		error = '';
 		const current = () =>
 			!abort.signal.aborted &&
@@ -83,10 +86,7 @@
 		} catch {
 			if (current()) error = m.git_name_generation_error();
 		} finally {
-			if (request === abort) {
-				request = null;
-				generating = false;
-			}
+			if (request === abort) setPendingRequest(null);
 		}
 	}
 </script>
@@ -125,11 +125,15 @@
 			onclick={suggest}
 			class="inline-flex h-10 shrink-0 items-center gap-2 rounded-md border border-border px-3 text-sm text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-disabled:opacity-50"
 		>
-			{#if generating}<LoaderCircle class="size-4 animate-spin" />{:else}<WandSparkles
-					class="size-4"
-				/>{/if}
+			{#if generating}
+				<LoaderCircle class="size-4 animate-spin" />
+			{:else}
+				<WandSparkles class="size-4" />
+			{/if}
 			<span>{m.git_name_generate()}</span>
 		</button>
 	</div>
-	{#if error}<p id={id + '-error'} role="alert" class="text-xs text-destructive">{error}</p>{/if}
+	{#if error}
+		<p id={id + '-error'} role="alert" class="text-xs text-destructive">{error}</p>
+	{/if}
 </div>

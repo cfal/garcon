@@ -62,25 +62,27 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-2">
 				<span class="min-w-0 flex-1 truncate text-sm font-medium">{worktreeDisplayName(worktree)}</span>
-				{#if worktree.isMain}<span class="shrink-0 text-xs text-muted-foreground"
-						>{m.git_worktree_repo()}</span
-					>{/if}
-				{#if worktree.isPathMissing}<span class="shrink-0 text-xs text-destructive"
-						>{m.git_worktree_missing()}</span
-					>{/if}
+				{#if worktree.isMain}
+					<span class="shrink-0 text-xs text-muted-foreground">{m.git_worktree_repo()}</span>
+				{/if}
+				{#if worktree.isPathMissing}
+					<span class="shrink-0 text-xs text-destructive">{m.git_worktree_missing()}</span>
+				{/if}
 				{#if modified}
 					<time
 						datetime={modifiedAt ?? undefined}
 						title={modified.tooltip}
 						class="max-w-[33%] truncate text-xs text-muted-foreground"
-						>{m.workspace_worktree_last_modified({ time: modified.label })}</time
 					>
+						{m.workspace_worktree_last_modified({ time: modified.label })}
+					</time>
 				{:else}
 					<span
 						title={m.workspace_worktree_last_modified_unavailable()}
 						class="truncate text-xs text-muted-foreground"
-						>{m.workspace_worktree_last_modified_unavailable_short()}</span
 					>
+						{m.workspace_worktree_last_modified_unavailable_short()}
+					</span>
 				{/if}
 			</div>
 			<div class="truncate font-mono text-xs text-muted-foreground" title={worktree.path}>
