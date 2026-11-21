@@ -65,6 +65,7 @@ async function fixture(options: {
       requiresNativePathForProjectPathUpdate: () => false, resolveNativeSession: async () => null,
       prepareProjectPathUpdate: prepare, publishSessionFact: unused,
       hasAgent: unused, executionPolicy: unused, assertAgentAvailable: unused,
+      supportsLiveStartRows: unused, providerSelectionRevision: unused,
       supportsImages: unused, fileAttachmentAdmission: unused, modelSupportsImages: unused,
       startSession: unused, resolvePermission: unused, getAgentAuthStatusMap: unused,
       getAgentReadinessMap: unused, getAgentCatalogEntries: unused,
