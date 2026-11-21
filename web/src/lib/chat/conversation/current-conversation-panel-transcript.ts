@@ -9,7 +9,7 @@ import {
 	type ChatRestoreResult,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { DeliveredSteerReceipt, OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
@@ -229,14 +229,8 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		this.options.panels.reconcileQueuedSteers(chatId, control, receipt);
 	}
 
-	acceptDeliveredSteer(chatId: string, receipt: DeliveredSteerReceipt): void {
-		this.options.panels.acceptDeliveredSteer(chatId, receipt);
-	}
-
 	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void {
-		const input = this.options.panels.overlayFor(chatId)?.optimisticInputs.find(input => input.clientMessageId === clientMessageId);
-		if (input?.delivery !== 'pending' || input.placement !== 'live-tail') return;
-		this.options.panels.upsertOptimisticInput(chatId, { ...input, placement: undefined });
+		this.options.panels.anchorUnconfirmedSteer(chatId, clientMessageId);
 	}
 
 	clearOptimisticUserInput(chatId: string, clientMessageId: string): void {

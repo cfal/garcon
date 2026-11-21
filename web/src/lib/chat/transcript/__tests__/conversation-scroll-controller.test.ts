@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import type { ConversationScrollState } from '../conversation-scroll-controller-contract.js';
@@ -77,7 +78,7 @@ function expandedTranscriptState(): ActiveTranscriptState {
 				message: new AssistantMessage('2026-08-16T00:00:00.000Z', `message-${ordinal}`),
 			};
 		});
-	chat.replaceGeneration('chat-1', 'generation-1', messages(1, 200), {
+	seedTranscript(chat, 'chat-1', 'generation-1', messages(1, 200), {
 		lastOrdinal: 200,
 		pageOldestOrdinal: 1,
 		nextBeforeOrdinal: null,

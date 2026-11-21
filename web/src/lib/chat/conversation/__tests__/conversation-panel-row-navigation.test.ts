@@ -1,6 +1,8 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { AssistantMessage } from '$shared/chat-types';
+import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import type { ChatHistoryResponse, CompleteChatHistoryResponse } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -88,8 +90,8 @@ function fixture() {
 		restoreInitialEnd: vi.fn(),
 		scrollBy: vi.fn(),
 		waitForLayout: vi.fn(async () => 'settled' as const),
-		measureViewportFill: vi.fn(async () => 'underfilled' as const),
-		readViewportFill: vi.fn(() => 'underfilled' as const),
+		measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(async () => 'underfilled'),
+		readViewportFill: vi.fn<ConversationViewportPort['readViewportFill']>(() => 'underfilled'),
 		onNextMeasurement: vi.fn(() => () => {}),
 		restoreHiddenReadingPosition: vi.fn(async () => 'restored' as const),
 		cancelPendingLayoutMutation: vi.fn(),
@@ -141,7 +143,7 @@ it('retains reload identity if the view changes while the target page is held', 
 	vi.mocked(getChatMessages).mockReturnValue(response.promise);
 	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
 	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
-	f.panel.transcript.replaceGeneration(chatId, 'view-2', [row(100)], {
+	seedTranscript(f.panel.transcript, chatId, 'view-2', [row(100)], {
 		lastOrdinal: 100,
 		pageOldestOrdinal: 100,
 		nextBeforeOrdinal: 51,
@@ -150,6 +152,179 @@ it('retains reload identity if the view changes while the target page is held', 
 	response.release(page());
 	expect(await work).toBe('view-changed');
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
+});
+
+function queueSteer(registry: ConversationPanelRegistry): () => void {
+	const timestamp = '2026-01-01T00:00:00.000Z';
+	const control = emptyChatExecutionControlState('server');
+	control.queue.entries = [{ id: 'entry', kind: 'steer', content: 'Synthetic guidance', attachments: [],
+		revision: 1, createdAt: timestamp, updatedAt: timestamp }];
+	registry.upsertOptimisticInput(chatId, { chatId, clientMessageId: 'own', content: 'Synthetic guidance',
+		createdAt: timestamp, delivery: 'pending', placement: 'live-tail' });
+	registry.reconcileQueuedSteers(chatId, control, {
+		clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server',
+	});
+	return () => registry.reconcileQueuedSteers(chatId, emptyChatExecutionControlState('server'));
+}
+
+it('yields steer presentation recovery to a held search-result navigation', async () => {
+	const f = fixture();
+	f.attach();
+	f.panel.installInitialSnapshot();
+	const depart = queueSteer(f.registry);
+	const response = held<ChatHistoryResponse>();
+	vi.mocked(getChatMessages).mockReturnValueOnce(response.promise).mockResolvedValue(snapshotPage());
+	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
+	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+	depart();
+	response.release(page());
+	expect(await work).toBe('completed');
+	expect(getChatMessages).toHaveBeenCalledOnce();
+	expect(f.registry.overlayFor(chatId)?.optimisticInputs).toEqual([]);
+	expect(f.viewport.scrollToTarget).toHaveBeenCalledExactlyOnceWith(
+		{ kind: 'row', id: 'view-1:100' }, { align: 'center' },
+	);
+});
+
+it.each(['earlier', 'later'] as const)('leaves held raw %s paging untouched on steer departure', async direction => {
+	const f = fixture();
+	f.attach();
+	seedTranscript(f.panel.transcript, chatId, 'view-1', Array.from({ length: 50 }, (_, i) => row(101 + i)), {
+		lastOrdinal: 1000, pageOldestOrdinal: 101, pageNewestOrdinal: 150, nextBeforeOrdinal: 101, hasMore: true,
+	});
+	const depart = queueSteer(f.registry);
+	const response = held<ChatHistoryResponse>();
+	vi.mocked(getChatMessages).mockReturnValueOnce(response.promise).mockResolvedValue(snapshotPage());
+	const work = direction === 'earlier'
+		? f.panel.transcript.loadEarlierPage(chatId) : f.panel.transcript.loadLaterPage(chatId);
+	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+	expect(f.panel.transcript.isPageLoading(direction)).toBe(true);
+	depart();
+	await vi.waitFor(() => expect(f.registry.overlayFor(chatId)?.optimisticInputs).toEqual([]));
+	const start = direction === 'earlier' ? 51 : 151;
+	response.release({ ...snapshotPage(), messages: Array.from({ length: 50 }, (_, i) => row(start + i)),
+		pageOldestOrdinal: start, pageNewestOrdinal: start + 49, nextBeforeOrdinal: start });
+	expect(await work).toBe('loaded');
+	expect(getChatMessages).toHaveBeenCalledOnce();
+	expect(f.panel.transcript.entries.some(entry => entry.ordinal === start)).toBe(true);
+});
+
+it('keeps newer raw live rows when a steer departs during jump-to-latest', async () => {
+	const f = fixture();
+	f.attach();
+	seedTranscript(f.panel.transcript, chatId, 'view-1', [row(100)], {
+		lastOrdinal: 1000, pageOldestOrdinal: 100, pageNewestOrdinal: 100, nextBeforeOrdinal: 51, hasMore: true,
+	});
+	const depart = queueSteer(f.registry);
+	const response = held<ChatHistoryResponse>();
+	vi.mocked(getChatMessages).mockReturnValueOnce(response.promise);
+	const work = f.panel.transcript.navigateToWindow(chatId, 'latest');
+	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+	depart();
+	f.registry.applyCommittedBatch({ chatId, transcriptViewId: 'view-1', firstOrdinal: 1001, lastOrdinal: 1001,
+		messages: [row(1001)], noticeRevision: 0, resendCandidates: [] });
+	response.release(snapshotPage());
+	expect(await work).toBe('loaded');
+	expect(f.panel.transcript.entries.at(-1)?.ordinal).toBe(1001);
+	expect(f.registry.transcriptCache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 1001, stale: false });
+	expect(f.registry.transcriptCache.get(chatId)?.messages.at(-1)?.ordinal).toBe(1001);
+	expect(getChatMessages).toHaveBeenCalledOnce();
+});
+
+it.each(['initial', 'latest'] as const)('honors %s navigation started after a steer departs', async destination => {
+	const f = fixture();
+	f.attach();
+	seedTranscript(f.panel.transcript, chatId, 'view-1', [row(100)], {
+		lastOrdinal: 1000, pageOldestOrdinal: 100, pageNewestOrdinal: 100, nextBeforeOrdinal: 51, hasMore: true,
+	});
+	f.viewport.measureViewportFill.mockResolvedValue('overflow');
+	f.viewport.readViewportFill.mockReturnValue('overflow');
+	const response = held<ChatHistoryResponse>();
+	vi.mocked(getChatMessages).mockReturnValueOnce(response.promise);
+	queueSteer(f.registry)();
+	const work = destination === 'initial' ? f.panel.scroll.scrollToTop() : f.panel.scroll.scrollToLatest();
+	try {
+		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+		response.release(destination === 'latest' ? snapshotPage() : {
+			...snapshotPage(), messages: Array.from({ length: 50 }, (_, index) => row(index + 1)), pageOldestOrdinal: 1, pageNewestOrdinal: 50,
+			nextBeforeOrdinal: null, hasMore: false,
+		});
+		await work;
+		expect(destination === 'initial' ? f.viewport.scrollToStart : f.viewport.scrollToEnd).toHaveBeenCalledOnce();
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(f.registry.overlayFor(chatId)?.optimisticInputs).toEqual([]);
+	} finally {
+		response.release(snapshotPage());
+		await work;
+	}
+});
+
+it.each(['earlier', 'later'] as const)('honors raw %s paging started after a steer departs', async direction => {
+	const f = fixture();
+	f.attach();
+	seedTranscript(f.panel.transcript, chatId, 'view-1', Array.from({ length: 50 }, (_, index) => row(101 + index)), {
+		lastOrdinal: 1000, pageOldestOrdinal: 101, pageNewestOrdinal: 150, nextBeforeOrdinal: 101, hasMore: true,
+	});
+	const response = held<ChatHistoryResponse>();
+	vi.mocked(getChatMessages).mockReturnValueOnce(response.promise);
+	queueSteer(f.registry)();
+	const work = f.panel.scroll.requestPage(direction, 'button');
+	try {
+		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+		const start = direction === 'earlier' ? 51 : 151;
+		response.release({ ...snapshotPage(), messages: Array.from({ length: 50 }, (_, index) => row(start + index)),
+			pageOldestOrdinal: start, pageNewestOrdinal: start + 49, nextBeforeOrdinal: start });
+		expect(await work).toBe('loaded');
+		expect(f.panel.transcript.entries.some(entry => entry.ordinal === start)).toBe(true);
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(f.registry.overlayFor(chatId)?.optimisticInputs).toEqual([]);
+	} finally {
+		response.release(snapshotPage());
+		await work;
+	}
+});
+
+it('keeps newer raw live rows when an ordinary snapshot fails during peer navigation and steer departure', async () => {
+	const f = fixture();
+	f.attach();
+	f.panel.installInitialSnapshot();
+	f.registry.reconcile(['one', 'two'].map(name => ({
+		surfaceId: `chat-view:window-${name}`, windowId: `window-${name}`, presentation: `window-${name}`,
+		chatId, snapshotAdmission: 'admitted',
+	} as const)));
+	const peer = f.registry.panel('chat-view:window-two')!.transcript;
+	seedTranscript(peer, chatId, 'view-1', [row(100)], {
+		lastOrdinal: 1000, pageOldestOrdinal: 100, pageNewestOrdinal: 100, nextBeforeOrdinal: 51, hasMore: true,
+	});
+	const refresh = Promise.withResolvers<ChatHistoryResponse>();
+	const response = held<ChatHistoryResponse>();
+	const retry = held<ChatHistoryResponse>();
+	const retryStarted = held<void>();
+	vi.mocked(getChatMessages).mockReturnValueOnce(refresh.promise).mockReturnValueOnce(response.promise)
+		.mockImplementationOnce(() => { retryStarted.release(); return retry.promise; });
+	const load = f.registry.loadChatSnapshot(chatId).catch(() => false);
+	queueSteer(f.registry)();
+	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+	const work = peer.navigateToWindow(chatId, 'latest');
+	try {
+		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+		refresh.reject(new Error('Synthetic refresh failure'));
+		await Promise.race([load, retryStarted.promise]);
+		f.registry.applyCommittedBatch({ chatId, transcriptViewId: 'view-1', firstOrdinal: 1001, lastOrdinal: 1001,
+			messages: [row(1001)], noticeRevision: 0, resendCandidates: [] });
+		response.release(snapshotPage());
+		expect(await work).toBe('loaded');
+		expect(peer.entries.at(-1)?.ordinal).toBe(1001);
+		expect(f.registry.transcriptCache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 1001, stale: false });
+		expect(getChatMessages).toHaveBeenCalledTimes(2);
+		expect(f.registry.overlayFor(chatId)?.optimisticInputs).toEqual([]);
+	} finally {
+		refresh.reject(new Error('Synthetic refresh failure'));
+		response.release(snapshotPage());
+		retry.release(snapshotPage());
+		await load;
+		await work;
+	}
 });
 
 it.each(['hide', 'interaction', 'supersede'] as const)(

@@ -2,6 +2,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { ExecutionControlInstanceAuthority } from '../execution-control-instance-authority.js';
 
 describe('ExecutionControlInstanceAuthority', () => {
+	it('orders live socket observations without confirming or superseding ambiguous instances', () => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(20);
+		try {
+			const authority = new ExecutionControlInstanceAuthority();
+			expect(authority.acceptsSocketObservation('first', 10)).toBe(true);
+			authority.classifyNonAuthoritativeInstance('current');
+			expect(authority.acceptsSocketObservation('unseen', 10)).toBe(false);
+			expect(authority.acceptsSocketObservation('unseen', 20)).toBe(false);
+			expect(authority.acceptsSocketObservation('current', 10)).toBe(true);
+			expect(authority.acceptsSocketObservation('unseen', 21)).toBe(true);
+			expect(authority.isSocketInstanceConfirmed('unseen')).toBe(false);
+			expect(authority.classifyNonAuthoritativeInstance('current')).toEqual({ kind: 'current' });
+			clock.mockReturnValue(30);
+			expect(authority.confirmSocketInstance('unseen', 25)).toEqual({ kind: 'replace' });
+			expect(authority.acceptsSocketObservation('unseen', 10)).toBe(true);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it('requires a later probe to replace an instance observed during the query', () => {
 		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
 		try {

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
-import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type {
 	ChatExecutionControlState,
 	ChatQueueState,
@@ -116,127 +115,83 @@ describe('ConversationUiState', () => {
 		expect(ui.getExecutionControl('chat')?.version).toBe(3);
 	});
 
-	it('waits for a successor process to confirm its queued steer without accepting a retired acknowledgement', () => {
+	it.each(['replacement', 'removal'] as const)('fences captured transient responses after feed %s', change => {
 		const ui = new ConversationUiState();
-		const previous = makeControl(makeQueue(), { serverInstanceId: 'previous', version: 9 });
-		const successor = makeControl(makeQueue(), { serverInstanceId: 'successor', version: 2 });
-		const bind = vi.fn();
-		ui.confirmExecutionControlSocketInstance('previous');
-		ui.setExecutionControlFromLiveUpdate('chat', previous);
-		const join = ui.captureSteerControlJoin('chat');
-		join(successor, bind);
-		ui.confirmExecutionControlSocketInstance('previous');
-		expect(bind).not.toHaveBeenCalled();
-		expect(ui.getExecutionControl('chat')).toEqual(previous);
-		ui.markExecutionControlSocketDisconnected();
-		ui.confirmExecutionControlSocketInstance('successor');
-		expect(bind.mock.calls).toEqual([[successor]]);
-		join(previous, bind);
-		expect(bind.mock.calls).toEqual([[successor], [null]]);
-		expect(ui.getExecutionControl('chat')).toEqual(successor);
+		const initial = makeTransientFeed('chat');
+		ui.setTransientFeedFromSnapshot(initial);
+		const response = ui.captureExecutionResponse();
+		const current = { ...initial, transcriptViewId: 'view-current', rows: [] };
+		if (change === 'replacement') ui.setTransientFeedFromSnapshot(current);
+		else ui.removeTransientFeed('chat');
+		expect(response.setTransientFeedFromSnapshot(initial)).toEqual({ kind: 'stale' });
+		expect(ui.getTransientFeed('chat')).toEqual(change === 'replacement' ? current : null);
 	});
 
-	it('drops a deferred acknowledgement on chat removal instead of reinstalling its queue', () => {
+	it.each([false, true])('orders concurrent same-view responses by revision (newer first: %s)', newerFirst => {
+		const ui = new ConversationUiState();
+		const older = ui.captureExecutionResponse();
+		const newer = ui.captureExecutionResponse();
+		const initial = { ...makeTransientFeed('chat'), rows: [] };
+		const current = { ...makeTransientFeed('chat'), transientRevision: 2 };
+		const applyOlder = () => older.setTransientFeedFromSnapshot(initial);
+		const applyNewer = () => newer.setTransientFeedFromSnapshot(current);
+		if (newerFirst) { applyNewer(); applyOlder(); }
+		else { applyOlder(); applyNewer(); }
+		expect(ui.getTransientFeed('chat')).toEqual(current);
+		expect(ui.pendingPermissionsFor('chat').map(request => request.permissionOccurrenceId)).toEqual(['permission-live']);
+	});
+
+	it.each([false, true])('accepts a successor feed without comparing predecessor views (confirmed: %s)', confirmed => {
+		const ui = new ConversationUiState();
+		ui.setTransientFeedFromSnapshot(makeTransientFeed('chat'));
+		const response = ui.captureExecutionResponse();
+		ui.markExecutionControlSocketDisconnected();
+		if (confirmed) ui.confirmExecutionControlSocketInstance('successor');
+		const current = { ...makeTransientFeed('chat'), serverInstanceId: 'successor', transcriptViewId: 'view-current', rows: [] };
+		expect(response.setTransientFeedFromSnapshot(current)).toMatchObject({ kind: 'applied' });
+		expect(ui.getTransientFeed('chat')).toEqual(current);
+	});
+
+	it('does not replay a rejected queued acknowledgement after later socket confirmation', () => {
 		const ui = new ConversationUiState();
 		ui.confirmExecutionControlSocketInstance('previous');
-		const bind = vi.fn();
-		ui.captureSteerControlJoin('chat')(makeControl(), bind);
-		ui.pruneExecutionControls(new Set());
-		ui.confirmExecutionControlSocketInstance('server-instance-test');
-		expect(bind.mock.calls).toEqual([[null]]);
+		const response = ui.captureExecutionResponse();
+		const ack = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { serverInstanceId: 'successor' });
+		response.setExecutionControlFromLiveUpdate('chat', ack);
 		expect(ui.getExecutionControl('chat')).toBeNull();
+		ui.markExecutionControlSocketDisconnected();
+		ui.confirmExecutionControlSocketInstance('successor');
+		expect(ui.getExecutionControl('chat')).toBeNull();
+		ui.captureExecutionResponse().setExecutionControlFromRefresh('chat', ack);
+		expect(ui.getExecutionControl('chat')).toEqual(ack);
 	});
 
 	it('does not let a delayed intermediate acknowledgement clear a later process while the socket is down', () => {
 		const changed = vi.fn();
 		const ui = new ConversationUiState(changed);
 		ui.confirmExecutionControlSocketInstance('first');
-		const delayed = ui.captureSteerControlJoin('chat');
+		const response = ui.captureExecutionResponse();
 		ui.markExecutionControlSocketDisconnected();
 		const current = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { serverInstanceId: 'third' });
 		ui.setExecutionControlFromRefresh('chat', current);
-		const bindCurrent = vi.fn(), bindDelayed = vi.fn();
-		ui.captureSteerControlJoin('chat')(current, bindCurrent);
 		changed.mockClear();
-		delayed(makeControl(makeQueue(), { serverInstanceId: 'second' }), bindDelayed);
+		response.setExecutionControlFromLiveUpdate('chat', makeControl(makeQueue(), { serverInstanceId: 'second' }));
 		expect(ui.getExecutionControl('chat')).toEqual(current);
 		expect(changed).not.toHaveBeenCalled();
-		ui.confirmExecutionControlSocketInstance('third', performance.now() + 1);
-		expect(bindCurrent.mock.calls).toEqual([[current]]);
-		expect(bindDelayed.mock.calls).toEqual([[null]]);
 	});
 
-	it.each(['first', 'intermediate'])('defers an unseen queued ACK when %s confirms during submission', confirmedInstance => {
-		const overlays = new ConversationTranscriptOverlayStore();
-		const ui = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
-		const chatId = 'chat', clientMessageId = 'own';
-		ui.confirmExecutionControlSocketInstance('first');
-		ui.markExecutionControlSocketDisconnected();
-		const join = ui.captureSteerControlJoin(chatId);
-		overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
-			createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending', placement: 'live-tail' }, 1);
-		ui.confirmExecutionControlSocketInstance(confirmedInstance);
-		const current = makeControl(makeQueue(), { serverInstanceId: confirmedInstance });
-		ui.setExecutionControlFromLiveUpdate(chatId, current);
-		const ack = makeControl(makeQueue({ entries: [makeEntry('entry', 'guidance')] }), { serverInstanceId: 'successor' });
-		const receipt = { clientMessageId, entryId: 'entry', serverInstanceId: ack.serverInstanceId, transcriptViewId: 'view' };
-		join(ack, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
-		expect(ui.getExecutionControl(chatId)).toEqual(current);
-		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toBe('pending');
-		ui.markExecutionControlSocketDisconnected();
-		ui.confirmExecutionControlSocketInstance(ack.serverInstanceId);
-		expect(ui.getExecutionControl(chatId)).toEqual(ack);
-		expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: ack.version });
-	});
-
-	it.each([
-		{ ackFirst: true, confirmedInstance: 'successor' },
-		{ ackFirst: true, confirmedInstance: 'first' },
-		{ ackFirst: false, confirmedInstance: 'successor' },
-		{ ackFirst: false, confirmedInstance: 'first' },
-	])('settles deferred ACKs only with a later probe: %j', ({ ackFirst, confirmedInstance }) => {
-		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
-		try {
-			const overlays = new ConversationTranscriptOverlayStore();
-			const ui = new ConversationUiState((chatId, control) => overlays.reconcileQueuedSteers(chatId, control));
-			const chatId = 'chat', clientMessageId = 'own';
-			ui.confirmExecutionControlSocketInstance('first', 10);
-			ui.markExecutionControlSocketDisconnected();
-			const join = ui.captureSteerControlJoin(chatId);
-			overlays.upsertOptimisticInput(chatId, { chatId, clientMessageId, content: 'guidance',
-				createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending', placement: 'live-tail' }, 1);
-			const oldProbeStartedAt = performance.now();
-			if (!ackFirst) ui.confirmExecutionControlSocketInstance('first', oldProbeStartedAt);
-			clock.mockReturnValue(20);
-			const ack = makeControl(makeQueue({ entries: [makeEntry('entry', 'guidance')] }), { serverInstanceId: 'successor' });
-			const receipt = { clientMessageId, entryId: 'entry', serverInstanceId: ack.serverInstanceId, transcriptViewId: 'view' };
-			join(ack, control => overlays.reconcileQueuedSteers(chatId, control, receipt));
-			if (ackFirst) ui.confirmExecutionControlSocketInstance('first', oldProbeStartedAt);
-			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toBe('pending');
-			ui.confirmExecutionControlSocketInstance('first', 20);
-			expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toBe('pending');
-			ui.confirmExecutionControlSocketInstance(confirmedInstance, 30);
-			if (confirmedInstance === ack.serverInstanceId) {
-				expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: ack.version });
-			} else expect(overlays.forChat(chatId).optimisticInputs[0]?.delivery).toEqual({ ...receipt, kind: 'queued', queuedAtVersion: null });
-		} finally {
-			clock.mockRestore();
-		}
-	});
-
-	it('keeps a newer control that establishes the replacement before socket confirmation', () => {
+	it('does not remove a control installed after a not-found request started', () => {
 		const ui = new ConversationUiState();
-		ui.confirmExecutionControlSocketInstance('previous');
-		const ack = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { version: 1 });
-		const removed = makeControl(makeQueue(), { version: 2 });
-		const bind = vi.fn();
-		ui.captureSteerControlJoin('chat')(ack, bind);
-		ui.markExecutionControlSocketDisconnected();
-		ui.setExecutionControlFromRefresh('chat', removed);
-		ui.confirmExecutionControlSocketInstance(ack.serverInstanceId);
-		expect(bind.mock.calls).toEqual([[removed]]);
-		expect(ui.getExecutionControl('chat')).toEqual(removed);
+		ui.setExecutionControlFromRefresh('chat', makeControl());
+		const remove = ui.captureExecutionControlRemoval('chat');
+		const current = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { version: 1 });
+		ui.setExecutionControlFromLiveUpdate('chat', current);
+		expect(remove()).toBe(false);
+		expect(ui.getExecutionControl('chat')).toEqual(current);
+		expect(ui.captureExecutionControlRemoval('chat')()).toBe(true);
+		expect(ui.getExecutionControl('chat')).toBeNull();
 	});
+
 	it('notifies queue projections only for accepted controls and authoritative removal', () => {
 		const changed = vi.fn();
 		const ui = new ConversationUiState(changed);

@@ -150,7 +150,9 @@ export async function submitSteerRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const transcriptViewId = requireTranscriptView(deps, context.chatId);
-	const joinControl = deps.conversationUi.captureSteerControlJoin(context.chatId);
+	const conversationUi = deps.conversationUi;
+	const chatId = context.chatId;
+	const receiver = conversationUi.captureExecutionResponse();
 	const submission = acceptedInputs.steer({
 		chatId: context.chatId,
 		transcriptViewId,
@@ -168,15 +170,13 @@ export async function submitSteerRoute(
 		if (response.delivery === 'queued') {
 			const receipt = {
 				clientMessageId: submission.clientMessageId,
-				transcriptViewId,
 				serverInstanceId: response.control.serverInstanceId,
 				entryId: response.entryId,
 			};
-			joinControl(response.control, control => deps.chatState.acceptQueuedSteer(context.chatId, receipt, control));
+			receiver.setExecutionControlFromLiveUpdate(chatId, response.control);
+			deps.chatState.acceptQueuedSteer(chatId, receipt, conversationUi.getExecutionControl(chatId));
 		} else {
-			deps.chatState.acceptDeliveredSteer(context.chatId, {
-				kind: 'delivered', clientMessageId: submission.clientMessageId, transcriptViewId,
-			});
+			deps.chatState.markOptimisticUserInputDelivered(chatId, submission.clientMessageId);
 		}
 		return 'accepted';
 	} catch (error) {

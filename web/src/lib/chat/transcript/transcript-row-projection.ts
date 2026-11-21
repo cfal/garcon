@@ -15,8 +15,12 @@ export interface ChatTranscriptRow {
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
 function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
-	const inputStatus: InputStatus | undefined = input.delivery === 'pending' ? 'sending'
-		: typeof input.delivery === 'object' && input.delivery.kind === 'queued' ? 'waiting-to-steer' : undefined;
+	let inputStatus: InputStatus | undefined;
+	if (input.delivery === 'pending') {
+		inputStatus = 'sending';
+	} else if (typeof input.delivery === 'object') {
+		inputStatus = 'waiting-to-steer';
+	}
 	return {
 		kind: 'message',
 		id: `optimistic:${input.clientMessageId}`,
@@ -38,10 +42,14 @@ export function mergeRowsWithOptimisticInputs(
 
 	// Steers can span ongoing output before either the acknowledgement or the echo.
 	const tailOrdinal = rows.at(-1)?.ordinal ?? 0;
-	const optimisticRows = optimisticInputs.map((input) => ({
-		row: optimisticInputToRow(input),
-		afterOrdinal: input.placement === 'live-tail' ? tailOrdinal : afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0,
-	})).sort((a, b) => a.afterOrdinal - b.afterOrdinal);
+	const optimisticRows = optimisticInputs
+		.map((input) => ({
+			row: optimisticInputToRow(input),
+			afterOrdinal: input.placement === 'live-tail'
+				? tailOrdinal
+				: afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0,
+		}))
+		.sort((a, b) => a.afterOrdinal - b.afterOrdinal);
 	const merged: ChatTranscriptRow[] = [];
 	let messageIndex = 0;
 	let optimisticIndex = 0;

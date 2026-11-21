@@ -2,6 +2,9 @@
 
 import { untrack } from 'svelte';
 import {
+	ChatExecutionControlUpdatedMessage,
+	ChatTransientFeedMutationMessage,
+	ChatTranscriptReplacedMessage,
 	ChatSubscribedMessage,
 	ReconnectStateMessage,
 	WsPongMessage,
@@ -15,7 +18,8 @@ import type {
 } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
-import { getChatExecutionControl } from '$lib/api/chats.js';
+import { getChatExecutionControl, getChatSnapshot } from '$lib/api/chats.js';
+import { ApiError } from '$lib/api/client.js';
 import type { WsMessageConsumer } from './connection.svelte.js';
 import type {
 	CommittedTranscriptBatch,
@@ -34,12 +38,12 @@ export interface ReconnectWsPort {
 
 export interface ReconnectPanelRegistryPort {
 	readonly transcriptCache: Pick<ChatTranscriptCache,
-		'readAppliedCursor' | 'markStaleExcept' | 'trackReplayValidation'>;
+		'readAppliedCursor' | 'markValidated' | 'markStaleExcept' | 'trackReplayValidation'>;
 	visibleChatIds(): readonly string[];
 	panelsForChat(chatId: string): readonly unknown[];
 	hasInactiveWindow(chatId: string): boolean;
 	markChatStale(chatId: string): void;
-	markChatValidated(chatId: string): void;
+	handleViewReplacement(chatId: string): void;
 	loadChatSnapshot(chatId: string): Promise<boolean>;
 	invalidateChatSnapshot(chatId: string): void;
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
@@ -64,6 +68,9 @@ export type ReconnectConversationUiState = Pick<
 	| 'captureExecutionResponse'
 	| 'markExecutionControlSocketDisconnected'
 	| 'confirmExecutionControlSocketInstance'
+	| 'acceptsExecutionControlSocketObservation'
+	| 'isExecutionControlSocketInstanceConfirmed'
+	| 'getTransientFeed'
 >;
 
 export interface ChatReconnectCoordinatorOptions {
@@ -98,19 +105,52 @@ export class ChatReconnectCoordinator {
 	#wasConnected = false;
 	#hasConnectedBefore = false;
 	#reconnectEpoch = 0;
+	readonly #suppressedChats = new Map<string, symbol>();
+	#suppressedRefreshEpoch: number | null = null;
 
 	constructor(private readonly options: ChatReconnectCoordinatorOptions) {}
 
 	mount(): void {
-		$effect(() =>
-			this.options.ws.addMessageConsumer((data, context) => {
-				if (data.type !== 'ws-pong' || context.requestStartedAt === undefined) return false;
+		$effect(() => {
+			const removeConsumer = this.options.ws.addMessageConsumer((data, context) => {
+				if (data.type === 'chat-session-deleted' && typeof data.chatId === 'string') {
+					this.#suppressedChats.delete(data.chatId);
+				}
+				if (data.type === 'chat-transcript-replaced') {
+					const message = parseServerWsMessage(data);
+					if (message instanceof ChatTranscriptReplacedMessage && this.#suppressedChats.has(message.chatId)) {
+						// A replacement invalidates snapshots before its new view reaches the cache.
+						this.#suppressedChats.set(message.chatId, Symbol());
+					}
+					return false;
+				}
+				if (data.type === 'ws-pong' && context.requestStartedAt !== undefined) {
+					const message = parseServerWsMessage(data);
+					if (message instanceof WsPongMessage) {
+						if (this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId, context.requestStartedAt)) {
+							void this.#refreshSuppressedChats(message.serverInstanceId);
+						}
+					}
+					return false;
+				}
+				if (context.connectionStartedAt === undefined
+					|| (data.type !== 'chat-execution-control-updated' && data.type !== 'chat-transient-feed-mutation')) return false;
 				const message = parseServerWsMessage(data);
-				if (!(message instanceof WsPongMessage)) return false;
-				this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId, context.requestStartedAt);
-				return false;
-			}),
-		);
+				let serverInstanceId: string;
+				if (message instanceof ChatExecutionControlUpdatedMessage) serverInstanceId = message.control.serverInstanceId;
+				else if (message instanceof ChatTransientFeedMutationMessage) serverInstanceId = message.serverInstanceId;
+				else return false;
+				// Ambiguous live frames cannot replace an instance observed after this socket began.
+				if (this.options.conversationUi.acceptsExecutionControlSocketObservation(serverInstanceId, context.connectionStartedAt)) return false;
+				this.#suppressedChats.set(message.chatId, Symbol());
+				return true;
+			});
+			return () => {
+				removeConsumer();
+				this.#reconnectEpoch += 1;
+				this.#suppressedChats.clear();
+			};
+		});
 		$effect(() => {
 			const connected = this.options.ws.isConnected;
 			untrack(() => {
@@ -203,7 +243,7 @@ export class ChatReconnectCoordinator {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
-			panels.markChatValidated(chatId);
+			panels.transcriptCache.markValidated(chatId);
 		} catch {
 			// Stops replay from buffering live commits during snapshot recovery.
 			panels.abortReconnectReplay(replayToken, chatId);
@@ -289,6 +329,7 @@ export class ChatReconnectCoordinator {
 			for (const chatId of controlChatIds) {
 				if (!returnedChatIds.has(chatId)) unavailableChatIds.push(chatId);
 			}
+			void this.#refreshSuppressedChats(message.serverInstanceId);
 
 			return {
 				controlRefresh: this.#refreshControls(unavailableChatIds, epoch),
@@ -308,6 +349,53 @@ export class ChatReconnectCoordinator {
 			response.setExecutionControlFromRefresh(chatId, result.control);
 		} catch {
 			// Later queue broadcasts will converge the visible queue state.
+		}
+	}
+
+	async #refreshSuppressedChats(serverInstanceId: string): Promise<void> {
+		const epoch = this.#reconnectEpoch;
+		if (this.#suppressedRefreshEpoch === epoch || this.#suppressedChats.size === 0) return;
+		this.#suppressedRefreshEpoch = epoch;
+		try {
+			const chats = [...this.#suppressedChats];
+			for (let index = 0; index < chats.length; index += CONTROL_REFRESH_CONCURRENCY) {
+				if (epoch !== this.#reconnectEpoch) return;
+				await Promise.all(chats.slice(index, index + CONTROL_REFRESH_CONCURRENCY)
+					.map(([chatId, token]) => this.#refreshSuppressedChat(chatId, token, serverInstanceId, epoch)));
+			}
+		} finally {
+			if (this.#suppressedRefreshEpoch === epoch) this.#suppressedRefreshEpoch = null;
+		}
+	}
+
+	async #refreshSuppressedChat(chatId: string, token: symbol, serverInstanceId: string, epoch: number): Promise<void> {
+		const { conversationUi: ui, panels } = this.options;
+		const isCurrent = () => epoch === this.#reconnectEpoch && this.#suppressedChats.get(chatId) === token;
+		if (!isCurrent()) return;
+		const response = ui.captureExecutionResponse();
+		const view = panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
+		const transientView = ui.getTransientFeed(chatId)?.transcriptViewId;
+		try {
+			const snapshot = await getChatSnapshot(chatId, 1);
+			if (!isCurrent() || snapshot.control.serverInstanceId !== serverInstanceId
+				|| !ui.isExecutionControlSocketInstanceConfirmed(serverInstanceId)) return;
+			response.setExecutionControlFromRefresh(chatId, snapshot.control);
+			if (panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId !== view
+				|| ui.getTransientFeed(chatId)?.transcriptViewId !== transientView) return;
+			response.setTransientFeedFromSnapshot(snapshot.transientFeed);
+			// Unavailable history may carry only a placeholder view, not a replacement.
+			if (view && snapshot.transcript.availability === 'available' && snapshot.transcript.transcriptViewId !== view) {
+				panels.handleViewReplacement(chatId);
+				if (panels.panelsForChat(chatId).length > 0) {
+					panels.invalidateChatSnapshot(chatId);
+					if (!await panels.loadChatSnapshot(chatId)
+						|| panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId !== snapshot.transcript.transcriptViewId) return;
+				}
+			}
+			if (isCurrent()) this.#suppressedChats.delete(chatId);
+		} catch (error) {
+			if (isCurrent() && error instanceof ApiError && error.status === 404) this.#suppressedChats.delete(chatId);
+			// Other failures remain pending for the next correlated pong.
 		}
 	}
 
@@ -370,7 +458,7 @@ export class ChatReconnectCoordinator {
 					if (!validation.isCurrent() || !reachedFrontier) {
 						throw new Error('Transcript replay did not establish continuity');
 					}
-					this.options.panels.markChatValidated(cursor.chatId);
+					cache.markValidated(cursor.chatId);
 					shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
 				} catch {
 					if (replayToken !== null) {
