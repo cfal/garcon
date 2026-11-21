@@ -31,6 +31,7 @@
 	} from '$lib/stores/local-settings.svelte.js';
 	import { onDestroy, untrack } from 'svelte';
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte';
+	import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import { getThemeProfile, resolveThemeId } from '$lib/theme/themes.js';
 
 	function emptyReviews(): PullRequestReviewsStore {
@@ -238,9 +239,10 @@
 			return getThemeProfile(resolveThemeId(localSettings.themePreference, 'light'));
 		},
 	});
+	const catalogs = new ModelCatalogStore();
 	setModelCatalog({
-		forExecutor() {
-			return this;
+		forExecutor(executorId: string) {
+			return Object.assign({}, this, { executorId, pendingLogins: catalogs.forExecutor(executorId).pendingLogins });
 		},
 		version: 0,
 		apiProviderCatalog: [],
@@ -296,6 +298,7 @@
 	} as never);
 
 	onDestroy(() => localSettings.destroy());
+	onDestroy(() => catalogs.clearPendingLogins());
 </script>
 
 {#if appShell.showSettings}<Settings />{/if}

@@ -6,22 +6,18 @@ import {
 	launchAgentAuthLogin,
 	type DeviceAuthInfo,
 	type AgentReadiness,
+	type AgentAuthStatus,
 	type AgentAuthLoginStatus,
 } from '$lib/api/agents.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 
-export interface AuthStatus {
-	authenticated: boolean;
-	canReauth: boolean;
-	label: string;
+export interface AuthStatus extends Pick<AgentAuthStatus, 'authenticated' | 'canReauth' | 'label' | 'detail'> {
 	loading: boolean;
 	error: string | null;
 }
 
 export type SettingsAgentId = string;
 
-const AUTH_POLL_INTERVAL_MS = 1500;
-const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_AUTH: AuthStatus = {
 	authenticated: false,
 	canReauth: true,
@@ -32,13 +28,10 @@ const DEFAULT_AUTH: AuthStatus = {
 
 export class SettingsAuthState {
 	readonly #modelCatalog: ModelCatalogStore;
-	#authPollTimers: Partial<Record<SettingsAgentId, ReturnType<typeof setTimeout>>> = {};
-	#authPollRunIds: Partial<Record<SettingsAgentId, number>> = {};
-	#authPollStartedAt: Partial<Record<SettingsAgentId, number>> = {};
+	#detachLogin = new Map<SettingsAgentId, () => void>();
 	#loginSessionIds: Partial<Record<SettingsAgentId, string>> = {};
 	#loginOperationGenerations: Partial<Record<SettingsAgentId, number>> = {};
 	#authRequestGenerations: Partial<Record<SettingsAgentId, number>> = {};
-	#nextAuthPollRunId = 0;
 	#lifecycleId = 0;
 	#active = true;
 
@@ -47,9 +40,11 @@ export class SettingsAuthState {
 	deviceAuthInfo = $state<Partial<Record<SettingsAgentId, DeviceAuthInfo>>>({});
 	loginPending = $state<Partial<Record<SettingsAgentId, boolean>>>({});
 
-	constructor(modelCatalog: ModelCatalogStore, readonly executorId = 'local') {
+	constructor(modelCatalog: ModelCatalogStore) {
 		this.#modelCatalog = modelCatalog;
 	}
+
+	get executorId(): string { return this.#modelCatalog.executorId; }
 
 	initialize(): () => void {
 		this.#active = true;
@@ -78,9 +73,8 @@ export class SettingsAuthState {
 	destroy(): void {
 		this.#active = false;
 		this.#lifecycleId += 1;
-		for (const agentId of Object.keys(this.#authPollTimers)) {
-			this.#stopAuthPolling(agentId);
-		}
+		for (const detach of this.#detachLogin.values()) detach();
+		this.#detachLogin.clear();
 		this.#loginSessionIds = {};
 		this.#loginOperationGenerations = {};
 		this.#authRequestGenerations = {};
@@ -124,10 +118,9 @@ export class SettingsAuthState {
 				}
 			}
 			this.loginPending = { ...this.loginPending, [agentId]: result.alreadyRunning };
-			this.#startLoginSessionPolling(agentId, result.sessionId, operationGeneration, lifecycleId);
+			this.#observeLogin(agentId, result.sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
 			if (!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) return;
-			this.#stopAuthPolling(agentId);
 			this.#clearLoginState(agentId);
 			this.#setAuth(agentId, {
 				...this.authFor(agentId),
@@ -141,8 +134,11 @@ export class SettingsAuthState {
 		if (!this.#active || !this.supportsAuthLogin(agentId) || this.isLoginPending(agentId) || !code.trim()) return;
 		const lifecycleId = this.#lifecycleId;
 		const sessionId = this.#loginSessionIds[agentId];
-		if (!sessionId) return;
-		const operationGeneration = this.#beginLoginOperation(agentId);
+		const operationGeneration = this.#loginOperationGenerations[agentId];
+		if (!sessionId || operationGeneration === undefined) return;
+		const resumePolling = this.#modelCatalog.pendingLogins.beginSubmission(agentId, sessionId);
+		if (!resumePolling) return;
+		this.#beginAuthRequest(agentId);
 		this.#setAuth(agentId, { ...this.authFor(agentId), error: null });
 		this.loginPending = { ...this.loginPending, [agentId]: true };
 
@@ -156,9 +152,7 @@ export class SettingsAuthState {
 				error: err instanceof Error ? err.message : String(err),
 			});
 		} finally {
-			if (this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) {
-				this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
-			}
+			resumePolling();
 		}
 	}
 
@@ -166,31 +160,19 @@ export class SettingsAuthState {
 		this.authByAgent = { ...this.authByAgent, [agentId]: auth };
 	}
 
-	async #checkAuth(
-		agentId: SettingsAgentId,
-		lifecycleId = this.#lifecycleId,
-		operationGeneration?: number,
-	): Promise<boolean | undefined> {
+	async #checkAuth(agentId: SettingsAgentId, lifecycleId: number): Promise<void> {
 		const authRequestGeneration = this.#beginAuthRequest(agentId);
+		const current = () => this.#isActive(lifecycleId) && this.#authRequestGenerations[agentId] === authRequestGeneration;
 		try {
 			const data = await getAgentAuthStatus(agentId, this.executorId);
-			if (
-				!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration, authRequestGeneration)
-			)
-				return undefined;
+			if (!current()) return;
 			this.#setAuth(agentId, {
-				authenticated: data.authenticated,
-				canReauth: data.canReauth,
-				label: data.label,
+				...data,
 				loading: false,
 				error: this.#loginSessionIds[agentId] ? this.authFor(agentId).error : null,
 			});
-			return data.authenticated;
 		} catch (err) {
-			if (
-				!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration, authRequestGeneration)
-			)
-				return undefined;
+			if (!current()) return;
 			this.#setAuth(agentId, {
 				authenticated: false,
 				canReauth: true,
@@ -198,7 +180,6 @@ export class SettingsAuthState {
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
-			return false;
 		}
 	}
 
@@ -211,133 +192,35 @@ export class SettingsAuthState {
 		}
 	}
 
-	#stopAuthPolling(agentId: SettingsAgentId): void {
-		const timer = this.#authPollTimers[agentId];
-		if (timer) clearTimeout(timer);
-		delete this.#authPollTimers[agentId];
-		delete this.#authPollRunIds[agentId];
-		delete this.#authPollStartedAt[agentId];
-	}
-
-	async #pollAuthUntilAuthenticated(
-		agentId: SettingsAgentId,
-		pollRunId: number,
-		operationGeneration: number,
-		lifecycleId: number,
-	): Promise<void> {
-		if (!this.#isCurrentPoll(agentId, pollRunId, operationGeneration, lifecycleId)) return;
-
-		await this.#checkAuth(agentId, lifecycleId, operationGeneration);
-		if (!this.#isCurrentPoll(agentId, pollRunId, operationGeneration, lifecycleId)) return;
-
-		if (this.authFor(agentId).authenticated) {
-			this.#stopAuthPolling(agentId);
-			this.#clearLoginState(agentId);
-			return;
-		}
-
-		const startedAt = this.#authPollStartedAt[agentId];
-		if (startedAt === undefined) return;
-		if (Date.now() - startedAt >= AUTH_POLL_TIMEOUT_MS) {
-			this.#stopAuthPolling(agentId);
-			return;
-		}
-
-		this.#authPollTimers[agentId] = setTimeout(() => {
-			void this.#pollAuthUntilAuthenticated(agentId, pollRunId, operationGeneration, lifecycleId);
-		}, AUTH_POLL_INTERVAL_MS);
-	}
-
-	#startAuthPolling(
-		agentId: SettingsAgentId,
-		operationGeneration: number,
-		lifecycleId: number,
-	): void {
-		this.#stopAuthPolling(agentId);
-		const pollRunId = ++this.#nextAuthPollRunId;
-		this.#authPollRunIds[agentId] = pollRunId;
-		this.#authPollStartedAt[agentId] = Date.now();
-		this.#authPollTimers[agentId] = setTimeout(() => {
-			void this.#pollAuthUntilAuthenticated(agentId, pollRunId, operationGeneration, lifecycleId);
-		}, AUTH_POLL_INTERVAL_MS);
-	}
-
-	// Polls the server-side login session while a device code is displayed.
-	// Auth status cannot signal completion here: agents with existing
-	// credentials report authenticated during the whole re-login, which would
-	// clear the code before the user can enter it.
-	async #pollLoginSessionUntilDone(
-		agentId: SettingsAgentId,
-		sessionId: string,
-		pollRunId: number,
-		operationGeneration: number,
-		lifecycleId: number,
-	): Promise<void> {
-		if (!this.#isCurrentPoll(agentId, pollRunId, operationGeneration, lifecycleId)) return;
-
-		let status: Awaited<ReturnType<typeof getAgentAuthLoginStatus>> | undefined;
-		try {
-			status = await getAgentAuthLoginStatus(agentId, sessionId, this.executorId);
-		} catch {
-			// The server watchdog owns expiry, so transient request failures retain session ownership.
-		}
-		if (!this.#isCurrentPoll(agentId, pollRunId, operationGeneration, lifecycleId)) return;
-
-		if (status?.state === 'running' && status.sessionId === sessionId) {
-			this.#applyRunningLoginStatus(agentId, status);
-		} else if (status?.state === 'succeeded' && status.sessionId === sessionId) {
-			this.#stopAuthPolling(agentId);
-			this.#clearLoginState(agentId);
-			const authenticated = await this.#checkAuth(agentId, lifecycleId, operationGeneration);
-			if (
-				authenticated === false &&
-				this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)
-			) {
-				this.#startAuthPolling(agentId, operationGeneration, lifecycleId);
+	#observeLogin(agentId: string, sessionId: string, operationGeneration: number, lifecycleId: number): void {
+		const detach = this.#modelCatalog.pendingLogins.observe(agentId, sessionId, (event) => {
+			if (!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) return;
+			if (event.state === 'running') {
+				this.#applyRunningLoginStatus(agentId, event);
+				return;
 			}
-			return;
-		} else if (status?.state === 'failed' && status.sessionId === sessionId) {
-			this.#stopAuthPolling(agentId);
 			this.#clearLoginState(agentId);
-			this.#setAuth(agentId, {
-				...this.authFor(agentId),
-				loading: false,
-				error: status.error,
-			});
-			return;
-		}
-
-		this.#authPollTimers[agentId] = setTimeout(() => {
-			void this.#pollLoginSessionUntilDone(
-				agentId,
-				sessionId,
-				pollRunId,
-				operationGeneration,
-				lifecycleId,
-			);
-		}, AUTH_POLL_INTERVAL_MS);
-	}
-
-	#startLoginSessionPolling(
-		agentId: SettingsAgentId,
-		sessionId: string,
-		operationGeneration: number,
-		lifecycleId: number,
-	): void {
-		this.#stopAuthPolling(agentId);
-		const pollRunId = ++this.#nextAuthPollRunId;
-		this.#authPollRunIds[agentId] = pollRunId;
-		void this.#pollLoginSessionUntilDone(
-			agentId,
-			sessionId,
-			pollRunId,
-			operationGeneration,
-			lifecycleId,
-		);
+			this.#beginAuthRequest(agentId);
+			if (event.state === 'credentials') {
+				this.#setAuth(agentId, { ...event.auth, loading: false, error: null });
+			} else if (event.state === 'credential-error') {
+				this.#setAuth(agentId, { ...DEFAULT_AUTH, loading: false, error: event.error });
+			} else if (event.state === 'failed') {
+				this.#setAuth(agentId, { ...this.authFor(agentId), loading: false, error: event.error });
+			}
+		});
+		this.#detachLogin.set(agentId, detach);
 	}
 
 	async #restoreLoginSession(agentId: SettingsAgentId, lifecycleId: number): Promise<void> {
 		const operationGeneration = this.#beginLoginOperation(agentId, false);
+		const observedSession = this.#modelCatalog.pendingLogins.sessionId(agentId);
+		if (observedSession) {
+			this.#loginSessionIds[agentId] = observedSession;
+			this.loginPending = { ...this.loginPending, [agentId]: true };
+			this.#observeLogin(agentId, observedSession, operationGeneration, lifecycleId);
+			return;
+		}
 		try {
 			const status = await getAgentAuthLoginStatus(agentId, undefined, this.executorId);
 			if (
@@ -348,7 +231,7 @@ export class SettingsAuthState {
 			}
 			this.#loginSessionIds[agentId] = status.sessionId;
 			this.#applyRunningLoginStatus(agentId, status);
-			this.#startLoginSessionPolling(agentId, status.sessionId, operationGeneration, lifecycleId);
+			this.#observeLogin(agentId, status.sessionId, operationGeneration, lifecycleId);
 		} catch {
 			// Auth status remains usable when login-session restoration is temporarily unavailable.
 		}
@@ -381,26 +264,12 @@ export class SettingsAuthState {
 	}
 
 	#beginLoginOperation(agentId: SettingsAgentId, invalidateAuthRequest = true): number {
-		this.#stopAuthPolling(agentId);
+		this.#detachLogin.get(agentId)?.();
+		this.#detachLogin.delete(agentId);
 		if (invalidateAuthRequest) this.#beginAuthRequest(agentId);
 		const generation = (this.#loginOperationGenerations[agentId] ?? 0) + 1;
 		this.#loginOperationGenerations[agentId] = generation;
 		return generation;
-	}
-
-	#canApplyAgentResult(
-		agentId: SettingsAgentId,
-		lifecycleId: number,
-		operationGeneration?: number,
-		authRequestGeneration?: number,
-	): boolean {
-		return (
-			this.#isActive(lifecycleId) &&
-			(operationGeneration === undefined ||
-				this.#loginOperationGenerations[agentId] === operationGeneration) &&
-			(authRequestGeneration === undefined ||
-				this.#authRequestGenerations[agentId] === authRequestGeneration)
-		);
 	}
 
 	#beginAuthRequest(agentId: SettingsAgentId): number {
@@ -414,7 +283,7 @@ export class SettingsAuthState {
 		operationGeneration: number,
 		lifecycleId: number,
 	): boolean {
-		return this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration);
+		return this.#isActive(lifecycleId) && this.#loginOperationGenerations[agentId] === operationGeneration;
 	}
 
 	#ownsSession(
@@ -426,18 +295,6 @@ export class SettingsAuthState {
 		return (
 			this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId) &&
 			this.#loginSessionIds[agentId] === sessionId
-		);
-	}
-
-	#isCurrentPoll(
-		agentId: SettingsAgentId,
-		pollRunId: number,
-		operationGeneration: number,
-		lifecycleId: number,
-	): boolean {
-		return (
-			this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId) &&
-			this.#authPollRunIds[agentId] === pollRunId
 		);
 	}
 

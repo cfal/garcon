@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { SettingsAuthState } from '../settings-auth-state.svelte.js';
+import OtherAgentsSection from '../OtherAgentsSection.svelte';
 import {
 	completeAgentAuthLogin,
 	getAgentAuthLoginStatus,
 	getAgentAuthStatus,
 	launchAgentAuthLogin,
 } from '$lib/api/agents.js';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
+import { nativeCatalogAgent } from '../../../../test/model-catalog';
+import * as catalogApi from '$lib/api/model-catalog';
+import { remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 vi.mock('$lib/api/agents.js', () => ({
 	completeAgentAuthLogin: vi.fn(),
@@ -21,12 +26,11 @@ const CLAUDE_AUTH = { url: 'https://example.test/claude', needsCode: true };
 const SESSION_ID = 'session-a';
 const POLL_TICK_MS = 1500;
 
-function createModelCatalog(agentIds: string[] = []) {
-	return {
-		getAgent: () => ({ authLoginSupported: true }),
-		getAgentMetadataList: () => agentIds.map((id) => ({ id })),
-		forceRefresh: async () => undefined,
-	} as unknown as ModelCatalogStore;
+function createModelCatalog(agentIds = ['claude', 'codex'], executorId = 'local') {
+	const catalog = new ModelCatalogStore(executorId);
+	catalog.agentMetadata = Object.fromEntries(agentIds.map(id => [id, nativeCatalogAgent(id)]));
+	vi.spyOn(catalog, 'forceRefresh').mockResolvedValue();
+	return catalog;
 }
 
 function deferred<T>() {
@@ -68,8 +72,88 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 		vi.useRealTimers();
+	});
+
+	it('shows the configured auth method diagnostic without offering an ineffective sign-in', async () => {
+		const detail = 'GEMINI_API_KEY is not set.';
+		vi.mocked(getAgentAuthStatus).mockResolvedValue({ authenticated: false, canReauth: false, label: '', detail });
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({ state: 'idle', running: false });
+		const settingsAuth = new SettingsAuthState(createModelCatalog(['antigravity']));
+		const cleanup = settingsAuth.initialize();
+		render(OtherAgentsSection, { settingsAuth });
+		await vi.waitFor(() => expect(settingsAuth.authFor('antigravity').loading).toBe(false));
+		expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /Antigravity/ }));
+		expect(screen.getByText(detail)).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+		cleanup();
+	});
+
+	it('publishes only the signed-in executor catalog when Settings closes after submitting a browser code', async () => {
+		const id = remoteExecutor.id;
+		const catalog = createModelCatalog(['antigravity'], id);
+		vi.mocked(catalog.forceRefresh).mockRestore();
+		const defaultModel = { value: 'default', label: 'Default' };
+		const discovered = { value: 'sample-model-high', label: 'Sample model (High)' };
+		const snapshot = (models: typeof defaultModel[]) => Response.json({
+			catalog: { apiProviders: [], agents: [nativeCatalogAgent('antigravity', models)] },
+		});
+		const stale = Promise.withResolvers<Response>();
+		const fresh = Promise.withResolvers<Response>();
+		const fetchCatalog = vi.spyOn(catalogApi, 'fetchModelCatalogResponse')
+			.mockResolvedValueOnce(snapshot([defaultModel]))
+			.mockReturnValueOnce(stale.promise)
+			.mockReturnValueOnce(fresh.promise);
+		const deviceAuth = { url: 'https://example.test/login', needsCode: true };
+		const confirmation = deferred<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
+		vi.mocked(getAgentAuthStatus)
+			.mockResolvedValueOnce({ authenticated: false, canReauth: true, label: '' })
+			.mockReturnValueOnce(confirmation.promise);
+		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
+			launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth,
+		});
+		const submitted = deferred<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
+		vi.mocked(completeAgentAuthLogin).mockReturnValueOnce(submitted.promise);
+		const terminal = deferred<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
+		vi.mocked(getAgentAuthLoginStatus)
+			.mockResolvedValueOnce({ state: 'idle', running: false })
+			.mockResolvedValueOnce({ state: 'running', running: true, sessionId: SESSION_ID, completionPending: false, deviceAuth })
+			.mockImplementation(async (agent, sessionId, executorId) => {
+				if (agent === 'antigravity' && sessionId === SESSION_ID && executorId === id) return terminal.promise;
+				return { state: 'idle', running: false };
+			});
+		const settingsAuth = new SettingsAuthState(catalog);
+		const cleanup = settingsAuth.initialize();
+		const view = render(OtherAgentsSection, { settingsAuth });
+		await vi.waitFor(() => expect(catalog.isValidated).toBe(true));
+		const preLoginRefresh = catalog.forceRefresh();
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+		expect(screen.getByRole('link', { name: deviceAuth.url })).toBeTruthy();
+		const callback = 'https://example.test/callback?code=test-code';
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: callback } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
+		expect(completeAgentAuthLogin).toHaveBeenCalledWith('antigravity', SESSION_ID, callback, id);
+		cleanup();
+		view.unmount();
+		expect(fetchCatalog).toHaveBeenCalledTimes(2);
+		submitted.resolve({ submitted: true, sessionId: SESSION_ID });
+		terminal.resolve({ state: 'succeeded', running: false, sessionId: SESSION_ID });
+		await vi.waitFor(() => expect(getAgentAuthStatus).toHaveBeenCalledTimes(2));
+		expect(fetchCatalog).toHaveBeenCalledTimes(2);
+		confirmation.resolve({ authenticated: true, canReauth: true, label: 'Google' });
+		await vi.waitFor(() => expect(fetchCatalog).toHaveBeenCalledTimes(3));
+		expect(catalog.isValidated).toBe(true);
+		expect(fetchCatalog.mock.calls.every(([executorId]) => executorId === id)).toBe(true);
+		fresh.resolve(snapshot([defaultModel, discovered]));
+		await vi.waitFor(() => expect(catalog.getModels('antigravity')).toHaveLength(2));
+		stale.resolve(snapshot([defaultModel]));
+		await preLoginRefresh;
+		expect(fetchCatalog).toHaveBeenCalledTimes(3);
+		expect(fetchCatalog).toHaveBeenLastCalledWith(id, null);
+		expect(catalog.getModels('antigravity').map(model => model.value)).toEqual(['default', discovered.value]);
 	});
 
 	it('keeps the device code visible while stale credentials report authenticated', async () => {
@@ -82,11 +166,36 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(settingsAuth.deviceAuthFor('codex')).toEqual(DEVICE_AUTH);
 	});
 
+	it('retains a mounted code form across same-owner reauthentication and releases it on owner loss', async () => {
+		const catalog = createModelCatalog(['antigravity']);
+		catalog.setLoginOwner('test-owner');
+		vi.mocked(getAgentAuthStatus).mockResolvedValue({ authenticated: false, canReauth: true, label: '' });
+		const login = { ...CLAUDE_AUTH, url: 'https://example.test/oauth' };
+		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
+			launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: login,
+		});
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValueOnce({ state: 'idle', running: false })
+			.mockResolvedValue({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: login });
+		const settingsAuth = new SettingsAuthState(catalog);
+		const cleanup = settingsAuth.initialize();
+		render(OtherAgentsSection, { settingsAuth });
+		await vi.waitFor(() => expect(settingsAuth.authFor('antigravity').loading).toBe(false));
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'synthetic-code' } });
+		catalog.setLoginOwner('test-owner');
+		await fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
+		expect(completeAgentAuthLogin).toHaveBeenCalledWith('antigravity', SESSION_ID, 'synthetic-code', 'local');
+		catalog.setLoginOwner(null);
+		await vi.waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+		expect(settingsAuth.isLoginPending('antigravity')).toBe(false);
+		cleanup();
+	});
+
 	it('routes login to the selected executor and ignores replies after leaving that executor', async () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
 		const launched = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launched.promise);
-		const remote = new SettingsAuthState(createModelCatalog(), executorId);
+		const remote = new SettingsAuthState(createModelCatalog(['codex'], executorId));
 		const pending = remote.handleLogin('codex');
 		expect(launchAgentAuthLogin).toHaveBeenCalledWith('codex', executorId);
 		remote.destroy();
@@ -153,7 +262,13 @@ describe('SettingsAuthState login lifecycle', () => {
 		settingsAuth.initialize();
 		await vi.waitFor(() => expect(settingsAuth.deviceAuthFor('codex')).toEqual(DEVICE_AUTH));
 
-		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(4);
+		expect(settingsAuth.isLoginPending('codex')).toBe(true);
+		await settingsAuth.completeLogin('codex', 'synthetic-code');
+		expect(completeAgentAuthLogin).not.toHaveBeenCalled();
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(3);
+		expect(settingsAuth.isLoginPending('codex')).toBe(false);
 	});
 
 	it('invalidates an in-flight launch when Settings is destroyed', async () => {
@@ -385,13 +500,16 @@ describe('SettingsAuthState login lifecycle', () => {
 				label: 'new@example.com',
 			});
 
-		const settingsAuth = new SettingsAuthState(createModelCatalog());
+		const catalog = createModelCatalog();
+		const settingsAuth = new SettingsAuthState(catalog);
 		await settingsAuth.handleLogin('codex');
 		expect(settingsAuth.authFor('codex').authenticated).toBe(false);
+		expect(catalog.forceRefresh).not.toHaveBeenCalled();
 
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 		expect(settingsAuth.authFor('codex').authenticated).toBe(true);
 		expect(getAgentAuthStatus).toHaveBeenCalledTimes(2);
+		expect(catalog.forceRefresh).toHaveBeenCalledOnce();
 	});
 
 	it('polls auth after terminal success when the first credential check is unauthenticated', async () => {

@@ -337,6 +337,7 @@
 		const key = owner ? JSON.stringify([owner.mode, owner.key]) : null;
 		untrack(() => {
 			fileImages.setOwner(key);
+			modelCatalog.setLoginOwner(key);
 			if (key !== presentationOwnerKey) {
 				presentationOwnerKey = key;
 				ticketsInvalidations.publishAuthority(authenticated);
@@ -529,6 +530,7 @@
 	});
 
 	onDestroy(() => {
+		modelCatalog.clearPendingLogins();
 		auth.destroy();
 		window.removeEventListener('pagehide', handlePageHide);
 		browserNotificationsRouter.destroy();
