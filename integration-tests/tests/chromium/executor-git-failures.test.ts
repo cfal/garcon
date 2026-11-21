@@ -6,6 +6,7 @@ import { withChromiumFixture, type ChromiumFixture } from '../../support/chromiu
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS } from '../../../common/pull-request-reviews.js';
+import type { PreambleSelectionPreviewResponse } from '../../../common/chat-preamble-selection-contracts.js';
 
 const remoteOptions = { executionBackend: 'remote-controller-dials', projectRoots: 'separate' } as const;
 
@@ -134,6 +135,14 @@ test('repository reconnect preserves the worktree result and filter focus', asyn
     const project = integration.executionDirs.project;
     const setEnabled = (enabled: boolean) => client.patch(`/api/v1/executors/${client.executorId}`, { enabled });
     await initializeFixtureRepository(project);
+    // New Chat also requests a preamble preview while the repository executor is disconnected.
+    await page.route('**/api/v1/preambles/selection-preview', route => {
+      const { executorId, projectPath } = route.request().postDataJSON();
+      return route.fulfill({ json: {
+        success: true, executorId, canonicalProjectPath: projectPath, orderedPreambleIds: [],
+        projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
+      } satisfies PreambleSelectionPreviewResponse });
+    });
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
     await page.getByRole('dialog').locator('[data-executor-picker]').click();
