@@ -6,11 +6,17 @@ import { WorkflowStore } from './store.js';
 
 export function initializeWorkflows(workspaceDir: string, options: Omit<WorkflowEngineOptions, 'store'>, selections: WorkflowSelectionSource) {
   let engine: WorkflowEngine | null = null;
+  const log = createLogger('workflows');
+  function disable(reason: string) {
+    engine?.close();
+    engine = null;
+    log.warn(reason);
+  }
   const unavailable = () => new DomainError('WORKFLOW_STORAGE_UNAVAILABLE', 'Workflow storage is unavailable until the controller restarts.', 503);
   try {
     engine = new WorkflowEngine({ ...options, store: new WorkflowStore(workspaceDir) });
   } catch {
-    createLogger('workflows').warn('Workflows disabled: storage could not open.');
+    disable('Workflows disabled: storage could not open.');
   }
   return {
     get service(): WorkflowEngine {
@@ -21,15 +27,15 @@ export function initializeWorkflows(workspaceDir: string, options: Omit<Workflow
       prepareWorkflowSettings(steps, context, selections),
     referencesApiProvider: (id: string) => engine?.referencesApiProvider(id) ?? true,
     referencesExecutor: (id: string) => engine?.referencesExecutor(id) ?? true,
-    handleChatRemoved: (id: string) => engine?.handleChatRemoved(id),
+    handleChatRemoved(id: string) {
+      // A failed secondary store cannot veto deletion after the chat registry has committed it.
+      try { engine?.handleChatRemoved(id); }
+      catch { disable('Workflows disabled: could not record chat removal.'); }
+    },
     wakeExecutor: (id: string) => engine?.wakeExecutor(id),
     async start() {
       try { await engine?.start(); }
-      catch {
-        engine?.close();
-        engine = null;
-        createLogger('workflows').warn('Workflows disabled: storage recovery failed.');
-      }
+      catch { disable('Workflows disabled: storage recovery failed.'); }
     },
     stop: () => engine?.stop(),
     close: () => engine?.close(),
