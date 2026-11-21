@@ -3,7 +3,7 @@ import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
-import { CODEX_BINARY } from '../../support/live-codex.js';
+import { CODEX_BINARY } from '../../support/pinned-agent-binaries.js';
 
 describe('pinned Codex shutdown compatibility', () => {
   it('waits for the native app-server to exit after terminating slow cleanup', async () => {

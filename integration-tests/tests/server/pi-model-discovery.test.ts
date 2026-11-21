@@ -2,9 +2,9 @@ import { expect, it } from 'bun:test';
 import { mkdir, mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { SharedModelOption } from '../../../common/models.js';
 import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../../support/pi-model-discovery-fixture.js';
+import { PI_BINARY } from '../../support/pinned-agent-binaries.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 function createPiHome() {
@@ -13,10 +13,9 @@ function createPiHome() {
 
 async function discover(home: string, env: Record<string, string> = {}): Promise<SharedModelOption[]> {
   const modulePath = new URL('../../../server-agents/pi/src/agents/pi/pi-models.ts', import.meta.url).href;
-  const binary = fileURLToPath(new URL('../../node_modules/.bin/pi', import.meta.url));
   const proc = Bun.spawn([process.execPath, '--no-install', '-e', `
     const { getPiAvailableModels } = await import(${JSON.stringify(modulePath)});
-    console.log(JSON.stringify(await getPiAvailableModels(${JSON.stringify(binary)})));
+    console.log(JSON.stringify(await getPiAvailableModels(${JSON.stringify(PI_BINARY)})));
   `], {
     cwd: home,
     env: { HOME: home, PATH: process.env.PATH, PI_CODING_AGENT_DIR: join(home, '.pi', 'agent'), ...env },

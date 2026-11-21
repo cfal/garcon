@@ -1,6 +1,6 @@
 # Integration Tests
 
-From the repository root, run `bun run setup:integration` before running these suites. This separate frozen install provisions the pinned reference CLIs; normal Garcon setup skips it.
+Run `bun run setup:integration` from the repository root to install the exact Claude Code, Codex, OpenCode, and Pi versions in [package.json](./package.json). Normal Garcon setup skips these test dependencies. CI runs the real CLIs against scripted models: a PR that updates a pin and [lockfile](./bun.lock) tests the new version, while an upstream release alone does not. Antigravity has a [separately pinned installer](../scripts/install-antigravity-cli.ts).
 
 This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda; the Chromium lane owns rendered layout and browser geometry.
 

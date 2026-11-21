@@ -1,13 +1,12 @@
 import { expect, test } from 'bun:test';
 import { mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { AgentCatalog } from '../../../common/agents.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { preparePiModelDiscoveryFixture } from '../../support/pi-model-discovery-fixture.js';
+import { PI_BINARY } from '../../support/pinned-agent-binaries.js';
 
 test('a missing Pi on PATH reports discovery unavailable and a new install is picked up without restart', async () => {
-  const pinnedPi = fileURLToPath(new URL('../../node_modules/.bin/pi', import.meta.url));
   const node = Bun.which('node');
   if (!node) throw new Error('The pinned Pi CLI requires Node.');
 
@@ -20,13 +19,13 @@ test('a missing Pi on PATH reports discovery unavailable and a new install is pi
     expect(await missing.json()).toMatchObject({ error: 'Model discovery unavailable' });
     expect(await client.get(auth)).toMatchObject({ pi: { authenticated: false, source: 'none' } });
 
-    await symlink(pinnedPi, join(executionDirs.home, 'bin', 'pi'));
+    await symlink(PI_BINARY, join(executionDirs.home, 'bin', 'pi'));
+    expect(await client.get(auth)).toMatchObject({ pi: { authenticated: true, source: 'cli' } });
     const { catalog } = await client.get<{ catalog: AgentCatalog }>(models);
     expect(catalog.agents.map(agent => agent.id)).toEqual(['pi']);
     expect(catalog.agents[0]?.models).toContainEqual({
       value: 'garcon-router/auto', label: 'garcon-router: auto', supportsImages: true,
     });
-    expect(await client.get(auth)).toMatchObject({ pi: { authenticated: true, source: 'cli' } });
   }, {
     resolveServerEnvironment: ({ home }) => ({ PATH: join(home, 'bin') }),
     prepareWorkspace: async ({ home }) => {

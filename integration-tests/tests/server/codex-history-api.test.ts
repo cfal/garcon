@@ -3,7 +3,7 @@ import { mkdtempDisposable, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
-import { CODEX_BINARY } from '../../support/live-codex.js';
+import { CODEX_BINARY } from '../../support/pinned-agent-binaries.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 async function rpcFailure(request: Promise<unknown>): Promise<CodexAppServerRpcError> {

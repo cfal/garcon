@@ -3,10 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseChatMessage } from '../../../common/chat-types.js';
-import { CODEX_BINARY } from '../../support/live-codex.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../../../server-agents/codex/src/agents/codex/app-server/approvals.js';
 import { convertCodexAppServerItem } from '../../../server-agents/codex/src/agents/codex/app-server/converter.js';
 import { parseThreadItemsListResponse, parseThreadTurnsListResponse, type CodexThreadItem } from '../../../server-agents/codex/src/agents/codex/app-server/protocol.js';
+import { CODEX_BINARY } from '../../support/pinned-agent-binaries.js';
 
 interface SchemaNode {
   $ref?: string;
