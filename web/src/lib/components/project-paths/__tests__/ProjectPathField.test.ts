@@ -127,6 +127,11 @@ describe('ProjectPathField', () => {
 			feedback: { worktree: { disabled: false, onOpen } },
 		});
 		const actions = screen.getAllByRole('button');
+		const column = screen.getByRole('textbox').closest('[data-slot="project-path-column"]')!;
+		expect(
+			column.contains(screen.getByRole('button', { name: 'Select a different worktree' })),
+		).toBe(true);
+		expect(column.contains(screen.getByRole('button', { name: 'Executor selector' }))).toBe(false);
 		expect(
 			actions.slice(0, 5).map((button) => button.getAttribute('aria-label') || button.textContent),
 		).toEqual([
@@ -242,13 +247,21 @@ describe('ProjectPathField', () => {
 		const view = renderField({ onkeydown });
 		const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project path' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Focus path' }));
-		const closed = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+		const closed = new KeyboardEvent('keydown', {
+			key: 'ArrowDown',
+			bubbles: true,
+			cancelable: true,
+		});
 		await fireEvent(input, closed);
 		expect(closed.defaultPrevented).toBe(false);
 
 		await view.rerender({ browser: browser({ open: true }) });
 		const row = await screen.findByRole('button', { name: 'existing' });
-		const down = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+		const down = new KeyboardEvent('keydown', {
+			key: 'ArrowDown',
+			bubbles: true,
+			cancelable: true,
+		});
 		await fireEvent(input, down);
 		expect(down.defaultPrevented).toBe(true);
 		expect(document.activeElement).toBe(row);
