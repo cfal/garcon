@@ -59,7 +59,6 @@ export interface ConversationUiPort {
 	captureExecutionResponse(): ExecutionResponseReceiver;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
 	captureExecutionControlRemoval(chatId: string): () => boolean;
-	removeExecutionControl(chatId: string): void;
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void;
 	activateTransientFeed(chatId: string | null): void;
 	getTransientFeed(chatId: string): ChatTransientFeedSnapshot | null;
@@ -312,12 +311,12 @@ export class ConversationUiState implements ConversationUiPort {
 		const control = this.getExecutionControl(chatId);
 		return () => {
 			if (this.getExecutionControl(chatId) !== control) return false;
-			this.removeExecutionControl(chatId);
+			this.#removeExecutionControl(chatId);
 			return true;
 		};
 	}
 
-	removeExecutionControl(chatId: string): void {
+	#removeExecutionControl(chatId: string): void {
 		if (!(chatId in this.executionControlByChatId)) return;
 		const nextControlByChatId = { ...this.executionControlByChatId };
 		delete nextControlByChatId[chatId];

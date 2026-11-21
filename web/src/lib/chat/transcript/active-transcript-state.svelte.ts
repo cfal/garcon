@@ -355,12 +355,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			if (cacheStateChanged) {
 				this.feedMutations.record('live-append', responseMessageTypes);
 			}
-			if (!this.usesSharedOverlay) {
-				this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
-			}
-			this.setResendCandidates(resendCandidates);
-			this.options.onRecoveredMessages?.(chatId, messages);
-			return 'applied';
+			return this.#finishAppliedAppend(chatId, messages, resendCandidates);
 		}
 		const previousEntryCount = this.entries.length;
 		const applied = applyTranscriptAppend(this.entries, append, appliedFrontierOrdinal);
@@ -401,6 +396,14 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		if (entriesChanged) {
 			this.feedMutations.record('live-append', responseMessageTypes);
 		}
+		return this.#finishAppliedAppend(chatId, messages, resendCandidates);
+	}
+
+	#finishAppliedAppend(
+		chatId: string,
+		messages: TranscriptMessage[],
+		resendCandidates: ResendCandidate[],
+	): 'applied' {
 		if (!this.usesSharedOverlay) {
 			this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
 		}

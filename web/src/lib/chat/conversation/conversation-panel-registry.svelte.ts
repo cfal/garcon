@@ -588,12 +588,13 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	markOptimisticInputDelivered(chatId: string, clientMessageId: string): void {
+		// Direct acceptance retires a live-tail steer without waiting for its echo.
 		if (this.#pendingOptimisticInput(chatId, clientMessageId)?.placement === 'live-tail') {
 			this.clearOptimisticInput(chatId, clientMessageId);
 			return;
 		}
 		const mutation = this.options.overlays.markOptimisticInputDelivered(chatId, clientMessageId);
-		if (!mutation?.feedStructureChanged) return;
+		if (!mutation) return;
 		this.#applyOverlayMutation(chatId, mutation);
 	}
 
