@@ -1,6 +1,6 @@
 import type { GarconTestClient } from "../../support/garcon-client.js";
 import { describe, expect, test } from "bun:test";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withIntegrationFixture } from "../../support/integration-fixture.js";
 import { initializeFixtureRepository, runFixtureGit } from "../../support/git-fixture.js";
@@ -100,8 +100,8 @@ describe("Git worktree HTTP API", () => {
           body: { errorCode: 'VALIDATION_FAILED', error: 'Missing required parameters: project and worktreePath.' },
         });
       }
-      for (const conflict of [{ branch: 'existing' }, { detach: true }]) {
-        expect(await reject({ project, worktreePath, newBranch: 'fresh-name', ...conflict })).toMatchObject({
+      for (const fields of [{ newBranch: '' }, { newBranch: 'fresh-name', branch: 'existing' }, { newBranch: 'fresh-name', detach: true }]) {
+        expect(await reject({ project, worktreePath, ...fields })).toMatchObject({
           status: 400, body: { errorCode: 'GIT_INVALID_INPUT' },
         });
       }
@@ -112,7 +112,7 @@ describe("Git worktree HTTP API", () => {
     await withIntegrationFixture("git-worktree-create", async (fixture) => {
       const projectPath = fixture.executionDirs.project;
       await initializeFixtureRepository(projectPath);
-      const create = (options: { branch?: string; newBranch?: string; worktreePath: string }) =>
+      const create = (options: { branch?: string; newBranch?: string; worktreePath: string; detach?: boolean }) =>
         fixture.client.fetch('/api/v1/git/worktrees/create', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ executorId: fixture.client.executorId, project: projectPath, ...options }),
@@ -120,8 +120,34 @@ describe("Git worktree HTTP API", () => {
       const suggestedPath = join(projectPath, 'suggested');
       await runFixtureGit(projectPath, "branch", "unused-local");
       expect((await create({ worktreePath: suggestedPath, newBranch: 'unused-local' })).ok).toBe(false);
-      expect((await create({ worktreePath: suggestedPath, newBranch: 'fresh-name' })).ok).toBe(true);
+      expect((await create({ worktreePath: suggestedPath, newBranch: 'fresh-name', detach: false })).ok).toBe(true);
       expect((await create({ worktreePath: join(projectPath, 'manual'), branch: 'unused-local' })).ok).toBe(true);
     }, { projectRoots: 'separate' });
+  });
+
+  test("an occupied destination does not consume a suggested branch name", async () => {
+    await withIntegrationFixture("git-worktree-occupied", async ({ client, executionDirs }) => {
+      const project = executionDirs.project;
+      await initializeFixtureRepository(project);
+      const occupied = join(project, 'occupied');
+      await mkdir(occupied);
+      const file = join(occupied, 'existing.txt');
+      await writeFile(file, 'Existing content\n');
+      const missing = join(project, 'missing');
+      await runFixtureGit(project, 'worktree', 'add', '-b', 'registered', missing);
+      await rm(missing, { recursive: true });
+      const newBranch = 'fresh-name';
+      const create = (worktreePath: string) => client.post('/api/v1/git/worktrees/create', {
+        executorId: client.executorId, project, worktreePath, newBranch,
+      });
+      for (const destination of [occupied, file, missing]) {
+        expect(await rejectionOf(create(destination))).toMatchObject({ status: 409, body: { errorCode: 'GIT_CONFLICT' } });
+        expect((await runFixtureGit(project, 'branch', '--list', newBranch)).trim()).toBe('');
+      }
+      const empty = join(project, 'empty');
+      await mkdir(empty);
+      await create(empty);
+      expect((await runFixtureGit(empty, 'branch', '--show-current')).trim()).toBe(newBranch);
+    });
   });
 });

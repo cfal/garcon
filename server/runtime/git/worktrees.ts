@@ -1,4 +1,5 @@
 import type { GitMutationResult } from '../../../common/git.js';
+import { GitServiceError } from '../../../common/git-error.js';
 import path from "path";
 import { promises as fs } from "fs";
 import type {
@@ -20,6 +21,7 @@ import {
   assertSafeBranchName,
 } from "./ref-validation.js";
 import { mapWithConcurrency } from "../../common/concurrency.js";
+import { hasNodeErrorCode } from "../../common/errors.js";
 import { createLogger } from "../../common/log.js";
 import { probeWorktreeLayout } from "./worktree-layout.js";
 import { readAdminWorktreeRecords } from "./worktree-admin.js";
@@ -54,6 +56,29 @@ async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
   } catch {
     worktree.isPathMissing = true;
     worktree.lastModifiedAt = null;
+  }
+}
+
+// Git's worktree add -b creates the branch before rejecting an occupied destination.
+async function assertFreshWorktreeDestination(projectPath: string, destination: string): Promise<void> {
+  const registered = await readPorcelainWorktreeRecords(projectPath);
+  if (registered.some(worktree => path.relative(destination, worktree.path) === '')) {
+    throw new GitServiceError('GIT_CONFLICT', 'A worktree is already registered at this location.');
+  }
+  let directory;
+  try {
+    directory = await fs.opendir(destination);
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return;
+    if (hasNodeErrorCode(error, 'ENOTDIR')) {
+      throw new GitServiceError('GIT_CONFLICT', 'The worktree location must be a directory.');
+    }
+    throw error;
+  }
+  try {
+    if (await directory.read()) throw new GitServiceError('GIT_CONFLICT', 'The worktree location is not empty.');
+  } finally {
+    await directory.close();
   }
 }
 
@@ -254,6 +279,8 @@ export function createWorktreeOperations(
     if (baseRef) await assertExistingCommitRef(projectPath, baseRef, "base");
     const name = newBranch ?? branch;
     if (name) await assertSafeBranchName(projectPath, name, "branch name");
+    const resolvedPath = path.resolve(projectPath, worktreePath);
+    if (newBranch) await assertFreshWorktreeDestination(projectPath, resolvedPath);
 
     const args: string[] = ["worktree", "add"];
     let checkoutRef = baseRef;
@@ -270,7 +297,6 @@ export function createWorktreeOperations(
     if (checkoutRef) args.push(checkoutRef);
 
     const { stdout } = await runGit(projectPath, args);
-    const resolvedPath = path.resolve(projectPath, worktreePath);
     return {
       success: true,
       output: stdout || "Worktree created",
