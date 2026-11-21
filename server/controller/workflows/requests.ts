@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { encodeWorkflowValue } from '../../../common/workflow-value.js';
 import { isExecutorId } from '../../../common/executors.js';
 import { isRecord, stableJsonStringify, type JsonObject, type JsonValue } from '../../../common/json.js';
 import type {
@@ -73,35 +74,10 @@ export function workflowSource(value: unknown): string {
 
 // Rejects non-JSON values before serialization can silently omit or coerce them.
 export function workflowJson(value: unknown, subject: string): string {
-  let nodes = 0;
-  let bytes = 0;
-  const visit = (item: unknown, depth: number): void => {
-    if (++nodes > 16_384 || depth > 32 || bytes > WORKFLOW_LIMITS.valueBytes) {
-      throw workflowLimit(`${subject} exceeds the JSON size limit.`);
-    }
-    if (item === null || typeof item === 'boolean' || typeof item === 'number' && Number.isFinite(item)) return;
-    if (typeof item === 'string') {
-      bytes += item.length > WORKFLOW_LIMITS.valueBytes ? item.length : Buffer.byteLength(item);
-      return;
-    }
-    if (Array.isArray(item)) {
-      for (const element of item) visit(element, depth + 1);
-      return;
-    }
-    if (isRecord(item) && (Object.getPrototypeOf(item) === Object.prototype || Object.getPrototypeOf(item) === null)) {
-      for (const key of Object.keys(item)) {
-        bytes += Buffer.byteLength(key);
-        visit(item[key], depth + 1);
-      }
-      return;
-    }
-    throw workflowInvalid(`${subject} must be valid JSON.`);
-  };
-  visit(value, 0);
-  if (bytes > WORKFLOW_LIMITS.valueBytes) throw workflowLimit(`${subject} exceeds the JSON size limit.`);
-  const json = stableJsonStringify(value);
-  if (Buffer.byteLength(json) > WORKFLOW_LIMITS.valueBytes) throw workflowLimit(`${subject} exceeds the JSON size limit.`);
-  return json;
+  const result = encodeWorkflowValue(value);
+  if ('json' in result) return result.json;
+  if (result.issue === 'limit') throw workflowLimit(`${subject} exceeds the JSON size limit.`);
+  throw workflowInvalid(`${subject} must be valid JSON.`);
 }
 
 const launchKeys = ['inputs', 'executionContext', 'operationId'];

@@ -52,6 +52,12 @@ export interface WorkflowEngineOptions {
 
 type CurrentAttempt = AttemptRow & { run_id: string; step_id: string; attempt_count: number };
 
+function unfinishedAttempt(row: CurrentAttempt, reason: string): Extract<WorkflowAttemptResult, { reason: string }> {
+  // The runner cannot submit a turn until its chat reservation commits.
+  if (row.chat_id === null) return { kind: 'failed', reason: 'The attempt ended before a chat was reserved. No turn was started.' };
+  return { kind: 'unknown', reason };
+}
+
 function currentAttempt(db: Database, id: string): CurrentAttempt | null {
   return db.query<CurrentAttempt, [string]>(`
     SELECT a.*, i.run_id, i.step_id, i.attempt_count
@@ -61,6 +67,13 @@ function currentAttempt(db: Database, id: string): CurrentAttempt | null {
 }
 
 function finishAttempt(db: Database, row: CurrentAttempt, status: Exclude<AttemptRow['status'], 'running'>, reason: string | null, now: string): void {
+  // Readiness can flap indefinitely. A refusal before chat reservation is a wait, not an execution attempt.
+  if (status === 'unavailable' && row.chat_id === null) {
+    db.query('DELETE FROM workflow_attempts WHERE id = ?').run(row.id);
+    db.query("UPDATE workflow_instances SET status = 'waiting-executor', reason = ?, attempt_count = attempt_count - 1 WHERE id = ?")
+      .run(reason, row.instance_id);
+    return;
+  }
   db.query('UPDATE workflow_attempts SET status = ?, reason = ?, finished_at = ? WHERE id = ?').run(status, reason, now, row.id);
   const update = db.query('UPDATE workflow_instances SET status = ?, reason = ? WHERE id = ?');
   if (status !== 'unavailable') {
@@ -438,7 +451,8 @@ export class WorkflowEngine {
           const reason = !live.chat_confirmed && live.chat_id
             ? 'The controller restarted before chat publication was confirmed. Check the chat list before taking further action.'
             : 'The controller restarted before the exact turn settled.';
-          finishAttempt(db, live, 'unknown', reason, now);
+          const outcome = unfinishedAttempt(live, reason);
+          finishAttempt(db, live, outcome.kind, outcome.reason, now);
           runs.add(live.run_id);
         }
         for (const runId of runs) new WorkflowGraph(db, runId, now).reconcile();
@@ -506,7 +520,7 @@ export class WorkflowEngine {
     this.#running.set(attemptId, cancellation);
     void Promise.resolve().then(async () => {
       if (this.#stopped) return;
-      let result: WorkflowAttemptResult;
+      let result: WorkflowAttemptResult | null;
       try {
         result = await this.options.runner.run(attempt, {
           signal: cancellation.signal,
@@ -515,10 +529,10 @@ export class WorkflowEngine {
           emit: request => this.#emit(attemptId, request),
         });
       } catch {
-        result = { kind: 'unknown', reason: UNKNOWN_OUTCOME };
+        result = null;
       }
       if (this.#closed) return;
-      if (result.kind === 'unavailable' && readiness === this.#readyExecutors.get(executorId)) this.#readyExecutors.delete(executorId);
+      if (result?.kind === 'unavailable' && readiness === this.#readyExecutors.get(executorId)) this.#readyExecutors.delete(executorId);
       this.#settle(attemptId, result);
     }).catch(error => {
       this.#ready = false;
@@ -580,10 +594,11 @@ export class WorkflowEngine {
     return result.signal;
   }
 
-  #settle(attemptId: string, result: WorkflowAttemptResult): void {
+  #settle(attemptId: string, outcome: WorkflowAttemptResult | null): void {
     const settled = this.#store.write(db => {
       const live = currentAttempt(db, attemptId);
       if (!live) return false;
+      const result = outcome ?? unfinishedAttempt(live, UNKNOWN_OUTCOME);
       const now = this.#now();
       const graph = new WorkflowGraph(db, live.run_id, now);
       if (live.chat_removed) {

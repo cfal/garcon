@@ -41,6 +41,16 @@ test('offline steps never inherit a bypass grant or borrow a model from Local', 
   expect(() => missing(step, location)).toThrow('Choose one explicitly');
 });
 
+test('authored settings must belong to the resolved agent, even without an explicit agent ID', async () => {
+  const implicit = { ...step, agentId: undefined, model: 'remote-model', agentSettings: createEmptyAgentSettings('codex') };
+  const context = { defaultTarget: location };
+  const fallback = await prepareWorkflowSettings([implicit], context, { ...source, recents: () => [] });
+  expect(() => fallback(implicit, location)).toThrow('Step "inspect"');
+  const recent = await prepareWorkflowSettings([implicit], context, source);
+  expect(recent(implicit, location)).toMatchObject({ agentId: 'codex', agentSettings: implicit.agentSettings });
+  expect(() => recent({ ...implicit, agentSettings: createEmptyAgentSettings('claude') }, location)).toThrow('resolved agent "codex"');
+});
+
 const scopedPreamble = (id: string, executorId: string): Preamble => ({ id, createdAt: '', updatedAt: '', enabled: true,
   title: 'Review', content: 'Review changes.', agentIds: ['codex'], tagFilter: { mode: 'any', tags: ['review'] },
   scope: { type: 'project-paths', rules: [{ executorId, projectPath: '/canonical/review', includeNested: true }] } });

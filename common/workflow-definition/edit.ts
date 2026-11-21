@@ -80,8 +80,12 @@ function itemStart(item: Item): number {
     ?? item.key?.offset ?? item.value!.offset;
 }
 
-function itemEnd(item: Item): number {
-  return (item.start[0]?.offset ?? itemStart(item)) + CST.stringify(item).length;
+function itemEnd(item: Item, source: string): number {
+  const text = CST.stringify(item);
+  const end = (item.start[0]?.offset ?? itemStart(item)) + text.length;
+  if (end === source.length) return end;
+  // YAML can attach the next sibling's indentation to a trailing comment.
+  return end - (/\n([ \t]+)$/u.exec(text)?.[1].length ?? 0);
 }
 
 function lineStart(text: string, position: number): number {
@@ -126,7 +130,7 @@ function deleteBlock(text: string, collection: CST.BlockMap | CST.BlockSequence,
   const leadingStart = lineStart(text, contentStart);
   const inline = text.slice(leadingStart, contentStart).trim() !== '';
   const start = inline ? contentStart : leadingStart;
-  const end = itemEnd(item);
+  const end = itemEnd(item, text);
   if (entries.length > 1) return { start, end, text: inline ? eolAt(text, end - 1) : '' };
   const empty = collection.type === 'block-map' ? '{}' : '[]';
   const indent = inline ? '' : text.slice(leadingStart, contentStart);
@@ -172,7 +176,7 @@ function insertEntry(
   }
   const last = entries.at(-1);
   const before = current ? lineStart(source.text, current.start[0]?.offset ?? itemStart(current))
-    : last ? itemEnd(last) : collection.offset;
+    : last ? itemEnd(last, source.text) : collection.offset;
   const eol = eolAt(source.text, before);
   const value: JsonValue = JSON.parse(json);
   const rendered = stringify(key === undefined ? [value] : { [key]: value }, { lineWidth: 0 });

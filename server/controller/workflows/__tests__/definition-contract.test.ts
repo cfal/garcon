@@ -6,6 +6,7 @@ import {
   type WorkflowDefinition, type WorkflowDiagnosticCode, type WorkflowFieldPath,
 } from '../../../../common/workflow-definition.js';
 import { isRecord } from '../../../../common/json.js';
+import { WORKFLOW_VALUE_BYTES } from '../../../../common/workflow-value.js';
 
 const fixture = (name: string) => readFileSync(new URL(`../../../../common/workflow-definition/fixtures/${name}.workflow.yaml`, import.meta.url), 'utf8');
 const recipe = fixture('research');
@@ -111,6 +112,53 @@ describe('YAML v1 workflow definition', () => {
     });
     expect(diagnostic.message).toContain('Did you mean "research.finding_ready"?');
     expect(source.slice(diagnostic.range.start.offset, diagnostic.range.end.offset)).toBe('research.findng_ready');
+  });
+
+  test('rejects input defaults that exceed the encoded launch budget, including together', () => {
+    const definition = (inputs: unknown) => JSON.stringify({ version: 1, name: 'Defaults', inputs,
+      steps: [{ id: 'print', kind: 'command', command: 'pwd' }] });
+    const size = WORKFLOW_VALUE_BYTES;
+    const string = (value: string) => ({ type: 'string', default: value });
+    const overhead = JSON.stringify({ a: '' }).length;
+    expect(validated(definition({ a: string('x'.repeat(size - overhead)) })).inputs.a).toBeDefined();
+    expectIssue(definition({ a: string('x'.repeat(size - overhead + 1)) }), 'invalid-value', ['inputs', 'a', 'default']);
+    const each = string('\u00e9'.repeat(size / 4));
+    expectIssue(definition({ a: each, b: each }), 'invalid-value', ['inputs']);
+  });
+
+  test('allows a decision group in a join but not as a source of final text, including run additions', () => {
+    const group = 'version: 1\nname: Review\nsteps:\n'
+      + '  - {id: research, kind: agent, prompt: Investigate, signals: {found: {delivery: many, payload: json, fields: {id: string}, key: id}}}\n'
+      + '  - {id: review, kind: decision, prompt: Review, choices: {ok: Approve}, on: {kind: each, signal: research.found}}\n';
+    const join = { id: 'summary', kind: 'agent', prompt: 'Summarize', on: { kind: 'all', close: 'research.turn_completed', steps: ['review'] } };
+    const base = validated(group);
+    expect(parseWorkflowStepAddition(base, JSON.stringify(join)).diagnostics).toEqual([]);
+    const bound = { ...join, bindings: { reports: 'all.review' } };
+    expectIssue(group + '  - ' + JSON.stringify(bound), 'invalid-binding', ['steps', 2, 'bindings', 'reports']);
+    expect(parseWorkflowStepAddition(base, JSON.stringify(bound)).diagnostics).toMatchObject([
+      { code: 'invalid-binding', path: ['bindings', 'reports'] },
+    ]);
+  });
+
+  test('keeps sibling indentation across indented trailing comments on block edits', () => {
+    for (const newline of ['\n', '\r\n']) {
+      const source = ['version: 1', 'name: Indentation', 'steps:', '  - id: first', '    kind: decision',
+        '    prompt: Pick', '    choices:', '      ok: Accept', '      # choice note', '    # first only',
+        '  - id: second', '    kind: command', '    command: pwd', ''].join(newline);
+      const first = source.indexOf('  - id: first');
+      const second = source.indexOf('  - id: second');
+      const removed = editWorkflowDefinition(source, [{ kind: 'delete', path: ['steps', 0] }]);
+      expect(removed.diagnostics).toEqual([]);
+      expect(removed.source).toBe(source.slice(0, first) + source.slice(second));
+      const added = editWorkflowDefinition(source, [{ kind: 'upsert', path: ['steps', 0, 'name'], value: 'First' }]);
+      expect(added.diagnostics).toEqual([]);
+      expect(added.definition?.steps[0].name).toBe('First');
+      expect(added.source.replace('    name: First' + newline, '')).toBe(source);
+      const atEof = ['version: 1', 'name: Literal', 'steps:', '  - id: command', '    kind: command',
+        '    command: |+', '      pwd', '         '].join(newline);
+      const literal = editWorkflowDefinition(atEof, [{ kind: 'upsert', path: ['steps', 0, 'name'], value: 'Keep' }]);
+      expect(literal.definition?.steps[0]).toEqual({ ...validated(atEof).steps[0], name: 'Keep' });
+    }
   });
 
   test('rejects malformed syntax and non-data YAML before using it', () => {

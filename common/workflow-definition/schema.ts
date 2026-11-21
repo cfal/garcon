@@ -1,4 +1,5 @@
 import { AGENT_OPTION_FIELDS, LOCATION_FIELDS, parseAgentOptions, parseWorkflowLocation } from './options.js';
+import { encodeWorkflowValue } from '../workflow-value.js';
 import type { WorkflowField } from './source.js';
 import {
   isWorkflowName, WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED, WORKFLOW_VALUE_TYPES,
@@ -12,7 +13,7 @@ export function readWorkflowDefinition(root: WorkflowField): WorkflowDefinition 
   if (version.value !== 1) version.expected('the format version 1');
   const name = root.at('name').text(256);
   const description = root.at('description').optional((field) => field.text());
-  const inputs = root.at('inputs').optional((field) => readNamed(field, readInput)) ?? {};
+  const inputs = root.at('inputs').optional(readInputs) ?? {};
   const steps = root.at('steps');
   const parsedSteps = steps.list(1, WORKFLOW_DEFINITION_LIMITS.steps)?.flatMap((_, index) => {
     const step = readWorkflowStep(steps.at(index));
@@ -89,6 +90,17 @@ function rejectReservedName(field: WorkflowField, names: object | undefined): vo
   if (names && Object.hasOwn(names, WORKFLOW_TURN_COMPLETED)) {
     field.at(WORKFLOW_TURN_COMPLETED).keyIssue('invalid-value', 'Rename this signal. Garcon reserves turn_completed for confirmed successful turns.');
   }
+}
+
+function readInputs(field: WorkflowField): Record<string, WorkflowInput> | undefined {
+  const inputs = readNamed(field, readInput);
+  if (!inputs) return;
+  const defaults = Object.entries(inputs).flatMap(([name, input]) => input.default === undefined ? [] : [[name, input.default] as const]);
+  if (defaults.length && 'issue' in encodeWorkflowValue(Object.fromEntries(defaults))) {
+    const target = defaults.length === 1 ? field.at(defaults[0][0]).at('default') : field;
+    target.issue('invalid-value', 'Reduce the input defaults to fit the launch JSON size and nesting limits.');
+  }
+  return inputs;
 }
 
 function readInput(field: WorkflowField): WorkflowInput | undefined {

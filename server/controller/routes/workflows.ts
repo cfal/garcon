@@ -5,7 +5,7 @@ import { readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import { isCurrentBrowserPrincipal } from '../auth/token.js';
-import { markRouteNoStore } from '../lib/http-route.js';
+import { markRouteResponseHeaders } from '../lib/http-route.js';
 import type { HttpRouteContext, RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { WorkflowEngine, WorkflowSettingsResolver } from '../workflows/engine.js';
 import {
@@ -18,6 +18,7 @@ export type WorkflowHttpService = Pick<WorkflowEngine,
   'listRuns' | 'listActiveChats' | 'addItem' | 'addStep' | 'decide' | 'retry' | 'archiveRun' | 'replayStartRun' | 'replayTestWorkflowDraft'>;
 
 const bodyLimit = 2 * 1024 * 1024;
+const workflowHeaders = { 'Cache-Control': 'no-store' };
 
 function actor(context: HttpRouteContext | undefined, requireHuman: boolean): WorkflowActor {
   const who = context?.principal;
@@ -43,12 +44,12 @@ async function readBody(request: Request): Promise<unknown> {
 }
 
 function read(handler: (url: URL) => unknown): RouteHandler {
-  return markRouteNoStore((_request, url, _server, context) => {
+  return markRouteResponseHeaders((_request, url, _server, context) => {
     try {
       actor(context, false);
       return Response.json(handler(url));
     } catch (error) { return jsonErrorFromUnknown(error); }
-  });
+  }, workflowHeaders);
 }
 
 function page(params: URLSearchParams): WorkflowPageRequest {
@@ -57,7 +58,7 @@ function page(params: URLSearchParams): WorkflowPageRequest {
 }
 
 function mutate(handler: (value: unknown, caller: WorkflowActor, assertCurrent: () => void) => Response | Promise<Response>, requireHuman = false): RouteHandler {
-  return markRouteNoStore(async (request, _url, _server, context) => {
+  return markRouteResponseHeaders(async (request, _url, _server, context) => {
     try {
       actor(context, requireHuman);
       const body = await readBody(request);
@@ -67,7 +68,7 @@ function mutate(handler: (value: unknown, caller: WorkflowActor, assertCurrent: 
         actor(context, requireHuman);
       });
     } catch (error) { return jsonErrorFromUnknown(error); }
-  });
+  }, workflowHeaders);
 }
 
 function invalidSource(diagnostics: readonly WorkflowDiagnostic[], fallback: string): Response {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { workflowPaths } from '../../../../common/workflow-http.js';
 import type { WorkflowExecutionContext, WorkflowRunDetail } from '../../../../common/workflow-runs.js';
 import { DomainError } from '../../../common/domain-error.js';
+import { wrapRoutes } from '../../lib/http-route.js';
 import { LOCAL_SERVER_PRINCIPAL, type HttpRouteContext } from '../../lib/http-route-types.js';
 import { createWorkflowRoutes, type PrepareWorkflowSettings } from '../../routes/workflows.js';
 import { WorkflowEngine } from '../engine.js';
@@ -27,8 +28,26 @@ function fixture(prepareSettings: PrepareWorkflowSettings = async () => () => ({
   };
   const publish = (expectedRevision: number | null, text = source) =>
     post(workflowPaths.definitions, { definitionId: 'review', expectedRevision, source: text });
-  return { service, post, publish };
+  return { service, routes, post, publish };
 }
+
+test('workflow HTTP reads and mutations never cache workspace data or errors', async () => {
+  const { routes } = fixture();
+  const wrapped = wrapRoutes(routes, { localCapability: 'synthetic-workspace' });
+  const request = (path: string, method: 'GET' | 'POST', body?: unknown) => wrapped[path][method](new Request(
+    new URL(path, 'http://localhost'), { method, headers: { authorization: 'Bearer synthetic-workspace', 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) },
+  ));
+  for (const [response, status] of [
+    [await request(workflowPaths.definitions, 'GET'), 200],
+    [await request(workflowPaths.definitions, 'POST', { definitionId: 'd', expectedRevision: null, source }), 201],
+    [await request(workflowPaths.definitions, 'POST', { definitionId: 'd', expectedRevision: 1, source: '{}' }), 422],
+    [await request(workflowPaths.runs, 'POST', {}), 400],
+  ] as const) {
+    expect(response.status).toBe(status);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  }
+});
 
 test('invalid source returns actionable field ranges and cannot publish over the current revision', async () => {
   const { publish, service } = fixture();
@@ -75,6 +94,28 @@ test('an added step prepares and records the same executor-qualified folder with
   const run = await response.json() as WorkflowRunDetail;
   expect(run.executionContext).toEqual(executionContext);
   expect(run.steps.at(-1)?.location).toEqual({ executorId: remote, projectPath: '/override' });
+});
+
+test('concurrent resends of an addition return the same single committed amendment', async () => {
+  const bothPreparing = Promise.withResolvers<void>();
+  let arrivals = 0;
+  const { post, publish } = fixture(async steps => {
+    if (steps[0]?.id === 'followup') {
+      if (++arrivals === 2) bothPreparing.resolve();
+      await bothPreparing.promise;
+    }
+    return () => ({});
+  });
+  await publish(null);
+  const started = await post(workflowPaths.runs, { definitionId: 'review', inputs: {} });
+  const { id } = await started.json() as WorkflowRunDetail;
+  const request = { runId: id, operationId: 'append-once',
+    source: 'id: followup\nkind: decision\nprompt: Proceed?\nchoices: {ok: OK}' };
+  const replies = await Promise.all([post(workflowPaths.addStep, request), post(workflowPaths.addStep, request)]);
+  for (const reply of replies) {
+    expect(reply.status).toBe(200);
+    expect((await reply.json() as WorkflowRunDetail).amendments).toMatchObject([{ operationId: request.operationId }]);
+  }
 });
 
 test('handoffs cannot be approved by a local CLI or delegated executor; revoked launch never mutates', async () => {

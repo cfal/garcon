@@ -92,6 +92,55 @@ function success(text: string): WorkflowAttemptResult {
   return { kind: 'succeeded', output: { kind: 'complete', text } };
 }
 
+test('pre-reservation unavailability waits through repeated readiness changes without exhausting attempts', async () => {
+  const { service, runner } = workspace()(new ControlledRunner(false));
+  publish(service, 'version: 1\nname: Wait\nsteps: [{id: work, kind: command, command: pwd}]');
+  const { id } = service.startRun({ definitionId: 'research', inputs: {}, executionContext: LOCAL });
+  await service.start();
+  for (let n = 0; n <= WORKFLOW_LIMITS.attemptsPerInstance; n++) {
+    const call = await runner.next('work', n);
+    call.finish({ kind: 'unavailable', reason: 'Reconnect the executor.' });
+    await until(() => step(service, id, 'work').instances[0].status === 'waiting-executor');
+    expect(step(service, id, 'work').instances[0]).toMatchObject({ attempts: [], reason: 'Reconnect the executor.' });
+    service.wakeExecutor('local');
+  }
+  const admitted = await runner.next('work', WORKFLOW_LIMITS.attemptsPerInstance + 1);
+  expect(admitted.request.attemptNumber).toBe(1);
+  expect(new Set(runner.attempts.map(({ request }) => request.attemptId)).size).toBe(runner.attempts.length);
+  admitted.callbacks.attachChat(admitted.chatId, admitted.turnId);
+  admitted.finish({ kind: 'unavailable', reason: 'Unavailable after reservation' });
+  await until(() => step(service, id, 'work').instances[0].status === 'waiting-executor');
+  service.wakeExecutor('local');
+  const next = await runner.next('work', WORKFLOW_LIMITS.attemptsPerInstance + 2);
+  next.callbacks.attachChat(next.chatId, next.turnId);
+  next.callbacks.confirmChat();
+  next.finish(success('Complete'));
+  await until(() => service.getRun(id).status === 'succeeded');
+  expect(step(service, id, 'work').instances[0].attempts).toMatchObject([{ number: 1, status: 'unavailable' }, { number: 2, status: 'succeeded' }]);
+});
+
+test('a completion-only join waits for every repeated human decision without requiring final text', async () => {
+  const { service, runner } = workspace()();
+  const source = `version: 1
+name: Join decisions
+steps:
+  - {id: producer, kind: agent, prompt: Report, signals: {item: {delivery: many, payload: json, fields: {id: string}, key: id}}}
+  - {id: review, kind: decision, prompt: Pick, choices: {ok: Accept}, on: {kind: each, signal: producer.item}}
+  - {id: finish, kind: command, command: pwd, on: {kind: all, close: producer.turn_completed, steps: [review]}}
+`;
+  publish(service, source);
+  const { id } = service.startRun({ definitionId: 'research', inputs: {}, executionContext: LOCAL });
+  await service.start();
+  const producer = await runner.next('producer');
+  producer.callbacks.emit({ signal: 'item', payload: { id: 'item-1' } });
+  producer.finish(success('Reported'));
+  await until(() => step(service, id, 'producer').instances[0].status === 'succeeded');
+  expect(step(service, id, 'finish').instances).toHaveLength(0);
+  service.decide({ runId: id, instanceId: step(service, id, 'review').instances[0].id, choice: 'ok', operationId: 'approve' }, ACTOR);
+  (await runner.next('finish')).finish(success('Complete'));
+  await until(() => service.getRun(id).status === 'succeeded');
+});
+
 test('pins exact published and isolated draft snapshots, validates inputs, and deduplicates launch across revisions', () => {
   const { service } = workspace()();
   const source = `# original whitespace
@@ -491,6 +540,40 @@ test('never links a failed private start to the chat that collided with its rese
   expect(service.listActiveChats().items).toEqual([]);
 });
 
+test('a restart before reservation leaves a failed attempt for manual retry, without dispatching it', async () => {
+  const open = workspace();
+  const first = open(new ControlledRunner(false));
+  publish(first.service);
+  await first.service.start();
+  const { id } = first.service.startRun({ definitionId: 'research', inputs: { topic: 'test' }, executionContext: LOCAL });
+  const { request } = await first.runner.next('research');
+  first.service.close();
+
+  const next = open();
+  await next.service.start();
+  await drain();
+  expect(next.runner.attempts).toHaveLength(0);
+  expect(step(next.service, id, 'research').instances[0]).toMatchObject({
+    status: 'failed', attempts: [{ status: 'failed', chatAvailable: false }],
+  });
+  next.service.retry({ runId: id, instanceId: request.instanceId, operationId: 'explicit-retry' }, ACTOR);
+  expect((await next.runner.next('research')).request.attemptNumber).toBe(2);
+});
+
+test.each([false, true])('runner exception uses durable reservation evidence (reserved: %s)', async reserved => {
+  const { service } = workspace()(new ControlledRunner(), {
+    runner: { async run(_attempt, callbacks) {
+      if (reserved) callbacks.attachChat('private-chat', 'private-turn');
+      throw new Error('Synthetic interrupted admission');
+    } },
+  });
+  publish(service);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'test' }, executionContext: LOCAL });
+  await until(() => service.getRun(id).status === 'attention');
+  expect(step(service, id, 'research').instances[0]?.status).toBe(reserved ? 'unknown' : 'failed');
+});
+
 test('restart between reservation and publication keeps the attempt unknown and unlinked', async () => {
   const open = workspace();
   const first = open(new ControlledRunner(false));
@@ -698,6 +781,11 @@ test('appends a single evidence-backed step and a future listener without replay
   const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'toy geometry' }, executionContext: LOCAL });
   const research = await runner.next('research');
   const evidence = research.callbacks.emit(finding('F1'));
+  research.callbacks.emit({ signal: 'research_started' });
+  const listen = (signal: string) => service.addStep({ runId: id, operationId: 'add-unreachable',
+    source: `id: unreachable\nkind: command\ncommand: "true"\non: {kind: once, signal: research.${signal}}\n`,
+  }, ACTOR);
+  expect(() => listen('research_started')).toThrow('can no longer emit');
   const request = { runId: id, operationId: 'add-selected', evidenceSignalId: evidence.id,
     source: 'id: selected\nkind: decision\nprompt: "Examine {{claim}}"\nbindings: {claim: signal.claim}\nchoices: {done: Done}\n' };
   const amendment = service.addStep(request, ACTOR);
@@ -718,6 +806,10 @@ test('appends a single evidence-backed step and a future listener without replay
   expect(service.getRun(id).amendments).toHaveLength(2);
   expect(service.getRevision('research').definition.steps.map(step => step.id)).toEqual(['research', 'verify', 'summary', 'decide']);
   expect(step(service, id, 'verify').instances.map(instance => instance.key)).toEqual(['F1', 'F2']);
+  research.finish(success('finished'));
+  await until(() => step(service, id, 'research').instances[0]?.status === 'succeeded');
+  expect(() => listen('report_ready')).toThrow('can no longer emit');
+  expect(service.getRun(id).amendments).toHaveLength(2);
 });
 
 test('charges authored and resolved step bytes against one persisted run budget', () => {
@@ -848,7 +940,7 @@ steps:
   await drain();
   expect(service.listActiveChats().items).toEqual([]);
   expect(step(service, id, 'remote').instances[0]).toMatchObject({
-    status: 'unknown', attempts: [{ status: 'unavailable' }, { status: 'unknown', chatAvailable: false }],
+    status: 'unknown', attempts: [{ status: 'unknown', chatAvailable: false }],
   });
   expect(service.getRun(id).signals.map(signal => signal.ref.stepId)).toEqual(['local']);
 });

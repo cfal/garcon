@@ -3,8 +3,8 @@ import { replaceWorkflowPlaceholders } from '../../../common/workflow-definition
 import {
   WORKFLOW_TURN_COMPLETED, type WorkflowAgentStep, type WorkflowDefinition, type WorkflowSignalDefinition, type WorkflowStep, type WorkflowValueType,
 } from '../../../common/workflow-definition.js';
-import type {
-  WorkflowAgentSettings, WorkflowExecutionContext, WorkflowLocation, WorkflowStepSettings,
+import {
+  inheritedWorkflowPath, type WorkflowAgentSettings, type WorkflowExecutionContext, type WorkflowLocation, type WorkflowStepSettings,
 } from '../../../common/workflow-runs.js';
 import { workflowInvalid } from './errors.js';
 import { WORKFLOW_LIMITS } from './limits.js';
@@ -29,9 +29,7 @@ export function captureInputs(definition: WorkflowDefinition, provided: JsonObje
 export function captureLocation(step: Exclude<WorkflowStep, { kind: 'decision' }>, context: WorkflowExecutionContext): WorkflowLocation {
   const executorId = step.executorId ?? context.defaultTarget?.executorId;
   if (!executorId) throw workflowInvalid(`Step "${step.id}" requires an executor.`);
-  const projectPath = step.projectPath
-    ?? (context.defaultTarget?.executorId === executorId ? context.defaultTarget.projectPath : undefined)
-    ?? context.projectPaths?.[executorId];
+  const projectPath = step.projectPath ?? inheritedWorkflowPath(context, executorId);
   if (!projectPath) throw workflowInvalid(`Step "${step.id}" requires a folder on executor "${executorId}".`);
   return { executorId, projectPath };
 }

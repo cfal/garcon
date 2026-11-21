@@ -13,6 +13,11 @@ export interface WorkflowExecutionContext {
   readonly projectPaths?: Readonly<Record<ExecutorId, string>>;
 }
 
+export function inheritedWorkflowPath(context: WorkflowExecutionContext, executorId: ExecutorId | undefined): string | undefined {
+  if (!executorId) return undefined;
+  return context.defaultTarget?.executorId === executorId ? context.defaultTarget.projectPath : context.projectPaths?.[executorId];
+}
+
 export type WorkflowAgentSettings = Pick<WorkflowAgentStep, 'agentId' | 'apiProviderId' | 'modelEndpointId'
   | 'model' | 'permissionMode' | 'thinkingMode' | 'agentSettings' | 'orderedPreambleIds' | 'attachments' | 'tags'> & {
     readonly modelProtocol?: ApiProtocol | null;
@@ -185,6 +190,15 @@ export interface WorkflowRunStep {
   readonly waitingReason: string | null;
   readonly instances: readonly WorkflowStepInstance[];
 }
+
+/** Direct listeners have one producer instance, or none yet while its intake is open. */
+export function workflowProducerCanEmit(intakeOpen: boolean, status?: WorkflowInstanceStatus, attempts = 0): boolean {
+  if (status === undefined) return intakeOpen;
+  if (status === 'failed') return attempts < WORKFLOW_ATTEMPT_LIMIT;
+  return status !== 'succeeded' && status !== 'blocked' && status !== 'unknown';
+}
+
+export const WORKFLOW_ATTEMPT_LIMIT = 16;
 
 export type WorkflowRunAmendment = {
   readonly operationId: string;

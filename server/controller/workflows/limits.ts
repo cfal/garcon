@@ -1,4 +1,5 @@
 import { WORKFLOW_DEFINITION_LIMITS } from '../../../common/workflow-definition.js';
+import { WORKFLOW_ATTEMPT_LIMIT } from '../../../common/workflow-runs.js';
 
 export const WORKFLOW_LIMITS = {
   definitionsPage: 100,
@@ -7,11 +8,10 @@ export const WORKFLOW_LIMITS = {
   globalAttempts: 16,
   steps: WORKFLOW_DEFINITION_LIMITS.steps,
   repeatInstances: 128,
-  attemptsPerInstance: 16,
+  attemptsPerInstance: WORKFLOW_ATTEMPT_LIMIT,
   explicitSignals: 512,
   operations: 1024,
   sourceBytes: WORKFLOW_DEFINITION_LIMITS.sourceBytes,
-  valueBytes: 64 * 1024,
   promptBytes: 128 * 1024,
   stepBytesPerRun: 2 * 1024 * 1024,
   signalBytesPerRun: 2 * 1024 * 1024,

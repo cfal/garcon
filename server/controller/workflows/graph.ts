@@ -5,6 +5,7 @@ import type { JsonObject, JsonValue } from '../../../common/json.js';
 import type {
   WorkflowInstanceStatus, WorkflowLocation, WorkflowRunStatus, WorkflowSignalSource, WorkflowStepSettings, WorkflowTrigger,
 } from '../../../common/workflow-runs.js';
+import { workflowProducerCanEmit } from '../../../common/workflow-runs.js';
 import { bindPrompt, WorkflowBindingError } from './bindings.js';
 import { workflowConflict, workflowLimit } from './errors.js';
 import { WORKFLOW_LIMITS } from './limits.js';
@@ -74,6 +75,19 @@ export class WorkflowGraph {
     const { step, location, settings } = captured;
     if (this.#steps.has(step.id)) throw workflowConflict(`Step "${step.id}" already exists in this run.`);
     if (this.#steps.size >= WORKFLOW_LIMITS.steps) throw workflowLimit('This run has reached its step limit.');
+    if (added && step.on) {
+      const ref = step.on.kind === 'all' ? step.on.close : step.on.signal;
+      const producer = this.#steps.get(ref.stepId)!;
+      const instance = this.db.query<{ status: WorkflowInstanceStatus; attempt_count: number }, [string, string]>(
+        'SELECT status, attempt_count FROM workflow_instances WHERE run_id = ? AND step_id = ? LIMIT 1',
+      ).get(this.runId, ref.stepId);
+      const emittedOnce = step.on.kind !== 'each' && this.db.query(
+        'SELECT 1 FROM workflow_signals WHERE run_id = ? AND step_id = ? AND signal = ? LIMIT 1',
+      ).get(this.runId, ref.stepId, ref.signal);
+      if (emittedOnce || !workflowProducerCanEmit(producer.intake === 'open', instance?.status, instance?.attempt_count)) {
+        throw workflowConflict(`The producer can no longer emit ${label(ref)}. Select a stored result instead.`);
+      }
+    }
     const stepJson = JSON.stringify(step);
     const locationJson = location && JSON.stringify(location);
     const settingsJson = settings && JSON.stringify(settings);

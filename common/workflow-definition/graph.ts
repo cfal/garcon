@@ -135,13 +135,13 @@ function validateStep(
       byId.get(evidence.stepId), 'uses selected evidence from');
   }
 
-  if (step.kind !== 'command') validateBindings(step, field, inputs, triggerSignal, evidence);
+  if (step.kind !== 'command') validateBindings(step, field, inputs, triggerSignal, evidence, byId);
   return dependencies;
 }
 
 function validateBindings(
   step: Exclude<WorkflowStep, { kind: 'command' }>, field: WorkflowField, inputs: WorkflowDefinition['inputs'],
-  triggerSignal: WorkflowSignalDefinition | undefined, evidence: WorkflowSignalReference | undefined,
+  triggerSignal: WorkflowSignalDefinition | undefined, evidence: WorkflowSignalReference | undefined, byId: ReadonlyMap<string, WorkflowStep>,
 ): void {
   const bindings = step.bindings ?? {};
   for (const [name, binding] of Object.entries(bindings)) {
@@ -153,6 +153,8 @@ function validateBindings(
     } else if (binding.kind === 'all') {
       if (step.on?.kind !== 'all' || !step.on.steps.includes(binding.stepId)) {
         entry.issue('invalid-binding', 'Use all.<step> only for a repeat group listed in this step\'s on.steps join.');
+      } else if (byId.get(binding.stepId)?.kind === 'decision') {
+        entry.issue('invalid-binding', 'A decision group has no final text. Keep it in the join but remove its output binding.');
       }
     } else if (!step.on && !evidence) {
       entry.issue('invalid-binding', 'Signal bindings require a subscription or a selected stored signal.');

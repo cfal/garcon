@@ -41,11 +41,17 @@ For typed inputs, keyed verifier instances, a join, and a decision on the summar
 - A diagnostic opens the relevant line and column in the source. Invalid source can be saved to a draft file, but any last valid graph is stale and graph edits, publish, and test are disabled until the source is fixed. If removing a step leaves a dangling reference, the graph edit is rejected; remove the dependency first or fix both in YAML.
 - **Share YAML** previews exactly what **Copy YAML** and **Download YAML** export: the authored source, not run inputs, evidence, chats, or access grants. Literal secrets pasted into a prompt or default are still in that source. Review it before sharing. Executor IDs, folders, attachments, and provider references must resolve for the recipient; sharing does not transfer credentials or files.
 
+Closing or moving the Studio tab keeps unsaved draft edits in this browser workspace. Reopen **New Workflow** to continue. Save the file or publish before leaving the browser; drafts are not persisted across a reload.
+
+A file path or matching name does not identify a published definition. **Publish new definition** from a freshly opened file creates revision 1. To update an existing definition later, select its published revision under **New run** and choose **Edit definition**.
+
 **Test run** really executes the draft, in a separate run without publishing. **Publish** creates a revision without running anything. Editing, moving, or deleting the source file does not change a published revision or an existing run. Only run definitions you trust: [Garcon does not sandbox agents or Shell commands](security.md).
 
 ## YAML v1
 
 Use one UTF-8 YAML 1.2 mapping with `version: 1`, `name`, and a `steps` list of 1 to 64 entries. `description` and `inputs` are optional. The source limit is 256 KiB. Comments and literal blocks (`|`) are supported; duplicate keys, explicit tags, anchors, aliases, merge keys, and multiple documents are not. Each entry of `inputs` has a `type` (`string`, `number`, `boolean`, or `json`) and optional `description` and `default`. Without a default, the input is required at launch.
+
+Launch inputs, including their defaults, must fit in 64 KiB of encoded JSON.
 
 Each step has a unique `id`, a `kind`, and optional display `name` and start condition `on`. Use stable IDs with letters, digits, underscores, and hyphens, starting with a letter or digit. Step list order is not execution order.
 
@@ -80,6 +86,8 @@ Joins include accepted items that are still queued and items manually added befo
 
 For agent and decision prompts, map placeholder names to data, for example `bindings: { topic: inputs.topic, claim: signal.claim }`, then use `{{topic}}` and `{{claim}}` in `prompt`. `inputs.<name>` selects a launch input. `signal` selects the whole triggering payload (the close signal in a join), and `signal.<field>` selects a declared JSON field. `all.<step>` binds the complete final text of a joined group as a JSON array in intake order. Strings are inserted as text; other values are rendered as JSON. Bindings are not expressions and are not expanded recursively.
 
+Decision groups can participate in a join, but cannot supply an `all.<step>` output binding: they produce a choice, not final text.
+
 ### Live Signals
 
 On an agent step, declare each custom signal under `signals`. Set `payload` to `none`, `text`, or `json`. `delivery` defaults to `once`. For `delivery: many`, use `payload: json`, declare `fields` with their types, and set `key` to a declared string field. For example, `finding_ready: { payload: json, delivery: many, fields: { finding_id: string, claim: string }, key: finding_id }`. Declared fields are required in the payload. A whole JSON value can be bound without declaring fields, but field bindings require a declaration.
@@ -112,3 +120,5 @@ Open a run from the sidebar or **Recent runs**. Use the graph or list to select 
 - **Add step** adds run-only work. Start independently, wait for a future signal, or select **Use a stored result**. A future listener does not replay prior signals. **Add step from result** chooses already recorded evidence, and an agent or decision can include its payload in the prompt. Existing dependencies and the published definition stay unchanged. To follow up on a succeeded run, start a new run.
 - **Retry step** is for a definitively failed attempt. **Outcome unknown** means Garcon could not confirm what happened. Inspect the executor and original chat before starting replacement work. If chat creation itself was not confirmed, there is no attempt link; check the ordinary chat list. A restart retains accepted signals and recorded history. Ready work can still start, but Garcon does not replay running attempts, infer success, or retry unknown work. This differs from **Retry same action** or **Retry same launch** after an unconfirmed browser request, which checks or resends the same operation rather than creating another attempt or run.
 - **Archive run** retires the run without deleting its revision, inputs, signals, attempts, or chats. It refuses while a live attempt is unsettled. Archiving is not Stop and does not undo any side effects from an unknown attempt. Once archived, pending work will not dispatch and the run no longer accepts decisions, retries, or additions. Its history remains available, and it no longer holds workflow executor or provider references. Individual chats and other runs can still hold those references. Archiving does not retire the definition.
+
+If admission reports that the executor is unavailable before a chat is reserved, the instance waits for readiness without spending any of its 16 attempts. An interruption or restart before reservation is instead marked failed and can be retried manually. Once a chat was reserved, a restart without a confirmed terminal outcome leaves the attempt unknown.

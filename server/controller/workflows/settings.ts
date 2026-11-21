@@ -58,6 +58,9 @@ export async function prepareWorkflowSettings(
       (!step.agentId || option.agentId === step.agentId) && option.agentId !== 'shell' &&
       (!catalog || catalog.catalog.agents.some(agent => agent.id === option.agentId && agent.executionPolicy !== 'literal')));
     const agentId = step.agentId ?? recent?.agentId ?? DEFAULT_AGENT_ID;
+    if (step.agentSettings && step.agentSettings.ownerId !== agentId) {
+      throw new ValidationDomainError(`Step "${step.id}": settings for "${step.agentSettings.ownerId}" do not belong to the resolved agent "${agentId}". Set agentId explicitly or change agentSettings.`);
+    }
     const entry = catalog?.catalog.agents.find(agent => agent.id === agentId);
     if (agentId === 'shell' || entry?.executionPolicy === 'literal') throw new ValidationDomainError(`Step "${step.id}": use a command step to run Shell.`);
     const recentRoute = !step.model && step.apiProviderId === undefined && step.modelEndpointId === undefined ? recent : undefined;
