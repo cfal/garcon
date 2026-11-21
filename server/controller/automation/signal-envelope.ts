@@ -14,6 +14,11 @@ export function workflowSignalCandidates(content: string): readonly AutomationSi
   if (Buffer.byteLength(content) > GARCON_COMMAND_ENVELOPE_MAX_BYTES) {
     return OPEN.test(content) ? [{ kind: 'invalid', reason: 'Workflow emit message is too large.' }] : [];
   }
+  // A raw payload can itself contain Markdown paragraphs.
+  if (OPEN.test(content)) {
+    const entireMessage = parseCandidate(content.trimEnd());
+    if (entireMessage.kind === 'emit') return [entireMessage];
+  }
   const candidates: AutomationSignalCandidate[] = [];
   for (const token of Lexer.lex(content)) {
     if (token.type === 'space') continue;
