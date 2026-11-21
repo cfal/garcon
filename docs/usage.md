@@ -66,9 +66,7 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
 - Codex 0.169.0 writes a `token_usage_record` for every billed response,
   including remote compaction, before that response's `token_count`. Once a
   rollout has records, only records are billed, keyed by `response_id`, and
-  `token_count` only reports context size. At the start of a native fork, a
-  record whose `thread_id` matches the fork's native ID counts as its own
-  response, regardless of how quickly it arrives. Records with no response id or
+  `token_count` only reports context size. Records with no response id or
   usage, or with no known model, are malformed. Records with a matching turn ID
   use the speed at turn start, including compaction billed before `turn_context`.
   Live edits do not reprice the active turn. When the record names a different turn,
@@ -80,10 +78,12 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   latest `thread_settings_applied`. Cumulative counters reconcile each request
   delta; inconsistent events are skipped and reported as malformed. Garcon's JSONL fork copies events verbatim under a new session id,
   so a request's identity is its event time, model, and counters, and copies
-  count once. Codex's native forks restamp the copied history; those copies are
-  recognized by timing when ownership cannot be confirmed: copied usage
-  arrives in a burst right after the fork's `session_meta`,
-  since legacy rollouts record no explicit boundary
+  count once.
+- Codex native forks restamp copied history. A response whose `thread_id` matches
+  the fork's native UUID (`session_meta.id`) ends the copy burst and counts immediately.
+  Otherwise, the parser treats usage as copied until the first gap of at least one
+  second, measured from `session_meta` or the preceding copied usage event.
+  Legacy rollouts have no explicit copy boundary
   (`forked_from_ordinal_exclusive` is set only for reverts and paginated
   history).
 - Both parsers read the first JSON value of a line that lost its newline, as

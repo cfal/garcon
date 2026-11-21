@@ -167,13 +167,10 @@ describe('Codex scripted per-chat speed', () => {
       expect((await savedSettings(fastChat)).values.speed).toBe('ultrafast');
       await expectTurnTier(resumeChat, fastChat, 'ultrafast');
       await changeSpeed(standardChild, 'fast');
-      for (const [child, tier, expectedSpeeds] of [
-        [premiumChild, 'ultrafast', ['ultrafast', 'ultrafast']],
-        [standardChild, 'priority', ['standard', 'fast']],
-      ] satisfies [string, InferenceTier, Speed[]][]) {
-        await expectTurnTier(resumeChat, child, tier);
-        expect(await recordedSpeeds(child)).toEqual(expectedSpeeds);
-      }
+      await expectTurnTier(resumeChat, premiumChild, 'ultrafast');
+      expect(await recordedSpeeds(premiumChild)).toEqual(['ultrafast', 'ultrafast']);
+      await expectTurnTier(resumeChat, standardChild, 'priority');
+      expect(await recordedSpeeds(standardChild)).toEqual(['standard', 'fast']);
 
       await changeSpeed(fastChat, 'fast');
       environment.model.scriptTurn([codexAssistantMessage('Synthetic compaction summary.')]);

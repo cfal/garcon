@@ -28,7 +28,7 @@ const USAGE_FIELDS = [
   'total_tokens',
 ] as const satisfies readonly (keyof CodexTokenUsage)[];
 
-// Restamped copies arrive in a burst. Only a matching native thread ID proves a fast response is new.
+// Native forks restamp inherited usage in a burst.
 const FORK_COPY_MAX_GAP_MS = 1000;
 const NATIVE_THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
@@ -145,8 +145,8 @@ function consumeForkCopy(state: CodexUsageState, timestampMs: number, threadId?:
   // Verbatim forks retain the original response's thread ID and dedupe by response ID;
   // a mismatch alone does not identify a restamped copy.
   // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/protocol.rs#L2568-L2576
-  const childResponse = state.forkThreadId !== null && threadId === state.forkThreadId;
-  if (!childResponse && timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
+  const belongsToChild = state.forkThreadId !== null && threadId === state.forkThreadId;
+  if (!belongsToChild && timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
     state.forkCopyAnchorMs = timestampMs;
     return true;
   }
@@ -179,6 +179,7 @@ function usageRecord(
 // Bills one response. Its id identifies the request across verbatim and restamped fork copies.
 function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string, unknown>, state: CodexUsageState): UsageRecord | MalformedUsage | null {
   const timestampMs = parseTimestampMs(entry.timestamp);
+  // Even a skipped copy makes its delayed token_count context-only.
   state.sawUsageRecord = true;
   if (timestampMs !== null && consumeForkCopy(state, timestampMs, payload.thread_id)) return null;
   const usage = readTokenUsage(payload.usage);
@@ -273,7 +274,6 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   const previous = state.lastCumulativeUsage;
   // A valid snapshot stays the next baseline even when its paired request is malformed.
   if (cumulative !== null) state.lastCumulativeUsage = cumulative;
-  // The session's usage records already billed this response.
   if (state.sawUsageRecord) return null;
   const malformed: MalformedUsage = { malformed: true, timestampMs };
   if (last === null || (hasCumulative && cumulative === null)) return malformed;
