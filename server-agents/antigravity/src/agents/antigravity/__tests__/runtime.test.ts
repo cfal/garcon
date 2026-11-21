@@ -53,12 +53,22 @@ class FakeAntigravityAgent {
   configReplyReportsOptions = true;
   // When set, `session/resume` fails with this internal error.
   resumeFailure: string | null = null;
+  // When set, `session/resume` replies only after this settles.
+  resumeGate: Promise<void> | null = null;
   // When set, `session/set_config_option` replies only after this settles.
   configReplyGate: Promise<void> | null = null;
 
   // Each spawn is a fresh process; later frames go to the newest one.
+  // Ends the newest process as a crash would.
+  crash(code = 1): void {
+    this.#exitCurrent?.(code);
+  }
+
+  #exitCurrent: ((code: number) => void) | null = null;
+
   process(): AcpProcess {
     const exited = Promise.withResolvers<number>();
+    this.#exitCurrent = exited.resolve;
     return {
       stdin: { write: (data: string | Uint8Array) => this.#receive(String(data)) },
       stdout: new ReadableStream<Uint8Array>({ start: (controller) => { this.#stdout = controller; } }),
@@ -129,7 +139,14 @@ class FakeAntigravityAgent {
         if (!this.sessions.has(String(params.sessionId))) {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
         }
-        return reply(this.resumeReportsOptions ? { models: MODELS, configOptions: [MODE_OPTION] } : { models: MODELS });
+      {
+        const result = this.resumeReportsOptions ? { models: MODELS, configOptions: [MODE_OPTION] } : { models: MODELS };
+        if (this.resumeGate) {
+          void this.resumeGate.then(() => reply(result));
+          return;
+        }
+        return reply(result);
+      }
       case 'session/set_config_option':
       {
         const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, currentValue: params.value }] } : {};
@@ -160,11 +177,11 @@ const CONFIG: AntigravityConfig = {
   authMethod: () => 'oauth-personal',
 };
 
-function harness() {
+function harness(options: { readonly requestTimeoutMs?: number } = {}) {
   const agent = new FakeAntigravityAgent();
   const runtime = new AcpAgentRuntime(createAntigravityAcpPolicy(CONFIG), {
     converter: new AntigravityAcpEventConverter(),
-    createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+    createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: options.requestTimeoutMs ?? 2_000 }),
     cancelSettleTimeoutMs: 100,
   });
   const events: AgentRuntimeEvent[] = [];
@@ -586,6 +603,77 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('lets a prompt outlast the transport request timeout', async () => {
+    const { agent, runtime, events, request } = harness({ requestTimeoutMs: 50 });
+    agent.onPrompt((fake, sessionId) => setTimeout(() => {
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Long turn.' } });
+      fake.endPrompt();
+    }, 200));
+
+    await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    expect(runEnded(events)[0]).toMatchObject({ outcome: 'finished' });
+  });
+
+  it('does not register a session whose restore was released mid-flight', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    const gate = Promise.withResolvers<void>();
+    agent.resumeGate = gate.promise;
+
+    const turn = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/resume').length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    gate.resolve();
+
+    await expect(turn).rejects.toThrow('was released while it was being restored');
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+    expect(agent.requests('session/prompt')).toHaveLength(1);
+  });
+
+  it('retires a session whose process exits while a turn is configured', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    agent.configReplyGate = new Promise(() => {});
+
+    const turn = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    agent.crash();
+    await expect(turn).rejects.toThrow();
+    agent.configReplyGate = null;
+
+    await runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    expect(agent.requests('initialize')).toHaveLength(2);
+    expect(agent.requests('session/resume')).toHaveLength(1);
+    runtime.shutdown();
+  });
+
+  it('lets a follow-up wait for a turn stopped while it was configured', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    const gate = Promise.withResolvers<void>();
+    agent.configReplyGate = gate.promise;
+
+    const stopped = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    runtime.abort(started.agentSessionId);
+    const followUp = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    agent.configReplyGate = null;
+    gate.resolve();
+
+    await stopped;
+    await followUp;
+    expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
   it('fails the run when agy reports an executor error in-band', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => {
@@ -624,6 +712,23 @@ describe('Antigravity ACP runtime', () => {
 });
 
 describe('Antigravity one-shot query', () => {
+  it('fails only when the executor error is the final output, keeping earlier text', async () => {
+    const run = async (chunks: readonly string[]) => {
+      const agent = new FakeAntigravityAgent();
+      agent.onPrompt((fake, sessionId) => {
+        for (const text of chunks) fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
+        setTimeout(() => fake.endPrompt(), 20);
+      });
+      return runAntigravitySingleQuery('Name this chat.', {
+        projectPath: '/work',
+        signal: new AbortController().signal,
+        createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+      }, CONFIG);
+    };
+    await expect(run(['Partial.\n⚠ agent executor error: Error 429\n'])).rejects.toThrow('Antigravity agent executor error: Error 429');
+    expect(await run(['Quoted:', '\n⚠ agent executor error: x\n', 'and more.'])).toBe('Quoted:\n⚠ agent executor error: x\nand more.');
+  });
+
   it('runs in plan mode and rejects every permission request', async () => {
     const agent = new FakeAntigravityAgent();
     agent.onPrompt((fake, sessionId) => {

@@ -80,13 +80,19 @@ export class AcpTransport extends EventEmitter {
     void this.#watchExit(this.#process.exited);
   }
 
-  async request<T>(method: string, params?: unknown, onSent?: () => void): Promise<T> {
+  // `timeoutMs` overrides the transport default for one request; 0 disables it.
+  async request<T>(
+    method: string,
+    params?: unknown,
+    onSent?: () => void,
+    timeoutMs: number = this.#requestTimeoutMs,
+  ): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = this.#requestTimeoutMs > 0
+      const timer = timeoutMs > 0
         ? setTimeout(() => {
-          this.#rejectPending(id, new Error(`ACP request timed out after ${this.#requestTimeoutMs}ms: ${method}`));
-        }, this.#requestTimeoutMs)
+          this.#rejectPending(id, new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`));
+        }, timeoutMs)
         : null;
       timer?.unref?.();
       this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });

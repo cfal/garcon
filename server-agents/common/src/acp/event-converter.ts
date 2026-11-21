@@ -51,3 +51,11 @@ export function asObject(value: unknown): Record<string, unknown> {
 export function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
+
+// Text of an ACP content block, a bare string, or a list of either.
+export function acpContentText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(acpContentText).join('');
+  const raw = asObject(value);
+  return asString(raw.text ?? raw.content ?? raw.delta) ?? '';
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   AntigravityAcpEventConverter,
-  antigravityExecutorError,
+  splitExecutorError,
 } from '../antigravity-acp-event-converter.ts';
 
 const SESSION = 'session-1';
@@ -336,10 +336,10 @@ describe('AntigravityAcpEventConverter', () => {
   });
 });
 
-describe('antigravityExecutorError', () => {
+describe('splitExecutorError', () => {
   it('matches only the complete marker chunk', () => {
-    expect(antigravityExecutorError('agent executor error: quoted by the model')).toBeNull();
-    expect(antigravityExecutorError('Note: ⚠ agent executor error: not at a line start')).toBeNull();
-    expect(antigravityExecutorError('\n⚠ agent executor error: Error 429\n')).toBe('Antigravity agent executor error: Error 429');
+    expect(splitExecutorError('agent executor error: quoted by the model').failure).toBeNull();
+    expect(splitExecutorError('Note: ⚠ agent executor error: not at a line start').failure).toBeNull();
+    expect(splitExecutorError('\n⚠ agent executor error: Error 429\n').failure).toBe('Antigravity agent executor error: Error 429');
   });
 });

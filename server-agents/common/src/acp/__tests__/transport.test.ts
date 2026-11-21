@@ -72,6 +72,16 @@ describe('AcpTransport', () => {
     await expect(transport.request('slow')).rejects.toThrow('ACP request timed out after 5ms: slow');
   });
 
+  it('lets a request opt out of the transport timeout', async () => {
+    const proc = createProcess();
+    const transport = await connectedTransport(proc, 5);
+
+    const result = transport.request('session/prompt', undefined, undefined, 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    writeStdout(proc.stdout, { jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } });
+    await expect(result).resolves.toEqual({ stopReason: 'end_turn' });
+  });
+
   it('rejects pending requests when closed', async () => {
     const proc = createProcess();
     const transport = await connectedTransport(proc, 1000);

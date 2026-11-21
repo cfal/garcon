@@ -7,7 +7,7 @@ import { runAcpSingleQuery } from '@garcon/server-agent-common/acp/single-query'
 import type { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
-import { antigravityExecutorError } from './antigravity-acp-event-converter.js';
+import { splitExecutorError } from './antigravity-acp-event-converter.js';
 import { applyAntigravityMode, applyAntigravityModel } from './antigravity-acp-policy.js';
 
 export interface AntigravitySingleQueryOptions {
@@ -58,6 +58,6 @@ export async function runAntigravitySingleQuery(
       await applyAntigravityModel(client, created.sessionId, created.models, options.model);
       await applyAntigravityMode(client, created.sessionId, created.configOptions, 'plan');
     },
-    failureFromChunk: antigravityExecutorError,
+    splitFailure: splitExecutorError,
   }));
 }

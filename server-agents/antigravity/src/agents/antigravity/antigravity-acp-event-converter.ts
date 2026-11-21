@@ -6,6 +6,7 @@ import {
   type ToolUseChatMessage,
 } from '@garcon/common/chat-types';
 import {
+  acpContentText,
   asObject,
   asString,
   type AcpEventConverter,
@@ -52,14 +53,6 @@ export function splitExecutorError(text: string): { readonly text: string; reado
   };
 }
 
-export function antigravityExecutorError(text: string): string | null {
-  return splitExecutorError(text).failure;
-}
-
-function chunkText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  return asString(asObject(value).text) ?? '';
-}
 
 function toolResultText(update: Record<string, unknown>): string {
   const rawOutput = asObject(update.rawOutput);
@@ -103,7 +96,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       // interleaved output keeps the order the agent produced it in.
       case 'agent_message_chunk': {
         this.#continueAfterFailureCandidate(session);
-        const chunk = chunkText(update.content);
+        const chunk = acpContentText(update.content);
         const { text, failure } = splitExecutorError(chunk);
         const flushed = session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
         session.assistantText += text;
@@ -113,7 +106,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       case 'agent_thought_chunk': {
         this.#continueAfterFailureCandidate(session);
         const flushed = session.assistantText.trim() ? this.#flush(session, context.timestamp) : [];
-        session.thinkingText += chunkText(update.content);
+        session.thinkingText += acpContentText(update.content);
         return flushed;
       }
       case 'tool_call':
