@@ -54,7 +54,15 @@ export function preambleMatchesNewChatDefaults(
   preamble: Preamble,
   context: NewChatPreambleContext,
 ): boolean {
-  if (!preambleMatchesProjectPath(preamble, context.canonicalProjectPath, context.executorId)) return false;
+  return preambleScopeMatches(preamble, context.canonicalProjectPath, context.executorId)
+    && preambleMatchesDefaultFilters(preamble, context);
+}
+
+export function preambleMatchesDefaultFilters(
+  preamble: Preamble,
+  context: Pick<NewChatPreambleContext, 'agentId' | 'tags'>,
+): boolean {
+  if (!preamble.enabled) return false;
   if (preamble.agentIds.length > 0 && !preamble.agentIds.includes(context.agentId)) return false;
   if (preamble.tagFilter.tags.length === 0) return true;
 

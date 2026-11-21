@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createEmptyAgentSettings } from '../../../../common/agent-settings.js';
+import type { ModelCatalogResponse } from '../../../../common/model-catalog.js';
+import type { Preamble } from '../../../../common/preambles.js';
 import { defaultExecutionDefaults } from '../../../../common/settings.js';
 import type { WorkflowAgentStep } from '../../../../common/workflow-definition.js';
 import type { AutomationExecutionPort } from '../../automation/service.js';
@@ -14,6 +16,7 @@ const saved = { agentId: 'codex', model: 'remote-model', apiProviderId: 'custom'
 const source = {
   ready: () => false,
   catalog: async () => { throw new Error('Offline catalog must not be consulted.'); },
+  inspectProject: async () => { throw new Error('Offline folders must not be inspected.'); },
   defaults: () => ({ global: { ...defaultExecutionDefaults(), permissionMode: 'default' as const }, byAgent: {} }),
   recents: () => [{ ...saved, executorId: 'local', model: 'other' }, { ...saved, executorId: remote }],
   preambles: () => ({ revision: 0, preambles: [] }),
@@ -38,6 +41,51 @@ test('offline steps never inherit a bypass grant or borrow a model from Local', 
   expect(() => missing(step, location)).toThrow('Choose one explicitly');
 });
 
+const scopedPreamble = (id: string, executorId: string): Preamble => ({ id, createdAt: '', updatedAt: '', enabled: true,
+  title: 'Review', content: 'Review changes.', agentIds: ['codex'], tagFilter: { mode: 'any', tags: ['review'] },
+  scope: { type: 'project-paths', rules: [{ executorId, projectPath: '/canonical/review', includeNested: true }] } });
+const nativeCatalog: ModelCatalogResponse = { catalog: { apiProviders: [], agents: [{
+  id: 'codex', label: 'Codex', kind: 'agent', selectionLabel: 'Model', inputFormatByModel: {}, executionPolicy: 'conversation',
+  generation: null, models: [{ value: 'test-model', label: 'Test model' }], defaultModel: 'test-model',
+  supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: [], defaultSettings: createEmptyAgentSettings('codex'),
+  supportsCompact: false, supportsFork: false, supportsForkAtMessage: false, supportsForkWhileRunning: false,
+  supportsSteering: false, supportsUpdateProjectPath: false, supportsImages: false, acceptsApiProviderEndpoints: false,
+  supportedProtocols: [], authLoginSupported: false, requiresStrictModelDiscovery: true,
+}] } };
+
+test('workflow defaults inspect each executor-qualified folder once and match its canonical path', async () => {
+  const inspect = { ...step, tags: ['review'], model: 'test-model' };
+  const inspectAgain = { ...inspect, id: 'again' };
+  const local = { ...inspect, id: 'local', executorId: 'local', projectPath: location.projectPath };
+  const inspected: string[] = [];
+  const capture = await prepareWorkflowSettings([inspect, inspectAgain, local], { defaultTarget: location }, {
+    ...source, ready: () => true, catalog: async () => nativeCatalog,
+    preambles: () => ({ revision: 1, preambles: [scopedPreamble('remote-rule', remote), scopedPreamble('local-rule', 'local')] }),
+    async inspectProject(path, id) {
+      expect(path).toBe(location.projectPath);
+      inspected.push(String(id));
+      return { kind: 'available', effectiveProjectKey: id === remote ? '/canonical/review/nested' : '/canonical/other' };
+    },
+  });
+  expect(inspected).toEqual([remote, 'local']);
+  expect(capture(inspect, location).orderedPreambleIds).toEqual(['remote-rule']);
+  expect(capture(inspectAgain, location).orderedPreambleIds).toEqual(['remote-rule']);
+  expect(capture(local, { executorId: 'local', projectPath: location.projectPath }).orderedPreambleIds).toEqual([]);
+});
+
+test('offline defaults need a canonical folder only for matching scope, agent and tags; an explicit list is sufficient', async () => {
+  const inspect = { ...step, tags: ['review'] };
+  const ctx = { defaultTarget: location };
+  const options = { ...source, preambles: () => ({ revision: 1, preambles: [scopedPreamble('remote-rule', remote)] }) };
+  const capture = await prepareWorkflowSettings([inspect], ctx, options);
+  expect(() => capture(inspect, location)).toThrow('reconnect executor');
+  expect(capture({ ...inspect, orderedPreambleIds: [] }, location).orderedPreambleIds).toEqual([]);
+  expect(capture(step, location).orderedPreambleIds).toEqual([]);
+  const elsewhere = await prepareWorkflowSettings([inspect], ctx, { ...source,
+    preambles: () => ({ revision: 1, preambles: [scopedPreamble('local-rule', 'local')] }) });
+  expect(elsewhere(inspect, location).orderedPreambleIds).toEqual([]);
+});
+
 test('attachments are read on the step executor and sent using normal chat attachment validation', async () => {
   let preflight = 0;
   const port: AutomationExecutionPort = {
@@ -60,6 +108,7 @@ test('attachments are read on the step executor and sent using normal chat attac
   const callbacks = {
     signal: new AbortController().signal,
     attachChat() { throw new Error('No chat should have been created.'); },
+    confirmChat() { throw new Error('No chat should have been published.'); },
     emit() { throw new Error('No signal should have been observed.'); },
   } satisfies WorkflowAttemptCallbacks;
   const result = await runner.run({ runId: 'r', stepId: 's', instanceId: 'i', attemptId: 'a', attemptNumber: 1,

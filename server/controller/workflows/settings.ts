@@ -5,11 +5,13 @@ import { effectiveExecutorId } from '../../../common/executors.js';
 import { executionDefaultsForAgent } from '../../../common/execution-defaults.js';
 import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import type { PreamblesSnapshot } from '../../../common/preambles.js';
+import { projectTargetKey, type ProjectInspector } from '../../../common/project-resolution.js';
 import type { RecentAgentSetting, RemoteExecutionDefaults } from '../../../common/settings.js';
 import { resolveStartSelection, StartSelectionError } from '../../../common/start-selection.js';
 import type { WorkflowAgentStep, WorkflowStep } from '../../../common/workflow-definition.js';
 import type { WorkflowAgentSettings, WorkflowExecutionContext, WorkflowLocation } from '../../../common/workflow-runs.js';
 import { ValidationDomainError } from '../../common/domain-error.js';
+import { preambleMatchesDefaultFilters } from '../preambles/matching.js';
 import { defaultOrderedPreambleIds } from '../preambles/selection.js';
 import { captureLocation } from './bindings.js';
 import type { WorkflowSettingsResolver } from './engine.js';
@@ -17,6 +19,7 @@ import type { WorkflowSettingsResolver } from './engine.js';
 export interface WorkflowSelectionSource {
   ready(executorId: string): boolean;
   catalog(executorId: string): Promise<ModelCatalogResponse>;
+  inspectProject: ProjectInspector;
   recents(): readonly RecentAgentSetting[];
   defaults(): RemoteExecutionDefaults;
   preambles(): PreamblesSnapshot;
@@ -26,13 +29,28 @@ export interface WorkflowSelectionSource {
 export async function prepareWorkflowSettings(
   steps: readonly WorkflowStep[], context: WorkflowExecutionContext, source: WorkflowSelectionSource,
 ): Promise<WorkflowSettingsResolver> {
-  const ids = new Set(steps.filter(step => step.kind === 'agent').map(step => captureLocation(step, context).executorId));
+  const agents = steps.filter(step => step.kind === 'agent');
+  const ids = new Set(agents.map(step => captureLocation(step, context).executorId));
   const catalogs = new Map<string, ModelCatalogResponse>();
   // Per-launch catalogs avoid crossing a config change or leaking one launcher's defaults into another.
   for (const id of ids) {
     if (source.ready(id)) catalogs.set(id, await source.catalog(id));
   }
   const recents = source.recents(), defaults = source.defaults(), preambles = source.preambles();
+  const scopedDefaults = (executorId: string) => preambles.preambles.filter(p => p.enabled && p.scope.type === 'project-paths'
+    && p.scope.rules.some(rule => effectiveExecutorId(rule.executorId) === executorId));
+  const canonical = new Map<string, string>();
+  for (const step of agents) {
+    const location = captureLocation(step, context);
+    if (step.orderedPreambleIds !== undefined || !catalogs.has(location.executorId) || !scopedDefaults(location.executorId).length) continue;
+    const key = projectTargetKey({ kind: 'path', ...location });
+    if (canonical.has(key)) continue;
+    const result = await source.inspectProject(location.projectPath, location.executorId);
+    if (result.kind === 'unavailable') {
+      throw new ValidationDomainError(`Step "${step.id}": cannot resolve folder "${location.projectPath}" on executor "${location.executorId}" (${result.reason}). Choose an accessible folder.`);
+    }
+    canonical.set(key, result.effectiveProjectKey);
+  }
   return (step: WorkflowAgentStep, location: WorkflowLocation): WorkflowAgentSettings => {
     const { executorId, projectPath } = location;
     const catalog = catalogs.get(executorId);
@@ -71,8 +89,13 @@ export async function prepareWorkflowSettings(
     }
     const route = selection.apiProviderId && selection.modelEndpointId
       ? source.providerRoute(executorId, selection.apiProviderId, selection.modelEndpointId) : null;
+    const tags = step.tags ?? [];
+    if (step.orderedPreambleIds === undefined && !catalog && scopedDefaults(executorId).some(p => preambleMatchesDefaultFilters(p, { agentId, tags }))) {
+      throw new ValidationDomainError(`Step "${step.id}": reconnect executor "${executorId}" to resolve folder-scoped preambles, or set orderedPreambleIds explicitly ([] for none).`);
+    }
+    const canonicalProjectPath = canonical.get(projectTargetKey({ kind: 'path', ...location })) ?? projectPath;
     return { ...selection, agentId, modelProtocol: route?.protocol ?? null, providerRevision: route?.revision ?? null,
-      orderedPreambleIds: step.orderedPreambleIds ?? defaultOrderedPreambleIds(preambles, { executorId, canonicalProjectPath: projectPath, agentId, tags: step.tags ?? [] }),
+      orderedPreambleIds: step.orderedPreambleIds ?? defaultOrderedPreambleIds(preambles, { executorId, canonicalProjectPath, agentId, tags }),
       ...(step.agentSettings && { agentSettings: step.agentSettings }) };
   };
 }

@@ -12,7 +12,7 @@ import { initializeWorkflows } from './setup.js';
 export function createControllerWorkflows(workspaceDir: string, deps: {
   automation: AutomationService;
   executors: ExecutorManager;
-  chats: Pick<IChatRegistry, 'onChatRemoved'>;
+  chats: Pick<IChatRegistry, 'onChatRemoved' | 'hasChat'>;
   modelCatalog: ModelCatalog;
   modelCatalogResponseCache: ModelCatalogResponseCache;
   settings: Pick<SettingsStore, 'getRecentAgentSettings' | 'getExecutionDefaults'>;
@@ -23,10 +23,12 @@ export function createControllerWorkflows(workspaceDir: string, deps: {
   const { automation, executors } = deps;
   const runtime = initializeWorkflows(workspaceDir, {
     runner: createWorkflowRunner(automation, id => executors.requireExecutor(id).getFilesService()),
+    hasChat: id => deps.chats.hasChat(id),
     retainExecutorReferences: executors.retainReferences,
     retainProviderReferences: deps.retainProviderReferences,
   }, {
     ready: id => executors.isReady(id),
+    inspectProject: executors.inspectProject,
     catalog: async id => (await deps.modelCatalogResponseCache.getSnapshot(deps.modelCatalog, id)).body,
     recents: () => deps.settings.getRecentAgentSettings(),
     defaults: () => deps.settings.getExecutionDefaults(),

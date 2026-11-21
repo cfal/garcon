@@ -118,6 +118,7 @@ export function createWorkflowRunner(automation: AutomationExecutionPort, files:
         }
         const started = await turn.start();
         if (started.kind === 'unknown') return { kind: 'unknown', reason: started.reason };
+        if (started.kind === 'published' || started.inputPublished) callbacks.confirmChat();
         if (started.kind === 'not-started') return {
           kind: started.inputPublished ? 'unknown' : offline(started.code) ? 'unavailable' : 'failed', reason: started.code,
         };

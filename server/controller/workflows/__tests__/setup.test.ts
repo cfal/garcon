@@ -9,7 +9,7 @@ test('a fenced workflow store cannot break ordinary chat deletion or drop refere
   const dir = mkdtempSync(join(tmpdir(), 'workflow-isolation-'));
   const unexpected = () => { throw new Error('No selection or dispatch expected'); };
   const runtime = initializeWorkflows(dir, { runner: { run: unexpected } }, {
-    ready: unexpected, catalog: unexpected, recents: unexpected, defaults: unexpected, preambles: unexpected, providerRoute: unexpected,
+    ready: unexpected, catalog: unexpected, inspectProject: unexpected, recents: unexpected, defaults: unexpected, preambles: unexpected, providerRoute: unexpected,
   });
   try {
     await runtime.start();
