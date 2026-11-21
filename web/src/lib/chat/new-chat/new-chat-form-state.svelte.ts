@@ -185,8 +185,7 @@ export class NewChatFormState {
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
-		this.#cancelWorktreeLoad();
-		this.worktreeModalOpen = false;
+		this.closeWorktreeModal();
 		this.showBrowser = false;
 		this.resetTabCompletions();
 		this.selectedModelsByAgent = {};
@@ -835,10 +834,8 @@ export class NewChatFormState {
 		this.showBrowser = false;
 		this.hasAutoOpened = false;
 		this.gitRepoStatus = 'unknown';
-		this.worktreeModalOpen = false;
+		this.closeWorktreeModal();
 		this.worktreeItems = [];
-		this.worktreeCreateError = null;
-		this.worktreeLoadError = null;
 		this.chatTags = [];
 		this.showTagInput = false;
 		this.#permissionModeTouched = false;
