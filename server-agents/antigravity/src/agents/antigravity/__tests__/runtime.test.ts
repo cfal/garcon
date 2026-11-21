@@ -51,6 +51,8 @@ class FakeAntigravityAgent {
   modeOptions: Array<{ value: string }> = MODE_OPTION.options;
   // Whether `session/set_config_option` replies with the session's options.
   configReplyReportsOptions = true;
+  // When set, `session/resume` fails with this internal error.
+  resumeFailure: string | null = null;
   // When set, `session/set_config_option` replies only after this settles.
   configReplyGate: Promise<void> | null = null;
 
@@ -121,6 +123,9 @@ class FakeAntigravityAgent {
         return reply({ sessionId, models: MODELS, configOptions: [{ ...MODE_OPTION, options: this.modeOptions }] });
       }
       case 'session/resume':
+        if (this.resumeFailure) {
+          return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: this.resumeFailure } });
+        }
         if (!this.sessions.has(String(params.sessionId))) {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
         }
@@ -536,6 +541,48 @@ describe('Antigravity ACP runtime', () => {
     expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
     expect(agent.requests('session/resume')).toHaveLength(1);
     expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
+  it('leaves no session behind when a restore fails partway', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+
+    agent.resumeFailure = 'Synthetic resume failure';
+    await expect(runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId })).rejects.toThrow('Synthetic resume failure');
+    agent.resumeFailure = null;
+
+    await runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    expect(agent.requests('session/resume')).toHaveLength(2);
+    expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
+  it('does not mark a turn started when Stop lands while it is configured', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    const gate = Promise.withResolvers<void>();
+    agent.configReplyGate = gate.promise;
+    let markedStarted = false;
+
+    const turn = runtime.runTurn({
+      ...request({ permissionMode: 'plan' }),
+      agentSessionId: started.agentSessionId,
+      executionAdmission: { signal: new AbortController().signal, markStarted: async () => { markedStarted = true; } },
+    });
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    expect(runtime.getRunningSessions()).toEqual([expect.objectContaining({ id: started.agentSessionId, status: 'running' })]);
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    gate.resolve();
+    await turn;
+
+    expect(markedStarted).toBe(false);
+    expect(agent.requests('session/prompt')).toHaveLength(1);
     runtime.shutdown();
   });
 

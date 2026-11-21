@@ -33,12 +33,28 @@ async function spawnAntigravityModels(binary: string): Promise<AntigravityCliRes
     stderr: 'pipe',
     signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited.catch(() => null),
-  ]);
-  return { stdout, stderr, exitCode };
+  // The signal kills only agy; a descendant holding its pipes would keep the
+  // reads open, so the shared probe also has its own deadline.
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    deadline = setTimeout(() => {
+      proc.kill();
+      reject(new Error(`agy models did not finish within ${MODELS_TIMEOUT_MS / 1000} s`));
+    }, MODELS_TIMEOUT_MS + 1_000);
+  });
+  try {
+    const [stdout, stderr, exitCode] = await Promise.race([
+      Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited.catch(() => null),
+      ]),
+      timedOut,
+    ]);
+    return { stdout, stderr, exitCode };
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 // Each line is `<id>\t<label>`, where the id encodes the model and its

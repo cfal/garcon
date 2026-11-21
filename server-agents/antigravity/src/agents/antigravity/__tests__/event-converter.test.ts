@@ -315,6 +315,18 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.endTurn(SESSION, context)).toEqual([]);
   });
 
+  it('treats a marker chunk followed by more output as ordinary text', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    for (const text of ['agy prints', '\n⚠ agent executor error: <detail>\n', 'when a request fails.']) {
+      converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }), context);
+    }
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{
+      type: 'assistant-message', content: 'agy prints\n⚠ agent executor error: <detail>\nwhen a request fails.',
+    }]);
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

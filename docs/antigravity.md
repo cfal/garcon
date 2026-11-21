@@ -63,14 +63,19 @@ After a cancelled turn, agy merges the next user message into the unanswered one
 
 ### Executor Errors
 
-Upstream model failures (invalid key, quota, HTTP 4xx/5xx) do not fail the ACP prompt. The CLI emits one complete `agent_message_chunk` whose text begins with `\n⚠ agent executor error: ` and then ends the turn normally with `end_turn`. The converter recognizes that chunk exactly, publishes it as an `ErrorMessage` instead of assistant text, and reports the turn as a provider failure. t3code reaches the same outcome by reading error steps from the CLI's SQLite store (t3code:apps/server/src/provider/acp/AntigravityTurnOutcome.ts:16-31). Garcon matches the wire marker instead, because the ledger, not native storage, is its serving authority.
+Upstream model failures (invalid key, quota, HTTP 4xx/5xx) do not fail the ACP prompt. The CLI emits one complete `agent_message_chunk` whose text begins with `\n⚠ agent executor error: ` and then ends the turn normally with `end_turn`. The converter treats the marker as a failure only when two things hold:
+
+- It opens the chunk or is the chunk's last line.
+- It is the turn's final output.
+
+Any later message, thought, or tool call means the chunk was ordinary text that quoted the marker. A recognized failure is published as an `ErrorMessage` instead of assistant text, and the turn is reported as a provider failure. t3code reaches the same outcome by reading error steps from the CLI's SQLite store (t3code:apps/server/src/provider/acp/AntigravityTurnOutcome.ts:16-31). Garcon matches the wire marker instead, because the ledger, not native storage, is its serving authority.
 
 ## Authentication
 
 The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. Otherwise it is `gemini-api-key` when `GEMINI_API_KEY` is set, and `oauth-personal` when it is not. The accepted values are the CLI's advertised methods: `oauth-personal`, `oauth-business`, `gemini-api-key`, and `agent-platform`.
 
 - **Google account (`oauth-personal`):** uses credentials the CLI cached from an interactive `agy` or `agy acp --login`. When none are cached, `authenticate` fails fast with the CLI's actionable "Run `agy acp --login`..." message, which surfaces as the run error.
-- **In-app sign-in:** `auth.launchLogin` runs `agy acp --login` through the shared `CliLoginController` in `browser-code` mode, with `DISPLAY` and `WAYLAND_DISPLAY` removed so the CLI prints its Google link instead of opening a browser (t3code:apps/server/src/provider/Drivers/AntigravityDriver.ts:402-474). The user opens the link, then pastes the code or the final URL, which is written to the CLI's stdin. Exit code 0 means the credentials are stored. This works when the executor is headless or remote.
+- **In-app sign-in:** `auth.launchLogin` runs `agy acp --login` through the shared `CliLoginController` in `browser-code` mode, with `DISPLAY` and `WAYLAND_DISPLAY` removed so the CLI prints its Google link instead of opening a browser (t3code:apps/server/src/provider/Drivers/AntigravityDriver.ts:402-474). The user opens the link, then pastes the code or the final URL, which is written to the CLI's stdin. Exit code 0 means the credentials are stored. This works when the executor is headless or remote, and was verified on Linux. A macOS executor may also open its own browser, since removing the display variables does not stop LaunchServices; the printed link and code still complete the sign-in. While a sign-in is running, auth status reports "Sign-in in progress" without probing the CLI.
 - **Credential storage:** the CLI stores Google sign-in in the OS keyring (Secret Service over D-Bus on Linux). On a headless executor without a running Secret Service, Antigravity's documented fix is to start a session bus (`export $(dbus-launch)`) before `agy` runs. The Docker image persists `~/.gemini` so CLI settings and history survive container recreation.
 - **Gemini API key / Agent Platform:** the key and Google Cloud variables pass to the child through the inherited environment. Antigravity documents that `agy models` needs `"modelProvider": "gemini"` in `~/.gemini/antigravity-cli/settings.json` for API-key accounts. Without that setting, model discovery returns no models and chats use the CLI's default model.
 

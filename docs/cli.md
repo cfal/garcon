@@ -26,6 +26,9 @@ Common options and environment variables:
 - `GARCON_CODEX_CLI`: Codex CLI override. By default Garcon runs the native binary from its bundled `@openai/codex` platform package, then falls back to `codex` on `PATH`.
 - `GARCON_CURSOR_BINARY`: Cursor Agent CLI override.
 - `CURSOR_API_KEY`: Cursor Agent API key for native sessions.
+- `GARCON_ANTIGRAVITY_BINARY`: Antigravity CLI (`agy`) override; defaults to `agy` on `PATH`.
+- `GARCON_ANTIGRAVITY_AUTH_METHOD`: Antigravity sign-in method: `oauth-personal`, `oauth-business`, `gemini-api-key`, or `agent-platform`. Defaults to `gemini-api-key` when `GEMINI_API_KEY` is set, otherwise `oauth-personal`.
+- `GEMINI_API_KEY`: Gemini API key for Antigravity sessions. See [Antigravity](antigravity.md).
 - `GARCON_PI_BINARY` / `PI_BINARY`: Pi CLI override.
 - `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
 

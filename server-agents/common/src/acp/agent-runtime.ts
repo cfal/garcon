@@ -330,7 +330,7 @@ export class AcpAgentRuntime {
       .filter((session) => this.#isBusy(session))
       .map((session) => ({
         id: session.id,
-        status: session.state,
+        status: session.activeTurn?.running ? session.state : 'running',
         startedAt: session.startedAt,
       }));
   }
@@ -447,13 +447,18 @@ export class AcpAgentRuntime {
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
     };
-    this.#sessions.set(request.agentSessionId, baseSession);
-
-    const connected = await this.#reconnectSession(baseSession, request, order);
+    // Registered only once restored, so a failed restore leaves nothing a later
+    // turn could mistake for a live session.
+    let connected = false;
+    try {
+      connected = await this.#reconnectSession(baseSession, request, order);
+    } finally {
+      if (!connected) client.close();
+    }
     if (!connected) {
-      this.#retireSession(baseSession, 'cancelled');
       throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
     }
+    this.#sessions.set(request.agentSessionId, baseSession);
     return baseSession;
   }
 
@@ -503,6 +508,8 @@ export class AcpAgentRuntime {
       await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
+      // Stopped while configuring: end before admission records the turn as started.
+      if (turn.aborted) return;
       if (request.executionAdmission) await markAcpExecutionStarted(request);
       if (turn.aborted) return;
       const promptRequest = session.client.promptSession({

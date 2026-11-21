@@ -24,7 +24,10 @@ const MAX_TOOL_NAMES_PER_SESSION = 512;
 interface SessionState {
   assistantText: string;
   thinkingText: string;
-  failure: string | null;
+  // An executor-error chunk is a failure only if nothing follows it before the
+  // turn ends, since agy ends the turn right after it; later output means the
+  // chunk was ordinary text that happened to quote the marker.
+  pendingFailure: { readonly failure: string; readonly text: string } | null;
   // Tool rows and results already published; kept across turns because a
   // stopped turn's late terminal update can arrive after the next turn begins.
   readonly emittedToolIds: Set<string>;
@@ -78,7 +81,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(sessionId);
     session.assistantText = '';
     session.thinkingText = '';
-    session.failure = null;
+    session.pendingFailure = null;
   }
 
   permissionToolUse(
@@ -99,18 +102,22 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       // Switching between thought and message text flushes the other buffer, so
       // interleaved output keeps the order the agent produced it in.
       case 'agent_message_chunk': {
-        const { text, failure } = splitExecutorError(chunkText(update.content));
-        if (failure) session.failure ??= failure;
+        this.#continueAfterFailureCandidate(session);
+        const chunk = chunkText(update.content);
+        const { text, failure } = splitExecutorError(chunk);
         const flushed = session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
         session.assistantText += text;
+        if (failure) session.pendingFailure = { failure, text: chunk.slice(text.length) };
         return flushed;
       }
       case 'agent_thought_chunk': {
+        this.#continueAfterFailureCandidate(session);
         const flushed = session.assistantText.trim() ? this.#flush(session, context.timestamp) : [];
         session.thinkingText += chunkText(update.content);
         return flushed;
       }
       case 'tool_call':
+        this.#continueAfterFailureCandidate(session);
         return this.#toolCall(session, update, context.timestamp, false);
       case 'tool_call_update':
         return this.#toolCallUpdate(session, update, context.timestamp);
@@ -131,8 +138,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
 
   takeTurnFailure(sessionId: string): string | null {
     const session = this.#sessions.get(sessionId);
-    const failure = session?.failure ?? null;
-    if (session) session.failure = null;
+    const failure = session?.pendingFailure?.failure ?? null;
+    if (session) session.pendingFailure = null;
     return failure;
   }
 
@@ -175,6 +182,12 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     return messages;
   }
 
+  #continueAfterFailureCandidate(session: SessionState): void {
+    if (!session.pendingFailure) return;
+    session.assistantText += session.pendingFailure.text;
+    session.pendingFailure = null;
+  }
+
   #remember(ids: Set<string>, toolCallId: string): void {
     ids.add(toolCallId);
     if (ids.size <= MAX_TOOL_NAMES_PER_SESSION) return;
@@ -206,7 +219,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const created: SessionState = {
       assistantText: '',
       thinkingText: '',
-      failure: null,
+      pendingFailure: null,
       emittedToolIds: new Set(),
       completedToolIds: new Set(),
       toolNames: new Map(),
