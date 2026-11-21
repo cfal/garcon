@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { resolveCodexCli } from './agents/codex/app-server/cli.js';
+import { CODEX_CLI_NOT_FOUND, resolveCodexCli } from './agents/codex/app-server/cli.js';
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
@@ -205,6 +205,10 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
+        if (!Bun.which(resolveCodexCli().command)) {
+          authStatus.invalidate();
+          return { authenticated: false, canReauth: false, label: 'Codex', source: 'none', detail: CODEX_CLI_NOT_FOUND };
+        }
         const status = await authStatus.refresh(signal);
         return {
           authenticated: status.authenticated,

@@ -3,6 +3,8 @@ export interface ResolvedCodexCli {
   source: 'env' | 'path';
 }
 
+export const CODEX_CLI_NOT_FOUND = 'Codex CLI was not found on this executor. Put Codex on the service PATH or set GARCON_CODEX_CLI to its executable (codex.exe on Windows).';
+
 export function resolveCodexCli(
   env: Readonly<Record<string, string | undefined>> = process.env,
   platform: NodeJS.Platform = process.platform,

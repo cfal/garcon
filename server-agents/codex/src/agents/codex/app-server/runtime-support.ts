@@ -1,5 +1,6 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { CODEX_USER_INPUT_METHOD } from '../user-input.js';
+import { CODEX_CLI_NOT_FOUND } from './cli.js';
 import { CodexAppServerRpcError } from './client.js';
 import type { CodexTurnError } from './protocol.js';
 import type {
@@ -42,7 +43,7 @@ export function humanizeCodexAppServerError(error: unknown): string {
     }
   }
   if (/executable not found|spawn.*ENOENT|ENOENT.*(?:spawn|codex)/i.test(raw)) {
-    return 'Codex CLI was not found on this executor. Put Codex on the service PATH or set GARCON_CODEX_CLI to its executable (codex.exe on Windows).';
+    return CODEX_CLI_NOT_FOUND;
   }
   if (/authentication|unauthorized|401|api.?key/i.test(raw)) {
     return 'Codex authentication failed. Run "codex" in your terminal to sign in.';
