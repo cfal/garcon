@@ -111,6 +111,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_tab_automation(),
 			m.settings_chat_generate_titles(),
 			m.settings_chat_title_model(),
+			m.settings_chat_title_model_hint(),
 			m.settings_agent_switch_compaction_enabled(),
 			m.settings_agent_switch_compaction_model(),
 			m.settings_commit_message_model(),

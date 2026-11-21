@@ -106,7 +106,7 @@
 		</div>
 	{/if}
 
-	{#if cardState.enabled || cardState.selectionUnavailable}
+	{#if settingsKey === 'chatTitle' || cardState.enabled || cardState.selectionUnavailable}
 		{#if cardState.enabled && settingsKey === 'agentSwitchCompaction'}
 			<div class="flex flex-wrap items-center justify-between gap-3 py-2">
 				<label for="agent-switch-context-window" class="text-sm font-medium text-foreground">
