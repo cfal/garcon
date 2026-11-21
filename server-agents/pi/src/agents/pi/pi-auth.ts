@@ -1,5 +1,5 @@
 interface PiModelReader {
-  getModels(): Promise<readonly unknown[]>;
+  getModelsStrict(): Promise<readonly unknown[]>;
 }
 
 export async function getPiAuthStatus(models: PiModelReader): Promise<{
@@ -8,7 +8,7 @@ export async function getPiAuthStatus(models: PiModelReader): Promise<{
   label: string;
 }> {
   try {
-    const availableModels = await models.getModels();
+    const availableModels = await models.getModelsStrict();
     return {
       authenticated: availableModels.length > 0,
       canReauth: false,

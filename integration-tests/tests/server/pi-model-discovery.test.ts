@@ -2,27 +2,32 @@ import { expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from './model-discovery-fixture.js';
+import { fileURLToPath } from 'node:url';
+import type { SharedModelOption } from '../../../common/models.js';
+import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../../support/pi-model-discovery-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
-it('discovers configured legacy, native, and virtual extension models through the real installed SDK', async () => {
+async function discover(home: string, env: Record<string, string> = {}): Promise<SharedModelOption[]> {
+  const modulePath = new URL('../../../server-agents/pi/src/agents/pi/pi-models.ts', import.meta.url).href;
+  const binary = fileURLToPath(new URL('../../node_modules/.bin/pi', import.meta.url));
+  const proc = Bun.spawn([process.execPath, '--no-install', '-e', `
+    const { getPiAvailableModels } = await import(${JSON.stringify(modulePath)});
+    console.log(JSON.stringify(await getPiAvailableModels({ binary: () => ${JSON.stringify(binary)} })));
+  `], {
+    cwd: home,
+    env: { HOME: home, PATH: process.env.PATH, PI_CODING_AGENT_DIR: join(home, '.pi', 'agent'), ...env },
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  if (code !== 0) throw new Error(err);
+  return JSON.parse(out);
+}
+
+it('discovers configured legacy, native, and virtual extension models through the installed CLI', async () => {
   const home = await mkdtemp(join(tmpdir(), 'garcon-pi-discovery-'));
   try {
-    const agentDir = await preparePiModelDiscoveryFixture(home);
-    const modulePath = new URL('../pi-models.ts', import.meta.url).href;
-    // A separate process excludes SDK module mocks and ambient provider credentials.
-    // Disables auto-install so jiti must use Pi's pinned extension aliases.
-    const child = Bun.spawn([process.execPath, '--no-install', '-e', `
-      const { getPiAvailableModels } = await import(${JSON.stringify(modulePath)});
-      console.log(JSON.stringify(await getPiAvailableModels()));
-    `], {
-      cwd: home,
-      env: { HOME: home, PATH: process.env.PATH, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', PI_TELEMETRY: '0' },
-      stdout: 'pipe', stderr: 'pipe',
-    });
-    const stdout = new Response(child.stdout).text();
-    const stderr = new Response(child.stderr).text();
-    expect(await child.exited, await stderr).toBe(0);
-    const models = JSON.parse(await stdout);
+    await preparePiModelDiscoveryFixture(home);
+    const models = await discover(home);
     expect(models.map((model: { value: string }) => model.value).sort()).toEqual(PI_DISCOVERY_MODELS);
     expect(models).toContainEqual({ value: 'garcon-discovery/physical', label: 'garcon-discovery: physical', supportsImages: false });
     expect(models).toContainEqual({ value: 'garcon-native/native', label: 'garcon-native: native', supportsImages: false });
@@ -32,27 +37,12 @@ it('discovers configured legacy, native, and virtual extension models through th
   }
 }, 30_000);
 
-it('discovers the renamed Azure provider without duplicating classifier variants through the real SDK', async () => {
+it('discovers the renamed Azure provider without duplicating classifier variants through the CLI', async () => {
   const home = await mkdtemp(join(tmpdir(), 'garcon-pi-builtin-discovery-'));
   try {
-    const modulePath = new URL('../pi-models.ts', import.meta.url).href;
-    const child = Bun.spawn([process.execPath, '-e', `
-      const { getPiAvailableModels } = await import(${JSON.stringify(modulePath)});
-      console.log(JSON.stringify(await getPiAvailableModels()));
-    `], {
-      cwd: home,
-      env: {
-        HOME: home, PATH: process.env.PATH,
-        PI_CODING_AGENT_DIR: join(home, '.pi', 'agent'), PI_OFFLINE: '1', PI_TELEMETRY: '0',
-        AZURE_OPENAI_API_KEY: 'synthetic-key', OPENAI_API_KEY: 'synthetic-key',
-        GEMINI_API_KEY: 'synthetic-key',
-      },
-      stdout: 'pipe', stderr: 'pipe',
+    const models = await discover(home, {
+      AZURE_OPENAI_API_KEY: 'synthetic-key', OPENAI_API_KEY: 'synthetic-key', GEMINI_API_KEY: 'synthetic-key',
     });
-    const stdout = new Response(child.stdout).text();
-    const stderr = new Response(child.stderr).text();
-    expect(await child.exited, await stderr).toBe(0);
-    const models: Array<{ value: string }> = JSON.parse(await stdout);
     const values = models.map((model) => model.value);
     expect(values).toContain('azure/gpt-5.4');
     expect(values).toContain('azure/deepseek-v4-pro');
@@ -88,25 +78,9 @@ it.each([false, true])('discovers the offline OpenRouter catalog with an empty p
         }],
       },
     }));
-    const modulePath = new URL('../pi-models.ts', import.meta.url).href;
-    const child = Bun.spawn([process.execPath, '-e', `
-      let networkCalls = 0;
-      globalThis.fetch = () => { networkCalls++; throw new Error('Discovery must remain offline'); };
-      const { getPiAvailableModels } = await import(${JSON.stringify(modulePath)});
-      console.log(JSON.stringify({ models: await getPiAvailableModels(), networkCalls }));
-    `], {
-      cwd: home,
-      env: {
-        HOME: home, PATH: process.env.PATH, PI_CODING_AGENT_DIR: agentDir,
-        PI_OFFLINE: '1', PI_TELEMETRY: '0', OPENROUTER_API_KEY: 'synthetic-key',
-      },
-      stdout: 'pipe', stderr: 'pipe',
-    });
-    const stdout = new Response(child.stdout).text();
-    const stderr = new Response(child.stderr).text();
-    expect(await child.exited, await stderr).toBe(0);
-    const { models, networkCalls } = JSON.parse(await stdout);
-    expect(networkCalls).toBe(0);
+    const guard = join(home, 'no-network.cjs');
+    await writeFile(guard, "globalThis.fetch = () => { process.exit(79); };");
+    const models = await discover(home, { OPENROUTER_API_KEY: 'synthetic-key', NODE_OPTIONS: `--require="${guard}"` });
     if (empty) {
       expect(models.length).toBeGreaterThan(1);
       expect(models.every((model: { value: string }) => model.value.startsWith('openrouter/'))).toBe(true);
@@ -115,6 +89,20 @@ it.each([false, true])('discovers the offline OpenRouter catalog with an empty p
         value: 'openrouter/garcon-personalized', label: 'openrouter: garcon-personalized', supportsImages: true,
       }]);
     }
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it('distinguishes a signed-out installation from broken model configuration', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'garcon-pi-empty-discovery-'));
+  try {
+    expect(await discover(home)).toEqual([]);
+    const agentDir = join(home, '.pi', 'agent');
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(join(agentDir, 'models.json'), '{invalid');
+    const failure = await rejectionOf(discover(home));
+    expect(failure).toMatchObject({ message: expect.stringContaining('discovery errors') });
   } finally {
     await rm(home, { recursive: true, force: true });
   }

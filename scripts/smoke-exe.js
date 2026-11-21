@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../server-agents/pi/src/agents/pi/__tests__/model-discovery-fixture.js';
+import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../integration-tests/support/pi-model-discovery-fixture.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -55,7 +55,7 @@ function isolatedServerEnvironment(piAgentDir) {
   environment.PI_CODING_AGENT_DIR = piAgentDir;
   environment.PI_OFFLINE = '1';
   environment.PI_TELEMETRY = '0';
-  environment.GARCON_PI_BINARY = path.resolve(import.meta.dir, '../server-agents/pi/node_modules/.bin/pi');
+  environment.GARCON_PI_BINARY = path.resolve(import.meta.dir, '../integration-tests/node_modules/.bin/pi');
   return environment;
 }
 

@@ -9,6 +9,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
   'codex-schema-compatibility': 'Direct pinned CLI protocol; no Garcon executor dispatch.',
   'codex-history-api': 'Direct pinned CLI history API; no Garcon executor dispatch.',
   'codex-native-shutdown': 'Direct pinned CLI process cleanup; no Garcon executor dispatch.',
+  'pi-model-discovery': 'Direct pinned CLI catalog fixtures; no Garcon executor dispatch.',
   ...Object.fromEntries([
     'account-credentials', 'garcon-cli-schedules', 'scheduled-prompt-toggles',
     'shell-agent', 'shell-search',

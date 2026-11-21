@@ -1,16 +1,9 @@
-import { createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { buildPiCliEnv } from './pi-cli.js';
 import type { SharedModelOption } from '@garcon/common/models';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { PiConfig } from '../../config.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-
-class PiModelDiscoveryTransientError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PiModelDiscoveryTransientError';
-  }
-}
 
 export class PiModelDiscoveryUnavailableError extends Error {
   readonly code = 'PI_MODEL_DISCOVERY_UNAVAILABLE';
@@ -23,88 +16,58 @@ export class PiModelDiscoveryUnavailableError extends Error {
   }
 }
 
-function piModelLabel(provider: string, id: string): string {
-  const tokens = id.split('/').filter(Boolean);
-  const shortId = tokens[tokens.length - 1] || id;
-  return `${provider}: ${shortId}`;
-}
-
-function piSdkModelToOption(model: unknown): SharedModelOption | null {
-  if (!model || typeof model !== 'object') return null;
-  const candidate = model as { provider?: unknown; id?: unknown; input?: unknown };
-  if (typeof candidate.provider !== 'string' || typeof candidate.id !== 'string') return null;
-  return {
-    value: `${candidate.provider}/${candidate.id}`,
-    label: piModelLabel(candidate.provider, candidate.id),
-    supportsImages: Array.isArray(candidate.input) && candidate.input.includes('image'),
-  };
-}
-
-function diagnosticMessage(value: unknown): string {
-  if (value instanceof Error) return value.message;
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    if (typeof record.message === 'string') return record.message;
-    if (record.error instanceof Error) return record.error.message;
-    if (record.error !== undefined) return String(record.error);
+// The metadata command works before a model is selected and reports config errors even on exit 0.
+// https://github.com/earendil-works/pi/blob/b4afdddf44e059c67ccf5097e5317d913521b470/packages/coding-agent/src/cli/list-models.ts#L29-L115
+export function parsePiModelListing(stdout: string, stderr: string): SharedModelOption[] {
+  const [header, ...rows] = stdout.trimEnd().split(/\r?\n/);
+  if (header?.startsWith('No models available. Use /login ') && rows.length === 2
+    && rows[0]?.trimEnd().endsWith('providers.md') && rows[1]?.trimEnd().endsWith('models.md')) {
+    if (stderr.trim()) throw new Error('Pi reported discovery errors. Check pi --list-models on this executor.');
+    return [];
   }
-  return String(value);
-}
-
-interface PiDiagnosticServices {
-  diagnostics?: unknown[];
-  modelRuntime?: { getError?: () => unknown };
-  settingsManager?: { drainErrors?: () => unknown[] };
-}
-
-function collectPiDiscoveryDiagnostics(services: PiDiagnosticServices): string[] {
-  const diagnostics: string[] = [];
-
-  const modelRuntimeError = typeof services?.modelRuntime?.getError === 'function'
-    ? services.modelRuntime.getError()
-    : undefined;
-  if (modelRuntimeError) {
-    diagnostics.push(`model runtime: ${diagnosticMessage(modelRuntimeError)}`);
+  if (!header || !/^provider +model +context +max-out +thinking +images$/.test(header) || !rows.length) {
+    throw new Error('Unexpected Pi --list-models output. Check the installed Pi CLI version.');
   }
-
-  if (Array.isArray(services?.diagnostics)) {
-    for (const diagnostic of services.diagnostics) {
-      const message = diagnosticMessage(diagnostic);
-      if (message) diagnostics.push(message);
+  const modelStart = header.indexOf('model');
+  const contextStart = header.indexOf('context');
+  const imagesStart = header.indexOf('images');
+  return rows.map((row) => {
+    const provider = row.slice(0, modelStart).trim();
+    const id = row.slice(modelStart, contextStart).trim();
+    const images = row.slice(imagesStart).trim();
+    if (!provider || !id || (images !== 'yes' && images !== 'no')) {
+      throw new Error('Malformed row in Pi --list-models output.');
     }
-  }
+    return { value: `${provider}/${id}`, label: `${provider}: ${id.split('/').at(-1) || id}`, supportsImages: images === 'yes' };
+  });
+}
 
-  const settingsErrors = typeof services?.settingsManager?.drainErrors === 'function'
-    ? services.settingsManager.drainErrors()
-    : [];
-  for (const error of settingsErrors) {
-    diagnostics.push(`settings: ${diagnosticMessage(error)}`);
-  }
-
-  return diagnostics;
+export async function getPiAvailableModels(
+  config: Pick<PiConfig, 'binary'>,
+  timeoutMs = 20_000,
+): Promise<SharedModelOption[]> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  const env = buildPiCliEnv();
+  delete env.FORCE_COLOR;
+  const proc = Bun.spawn([config.binary(), '--list-models'], {
+    env: { ...env, NO_COLOR: '1' },
+    stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+    signal, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL',
+  });
+  // An extension subprocess can keep a pipe open after Pi exits. The deadline also cancels both reads.
+  const read = (stream: ReadableStream<Uint8Array>) =>
+    new Response(stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal })).text();
+  const [stdout, stderr, code] = await Promise.all([
+    read(proc.stdout), read(proc.stderr), proc.exited,
+  ]);
+  signal.throwIfAborted();
+  if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
+  return parsePiModelListing(stdout, stderr);
 }
 
 function delay(ms: number): Promise<void> {
   return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-async function readPiModelsFromSdk(): Promise<SharedModelOption[]> {
-  const services = await createAgentSessionServices({
-    cwd: process.cwd(),
-    agentDir: getAgentDir(),
-  });
-  const available = await services.modelRuntime.getAvailable();
-  const models = available
-    .map(piSdkModelToOption)
-    .filter((model): model is SharedModelOption => Boolean(model));
-  const diagnostics = collectPiDiscoveryDiagnostics(services);
-  if (models.length === 0 && diagnostics.length > 0) {
-    throw new PiModelDiscoveryTransientError(diagnostics.join('; '));
-  }
-  return models;
-}
-
-export const getPiAvailableModels = readPiModelsFromSdk;
 
 export class PiModelCatalogService {
   #cachedModels: SharedModelOption[] | null = null;
@@ -114,7 +77,7 @@ export class PiModelCatalogService {
 
   constructor(
     private readonly config: PiConfig,
-    private readonly discover: () => Promise<SharedModelOption[]> = getPiAvailableModels,
+    private readonly discover: () => Promise<SharedModelOption[]> = () => getPiAvailableModels(config),
   ) {}
 
   async getModelsStrict(): Promise<SharedModelOption[]> {
