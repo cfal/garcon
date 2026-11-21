@@ -32,6 +32,7 @@ import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
 import { LazyPiRuntime } from './agents/pi/lazy-runtime.js';
 import { getPiAuthStatus } from './agents/pi/pi-auth.js';
+import { PiModelCatalogService } from './agents/pi/pi-models.js';
 
 const PI_DESCRIPTOR = {
   id: 'pi',
@@ -46,6 +47,7 @@ const PI_DESCRIPTOR = {
   configuration: [
     { key: 'GARCON_PI_BINARY', source: 'environment' as const, description: 'Garcon Pi CLI binary.' },
     { key: 'PI_BINARY', source: 'environment' as const, description: 'Pi CLI binary.' },
+    { key: 'PI_CODING_AGENT_DIR', source: 'environment' as const, description: 'Pi agent directory.' },
     {
       key: 'PI_CODING_AGENT_SESSION_DIR',
       source: 'environment' as const,
@@ -90,7 +92,7 @@ export default class PiAgentIntegration implements AgentIntegration {
   constructor(host: AgentHost) {
     const config = createPiConfig(host.environment);
     const logger = createScopedAgentLogger(host.logger, 'pi');
-    const models = createLazyPiModels(config);
+    const models = new PiModelCatalogService(config);
     const nativeSessions = createPathNativeSessionCodec('pi');
     const runtime = new LazyPiRuntime(async () => {
       const { PiRpcRuntime } = await import('./agents/pi/pi-rpc-runtime.js');
@@ -159,16 +161,8 @@ export default class PiAgentIntegration implements AgentIntegration {
       steer: (request) => runtime.steer(request),
     });
     this.lifecycle = createIntegrationLifecycle({
-      start: async () => {
-        // The SDK compiles its modules on first import, holding the event loop for over a
-        // second. Loading it while the controller starts, or while an executor is being set
-        // up, keeps that stall out of live work. A failure surfaces when Pi is first used.
-        await import('@earendil-works/pi-coding-agent').catch(() => undefined);
-        runtime.startPurgeTimer();
-      },
-      stop: async () => {
-        await runtime.shutdown();
-      },
+      start: () => runtime.startPurgeTimer(),
+      stop: () => runtime.shutdown(),
     });
   }
 }
@@ -201,8 +195,8 @@ async function loadPiMessages(
   const history = await import('./agents/pi/history-loader.js');
   if (hasRealPiPath(reference)) return history.loadPiChatMessages(reference.nativePath!);
   if (!reference.agentSessionId) return [];
-  const { findPiSessionFileBySessionIdStrict } = await import('./agents/pi/pi-session-paths.js');
-  const sessionPath = await findPiSessionFileBySessionIdStrict(
+  const { findPiSessionFileBySessionId } = await import('./agents/pi/pi-session-paths.js');
+  const sessionPath = await findPiSessionFileBySessionId(
     reference.agentSessionId,
     reference.projectPath,
     config,
@@ -289,24 +283,6 @@ function createPiNativeEvidence(
     async release({ chat, signal }) {
       signal.throwIfAborted();
       await runtime.releaseSession(chat.chatId, piReference(chat, nativeSessions).agentSessionId);
-    },
-  };
-}
-
-function createLazyPiModels(config: PiConfig) {
-  let service: Promise<import('./agents/pi/pi-models.js').PiModelCatalogService> | null = null;
-  const getService = () => {
-    service ??= import('./agents/pi/pi-models.js').then(
-      ({ PiModelCatalogService }) => new PiModelCatalogService(config),
-    );
-    return service;
-  };
-  return {
-    async getModels() {
-      return (await getService()).getModels();
-    },
-    async getModelsStrict() {
-      return (await getService()).getModelsStrict();
     },
   };
 }

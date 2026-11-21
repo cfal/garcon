@@ -430,7 +430,6 @@ export class PiRpcRuntime {
       model,
       thinking,
       permissionMode: request.permissionMode,
-      projectPath: request.projectPath,
       resumePath: resume?.nativePath ?? null,
     }), {
       cwd: request.projectPath,

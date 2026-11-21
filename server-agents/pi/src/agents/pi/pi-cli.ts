@@ -2,14 +2,12 @@ import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { captureSingleQueryInputFailure } from '@garcon/server-agent-common/shared/single-query-input';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
+import type { PiThinkingLevel } from './pi-rpc-protocol.js';
 import type { PiConfig } from '../../config.js';
-import { resolvePiConfiguredSessionDir } from './pi-session-paths.js';
 
 const PI_OFFLINE_ENV = 'PI_OFFLINE';
 const PI_SKIP_VERSION_CHECK_ENV = 'PI_SKIP_VERSION_CHECK';
 const PI_TELEMETRY_ENV = 'PI_TELEMETRY';
-const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';
 export const PI_READ_ONLY_TOOLS = ['read', 'grep', 'find', 'ls'] as const;
 
 export const PI_PLAN_PREFIX = [
@@ -31,7 +29,7 @@ const PI_NESTED_SESSION_ENV = [
 ] as const;
 
 // Preserves Garcon's xhigh ceiling even when Pi supports model-specific max effort.
-export function mapThinkingMode(mode: ThinkingMode): ModelThinkingLevel | undefined {
+export function mapThinkingMode(mode: ThinkingMode): PiThinkingLevel | undefined {
   switch (mode) {
     case 'none':
       return 'off';
@@ -80,12 +78,6 @@ export function buildPiCliEnv(
   env[PI_OFFLINE_ENV] = '1';
   env[PI_SKIP_VERSION_CHECK_ENV] = '1';
   env[PI_TELEMETRY_ENV] = '0';
-  const embeddedPackageDir = env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
-  if (embeddedPackageDir && env.PI_PACKAGE_DIR === embeddedPackageDir) {
-    // Keeps Garcon's executable-only SDK metadata override out of the external Pi CLI.
-    delete env.PI_PACKAGE_DIR;
-  }
-  delete env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
   return env;
 }
 
@@ -93,9 +85,8 @@ export function buildPiCliEnv(
 export function buildPiRpcSpawnCommand(options: {
   readonly config: PiConfig;
   readonly model: string;
-  readonly thinking: ModelThinkingLevel | undefined;
+  readonly thinking: PiThinkingLevel | undefined;
   readonly permissionMode: PermissionMode;
-  readonly projectPath: string;
   readonly resumePath: string | null;
 }): string[] {
   const args = ['--mode', 'rpc', '--model', options.model];
@@ -103,7 +94,7 @@ export function buildPiRpcSpawnCommand(options: {
   if (options.permissionMode === 'plan') {
     args.push('--tools', PI_READ_ONLY_TOOLS.join(','));
   }
-  const configuredSessionDir = resolvePiConfiguredSessionDir(options.projectPath, options.config);
+  const configuredSessionDir = options.config.sessionDirectoryOverride();
   if (configuredSessionDir) args.push('--session-dir', configuredSessionDir);
   if (options.resumePath) args.push('--session', options.resumePath);
   return [options.config.binary(), ...args];

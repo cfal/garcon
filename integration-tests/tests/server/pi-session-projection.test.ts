@@ -1,16 +1,17 @@
 import { expect, test } from 'bun:test';
-import { buildSessionProjection } from '@earendil-works/pi-coding-agent';
-import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
-import { projectPiHistory } from '../session-projection.js';
+import { buildSessionProjection, type SessionEntry } from '@earendil-works/pi-coding-agent';
+import { rejectionOf } from '../../support/promise-assertions.js';
+import { EventLoopSteps } from '../../../server-agents/common/src/shared/event-loop.js';
+import { projectPiHistory, type PiSessionEntry } from '../../../server-agents/pi/src/agents/pi/session-projection.js';
 
 const at = '2026-01-01T00:00:00.000Z';
-function entry(id, parentId, fields) {
+function entry(id: string, parentId: string | null | undefined, fields: PiSessionEntry): PiSessionEntry {
   return { id, parentId, timestamp: at, ...fields };
 }
-function message(id, parentId, role, content) {
+function message(id: string, parentId: string | null | undefined, role: string, content: unknown) {
   return entry(id, parentId, { type: 'message', message: { role, content, timestamp: Date.parse(at) } });
 }
-function edit(id, parentId, targetId, replacement) {
+function edit(id: string, parentId: string, targetId: string, replacement: unknown) {
   return entry(id, parentId, { type: 'context_edit', targetId, replacement });
 }
 
@@ -21,7 +22,7 @@ const base = [
   entry('custom', 'tool', { type: 'custom_message', customType: 'synthetic', content: 'synthetic custom', display: true }),
 ];
 
-test.each([
+const samples: Array<[string, PiSessionEntry[]]> = [
   ['empty', []],
   ['ordinary', base],
   ['malformed inactive branch', [entry('inactive', null, { type: 'message', message: null }), ...base]],
@@ -29,6 +30,13 @@ test.each([
   ['missing parent', [...base, message('orphan', 'missing', 'user', 'orphan')]],
   ['omitted parent', [...base, message('orphan', undefined, 'user', 'orphan')]],
   ['missing content', [message('user', null, 'user', null), message('answer', 'user', 'assistant', undefined)]],
+  ['unchecked native values', [
+    message('user', null, 'user', 'request'),
+    edit('edit', 'user', 'user', 'incomplete'),
+    entry('raw', 'edit', { type: 'message', message: 'unknown message' }),
+    entry('checkpoint', 'raw', { type: 'compaction', firstKeptEntryId: 'user', summary: 'summary',
+      tokensBefore: 1, systemMessage: 'unknown checkpoint', timestamp: Date.parse(at) }),
+  ]],
   ['edits and omissions', [...base,
     edit('replace', 'custom', 'user', { content: 'edited' }),
     edit('replace-again', 'replace', 'user', { content: 'latest edit' }),
@@ -38,7 +46,7 @@ test.each([
     edit('sibling-edit', 'custom', 'user', { content: 'wrong branch' }),
     entry('leaf', 'replace-custom', { type: 'usage', kind: 'cache_warm' }),
   ]],
-  ...['answer', 'missing', 'compacted'].map((firstKeptEntryId) => [`compaction retaining ${firstKeptEntryId}`, [...base,
+  ...['answer', 'missing', 'compacted'].map((firstKeptEntryId): [string, PiSessionEntry[]] => [`compaction retaining ${firstKeptEntryId}`, [...base,
     entry('compacted', 'custom', { type: 'compaction', firstKeptEntryId, summary: 'synthetic summary', tokensBefore: 100 }),
     message('next', 'compacted', 'user', 'after compaction'),
   ]]),
@@ -52,12 +60,19 @@ test.each([
     edit('after', 'second', 'answer', { content: 'outside retained range' }),
     message('new-system', 'after', 'system', 'after compaction system'),
   ]],
-])('matches the pinned SDK projection: %s', async (_name, entries) => {
-  const expected = buildSessionProjection(entries).entries;
+];
+
+// The SDK consumes unchecked JSONL, including the deliberately malformed cases below.
+function reference(entries: PiSessionEntry[]) {
+  return buildSessionProjection(entries as PiSessionEntry[] & SessionEntry[]).entries;
+}
+
+test.each(samples)('matches the pinned SDK projection: %s', async (_name, entries) => {
+  const expected = reference(entries);
   const actual = await projectPiHistory(entries, new EventLoopSteps('pi-projection-parity'));
-  expect(actual).toEqual(expected);
+  expect<readonly object[]>(actual).toEqual(expected);
   for (let index = 0; index < actual.length; index += 1) {
-    expect(actual[index].sourceEntry).toBe(expected[index].sourceEntry);
+    expect<object>(actual[index].sourceEntry).toBe(expected[index].sourceEntry);
   }
 });
 
@@ -69,8 +84,9 @@ for (const container of [null, undefined]) {
         message('kept', 'malformed', 'user', 'synthetic retained request'),
         entry('compaction', 'kept', { type: 'compaction', firstKeptEntryId, summary: 'summary', tokensBefore: 100 }),
       ];
-      expect(() => buildSessionProjection(entries)).toThrow();
-      await expect(projectPiHistory(entries, new EventLoopSteps('pi-projection-malformed'))).rejects.toThrow();
+      expect(() => reference(entries)).toThrow();
+      const failure = await rejectionOf(projectPiHistory(entries, new EventLoopSteps('pi-projection-malformed')));
+      expect(failure).toBeInstanceOf(Error);
     });
   }
 }

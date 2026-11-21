@@ -36,7 +36,6 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_AGENT_EXECUTOR_CONFIG',
   'DISABLE_AUTH',
   'PI_PACKAGE_DIR',
-  'GARCON_EMBEDDED_PI_PACKAGE_DIR',
 ]);
 const executableNamesByHost = {
   'linux-x64': { server: 'garcon-linux-x64', cli: 'garcon-cli-linux-x64' },
@@ -158,7 +157,7 @@ async function assertPiModelDiscovery(url, apiFetch, executorId = '') {
   const body = await response.json();
   const models = body.catalog?.agents?.find((agent) => agent.id === 'pi')?.models ?? [];
   if (!response.ok || PI_DISCOVERY_MODELS.some((value) => !models.some((model) => model.value === value))) {
-    throw new Error(`Compiled Pi SDK extension discovery failed: ${JSON.stringify(body)}`);
+    throw new Error(`External Pi CLI extension discovery failed: ${JSON.stringify(body)}`);
   }
 }
 

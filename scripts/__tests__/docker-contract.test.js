@@ -12,7 +12,7 @@ const provisionedAgents = {
   cursor: 'https://cursor.com/install',
   factory: 'https://app.factory.ai/cli',
   opencode: 'npm install -g "opencode-ai@${OPENCODE_VERSION}"',
-  pi: '/app/server-agents/pi/node_modules/.bin/pi',
+  pi: '"@earendil-works/pi-coding-agent@${PI_VERSION}"',
   shell: '/bin/bash',
 };
 const persistedPaths = [
@@ -155,7 +155,7 @@ describe('Docker contract', () => {
     expect(opencodeAgentPackage.dependencies['@opencode-ai/sdk']).toBe(openCodeVersion);
     expect(opencodeSupervisor).toContain(`export const PINNED_OPENCODE_VERSION = '${openCodeVersion}';`);
     expect(dockerfile).toContain(`ARG CODEX_VERSION=${integrationPackage.devDependencies['@openai/codex']}`);
-    expect(dockerfile).not.toContain('pi-coding-agent');
+    expect(dockerfile).toContain(`ARG PI_VERSION=${integrationPackage.devDependencies['@earendil-works/pi-coding-agent']}`);
     expect(dockerfile).not.toContain('opencode-ai@latest');
   });
 
@@ -203,6 +203,9 @@ describe('Docker contract', () => {
   test('creates every persistent mountpoint as the runtime user', () => {
     const mkdirIndex = dockerfile.indexOf('mkdir -p \\');
     expect(mkdirIndex).toBeGreaterThan(-1);
+    const codexVersionCheck = dockerfile.indexOf('codex --version');
+    expect(codexVersionCheck).toBeGreaterThan(dockerfile.indexOf('USER garcon'));
+    expect(codexVersionCheck).toBeLessThan(dockerfile.lastIndexOf('rm -rf', mkdirIndex));
     expect(dockerfile.lastIndexOf('USER garcon', mkdirIndex)).toBeGreaterThan(
       dockerfile.lastIndexOf('USER root', mkdirIndex),
     );
