@@ -20,14 +20,13 @@ import {
 	type PortableSingletonKind,
 	type PresentationHostId,
 	type WorkflowLaunchContext,
-	type WorkflowSurfaceDescriptor,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 	type WorkspacePartitionId,
 	type WorkspaceWindowEdge,
 	type WorkspaceWindowId,
 } from './surface-types.js';
-import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
+import { collectWindowNodes, windowNodeById } from './window-tree.js';
 import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
@@ -48,6 +47,7 @@ import type { WorkspaceCommitOptions } from './workspace-commit.js';
 import type { ChatSurfaceTransferPort } from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js';
+import { WorkspaceTabPlacementService } from './workspace-tab-placement.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
 import { disposeClosedSurface, prepareSurfaceClose } from './workspace-surface-lifecycle.js';
 import { WorkspaceChatPlacementService } from './workspace-chat-placement.js';
@@ -96,6 +96,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #fileDialog: FileDialogCoordinator;
 	readonly #terminalPlacement: TerminalPlacementService;
 	readonly #tabMovement: WorkspaceTabMovementService;
+	readonly #tabPlacement: WorkspaceTabPlacementService;
 	readonly #windowDestruction: WorkspaceWindowDestructionService;
 	readonly #chatPlacement: WorkspaceChatPlacementService;
 	closeGuardRequest = $state<{
@@ -123,6 +124,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		});
 		const commit = (mutations: WorkspaceMutationPlan, options?: WorkspaceCommitOptions) =>
 			this.#presentation.commit(mutations, options);
+		this.#tabPlacement = new WorkspaceTabPlacementService({
+			presentation: this.#presentation,
+			surfaceReservations: this.#reservedSurfaceIds,
+			windowReservations: this.#reservedWindowIds,
+			resolveWindowId: (snapshot, preferred) => this.#resolveWindowId(snapshot, preferred),
+			cancelDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
+		});
 		this.#tabMovement = new WorkspaceTabMovementService({
 			layout: deps.arbiter.layout,
 			surfaceReservations: this.#reservedSurfaceIds,
@@ -460,86 +468,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	openNewWorkflow(context: WorkflowLaunchContext | null): Promise<void> {
-		return this.#openWorkflowSurface({ id: 'new-workflow', type: 'new-workflow', context });
+		return this.#tabPlacement.openNewWorkflow(context, this.currentWindowId);
 	}
 
 	openWorkflowRun(runId: string, windowId = this.currentWindowId): Promise<void> {
-		return this.#openWorkflowSurface({ id: 'workflow-run', type: 'workflow-run', runId }, windowId);
+		return this.#tabPlacement.openWorkflowRun(runId, windowId);
 	}
 
-	async #openWorkflowSurface(
-		surface: WorkflowSurfaceDescriptor,
-		preferredWindowId = this.currentWindowId,
-	): Promise<void> {
-		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
-		let target: string | null = null;
-		const current = await this.#presentation.commitWithPresentationTarget(
-			(latest) => {
-				const windowId =
-					windowIdOfSurface(latest.desktopRoot, surface.id) ??
-					this.#resolveWindowId(latest, preferredWindowId);
-				if (this.#reservedWindowIds.has(windowId) || this.#reservedSurfaceIds.has(surface.id)) {
-					return [];
-				}
-				target = surface.id;
-				const previous = latest.surfaces[surface.id];
-				const mutations: WorkspaceLayoutMutation[] = [];
-				if (!previous) mutations.push({ type: 'register-surface', surface, windowId });
-				else if (
-					previous.type === 'workflow-run' &&
-					surface.type === 'workflow-run' &&
-					previous.runId !== surface.runId
-				) {
-					mutations.push({ type: 'replace-surface', previousId: previous.id, surface });
-				}
-				mutations.push({ type: 'activate-window-tab', windowId, surfaceId: surface.id });
-				if (this.isMobile) {
-					mutations.push({
-						type: 'set-mobile-presentation',
-						activeId: surface.id,
-						returnStack: this.#presentation.returnStackForTransient(surface.id),
-					});
-				}
-				return mutations;
-			},
-			() => target,
-		);
-		if (!target) throw new Error(m.workspace_open_failed());
-		if (current) this.#presentation.presentSurface(target);
-	}
-
-	async openSingletonAsTab(
-		kind: PortableSingletonKind,
-		windowId: WorkspaceWindowId,
-	): Promise<void> {
-		const surfaceId = singletonSurfaceId(kind);
-		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		if (this.isMobile) {
-			await this.focusMobileSingleton(kind);
-			return;
-		}
-		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
-		const current = await this.#presentation.commit((latest) => {
-			if (!windowNodeById(latest.desktopRoot, windowId) || this.#reservedWindowIds.has(windowId)) {
-				return [];
-			}
-			const existingWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
-			if (existingWindowId === windowId) {
-				return [{ type: 'activate-window-tab', windowId, surfaceId }];
-			}
-			if (latest.surfaces[surfaceId]) {
-				return [{ type: 'move-tab', surfaceId, destinationWindowId: windowId }];
-			}
-			return [
-				{
-					type: 'register-surface',
-					surface: portableSingletonDescriptor(kind),
-					windowId,
-				},
-				{ type: 'activate-window-tab', windowId, surfaceId },
-			];
-		});
-		if (current && this.layout.surface(surfaceId)) this.#presentation.presentSurface(surfaceId);
+	openSingletonAsTab(kind: PortableSingletonKind, windowId: WorkspaceWindowId): Promise<void> {
+		return this.#tabPlacement.openSingletonAsTab(kind, windowId);
 	}
 
 	async openSingletonInNewWindow(
