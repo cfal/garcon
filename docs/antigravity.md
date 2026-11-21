@@ -94,6 +94,8 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-adc.json
 ```
 
+For a standalone worker, put the project, location, and container credential path in `executor.env` and add the same read-only mount to the `executor` service in a `docker-compose.executor.yml` override.
+
 ## Models And Modes
 
 `agy models` prints `<id>\t<label>` lines such as `gemini-3.1-pro-high	Gemini 3.1 Pro (High)`. Each ID encodes the model and its thinking level, and the levels differ per model. Garcon therefore exposes these IDs directly as catalog models and declares no thinking modes. Discovery runs no session, so it leaves no empty conversation in the user's history. `session/set_model` accepts the same IDs and updates both the `model` and `thought_level` options.
