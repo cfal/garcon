@@ -176,6 +176,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		const entries = new Map(control?.queue.entries.map(entry => [entry.id, entry.content]));
 		const next: OptimisticUserInput[] = [];
 		const ordinals = new Map(this.#optimisticAfterOrdinals);
+		let changed = false;
 		for (const input of this.#optimisticInputs) {
 			if (
 				(receipt && receipt.clientMessageId !== input.clientMessageId)
@@ -191,22 +192,21 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 				continue;
 			}
 			const sameInstance = binding.serverInstanceId === control?.serverInstanceId;
-			const queueContent = sameInstance ? entries.get(binding.entryId) : undefined;
-			if (queueContent === undefined) {
+			const content = sameInstance ? entries.get(binding.entryId) : undefined;
+			if (content === undefined) {
 				ordinals.delete(input.clientMessageId);
+				changed = true;
 				continue;
 			}
 			const delivery = previous ?? { ...binding, kind: 'queued' as const };
-			const content = queueContent;
 			if (delivery === input.delivery && content === input.content) {
 				next.push(input);
 			} else {
 				next.push({ ...input, content, delivery });
+				changed = true;
 			}
 		}
-		if (next.length === this.#optimisticInputs.length && next.every((input, index) => input === this.#optimisticInputs[index])) {
-			return feedMutation(false);
-		}
+		if (!changed) return feedMutation(false);
 		this.#optimisticInputs = next;
 		this.#optimisticAfterOrdinals = ordinals;
 		return feedMutation(true);

@@ -150,9 +150,10 @@ export async function submitSteerRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const transcriptViewId = requireTranscriptView(deps, context.chatId);
+	// The acknowledgement stays bound to the submitting UI across the request.
 	const conversationUi = deps.conversationUi;
 	const chatId = context.chatId;
-	const receiver = conversationUi.captureExecutionResponse();
+	const response = conversationUi.captureExecutionResponse();
 	const submission = acceptedInputs.steer({
 		chatId: context.chatId,
 		transcriptViewId,
@@ -166,14 +167,14 @@ export async function submitSteerRoute(
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {
-		const response = await submission.submit();
-		if (response.delivery === 'queued') {
+		const result = await submission.submit();
+		if (result.delivery === 'queued') {
 			const receipt = {
 				clientMessageId: submission.clientMessageId,
-				serverInstanceId: response.control.serverInstanceId,
-				entryId: response.entryId,
+				serverInstanceId: result.control.serverInstanceId,
+				entryId: result.entryId,
 			};
-			receiver.setExecutionControlFromLiveUpdate(chatId, response.control);
+			response.setExecutionControlFromLiveUpdate(chatId, result.control);
 			deps.chatState.acceptQueuedSteer(chatId, receipt, conversationUi.getExecutionControl(chatId));
 		} else {
 			deps.chatState.markOptimisticUserInputDelivered(chatId, submission.clientMessageId);
