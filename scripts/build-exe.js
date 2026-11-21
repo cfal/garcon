@@ -12,6 +12,7 @@ const EMBEDDED_WORKER_SOURCES = {
   'search-reader': 'server-agents/common/src/search/reader-main.ts',
   'token-fitting': 'server/controller/chats/token-fitting/worker-main.ts',
   'transcript-rendering': 'server/controller/chats/transcript-rendering/worker-main.ts',
+  'ledger-activity': 'server/controller/ledger/activity-worker-main.ts',
 };
 const distDir = path.resolve(repoRoot, 'web', 'build');
 const executableDir = path.resolve(repoRoot, 'dist');

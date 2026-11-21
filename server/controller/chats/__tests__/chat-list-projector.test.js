@@ -38,6 +38,7 @@ function makeDeps() {
         getChatName: mock(() => null),
       },
       metadata: {
+        getRunOutcome: mock(() => null),
         listAllChatMetadata: mock(
           () =>
             new Map([
@@ -60,12 +61,27 @@ function makeDeps() {
         })),
       },
       processing: { phase: mock(() => 'running') },
+      transientFeeds: { hasPendingUserAction: mock(() => false) },
       canReloadFromNativeHistory: mock(() => true),
     },
   };
 }
 
 describe('ChatListProjector', () => {
+  it('projects pending action before working and terminal results only while idle', () => {
+    const { deps } = makeDeps();
+    const projector = new ChatListProjector(deps);
+    deps.metadata.getRunOutcome.mockReturnValue('failed');
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBe('working');
+    deps.transientFeeds.hasPendingUserAction.mockReturnValue(true);
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBe('pending-user-action');
+    deps.processing.phase.mockReturnValue(null);
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBe('error');
+    deps.metadata.getRunOutcome.mockReturnValue('finished');
+    expect(projector.buildSummary(CHAT_ID).chat.activityStatus).toBe('complete');
+    deps.metadata.getRunOutcome.mockReturnValue('interrupted');
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBeNull();
+  });
   it('projects the complete canonical list entry for list and command paths', async () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
@@ -117,6 +133,7 @@ describe('ChatListProjector', () => {
     expect(projector.buildSummary(CHAT_ID)).toEqual({
       chat: {
         id: CHAT_ID,
+        activityStatus: 'working',
         agentId: 'claude',
         agentOwnershipEpoch: 'epoch-1',
         carryOverRevision: 'carry-v1:0',

@@ -50,6 +50,8 @@ import {
   type ServerControlOffer,
   type UserInputAdmissionOptions,
   type ProcessingInvalidatedCallback,
+  type InputAcceptedCallback,
+  type TurnStartedCallback,
   type ProjectAdmissionPort,
   type ProjectUnavailableCallback,
   type QueueCommandMutationResult,
@@ -69,7 +71,7 @@ import { AcceptedInputTranscript, type AcceptedInputTranscriptPort } from './acc
 import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { QueuedSteerDelivery } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
-import { settleAgentTurn } from './turn-terminal-settlement.js';
+import { interruptAgentTurn, settleAgentTurn } from './turn-terminal-settlement.js';
 import { controlInputBlockedError, serverShuttingDownError, chatNotFoundError } from './execution-errors.js';
 import type { TurnEventMetadata } from '../agents/event-bus.js';
 import type { WorkingDirectorySettlement, WorkingDirectorySettlementPort } from '../projects/working-directory-settlement.js';
@@ -148,6 +150,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       runExclusive: (chatId, operation) => this.#locks.runExclusive(`chat:${chatId}`, operation),
       chatExists: (chatId) => this.#chatExists(chatId),
       unsettledQueueReceiptKeys,
+      inputAccepted: (chatId) => { this.emit('input-accepted', chatId); },
       publish: (chatId, control) => {
         this.#queuedSteers.observe(chatId, control);
         this.emit('execution-control-updated', chatId, control);
@@ -222,6 +225,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       projectAdmission: options.projectAdmission,
       attachmentAdmission: options.attachmentAdmission,
       callbacks: {
+        publishTurnStarted: (chatId, runId) => { this.emit('turn-started', chatId, runId); },
         canDispatch: this.#canDispatch,
         isShuttingDown: () => this.#shuttingDown,
         registerQueued: (chatId, content, options) => (
@@ -268,6 +272,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
   onProcessingInvalidated(cb: ProcessingInvalidatedCallback): void {
     this.on('processing-invalidated', cb);
+  }
+  onInputAccepted(cb: InputAcceptedCallback): void {
+    this.on('input-accepted', cb);
+  }
+  onTurnStarted(cb: TurnStartedCallback): void {
+    this.on('turn-started', cb);
   }
 
   beginShutdown(): string[] {
@@ -557,7 +567,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     command: string,
     options: UserInputAdmissionOptions,
   ): Promise<boolean> {
-    return this.#acceptedInputTranscript.register(chatId, command, options);
+    const inserted = await this.#acceptedInputTranscript.register(chatId, command, options);
+    if (inserted) this.emit('input-accepted', chatId, options.turnId);
+    return inserted;
   }
 
   reserveDirectTurn(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {
@@ -723,6 +735,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
     const reservation = this.#ownership.reserveDirect(chatId, turn);
+    if (turn.turnId) this.emit('turn-started', chatId, turn.turnId);
     this.#invalidateProcessing(chatId);
     return reservation;
   }
@@ -959,21 +972,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   async #performStop(chatId: string): Promise<ChatStopOutcome> {
-    const attempt = this.#ownership.attempt(chatId);
-    if (attempt?.hasTerminalCommit) return 'already-idle';
-    const interruption = new Error('Turn interrupted by the user');
-    if (attempt) this.#ownership.abortAdmission(chatId, interruption);
     try {
-      const acknowledged = await this.#turnRunner.abortSession(chatId);
-      let currentAttempt: QueueExecutionAttempt | undefined;
-      if (attempt && this.#ownership.isCurrentAttempt(chatId, attempt)) {
-        currentAttempt = attempt;
-      }
-      if (!acknowledged && !attempt) return 'already-idle';
-      if (currentAttempt) {
-        this.#retireAttempt(chatId, currentAttempt, interruption);
-      }
-      return 'interrupt-requested';
+      return await interruptAgentTurn({
+        ownership: this.#ownership,
+        abortSession: id => this.#turnRunner.abortSession(id),
+        retire: (id, attempt, reason) => this.#retireAttempt(id, attempt, reason),
+      }, chatId);
     } catch (error) {
       logger.warn('queue: provider interrupt failed', {
         chatId,

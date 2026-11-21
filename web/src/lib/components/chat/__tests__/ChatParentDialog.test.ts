@@ -27,6 +27,7 @@ function chat(id: string, title = 'Duplicate'): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: true,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',

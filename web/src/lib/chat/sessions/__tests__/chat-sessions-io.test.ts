@@ -81,6 +81,7 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,

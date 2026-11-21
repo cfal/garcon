@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 
 import { lstat, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import { LedgerActivityWorker } from './activity-worker.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import {
   encodeDrafts,
@@ -53,7 +54,6 @@ import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './director
 import {
   isLedgerCliRowNoticeRow,
   isLedgerPreambleSelectionChangedNoticeRow,
-  isPresentationOnlyProviderRow,
   PREAMBLES_UPDATED_MESSAGE,
   transcriptViewId,
 } from './contracts.js';
@@ -95,6 +95,7 @@ import {
   preparePreambleInput,
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
+import { composeInputPrompt, readResendCandidates } from './input-composition.js';
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
 import { readAnchorPage, type AnchorScanInput, type AnchorScanResult } from './anchor-page.js';
 import { readRawPage } from './raw-page.js';
@@ -140,6 +141,7 @@ export class TranscriptLedgerStore {
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
   readonly #staging: StagingViews;
   #anchorReadEpoch = 0;
+  #activityWorker: LedgerActivityWorker | null = null;
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
@@ -282,7 +284,7 @@ export class TranscriptLedgerStore {
         insertEncodedRows(entry.db, request.viewId, encoded, firstOrdinal);
         return prepared.detail.steer || prepared.detail.message.metadata?.contentMode === 'literal'
           ? [input]
-          : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
+          : composeInputPrompt(entry, request.viewId, input, request.excludedOrdinals);
       });
       entry.nextOrdinal += committedRows.length;
       return {
@@ -398,17 +400,7 @@ export class TranscriptLedgerStore {
   resendCandidates(chatId: string): readonly LedgerUserInputRow[] {
     return this.#read(chatId, (entry) => {
       const view = this.#requireCurrent(entry);
-      const statement = entry.db.query<StoredLedgerRow, [string]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ?
-        ORDER BY ordinal DESC
-      `);
-      try {
-        return collectResendCandidates(statement.iterate(view.viewId));
-      } finally {
-        statement.finalize();
-      }
+      return readResendCandidates(entry, view.viewId);
     });
   }
 
@@ -619,6 +611,44 @@ export class TranscriptLedgerStore {
     });
   }
 
+  // Captures one ledger snapshot and keeps SQLite JSON inspection off the controller loop.
+  async lastRunOutcome(chatId: string, viewId: TranscriptViewId): Promise<'finished' | 'failed' | 'interrupted' | null> {
+    const epoch = this.#anchorReadEpoch;
+    const chatGeneration = this.#staging.generation(chatId);
+    const assertReadCurrent = () => {
+      if (epoch !== this.#anchorReadEpoch || this.#staging.generation(chatId) !== chatGeneration) {
+        throw new LedgerBulkOperationAbandonedError(chatId);
+      }
+      if (!this.existingCurrentView(chatId)) throw new TranscriptViewNotInitializedError(chatId);
+      this.#read(chatId, entry => this.#assertCurrent(entry, viewId));
+    };
+    if (!this.existingCurrentView(chatId)) throw new TranscriptViewNotInitializedError(chatId);
+    const beforeOrdinal = this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return entry.nextOrdinal;
+    });
+    this.#activityWorker ??= new LedgerActivityWorker();
+    let outcome;
+    try {
+      outcome = await this.#activityWorker.read({
+        kind: 'read-run-outcome',
+        databasePath: path.join(this.#rootDirectory, chatId, 'ledger.sqlite'),
+        viewId,
+        beforeOrdinal,
+      });
+    } catch (error) {
+      const code = error instanceof Error ? (error as Error & { code?: unknown }).code : null;
+      // A secondary reader's contention or resource failure does not make the ledger corrupt.
+      const corrupt = typeof code === 'string'
+        && (code === 'SQLITE_NOTADB' || code === 'SQLITE_CORRUPT' || code.startsWith('SQLITE_CORRUPT_'));
+      if (code !== UNDECODABLE_LEDGER_ROW && !corrupt) throw error;
+      assertReadCurrent();
+      return this.#read(chatId, () => { throw error; });
+    }
+    assertReadCurrent();
+    return outcome;
+  }
+
   nativeActivityState(chatId: string): TranscriptNativeActivityState {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
@@ -744,6 +774,7 @@ export class TranscriptLedgerStore {
   }
 
   closeChat(chatId: string): void {
+    this.#activityWorker?.retire(path.join(this.#rootDirectory, chatId, 'ledger.sqlite'));
     this.#staging.abandon(chatId);
     const entry = this.#connections.get(chatId) ?? this.#failedCloseEntries.get(chatId);
     if (!entry) return;
@@ -794,6 +825,8 @@ export class TranscriptLedgerStore {
 
   close(): void {
     this.#anchorReadEpoch++;
+    this.#activityWorker?.close();
+    this.#activityWorker = null;
     this.#staging.abandonAll();
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);
@@ -850,31 +883,6 @@ export class TranscriptLedgerStore {
     } catch (error) {
       logger.warn('Deleted transcript ledger removal failed; it is retried on the next start', error);
     }
-  }
-
-  #composePrompt(
-    entry: ConnectionEntry,
-    viewId: TranscriptViewId,
-    current: LedgerUserInputRow,
-    excludedOrdinals: ReadonlySet<number> | undefined,
-  ): readonly LedgerUserInputRow[] {
-    return runQuery(() => {
-      const statement = entry.db.query<StoredLedgerRow, [string, number]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND ordinal < ?
-        ORDER BY ordinal DESC
-      `);
-      try {
-        const preceding = collectResendCandidates(
-          statement.iterate(viewId, current.ordinal),
-          excludedOrdinals,
-        );
-        return [...preceding, current];
-      } finally {
-        statement.finalize();
-      }
-    });
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
@@ -958,26 +966,6 @@ export class TranscriptLedgerStore {
     }
     return current;
   }
-}
-
-function collectResendCandidates(
-  storedRows: Iterable<StoredLedgerRow>,
-  excludedOrdinals?: ReadonlySet<number>,
-): readonly LedgerUserInputRow[] {
-  const candidates: LedgerUserInputRow[] = [];
-  for (const stored of storedRows) {
-    const row = decodeStoredLedgerRow(stored);
-    if (row.kind === 'user-input') {
-      if (row.detail.message.metadata?.contentMode !== 'literal' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
-      continue;
-    }
-    if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
-    if (isPresentationOnlyProviderRow(row)) continue;
-    if (row.kind === 'provider-row'
-        || row.kind === 'permission-requested'
-        || row.kind === 'run-ended') break;
-  }
-  return candidates;
 }
 
 function validateChatDirectoryName(chatId: string): void {
