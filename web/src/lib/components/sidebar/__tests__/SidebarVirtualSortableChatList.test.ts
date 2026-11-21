@@ -62,6 +62,31 @@ it('opens workflow runs and their worker chats independently from the virtual si
 	expect(workflowControls.loadMore).toHaveBeenCalledWith('runs');
 });
 
+it('keeps an archived workflow run openable without active chats', async () => {
+	const openRun = vi.fn();
+	const workflowControls = {
+		selectedRunId: null,
+		fetching: false,
+		failed: false,
+		openRun,
+		toggleRun: vi.fn(),
+		loadMore: vi.fn(),
+		retry: vi.fn(),
+	} satisfies SidebarWorkflowControls;
+	const rows = buildSidebarRowModel(projectionInput([], {
+		workflows: {
+			runs: [{ id: 'archived-run', name: 'Archived review', status: 'archived' }],
+			runIdByChatId: new Map(),
+			collapsedRunIds: new Set(),
+			moreRuns: false,
+			moreActiveChats: false,
+		},
+	})).rows;
+	render(SidebarVirtualSortableChatListHost, { rows, workflowControls, rowHeight });
+	await fireEvent.click(await screen.findByRole('button', { name: 'Archived review Archived' }));
+	expect(openRun).toHaveBeenCalledWith('archived-run');
+});
+
 function touchAt(identifier: number, clientX: number, clientY: number) {
 	return {
 		identifier,

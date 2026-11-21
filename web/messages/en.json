@@ -2429,6 +2429,7 @@
 	"workflow_nav_waiting": "Waiting",
 	"workflow_nav_attention": "Needs attention",
 	"workflow_nav_succeeded": "Succeeded",
+	"workflow_nav_archived": "Archived",
 	"workflow_nav_more_runs": "More workflow runs",
 	"workflow_nav_more_active_chats": "More active workflow chats",
 	"workflow_nav_refresh_failed": "Could not refresh workflows.",

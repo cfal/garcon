@@ -24,7 +24,11 @@
 		waiting: m.workflow_nav_waiting,
 		attention: m.workflow_nav_attention,
 		succeeded: m.workflow_nav_succeeded,
+		archived: m.workflow_nav_archived,
 	};
+	const status = $derived(
+		row.run.status && Object.hasOwn(statuses, row.run.status) ? statuses[row.run.status]() : null,
+	);
 </script>
 
 <div
@@ -56,8 +60,8 @@
 	>
 		<Workflow class="size-3.5 shrink-0 text-muted-foreground" />
 		<span class="min-w-0 flex-1 truncate font-medium" title={name}>{name}</span>
-		{#if row.run.status}
-			<span class="shrink-0 text-[11px] text-muted-foreground">{statuses[row.run.status]()}</span>
+		{#if status}
+			<span class="shrink-0 text-[11px] text-muted-foreground">{status}</span>
 		{/if}
 	</button>
 </div>
