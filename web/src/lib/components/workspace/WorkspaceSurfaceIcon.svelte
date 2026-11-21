@@ -13,6 +13,7 @@
 	import Columns3 from '@lucide/svelte/icons/columns-3';
 	import Tickets from '@lucide/svelte/icons/tickets';
 	import ChartSpline from '@lucide/svelte/icons/chart-spline';
+	import Workflow from '@lucide/svelte/icons/workflow';
 	import type { ActiveSurfaceKind } from '$lib/workspace/surface-types.js';
 
 	let {
@@ -34,6 +35,7 @@
 {:else if kind === 'chat-board'}<Columns3 class={className} {size} />
 {:else if kind === 'tickets'}<Tickets class={className} {size} />
 {:else if kind === 'usage'}<ChartSpline class={className} {size} />
+{:else if kind === 'workflow-run' || kind === 'new-workflow'}<Workflow class={className} {size} />
 {:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal
 		class={className}
 		{size}

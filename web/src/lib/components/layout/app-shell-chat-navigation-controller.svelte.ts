@@ -49,7 +49,7 @@ export class AppShellChatNavigationController {
 	handleRouteChat(chatId: string | null): void {
 		if (this.#disposed) return;
 		if (chatId === null) {
-			this.#cancelPendingNavigation();
+			this.cancelPendingNavigation();
 			this.#options.setSelectedChatId(null);
 			return;
 		}
@@ -60,6 +60,7 @@ export class AppShellChatNavigationController {
 	async showChatInCurrentWindow(chatId: string, options: {
 		navigate: boolean;
 		drawerSelection?: DrawerComposerSelection;
+		onSelected?: () => void;
 	}): Promise<void> {
 		if (this.#disposed) return;
 		const generation = this.#begin(chatId);
@@ -69,6 +70,7 @@ export class AppShellChatNavigationController {
 			if (this.#options.focusedChatId !== chatId) return;
 			if (!this.#options.isLoadingChats && !this.#options.hasChat(chatId)) return;
 			this.#options.setSelectedChatId(chatId);
+			options.onSelected?.();
 			if (options.navigate) await this.#queueChatRoute(chatId, generation);
 			if (this.#isCurrent(generation)) {
 				this.#options.requestComposerFocus(options.drawerSelection);
@@ -79,6 +81,11 @@ export class AppShellChatNavigationController {
 		} finally {
 			this.#complete(generation);
 		}
+	}
+
+	cancelPendingNavigation(): void {
+		this.#generation += 1;
+		this.#clearPendingTarget();
 	}
 
 	async synchronizeFocusedChat(chatId: string): Promise<void> {
@@ -121,7 +128,7 @@ export class AppShellChatNavigationController {
 
 	destroy(): void {
 		this.#disposed = true;
-		this.#cancelPendingNavigation();
+		this.cancelPendingNavigation();
 		this.#routeEchoes.clear();
 	}
 
@@ -155,11 +162,6 @@ export class AppShellChatNavigationController {
 
 	#complete(generation: number): void {
 		if (!this.#isCurrent(generation)) return;
-		this.#clearPendingTarget();
-	}
-
-	#cancelPendingNavigation(): void {
-		this.#generation += 1;
 		this.#clearPendingTarget();
 	}
 

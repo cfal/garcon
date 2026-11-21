@@ -50,6 +50,8 @@ export function createWorkspaceSurfaceCatalog(
 				: m.workspace_surface_file();
 		}
 		if (surface.type === 'terminal-launcher') return m.workspace_surface_terminal();
+		if (surface.type === 'new-workflow') return m.workflow_nav_new();
+		if (surface.type === 'workflow-run') return m.workflow_nav_run();
 		return singletonLabels[surface.kind];
 	}
 

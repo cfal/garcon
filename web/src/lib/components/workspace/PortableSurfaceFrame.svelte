@@ -13,7 +13,11 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
-	import type { WorkspaceWindowId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import {
+		isWorkflowSurface,
+		type WorkspaceWindowId,
+		type SurfaceDescriptor,
+	} from '$lib/workspace/surface-types.js';
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -48,13 +52,14 @@
 	);
 	const showMobileNavigation = $derived(
 		presentation === 'mobile' &&
-			surface.type === 'singleton' &&
-			(surface.kind === 'commit' ||
-				surface.kind === 'chat-board' ||
-				surface.kind === 'chat-map' ||
-				surface.kind === 'chat-canvas' ||
-				surface.kind === 'pull-requests' ||
-				surface.kind === 'usage'),
+			(isWorkflowSurface(surface) ||
+				(surface.type === 'singleton' &&
+					(surface.kind === 'commit' ||
+						surface.kind === 'chat-board' ||
+						surface.kind === 'chat-map' ||
+						surface.kind === 'chat-canvas' ||
+						surface.kind === 'pull-requests' ||
+						surface.kind === 'usage'))),
 	);
 	const attachFrame = fromAction(surfaceFrame, () => ({
 		registry: surfaceFrames,

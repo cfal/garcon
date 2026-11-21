@@ -34,6 +34,7 @@
 	import { workingChatIdsForTiling } from '$lib/workspace/workspace-chat-tiling.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import type { SidebarWorkflowControls } from './sidebar-workflow-controls';
 
 	interface SidebarProps {
 		reorder: SidebarOrderController;
@@ -46,6 +47,8 @@
 		isMobile?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onNewChat: () => void;
+		onNewWorkflow?: () => void;
+		workflowControls?: SidebarWorkflowControls;
 		onNewProjectChat: (project: NewChatProjectTarget) => void;
 		/** Applies the optimistic local removal (store + navigation) a
 		 *  ChatSessionDeletedWsMessage would trigger, without waiting for
@@ -87,6 +90,8 @@
 		isMobile = false,
 		onChatSelect,
 		onNewChat,
+		onNewWorkflow,
+		workflowControls,
 		onNewProjectChat,
 		onLocallyDeleteChat,
 		onQuietRefresh,
@@ -430,6 +435,10 @@
 			onTileWorkingChats={canTileWorkingChats && onTileWorkingChats
 				? handleTileWorkingChats
 				: undefined}
+			onCreateWorkflow={onNewWorkflow && (() => {
+				if (selection.isActive) selection.exit();
+				onNewWorkflow?.();
+			})}
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
@@ -460,11 +469,20 @@
 			>
 		</div>
 	{/if}
+	{#if workflowControls?.failed}
+		<div class="order-1 flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs" role="status">
+			<span>{m.workflow_nav_refresh_failed()}</span>
+			<Button variant="ghost" size="sm" disabled={workflowControls.fetching} onclick={() => workflowControls?.retry()}>
+				{m.sidebar_order_refresh_retry()}
+			</Button>
+		</div>
+	{/if}
 
 	<div class="order-2 flex min-h-0 flex-1">
 		<SidebarContent
 			{projection}
 			{reorder}
+			{workflowControls}
 			{selectedChatId}
 			{isLoading}
 			{isMobile}

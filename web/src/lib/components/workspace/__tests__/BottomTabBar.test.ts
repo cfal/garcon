@@ -6,6 +6,15 @@ import BottomTabBar from '../BottomTabBar.svelte';
 afterEach(cleanup);
 
 describe('BottomTabBar', () => {
+	it('returns from a worker chat to its workflow run without switching the Chat tab', async () => {
+		const onOpenWorkflow = vi.fn();
+		const onTabChange = vi.fn();
+		render(BottomTabBar, { activeItem: 'chat', onTabChange, onMenuClick: vi.fn(), onOpenWorkflow });
+		await fireEvent.click(screen.getByRole('button', { name: m.workflow_nav_back_to_run() }));
+		expect(onOpenWorkflow).toHaveBeenCalledOnce();
+		expect(onTabChange).not.toHaveBeenCalled();
+	});
+
 	it('keeps only the primary mobile destinations and routes their actions', async () => {
 		const onTabChange = vi.fn();
 		const onMenuClick = vi.fn();

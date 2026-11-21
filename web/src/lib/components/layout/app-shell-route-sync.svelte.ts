@@ -13,7 +13,10 @@ import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-
 import { shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 import type { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
 
-export function bindAppShellRoute(chatNavigation: AppShellChatNavigationController): void {
+export function bindAppShellRoute(
+	chatNavigation: AppShellChatNavigationController,
+	options?: { hasFocusedWorkflow?: () => boolean },
+): void {
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
@@ -54,7 +57,7 @@ export function bindAppShellRoute(chatNavigation: AppShellChatNavigationControll
 	});
 
 	$effect(() => {
-		if (routeTicketId) return;
+		if (routeTicketId || options?.hasFocusedWorkflow?.()) return;
 		const lastSelectedChatId = sessions.lastSelectedChatId;
 		const target = restoreChatIdForBareRoute({
 			pathname: appPathname(page.url.pathname),

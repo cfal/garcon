@@ -46,7 +46,11 @@
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import type { WorkspaceWindowId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import {
+		isWorkflowSurface,
+		type WorkspaceWindowId,
+		type SurfaceDescriptor,
+	} from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		setSurfaceFrameBridge,
@@ -55,6 +59,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import ProjectSurfaceGate from './ProjectSurfaceGate.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
+	import WorkflowWorkspaceContent from './WorkflowWorkspaceContent.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
@@ -126,6 +131,10 @@
 				</div>
 			</div>
 		{/if}
+	{:else if isWorkflowSurface(surface)}
+		{#key surface}
+			<WorkflowWorkspaceContent {surface} {visible} />
+		{/key}
 	{:else if surface.type === 'singleton' && surface.kind === 'files'}
 		{#await filesRenderer()}
 			{@const controller = singletonSurfaces.files()}

@@ -14,6 +14,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
+	import Workflow from '@lucide/svelte/icons/workflow';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
@@ -43,6 +44,7 @@
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
+		onCreateWorkflow?: () => void;
 		onMarkAllRead?: () => void;
 		onTileWorkingChats?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
@@ -69,6 +71,7 @@
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
 		onCreateChat,
+		onCreateWorkflow,
 		onMarkAllRead,
 		onTileWorkingChats,
 		onSetSortMode,
@@ -130,8 +133,27 @@
 			title={buttonLabel}
 		>
 			<MessageSquarePlus class="h-4 w-4 shrink-0" />
-			<span class="hidden truncate @min-[136px]/sidebar-create:inline">{buttonLabel}</span>
+			<span
+				class={[
+					'hidden truncate',
+					onCreateWorkflow
+						? '@min-[84px]/sidebar-create:inline'
+						: '@min-[136px]/sidebar-create:inline',
+				]}>{buttonLabel}</span
+			>
 		</button>
+		{#if onCreateWorkflow}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
+				onclick={onCreateWorkflow}
+				aria-label={m.workflow_nav_new()}
+				title={m.workflow_nav_new()}
+			>
+				<Workflow class="size-4" />
+			</Button>
+		{/if}
 
 		<Button
 			variant="ghost"

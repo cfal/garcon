@@ -62,13 +62,28 @@
 	import { createAppShellSidebarOrder } from './app-shell-sidebar-order';
 	import { createAppShellMobileDrawer } from './app-shell-mobile-drawer.js';
 	import SidebarDisplayDialog from '../sidebar/SidebarDisplayDialog.svelte';
-	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import {
+		isWorkflowSurface,
+		WORKFLOW_SURFACE_IDS,
+		type WorkflowSurfaceDescriptor,
+		type WorkspaceWindowEdge,
+	} from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
 	import type { DrawerComposerSelection } from '$lib/stores/app-shell.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
+	import { effectiveExecutorId } from '$shared/executors';
+	import {
+		listWorkflowRunsPage,
+		listActiveWorkflowChatsPage,
+		subscribeWorkflowChanges,
+	} from '$lib/api/workflows';
+	import { SidebarWorkflowIndex } from '$lib/sidebar/display/sidebar-workflow-index.svelte';
+	import type { SidebarWorkflowRun } from '$lib/sidebar/display/sidebar-virtual-chat-list';
+	import type { SidebarWorkflowControls } from '../sidebar/sidebar-workflow-controls';
+	import { setWorkflowNavigation } from '$lib/workflows/navigation/workflow-navigation-context';
 
 	const commandRegistry = getWorkbenchCommands();
 	const navigation = getNavigation();
@@ -89,7 +104,12 @@
 	const chatActionDialogs = new ChatActionDialogsState();
 	let sidebarDisplayOpen = $state(false);
 	let sidebarDisplayReturnFocus = $state<(() => void) | undefined>();
-	const sidebarOrder = createAppShellSidebarOrder();
+	const workflowIndex = new SidebarWorkflowIndex({
+		runs: listWorkflowRunsPage,
+		activeChats: listActiveWorkflowChatsPage,
+	});
+	const sidebarOrder = createAppShellSidebarOrder(workflowIndex);
+	let pageVisible = $state(false);
 	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
 	const mobileDrawer = createAppShellMobileDrawer(handleChatSelect);
 	const archiveUndo = new ArchiveUndoController(sessions, notifications);
@@ -171,6 +191,33 @@
 	const mobileActiveDescriptor = $derived(
 		workspace.layout.surface(workspace.layout.snapshot.mobileActiveSurfaceId),
 	);
+	const focusedWorkflow = $derived.by(() => {
+		const surface = isMobile
+			? mobileActiveDescriptor
+			: workspace.layout.surface(workspace.lastFocusedSurfaceId);
+		return isWorkflowSurface(surface) ? surface : null;
+	});
+	const focusedRun = $derived(focusedWorkflow?.type === 'workflow-run' ? focusedWorkflow.runId : null);
+	const mobileChatRun = $derived(
+		mobileActiveDescriptor?.type === 'chat' && mobileActiveDescriptor.chatId
+			? workflowIndex.runIdByChatId.get(mobileActiveDescriptor.chatId)
+			: undefined,
+	);
+	const workflowControls: SidebarWorkflowControls = {
+		get selectedRunId() {
+			return focusedRun;
+		},
+		get fetching() {
+			return workflowIndex.fetching;
+		},
+		get failed() {
+			return workflowIndex.failed;
+		},
+		openRun: (runId) => handleOpenWorkflowSurface(() => workspace.openWorkflowRun(runId)),
+		toggleRun: (runId) => workflowIndex.toggleRunCollapsed(runId),
+		loadMore: (kind) => workflowIndex.loadMore(kind),
+		retry: () => workflowIndex.invalidate(),
+	};
 	const mobileActiveTab = $derived.by<MobileWorkspaceTabId>(() => {
 		const surface = mobileActiveDescriptor;
 		if (surface?.type === 'terminal' || surface?.type === 'terminal-launcher') return 'terminal';
@@ -184,6 +231,7 @@
 	});
 	const mobileTransientSurface = $derived(
 		mobileActiveDescriptor?.type === 'file' ||
+			isWorkflowSurface(mobileActiveDescriptor) ||
 			(mobileActiveDescriptor?.type === 'singleton' &&
 				(mobileActiveDescriptor.kind === 'commit' ||
 					mobileActiveDescriptor.kind === 'chat-map' ||
@@ -231,8 +279,33 @@
 			);
 		},
 	});
+	setWorkflowNavigation({
+		openRun: handleOpenRunFromWorkflow,
+		openChat: (chatId, source) => void handleOpenWorkflowChat(chatId, source),
+	});
 
-	bindAppShellRoute(chatNavigation);
+	$effect(() => {
+		const sidebarVisible = sidebarMounted && !hideChatList && !chatListAutohide.collapsed;
+		const workflowVisible = WORKFLOW_SURFACE_IDS.some((id) =>
+			workspace.layout.surface(id) && workspace.isSurfacePresented(id),
+		);
+		const live = pageVisible && (sidebarVisible || workflowVisible);
+		untrack(() => workflowIndex.setLive(live));
+	});
+
+	$effect(() => {
+		if (!ws.connectionStatus.lastConnectedAt) return;
+		untrack(() => workflowIndex.invalidate());
+	});
+
+	$effect(() => {
+		const chatId = sessions.selectedChatId;
+		untrack(() => workflowIndex.selectChat(chatId));
+	});
+
+	bindAppShellRoute(chatNavigation, {
+		hasFocusedWorkflow: () => Boolean(focusedWorkflow),
+	});
 
 	$effect(() => {
 		const matches = mobileBreakpointMatches;
@@ -297,9 +370,91 @@
 		void sessions.refreshChats();
 	});
 
+	onMount(() => {
+		const updateVisibility = () => (pageVisible = document.visibilityState !== 'hidden');
+		updateVisibility();
+		document.addEventListener('visibilitychange', updateVisibility);
+		const unsubscribe = subscribeWorkflowChanges(() => workflowIndex.invalidate());
+		return () => {
+			unsubscribe();
+			document.removeEventListener('visibilitychange', updateVisibility);
+			workflowIndex.setLive(false);
+		};
+	});
+
 	function handleChatSelect(chatId: string, drawerSelection?: DrawerComposerSelection): void {
 		cancelSearchResultNavigation();
-		void chatNavigation.showChatInCurrentWindow(chatId, { navigate: true, drawerSelection });
+		showChat(chatId, workflowIndex.runForChat(chatId), drawerSelection);
+	}
+
+	function showChat(chatId: string, run?: SidebarWorkflowRun, drawerSelection?: DrawerComposerSelection): void {
+		void chatNavigation.showChatInCurrentWindow(chatId, {
+			navigate: true,
+			drawerSelection,
+			onSelected: run ? () => workflowIndex.selectChat(chatId, run) : undefined,
+		});
+	}
+
+	function isCurrentWorkflowSource(source: WorkflowSurfaceDescriptor): boolean {
+		return (
+			workspace.layout.surface(source.id) === source &&
+			workspace.lastFocusedSurfaceId === source.id &&
+			workspace.isSurfacePresented(source.id)
+		);
+	}
+
+	function handleOpenRunFromWorkflow(runId: string, source: WorkflowSurfaceDescriptor): void {
+		if (!isCurrentWorkflowSource(source)) return;
+		const windowId = workspace.windowOf(source.id) ?? workspace.currentWindowId;
+		handleOpenWorkflowSurface(() => workspace.openWorkflowRun(runId, windowId));
+	}
+
+	async function handleOpenWorkflowChat(
+		chatId: string,
+		source: Extract<WorkflowSurfaceDescriptor, { type: 'workflow-run' }>,
+	): Promise<void> {
+		if (!isCurrentWorkflowSource(source)) return;
+		cancelSearchResultNavigation();
+		const version = searchSelectionVersion;
+		const run = workflowIndex.runForChat(chatId, source.runId);
+		if (!sessions.hasChat(chatId)) await quietRefresh();
+		if (version !== searchSelectionVersion || !isCurrentWorkflowSource(source)) return;
+		if (!sessions.hasChat(chatId)) {
+			notifications.error(m.workflow_nav_chat_unavailable());
+			return;
+		}
+		showChat(chatId, run);
+	}
+
+	function handleNewWorkflow(): void {
+		const focusedChatId = workspace.focusedChatId;
+		const chat = focusedChatId ? sessions.byId[focusedChatId] : sessions.selectedChat;
+		const context = chat?.projectPath.trim()
+			? { executorId: effectiveExecutorId(chat.executorId), cwd: chat.projectPath }
+			: null;
+		handleOpenWorkflowSurface(() => workspace.openNewWorkflow(context));
+	}
+
+	function handleOpenWorkflowSurface(open: () => Promise<void>): void {
+		cancelSearchResultNavigation();
+		chatNavigation.cancelPendingNavigation();
+		const version = searchSelectionVersion;
+		const drawerClosed = isMobile && appShell.sidebarOpen;
+		if (drawerClosed) mobileDrawer.close();
+		const ready = drawerClosed ? tick() : Promise.resolve();
+		void ready
+			.then(() => {
+				if (version === searchSelectionVersion) return open();
+			})
+			.catch((error) => {
+				if (version === searchSelectionVersion) {
+					notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+				}
+			});
+	}
+
+	function handleReturnToWorkflow(): void {
+		if (mobileChatRun) workflowControls.openRun(mobileChatRun);
 	}
 
 	function cancelSearchResultNavigation(): void {
@@ -515,6 +670,7 @@
 	);
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => {
+		cancelSearchResultNavigation();
 		sidebarOrder.destroy();
 		archiveUndo.destroy();
 		chatNavigation.destroy();
@@ -597,12 +753,14 @@
 			sidebarDisplayOpen = true;
 		}}
 		chats={sessions.orderedChats}
-		selectedChatId={sessions.selectedChatId}
+		selectedChatId={focusedRun === null ? sessions.selectedChatId : null}
 		isLoading={sessions.isLoadingChats}
 		rosterReady={sessions.chatListStatus === 'ready'}
 		{isMobile}
 		{onChatSelect}
 		{...sidebarActions}
+		onNewWorkflow={handleNewWorkflow}
+		{workflowControls}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
 		chatListAutohideAvailable={hoverCapability.current}
 		{newWindowEdges}
@@ -739,6 +897,7 @@
 					activeItem={mobileActiveTab}
 					onTabChange={handleMobileTabChange}
 					onMenuClick={mobileDrawer.toggle}
+					onOpenWorkflow={mobileChatRun ? handleReturnToWorkflow : undefined}
 				/>
 			{/if}
 		</div>

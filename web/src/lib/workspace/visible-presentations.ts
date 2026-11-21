@@ -1,8 +1,10 @@
-import type {
-	ChatViewSurfaceId,
-	PresentationHostId,
-	WorkspaceLayoutSnapshot,
-	WorkspaceWindowId,
+import {
+	WORKFLOW_SURFACE_IDS,
+	isWorkflowSurface,
+	type ChatViewSurfaceId,
+	type PresentationHostId,
+	type WorkspaceLayoutSnapshot,
+	type WorkspaceWindowId,
 } from './surface-types.js';
 import { collectWindowNodes, windowNodeById } from './window-tree.js';
 
@@ -28,7 +30,7 @@ interface VisiblePresentationOptions {
 }
 
 export function portablePresentationKey(
-	presentation: WorkspaceWindowId,
+	presentation: WorkspaceWindowId | 'mobile',
 	surfaceId: string,
 ): string {
 	return `${presentation}:${surfaceId}`;
@@ -133,18 +135,27 @@ function visibleDesktopPresentationKeys(
 	return keys;
 }
 
-export function nextRetainedSingletonPresentationKeys(
+export function nextRetainedPortablePresentationKeys(
 	snapshot: WorkspaceLayoutSnapshot,
 	isMobile: boolean,
 	visible: readonly PortablePresentation[],
 	current: ReadonlySet<string>,
 ): ReadonlySet<string> {
-	if (isMobile) return new Set();
 	const next = new Set<string>();
+	if (isMobile) {
+		for (const id of WORKFLOW_SURFACE_IDS) {
+			const key = portablePresentationKey('mobile', id);
+			if (snapshot.surfaces[id] && (current.has(key) || snapshot.mobileActiveSurfaceId === id)) {
+				next.add(key);
+			}
+		}
+		return next;
+	}
 	const visibleKeys = visibleDesktopPresentationKeys(visible);
 	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
 		for (const surfaceId of workspaceWindow.tabs.order) {
-			if (snapshot.surfaces[surfaceId]?.type !== 'singleton') continue;
+			const surface = snapshot.surfaces[surfaceId];
+			if (surface?.type !== 'singleton' && !isWorkflowSurface(surface)) continue;
 			const key = portablePresentationKey(workspaceWindow.id, surfaceId);
 			if (current.has(key) || visibleKeys.has(key)) next.add(key);
 		}
@@ -156,13 +167,22 @@ export function renderedPortablePresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	isMobile: boolean,
 	visible: readonly PortablePresentation[],
-	retainedSingletonKeys: ReadonlySet<string>,
+	retainedKeys: ReadonlySet<string>,
 ): RenderedPortablePresentation[] {
 	if (isMobile) {
 		const rendered: RenderedPortablePresentation[] = [];
 		for (const item of visible) {
 			if (item.presentation === 'mobile') {
 				rendered.push({ ...item, visible: true, windowId: null });
+			}
+		}
+		for (const id of WORKFLOW_SURFACE_IDS) {
+			if (
+				id !== snapshot.mobileActiveSurfaceId &&
+				snapshot.surfaces[id] &&
+				retainedKeys.has(portablePresentationKey('mobile', id))
+			) {
+				rendered.push({ surfaceId: id, presentation: 'mobile', visible: false, windowId: null });
 			}
 		}
 		return rendered;
@@ -179,7 +199,7 @@ export function renderedPortablePresentations(
 				fullscreenWindowId !== null &&
 				workspaceWindow.id !== fullscreenWindowId &&
 				workspaceWindow.tabs.activeId === surfaceId;
-			if (!isVisible && !retainedSingletonKeys.has(key) && !isHiddenFullscreenActive) continue;
+			if (!isVisible && !retainedKeys.has(key) && !isHiddenFullscreenActive) continue;
 			rendered.push({
 				surfaceId,
 				presentation: workspaceWindow.id,

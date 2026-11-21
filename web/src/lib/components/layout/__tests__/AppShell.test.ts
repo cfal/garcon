@@ -30,6 +30,7 @@ import { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 import ChatSummary from '../../chat/ChatSummary.svelte';
 import { createAppShellSidebarOrder } from '../app-shell-sidebar-order';
+import type { WorkflowRunSummary } from '$shared/workflow-runs';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const shortcuts = vi.hoisted(() => ({ userInteractionGeneration: 0 }) satisfies Pick<WorkspaceShortcutDispatcher, 'userInteractionGeneration'>);
@@ -38,6 +39,19 @@ const chatNavigation = vi.hoisted(() => ({
 }));
 const chatDraftContext = vi.hoisted(() => ({
 	set: vi.fn<(_drafts: unknown) => void>(),
+}));
+const workflows = vi.hoisted(() => ({
+	runs: vi.fn<typeof import('$lib/api/workflows').listWorkflowRunsPage>(),
+	activeChats: vi.fn<typeof import('$lib/api/workflows').listActiveWorkflowChatsPage>(),
+	subscribers: new Set<() => void>(),
+}));
+vi.mock('$lib/api/workflows', () => ({
+	listWorkflowRunsPage: workflows.runs,
+	listActiveWorkflowChatsPage: workflows.activeChats,
+	subscribeWorkflowChanges(listener: () => void) {
+		workflows.subscribers.add(listener);
+		return () => { workflows.subscribers.delete(listener); };
+	},
 }));
 
 vi.mock('$lib/chat/actions/chat-navigation.js', () => ({
@@ -208,7 +222,7 @@ function installContext(chats: ChatSessionRecord[] = []): AppShellBreakpointWork
 		isLoadingChats: false,
 		chatListStatus: 'ready',
 		order: chats.map((entry) => entry.id),
-		byId: {},
+		byId: Object.fromEntries(chats.map((entry) => [entry.id, entry])),
 		setSelectedChatId: vi.fn((chatId: string | null) => {
 			selectedChatId = chatId;
 		}),
@@ -295,6 +309,8 @@ describe('AppShell responsive workspace binding', () => {
 	let hoverMediaQuery: TestMediaQueryList;
 
 	beforeEach(() => {
+		workflows.runs.mockResolvedValue({ items: [], nextCursor: null });
+		workflows.activeChats.mockResolvedValue({ items: [], nextCursor: null });
 		setViewportWidth(1_024, false);
 		hoverMediaQuery = new TestMediaQueryList(HOVER_CAPABLE_MEDIA_QUERY, true);
 		vi.stubGlobal(
@@ -318,6 +334,43 @@ describe('AppShell responsive workspace binding', () => {
 		chatDraftContext.set.mockReset();
 		searchNavigationPort.open.mockClear();
 		searchNavigationPort.cancel.mockClear();
+		workflows.runs.mockReset();
+		workflows.activeChats.mockReset();
+		workflows.subscribers.clear();
+	});
+
+	it('opens New Workflow with the focused executor-qualified folder', async () => {
+		const workspace = installContext([chat('remote-chat', { executorId: 'remote', projectPath: '/remote/project' })]);
+		await workspace.showChatInCurrentWindow('remote-chat');
+		render(AppShell);
+		await fireEvent.click(screen.getByRole('button', { name: 'New Workflow' }));
+		expect(workspace.openedWorkflowContexts).toEqual([{ executorId: 'remote', cwd: '/remote/project' }]);
+	});
+
+	it('closes the native-width drawer and opens New Workflow without inventing a folder', async () => {
+		setViewportWidth(390, false);
+		const workspace = installContext();
+		render(AppShell);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Open chat drawer' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'New Workflow' }));
+		await waitFor(() => expect(workspace.openedWorkflowContexts).toEqual([null]));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
+	});
+
+	it('refreshes from workflow mutations and opens the real run identity from the sidebar', async () => {
+		const workspace = installContext();
+		const view = render(AppShell);
+		await waitFor(() => expect(workflows.runs).toHaveBeenCalled());
+		const run = {
+			id: 'actual-run', name: 'Review', status: 'running', kind: 'published', definitionId: 'definition',
+			revision: 1, createdAt: '2026-11-21T00:00:00Z', updatedAt: '2026-11-21T00:00:00Z',
+		} satisfies WorkflowRunSummary;
+		workflows.runs.mockResolvedValue({ items: [run], nextCursor: null });
+		for (const notify of workflows.subscribers) notify();
+		await fireEvent.click(await screen.findByRole('button', { name: 'Review' }));
+		expect(workspace.openedWorkflowRuns).toEqual(['actual-run']);
+		view.unmount();
+		expect(workflows.subscribers.size).toBe(0);
 	});
 
 	it.each([

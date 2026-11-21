@@ -8,7 +8,7 @@ import {
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '$lib/workspace/canonical-layout';
-import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
+import type { PortableSingletonKind, WorkflowLaunchContext, WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy';
 import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
 import { collectWindowNodes, windowNodeById } from '$lib/workspace/window-tree';
@@ -63,6 +63,8 @@ export class AppShellBreakpointWorkspace implements Pick<
 	showChatCalls = 0;
 	readonly focusedMobileSingletons: PortableSingletonKind[] = [];
 	readonly openedSingletons: PortableSingletonKind[] = [];
+	readonly openedWorkflowContexts: (WorkflowLaunchContext | null)[] = [];
+	readonly openedWorkflowRuns: string[] = [];
 
 	get currentWindowId(): WorkspaceWindowId {
 		return CANONICAL_WINDOW_ID;
@@ -140,6 +142,12 @@ export class AppShellBreakpointWorkspace implements Pick<
 		this.focusedMobileSingletons.push(kind);
 	}
 	async focusChat(): Promise<void> {}
+	async openNewWorkflow(context: WorkflowLaunchContext | null): Promise<void> {
+		this.openedWorkflowContexts.push(context);
+	}
+	async openWorkflowRun(runId: string): Promise<void> {
+		this.openedWorkflowRuns.push(runId);
+	}
 	openSingletonInNewWindow(kind: PortableSingletonKind): Promise<string> {
 		this.openedSingletons.push(kind);
 		return Promise.resolve(`singleton:${kind}`);

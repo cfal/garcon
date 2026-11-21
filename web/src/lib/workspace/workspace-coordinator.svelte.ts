@@ -19,6 +19,8 @@ import {
 	type FocusOwner,
 	type PortableSingletonKind,
 	type PresentationHostId,
+	type WorkflowLaunchContext,
+	type WorkflowSurfaceDescriptor,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 	type WorkspacePartitionId,
@@ -455,6 +457,55 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async openTicket(id: string): Promise<void> {
 		await this.openSingletonAsTab('tickets', this.currentWindowId);
 		this.#deps.singletons.tickets().select(id);
+	}
+
+	openNewWorkflow(context: WorkflowLaunchContext | null): Promise<void> {
+		return this.#openWorkflowSurface({ id: 'new-workflow', type: 'new-workflow', context });
+	}
+
+	openWorkflowRun(runId: string, windowId = this.currentWindowId): Promise<void> {
+		return this.#openWorkflowSurface({ id: 'workflow-run', type: 'workflow-run', runId }, windowId);
+	}
+
+	async #openWorkflowSurface(
+		surface: WorkflowSurfaceDescriptor,
+		preferredWindowId = this.currentWindowId,
+	): Promise<void> {
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		let target: string | null = null;
+		const current = await this.#presentation.commitWithPresentationTarget(
+			(latest) => {
+				const windowId =
+					windowIdOfSurface(latest.desktopRoot, surface.id) ??
+					this.#resolveWindowId(latest, preferredWindowId);
+				if (this.#reservedWindowIds.has(windowId) || this.#reservedSurfaceIds.has(surface.id)) {
+					return [];
+				}
+				target = surface.id;
+				const previous = latest.surfaces[surface.id];
+				const mutations: WorkspaceLayoutMutation[] = [];
+				if (!previous) mutations.push({ type: 'register-surface', surface, windowId });
+				else if (
+					previous.type === 'workflow-run' &&
+					surface.type === 'workflow-run' &&
+					previous.runId !== surface.runId
+				) {
+					mutations.push({ type: 'replace-surface', previousId: previous.id, surface });
+				}
+				mutations.push({ type: 'activate-window-tab', windowId, surfaceId: surface.id });
+				if (this.isMobile) {
+					mutations.push({
+						type: 'set-mobile-presentation',
+						activeId: surface.id,
+						returnStack: this.#presentation.returnStackForTransient(surface.id),
+					});
+				}
+				return mutations;
+			},
+			() => target,
+		);
+		if (!target) throw new Error(m.workspace_open_failed());
+		if (current) this.#presentation.presentSurface(target);
 	}
 
 	async openSingletonAsTab(

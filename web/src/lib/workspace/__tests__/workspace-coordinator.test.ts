@@ -2417,6 +2417,39 @@ describe('WorkspaceCoordinator', () => {
 		expect(singletons.disposeSurface).not.toHaveBeenCalledWith('git-history');
 	});
 
+	it('keeps one workflow viewer tab while rapidly switching runs and leaves the chat in place', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('existing-chat');
+		await Promise.all([coordinator.openWorkflowRun('run-a'), coordinator.openWorkflowRun('run-b')]);
+		expect(windowTabs(layout.snapshot, 'window-main').order.filter((id) => id === 'workflow-run'))
+			.toEqual(['workflow-run']);
+		expect(layout.surface('workflow-run')).toEqual({ id: 'workflow-run', type: 'workflow-run', runId: 'run-b' });
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('workflow-run');
+		expect(layout.surface(CANONICAL_CHAT_SURFACE_ID)).toMatchObject({ chatId: 'existing-chat' });
+		await coordinator.showChatInCurrentWindow('worker-chat');
+		expect(coordinator.focusedChatId).toBe('worker-chat');
+		expect(layout.surface('workflow-run')).toMatchObject({ runId: 'run-b' });
+	});
+
+	it('restores the launch view and then the previous chat on mobile Back', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('existing-chat');
+		await coordinator.enterMobilePresentation();
+		const context = { executorId: 'remote', cwd: '/remote/project' };
+		await coordinator.openNewWorkflow(context);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('new-workflow');
+		expect(layout.surface('new-workflow')).toEqual({ id: 'new-workflow', type: 'new-workflow', context });
+		await coordinator.openWorkflowRun('first');
+		await coordinator.openWorkflowRun('second');
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('workflow-run');
+		expect(layout.surface('workflow-run')).toMatchObject({ runId: 'second' });
+		await coordinator.mobileBack();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('new-workflow');
+		await coordinator.mobileBack();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusedChatId).toBe('existing-chat');
+	});
+
 	it('rolls back a failed desktop return and remains retryable', async () => {
 		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 4 });
 		await coordinator.enterMobilePresentation();

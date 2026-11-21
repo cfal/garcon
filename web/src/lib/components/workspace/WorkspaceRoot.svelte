@@ -321,7 +321,7 @@
 			snapshot,
 			isMobile,
 			portablePresentations,
-			rootState.retainedSingletonPresentationKeys,
+			rootState.retainedPortablePresentationKeys,
 		),
 	);
 	const renderedMobilePresentations = $derived(

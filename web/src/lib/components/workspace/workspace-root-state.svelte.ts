@@ -2,7 +2,7 @@ import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 import type { WorkspacePartitionId } from '$lib/workspace/surface-types.js';
 import type { WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types.js';
 import {
-	nextRetainedSingletonPresentationKeys,
+	nextRetainedPortablePresentationKeys,
 	type PortablePresentation,
 } from '$lib/workspace/visible-presentations.js';
 
@@ -13,7 +13,7 @@ interface WorkspaceRootStateOptions {
 }
 
 export class WorkspaceRootState {
-	retainedSingletonPresentationKeys = $state.raw<ReadonlySet<string>>(new Set());
+	retainedPortablePresentationKeys = $state.raw<ReadonlySet<string>>(new Set());
 	partitionRatioPreviews = $state.raw<Readonly<Record<string, number>>>({});
 	readonly #frameBridges = new Map<string, SurfaceFrameBridge>();
 
@@ -36,15 +36,15 @@ export class WorkspaceRootState {
 			bridge.deactivate();
 			this.#frameBridges.delete(surfaceId);
 		}
-		const current = this.retainedSingletonPresentationKeys;
-		const next = nextRetainedSingletonPresentationKeys(
+		const current = this.retainedPortablePresentationKeys;
+		const next = nextRetainedPortablePresentationKeys(
 			snapshot,
 			this.options.isMobile,
 			this.options.portablePresentations,
 			current,
 		);
 		if (next.size === current.size && [...next].every((key) => current.has(key))) return;
-		this.retainedSingletonPresentationKeys = next;
+		this.retainedPortablePresentationKeys = next;
 	}
 
 	setPartitionRatioPreview(partitionId: WorkspacePartitionId, ratio: number | null): void {
