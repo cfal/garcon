@@ -39,7 +39,15 @@ function emit(event: AutomationSignal, request: Extract<WorkflowAttemptRequest, 
 function terminal(result: AutomationResult, command: boolean): WorkflowAttemptResult {
   if (result.kind === 'unavailable') return { kind: 'unknown', reason: result.reason };
   if (result.kind === 'interrupted') return { kind: result.termination === 'requested' ? 'unknown' : 'failed', reason: 'The managed turn was interrupted.' };
-  if (result.kind === 'failed') return { kind: result.certainty === 'unknown' ? 'unknown' : 'failed', reason: result.detail };
+  if (result.kind === 'failed') {
+    const exit = result.commandOutcome;
+    const unsuccessfulExit = exit && exit.outcome !== 'unknown'
+      && (exit.signal !== null || (exit.exitCode !== null && exit.exitCode !== 0));
+    // Shell can publish a failed receipt after losing the result of an already executed command.
+    const uncertain = result.certainty === 'unknown'
+      || (command && result.certainty !== 'not-started' && !unsuccessfulExit);
+    return { kind: uncertain ? 'unknown' : 'failed', reason: result.detail };
+  }
   if (command) {
     const evidence = result.commandOutcome;
     if (!evidence || evidence.outcome === 'unknown') return { kind: 'unknown', reason: 'No exact shell exit was confirmed.' };
