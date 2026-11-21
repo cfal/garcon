@@ -3,6 +3,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
 	import { GIT_NAME_DESCRIPTION_LIMIT, GIT_NAME_LIMIT } from '$shared/git-name';
+	import { ApiError } from '$lib/api/client.js';
 	import { generateGitName } from '$lib/api/git-name.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -83,8 +84,11 @@
 				ref.focus();
 				ref.select();
 			}
-		} catch {
-			if (current()) error = m.git_name_generation_error();
+		} catch (cause) {
+			if (!current()) return;
+			error = cause instanceof ApiError && cause.errorCode === 'UNSUPPORTED_AGENT'
+				? m.git_name_unsupported_agent()
+				: m.git_name_generation_error();
 		} finally {
 			if (request === abort) setPendingRequest(null);
 		}

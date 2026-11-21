@@ -1,5 +1,6 @@
 import { GIT_NAME_LIMIT, isGenerateGitNameRequest, type GenerateGitNameResponse } from '../../../common/git-name.js';
 import { jsonError } from '../../common/http-error.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { resolveTitleModelQuery, type TitleModelAgents } from '../settings/title-model.js';
 import { gitRouteFailure } from './git-executor-service.js';
@@ -12,13 +13,18 @@ function parseSuggestedName(answer: string, previousName: string): string | null
   return name === previousName.toLowerCase() ? null : name;
 }
 
-export function createGitNameRoute(agents: TitleModelAgents, settings: { getUiSettings(): { chatTitle?: unknown } | undefined }) {
+type GitNameAgents = TitleModelAgents & Pick<AgentRegistryServiceContract, 'singleQueryRunsToolsWithoutPermission'>;
+
+export function createGitNameRoute(agents: GitNameAgents, settings: { getUiSettings(): { chatTitle?: unknown } | undefined }) {
   return withJsonBody<unknown>(async (body, request) => {
     try {
       assertGitBodyUrl(request);
       if (!isGenerateGitNameRequest(body)) return jsonError('Invalid Git name suggestion request.', 400);
       const query = await resolveTitleModelQuery(agents, settings.getUiSettings()?.chatTitle, 'on-demand', request.signal);
       if (!query) return jsonError('No title generation model is configured or ready.', 409);
+      if (agents.singleQueryRunsToolsWithoutPermission(query.agentId, query.executorId)) {
+        return jsonError('This agent can run tools without permission and cannot suggest Git names.', 422, 'UNSUPPORTED_AGENT');
+      }
       const prompt = [
         `Suggest one name for a Git branch or worktree. Return only two to five lowercase ASCII words joined by hyphens, at most ${GIT_NAME_LIMIT} characters.`,
         'Name the task when a description is provided. Otherwise invent a memorable two-word handle. Avoid the previous name.',

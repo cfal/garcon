@@ -1119,6 +1119,7 @@
 	"git_new_branch_branch_name": "Branch Name",
 	"git_name_generate": "Generate name",
 	"git_name_generation_error": "Could not suggest a name. Try again, check the title model in Settings, or type a name.",
+	"git_name_unsupported_agent": "This agent cannot suggest Git names. Choose a different agent for the title model in Settings, or type a name.",
 	"git_new_branch_cancel": "Cancel",
 	"git_new_branch_create": "Create Branch",
 	"git_new_branch_creating": "Creating...",

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import NewBranchModalTestHost from './NewBranchModalTestHost.svelte';
+import { ApiError } from '$lib/api/client.js';
 import { generateGitName } from '$lib/api/git-name.js';
 
 vi.mock('$lib/api/git-name.js', () => ({ generateGitName: vi.fn() }));
@@ -64,8 +65,8 @@ describe('NewBranchModal', () => {
 		expect(generate.getAttribute('aria-disabled')).toBe('true');
 		await fireEvent.click(generate);
 		expect(generateGitName).toHaveBeenCalledTimes(1);
-		reply.reject(new Error('Model unavailable'));
-		await screen.findByRole('alert');
+		reply.reject(new ApiError(422, 'Unsupported', 'UNSUPPORTED_AGENT'));
+		expect((await screen.findByRole('alert')).textContent).toContain('Choose a different agent');
 		expect(document.activeElement).toBe(generate);
 		expect(generate.getAttribute('aria-disabled')).toBe('false');
 	});

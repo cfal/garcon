@@ -1,7 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { GIT_NAME_DESCRIPTION_LIMIT } from '../../../../common/git-name.js';
 import { createGitNameRoute } from '../git-name.js';
-import type { TitleModelAgents } from '../../settings/title-model.js';
+
+type GitNameAgents = Parameters<typeof createGitNameRoute>[0];
 
 const target = {
   executorId: '22222222-2222-4222-8222-222222222222',
@@ -13,8 +14,9 @@ function fixture(output = 'worktree-picker', chatTitle: unknown = { ...target, e
     getAgentAuthStatusMap: mock(async () => ({})),
     getAgentReadinessMap: async () => ({}),
     getAgentCatalogEntries: async () => [],
-    runSingleQuery: mock<TitleModelAgents['runSingleQuery']>(async () => output),
-  } satisfies TitleModelAgents;
+    singleQueryRunsToolsWithoutPermission: mock<GitNameAgents['singleQueryRunsToolsWithoutPermission']>(() => false),
+    runSingleQuery: mock<GitNameAgents['runSingleQuery']>(async () => output),
+  } satisfies GitNameAgents;
   const handler = createGitNameRoute(agents, { getUiSettings: () => ({ chatTitle }) });
   const url = new URL('http://localhost/api/v1/git/generate-name');
   const post = (body: unknown) => handler(new Request(url, {
@@ -38,6 +40,15 @@ describe('Git name suggestions', () => {
       { description: '', previousName: '', executorId: 'local' }]) {
       expect((await post(body)).status).toBe(400);
     }
+    expect(agents.runSingleQuery).not.toHaveBeenCalled();
+  });
+  it.each(['local', target.executorId])('refuses unrestricted tools on the generation executor %s', async (executorId) => {
+    const { agents, post } = fixture('unused-name', { ...target, executorId });
+    agents.singleQueryRunsToolsWithoutPermission.mockReturnValue(true);
+    const response = await post({ description: 'Routine UI task', previousName: '' });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ errorCode: 'UNSUPPORTED_AGENT', retryable: false });
+    expect(agents.singleQueryRunsToolsWithoutPermission).toHaveBeenCalledWith(target.agentId, executorId);
     expect(agents.runSingleQuery).not.toHaveBeenCalled();
   });
   it('accepts a single clearly formatted suggestion without an extra model request', async () => {
