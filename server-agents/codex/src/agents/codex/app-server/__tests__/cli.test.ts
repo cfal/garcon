@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { assertCompatibleCodex, resolveCodexCli } from '../cli.js';
+import { CodexAppServerClient } from '../client.js';
 
 test('selects the executor override or its native PATH command without invoking a shell', () => {
   expect(resolveCodexCli({}, 'linux')).toEqual({ command: 'codex', source: 'path' });
@@ -14,5 +15,26 @@ test('checks the app-server version, not the Garcon version later in its user ag
   }
   for (const agent of ['garcon/0.9.0 (garcon; 1.9.0)', 'unknown']) {
     expect(() => assertCompatibleCodex(agent)).toThrow('0.171.0');
+  }
+});
+
+test('an incompatible handshake closes the CLI before connect rejects', async () => {
+  const client = new CodexAppServerClient({
+    spawn: () => Bun.spawn([process.execPath, '-e', `
+      for await (const line of console) {
+        if (!line) continue;
+        const { id, method } = JSON.parse(line);
+        if (method !== 'initialize') process.exit(1);
+        console.log(JSON.stringify({ id, result: { userAgent: 'codex/0.170.9' } }));
+      }
+    `], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }),
+  });
+  let exitCode: number | null = null;
+  client.once('exit', (code: number) => { exitCode = code; });
+  try {
+    await expect(client.connect()).rejects.toThrow('0.171.0');
+    expect(exitCode).toBe(0);
+  } finally {
+    await client.shutdown();
   }
 });
