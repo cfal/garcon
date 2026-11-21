@@ -42,11 +42,11 @@ function tokenCount(last: unknown, total?: unknown, timestamp = '2026-10-01T05:1
 }
 
 // Mirrors the pinned 0.169.0 rollout line written for each billed response.
-function usageRecordLine(responseId: unknown, usage: unknown, timestamp = '2026-10-01T05:17:49.900Z', turnId = 'turn-1'): string {
+function usageRecordLine(responseId: unknown, usage: unknown, timestamp = '2026-10-01T05:17:49.900Z', turnId = 'turn-1', threadId: string | null = SESSION_ID): string {
   return JSON.stringify({
     type: 'token_usage_record',
     timestamp,
-    payload: { thread_id: SESSION_ID, turn_id: turnId, session_id: SESSION_ID, root_turn_id: turnId, response_id: responseId, usage },
+    payload: { thread_id: threadId ?? undefined, turn_id: turnId, session_id: SESSION_ID, root_turn_id: turnId, response_id: responseId, usage },
   });
 }
 
@@ -270,15 +270,72 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(line, copy)?.dedupeKey).toBe(parseCodexUsageLine(line, parent)?.dedupeKey ?? 'missing');
   });
 
-  test('skip restamped usage records copied into a native fork', () => {
+  test('counts the first child response even when it lands immediately after the fork', () => {
     const state = createCodexUsageState();
-    parseCodexUsageLine(sessionMeta({ forked_from_id: '00000000-0000-4000-8000-0000000000c0' }, '2026-10-01T05:00:00.000Z'), state);
+    const at = '2026-10-01T05:17:43.000Z';
+    parseCodexUsageLine(sessionMeta({ forked_from_id: 'parent-thread' }, '2026-10-01T05:17:42.650Z'), state);
     parseCodexUsageLine(turnContext(), state);
-    expect(parseCodexUsageLine(usageRecordLine('resp_parent', counters(100, 10), '2026-10-01T05:00:00.010Z'), state)).toBeNull();
-    expect(parseCodexUsageLine(tokenCount(counters(100, 10), counters(100, 10), '2026-10-01T05:00:00.020Z'), state)).toBeNull();
-    const child = parseCodexUsageLine(usageRecordLine('resp_child', counters(40, 4), '2026-10-01T05:00:09.000Z'), state);
-    expect(child?.dedupeKey).toBe('codex-response:resp_child');
-    expect(parseCodexUsageLine(tokenCount(counters(40, 4), counters(140, 14), '2026-10-01T05:00:09.100Z'), state)).toBeNull();
+    parseCodexUsageLine(threadSettings('priority'), state);
+    const usage = counters(40, 4);
+    expect(parseCodexUsageLine(usageRecordLine('fast-child', usage, at), state))
+      .toMatchObject({ speed: 'fast', dedupeKey: 'codex-response:fast-child' });
+    expect(parseCodexUsageLine(tokenCount(usage, usage), state)).toBeNull();
+  });
+
+  test('skips a restamped parent record but counts the child response immediately after it', () => {
+    const parentId = '00000000-0000-4000-8000-0000000000c0';
+    const state = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({ forked_from_id: parentId }, '2026-10-01T05:00:00.000Z'), state);
+    parseCodexUsageLine(turnContext(), state);
+    const parent = counters(100, 10);
+    expect(parseCodexUsageLine(usageRecordLine('resp_parent', parent, '2026-10-01T05:00:00.020Z', 'parent-turn', parentId), state)).toBeNull();
+    expect(parseCodexUsageLine(tokenCount(parent, parent, '2026-10-01T05:00:00.030Z'), state)).toBeNull();
+    const child = counters(40, 4);
+    expect(parseCodexUsageLine(usageRecordLine('resp_child', child, '2026-10-01T05:00:00.040Z'), state))
+      .toMatchObject({ dedupeKey: 'codex-response:resp_child', totals: { uncachedInputTokens: 40 } });
+    expect(parseCodexUsageLine(tokenCount(child, child, '2026-10-01T05:00:02.030Z'), state)).toBeNull();
+  });
+
+  test('preserves the response id in a verbatim copy of a fork, without billing a delayed counter', () => {
+    const copy = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({ id: '00000000-0000-4000-8000-0000000000c2', forked_from_id: 'parent-thread' },
+      '2026-10-01T05:00:00.000Z'), copy);
+    parseCodexUsageLine(turnContext(), copy);
+    const usage = counters(40, 4);
+    const record = usageRecordLine('original-response', usage, '2026-10-01T05:00:02.000Z');
+    expect(parseCodexUsageLine(record, copy)?.dedupeKey).toBe('codex-response:original-response');
+    expect(parseCodexUsageLine(tokenCount(usage, usage, '2026-10-01T05:00:03.100Z'), copy)).toBeNull();
+  });
+
+  test('does not bill a delayed token_count when its response record was skipped as a fork copy', () => {
+    const copy = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({ id: '00000000-0000-4000-8000-0000000000c2', forked_from_id: 'parent-thread' },
+      '2026-10-01T05:00:00.000Z'), copy);
+    parseCodexUsageLine(turnContext(), copy);
+    const usage = counters(40, 4);
+    expect(parseCodexUsageLine(usageRecordLine('copied-response', usage, '2026-10-01T05:00:00.500Z'), copy)).toBeNull();
+    expect(parseCodexUsageLine(tokenCount(usage, usage, '2026-10-01T05:00:02.000Z'), copy)).toBeNull();
+  });
+
+  test.each([
+    ['missing', undefined, SESSION_ID],
+    ['malformed', 'not-a-thread-id', 'not-a-thread-id'],
+  ] as const)('falls back to timing when the native fork id is %s', (_case, id, threadId) => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({ id, session_id: SESSION_ID, forked_from_id: 'parent-thread' },
+      '2026-10-01T05:00:00.000Z'), state);
+    parseCodexUsageLine(turnContext(), state);
+    expect(parseCodexUsageLine(usageRecordLine('copy', counters(40, 4), '2026-10-01T05:00:00.010Z', 'turn-1', threadId), state)).toBeNull();
+  });
+
+  test('uses the copy burst for forked usage records that have no thread id', () => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({ forked_from_id: 'parent-thread' }, '2026-10-01T05:00:00.000Z'), state);
+    parseCodexUsageLine(turnContext(), state);
+    const usage = counters(40, 4);
+    expect(parseCodexUsageLine(usageRecordLine('copy', usage, '2026-10-01T05:00:00.010Z', 'turn-1', null), state)).toBeNull();
+    expect(parseCodexUsageLine(usageRecordLine('child', usage, '2026-10-01T05:00:09.000Z', 'turn-2', null), state)?.dedupeKey)
+      .toBe('codex-response:child');
   });
 
   test('count a usage record without a response, usage, or model as malformed', () => {

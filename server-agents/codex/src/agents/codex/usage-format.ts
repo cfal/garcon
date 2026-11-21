@@ -28,9 +28,9 @@ const USAGE_FIELDS = [
   'total_tokens',
 ] as const satisfies readonly (keyof CodexTokenUsage)[];
 
-// Forks copy and restamp parent history in a burst (0-40ms gaps); genuine child
-// usage follows a model turn (5s+ observed).
+// Restamped copies arrive in a burst. Only a matching native thread ID proves a fast response is new.
 const FORK_COPY_MAX_GAP_MS = 1000;
+const NATIVE_THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 interface UsageTurn {
   readonly id: string;
@@ -59,8 +59,8 @@ export interface CodexUsageState {
   sawSessionMeta: boolean;
   lastUsageSignature: string | null;
   lastCumulativeUsage: CodexTokenUsage | null;
-  suppressingForkCopies: boolean;
-  forkCopyAnchorMs: number;
+  forkThreadId: string | null;
+  forkCopyAnchorMs: number | null;
   sawUsageRecord: boolean;
 }
 
@@ -74,8 +74,8 @@ export function createCodexUsageState(): CodexUsageState {
     sawSessionMeta: false,
     lastUsageSignature: null,
     lastCumulativeUsage: null,
-    suppressingForkCopies: false,
-    forkCopyAnchorMs: 0,
+    forkThreadId: null,
+    forkCopyAnchorMs: null,
     sawUsageRecord: false,
   };
 }
@@ -140,15 +140,17 @@ function usageSpeedFromServiceTier(serviceTier: unknown): UsageSpeed {
   return serviceTier === 'flex' || serviceTier === 'ultrafast' ? serviceTier : 'unknown';
 }
 
-// Forks copy and restamp parent history in a burst right after their session_meta;
-// those copies were billed in the parent. Advances the burst, or ends it at the first gap.
-function consumeForkCopyBurst(state: CodexUsageState, timestampMs: number): boolean {
-  if (!state.suppressingForkCopies) return false;
-  if (timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
+function consumeForkCopy(state: CodexUsageState, timestampMs: number, threadId?: unknown): boolean {
+  if (state.forkCopyAnchorMs === null) return false;
+  // Verbatim forks retain the original response's thread ID and dedupe by response ID;
+  // a mismatch alone does not identify a restamped copy.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/protocol.rs#L2568-L2576
+  const childResponse = state.forkThreadId !== null && threadId === state.forkThreadId;
+  if (!childResponse && timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
     state.forkCopyAnchorMs = timestampMs;
     return true;
   }
-  state.suppressingForkCopies = false;
+  state.forkCopyAnchorMs = null;
   state.lastUsageSignature = null;
   return false;
 }
@@ -177,8 +179,8 @@ function usageRecord(
 // Bills one response. Its id identifies the request across verbatim and restamped fork copies.
 function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string, unknown>, state: CodexUsageState): UsageRecord | MalformedUsage | null {
   const timestampMs = parseTimestampMs(entry.timestamp);
-  if (timestampMs !== null && consumeForkCopyBurst(state, timestampMs)) return null;
   state.sawUsageRecord = true;
+  if (timestampMs !== null && consumeForkCopy(state, timestampMs, payload.thread_id)) return null;
   const usage = readTokenUsage(payload.usage);
   const responseId = payload.response_id;
   const turn = state.turn?.id === payload.turn_id ? state.turn : null;
@@ -211,7 +213,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     if (typeof id === 'string') state.sessionId = id;
     const metaTimestampMs = parseTimestampMs(entry.timestamp);
     if (metaTimestampMs !== null && isForkedSessionMeta(payload)) {
-      state.suppressingForkCopies = true;
+      if (typeof payload.id === 'string' && NATIVE_THREAD_ID.test(payload.id)) state.forkThreadId = payload.id;
       state.forkCopyAnchorMs = metaTimestampMs;
     }
     return null;
@@ -257,7 +259,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   const hasCumulative = rawCumulative !== undefined && rawCumulative !== null;
   const cumulative = hasCumulative ? readTokenUsage(rawCumulative) : null;
 
-  if (consumeForkCopyBurst(state, timestampMs)) {
+  if (consumeForkCopy(state, timestampMs)) {
     // Copied history is billed in the parent but sets the child's baseline.
     const signature = last === null ? null : JSON.stringify(last);
     if (cumulative !== null) state.lastCumulativeUsage = cumulative;
