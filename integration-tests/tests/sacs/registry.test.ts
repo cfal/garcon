@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { ANTIGRAVITY_BINARY } from '../../support/scripted-antigravity.js';
 import {
   sacsScriptedDriverFactories,
 } from './drivers.js';
@@ -13,6 +14,7 @@ test('[TLV5-L12.04-SACS-REGISTRY-01] registers every required scripted integrati
     'direct-anthropic-compatible',
     ...(process.platform === 'linux' ? ['opencode'] : []),
     'pi',
+    ...(ANTIGRAVITY_BINARY ? ['antigravity'] : []),
   ]);
   expect(new Set(ids).size).toBe(ids.length);
 });

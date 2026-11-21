@@ -138,6 +138,9 @@
 	--color-provider-pi-bg: hsl(var(--provider-pi-bg));
 	--color-provider-pi-foreground: hsl(var(--provider-pi-foreground));
 	--color-provider-pi-border: hsl(var(--provider-pi-border));
+	--color-provider-antigravity-bg: hsl(var(--provider-antigravity-bg));
+	--color-provider-antigravity-foreground: hsl(var(--provider-antigravity-foreground));
+	--color-provider-antigravity-border: hsl(var(--provider-antigravity-border));
 	--color-provider-openrouter-bg: hsl(var(--provider-openrouter-bg));
 	--color-provider-openrouter-foreground: hsl(var(--provider-openrouter-foreground));
 	--color-provider-openrouter-border: hsl(var(--provider-openrouter-border));

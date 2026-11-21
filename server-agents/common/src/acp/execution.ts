@@ -4,12 +4,13 @@ import {
   type AgentRuntimeExecution,
   type AgentRuntimePublisher,
   type AgentRuntimeExecutionContext,
-} from '@garcon/server-agent-common/execution/runtime-events';
-import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+} from '../execution/runtime-events.js';
+import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
-import type { AcpAgentRuntime } from '../shared/acp-agent-runtime.js';
+import type { AcpAgentRuntime } from './agent-runtime.js';
 
-export class CursorExecution implements AgentRuntimeExecution {
+// Adapts an ACP runtime to the producer-adapter execution port.
+export class AcpExecution implements AgentRuntimeExecution {
   constructor(
     private readonly runtime: AcpAgentRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,

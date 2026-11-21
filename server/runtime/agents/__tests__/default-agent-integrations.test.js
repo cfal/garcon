@@ -12,6 +12,7 @@ describe('default agent integrations', () => {
       'opencode',
       'amp',
       'cursor',
+      'antigravity',
       'factory',
       'pi',
       ...(process.platform === 'linux' || process.platform === 'darwin' ? ['shell'] : []),

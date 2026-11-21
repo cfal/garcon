@@ -46,6 +46,7 @@
         "@cfal/noise-ws": "github:cfal/noise-ws#6cf4a4b2ab25d300316a21c23cbcef1bb3558556",
         "@garcon/common": "workspace:*",
         "@garcon/server-agent-amp": "workspace:*",
+        "@garcon/server-agent-antigravity": "workspace:*",
         "@garcon/server-agent-claude": "workspace:*",
         "@garcon/server-agent-codex": "workspace:*",
         "@garcon/server-agent-common": "workspace:*",
@@ -74,6 +75,19 @@
     },
     "server-agents/amp": {
       "name": "@garcon/server-agent-amp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.3",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/antigravity": {
+      "name": "@garcon/server-agent-antigravity",
       "version": "0.1.0",
       "dependencies": {
         "@garcon/common": "workspace:*",
@@ -575,6 +589,8 @@
     "@garcon/server": ["@garcon/server@workspace:server"],
 
     "@garcon/server-agent-amp": ["@garcon/server-agent-amp@workspace:server-agents/amp"],
+
+    "@garcon/server-agent-antigravity": ["@garcon/server-agent-antigravity@workspace:server-agents/antigravity"],
 
     "@garcon/server-agent-claude": ["@garcon/server-agent-claude@workspace:server-agents/claude"],
 

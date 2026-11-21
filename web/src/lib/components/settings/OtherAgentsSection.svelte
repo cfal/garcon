@@ -3,20 +3,32 @@
 	import AgentCard from './AgentCard.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 
+	export type OtherAgentsAuth = Pick<
+		SettingsAuthState,
+		| 'authFor'
+		| 'readinessFor'
+		| 'supportsAuthLogin'
+		| 'deviceAuthFor'
+		| 'isLoginPending'
+		| 'handleLogin'
+		| 'completeLogin'
+	>;
+
 	type AgentConfig = {
-		id: 'opencode' | 'amp' | 'cursor' | 'factory' | 'pi';
+		id: 'opencode' | 'amp' | 'antigravity' | 'cursor' | 'factory' | 'pi';
 		loginCommand: string;
 	};
 
 	const agents: AgentConfig[] = [
 		{ id: 'amp', loginCommand: 'amp login' },
+		{ id: 'antigravity', loginCommand: 'agy acp --login' },
 		{ id: 'cursor', loginCommand: 'cursor-agent login' },
 		{ id: 'factory', loginCommand: 'droid' },
 		{ id: 'opencode', loginCommand: 'opencode auth login' },
 		{ id: 'pi', loginCommand: 'pi' },
 	];
 
-	let { settingsAuth }: { settingsAuth: SettingsAuthState } = $props();
+	let { settingsAuth }: { settingsAuth: OtherAgentsAuth } = $props();
 
 	let openByAgent = $state<Record<string, boolean>>({});
 
@@ -38,9 +50,15 @@
 				auth={settingsAuth.authFor(agent.id)}
 				open={isOpen(agent.id)}
 				onOpenChange={(open) => setOpen(agent.id, open)}
-				cliOnly={true}
+				cliOnly={!settingsAuth.supportsAuthLogin(agent.id)}
 				loginCommand={agent.loginCommand}
 				readiness={settingsAuth.readinessFor(agent.id)}
+				deviceAuth={settingsAuth.deviceAuthFor(agent.id)}
+				pending={settingsAuth.isLoginPending(agent.id)}
+				onLogin={() => settingsAuth.handleLogin(agent.id)}
+				onCompleteLogin={(code) => {
+					void settingsAuth.completeLogin(agent.id, code);
+				}}
 			/>
 		{/each}
 	</div>

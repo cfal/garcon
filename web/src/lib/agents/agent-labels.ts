@@ -9,6 +9,7 @@ export function agentLabelFor(agentId: string, fallback?: string): string {
 	if (agentId === 'amp') return m.agent_amp();
 	if (agentId === 'factory') return m.agent_factory();
 	if (agentId === 'pi') return m.agent_pi();
+	if (agentId === 'antigravity') return m.agent_antigravity();
 	const directLabel = directAgentShortLabel(agentId);
 	if (directLabel !== null) return m.agent_direct_qualified({ agent: directLabel });
 	return fallback ?? agentId;

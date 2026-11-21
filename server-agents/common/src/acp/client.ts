@@ -78,8 +78,10 @@ export class AcpClient {
     sessionId: string;
     prompt: Array<{ type: string; text?: string; [key: string]: unknown }>;
     config?: Record<string, unknown>;
-  }, onSent?: () => void): Promise<AcpSessionPromptResult> {
-    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params, onSent);
+  }, onSent?: () => void, timeoutMs = 0): Promise<AcpSessionPromptResult> {
+    // A prompt lasts as long as the agent's turn, so by default it has no
+    // transport deadline; Stop, process exit, and caller timeouts end it.
+    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params, onSent, timeoutMs);
   }
 
   async setSessionConfigOption(params: {
@@ -90,8 +92,16 @@ export class AcpClient {
     return this.#transport.request<AcpSessionConfigOptionsResult>('session/set_config_option', params);
   }
 
-  async cancelSession(params: { sessionId: string }): Promise<Record<string, unknown>> {
-    return this.#transport.request<Record<string, unknown>>('session/cancel', params);
+  async setSessionModel(params: {
+    sessionId: string;
+    modelId: string;
+  }): Promise<Record<string, unknown>> {
+    return this.#transport.request<Record<string, unknown>>('session/set_model', params);
+  }
+
+  // A notification per the ACP specification; the open prompt settles with `cancelled`.
+  cancelSession(params: { sessionId: string }): void {
+    this.#transport.notify('session/cancel', params);
   }
 
   getAdvertisedCapabilities(): AcpAdvertisedCapabilities {

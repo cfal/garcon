@@ -1,13 +1,13 @@
 import { EventEmitter } from 'events';
 import { AcpRpcError } from './errors.js';
-import type { AcpJsonRpcId, AcpJsonRpcMessage } from './protocol.js';
+import { isJsonRpcId, type AcpJsonRpcId, type AcpJsonRpcMessage } from './protocol.js';
 
 interface WritableProcessStdin {
   write(data: string | Uint8Array): unknown;
   end?(): unknown;
 }
 
-interface AcpProcess {
+export interface AcpProcess {
   stdin?: WritableProcessStdin | null;
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
@@ -35,10 +35,6 @@ export interface AcpTransportOptions {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
-function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
-  return typeof value === 'number' || typeof value === 'string';
-}
-
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
   const process = Bun.spawn([command, ...args], {
     cwd: options.cwd,
@@ -62,6 +58,7 @@ export class AcpTransport extends EventEmitter {
   #pending = new Map<AcpJsonRpcId, PendingRequest>();
   #spawn: NonNullable<AcpTransportOptions['spawn']>;
   #requestTimeoutMs: number;
+  #exitCode: number | null = null;
 
   constructor(options: AcpTransportOptions = {}) {
     super();
@@ -71,6 +68,7 @@ export class AcpTransport extends EventEmitter {
 
   async connect(spec: AcpSpawnSpec): Promise<void> {
     if (this.#process) return;
+    this.#exitCode = null;
     this.#process = this.#spawn(spec.command, spec.args, {
       cwd: spec.cwd,
       env: spec.env,
@@ -80,13 +78,19 @@ export class AcpTransport extends EventEmitter {
     void this.#watchExit(this.#process.exited);
   }
 
-  async request<T>(method: string, params?: unknown, onSent?: () => void): Promise<T> {
+  // `timeoutMs` overrides the transport default for one request; 0 disables it.
+  async request<T>(
+    method: string,
+    params?: unknown,
+    onSent?: () => void,
+    timeoutMs: number = this.#requestTimeoutMs,
+  ): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = this.#requestTimeoutMs > 0
+      const timer = timeoutMs > 0
         ? setTimeout(() => {
-          this.#rejectPending(id, new Error(`ACP request timed out after ${this.#requestTimeoutMs}ms: ${method}`));
-        }, this.#requestTimeoutMs)
+          this.#rejectPending(id, new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`));
+        }, timeoutMs)
         : null;
       timer?.unref?.();
       this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
@@ -148,7 +152,17 @@ export class AcpTransport extends EventEmitter {
     return () => this.off('stderr', cb);
   }
 
+  // A listener attached after the process exited still hears of it, so a
+  // watcher added after the last awaited reply cannot miss a death.
   onExit(cb: (exitCode: number) => void): () => void {
+    const exitCode = this.#exitCode;
+    if (exitCode !== null) {
+      let detached = false;
+      queueMicrotask(() => {
+        if (!detached) cb(exitCode);
+      });
+      return () => { detached = true; };
+    }
     this.on('exit', cb);
     return () => this.off('exit', cb);
   }
@@ -231,6 +245,7 @@ export class AcpTransport extends EventEmitter {
 
   async #watchExit(exited: Promise<number>): Promise<void> {
     const exitCode = await exited;
+    this.#exitCode = exitCode;
     this.#process = null;
     const error = new Error(`ACP transport process exited with code ${exitCode}`);
     this.#rejectAllPending(error);

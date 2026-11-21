@@ -1569,6 +1569,7 @@
 	"onboarding_setup_wizard_label": "Setup wizard",
 	"onboarding_restart_wizard_hint": "Review your setup preferences.",
 	"agent_amp": "Amp",
+	"agent_antigravity": "Antigravity",
 	"agent_claude": "Claude",
 	"agent_claude_oauth": "Claude OAuth",
 	"agent_codex": "Codex",
