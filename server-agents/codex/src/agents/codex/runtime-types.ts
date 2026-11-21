@@ -27,10 +27,10 @@ export interface CodexThreadConfiguration {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly speed?: CodexSpeed;
 }
 
 export interface CodexExecutionRequest extends CodexThreadConfiguration {
+  readonly speed?: CodexSpeed;
   readonly chatId: string;
   readonly projectPath: string;
   readonly modelEndpointId: string | null;

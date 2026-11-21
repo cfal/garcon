@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntimeEvent } from '@garcon/server-agent-common/execution/runtime-events';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexExecutionRequest } from '../../runtime-types.js';
+import { codexServiceTier, type CodexSpeed } from '../../service-tier.js';
 import { CodexAppServerClient } from '../client.js';
 import type { CodexTurn, ThreadSettingsUpdatedNotification, ThreadStartResponse } from '../protocol.js';
 import { CodexAppServerRuntime } from '../runtime.js';
@@ -14,11 +14,13 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function startedSession() {
+async function startedSession(speed: CodexSpeed = 'ultrafast', thinkingMode: CodexExecutionRequest['thinkingMode'] = 'low') {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'codex-tier-lifecycle-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const nativePath = path.join(directory, 'thread.jsonl');
-  await writeFile(nativePath, '{}\n');
+  await writeFile(nativePath, JSON.stringify({ type: 'session_meta', payload: {
+    id: 'thread-1', timestamp: '2026-11-20T00:00:00Z', cwd: directory,
+  } }) + '\n');
   const response = {
     thread: {
       id: 'thread-1', forkedFromId: null, preview: '', ephemeral: false, modelProvider: 'openai',
@@ -26,7 +28,7 @@ async function startedSession() {
       cliVersion: '0.169.0', source: null, agentNickname: null, agentRole: null, gitInfo: null,
       name: null, turns: [],
     },
-    model: 'model-a', modelProvider: 'openai', serviceTier: 'ultrafast', cwd: directory,
+    model: 'model-a', modelProvider: 'openai', serviceTier: codexServiceTier(speed), cwd: directory,
     approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: { type: 'workspaceWrite' },
     reasoningEffort: 'low',
   } satisfies ThreadStartResponse;
@@ -34,38 +36,41 @@ async function startedSession() {
   const terminal = Promise.withResolvers<void>();
   const request = {
     chatId: 'chat-1', command: 'Synthetic prompt', projectPath: directory, model: response.model,
-    modelEndpointId: null, permissionMode: 'default', thinkingMode: 'low', speed: 'ultrafast',
+    modelEndpointId: null, permissionMode: 'default', thinkingMode, speed,
     operation: { chatId: 'chat-1', runId: 'run-1', publish(event: AgentRuntimeEvent) {
       events.push(event);
       if (event.type === 'run-ended') terminal.resolve();
     } },
   } satisfies CodexExecutionRequest;
   let turnNumber = 0;
-  let turn: CodexTurn;
+  let resumedTier: string | undefined;
   function createClient() {
     const client = new CodexAppServerClient();
+    let turn: CodexTurn;
     spyOn(client, 'connect').mockResolvedValue({
       userAgent: 'codex', codexHome: directory, platformFamily: 'unix', platformOs: 'linux',
     });
-    spyOn(client, 'shutdown').mockResolvedValue();
+    const shutdown = spyOn(client, 'shutdown').mockResolvedValue();
     spyOn(client, 'startThread').mockResolvedValue(response);
     const resume = spyOn(client, 'resumeThread').mockImplementation(async (params) => ({
-      ...response, model: typeof params.model === 'string' ? params.model : response.model,
+      ...response,
+      model: typeof params.model === 'string' ? params.model : response.model,
+      serviceTier: resumedTier ?? String(params.serviceTier),
     }));
-    const startTurn = spyOn(client, 'startTurn').mockImplementation(async () => {
+    const nextTurn = () => {
       turn = { id: `turn-${++turnNumber}`, items: [], itemsView: 'full', status: 'inProgress',
         error: null, startedAt: 0, completedAt: null, durationMs: null };
       client.emit('notification', { method: 'turn/started', params: { threadId: 'thread-1', turn } });
       return { turn };
-    });
-    const discovery = mock(async (method: string): Promise<unknown> => ({ data: method === 'model/list'
-      ? ['model-a', 'model-b'].map((model) => ({ model, serviceTiers: [{ id: 'priority' }, { id: 'ultrafast' }] }))
-      : [{ name: 'ultrafast_mode', enabled: true }, { name: 'fast_mode', enabled: true }] }));
-    spyOn(client, 'request').mockImplementation(async <T>(method: string) => await discovery(method) as T);
+    };
+    const startTurn = spyOn(client, 'startTurn').mockImplementation(async () => nextTurn());
+    const compact = spyOn(client, 'compactThread').mockImplementation(async () => { nextTurn(); return {}; });
+    spyOn(client, 'interruptTurn').mockResolvedValue({});
+    const rpc = spyOn(client, 'request').mockRejectedValue(new Error('Unexpected native RPC'));
     const confirm = (settings: Partial<ThreadSettingsUpdatedNotification['threadSettings']> = {}) => {
       client.emit('notification', { method: 'thread/settings/updated', params: {
         threadId: 'thread-1', threadSettings: { cwd: directory, modelProvider: 'openai', model: response.model,
-          serviceTier: 'ultrafast', effort: 'low', approvalPolicy: 'never', approvalsReviewer: 'user',
+          serviceTier: codexServiceTier(speed), effort: 'low', approvalPolicy: 'never', approvalsReviewer: 'user',
           sandboxPolicy: { type: 'workspaceWrite' }, ...settings },
       } satisfies ThreadSettingsUpdatedNotification });
     };
@@ -81,123 +86,194 @@ async function startedSession() {
         threadId: 'thread-1', turn: { ...turn, status: error ? 'failed' : 'completed', error },
       } });
     };
-    return { client, resume, startTurn, discovery, confirm, update, finish };
+    return { client, resume, startTurn, compact, shutdown, rpc, confirm, update, finish };
   }
   const clients: ReturnType<typeof createClient>[] = [];
+  const backoff = mock(async () => {});
   const runtime = new CodexAppServerRuntime({ createClient: () => {
     const created = createClient();
     clients.push(created);
     return created.client;
-  }, capacityRetryDelaysMs: [0] });
+  }, capacityRetryDelaysMs: [0], capacityRetryDelay: backoff });
   cleanups.push(() => runtime.shutdown());
   await runtime.startSession(request);
   const first = clients[0]!;
-  const failCapacity = () => first.finish({ message: 'Selected model is at capacity',
-    codexErrorInfo: 'serverOverloaded', additionalDetails: null });
-  const ended = () => events.filter((event) => event.type === 'run-ended');
-  return { runtime, request, clients, first, events, ended, terminal, failCapacity };
+  const resume = { ...request, agentSessionId: 'thread-1', nativePath,
+    operation: { ...request.operation, runId: 'run-2' } };
+  return { runtime, request, resume, clients, first, events, terminal, backoff,
+    denyResume() { resumedTier = 'default'; } };
 }
 
-describe('Codex premium route lifecycle', () => {
-  it.each(['disabled gate', 'missing tier', 'discovery timeout'] as const)(
-    'fails a capacity retry exactly once after %s', async (denial) => {
-      const { runtime, first, failCapacity, terminal, ended } = await startedSession();
-      first.discovery.mockImplementation(async (method) => {
-        if (denial === 'discovery timeout') throw new AgentIntegrationError('TIMEOUT', 'Discovery timed out', true);
-        return { data: method === 'model/list'
-          ? [{ model: 'model-a', serviceTiers: denial === 'missing tier' ? [] : [{ id: 'ultrafast' }] }]
-          : [{ name: 'ultrafast_mode', enabled: denial !== 'disabled gate' }] };
-      });
-      failCapacity();
-      await terminal.promise;
-      await Bun.sleep(0);
-      expect(first.discovery.mock.calls.map(([method]) => method)).toEqual(['model/list', 'experimentalFeature/list']);
+describe('Codex admission-time speed', () => {
+  it.each(['standard', 'fast', 'ultrafast'] as const)('reuses only Standard sources, starting from %s', async (speed) => {
+    const { runtime, resume, clients, first } = await startedSession(speed);
+    first.finish();
+    await runtime.runTurn(resume);
+    expect(clients).toHaveLength(speed === 'standard' ? 1 : 2);
+    const active = clients.at(-1)!;
+    expect(active.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({ serviceTier: codexServiceTier(speed) }));
+    if (speed !== 'standard') {
+      expect(first.shutdown).toHaveBeenCalledTimes(1);
+      expect(active.resume).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'thread-1', path: resume.nativePath,
+        model: resume.model, serviceTier: codexServiceTier(speed) }));
       expect(first.startTurn).toHaveBeenCalledTimes(1);
-      expect(ended()).toEqual([expect.objectContaining({ type: 'run-ended', outcome: 'failed',
-        error: expect.objectContaining({ message: expect.stringContaining(denial === 'discovery timeout' ? 'timed out' : 'Ultrafast speed is unavailable') }),
-      })]);
-      expect(runtime.isRunning('thread-1')).toBe(false);
-    },
-  );
+    }
+    for (const source of clients) expect(source.rpc).not.toHaveBeenCalled();
+  });
 
-  it('fences a late successful retry discovery after explicit source release', async () => {
-    const { runtime, request, first, events, failCapacity } = await startedSession();
-    const checking = Promise.withResolvers<void>();
+  it.each(['turn', 'compaction'] as const)('rejects a downgraded fresh premium %s before inference', async (action) => {
+    const { runtime, resume, clients, first, denyResume } = await startedSession();
+    first.finish();
+    denyResume();
+    const markStarted = mock(async () => {});
+    const request = { ...resume, executionAdmission: { signal: new AbortController().signal, markStarted } };
+    const operation = action === 'turn' ? runtime.runTurn(request) : runtime.compact(request);
+    await expect(operation).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(clients[1]!.startTurn).not.toHaveBeenCalled();
+    expect(clients[1]!.compact).not.toHaveBeenCalled();
+    expect(clients[1]!.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['standard', 'fast', 'ultrafast'] as const)('freshly resumes a premium source before %s compaction', async (speed) => {
+    const { runtime, resume, clients, first } = await startedSession();
+    first.finish();
+    await runtime.compact({ ...resume, speed });
+    expect(clients).toHaveLength(2);
+    expect(clients[1]!.resume).toHaveBeenCalledWith(expect.objectContaining({ serviceTier: codexServiceTier(speed) }));
+    expect(clients[1]!.compact).toHaveBeenCalledWith('thread-1');
+    expect(first.compact).not.toHaveBeenCalled();
+  });
+
+  it('freshly resumes Standard after premium, then permits Standard reuse', async () => {
+    const { runtime, resume, clients, first } = await startedSession();
+    first.finish();
+    await runtime.runTurn({ ...resume, speed: 'standard' });
+    expect(clients).toHaveLength(2);
+    const standard = clients[1]!;
+    expect(standard.resume).toHaveBeenCalledWith(expect.objectContaining({ serviceTier: 'default' }));
+    standard.finish();
+    await runtime.runTurn({ ...resume, speed: 'standard', operation: { ...resume.operation, runId: 'run-3' } });
+    expect(clients).toHaveLength(2);
+    expect(standard.startTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['fast', 'ultrafast'] as const)('ends a %s capacity failure once without backoff or retry', async (speed) => {
+    const { runtime, first, events, terminal, backoff } = await startedSession(speed);
+    first.finish({ message: 'Selected model is at capacity', codexErrorInfo: 'serverOverloaded', additionalDetails: null });
+    await terminal.promise;
+    expect(backoff).not.toHaveBeenCalled();
+    expect(first.startTurn).toHaveBeenCalledTimes(1);
+    expect(first.rpc).not.toHaveBeenCalled();
+    expect(events.filter((event) => event.type === 'run-ended')).toEqual([
+      expect.objectContaining({ outcome: 'failed', error: expect.objectContaining({ message: expect.stringContaining('capacity') }) }),
+    ]);
+    expect(runtime.isRunning('thread-1')).toBe(false);
+  });
+
+  it('keeps ordinary settings writes tier-free and reopens after a model change', async () => {
+    const { runtime, request, resume, clients, first } = await startedSession();
+    first.finish();
+    await runtime.updateSessionSettings('thread-1', { ...request, model: 'model-b', thinkingMode: 'medium' });
+    expect(first.update).toHaveBeenCalledWith(expect.objectContaining({ model: 'model-b', effort: 'medium' }));
+    expect(first.update.mock.calls[0]![0]).not.toHaveProperty('serviceTier');
+    await runtime.runTurn({ ...resume, model: 'model-b' });
+    expect(clients[1]!.resume).toHaveBeenCalledWith(expect.objectContaining({ model: 'model-b', serviceTier: 'ultrafast' }));
+    expect(first.rpc).not.toHaveBeenCalled();
+  });
+
+  it('confirms non-speed settings independently of the tier echo or a delayed turn reply', async () => {
+    const { runtime, request, resume, first } = await startedSession('standard');
+    first.finish();
+    const started = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<void>();
-    const discover = first.discovery.getMockImplementation()!;
-    first.discovery.mockImplementation(async (method) => { checking.resolve(); await reply.promise; return discover(method); });
-    failCapacity();
+    const start = first.startTurn.getMockImplementation()!;
+    first.startTurn.mockImplementation(async (params) => {
+      const result = await start(params);
+      started.resolve();
+      await reply.promise;
+      return result;
+    });
+    const resumed = runtime.runTurn(resume);
     try {
-      await checking.promise;
-      await runtime.releaseSession(request.chatId, 'thread-1');
-      const beforeReply = [...events];
+      await started.promise;
+      first.update.mockImplementation(async () => { first.confirm({ serviceTier: 'fast', effort: 'medium' }); return {}; });
+      await runtime.updateSessionSettings('thread-1', { ...request, thinkingMode: 'medium' });
       reply.resolve();
-      await Bun.sleep(0);
-      expect(first.startTurn).toHaveBeenCalledTimes(1);
-      expect(events).toEqual(beforeReply);
-      expect(runtime.isRunning('thread-1')).toBe(false);
+      await resumed;
+      await runtime.updateSessionSettings('thread-1', { ...request, thinkingMode: 'medium' });
+      expect(first.update).toHaveBeenCalledTimes(1);
     } finally {
       reply.resolve();
+      await resumed;
     }
   });
 
-  it('reopens a premium source after a live model change instead of trusting its old activation', async () => {
-    const { runtime, request, clients, first } = await startedSession();
-    first.finish();
-    await runtime.updateSessionSettings('thread-1', { ...request, model: 'model-b' });
-    expect(first.update).toHaveBeenCalledWith(expect.objectContaining({ model: 'model-b', serviceTier: 'ultrafast' }));
-    await runtime.runTurn({ ...request, model: 'model-b', agentSessionId: 'thread-1',
-      operation: { ...request.operation, runId: 'run-2' } });
-    expect(clients).toHaveLength(2);
-    expect(clients[1]!.resume).toHaveBeenCalledWith(expect.objectContaining({ model: 'model-b', serviceTier: 'ultrafast' }));
-    expect(clients[1]!.startTurn).toHaveBeenCalledTimes(1);
-    expect(first.startTurn).toHaveBeenCalledTimes(1);
+  it.each([false, true])('waits for a premium interrupt terminal before replacing the writer (cancel: %s)', async (cancel) => {
+    const { runtime, resume, clients, first } = await startedSession();
+    await runtime.abort('thread-1');
+    const controller = new AbortController();
+    const pending = runtime.runTurn({ ...resume,
+      executionAdmission: { signal: controller.signal, async markStarted() {} } }).then(() => null, (error: unknown) => error);
+    try {
+      await Bun.sleep(0);
+      expect(clients).toHaveLength(1);
+      expect(first.shutdown).not.toHaveBeenCalled();
+      if (cancel) controller.abort(new Error('Admission cancelled'));
+      first.finish();
+      if (cancel) {
+        expect(await pending).toMatchObject({ message: 'Admission cancelled' });
+        expect(clients).toHaveLength(1);
+      } else {
+        expect(await pending).toBeNull();
+        expect(clients).toHaveLength(2);
+        expect(clients[1]!.resume).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      first.finish();
+      await pending;
+    }
   });
 
-  it.each([['fast', 'priority'], ['fast', 'fast'], ['ultrafast', 'ultrafast']] as const)(
-    'confirms %s using the %s echo, not a wrong tier or an unrelated turn reply', async (speed, echo) => {
-      const { runtime, request, first } = await startedSession();
+  it('rechecks interrupt reuse after a later queued settings write changes effort ownership', async () => {
+    const { runtime, request, resume, clients, first } = await startedSession('standard', 'none');
+    await runtime.abort('thread-1');
+    const reply = Promise.withResolvers<void>();
+    const confirmed = Promise.withResolvers<void>();
+    const apply = first.update.getMockImplementation()!;
+    first.update.mockImplementation(async (params) => {
+      await apply(params);
+      confirmed.resolve();
+      await reply.promise;
+      return {};
+    });
+    const update = runtime.updateSessionSettings('thread-1', { ...request, permissionMode: 'manualBypass' });
+    let resumed: Promise<void> | undefined;
+    let queued: Promise<void> | undefined;
+    try {
+      await confirmed.promise;
+      resumed = runtime.runTurn(resume);
+      await Bun.sleep(0);
+      queued = runtime.updateSessionSettings('thread-1', { ...request, thinkingMode: 'high' });
+      reply.resolve();
+      await update;
+      await queued;
+      await Bun.sleep(25);
+      expect(clients).toHaveLength(1);
+      expect(first.shutdown).not.toHaveBeenCalled();
+      expect(first.startTurn).toHaveBeenCalledTimes(1);
       first.finish();
-      const turnStarted = Promise.withResolvers<void>();
-      const turnReply = Promise.withResolvers<void>();
-      const start = first.startTurn.getMockImplementation()!;
-      first.startTurn.mockImplementation(async (params) => {
-        const result = await start(params);
-        turnStarted.resolve();
-        await turnReply.promise;
-        return result;
-      });
-      const resumed = runtime.runTurn({ ...request, agentSessionId: 'thread-1', operation: { ...request.operation, runId: 'run-2' } });
-      const applying = Promise.withResolvers<void>();
-      first.update.mockImplementation(async () => { applying.resolve(); return {}; });
-      let update: Promise<void> | undefined;
-      try {
-        await turnStarted.promise;
-        let settled = false;
-        update = runtime.updateSessionSettings('thread-1', { ...request, speed, thinkingMode: 'medium' })
-          .then(() => { settled = true; });
-        await applying.promise;
-        first.confirm({ serviceTier: 'default', effort: 'medium' });
-        await Bun.sleep(0);
-        expect(settled).toBe(false);
-        first.confirm({ serviceTier: echo, effort: 'medium' });
-        await update;
-        expect(first.update).toHaveBeenCalledWith(expect.objectContaining({ serviceTier: speed === 'fast' ? 'priority' : 'ultrafast' }));
-        expect(settled).toBe(true);
-        turnReply.resolve();
-        await resumed;
-        first.update.mockImplementation(async () => {
-          first.confirm({ serviceTier: echo, effort: 'medium' });
-          return {};
-        });
-        await runtime.updateSessionSettings('thread-1', { ...request, speed, thinkingMode: 'medium' });
-        expect(first.update).toHaveBeenCalledTimes(1);
-      } finally {
-        turnReply.resolve();
-        first.confirm({ serviceTier: echo, effort: 'medium' });
-        await resumed;
-        await update;
-      }
-    },
-  );
+      await resumed;
+      expect(first.shutdown).toHaveBeenCalledTimes(1);
+      expect(clients).toHaveLength(2);
+      expect(clients[1]!.startTurn).toHaveBeenCalledTimes(1);
+      expect(clients[1]!.startTurn.mock.calls[0]![0]).not.toHaveProperty('effort');
+    } finally {
+      reply.resolve();
+      first.finish();
+      await update;
+      await queued;
+      await resumed;
+    }
+  });
 });

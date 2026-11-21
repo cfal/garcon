@@ -1,7 +1,7 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { CodexThreadConfiguration } from '../runtime-types.js';
-import type { CodexServiceTier } from '../service-tier.js';
+import type { CodexExecutionRequest, CodexThreadConfiguration } from '../runtime-types.js';
+import { codexServiceTier, type CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import type { CodexOperation } from './operation-routes.js';
@@ -26,7 +26,7 @@ export type FinishSessionOptions = {
   emitFinishedOnAbort?: boolean;
 };
 
-type CodexInferenceRoute = Pick<CodexThreadSettingsTarget, 'model' | 'serviceTier'>;
+type CodexInferenceRoute = { readonly model: string; readonly serviceTier: CodexServiceTier };
 
 export interface ThreadSettingsWaiter {
   readonly target: CodexThreadSettingsTarget;
@@ -70,10 +70,7 @@ export interface RunningCodexSession {
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
-  capacityRetryRoute: CodexInferenceRoute;
-  // Native filtering is bound to the model and feature state at activation, not a later settings echo.
-  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/core/src/session/session.rs#L755-L771
-  readonly activatedRoute: CodexInferenceRoute;
+  admittedRoute: CodexInferenceRoute;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
   sourceOperation: CodexOperation;
@@ -107,17 +104,14 @@ export function recordExplicitReasoningEffort(
 }
 
 export function canReuseThreadSettings(
-  session: RunningCodexSession, request: CodexThreadConfiguration, tier: CodexServiceTier,
+  session: RunningCodexSession, request: CodexExecutionRequest,
 ): boolean {
   if (session.configurationFenced || session.pendingThreadSettings) return false;
-  if (session.confirmedThreadSettings.serviceTier !== tier) return false;
+  // Only fresh activation proves a premium tier; compaction cannot override a loaded tier.
+  if (codexServiceTier(request.speed) !== 'default' || session.admittedRoute.serviceTier !== 'default') return false;
+  if (session.confirmedThreadSettings.serviceTier !== 'default') return false;
   if (providerOwnsReasoningEffort(request) && !session.providerOwnsReasoningEffort) return false;
-  // A live settings echo cannot prove a new premium route; a fresh resume can.
-  return tier === 'default' || (
-    session.confirmedThreadSettings.model === request.model
-    && session.activatedRoute.model === request.model
-    && session.activatedRoute.serviceTier === tier
-  );
+  return true;
 }
 
 export interface CodexAppServerRuntimeOptions {

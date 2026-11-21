@@ -117,14 +117,10 @@ describe('Codex scripted per-chat speed', () => {
       await writeFile(config, restrictedConfig);
       await expectTurnTier(startChat, fastChat, undefined);
       const beforeChange = environment.model.requests().length;
-      const originalSettings = await savedSettings(fastChat);
       await writeFile(config, 'invalid = [\n');
       try {
-        const failed = await patchSpeed(fastChat, 'fast');
-        expect(failed.status).toBe(503);
-        expect(await failed.json()).toMatchObject({ errorCode: 'UNAVAILABLE', retryable: true,
-          error: expect.stringContaining('could not verify speed') });
-        expect(await savedSettings(fastChat)).toEqual(originalSettings);
+        await changeSpeed(fastChat, 'fast');
+        expect((await savedSettings(fastChat)).values.speed).toBe('fast');
       } finally {
         await writeFile(config, restrictedConfig);
       }
@@ -144,7 +140,7 @@ describe('Codex scripted per-chat speed', () => {
       try {
         expect((await held.requested).body.service_tier).toBe('priority');
         await fixture.client.enqueueNew(fastChat, queuedPrompt);
-        // Feature discovery reloads this file, but the active thread still filters with its original config.
+        // The next operation reloads config; the active turn keeps its admitted tier.
         expect(await readFile(config, 'utf8')).toBe(restrictedConfig);
         await writeFile(config, originalConfig);
         await changeSpeed(fastChat, 'ultrafast');
@@ -197,13 +193,35 @@ describe('Codex scripted per-chat speed', () => {
       await fixture.client.patch('/api/v1/chats/model', { chatId: fastChat, model: STANDARD_ONLY_MODEL });
       const beforeRejection = environment.model.requests().length;
       for (const thinkingMode of [undefined, 'none'] as const) {
-        const unavailable = await patchSpeed(fastChat, 'ultrafast', thinkingMode);
-        expect(unavailable.status).toBe(422);
-        expect(await unavailable.json()).toMatchObject({ errorCode: 'INVALID_SETTINGS', retryable: false,
-          error: expect.stringContaining('Ultrafast speed is unavailable') });
+        const saved = await patchSpeed(fastChat, 'ultrafast', thinkingMode);
+        expect(saved.status).toBe(200);
+        expect((await savedSettings(fastChat)).values.speed).toBe('ultrafast');
+        const cursor = fixture.client.markEvents();
+        const denied = await fixture.client.runChat({
+          ...liveCodexRunRequest({ chatId: fastChat, command: 'Must not infer with an unavailable speed.' }),
+          model: STANDARD_ONLY_MODEL, thinkingMode: thinkingMode ?? LIVE_CODEX_THINKING_MODE,
+          agentSettings: await savedSettings(fastChat),
+        });
+        expect(await fixture.client.waitForTurnTerminal(fastChat, denied.turnId, { afterIndex: cursor }))
+          .toMatchObject({ type: 'agent-run-failed', error: expect.stringContaining('Ultrafast speed is unavailable') });
       }
-      expect((await savedSettings(fastChat)).values.speed).toBe('standard');
       expect(environment.model.requests()).toHaveLength(beforeRejection);
+      // Fork-run creates the native child from source settings before applying run overrides.
+      expect(await rejectionOf(fixture.client.forkRunChat({
+        sourceChatId: fastChat, chatId: fixture.newChatId(), model: codexRequestModel(),
+        command: 'An override must not bypass source fork validation.', thinkingMode: LIVE_CODEX_THINKING_MODE,
+        clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+      }))).toMatchObject({ status: 422, body: { errorCode: 'INVALID_SETTINGS',
+        error: expect.stringContaining('Ultrafast speed is unavailable') } });
+      expect(environment.model.requests()).toHaveLength(beforeRejection);
+      await changeSpeed(fastChat, 'standard');
+      await fixture.client.patch('/api/v1/chats/model', { chatId: fastChat, model: codexRequestModel() });
+      await fixture.client.fetch('/api/v1/chats/execution-settings', {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId: fastChat, thinkingMode: LIVE_CODEX_THINKING_MODE } satisfies ExecutionSettingsPatchRequest),
+      }).then((response) => expect(response.status).toBe(200));
+      await expectTurnTier(resumeChat, fastChat, undefined);
+      const beforeColdRejection = environment.model.requests().length;
 
       await fixture.restartGarcon({ beforeStart: () => writeFile(config, restrictedConfig) });
       const denial = await rejectionOf(fixture.client.startChat({
@@ -224,13 +242,49 @@ describe('Codex scripted per-chat speed', () => {
         .toMatchObject({ status: 422, body: { errorCode: 'INVALID_SETTINGS',
           error: expect.stringContaining('Ultrafast speed is unavailable') } });
       expect((await fixture.client.listChats()).sessions.map(({ id }) => id).sort()).toEqual(beforeForkRejection);
-      expect(environment.model.requests()).toHaveLength(beforeRejection);
+      expect(environment.model.requests()).toHaveLength(beforeColdRejection);
       environment.model.assertSettled();
     }, {
       serverEnvironment: environment.serverEnvironment,
       prepareWorkspace: (directories) => prepareScriptedCodexSpeed(environment, directories),
     });
   }, 120_000);
+
+  test('leaves premium capacity failures for a manually admitted retry', async () => {
+    await withIntegrationFixture('codex-speed-capacity', async (fixture) => {
+      for (const [speed, tier] of [['fast', 'priority'], ['ultrafast', 'ultrafast']] as const) {
+        const chatId = fixture.newChatId();
+        const agentSettings = { ownerId: 'codex', schemaVersion: 1, values: { speed } };
+        const before = environment.model.requests().length;
+        environment.model.scriptFault({ kind: 'stream-error', code: 'server_is_overloaded', message: 'Synthetic capacity failure.' });
+        const cursor = fixture.client.markEvents();
+        const failed = await fixture.client.startChat({
+          ...liveCodexStartRequest({ chatId, projectPath: fixture.executionDirs.project, command: 'Synthetic capacity check.' }),
+          agentSettings,
+        });
+        expect(await fixture.client.waitForTurnTerminal(chatId, failed.turnId, { afterIndex: cursor }))
+          .toMatchObject({ type: 'agent-run-failed', error: expect.stringContaining('capacity') });
+        expect(environment.model.requests()).toHaveLength(before + 1);
+        expect(environment.model.requests().at(-1)?.body.service_tier).toBe(tier);
+        const marker = `Synthetic manual ${speed} retry.`;
+        environment.model.scriptTurn([codexAssistantMessage(marker)]);
+        const retryCursor = fixture.client.markEvents();
+        const retry = await fixture.client.runChat({ ...liveCodexRunRequest({ chatId, command: marker }), agentSettings });
+        await waitForVisibleResponse({ fixture, chatId, turnId: retry.turnId, marker, afterIndex: retryCursor });
+        expect(environment.model.requests()).toHaveLength(before + 2);
+        expect(environment.model.requests().at(-1)?.body.service_tier).toBe(tier);
+      }
+      environment.model.assertSettled();
+    }, {
+      serverEnvironment: environment.serverEnvironment,
+      prepareWorkspace: async (directories) => {
+        await prepareScriptedCodexSpeed(environment, directories);
+        const config = join(directories.home, '.codex', 'config.toml');
+        // Isolates Garcon's retry policy from the native transport's own retry budget.
+        await writeFile(config, `${await readFile(config, 'utf8')}stream_max_retries = 0\n`);
+      },
+    });
+  }, 60_000);
 
   test('runs background generation at Standard despite an Ultrafast executor default', async () => {
     await withIntegrationFixture('codex-speed-generation', async ({ client }) => {

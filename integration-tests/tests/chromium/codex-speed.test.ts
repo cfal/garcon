@@ -6,7 +6,7 @@ import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { prepareScriptedCodexSpeed, STANDARD_ONLY_MODEL } from '../../support/scripted-codex-speed.js';
 
-test('the speed picker persists per chat and rolls back a rejected tier', async () => {
+test('the speed picker persists per chat and defers unavailable-tier errors until activation', async () => {
   const environment = await startScriptedCodexTestEnvironment();
   try {
     await withChromiumFixture('codex-speed-picker', async ({ page, integration, withExpectedConsoleErrors, assertNoBrowserErrors }) => {
@@ -65,7 +65,10 @@ test('the speed picker persists per chat and rolls back a rejected tier', async 
         await browserExpect(picker(speed)).toBeVisible();
         expect(Math.abs((await editor.boundingBox())!.y - startY)).toBeLessThan(2);
       }
-      await withExpectedConsoleErrors([/Failed to load resource: the server responded with a status of 422 .*/], async () => {
+      await withExpectedConsoleErrors([
+        /Failed to load resource: the server responded with a status of 422 .*/,
+        /Failed to fork chat: ApiError: Codex Ultrafast speed is unavailable for integration-standard-only on this executor\. Check the model and workspace settings or choose Standard\.[\s\S]*/,
+      ], async () => {
         const received = Promise.withResolvers<void>();
         const release = Promise.withResolvers<void>();
         await page.route('**/api/v1/chats/execution-settings', async (route) => {
@@ -83,11 +86,11 @@ test('the speed picker persists per chat and rolls back a rejected tier', async 
           release.resolve();
         }
         await browserExpect(page.getByText(/Ultrafast speed is unavailable/)).toBeVisible();
-        await browserExpect(picker('Standard')).toBeVisible();
+        await browserExpect(picker('Ultrafast')).toBeVisible();
         await browserExpect(page.getByText('Forking chat...', { exact: true })).toHaveCount(0);
         expect((await client.listChats()).sessions).toHaveLength(3);
       });
-      expect((await client.listChats()).sessions.find(({ id }) => id === second)?.agentSettings.values.speed ?? 'standard').toBe('standard');
+      expect((await client.listChats()).sessions.find(({ id }) => id === second)?.agentSettings.values.speed).toBe('ultrafast');
       expect(environment.model.requests()).toHaveLength(2);
       environment.model.assertSettled();
       assertNoBrowserErrors();

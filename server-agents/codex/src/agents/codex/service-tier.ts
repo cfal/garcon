@@ -37,7 +37,7 @@ export function normalizeCodexServiceTier(tier: string | null): string {
   return tier === 'fast' ? 'priority' : tier ?? 'default';
 }
 
-export function unavailableTier(tier: CodexServiceTier, model: string): AgentIntegrationError {
+function unavailableTier(tier: CodexServiceTier, model: string): AgentIntegrationError {
   const { label } = SPEED_OPTION_BY_TIER[tier];
   return new AgentIntegrationError('INVALID_SETTINGS',
     `Codex ${label} speed is unavailable for ${model} on this executor. Check the model and workspace settings or choose Standard.`, false);

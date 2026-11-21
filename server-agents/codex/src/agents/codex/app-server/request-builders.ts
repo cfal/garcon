@@ -11,7 +11,7 @@ import {
   GPT_6_LUNA_MODEL,
 } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest, CodexThreadConfiguration } from '../runtime-types.js';
-import { codexServiceTier, normalizeCodexServiceTier, type CodexSpeed, type CodexServiceTier } from '../service-tier.js';
+import { codexServiceTier, normalizeCodexServiceTier, type CodexSpeed } from '../service-tier.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type {
   CodexThreadSettings,
@@ -64,7 +64,6 @@ interface CodexSandboxSettings {
 
 export interface CodexThreadSettingsTarget {
   readonly model: string;
-  readonly serviceTier: CodexServiceTier;
   // Represents provider-owned Default as null because Codex reports the effective concrete effort.
   readonly effort: string | null;
   readonly approvalPolicy: CodexApprovalPolicy;
@@ -99,7 +98,6 @@ export function codexThreadSettingsTarget(configuration: CodexThreadConfiguratio
   const { sandbox, approvalPolicy } = codexSandboxSettings(configuration.permissionMode);
   return {
     model: configuration.model,
-    serviceTier: codexServiceTier(configuration.speed),
     effort: mapThinkingModeToCodexEffort(configuration.thinkingMode, configuration.model) ?? null,
     approvalPolicy,
     approvalsReviewer: 'user',
@@ -120,10 +118,11 @@ export function buildThreadSettingsUpdateParams(
   threadId: string,
   target: CodexThreadSettingsTarget,
 ): ThreadSettingsUpdateParams {
+  // Omitting the tier preserves the source's selection until the next admission.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L271-L280
   return {
     threadId,
     model: target.model,
-    serviceTier: target.serviceTier,
     approvalPolicy: target.approvalPolicy,
     approvalsReviewer: target.approvalsReviewer,
     sandboxPolicy: target.sandboxPolicy,
@@ -137,7 +136,6 @@ export function threadSettingsMatch(
 ): boolean {
   // Accepts any confirmed effort when Codex owns the Default omitted from the update.
   return settings.model === target.model
-    && settings.serviceTier === target.serviceTier
     && (target.effort === null || settings.effort === target.effort)
     && settings.approvalPolicy === target.approvalPolicy
     && settings.approvalsReviewer === target.approvalsReviewer
@@ -239,8 +237,10 @@ function appendCommonThreadParams(
 ): Record<string, unknown> {
   const { sandbox, approvalPolicy } = codexSandboxSettings(request.permissionMode);
   params.model = request.model;
-  // Explicit Standard overrides executor config and previously persisted Fast settings.
-  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L271-L280
+  // Explicit Standard overrides executor config and previously persisted premium settings.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L74-L81
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L394-L401
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L603-L610
   params.serviceTier = codexServiceTier(request.speed);
   params.cwd = request.projectPath;
   params.sandbox = sandbox;

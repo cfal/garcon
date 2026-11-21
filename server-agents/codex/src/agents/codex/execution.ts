@@ -121,6 +121,11 @@ export class CodexExecution implements AgentRuntimeExecution {
     const sourceEndpointId = this.runtime.sourceEndpointId(agentSessionId);
     if (sourceEndpointId === undefined) return;
     assertCodexSessionEndpoint(sourceEndpointId, configuration.endpoint?.endpointId ?? null);
+    // Speed is a next-operation preference; saving it never changes the loaded thread.
+    if (configuration.model === previousConfiguration.model
+      && configuration.permissionMode === previousConfiguration.permissionMode
+      && configuration.thinkingMode === previousConfiguration.thinkingMode
+      && configuration.endpoint?.endpointId === previousConfiguration.endpoint?.endpointId) return;
     const previousEffort = mapThinkingModeToCodexEffort(
       previousConfiguration.thinkingMode,
       previousConfiguration.model,
@@ -137,14 +142,13 @@ export class CodexExecution implements AgentRuntimeExecution {
           false,
         );
       }
-      // A fresh resume clears explicit effort; deferring that write must not skip speed validation.
-      return this.runtime.validateDeferredSpeed(agentSessionId, configuration.model, codexSpeed(configuration.settings));
+      // A fresh resume clears explicit effort.
+      return;
     }
     await this.runtime.updateSessionSettings(agentSessionId, {
       model: configuration.model,
       permissionMode: configuration.permissionMode,
       thinkingMode: configuration.thinkingMode,
-      speed: codexSpeed(configuration.settings),
     });
   }
 

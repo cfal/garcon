@@ -780,7 +780,6 @@ export type CodexThreadSettingsSandboxPolicy =
 
 export interface ThreadSettingsUpdateParams {
   readonly threadId: string;
-  readonly serviceTier: string;
   readonly model: string;
   readonly approvalPolicy: 'never' | 'on-request';
   readonly approvalsReviewer: 'user';

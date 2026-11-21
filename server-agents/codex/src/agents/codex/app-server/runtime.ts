@@ -78,8 +78,7 @@ import {
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
-import { assertEffectiveTier, codexServiceTier, type CodexServiceTier, type CodexSpeed } from '../service-tier.js';
-import { assertLoadedTierAvailable } from './service-tier-discovery.js';
+import { assertEffectiveTier, codexServiceTier, normalizeCodexServiceTier } from '../service-tier.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
   rejectedCodexSteer,
@@ -531,22 +530,6 @@ export class CodexAppServerRuntime {
     takePendingApproval(this.#pendingApprovals, pending.client, pending.requestId, pending);
   }
 
-  async validateDeferredSpeed(threadId: string, model: string, speed: CodexSpeed): Promise<void> {
-    const session = this.#sourceForThread(threadId);
-    if (!session || speed === 'standard') return;
-    session.configurationReservations += 1;
-    try {
-      await this.#checkLoadedTier(session, model, codexServiceTier(speed));
-      this.#assertSettingsSourceCurrent(session);
-    } finally {
-      session.configurationReservations -= 1;
-    }
-  }
-
-  #checkLoadedTier(session: RunningCodexSession, model: string, tier: CodexServiceTier): Promise<void> {
-    return assertLoadedTierAvailable(session.client, session.threadId, model, tier, this.#settingsUpdateTimeoutMs);
-  }
-
   #assertSettingsSourceCurrent(session: RunningCodexSession): void {
     if (this.#sources.get(session.client) !== session || session.superseded) {
       throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while updating settings', true);
@@ -579,10 +562,6 @@ export class CodexAppServerRuntime {
         'Codex settings are fenced after an ambiguous update',
         false,
       );
-    }
-    if (target.serviceTier !== 'default') {
-      await this.#checkLoadedTier(session, target.model, target.serviceTier);
-      this.#assertSettingsSourceCurrent(session);
     }
     // Records explicit intent before the RPC because its confirmation may precede its response.
     if (target.effort !== null) session.providerOwnsReasoningEffort = false;
@@ -796,7 +775,8 @@ export class CodexAppServerRuntime {
     const threadId = response.thread.id;
     const requested = codexThreadSettingsTarget(request);
     const confirmedThreadSettings = this.#initialThreadSettings(requested, response);
-    const activatedRoute = { model: confirmedThreadSettings.model, serviceTier: requested.serviceTier };
+    const serviceTier = codexServiceTier(request.speed);
+    assertEffectiveTier(serviceTier, response.serviceTier, confirmedThreadSettings.model);
     // Keyed by Codex's own turn id so an event it labels later still names the run that asked
     // for that turn, long after the session moved on to the next one.
     const turnRoutes = new Map<string, CodexOperation>();
@@ -824,8 +804,7 @@ export class CodexAppServerRuntime {
         publishRows(this.#logger, chatId, messages, turnRoutes.get(turnId))
       )),
       turnRoutes,
-      capacityRetryRoute: activatedRoute,
-      activatedRoute,
+      admittedRoute: { model: confirmedThreadSettings.model, serviceTier },
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
@@ -864,12 +843,11 @@ export class CodexAppServerRuntime {
       && retained.nativePath && request.nativePath && retained.nativePath !== request.nativePath) {
       request = await this.#resolveResumePath(request);
     }
-    const tier = codexServiceTier(request.speed);
     const matchingPath = !retained?.nativePath
       || !request.nativePath
       || retained.nativePath === request.nativePath;
     const canReuseRuntime = (session: RunningCodexSession) => session.runtimeIdentity === runtimeIdentity
-      && matchingPath && canReuseThreadSettings(session, request, tier);
+      && matchingPath && canReuseThreadSettings(session, request);
     let interruptedWriterReady = false;
     if (
       retained
@@ -905,53 +883,41 @@ export class CodexAppServerRuntime {
       }
       assertCodexExecutionOpen(request);
     }
-    if (
-      retained?.status === 'interrupting'
-      && interruptedWriterReady
-      && !retained.superseded
-      && !canReuseThreadSettings(retained, request, tier)
-    ) {
-      await this.#waitForSourceTerminal(retained, request);
-      assertCodexExecutionOpen(request);
-    }
     const canReactivate = (session: RunningCodexSession) => this.#latestSourceByChat.get(request.chatId) === session
       && session.threadId === request.agentSessionId
       && !session.superseded
       && (isTerminalSessionStatus(session.status) || (session.status === 'interrupting' && interruptedWriterReady))
       && canReuseRuntime(session);
-    if (retained && canReactivate(retained)) {
-      let tierVerified = true;
-      if (tier !== 'default') {
-        retained.configurationReservations += 1;
-        try {
-          try {
-            await this.#checkLoadedTier(retained, request.model, tier);
-          } catch (error) {
-            // Only an idle writer can be reopened for a fresh effective-tier check.
-            const canReopen = isTerminalSessionStatus(retained.status)
-              && error instanceof AgentIntegrationError
-              && error.retryable
-              && (error.code === 'TIMEOUT' || error.code === 'UNAVAILABLE');
-            if (!canReopen) throw error;
-            tierVerified = false;
-          }
-          await retained.threadSettingsUpdateChain;
-          assertCodexExecutionOpen(request);
-        } finally {
-          retained.configurationReservations -= 1;
-        }
+    let resumePathResolved = false;
+    while (true) {
+      if (
+        retained?.status === 'interrupting'
+        && interruptedWriterReady
+        && !retained.superseded
+        && !canReuseThreadSettings(retained, request)
+      ) {
+        await this.#waitForSourceTerminal(retained, request);
+        assertCodexExecutionOpen(request);
       }
-      if (tierVerified && canReactivate(retained)) {
+      // Confirmation can precede the RPC reply; neither reuse nor replacement may cross that write.
+      if (retained && retained.configurationReservations > 0) {
+        await retained.threadSettingsUpdateChain;
+        assertCodexExecutionOpen(request);
+        this.#assertSettingsSourceCurrent(retained);
+        if (!isTerminalSessionStatus(retained.status)
+          && !(retained.status === 'interrupting' && interruptedWriterReady)) {
+          throw new AgentIntegrationError('SESSION_BUSY', 'Codex thread became active while settling settings', true);
+        }
+        continue;
+      }
+      if (retained && canReactivate(retained)) {
         return { session: this.#reactivateSession(retained, request, operation), buffered: false };
       }
-      // A changed selection can use a fresh resume; a displaced or busy writer cannot.
-      if (this.#latestSourceByChat.get(request.chatId) !== retained
-        || !isTerminalSessionStatus(retained.status) || retained.pendingThreadSettings) {
-        throw new AgentIntegrationError('SESSION_BUSY', 'Codex session changed while checking speed', true);
-      }
+      if (resumePathResolved) break;
+      // Path resolution can admit another settings write, so both barriers are rechecked afterward.
+      request = await this.#resolveResumePath(request);
+      resumePathResolved = true;
     }
-
-    request = await this.#resolveResumePath(request);
 
     if (
       retained
@@ -1026,7 +992,7 @@ export class CodexAppServerRuntime {
     session.terminalWaiters.clear();
     session.liveCodeModeResultToolIds.clear();
     session.capacityRetryCount = 0;
-    session.capacityRetryRoute = { model: request.model, serviceTier: codexServiceTier(request.speed) };
+    session.admittedRoute = { model: request.model, serviceTier: codexServiceTier(request.speed) };
     session.turnAttemptGeneration += 1;
     session.pendingCapacityFailure = null;
     session.sourceOperation = operation;
@@ -1101,7 +1067,6 @@ export class CodexAppServerRuntime {
     response: ThreadStartResponse,
   ): CodexConfirmedThreadSettings {
     const model = response.model || response.thread.model || requested.model;
-    assertEffectiveTier(requested.serviceTier, response.serviceTier, model);
     const responseEffort = response.reasoningEffort !== undefined
       ? response.reasoningEffort
       : response.thread.reasoningEffort;
@@ -1114,6 +1079,7 @@ export class CodexAppServerRuntime {
       return {
         ...requested,
         model,
+        serviceTier: normalizeCodexServiceTier(response.serviceTier),
         effort,
       };
     }
@@ -1392,6 +1358,8 @@ export class CodexAppServerRuntime {
     session: RunningCodexSession,
     operation: CodexOperation,
   ): Promise<boolean> {
+    // Premium retries require fresh activation to verify the effective tier, not a settings echo.
+    if (session.admittedRoute.serviceTier !== 'default') return false;
     const delayMs = this.#capacityRetryDelaysMs[session.capacityRetryCount];
     if (delayMs === undefined) return false;
 
@@ -1409,23 +1377,15 @@ export class CodexAppServerRuntime {
       session.activeDeliveryReservations += 1;
       try {
         if (session.activeTurnId) return true;
-        const { model, serviceTier } = session.capacityRetryRoute;
-        const routeUnchanged = () => !session.configurationFenced
-          && !session.pendingThreadSettings
-          && session.confirmedThreadSettings.model === model
-          && session.confirmedThreadSettings.serviceTier === serviceTier;
-        if (!routeUnchanged()) return false;
-        if (serviceTier !== 'default') {
-          await this.#checkLoadedTier(session, model, serviceTier);
-          if (!this.#canApplyTurnAttempt(session, retryGeneration) || session.activeTurnId) return true;
-          if (!routeUnchanged()) return false;
-        }
+        if (session.configurationFenced || session.pendingThreadSettings
+          || session.confirmedThreadSettings.model !== session.admittedRoute.model
+          || session.confirmedThreadSettings.serviceTier !== 'default') return false;
         session.nextTurnOperation = operation;
         const turn = await session.client.startTurn({
           threadId: session.threadId,
           input: [],
           // Replays the admitted tier without changing the thread's selected tier.
-          serviceTierForTurn: serviceTier,
+          serviceTierForTurn: 'default',
         });
         if (isRunningAttempt()) adoptTurn(session, turn.turn.id, operation);
         return true;
