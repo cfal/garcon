@@ -90,7 +90,9 @@ export async function configureSessionFor(
   });
 }
 
-export function promptFor(policy: AcpAgentPolicy, request: AcpRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {
+export type AcpPrompt = Array<{ type: string; text?: string; [key: string]: unknown }>;
+
+export function promptFor(policy: AcpAgentPolicy, request: AcpRequest): AcpPrompt {
   const prompt = policy.buildPrompt ? policy.buildPrompt(request) : buildPromptFallback(request);
   return prompt.length > 0 ? prompt : buildPromptFallback(request);
 }

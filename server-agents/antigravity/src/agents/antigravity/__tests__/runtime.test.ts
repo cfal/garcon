@@ -737,6 +737,40 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('applies a permission mode change made while the turn is configured', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    const gate = Promise.withResolvers<void>();
+    agent.configReplyGate = gate.promise;
+    agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1'));
+
+    const turn = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
+    runtime.updateSessionSettings(started.agentSessionId, { permissionMode: 'bypassPermissions' });
+    agent.configReplyGate = null;
+    gate.resolve();
+    await waitFor(() => agent.received.some((message) => message.id === 'permission-1'));
+
+    expect(agent.received.find((message) => message.id === 'permission-1')?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow' },
+    });
+    expect(events.some((event) => event.type === 'permission')).toBe(false);
+    agent.endPrompt();
+    await turn;
+    runtime.shutdown();
+  });
+
+  it('rejects an unsupported attachment on start before spawning agy', async () => {
+    const { agent, runtime, request } = harness();
+
+    await expect(runtime.startSession(request({
+      images: [{ kind: 'image', name: 'notes.txt', mimeType: 'text/plain', data: 'data:text/plain;base64,AAAA' }],
+    }))).rejects.toThrow('Antigravity cannot attach notes.txt');
+    expect(agent.requests('initialize')).toEqual([]);
+  });
+
   it('rejects an unsupported attachment before changing the session model or mode', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());

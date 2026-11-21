@@ -9,6 +9,7 @@ import {
   runAntigravityModels,
   type AntigravityCliResult,
 } from './antigravity-models.js';
+import { sharedProbe } from './shared-probe.js';
 
 // The probe is shared with concurrent callers, so an abort stops waiting rather
 // than killing it.
@@ -32,12 +33,7 @@ const inFlightAuthentication = new Map<string, Promise<void>>();
 export function probeAntigravityAuthentication(config: AntigravityConfig): Promise<void> {
   const binary = config.binary();
   const method = config.authMethod();
-  const key = JSON.stringify([binary, method]);
-  const running = inFlightAuthentication.get(key);
-  if (running) return running;
-  const started = authenticateOnce(binary, method, config).finally(() => inFlightAuthentication.delete(key));
-  inFlightAuthentication.set(key, started);
-  return started;
+  return sharedProbe(inFlightAuthentication, JSON.stringify([binary, method]), () => authenticateOnce(binary, method, config));
 }
 
 async function authenticateOnce(binary: string, method: string, config: AntigravityConfig): Promise<void> {

@@ -1,6 +1,7 @@
 import type { AgentModelOption } from '@garcon/common/agents';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
+import { sharedProbe } from './shared-probe.js';
 
 const MODELS_TIMEOUT_MS = 10_000;
 
@@ -21,11 +22,7 @@ export function runAntigravityModels(config: AntigravityConfig): Promise<Antigra
   // Shared only by callers that would run the identical probe.
   const env = antigravityChildEnvironment(config);
   const key = JSON.stringify([binary, env.GEMINI_API_KEY ?? null]);
-  const running = inFlightModels.get(key);
-  if (running) return running;
-  const started = spawnAntigravityModels(binary, env).finally(() => inFlightModels.delete(key));
-  inFlightModels.set(key, started);
-  return started;
+  return sharedProbe(inFlightModels, key, () => spawnAntigravityModels(binary, env));
 }
 
 async function spawnAntigravityModels(

@@ -282,6 +282,10 @@ function cursorCancelledResponse(): Record<string, unknown> {
 export class CursorAcpEventConverter implements AcpEventConverter {
   #sessions = new Map<string, SessionState>();
 
+  releaseSession(sessionId: string): void {
+    this.#sessions.delete(sessionId);
+  }
+
   beginTurn(sessionId: string): void {
     const session = this.#sessionFor(sessionId);
     session.buffer = {

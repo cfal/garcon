@@ -41,6 +41,7 @@ import {
   promptFor,
   configureSessionFor,
   type AcpAgentPolicy,
+  type AcpPrompt,
 } from './policy.js';
 import { AcpTransport } from './transport.js';
 import {
@@ -109,6 +110,9 @@ export class AcpAgentRuntime {
 
   async startSession(request: AcpStartRequest): Promise<AcpStartedSession> {
     assertAcpExecutionOpen(request);
+    // Built first, so an unusable attachment fails before any process or native
+    // conversation exists.
+    const prompt = promptFor(this.#policy, request);
     const client = await this.#connectClient(request);
     let created: Awaited<ReturnType<AcpClient['newSession']>>;
     try {
@@ -164,7 +168,7 @@ export class AcpAgentRuntime {
       resolveStarted = resolve;
       rejectStarted = reject;
     });
-    const promptTask = this.#runPrompt(session, request, () => {
+    const promptTask = this.#runPrompt(session, request, prompt, () => {
       this.#retireSupersededChatSessions(session);
       if (executionStarted) return;
       executionStarted = true;
@@ -187,6 +191,7 @@ export class AcpAgentRuntime {
 
   async runTurn(request: AcpResumeRequest): Promise<void> {
     assertAcpExecutionOpen(request);
+    const prompt = promptFor(this.#policy, request);
     let session = await this.#liveSessionForTurn(request, await this.#sessionForTurn(request));
     // A turn stopped while configuring is still the pending turn.
     const cancelled = session.activeTurn?.running ? session.activeTurn : session.pendingTurn;
@@ -198,7 +203,7 @@ export class AcpAgentRuntime {
     if (this.#isBusy(session)) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
-    await this.#runPrompt(session, request);
+    await this.#runPrompt(session, request, prompt);
   }
 
   // A session can retire while a turn awaits it. One that crashed or timed out is
@@ -332,7 +337,11 @@ export class AcpAgentRuntime {
     if (!session) return;
     if (patch.permissionMode !== undefined) {
       session.permissionMode = patch.permissionMode;
-      if (session.sourceTurn) session.sourceTurn.permissionMode = patch.permissionMode;
+      // A turn still configuring becomes the source when its prompt goes out,
+      // so it carries the change too.
+      for (const turn of [session.sourceTurn, session.pendingTurn]) {
+        if (turn) turn.permissionMode = patch.permissionMode;
+      }
     }
   }
 
@@ -471,6 +480,7 @@ export class AcpAgentRuntime {
   async #runPrompt(
     session: AcpAgentRuntimeSession,
     request: AcpStartRequest | AcpResumeRequest,
+    prompt: AcpPrompt,
     onExecutionStarted?: () => void,
   ): Promise<void> {
     assertAcpExecutionOpen(request);
@@ -492,7 +502,6 @@ export class AcpAgentRuntime {
     let admissionClosed = false;
 
     try {
-      const prompt = promptFor(this.#policy, request);
       const promptConfig = promptConfigFor(this.#policy, request);
       await configureSessionFor(this.#policy, session, request);
       // Stopped while configuring: end before admission records the turn as started.
