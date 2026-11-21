@@ -10,6 +10,7 @@ import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
 import { AssistantMessage, BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 import type { CompleteChatHistoryResponse } from '$shared/chat-view';
 import type { DrainHandle } from '$lib/ws/drain';
@@ -543,7 +544,7 @@ describe('event router integration', () => {
 		}
 	});
 
-	it('invalidates held permission catch-up when a replacement broadcast precedes its history load', async () => {
+	it.each(['broadcast', 'native-reload'] as const)('fences held permission catch-up after %s replacement', async replacement => {
 		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
 		const socket = new RouterTestSocket();
 		vi.stubGlobal('WebSocket', class extends RouterTestSocket { constructor() { super(); return socket; } });
@@ -565,12 +566,14 @@ describe('event router integration', () => {
 		const catchup = Promise.withResolvers<ChatSnapshotResponse>();
 		const control = executionControl('successor', 1, 'Queued guidance');
 		const snapshot: ChatSnapshotResponse = { ...chatSnapshot('view'), control,
+			transcript: { availability: 'available', ...page },
 			transientFeed: { ...transientFeed('view', 1), serverInstanceId: 'successor', rows: [{
 				permissionOccurrenceId: 'obsolete-permission', runId: 'run', displayOrder: 1,
 				transcript: { transcriptViewId: 'view', afterOrdinal: 1 },
 				message: new PermissionRequestMessage(TS, 'obsolete-permission', new BashToolUseMessage(TS, 'tool', 'pwd')) }] } };
 		const replacementFeed = { ...transientFeed('replacement'), serverInstanceId: 'successor' };
-		vi.mocked(getChatSnapshot).mockReturnValueOnce(catchup.promise).mockResolvedValue({ ...snapshot, transientFeed: replacementFeed });
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(catchup.promise).mockResolvedValue({ ...snapshot, transientFeed: replacementFeed,
+			transcript: { availability: 'available', ...page, transcriptViewId: 'replacement' } });
 		const refresh = vi.fn(async () => ({ control }));
 		const coordinator = render(ReconnectCoordinatorTestHost, { options: {
 			ws: connection, panels, conversationUi: ui,
@@ -604,21 +607,38 @@ describe('event router integration', () => {
 			clock.mockReturnValue(30);
 			await confirmHeartbeat(connection, socket, 'successor');
 			expect(getChatSnapshot).toHaveBeenCalledOnce();
-			socket.message({ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'view',
-				transcriptViewId: 'replacement', lastOrdinal: 1 });
-			flushSync();
-			expect(cache.readAppliedCursor('chat-a')).toMatchObject({ transcriptViewId: 'view', stale: true });
+			if (replacement === 'broadcast') {
+				socket.message({ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'view',
+					transcriptViewId: 'replacement', lastOrdinal: 1 });
+				flushSync();
+				expect(cache.readAppliedCursor('chat-a')).toMatchObject({ transcriptViewId: 'view', stale: true });
+			} else {
+				const reloading = reloadChatFromNative(connection, panels, 'chat-a', {
+					signal: new AbortController().signal, onProgress() {},
+				});
+				const request = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; type: string };
+				expect(request.type).toBe('chat-reload');
+				socket.message({ ...page, type: 'chat-reloaded', clientRequestId: request.clientRequestId,
+					transcriptViewId: 'replacement' });
+				await expect(reloading).resolves.toBe('reloaded');
+				expect(cache.readAppliedCursor('chat-a')).toMatchObject({ transcriptViewId: 'replacement', stale: false });
+				panels.upsertOptimisticInput('chat-a', { chatId: 'chat-a', clientMessageId: 'new-input', content: 'New guidance',
+					createdAt: TS, delivery: 'pending', placement: 'live-tail' });
+			}
 			expect(ui.getTransientFeed('chat-a')).toBeNull();
 			catchup.resolve(snapshot);
 			await catchup.promise;
 			await new Promise<void>(resolve => setTimeout(resolve, 0));
 			expect(ui.pendingPermissionRequests).toEqual([]);
-			history.resolve({ ...page, transcriptViewId: 'replacement' });
+			if (replacement === 'broadcast') history.resolve({ ...page, transcriptViewId: 'replacement' });
 			await vi.waitFor(() => expect(panels.panel('chat-view:window-one')?.transcript.transcriptViewId).toBe('replacement'));
 			await confirmHeartbeat(connection, socket, 'successor');
 			await vi.waitFor(() => expect(ui.getTransientFeed('chat-a')).toEqual(replacementFeed));
 			expect(getChatSnapshot).toHaveBeenCalledTimes(2);
 			expect(ui.pendingPermissionRequests).toEqual([]);
+			expect(read).toHaveBeenCalledTimes(replacement === 'broadcast' ? 2 : 1);
+			expect(panels.overlayFor('chat-a')?.optimisticInputs.map(input => input.clientMessageId))
+				.toEqual(replacement === 'native-reload' ? ['new-input'] : []);
 		} finally {
 			history.resolve({ ...page, transcriptViewId: 'replacement' });
 			router.unmount();
