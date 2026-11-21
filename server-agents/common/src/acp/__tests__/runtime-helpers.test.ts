@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { isAutoApproveMode, permissionChoiceOutcome } from '../runtime-helpers.ts';
+import { automaticPermissionChoice, permissionChoiceOutcome } from '../runtime-helpers.ts';
 import type { AcpAgentPolicy } from '../policy.ts';
 
 const ANTIGRAVITY_OPTIONS = [
@@ -14,7 +14,7 @@ const CURSOR_OPTIONS = [
 ];
 
 function selected(optionId: string) {
-  return { outcome: { outcome: 'selected', optionId } };
+  return { outcome: { outcome: 'selected' as const, optionId } };
 }
 
 describe('permissionChoiceOutcome', () => {
@@ -57,6 +57,7 @@ describe('permissionChoiceOutcome', () => {
     expect(permissionChoiceOutcome(CURSOR_OPTIONS, 'auto-approve')).toEqual(selected('allow-once'));
     const persistentOnly = [{ optionId: 'always', kind: 'allow_always' }, { optionId: 'never', kind: 'reject_always' }];
     expect(permissionChoiceOutcome(persistentOnly, 'auto-approve')).toEqual(selected('always'));
+    expect(permissionChoiceOutcome([...persistentOnly, { optionId: 'allow-once' }], 'auto-approve')).toEqual(selected('allow-once'));
   });
 
   it('never resolves a denial to an allow option', () => {
@@ -69,19 +70,21 @@ describe('permissionChoiceOutcome', () => {
     expect(permissionChoiceOutcome(untyped, 'reject')).toEqual(selected('reject-once'));
   });
 
-  it('answers an empty option list with the conventional id', () => {
-    expect(permissionChoiceOutcome([], 'allow-once')).toEqual(selected('allow-once'));
-    expect(permissionChoiceOutcome([], 'reject')).toEqual(selected('reject-once'));
+  it('never selects an option the agent did not offer', () => {
+    expect(permissionChoiceOutcome([], 'allow-once')).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect(permissionChoiceOutcome([], 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 });
 
-describe('isAutoApproveMode', () => {
-  it('follows the policy when an agent applies a mode natively', () => {
-    const native = { agentId: 'native', command: 'agent', autoApprovePermissionModes: ['bypassPermissions'] } satisfies AcpAgentPolicy;
-    const standard = { agentId: 'standard', command: 'agent' } satisfies AcpAgentPolicy;
-    expect(isAutoApproveMode('acceptEdits', native)).toBe(false);
-    expect(isAutoApproveMode('bypassPermissions', native)).toBe(true);
-    expect(isAutoApproveMode('acceptEdits', standard)).toBe(true);
-    expect(isAutoApproveMode('default', standard)).toBe(false);
+describe('automaticPermissionChoice', () => {
+  it('narrows client-managed accept-edits to explicitly identified edits and one-time grants', () => {
+    const native = { agentId: 'native', command: 'agent' } satisfies AcpAgentPolicy;
+    const client = { ...native, acceptsEditsOnClient: true } satisfies AcpAgentPolicy;
+    expect(automaticPermissionChoice('acceptEdits', 'edit', native)).toBeNull();
+    expect(automaticPermissionChoice('acceptEdits', 'edit', client)).toBe('allow-once');
+    expect(automaticPermissionChoice('acceptEdits', 'execute', client)).toBeNull();
+    expect(automaticPermissionChoice('acceptEdits', undefined, client)).toBeNull();
+    expect(automaticPermissionChoice('bypassPermissions', 'execute', native)).toBe('auto-approve');
+    expect(automaticPermissionChoice('default', 'edit', client)).toBeNull();
   });
 });

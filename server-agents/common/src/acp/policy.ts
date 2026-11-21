@@ -31,13 +31,10 @@ export interface AcpAgentPolicy {
   command: string | (() => string);
   args?: string[];
   abortStrategy?: AcpAbortStrategy;
-  // Modes in which the runtime answers permission requests itself; agents that
-  // apply a mode natively leave the remaining requests to the user.
-  autoApprovePermissionModes?: readonly PermissionMode[];
+  // Agents with native accept-edits mode decide edits themselves.
+  acceptsEditsOnClient?: boolean;
   authenticateMethodId?: string | (() => string);
   mcpServers?: unknown[];
-  binaryVersion?: string;
-  reconnectAllowNewSession?: boolean;
   clientCapabilities?: AcpInitializeParams['clientCapabilities'];
   configureSession?: (context: AcpSessionConfigurationContext) => Promise<void>;
   newSessionModelConfig?: boolean;
@@ -72,7 +69,7 @@ export function newSessionModelFor(policy: AcpAgentPolicy, request: AcpRequest):
 // The session state a configuration pass reads and updates.
 interface AcpConfigurableSession {
   readonly client: AcpClient;
-  readonly remoteSessionId: string;
+  readonly id: string;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
   readonly agentDefaultModelId?: string;
@@ -85,7 +82,7 @@ export async function configureSessionFor(
 ): Promise<void> {
   await policy.configureSession?.({
     client: session.client,
-    sessionId: session.remoteSessionId,
+    sessionId: session.id,
     request,
     configOptions: session.configOptions,
     models: session.models,

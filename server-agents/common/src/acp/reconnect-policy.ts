@@ -1,60 +1,29 @@
 import type { AcpClient } from './client.js';
 import { isRecoverableLoadFailure } from './errors.js';
-import type { AcpSessionConfigOption, AcpSessionModelState } from './protocol.js';
-
-export type ReconnectStrategy = 'resume' | 'load' | 'new';
+import type { AcpSessionNewResult } from './protocol.js';
 
 export interface AcpAdvertisedCapabilities {
   loadSession: boolean;
   sessionResume: boolean;
 }
 
-export function reconnectOrder(caps: AcpAdvertisedCapabilities): ReconnectStrategy[] {
-  if (caps.sessionResume) return ['resume', 'load', 'new'];
-  if (caps.loadSession) return ['load', 'new'];
-  return ['new'];
-}
-
-export interface AcpReconnectTarget {
-  readonly sessionId: string;
-  readonly cwd: string;
-  readonly mcpServers?: unknown[];
-  readonly allowNewSession: boolean;
-  readonly newSessionModel?: string;
-}
-
-export interface AcpReconnectedSession {
-  readonly sessionId: string;
-  readonly configOptions?: AcpSessionConfigOption[];
-  readonly models?: AcpSessionModelState;
-}
-
-// Restores a session in a fresh agent process, trying each strategy in order;
-// a strategy the agent lacks or a session it no longer knows falls through.
+// Reconnects only to the original conversation. A new session cannot supply
+// that conversation's history, even if the agent no longer recognizes its ID.
 export async function reconnectAcpSession(
   client: AcpClient,
-  target: AcpReconnectTarget,
-  order: readonly ReconnectStrategy[],
-): Promise<AcpReconnectedSession | null> {
-  const existing = { sessionId: target.sessionId, cwd: target.cwd, mcpServers: target.mcpServers };
-  for (const strategy of order) {
-    if (strategy === 'new') {
-      if (!target.allowNewSession) continue;
-      const created = await client.newSession({
-        cwd: target.cwd,
-        mcpServers: target.mcpServers,
-        ...(target.newSessionModel ? { model: target.newSessionModel } : {}),
-      });
-      return { sessionId: created.sessionId, configOptions: created.configOptions, models: created.models };
-    }
+  target: Parameters<AcpClient['resumeSession']>[0],
+): Promise<AcpSessionNewResult> {
+  const { sessionResume, loadSession } = client.getAdvertisedCapabilities();
+  const methods: Array<'resumeSession' | 'loadSession'> = [];
+  if (sessionResume) methods.push('resumeSession');
+  if (loadSession) methods.push('loadSession');
+  for (const method of methods) {
     try {
-      const loaded = strategy === 'resume'
-        ? await client.resumeSession(existing)
-        : await client.loadSession(existing);
-      return { sessionId: target.sessionId, configOptions: loaded.configOptions, models: loaded.models };
+      const opened = await client[method](target);
+      return { ...opened, sessionId: target.sessionId };
     } catch (error) {
       if (!isRecoverableLoadFailure(error)) throw error;
     }
   }
-  return null;
+  throw new Error(`Unable to restore ACP session ${target.sessionId}. Start a new chat session.`);
 }
