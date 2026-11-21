@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import type { WorkflowInput, WorkflowValueType } from '$shared/workflow-definition';
-	import type { JsonValue } from '$shared/json';
-	import { decodeWorkflowInputs, workflowInputText } from '$lib/workflows/launch/workflow-inputs';
 	import {
 		WORKFLOW_VALUE_TYPES,
-		isNewWorkflowField,
-	} from '$lib/workflows/definition/workflow-named-fields';
+		type WorkflowInput,
+		type WorkflowValueType,
+	} from '$shared/workflow-definition';
+	import type { JsonValue } from '$shared/json';
+	import { decodeWorkflowInputs, workflowInputText } from '$lib/workflows/launch/workflow-inputs';
+	import { isNewWorkflowField } from '$lib/workflows/definition/workflow-named-fields';
 	import * as m from '$lib/paraglide/messages.js';
 	import WorkflowNamedEntries from './WorkflowNamedEntries.svelte';
 

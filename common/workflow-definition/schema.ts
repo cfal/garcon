@@ -1,13 +1,10 @@
 import { AGENT_OPTION_FIELDS, LOCATION_FIELDS, parseAgentOptions, parseWorkflowLocation } from './options.js';
 import type { WorkflowField } from './source.js';
 import {
-  WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED,
+  isWorkflowName, WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED, WORKFLOW_VALUE_TYPES,
   type WorkflowBinding, type WorkflowDefinition, type WorkflowInput, type WorkflowSignalDefinition,
-  type WorkflowSignalReference, type WorkflowStep, type WorkflowSubscription, type WorkflowValueType,
+  type WorkflowSignalReference, type WorkflowStep, type WorkflowSubscription,
 } from './types.js';
-
-const NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u;
-const VALUE_TYPES: readonly WorkflowValueType[] = ['string', 'number', 'boolean', 'json'];
 
 export function readWorkflowDefinition(root: WorkflowField): WorkflowDefinition | null {
   if (!root.map(['version', 'name', 'description', 'inputs', 'steps'])) return null;
@@ -65,12 +62,8 @@ export function readWorkflowStep(field: WorkflowField): WorkflowStep | null {
     ...(bindings === undefined ? {} : { bindings }), ...(signals === undefined ? {} : { signals }) } : null;
 }
 
-function isName(value: string): boolean {
-  return NAME.test(value);
-}
-
 function readName(field: WorkflowField): string | undefined {
-  if (typeof field.value === 'string' && isName(field.value)) return field.value;
+  if (typeof field.value === 'string' && isWorkflowName(field.value)) return field.value;
   return field.expected('a name of at most 128 letters, digits, underscores, or hyphens, starting with a letter or digit');
 }
 
@@ -82,7 +75,7 @@ function readNamed<T>(field: WorkflowField, read: (entry: WorkflowField) => T | 
   const entries: [string, T][] = [];
   for (const key of keys) {
     const entry = field.at(key);
-    if (!isName(key)) {
+    if (!isWorkflowName(key)) {
       entry.keyIssue('invalid-value', 'Use a name of at most 128 letters, digits, underscores, or hyphens, starting with a letter or digit.');
       continue;
     }
@@ -100,7 +93,7 @@ function rejectReservedName(field: WorkflowField, names: object | undefined): vo
 
 function readInput(field: WorkflowField): WorkflowInput | undefined {
   if (!field.map(['type', 'description', 'default'])) return undefined;
-  const type = field.at('type').choice(VALUE_TYPES);
+  const type = field.at('type').choice(WORKFLOW_VALUE_TYPES);
   if (!type) return undefined;
   const description = field.at('description').optional((entry) => entry.text());
   const defaultField = field.at('default');
@@ -133,11 +126,11 @@ function readSignal(field: WorkflowField): WorkflowSignalDefinition | undefined 
     }
     return { payload, delivery };
   }
-  const fields = fieldsField.optional((entry) => readNamed(entry, (item) => item.choice(VALUE_TYPES), 1));
+  const fields = fieldsField.optional((entry) => readNamed(entry, (item) => item.choice(WORKFLOW_VALUE_TYPES), 1));
   if (delivery === 'once') return { payload, delivery, ...(fields === undefined ? {} : { fields }) };
 
   const key = keyField.value;
-  if (typeof key !== 'string' || !isName(key) || !fields || !Object.hasOwn(fields, key) || fields[key] !== 'string') {
+  if (typeof key !== 'string' || !isWorkflowName(key) || !fields || !Object.hasOwn(fields, key) || fields[key] !== 'string') {
     keyField.issue('invalid-repeat-key', 'Set key to the name of a declared string field, e.g. key: finding_id.');
     return undefined;
   }
@@ -146,7 +139,7 @@ function readSignal(field: WorkflowField): WorkflowSignalDefinition | undefined 
 
 function readSignalReference(field: WorkflowField): WorkflowSignalReference | undefined {
   const parts = typeof field.value === 'string' ? field.value.split('.') : [];
-  if (parts.length !== 2 || !parts.every(isName)) return field.expected('a step.signal reference, e.g. research.finding_ready');
+  if (parts.length !== 2 || !parts.every(isWorkflowName)) return field.expected('a step.signal reference, e.g. research.finding_ready');
   return { stepId: parts[0], signal: parts[1] };
 }
 
@@ -191,7 +184,7 @@ function readBindings(field: WorkflowField): Record<string, WorkflowBinding> | u
     if (typeof entry.value === 'string') {
       const parts = entry.value.split('.');
       const [source, name] = parts;
-      if (parts.length === 2 && isName(name)) {
+      if (parts.length === 2 && isWorkflowName(name)) {
         if (source === 'inputs') return { kind: 'input', input: name };
         if (source === 'signal') return { kind: 'signal', field: name };
         if (source === 'all') return { kind: 'all', stepId: name };

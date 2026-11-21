@@ -13,7 +13,12 @@ export const WORKFLOW_DEFINITION_LIMITS = {
   repeatConcurrency: 4,
 } as const;
 
-export type WorkflowValueType = 'string' | 'number' | 'boolean' | 'json';
+export const WORKFLOW_VALUE_TYPES = ['string', 'number', 'boolean', 'json'] as const;
+export type WorkflowValueType = typeof WORKFLOW_VALUE_TYPES[number];
+
+export function isWorkflowName(value: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(value);
+}
 
 export type WorkflowInput = { readonly description?: string } & (
   | { readonly type: 'string'; readonly default?: string }

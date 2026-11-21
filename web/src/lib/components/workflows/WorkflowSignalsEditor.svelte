@@ -1,12 +1,13 @@
 <script lang="ts">
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { Button } from '$lib/components/ui/button';
-	import type { WorkflowSignalDefinition, WorkflowValueType } from '$shared/workflow-definition';
-	import { createRandomId } from '$lib/utils/random-id';
 	import {
 		WORKFLOW_VALUE_TYPES,
-		isNewWorkflowField,
-	} from '$lib/workflows/definition/workflow-named-fields';
+		type WorkflowSignalDefinition,
+		type WorkflowValueType,
+	} from '$shared/workflow-definition';
+	import { createRandomId } from '$lib/utils/random-id';
+	import { isNewWorkflowField } from '$lib/workflows/definition/workflow-named-fields';
 	import * as m from '$lib/paraglide/messages.js';
 	import WorkflowNamedEntries from './WorkflowNamedEntries.svelte';
 

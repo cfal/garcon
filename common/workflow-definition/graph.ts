@@ -20,7 +20,11 @@ interface Dependency {
 }
 
 function edgeCount(steps: readonly WorkflowStep[]): number {
-  return steps.reduce((count, { on }) => count + (!on ? 0 : on.kind === 'all' ? on.steps.length + 1 : 1), 0);
+  let count = 0;
+  for (const { on } of steps) {
+    if (on) count += on.kind === 'all' ? on.steps.length + 1 : 1;
+  }
+  return count;
 }
 
 export function validateWorkflowGraph(definition: WorkflowDefinition, root: WorkflowField): void {
@@ -87,7 +91,6 @@ function validateStep(
 ): Dependency[] {
   const dependencies: Dependency[] = [];
   const on = step.on;
-  const joined = new Set<string>();
   let triggerSignal: WorkflowSignalDefinition | undefined;
   if (on) {
     const onField = field.at('on');
@@ -100,6 +103,7 @@ function validateStep(
       referenceField.issue('invalid-subscription', 'A repeated step cannot be a direct trigger. Join its instances with on.kind: all.');
     }
     if (on.kind === 'all') {
+      const joined = new Set<string>();
       if (on.close.signal !== WORKFLOW_TURN_COMPLETED) {
         referenceField.issue('invalid-subscription', 'Close the join with the producer\'s turn_completed signal.');
       }
@@ -131,31 +135,39 @@ function validateStep(
       byId.get(evidence.stepId), 'uses selected evidence from');
   }
 
-  if (step.kind !== 'command') {
-    const bindings = step.bindings ?? {};
-    for (const [name, binding] of Object.entries(bindings)) {
-      const entry = field.at('bindings').at(name);
-      if (binding.kind === 'input' && !Object.hasOwn(inputs, binding.input)) {
+  if (step.kind !== 'command') validateBindings(step, field, inputs, triggerSignal, evidence);
+  return dependencies;
+}
+
+function validateBindings(
+  step: Exclude<WorkflowStep, { kind: 'command' }>, field: WorkflowField, inputs: WorkflowDefinition['inputs'],
+  triggerSignal: WorkflowSignalDefinition | undefined, evidence: WorkflowSignalReference | undefined,
+): void {
+  const bindings = step.bindings ?? {};
+  for (const [name, binding] of Object.entries(bindings)) {
+    const entry = field.at('bindings').at(name);
+    if (binding.kind === 'input') {
+      if (!Object.hasOwn(inputs, binding.input)) {
         entry.issue('invalid-binding', `Declare the input ${JSON.stringify(binding.input)} or bind to an existing input.`);
-      } else if (binding.kind === 'all' && !joined.has(binding.stepId)) {
+      }
+    } else if (binding.kind === 'all') {
+      if (step.on?.kind !== 'all' || !step.on.steps.includes(binding.stepId)) {
         entry.issue('invalid-binding', 'Use all.<step> only for a repeat group listed in this step\'s on.steps join.');
-      } else if (binding.kind === 'signal') {
-        if (!on && !evidence) entry.issue('invalid-binding', 'Signal bindings require a subscription or a selected stored signal.');
-        else if (triggerSignal?.payload === 'none') {
-          entry.issue('invalid-binding', 'This signal carries no payload. Remove the binding or subscribe to a signal with data.');
-        } else if (triggerSignal && binding.field !== undefined
-          && (triggerSignal.payload !== 'json' || !triggerSignal.fields || !Object.hasOwn(triggerSignal.fields, binding.field))) {
-          entry.issue('invalid-binding', `Use the whole signal or declare the JSON field ${JSON.stringify(binding.field)} on the emitting signal.`);
-        }
       }
-    }
-    for (const name of workflowPromptBindingNames(step.prompt)) {
-      if (!Object.hasOwn(bindings, name)) {
-        field.at('prompt').issue('invalid-binding', `Add a binding for {{${name}}} or remove the placeholder from the prompt.`);
-      }
+    } else if (!step.on && !evidence) {
+      entry.issue('invalid-binding', 'Signal bindings require a subscription or a selected stored signal.');
+    } else if (triggerSignal?.payload === 'none') {
+      entry.issue('invalid-binding', 'This signal carries no payload. Remove the binding or subscribe to a signal with data.');
+    } else if (triggerSignal && binding.field !== undefined
+      && (triggerSignal.payload !== 'json' || !triggerSignal.fields || !Object.hasOwn(triggerSignal.fields, binding.field))) {
+      entry.issue('invalid-binding', `Use the whole signal or declare the JSON field ${JSON.stringify(binding.field)} on the emitting signal.`);
     }
   }
-  return dependencies;
+  for (const name of workflowPromptBindingNames(step.prompt)) {
+    if (!Object.hasOwn(bindings, name)) {
+      field.at('prompt').issue('invalid-binding', `Add a binding for {{${name}}} or remove the placeholder from the prompt.`);
+    }
+  }
 }
 
 function resolveSignal(

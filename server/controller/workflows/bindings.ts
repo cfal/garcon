@@ -1,4 +1,5 @@
 import { isRecord, type JsonObject, type JsonValue } from '../../../common/json.js';
+import { replaceWorkflowPlaceholders } from '../../../common/workflow-definition/prompt.js';
 import {
   WORKFLOW_TURN_COMPLETED, type WorkflowAgentStep, type WorkflowDefinition, type WorkflowSignalDefinition, type WorkflowStep, type WorkflowValueType,
 } from '../../../common/workflow-definition.js';
@@ -119,10 +120,15 @@ export function bindPrompt(
   const bindings: [string, JsonValue][] = [];
   const replacements = new Map<string, { text: string; bytes: number }>();
   for (const [name, binding] of Object.entries(step.bindings ?? {})) {
-    const value = binding.kind === 'input' ? inputs[binding.input]
-      : binding.kind === 'all' ? all(binding.stepId)
-      : binding.field === undefined ? signal
-      : isRecord(signal) && Object.hasOwn(signal, binding.field) ? signal[binding.field] : undefined;
+    let value: JsonValue | undefined;
+    switch (binding.kind) {
+      case 'input': value = inputs[binding.input]; break;
+      case 'all': value = all(binding.stepId); break;
+      case 'signal':
+        if (binding.field === undefined) value = signal;
+        else if (isRecord(signal) && Object.hasOwn(signal, binding.field)) value = signal[binding.field];
+        break;
+    }
     if (value === undefined) throw new WorkflowBindingError(`Binding "${name}" requires a complete signal payload.`);
     const text = JSON.stringify(value);
     bindingBytes += Buffer.byteLength(text) + Buffer.byteLength(name) + 4;
@@ -132,7 +138,7 @@ export function bindPrompt(
     bindings.push([name, value]);
   }
   let promptBytes = Buffer.byteLength(step.prompt);
-  const authored = step.prompt.replace(/\{\{[ \t]*([A-Za-z0-9][A-Za-z0-9_-]{0,127})[ \t]*\}\}/gu, (matched, name: string) => {
+  const authored = replaceWorkflowPlaceholders(step.prompt, (matched, name) => {
     const replacement = replacements.get(name);
     if (!replacement) throw new WorkflowBindingError(`Missing binding "${name}".`);
     promptBytes += replacement.bytes - Buffer.byteLength(matched);

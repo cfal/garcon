@@ -11,7 +11,7 @@ import {
 
 export { getWorkflowStepSignal } from './workflow-definition/graph.js';
 export { renderWorkflowPrompt } from './workflow-definition/prompt.js';
-export { WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED } from './workflow-definition/types.js';
+export { isWorkflowName, WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED, WORKFLOW_VALUE_TYPES } from './workflow-definition/types.js';
 export type {
   WorkflowAgentStep,
   WorkflowAttachment,
