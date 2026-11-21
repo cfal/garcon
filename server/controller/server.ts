@@ -112,6 +112,8 @@ import { createCarriedContext } from './chats/carryover/context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { initializePullRequestReviews } from './pull-request-reviews/setup.js';
+import { initializeWorkflows } from './workflows/setup.js';
+import { createWorkflowRunner } from './workflows/automation-runner.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
 import {
   TranscriptAdoptionService,
@@ -338,7 +340,7 @@ export async function startServer(): Promise<void> {
     if (workspaceMigrations.initialVersion >= 5 && !workspaceMigrations.resumedFromCheckpoint) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
-    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);
+    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, workflows, settings]);
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
     executors.onAvailabilityChanged((executorId) => modelCatalogResponseCache.clear(executorId));
     executors.onChanged(() => {
@@ -635,6 +637,27 @@ export async function startServer(): Promise<void> {
       chatTags: chatBoardRuntime.chatTags,
       chatMutationLock,
     });
+    const automation = chatCommands.createAutomation({ serverInstanceId: runtimeState.identity.instanceId, chatIds, execution: queue });
+    const workflows = initializeWorkflows(workspaceDir, {
+      runner: createWorkflowRunner(automation, id => executors.requireExecutor(id).getFilesService()),
+      retainExecutorReferences, retainProviderReferences,
+    }, {
+      ready: id => executors.isReady(id),
+      catalog: async id => (await modelCatalogResponseCache.getSnapshot({ agents: agentRegistry, apiProviders }, id)).body,
+      recents: () => settings.getRecentAgentSettings(),
+      defaults: () => settings.getExecutionDefaults(),
+      preambles: () => preambles.snapshot(),
+      providerRoute: (id, provider, endpoint) => {
+        const route = access.require(id, provider, endpoint);
+        return { revision: route.apiProvider.revision, protocol: route.endpoint.protocol };
+      },
+    });
+    chatRegistry.onChatRemoved((id, reason) => {
+      if (reason === 'user-deletion') workflows.handleChatRemoved(id);
+    });
+    const stopWorkflowAvailability = executors.onAvailabilityChanged((id, availability) => {
+      if (availability === 'ready') workflows.wakeExecutor(id);
+    });
     const scheduledPromptStore = new ScheduledPromptStore(workspaceDir, retainExecutorReferences, retainProviderReferences);
     const scheduledPrompts = new ScheduledPromptScheduler({
       inspectProject,
@@ -733,6 +756,8 @@ export async function startServer(): Promise<void> {
       startDispatchers: async () => {
         await scheduledPrompts.start();
         pullRequestReviews.start();
+        await workflows.start();
+        for (const { id } of executors.list()) if (executors.isReady(id)) workflows.wakeExecutor(id);
       },
     });
     unsubscribeSearchStatus = chatSearch.onStatusChanged((status) => {
@@ -740,7 +765,7 @@ export async function startServer(): Promise<void> {
     });
 
     executors.setGuards(executorConfigGuards({
-      chats: chatRegistry, execution: queue, ownership: agentOwnership,
+      chats: chatRegistry, execution: queue, ownership: agentOwnership, workflows,
     }));
     let configuredExecutors = new Set(executors.config.list().map((executor) => executor.id));
     executors.onChanged(() => {
@@ -780,6 +805,7 @@ export async function startServer(): Promise<void> {
       lastSelectedChat,
       scheduledPrompts,
       pullRequestReviews,
+      workflows,
       snippets,
       preambles,
       chatPreambleSelection,
@@ -899,6 +925,9 @@ export async function startServer(): Promise<void> {
         () => agentCommands.shutdown(),
         () => carryOverGarbageCollector.shutdown(),
         () => { metadataClosed = metadata.close().catch(reportCleanupError); },
+        stopWorkflowAvailability,
+        () => workflows.stop(),
+        () => automation.beginShutdown(),
         () => { reservedChatIds = queue.beginShutdown(); },
         () => executors.quiesce(),
         stopObservingProviders,
@@ -959,6 +988,7 @@ export async function startServer(): Promise<void> {
           () => server.stop(true),
           () => tickets.close(),
           () => pullRequestReviews.close(),
+          () => workflows.close(),
           () => removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId),
           () => workspaceLease?.release(),
         ]);

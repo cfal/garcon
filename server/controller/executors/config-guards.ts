@@ -8,6 +8,7 @@ export function executorConfigGuards(deps: {
   chats: Pick<IChatRegistry, 'listAllChats'>;
   execution: Pick<ChatExecutionCoordinator, 'ownsExecution'>;
   ownership: Pick<AgentOwnershipJournal, 'blocksExecutorRemoval'>;
+  workflows: { referencesExecutor(id: string): boolean };
 }) {
   return {
     assertIdle(executorId: string): void {
@@ -16,6 +17,9 @@ export function executorConfigGuards(deps: {
       }
     },
     assertRemovable(executorId: string): void {
+      if (deps.workflows.referencesExecutor(executorId)) {
+        throw new DomainError('EXECUTOR_IN_USE', 'A workflow may still dispatch work on this executor.', 409);
+      }
       if (deps.ownership.blocksExecutorRemoval(executorId)) {
         throw new DomainError('EXECUTOR_IN_USE', 'An ownership change or chat deletion is pending on this executor. Try deleting it after that operation finishes.', 409, true);
       }

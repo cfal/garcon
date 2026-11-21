@@ -221,6 +221,7 @@ export const ERROR_CODES = [
   'WORKFLOW_FORBIDDEN',
   'WORKFLOW_LIMIT',
   'WORKFLOW_NOT_FOUND',
+  'WORKFLOW_STORAGE_UNAVAILABLE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

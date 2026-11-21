@@ -9,7 +9,7 @@ import { WORKFLOW_SCHEMA, WORKFLOW_SCHEMA_VERSION } from './schema.js';
 const logger = createLogger('workflow-store');
 
 function unavailable(): DomainError {
-  return new DomainError('INTERNAL_ERROR', 'Workflow storage is unavailable.', 503);
+  return new DomainError('WORKFLOW_STORAGE_UNAVAILABLE', 'Workflow storage is unavailable.', 503);
 }
 
 export class WorkflowStore {

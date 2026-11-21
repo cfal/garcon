@@ -1,6 +1,6 @@
 import { workflowPaths } from '$shared/workflow-http';
 import type {
-	WorkflowActiveChat, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowDecisionRequest,
+	WorkflowActiveChat, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowArchiveRequest, WorkflowDecisionRequest,
 	WorkflowDefinitionSummary, WorkflowPage, WorkflowPageRequest, WorkflowPublishRequest, WorkflowRetryRequest,
 	WorkflowRevision, WorkflowRunDetail, WorkflowRunSummary, WorkflowStartRequest, WorkflowTestRequest,
 } from '$shared/workflow-runs';
@@ -59,3 +59,4 @@ export const decideWorkflow = (request: WorkflowDecisionRequest) => mutation<Wor
 export const addWorkflowItem = (request: WorkflowAddItemRequest) => mutation<WorkflowRunDetail>(workflowPaths.addItem, request);
 export const addWorkflowStep = (request: WorkflowAddStepRequest) => mutation<WorkflowRunDetail>(workflowPaths.addStep, request);
 export const retryWorkflowStep = (request: WorkflowRetryRequest) => mutation<WorkflowRunDetail>(workflowPaths.retry, request);
+export const archiveWorkflowRun = (request: WorkflowArchiveRequest) => mutation<WorkflowRunDetail>(workflowPaths.archive, request);
