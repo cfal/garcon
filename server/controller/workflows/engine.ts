@@ -34,6 +34,7 @@ import type { WorkflowStore } from './store.js';
 
 const logger = createLogger('workflow-engine');
 const UNKNOWN_OUTCOME = 'The exact turn outcome could not be confirmed.';
+const REMOVED_CHAT_OUTCOME = 'The attempt chat was removed before its exact turn settled.';
 const RECOVERY_BATCH = 32;
 
 export type WorkflowSettingsResolver = (step: WorkflowAgentStep, location: WorkflowLocation) => WorkflowAgentSettings;
@@ -111,6 +112,7 @@ export class WorkflowEngine {
     this.#stopped = true;
     this.#ready = false;
     if (this.#scheduled) clearImmediate(this.#scheduled);
+    this.#scheduled = null;
     for (const attempt of this.#running.values()) attempt.abort();
   }
 
@@ -366,11 +368,12 @@ export class WorkflowEngine {
       if (!attempt) return null;
       db.query('UPDATE workflow_attempts SET chat_removed = 1 WHERE id = ?').run(attempt.id);
       const live = currentAttempt(db, attempt.id);
-      const now = this.#now();
       if (live) {
-        finishAttempt(db, live, 'unknown', 'The attempt chat was removed before its exact turn settled.', now);
-        new WorkflowGraph(db, live.run_id, now).reconcile();
-      } else db.query('UPDATE workflow_runs SET updated_at = ? WHERE id = ?').run(now, attempt.run_id);
+        // Holds the execution slot until the runner settles; removing a chat is not confirmation of termination.
+        db.query('UPDATE workflow_instances SET reason = ? WHERE id = ?')
+          .run('Attempt chat removed; waiting for the exact turn to settle.', live.instance_id);
+      }
+      db.query('UPDATE workflow_runs SET updated_at = ? WHERE id = ?').run(this.#now(), attempt.run_id);
       return attempt;
     });
     if (!removed) return;
@@ -490,7 +493,7 @@ export class WorkflowEngine {
     if (this.#stopped) throw workflowConflict('Workflow admissions have stopped.');
     const runId = this.#store.write(db => {
       const row = currentAttempt(db, attemptId);
-      if (!row) throw workflowConflict('This attempt is no longer live.');
+      if (!row || row.chat_removed) throw workflowConflict('This attempt is no longer live.');
       if (row.chat_id === chatId && row.turn_id === turnId) return row.run_id;
       if (row.chat_id !== null || db.query('SELECT 1 FROM workflow_attempts WHERE chat_id = ?').get(chatId)) {
         throw workflowConflict('Every attempt requires a fresh chat and exactly one turn.');
@@ -532,11 +535,16 @@ export class WorkflowEngine {
       if (!live) return null;
       const now = this.#now();
       const graph = new WorkflowGraph(db, live.run_id, now);
-      if (result.kind === 'succeeded' && live.chat_id && live.turn_id && !live.chat_removed) {
+      if (live.chat_removed) {
+        finishAttempt(db, live, 'unknown', REMOVED_CHAT_OUTCOME, now);
+      } else if (result.kind === 'succeeded' && live.chat_id && live.turn_id) {
         let output: string | null = null;
         let reason = result.output?.kind === 'incomplete' ? 'Final output was not captured completely.' : null;
         if (result.output?.kind === 'complete') {
-          try { output = workflowJson(result.output.text, 'Final output'); }
+          try {
+            if (typeof result.output.text !== 'string') throw workflowInvalid('Final output was not text.');
+            output = workflowJson(result.output.text, 'Final output');
+          }
           catch (error) {
             if (!(error instanceof DomainError)) throw error;
             reason = error.message;

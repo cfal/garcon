@@ -73,7 +73,10 @@ export function workflowJson(value: unknown, subject: string): string {
       throw workflowLimit(`${subject} exceeds the JSON size limit.`);
     }
     if (item === null || typeof item === 'boolean' || typeof item === 'number' && Number.isFinite(item)) return;
-    if (typeof item === 'string') { bytes += Buffer.byteLength(item); return; }
+    if (typeof item === 'string') {
+      bytes += item.length > WORKFLOW_LIMITS.valueBytes ? item.length : Buffer.byteLength(item);
+      return;
+    }
     if (Array.isArray(item)) {
       for (const element of item) visit(element, depth + 1);
       return;

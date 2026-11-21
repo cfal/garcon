@@ -109,6 +109,9 @@ steps:
   expect(() => service.startRun({ definitionId: 'research', inputs: { title: 'test', unknown: true } })).toThrow('Unknown workflow input');
   expect(() => service.startRun({ definitionId: 'research', inputs: { title: 1 } })).toThrow('requires a string');
   expect(() => service.startRun({ definitionId: 'research', inputs: { title: 'test', count: Infinity } })).toThrow('valid JSON');
+  let nested: unknown = null;
+  for (let level = 0; level < 33; level++) nested = [nested];
+  expect(() => service.startRun({ definitionId: 'research', inputs: { title: 'test', extra: nested } })).toThrow('JSON size limit');
   expect(() => service.startRun({
     definitionId: 'research', inputs: { title: 'test' }, executionContext: { defaultTarget: { executorId: 'bogus', projectPath: '/test' } },
   })).toThrow('valid executor id');
@@ -159,6 +162,7 @@ test('schedules keyed signals early, respects running limits, includes queued ma
   expect(service.addItem(add, ACTOR).id).toBe(manual.id);
   expect(manual.source).toEqual({ kind: 'manual', actor: ACTOR, operationId: 'manual-1' });
   expect(() => service.addItem({ ...add, key: 'changed' }, ACTOR)).toThrow('different request');
+  expect(() => research.callbacks.emit(finding('manual'))).toThrow('already has a manual item');
   expect(step(service, id, 'verify').instances.map(instance => instance.status)).toEqual(['running', 'ready', 'ready']);
   expect(service.listActiveChats().items).toEqual(expect.arrayContaining([
     expect.objectContaining({ chatId: research.chatId, runId: id, runName: 'Verify synthetic research', runStatus: 'running' }),
@@ -218,13 +222,80 @@ test('closes an empty join on success, not on partial data, and runs independent
   const summary = await runner.next('summary');
   const command = await runner.next('completion_only');
   expect(command.request).toMatchObject({ kind: 'command', command: 'printf "{{literal}}"' });
+  expect(() => command.callbacks.emit({ signal: 'report_ready', payload: 'not an authorized emit' })).toThrow('does not declare');
   expect(summary.request).toMatchObject({ prompt: expect.stringContaining('responses without using tools: []') });
   const completion = service.getRun(id).signals.find(signal => signal.ref.stepId === 'research' && signal.ref.signal === 'turn_completed')!;
   expect(completion).not.toHaveProperty('payload');
   expect(step(service, id, 'needs_text').instances[0]).toMatchObject({ status: 'blocked', reason: expect.stringContaining('complete signal payload') });
+  expect(() => service.addStep({ runId: id, operationId: 'select-gap', evidenceSignalId: completion.id,
+    source: 'id: rejected\nkind: decision\nprompt: "{{response}}"\nbindings: {response: signal}\nchoices: {done: Done}\n',
+  }, ACTOR)).toThrow('complete signal payload');
+  expect(service.getRun(id).amendments).toEqual([]);
   command.finish({ kind: 'succeeded' });
   summary.finish(success('No findings.'));
   await until(() => service.getRun(id).status === 'attention');
+});
+
+test('requires every sealed item to succeed and blocks a join binding on incomplete verifier output', async () => {
+  const { service, runner } = workspace()();
+  publish(service);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'toy geometry' }, executionContext: LOCAL });
+  const research = await runner.next('research');
+  research.callbacks.emit(finding('F1'));
+  const verifier = await runner.next('verify');
+  verifier.finish({ kind: 'failed', reason: 'Definite verification failure' });
+  research.finish(success('closed'));
+  await until(() => service.getRun(id).status === 'attention');
+  expect(step(service, id, 'verify').intake).toBe('closed');
+  expect(step(service, id, 'summary')).toMatchObject({ instances: [], waitingReason: expect.stringContaining('need attention') });
+  service.retry({ runId: id, instanceId: verifier.request.instanceId, operationId: 'known-retry' }, ACTOR);
+  const retried = await runner.next('verify', 1);
+  retried.finish({ kind: 'succeeded', output: { kind: 'incomplete' } });
+  await until(() => step(service, id, 'summary').instances[0]?.status === 'blocked');
+  expect(step(service, id, 'summary').instances[0]?.reason).toContain('without complete final output');
+  expect(runner.attempts.map(attempt => attempt.request.stepId)).toEqual(['research', 'verify', 'verify']);
+});
+
+test('rejects an over-limit emission without adding a signal or partially admitting its fan-out', async () => {
+  const { service, runner } = workspace()(new ControlledRunner(), { maxConcurrent: 1 });
+  publish(service, RESEARCH + `
+  - id: repeat
+    kind: decision
+    on: { kind: each, signal: research.finding_ready }
+    prompt: Inspect finding.
+    choices: { done: Done }
+`);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'toy geometry' }, executionContext: LOCAL });
+  const research = await runner.next('research');
+  service.addItem({ runId: id, stepId: 'verify', key: 'manual', payload: finding('manual').payload, operationId: 'manual-1' }, ACTOR);
+  const accepted = WORKFLOW_LIMITS.repeatInstances / 2 - 1;
+  for (let item = 0; item < accepted; item++) research.callbacks.emit(finding(`F${item}`));
+  expect(() => research.callbacks.emit(finding('does-not-fit'))).toThrow('repeat item limit');
+  const run = service.getRun(id);
+  expect(run.signals).toHaveLength(accepted + 1);
+  expect(run.steps.find(step => step.step.id === 'verify')?.instances).toHaveLength(accepted + 1);
+  expect(run.steps.find(step => step.step.id === 'repeat')?.instances).toHaveLength(accepted);
+});
+
+test('retains the execution slot of a removed chat until the exact runner settles', async () => {
+  const { service, runner } = workspace()();
+  publish(service, RESEARCH.replace('maxConcurrency: 2', 'maxConcurrency: 1'));
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'toy geometry' }, executionContext: LOCAL });
+  const research = await runner.next('research');
+  research.callbacks.emit(finding('F1'));
+  research.callbacks.emit(finding('F2'));
+  const first = await runner.next('verify');
+  service.handleChatRemoved(first.chatId);
+  await drain();
+  expect(runner.attempts.filter(attempt => attempt.request.stepId === 'verify')).toHaveLength(1);
+  first.finish(success('late result'));
+  await runner.next('verify', 1);
+  const instance = step(service, id, 'verify').instances[0]!;
+  expect(instance.status).toBe('unknown');
+  expect(service.getRun(id).signals.some(signal => signal.instanceId === instance.id)).toBe(false);
 });
 
 test('retries only a known failure with a fresh chat and retains its prior signal identities', async () => {
@@ -327,9 +398,10 @@ test('rolls back both signal and eligible instance when the write does not commi
 
 test('snapshots and protects executor/provider references, waits for exact executor readiness, and fences a deleted chat', async () => {
   let model = 'initial';
+  let defaultResolutions = 0;
   const guarded: string[][] = [];
   const { service, runner } = workspace()(new ControlledRunner(false), {
-    snapshotAgentSettings: () => ({ model, apiProviderId: 'synthetic-provider', providerRevision: 7 }),
+    snapshotAgentSettings: () => { defaultResolutions++; return {}; },
     retainExecutorReferences: ids => { guarded.push(ids.flatMap(id => id ? [id] : [])); return () => {}; },
     retainProviderReferences: ids => { guarded.push(ids.flatMap(id => id ? [id] : [])); return () => {}; },
   });
@@ -348,7 +420,8 @@ steps:
   expect(service.referencesExecutor(REMOTE)).toBe(false);
   expect(() => service.startRun({ definitionId: 'research', inputs: {}, executionContext: LOCAL })).toThrow('requires a folder');
   const { id } = service.startRun({ definitionId: 'research', inputs: {},
-    executionContext: { ...LOCAL, projectPaths: { [REMOTE]: '/synthetic/remote' } } });
+    executionContext: { ...LOCAL, projectPaths: { [REMOTE]: '/synthetic/remote' } } },
+  () => ({ model, apiProviderId: 'synthetic-provider', providerRevision: 7 }));
   model = 'changed';
   expect(guarded).toEqual([[REMOTE, 'local'], ['synthetic-provider']]);
   expect(service.referencesExecutor(REMOTE)).toBe(true);
@@ -367,6 +440,8 @@ steps:
   expect(runner.attempts.filter(attempt => attempt.request.stepId === 'remote')).toHaveLength(1);
   service.wakeExecutor(REMOTE);
   const recovered = await runner.next('remote', 1);
+  expect(defaultResolutions).toBe(0);
+  expect(recovered.request).toMatchObject({ settings: { model: 'initial' } });
   recovered.callbacks.attachChat(recovered.chatId, recovered.turnId);
   service.handleChatRemoved(recovered.chatId);
   expect(recovered.callbacks.signal.aborted).toBe(true);

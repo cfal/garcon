@@ -142,6 +142,12 @@ export class WorkflowGraph {
 
   #deliver(signal: SignalRow): void {
     const ref = { stepId: signal.step_id, signal: signal.signal };
+    if (signal.key) {
+      const groups = [...this.#steps.values()].filter(state => state.step.on?.kind === 'each' && sameSignal(state.step.on.signal, ref));
+      if (groups.length && groups.every(group => group.intake !== 'open')) {
+        throw workflowConflict('All repeat groups for this signal are closed to new items.');
+      }
+    }
     for (const state of this.#steps.values()) {
       if (state.intake !== 'open') continue;
       const on = state.step.on;
@@ -220,14 +226,20 @@ export class WorkflowGraph {
   }
 
   #collectAll(stepId: string, close: number): JsonValue {
-    const rows = this.db.query<{ payload_json: string | null }, [string, string, string, number]>(`
-      SELECT s.payload_json FROM workflow_instances i LEFT JOIN workflow_signals s ON s.instance_id = i.id AND s.signal = ?
-      WHERE i.run_id = ? AND i.step_id = ? AND i.trigger_sequence <= ? ORDER BY i.trigger_sequence
-    `).all(WORKFLOW_TURN_COMPLETED, this.runId, stepId, close);
-    return rows.map(row => {
-      if (row.payload_json === null) throw new WorkflowBindingError(`Step "${stepId}" has an item without complete final output.`);
-      return JSON.parse(row.payload_json) as JsonValue;
-    });
+    const members = `FROM workflow_instances i LEFT JOIN workflow_signals s ON s.instance_id = i.id AND s.signal = ?
+      WHERE i.run_id = ? AND i.step_id = ? AND i.trigger_sequence <= ?`;
+    const args = [WORKFLOW_TURN_COMPLETED, this.runId, stepId, close] as const;
+    const totals = this.db.query<{ items: number; complete: number; bytes: number }, [string, string, string, number]>(`
+      SELECT count(*) AS items, count(s.payload_json) AS complete,
+        coalesce(sum(length(CAST(s.payload_json AS BLOB))), 0) AS bytes ${members}
+    `).get(...args)!;
+    if (totals.items !== totals.complete) throw new WorkflowBindingError(`Step "${stepId}" has an item without complete final output.`);
+    if (totals.bytes + totals.items + 1 > WORKFLOW_LIMITS.promptBytes) {
+      throw new WorkflowBindingError(`Step "${stepId}" final outputs exceed the binding size limit.`);
+    }
+    return this.db.query<{ payload_json: string }, [string, string, string, number]>(
+      `SELECT s.payload_json ${members} ORDER BY i.trigger_sequence`,
+    ).all(...args).map(row => JSON.parse(row.payload_json) as JsonValue);
   }
 
   #availability(ref: WorkflowSignalReference): 'pending' | 'attention' | 'absent' | 'unselected' {
@@ -281,7 +293,7 @@ export class WorkflowGraph {
       'SELECT step_id, status, count(*) AS total FROM workflow_instances WHERE run_id = ? GROUP BY step_id, status',
     ).all(this.runId);
     for (const item of counts) this.#steps.get(item.step_id)!.counts[item.status] = item.total;
-    // A skipped producer can make another listener unreachable. Each pass closes or readies at least one such step.
+    // Closing or skipping a producer can make another listener unreachable, regardless of authored order.
     for (let pass = 0; pass <= this.#steps.size; pass++) {
       let changed = false;
       for (const state of this.#steps.values()) changed = this.#reconcileStep(state) || changed;

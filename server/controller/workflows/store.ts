@@ -48,6 +48,7 @@ export class WorkflowStore {
   write<T>(operation: (database: Database) => T): T {
     return this.read(db => db.transaction(() => {
       const value = operation(db);
+      if (value instanceof Promise) throw new Error('Workflow writes must be synchronous.');
       this.beforeCommit?.();
       return value;
     }).immediate());

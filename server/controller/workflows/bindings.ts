@@ -92,30 +92,30 @@ export function bindPrompt(
   signal: JsonValue | undefined,
   all: (stepId: string) => JsonValue,
 ): { prompt: string; bindingsJson: string; bytes: number } {
-  const bindings = Object.fromEntries(Object.entries(step.bindings ?? {}).map(([name, binding]) => {
-    if (binding.kind === 'input') return [name, inputs[binding.input]];
-    if (binding.kind === 'all') return [name, all(binding.stepId)];
-    const value = binding.field === undefined
-      ? signal
+  let bindingBytes = 2;
+  const bindings: [string, JsonValue][] = [];
+  const replacements = new Map<string, { text: string; bytes: number }>();
+  for (const [name, binding] of Object.entries(step.bindings ?? {})) {
+    const value = binding.kind === 'input' ? inputs[binding.input]
+      : binding.kind === 'all' ? all(binding.stepId)
+      : binding.field === undefined ? signal
       : isRecord(signal) && Object.hasOwn(signal, binding.field) ? signal[binding.field] : undefined;
     if (value === undefined) throw new WorkflowBindingError(`Binding "${name}" requires a complete signal payload.`);
-    return [name, value];
-  }));
-  let bindingBytes = 2;
-  const serialized = Object.fromEntries(Object.entries(bindings).map(([name, value]) => {
     const text = JSON.stringify(value);
     bindingBytes += Buffer.byteLength(text) + Buffer.byteLength(name) + 4;
     if (bindingBytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Bindings exceed the size limit.');
-    return [name, { text, plain: typeof value === 'string' ? value : text }];
-  }));
+    const replacement = typeof value === 'string' ? value : text;
+    replacements.set(name, { text: replacement, bytes: Buffer.byteLength(replacement) });
+    bindings.push([name, value]);
+  }
   let promptBytes = Buffer.byteLength(step.prompt);
   const prompt = step.prompt.replace(/\{\{[ \t]*([A-Za-z0-9][A-Za-z0-9_-]{0,127})[ \t]*\}\}/gu, (matched, name: string) => {
-    if (!Object.hasOwn(serialized, name)) throw new WorkflowBindingError(`Missing binding "${name}".`);
-    const value = serialized[name]!.plain;
-    promptBytes += Buffer.byteLength(value) - Buffer.byteLength(matched);
+    const replacement = replacements.get(name);
+    if (!replacement) throw new WorkflowBindingError(`Missing binding "${name}".`);
+    promptBytes += replacement.bytes - Buffer.byteLength(matched);
     if (promptBytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Rendered prompt exceeds the size limit.');
-    return value;
+    return replacement.text;
   });
-  const bindingsJson = JSON.stringify(bindings);
+  const bindingsJson = JSON.stringify(Object.fromEntries(bindings));
   return { prompt, bindingsJson, bytes: promptBytes + Buffer.byteLength(bindingsJson) };
 }
