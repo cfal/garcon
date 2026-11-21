@@ -1,11 +1,9 @@
 import { UnknownToolUseMessage } from '@garcon/common/chat-types';
 import { normalizeToolInput } from '../shared/normalize-util.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import type { AcpJsonRpcId } from './protocol.js';
 import { asString } from './event-converter.js';
 import type { AcpAbortStrategy, AcpAgentPolicy } from './policy.js';
 import type { AcpResumeRequest, AcpStartRequest } from './runtime-types.js';
-
 
 export function buildPromptFallback(
   request: AcpStartRequest | AcpResumeRequest,
@@ -29,7 +27,6 @@ export function isAutoApproveMode(mode: PermissionMode, policy: AcpAgentPolicy):
 // one-time option so no persistent grant is written, and takes a persistent one
 // only when the agent offers nothing else, since bypass means the tool runs.
 export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'auto-approve' | 'reject';
-
 
 function optionIdFrom(option: Record<string, unknown>): string | undefined {
   return asString(option.optionId ?? option.option_id ?? option.id);

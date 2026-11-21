@@ -408,6 +408,32 @@ describe('AntigravityAcpEventConverter', () => {
     }), context)).toEqual([]);
   });
 
+  it('publishes a waiting row before output that follows it', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'first', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+    }), context);
+    const rows = converter.fromSessionUpdate(toolCall('second', 'read_file', 'read', { Path: '/work/a' }), context);
+    expect(plain(rows).map((row) => row.toolId)).toEqual(['first', 'second']);
+  });
+
+  it('shows a permission request the arguments an earlier frame carried', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'rm -rf build' }), context);
+    expect(converter.permissionToolUse({ toolCallId: 'tool-1' }, context))
+      .toMatchObject({ type: 'bash-tool-use', command: 'rm -rf build' });
+  });
+
+  it('settles a cancelled call with an error result', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'sleep 9' }), context);
+    const rows = converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'cancelled' }), context);
+    expect(plain(rows)).toEqual([{ type: 'tool-result', toolId: 'tool-1', content: { status: 'cancelled' }, isError: true }]);
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

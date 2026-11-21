@@ -18,16 +18,22 @@ const inFlightModels = new Map<string, Promise<AntigravityCliResult>>();
 // process.
 export function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
   const binary = config.binary();
-  const running = inFlightModels.get(binary);
+  // Shared only by callers that would run the identical probe.
+  const env = antigravityChildEnvironment(config);
+  const key = JSON.stringify([binary, env.GEMINI_API_KEY ?? null]);
+  const running = inFlightModels.get(key);
   if (running) return running;
-  const started = spawnAntigravityModels(config, binary).finally(() => inFlightModels.delete(binary));
-  inFlightModels.set(binary, started);
+  const started = spawnAntigravityModels(binary, env).finally(() => inFlightModels.delete(key));
+  inFlightModels.set(key, started);
   return started;
 }
 
-async function spawnAntigravityModels(config: AntigravityConfig, binary: string): Promise<AntigravityCliResult> {
+async function spawnAntigravityModels(
+  binary: string,
+  env: Record<string, string | undefined>,
+): Promise<AntigravityCliResult> {
   const proc = Bun.spawn([binary, 'models'], {
-    env: antigravityChildEnvironment(config),
+    env,
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

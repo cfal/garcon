@@ -23,6 +23,9 @@ import {
 
 const WARNING_MARKER = '\n⚠ ';
 const EXECUTOR_ERROR = 'agent executor error: ';
+// Statuses that settle a call; every one but `completed` is an error.
+const TERMINAL_TOOL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
+
 // Bounds each per-session tool collection; the oldest entry is evicted first.
 const MAX_TOOL_ENTRIES_PER_SESSION = 512;
 
@@ -65,7 +68,6 @@ export function splitExecutorError(text: string): { readonly text: string; reado
   };
 }
 
-
 function toolResultText(update: Record<string, unknown>): string {
   const rawOutput = asObject(update.rawOutput);
   const output = asString(rawOutput.output);
@@ -97,9 +99,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     if (!call) return null;
     const session = this.#sessionFor(context.sessionId);
     this.#rememberCall(session, call);
-    // The request may omit the name an earlier frame of the same call carried.
+    // The request may omit the name or arguments an earlier frame of the call carried.
     const name = call.name ?? session.toolNames.get(call.toolCallId) ?? null;
-    return convertAntigravityToolUse(context.timestamp, { ...call, name });
+    const input = Object.keys(call.input).length > 0 ? call.input : session.toolInputs.get(call.toolCallId) ?? {};
+    return convertAntigravityToolUse(context.timestamp, { ...call, name, input });
   }
 
   fromSessionUpdate(
@@ -110,6 +113,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(context.sessionId);
     const updateType = asString(update.sessionUpdate);
     session.assistantText += session.failure.continueOn(updateType);
+    // New output publishes waiting rows first, so nothing moves ahead of a call
+    // that started earlier.
+    const waiting = this.#emitDeferred(session, update, updateType, context.timestamp);
+    if (waiting.length > 0) return [...waiting, ...this.fromSessionUpdate(notification, context)];
     switch (updateType) {
       // Switching between thought and message text flushes the other buffer, so
       // interleaved output keeps the order the agent produced it in.
@@ -141,14 +148,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const messages = this.#flush(session, context.timestamp);
     // A stopped turn may never send the frame a waiting row needed; the call
     // still happened, so its row is published with what is known.
-    for (const call of session.deferredCalls.values()) {
-      this.#remember(session.emittedToolIds, call.toolCallId);
-      messages.push(convertAntigravityToolUse(context.timestamp, {
-        ...call,
-        input: session.toolInputs.get(call.toolCallId) ?? call.input,
-      }));
-    }
-    session.deferredCalls.clear();
+    messages.push(...this.#emitDeferred(session, null, undefined, context.timestamp));
     const late = session.failure.take();
     if (late) messages.push(new ErrorMessage(context.timestamp, late));
     return messages;
@@ -195,7 +195,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
 
   #toolCallUpdate(session: SessionState, update: Record<string, unknown>, timestamp: string): ChatMessage[] {
     const status = asString(update.status);
-    if (status !== 'completed' && status !== 'failed') return this.#toolCall(session, update, timestamp, false);
+    if (!status || !TERMINAL_TOOL_STATUSES.has(status)) return this.#toolCall(session, update, timestamp, false);
     const toolCallId = asString(update.toolCallId);
     if (!toolCallId || session.completedToolIds.has(toolCallId)) return [];
     this.#remember(session.completedToolIds, toolCallId);
@@ -205,10 +205,35 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     session.toolNames.delete(toolCallId);
     session.toolInputs.delete(toolCallId);
     const text = antigravityToolResultText(name, toolResultText(update));
-    const failed = status === 'failed';
+    const failed = status !== 'completed';
     const content = text.trim() ? { raw: text } : failed ? { status } : {};
     messages.push(new ToolResultMessage(timestamp, toolCallId, content, failed));
     return messages;
+  }
+
+  // Publishes rows still waiting for arguments: all of them at the turn's end
+  // (`update` null), otherwise when output other than the waiting call's own
+  // frames arrives.
+  #emitDeferred(
+    session: SessionState,
+    update: Record<string, unknown> | null,
+    updateType: string | undefined,
+    timestamp: string,
+  ): ChatMessage[] {
+    if (session.deferredCalls.size === 0) return [];
+    if (update) {
+      const ownFrame = (updateType === 'tool_call' || updateType === 'tool_call_update')
+        && session.deferredCalls.has(asString(update.toolCallId) ?? '');
+      const output = ['agent_message_chunk', 'agent_message', 'agent_thought_chunk', 'tool_call'].includes(updateType ?? '');
+      if (ownFrame || !output) return [];
+    }
+    const rows: ChatMessage[] = [];
+    for (const call of session.deferredCalls.values()) {
+      this.#remember(session.emittedToolIds, call.toolCallId);
+      rows.push(convertAntigravityToolUse(timestamp, { ...call, input: session.toolInputs.get(call.toolCallId) ?? call.input }));
+    }
+    session.deferredCalls.clear();
+    return rows;
   }
 
   #remember(ids: Set<string>, toolCallId: string): void {

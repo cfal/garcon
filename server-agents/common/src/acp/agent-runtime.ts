@@ -449,6 +449,11 @@ export class AcpAgentRuntime {
 
   async #restoreSession(request: AcpResumeRequest, isCancelled: () => boolean): Promise<AcpAgentRuntimeSession> {
     const client = await this.#connectClient(request);
+    // A release during connect stops the restore before it resumes the session.
+    if (isCancelled() || this.#stopped) {
+      client.close();
+      throw new Error(`The ${this.#policy.agentId} session ${request.agentSessionId} was released while it was being restored.`);
+    }
     const capabilities = client.getAdvertisedCapabilities();
     const order = reconnectOrder(capabilities);
     const baseSession: AcpAgentRuntimeSession = {

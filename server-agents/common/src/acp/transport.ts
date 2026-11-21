@@ -35,7 +35,6 @@ export interface AcpTransportOptions {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
-
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
   const process = Bun.spawn([command, ...args], {
     cwd: options.cwd,
