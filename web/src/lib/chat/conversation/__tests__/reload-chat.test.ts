@@ -12,6 +12,7 @@ import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import { getChatMessages } from '$lib/api/chats.js';
 import { AssistantMessage } from '$shared/chat-types';
+import type { CompleteChatHistoryResponse } from '$shared/chat-view';
 import type { WsRequestProgress } from '$lib/ws/connection.svelte.js';
 import { WsRequestError } from '$lib/ws/ws-request-error.js';
 
@@ -173,6 +174,71 @@ describe('reloadChatFromNative', () => {
 		expect(chat.getCursor()).toEqual({ transcriptViewId: viewId, lastOrdinal: 1 });
 		expect(chat.optimisticUserInputs.map(input => input.clientMessageId)).toEqual(['new-input']);
 	});
+
+	it.each(['snapshot-first', 'reply-first', 'snapshot-failure'] as const)(
+		'preserves both panels and new guidance across an overlapping reload snapshot (%s)', async completion => {
+			const page: CompleteChatHistoryResponse = {
+				chatId: 'chat-1', transcriptViewId: 'generation-2', lastOrdinal: 1,
+				pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+				messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'Native history') }],
+				historyState: { kind: 'complete' }, limit: 50, resendCandidates: [],
+			};
+			vi.mocked(getChatMessages).mockResolvedValue({ ...page, transcriptViewId: 'generation-1',
+				messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'Previous history') }] });
+			const { chat, panels } = fixture();
+			await panels.loadChatSnapshot('chat-1');
+			panels.reconcile((['main', 'peer'] as const).map(id => ({ chatId: 'chat-1', surfaceId: `chat-view:window-${id}`,
+				windowId: `window-${id}`, presentation: `window-${id}`, snapshotAdmission: 'admitted' } as const)));
+			await panels.loadChatSnapshot('chat-1');
+			const response = Promise.withResolvers<Record<string, unknown>>();
+			const reloading = reloadChatFromNative(wsWithResponse(response.promise), panels, 'chat-1', options());
+			const history = Promise.withResolvers<CompleteChatHistoryResponse>();
+			vi.mocked(getChatMessages).mockClear().mockReturnValueOnce(history.promise);
+			panels.handleViewReplacement('chat-1');
+			const loading = panels.loadChatSnapshot('chat-1');
+			expect(getChatMessages).toHaveBeenCalledOnce();
+			const reply = { ...page, type: 'chat-reloaded', clientRequestId: 'req-1' };
+			if (completion === 'snapshot-first') {
+				history.resolve(page);
+				await expect(loading).resolves.toBe(true);
+			} else {
+				response.resolve(reply);
+				await expect(reloading).resolves.toBe('reloaded');
+			}
+			expect(panels.applyCommittedBatch({ chatId: 'chat-1', transcriptViewId: 'generation-2',
+				messages: [{ ordinal: 2, message: new AssistantMessage(TS, 'New live output') }],
+				firstOrdinal: 2, lastOrdinal: 2, resendCandidates: [], noticeRevision: 0,
+			}).kind).toBe('applied');
+			panels.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'new-input',
+				content: 'New guidance', createdAt: TS, delivery: 'pending', placement: 'live-tail' });
+
+			if (completion === 'snapshot-first') {
+				response.resolve(reply);
+				await expect(reloading).resolves.toBe('reloaded');
+			} else if (completion === 'snapshot-failure') {
+				history.reject(new Error('Obsolete snapshot failed'));
+				await expect(loading).rejects.toThrow('Obsolete snapshot failed');
+			} else {
+				history.resolve(page);
+				await expect(loading).resolves.toBe(false);
+			}
+			expect(panels.panelsForChat('chat-1')).toHaveLength(2);
+			for (const panel of panels.panelsForChat('chat-1')) {
+				expect(panel.transcript.getCursor()).toEqual({ transcriptViewId: 'generation-2', lastOrdinal: 2 });
+				expect(panel.transcript.chatMessages).toEqual([
+					expect.objectContaining({ content: 'Native history' }),
+					expect.objectContaining({ content: 'New live output' }),
+				]);
+				expect(panel.transcript.optimisticUserInputs.map(input => input.clientMessageId)).toEqual(['new-input']);
+				expect(panel.transcript.isLoadingMessages).toBe(false);
+				expect(panel.transcript.loadError).toBeNull();
+			}
+			expect(chat.transcriptCache.readAppliedCursor('chat-1')).toMatchObject({
+				transcriptViewId: 'generation-2', lastOrdinal: 2, stale: false,
+			});
+			expect(getChatMessages).toHaveBeenCalledOnce();
+		},
+	);
 
 	it('keeps the current transcript when replacement page metadata is malformed', async () => {
 		const ws = wsWithResponse({
