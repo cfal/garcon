@@ -36,9 +36,12 @@ export function publishRows(
   chatId: string,
   messages: ChatMessage[],
   operation: CodexOperation | undefined,
+  exactOrigin = false,
 ): void {
   if (!messages.length) return;
-  publish(logger, chatId, operation, () => ({ type: 'rows', rows: runtimeRows(messages) }));
+  publish(logger, chatId, operation, (runId) => ({
+    type: 'rows', rows: runtimeRows(messages), ...(exactOrigin ? { originRunId: runId } : {}),
+  }));
 }
 
 export function publishPermissionRequested(

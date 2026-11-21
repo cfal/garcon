@@ -168,6 +168,7 @@ class ClaudeCliRuntime {
     session: ClaudeRunningSession,
     proc: ReturnType<typeof Bun.spawn>,
     msg: ClaudeCLIMessage,
+    freshTurn?: ClaudeActiveTurn,
   ): void {
     if (this.#runningSessions.get(session.id) !== session || session.process !== proc) return;
     if (isClaudeSubagentContent(msg)) return;
@@ -214,7 +215,12 @@ class ClaudeCliRuntime {
           chatMessages.some((message) => message.type === 'assistant-message'),
         );
         if (chatMessages.length > 0) {
-          this.#turnPublisher.messages(session, turn, chatMessages);
+          // Assistant frames name a session and subagent, not the submitted input.
+          // Only the first matched input on this fresh process can prove provenance.
+          // https://github.com/anthropics/claude-agent-sdk-python/blob/a39c96edf8cc414e640620ff3360f17475db0bd9/src/claude_agent_sdk/_internal/message_parser.py#L96-L143
+          const exactOrigin = turn === freshTurn && !msg.isReplay && !msg.is_error
+            && chatMessages.filter(message => message.type === 'assistant-message').length === 1;
+          this.#turnPublisher.messages(session, turn, chatMessages, exactOrigin);
         }
         break;
       }
@@ -917,6 +923,7 @@ class ClaudeCliRuntime {
     options: ClaudeSessionOptions,
     resume: boolean,
     cliVersion: readonly [number, number, number],
+    freshTurn?: ClaudeActiveTurn,
   ): Promise<ReturnType<typeof Bun.spawn>> {
     await session.retirement;
     await this.#processRetirements.wait(session.id, session.chatId);
@@ -961,7 +968,7 @@ class ClaudeCliRuntime {
       process: proc,
       logger: this.#dependencies.logger,
       sessionId: session.id,
-      onMessage: msg => this.#routeCLIMessage(session, proc, msg),
+      onMessage: msg => this.#routeCLIMessage(session, proc, msg, freshTurn),
       onFailure: failure => this.#handleTransportFailure(session, proc, failure),
       onEof: () => this.#handleStdoutEof(session, proc),
       onExit: exit => {
@@ -1099,7 +1106,7 @@ class ClaudeCliRuntime {
     let cleanupDiskAttachments = async () => {};
     try {
       assertClaudeExecutionOpen(requestAdmission);
-      await this.#spawnCLI(session, allOpts, false, cliVersion);
+      await this.#spawnCLI(session, allOpts, false, cliVersion, request.captureLiveOrigin ? activeTurn : undefined);
       assertClaudeExecutionOpen(requestAdmission);
       const prepared = await materializeClaudeDiskAttachments(command, images);
       cleanupDiskAttachments = prepared.cleanup;

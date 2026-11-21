@@ -22,6 +22,7 @@ const integration = {
   },
   attachments: null,
   literalExecution: null,
+  liveTurnRows: null,
   readiness: null,
   execution: {
     start: async () => createAgentResourceRef(scope, 'execution'),

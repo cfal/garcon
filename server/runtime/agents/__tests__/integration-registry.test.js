@@ -67,6 +67,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     },
     auth: null,
     literalExecution: null,
+    liveTurnRows: null,
     readiness: null,
     commands: null,
     compaction: null,

@@ -20,6 +20,7 @@ export default class ShellIntegration implements AgentIntegration {
     ],
   } as const;
   readonly literalExecution = { selectionLabel: 'Mode', inputFormatByModel: SHELL_INPUT_FORMATS };
+  readonly liveTurnRows = null;
   readonly readiness;
   readonly attachments = null;
   readonly auth = null;

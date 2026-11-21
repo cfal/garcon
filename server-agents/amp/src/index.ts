@@ -45,6 +45,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   static readonly apiVersion = 5 as const;
   readonly descriptor = AMP_DESCRIPTOR;
   readonly literalExecution = null;
+  readonly liveTurnRows = null;
   readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],

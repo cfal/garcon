@@ -71,6 +71,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
   readonly descriptor = ANTIGRAVITY_DESCRIPTOR;
   readonly configurationValidation = null;
   readonly literalExecution = null;
+  readonly liveTurnRows = null;
   readonly readiness = null;
   readonly attachments = null;
   readonly execution;

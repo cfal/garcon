@@ -121,6 +121,9 @@ export class CodexAppServerRuntime {
   #latestSourceByChat = new Map<string, RunningCodexSession>();
   #terminalOperations = new WeakSet<CodexOperation>();
   #finalResponses = new WeakMap<CodexOperation, AgentFinalResponse>();
+  readonly #liveStartTurns = new WeakMap<RunningCodexSession, { readonly operation: CodexOperation; readonly turnId: string }>();
+  readonly #preparingLiveStarts = new WeakSet<RunningCodexSession>();
+  readonly #startReceiptBuffers = new WeakMap<CodexAppServerClient, { bytes: number; overflow: boolean }>();
   #steerTargets = new WeakMap<AgentSteerTarget, {
     session: RunningCodexSession;
     turnId: string;
@@ -197,10 +200,10 @@ export class CodexAppServerRuntime {
   }
 
   async #startRequestedTurn(
-    client: CodexAppServerClient,
     session: RunningCodexSession,
     request: CodexStartRequest | CodexResumeRequest,
     operation: CodexOperation,
+    captureLiveOrigin = false,
   ): Promise<void> {
     const attachments = await writeAttachmentsToTempFiles(request.images);
     session.cleanupAttachments = attachments.cleanup;
@@ -210,8 +213,7 @@ export class CodexAppServerRuntime {
       throw new Error('Codex session ended before starting the turn');
     }
     const turnAttemptGeneration = session.turnAttemptGeneration;
-    session.nextTurnOperation = operation;
-    const turn = await client.startTurn(buildTurnStartParams({
+    await this.#submitTurn(session, operation, buildTurnStartParams({
       threadId: session.threadId,
       command: request.command,
       imagePaths: attachments.imagePaths,
@@ -223,9 +225,38 @@ export class CodexAppServerRuntime {
       speed: request.speed,
       clientMessageId: request.clientMessageId,
       skills,
-    }));
-    if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
-    adoptTurn(session, turn.turn.id, operation);
+    }), () => this.#canApplyTurnAttempt(session, turnAttemptGeneration)
+      && (!captureLiveOrigin || !request.executionAdmission?.signal.aborted), captureLiveOrigin);
+  }
+
+  async #submitTurn(
+    session: RunningCodexSession, operation: CodexOperation, params: Record<string, unknown>,
+    canApply: () => boolean, pinOrigin: boolean,
+  ): Promise<void> {
+    const client = session.client;
+    session.nextTurnOperation = operation;
+    // The request reply names the submitted turn. A preceding turn/started is not proof.
+    // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server/src/request_processors/turn_processor.rs#L745-L801
+    const buffer = pinOrigin ? { bytes: 0, overflow: false } : null;
+    if (buffer) {
+      this.#startReceiptBuffers.set(client, buffer);
+      this.#bufferingClients.add(client);
+    }
+    try {
+      const { turn } = await client.startTurn(params);
+      if (buffer?.overflow) throw new Error('Codex output exceeded the buffer before the submitted turn could be identified.');
+      if (!canApply()) {
+        if (buffer) void client.interruptTurn(session.threadId, turn.id).catch(() => undefined);
+        return;
+      }
+      if (buffer) this.#liveStartTurns.set(session, { operation, turnId: turn.id });
+      adoptTurn(session, turn.id, operation);
+    } finally {
+      if (buffer) {
+        this.#startReceiptBuffers.delete(client);
+        this.#releaseBufferedClientEvents(client);
+      }
+    }
   }
 
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
@@ -284,11 +315,16 @@ export class CodexAppServerRuntime {
         operation,
       });
       activeSession = session;
+      if (request.captureLiveOrigin) this.#preparingLiveStarts.add(session);
       this.#releaseBufferedClientEvents(client);
       assertCodexExecutionOpen(request);
       request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
-      await this.#startRequestedTurn(client, session, request, operation);
+      try {
+        await this.#startRequestedTurn(session, request, operation, request.captureLiveOrigin);
+      } finally {
+        this.#preparingLiveStarts.delete(session);
+      }
 
       const nativePath = await waitForMaterializedThread(started.thread, {
         timeoutMs: this.#materializationTimeoutMs,
@@ -340,7 +376,7 @@ export class CodexAppServerRuntime {
           }
           recordExplicitReasoningEffort(session, request);
           if (request.executionAdmission) await markCodexExecutionStarted(request);
-          await this.#startRequestedTurn(client, session, request, operation);
+          await this.#startRequestedTurn(session, request, operation);
           if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
             session.pendingFinish = null;
           }
@@ -800,8 +836,8 @@ export class CodexAppServerRuntime {
       interruptAcknowledgement: null,
       terminalWaiters: new Set(),
       liveCodeModeResultToolIds: new Map(),
-      turnItems: new CodexTurnItemLedger((turnId, messages) => (
-        publishRows(this.#logger, chatId, messages, turnRoutes.get(turnId))
+      turnItems: new CodexTurnItemLedger((turnId, messages, live) => (
+        publishRows(this.#logger, chatId, messages, turnRoutes.get(turnId), live && this.#liveStartTurns.get(session)?.turnId === turnId)
       )),
       turnRoutes,
       admittedRoute: { model: confirmedThreadSettings.model, serviceTier },
@@ -1118,6 +1154,17 @@ export class CodexAppServerRuntime {
 
   #bufferClientEvent(client: CodexAppServerClient, event: BufferedClientEvent): void {
     const buffered = this.#bufferedClientEvents.get(client) ?? [];
+    const startBuffer = this.#startReceiptBuffers.get(client);
+    if (startBuffer) {
+      if (startBuffer.overflow) return;
+      startBuffer.bytes += Buffer.byteLength(JSON.stringify(event));
+      if (startBuffer.bytes > 4 * 1024 * 1024 || buffered.length >= 512) {
+        startBuffer.overflow = true;
+        this.#discardBufferedClientEvents(client);
+        void this.#shutdownClient(client);
+        return;
+      }
+    }
     buffered.push(event);
     this.#bufferedClientEvents.set(client, buffered);
   }
@@ -1226,6 +1273,8 @@ export class CodexAppServerRuntime {
       );
       return;
     }
+    if (this.#preparingLiveStarts.has(session)
+      || (!session.nextTurnOperation && session.activeTurnId === this.#liveStartTurns.get(session)?.turnId)) return;
     const operation = session.nextTurnOperation ?? session.sourceOperation;
     if (!adoptTurn(session, params.turn.id, operation)) return;
     if (session.status !== 'interrupting') session.status = 'running';
@@ -1234,7 +1283,7 @@ export class CodexAppServerRuntime {
   #handleItemCompleted(client: CodexAppServerClient, params: ItemCompletedNotification): void {
     const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turnId);
     if (!session) return;
-    session.turnItems.emit(params.turnId, params.item);
+    session.turnItems.emit(params.turnId, params.item, !session.terminalTurnIds.has(params.turnId));
   }
 
   #handleRawResponseItemCompleted(client: CodexAppServerClient, params: RawResponseItemCompletedNotification): void {
@@ -1301,7 +1350,7 @@ export class CodexAppServerRuntime {
     session.turnAttemptGeneration += 1;
     session.liveCodeModeResultToolIds.clear();
     session.lastTurnOperation = operation;
-    for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
+    for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item, true);
     if (params.turn.status === 'failed') {
       const pendingCapacityFailure = session.pendingCapacityFailure?.turnId === params.turn.id
         ? session.pendingCapacityFailure
@@ -1381,14 +1430,12 @@ export class CodexAppServerRuntime {
         if (session.configurationFenced || session.pendingThreadSettings
           || session.confirmedThreadSettings.model !== session.admittedRoute.model
           || session.confirmedThreadSettings.serviceTier !== 'default') return false;
-        session.nextTurnOperation = operation;
-        const turn = await session.client.startTurn({
+        await this.#submitTurn(session, operation, {
           threadId: session.threadId,
           input: [],
           // Replays the admitted tier without changing the thread's selected tier.
           serviceTierForTurn: 'default',
-        });
-        if (isRunningAttempt()) adoptTurn(session, turn.turn.id, operation);
+        }, isRunningAttempt, this.#liveStartTurns.get(session)?.operation === operation);
         return true;
       } finally {
         session.activeDeliveryReservations -= 1;

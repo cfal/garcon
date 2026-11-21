@@ -238,6 +238,15 @@ number means dropped output and records one notice on the active run: "Some
 agent output could not be delivered from the executor. Reload from native
 history after this turn finishes to recover it."
 
+An integration can advertise exact live rows for fresh starts in its manifest.
+Only a provider emission captured by the originating operation may carry
+`originRunId` on a row batch. The controller uses it for the matching live
+managed attempt at commit; it is not stored or reconstructed from native
+history. Retained frames after a same-process reconnect must still pass the
+original binding, sequence, transcript view and attempt fences. A gap blocks
+confirmation of managed signal intake. The run terminal can independently
+carry Shell's command outcome and mark a retained final response best-effort.
+
 A row batch the controller cannot decode is logged and counts as undelivered
 output; consecutive undecodable batches record one notice with the same text.
 Any other event it cannot read, such as a permission request or a launch

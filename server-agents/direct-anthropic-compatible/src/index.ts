@@ -49,6 +49,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;
   readonly literalExecution = null;
+  readonly liveTurnRows = null;
   readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: [

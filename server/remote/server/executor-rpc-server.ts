@@ -155,6 +155,10 @@ export function serveExecutionRuntime(
       }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
       case 'execution.start':
+        if (call.request.captureLiveOrigin !== undefined
+          && (call.request.captureLiveOrigin !== true || integration.liveTurnRows?.scope !== 'fresh-start')) {
+          throw new AgentCallError('rejected', 'The integration cannot provide exact live output for this start', 'OPERATION_UNSUPPORTED');
+        }
         return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
           integration.execution.start(call.request, { signal: launchSignal })
         ));
@@ -230,7 +234,7 @@ function manifest(integration: AgentIntegration): IntegrationManifest {
     descriptor: integration.descriptor, scope: integration.producers.scope,
     settings: { descriptors: integration.settings.describe(), defaults: integration.settings.defaults() },
     attachments: integration.attachments,
-    capabilities: Object.fromEntries(NULLABLE_AGENT_FACETS.map((key) => [key, integration[key] !== null])) as IntegrationManifest['capabilities'],
+    capabilities: Object.fromEntries(NULLABLE_AGENT_FACETS.map((key) => [key, integration[key] != null])) as IntegrationManifest['capabilities'],
     literalExecution: integration.literalExecution,
     authMethods: {
       launchLogin: typeof integration.auth?.launchLogin === 'function',

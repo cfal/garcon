@@ -16,6 +16,7 @@ import type { CarryOverSegmentRef } from '../chats/registry-contracts.js';
 import type { TurnCommandType } from '../lib/turn-identity.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '@garcon/common/preambles';
 import type { TranscriptViewId } from '../ledger/contracts.js';
+import type { AutomationAdmission } from '../automation/start-admission.js';
 
 export type { AgentCommandImage, PermissionMode, ThinkingMode };
 export type AgentName = string;
@@ -160,6 +161,7 @@ export interface RunAgentTurnRequest {
 }
 
 export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'> & {
+  automation?: AutomationAdmission;
   questionReply?: AsyncQuestionReply;
   clientRequestId?: string;
   clientMessageId?: string;
@@ -172,6 +174,10 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
 };
 
 export interface StartSessionOptions {
+  managedAdmission?: {
+    readonly providerRevision: number | null;
+    readonly assertCurrent: () => void;
+  };
   onContextPreparation?: (phase: 'compacting-context' | 'starting-agent') => void;
   images?: AgentCommandImage[];
   model?: string;

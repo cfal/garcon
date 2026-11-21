@@ -349,7 +349,7 @@ export function parseGarconPromptEnvelope(
   return { ...envelope, body: normalizeGarconCommandBody(envelope.body) };
 }
 
-function parseGarconEnvelopeFrame(
+export function parseGarconEnvelopeFrame(
   content: string,
   name: string,
   allowedAttributes: readonly string[],

@@ -88,6 +88,8 @@ async function getIntegrationAuthStatus(integration: AgentIntegration): Promise<
 export type SteeringSupport = 'supported' | 'unsupported' | 'unknown';
 
 export interface AgentRegistryServiceContract {
+  supportsLiveStartRows(agentId: string, executorId: string): boolean;
+  providerSelectionRevision(input: AgentConfigurationInput): number | null;
   executionPolicy(agentId: string, executorId?: string | null): 'conversation' | 'literal';
   chatExecutionPolicy(chatId: string): 'conversation' | 'literal';
   hasAgent(agentId: string, executorId?: string | null): boolean;
@@ -195,6 +197,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
   readonly #catalog: AgentCatalogService;
+  readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
   readonly #runtime: AgentRuntimeRouter;
   readonly #settings: AgentSessionSettingsService;
@@ -234,6 +237,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#ledger = args.ledger;
     this.#adoption = args.adoption;
     this.#directory = new AgentDirectory(args.executors);
+    this.#endpointResolver = args.endpointResolver;
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
@@ -279,6 +283,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   hasAgent(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }
+  supportsLiveStartRows(agentId: string, executorId: string): boolean {
+    const integration = this.#directory.get(agentId, executorId);
+    return integration?.liveTurnRows?.scope === 'fresh-start' && !integration.literalExecution;
+  }
+
+  providerSelectionRevision(input: AgentConfigurationInput): number | null {
+    return this.#endpointResolver.resolveSelection(input).endpoint?.credential?.revision ?? null;
+  }
   assertExecutorReady(executorId?: string | null): void { this.#directory.requireReady(executorId); }
   assertAgentAvailable(agentId: string, executorId?: string | null): void {
     if (!this.#directory.list(executorId).some(integration => integration.descriptor.id === agentId)) {
@@ -375,7 +387,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): Promise<AgentSteerResult> {
     return this.#runtime.steerInput(chatId, input, options, target, prepareDelivery, deadline);
   }
-  abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
+  abortSession(chatId: string, expectedTurnId?: string): Promise<boolean> { return this.#runtime.abortSession(chatId, expectedTurnId); }
 
   executionSessionLost(executorId?: string): void { this.#runtime.executionSessionLost(executorId); }
   executionSessionResumed(executorId: string): void { this.#runtime.executionSessionResumed(executorId); }
@@ -735,6 +747,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         );
       }
       if (boundary) assertPreambleSelectionComposition(chatId, preambles);
+      options.automation?.signal.throwIfAborted();
+      options.automation?.assertPreambles(preambles);
       composition = this.#ledger.appendInputAndCompose({
         chatId,
         viewId,
@@ -748,6 +762,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           ? { excludedOrdinals: new Set(options.excludedResendOrdinals) }
           : {}),
       });
+      if (composition.inserted && options.automation) options.automation.inputPublished = true;
     } catch (error) {
       throw mapInputSubmissionError(error);
     }

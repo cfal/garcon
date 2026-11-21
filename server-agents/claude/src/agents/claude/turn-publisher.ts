@@ -31,9 +31,12 @@ export class ClaudeTurnPublisher {
     session: ClaudeRunningSession,
     turn: ClaudeActiveTurn,
     messages: Parameters<typeof runtimeRows>[0],
+    exactOrigin = false,
   ): void {
     if (messages.length === 0) return;
-    this.event(session, turn, { type: 'rows', rows: runtimeRows(messages) });
+    this.event(session, turn, {
+      type: 'rows', rows: runtimeRows(messages), ...(exactOrigin ? { originRunId: turn.operation.runId } : {}),
+    });
   }
 
   finished(session: ClaudeRunningSession, turn: ClaudeActiveTurn): void {

@@ -112,14 +112,17 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
   readonly drafts: readonly LedgerRowDraft[];
   readonly commands: readonly PendingGarconCommand[];
   readonly rejections: readonly PendingGarconCommandRejection[];
+  readonly unmodifiedAssistantIndices: readonly number[];
 } {
   const drafts: LedgerRowDraft[] = [];
   const commands: PendingGarconCommand[] = [];
   const rejections: PendingGarconCommandRejection[] = [];
+  const unmodifiedAssistantIndices: number[] = [];
   for (const row of rows) {
     const transformed = extractGarconCommands(row.message);
     const message = transformed ? transformed.message : row.message;
     if (message) {
+      if (!transformed && message.type === 'assistant-message') unmodifiedAssistantIndices.push(drafts.length);
       drafts.push({
         kind: 'provider-row',
         at: message.timestamp,
@@ -165,7 +168,7 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
       });
     }
   }
-  return { drafts, commands, rejections };
+  return { drafts, commands, rejections, unmodifiedAssistantIndices };
 }
 
 export function dispatchGarconCommands(

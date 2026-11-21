@@ -828,7 +828,7 @@ bun cli/main.ts --runtime controller wait 1785337200123456 \
   --turn 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
 ```
 
-`wait --json` prints one terminal turn receipt. Available output contains one `text` value: the complete final assistant response selected by the integration, including all its text parts, without earlier commentary. Synchronous `start`, `resume`, prompted `fork`, and plain-text `wait` use that same result. An explicitly empty final succeeds without answer text; a successful turn without an identifiable final reports `no-final-response` and exits nonzero. Failed and interrupted turns never return partial commentary as an answer. Receipts belong to the running server process and may expire after restart or retention eviction even though the durable transcript remains available.
+`wait --json` prints one terminal turn receipt. Available output contains one `text` value: the final response selected by the integration, without earlier commentary. Treat it as complete only when `completeness` is `complete`; for example, a truncated Shell capture is `best-effort`. Synchronous `start`, `resume`, prompted `fork`, and plain-text `wait` use that same result. An explicitly empty final succeeds without answer text; a successful turn without an identifiable final reports `no-final-response` and exits nonzero. Failed and interrupted turns never return partial commentary as an answer. Receipts belong to the running server process and may expire after restart or retention eviction even though the durable transcript remains available.
 
 Inspect current chat-level progress when no retained turn handle is available:
 

@@ -48,6 +48,7 @@ export default class DirectOpenAiResponsesCompatibleIntegration implements Agent
   static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;
   readonly literalExecution = null;
+  readonly liveTurnRows = null;
   readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: TEXT_FILE_ATTACHMENT_MIME_TYPES,

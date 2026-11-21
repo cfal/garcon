@@ -97,6 +97,8 @@ export interface MetadataDep {
 export type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
   | 'hasAgent'
+  | 'supportsLiveStartRows'
+  | 'providerSelectionRevision'
   | 'executionPolicy'
   | 'assertExecutorReady'
   | 'assertAgentAvailable'
@@ -218,7 +220,7 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
 }
 
 export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & {
-  origin: ChatStartOrigin;
+  origin: ChatStartOrigin | 'automation';
   title?: string;
   transcriptSnapshot?: TranscriptWatermark & { sourceChatId: string };
 };
@@ -267,7 +269,7 @@ export interface NormalizedChatStart {
   executorId: string;
   title: string | null;
   transcriptSnapshot: (TranscriptWatermark & { sourceChatId: string }) | null;
-  origin: ChatStartOrigin;
+  origin: ChatStartInput['origin'];
   chatId: ChatId;
   parentChatId: ChatId | null;
   clientRequestId: string;

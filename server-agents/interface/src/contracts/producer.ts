@@ -1,5 +1,5 @@
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import type { CommandWorkingDirectory } from '@garcon/common/command-output';
+import type { CommandOutcome, CommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ChatMessage, ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
@@ -84,9 +84,13 @@ export interface AgentRunFailureDetail {
 export interface AgentFinalResponse {
   readonly type: 'text' | 'literal-text';
   readonly text: string;
+  readonly completeness?: 'best-effort';
 }
 
-export type AgentRunEndedEvent = { readonly workingDirectory?: CommandWorkingDirectory } & (
+export type AgentRunEndedEvent = {
+  readonly workingDirectory?: CommandWorkingDirectory;
+  readonly commandOutcome?: CommandOutcome;
+} & (
   | {
       readonly type: 'run-ended';
       readonly runId: string;
@@ -110,7 +114,12 @@ export type AgentRunEndedEvent = { readonly workingDirectory?: CommandWorkingDir
     });
 
 export type AgentProducerEvent =
-  | { readonly type: 'rows'; readonly rows: readonly AgentProducedRow[] }
+  | {
+      readonly type: 'rows';
+      readonly rows: readonly AgentProducedRow[];
+      // Only an emitter with exact operation provenance may supply this. It never enters storage.
+      readonly originRunId?: string;
+    }
   | { readonly type: 'session'; readonly session: AgentEstablishedSession }
   | AgentPermissionRequestedEvent
   | AgentPermissionTerminalEvent

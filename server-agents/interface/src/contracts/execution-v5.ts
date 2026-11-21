@@ -30,6 +30,8 @@ export interface AgentExecutionContextV5 {
 }
 
 export interface AgentStartRequestV5 extends AgentExecutionContextV5 {
+  // Requests originRunId only on fresh rows with exact operation provenance.
+  readonly captureLiveOrigin?: true;
   readonly prompt: string;
   readonly attachments: readonly AgentAttachment[];
   readonly carriedContext: CarriedContext | null;

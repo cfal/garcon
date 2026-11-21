@@ -33,6 +33,7 @@ import { QueueCommands } from './queue-commands.js';
 import { SessionCommands } from './session-commands.js';
 import { StartCommands } from './start-commands.js';
 import { SteerCommands } from './steer-commands.js';
+import { AutomationService, type AutomationServiceOptions } from '../automation/service.js';
 
 export {
   CommandExecutionControlError,
@@ -53,15 +54,21 @@ export class ChatCommandService {
   readonly #queue: QueueCommands;
   readonly #session: SessionCommands;
   readonly #steer: SteerCommands;
+  readonly #support: CommandSupport;
 
   constructor(private readonly deps: ChatCommandServiceDeps) {
     const support = new CommandSupport(deps);
+    this.#support = support;
     this.#start = new StartCommands(support);
     this.#fork = new ForkCommands(support);
     this.#selfHandoff = new SelfHandoffCommands(support);
     this.#queue = new QueueCommands(support);
     this.#session = new SessionCommands(support);
     this.#steer = new SteerCommands(support);
+  }
+
+  createAutomation(options: AutomationServiceOptions): AutomationService {
+    return new AutomationService(this.#support, this.#start, options);
   }
 
   async waitForBackgroundTasks(): Promise<void> {
