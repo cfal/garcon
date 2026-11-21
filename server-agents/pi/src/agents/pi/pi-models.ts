@@ -116,10 +116,6 @@ export class PiModelCatalogService {
     this.#cachedModels = null;
   }
 
-  expireForTests(): void {
-    this.#cachedAt = 0;
-  }
-
   #staleModels(): SharedModelOption[] {
     return this.#cachedModels?.length ? this.#cachedModels : [];
   }

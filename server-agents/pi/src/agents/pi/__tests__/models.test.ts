@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'bun:test';
+import { expect, mock, spyOn, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,21 +74,25 @@ test('caller cancellation leaves a shared probe running; shutdown drains it with
 });
 
 test('retries transient errors, caches success, and preserves last-known-good only for non-strict reads', async () => {
+  using clock = spyOn(Date, 'now').mockReturnValue(0);
+  const fiveMinutes = 5 * 60 * 1000;
   const expected = [{ value: 'acme/text', label: 'acme: text', supportsImages: false }];
   const discover = mock<() => Promise<typeof expected>>()
     .mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValueOnce(expected)
     .mockRejectedValue(new Error('discovery unavailable'));
   const service = new PiModelCatalogService(testPiConfig, discover);
   expect(await service.getModelsStrict()).toEqual(expected);
+  clock.mockReturnValue(fiveMinutes - 1);
   expect(await service.getModels()).toEqual(expected);
   expect(discover).toHaveBeenCalledTimes(2);
-  service.expireForTests();
+  clock.mockReturnValue(fiveMinutes);
   await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: expected });
   expect(await service.getModels()).toEqual(expected);
 
   discover.mockResolvedValueOnce([]);
   expect(await service.getModelsStrict()).toEqual([]);
-  service.expireForTests();
+  expect(await service.getModelsStrict()).toEqual([]);
+  clock.mockReturnValue(2 * fiveMinutes);
   await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: [] });
 });
 
