@@ -107,7 +107,8 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
     appendCodexConfigArgs(args, codexConfig?.config);
     if (reasoningEffort) args.push('--config', `model_reasoning_effort="${reasoningEffort}"`);
     if (approvalPolicy) args.push('--config', `approval_policy="${approvalPolicy}"`);
-    args.push('-');
+    // Background generation has no chat speed selection and must not inherit the host tier.
+    args.push('--config', 'service_tier="default"', '-');
 
     try {
       const { stdout } = await runCodexExec(args, prompt, envOverrides, codexConfig, querySignal);

@@ -318,7 +318,7 @@ describe('buildRouterStores', () => {
 			deps.panels.reconcile([]);
 			deps.chatState.activateChat(null);
 			stores.chatState.markChatTranscriptStale('chat-1');
-			deps.chatState.clearOptimisticUserInput('input-1');
+			deps.chatState.clearOptimisticUserInput('chat-1', 'input-1');
 			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
 			deps.panels.reconcile(panels);
 			await stores.chatState.loadRenderedChat('chat-1');

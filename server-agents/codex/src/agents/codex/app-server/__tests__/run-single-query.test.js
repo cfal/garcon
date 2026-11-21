@@ -52,6 +52,7 @@ describe('Codex runSingleQuery', () => {
       codexConfig: {
         modelCatalogPath: '/opt/garcon/codex-models.json',
         config: {
+          service_tier: 'ultrafast',
           model_provider: 'garcon_acme_openai',
           model_providers: {
             garcon_acme_openai: {
@@ -72,7 +73,8 @@ describe('Codex runSingleQuery', () => {
 
     const [command, options] = spawnMock.mock.calls[0];
     expect(command[0]).toBe(expectedCodexCommand);
-    expect(command).toContain('--config');
+    expect(command).toContain('service_tier="ultrafast"');
+    expect(command.slice(-3)).toEqual(['--config', 'service_tier="default"', '-']);
     expect(command).toContain('model_catalog_json="/opt/garcon/codex-models.json"');
     expect(command).toContain('model_provider="garcon_acme_openai"');
     expect(Bun.TOML.parse(command.find((arg) => arg.startsWith('model_providers=')))).toEqual({

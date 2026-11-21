@@ -64,9 +64,18 @@ describe('Codex fallback model catalog', () => {
       context_window: contextWindow,
       max_context_window: 872_000,
       input_modalities: inputModalities,
-      service_tiers: [{ id: 'priority', name: 'Fast', description: serviceTierDescription }],
+      service_tiers: expect.arrayContaining([{ id: 'priority', name: 'Fast', description: serviceTierDescription }]),
     });
     expect(model.supported_reasoning_levels.map(({ effort }) => effort)).toEqual(expectedEfforts);
+  });
+
+  it('advertises the published Ultrafast API models without opting in unrelated models', async () => {
+    const catalog = JSON.parse(await readFile(resolveCodexModelCatalogPath(), 'utf8'));
+    const tiers = (slug) => catalog.models.find((model) => model.slug === slug).service_tiers.map(({ id }) => id);
+    for (const slug of ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-astra', 'gpt-6.1-sol']) {
+      expect(tiers(slug)).toContain('ultrafast');
+    }
+    expect(tiers('gpt-6.1-terra')).not.toContain('ultrafast');
   });
 
   it.each(['gpt-6.2-sol', 'gpt-6.2-astra'])('preserves %s native tools and Ultra metadata', async (slug) => {

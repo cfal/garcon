@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
@@ -36,7 +37,7 @@ function deferred<T>() {
 
 function setup(messages: TranscriptMessage[] = [entry(1, user('first'))]) {
 	const transcript = new ActiveTranscriptState();
-	transcript.replaceGeneration('chat-1', 'generation-1', messages, {
+	seedTranscript(transcript, 'chat-1', 'generation-1', messages, {
 		lastOrdinal: messages.at(-1)?.ordinal ?? 0,
 		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: messages.at(-1)?.ordinal ?? 0,
@@ -224,7 +225,7 @@ describe('UserMessageNavigatorController', () => {
 
 		controller.openForActiveChat();
 		expect(controller.isInitialLoading).toBe(true);
-		transcript.replaceGeneration('chat-1', 'generation-1', [], {
+		seedTranscript(transcript, 'chat-1', 'generation-1', [], {
 			lastOrdinal: 0,
 			pageOldestOrdinal: 0,
 			pageNewestOrdinal: 0,

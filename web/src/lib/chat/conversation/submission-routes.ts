@@ -102,6 +102,7 @@ export async function submitQueueRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
+	const response = deps.conversationUi.captureExecutionResponse();
 	// Clears before awaiting the network so typing during the request survives.
 	const clearedRevision = clearOwnedComposer(deps, context);
 	if (clearedRevision !== null) queue.recordComposerClear(context.chatId, clearedRevision);
@@ -117,7 +118,7 @@ export async function submitQueueRoute(
 	});
 	try {
 		const result = await submission.submit();
-		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
+		response.setExecutionControlFromLiveUpdate(context.chatId, result.control);
 		deps.chatState.clearResendExclusions();
 		return 'accepted';
 	} catch (error) {
@@ -148,32 +149,44 @@ export async function submitSteerRoute(
 	acceptedInputs: AcceptedInputSubmissionService,
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
+	const transcriptViewId = requireTranscriptView(deps, context.chatId);
+	// The acknowledgement stays bound to the submitting UI across the request.
+	const conversationUi = deps.conversationUi;
+	const chatId = context.chatId;
+	const response = conversationUi.captureExecutionResponse();
 	const submission = acceptedInputs.steer({
 		chatId: context.chatId,
-		transcriptViewId: requireTranscriptView(deps, context.chatId),
+		transcriptViewId,
 		content: context.content,
 		whenTurnUnavailable: 'queue',
 	});
-	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode, context.contentFormat),
-	);
+	deps.chatState.upsertOptimisticUserInput({
+		...optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode, context.contentFormat),
+		placement: 'live-tail',
+	});
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {
-		const response = await submission.submit();
-		if (response.delivery === 'queued') {
-			// The queue shows the steer until it is delivered with the same client message ID.
-			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
-			deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, response.control);
+		const result = await submission.submit();
+		if (result.delivery === 'queued') {
+			const receipt = {
+				clientMessageId: submission.clientMessageId,
+				serverInstanceId: result.control.serverInstanceId,
+				entryId: result.entryId,
+			};
+			response.setExecutionControlFromLiveUpdate(chatId, result.control);
+			deps.chatState.acceptQueuedSteer(chatId, receipt, conversationUi.getExecutionControl(chatId));
 		} else {
-			deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+			deps.chatState.markOptimisticUserInputDelivered(chatId, submission.clientMessageId);
 		}
 		return 'accepted';
 	} catch (error) {
 		const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
 		if (!outcomeUnknown) {
-			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
+			deps.chatState.clearOptimisticUserInput(context.chatId, submission.clientMessageId);
 			restoreSteerComposer(deps, context, clearedComposerRevision);
+		} else {
+			deps.chatState.anchorUnconfirmedSteer(context.chatId, submission.clientMessageId);
 		}
 		deps.chatState.appendLocalNoticeForChat(
 			context.chatId,
@@ -257,7 +270,7 @@ export async function submitDraftRoute(
 	deps.startupCoordinator.beginLocalStartup(chatId);
 	try {
 		const response = await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+		deps.chatState.markOptimisticUserInputDelivered(context.chatId, submission.clientMessageId);
 		deps.sessions.applyStartEntry(response.chat);
 		if (response.status === 'accepted') deps.lifecycle.beginTurn(chatId);
 		else deps.startupCoordinator.completeStartup(chatId);
@@ -303,7 +316,7 @@ export async function submitRunRoute(
 	);
 	try {
 		const response = await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+		deps.chatState.markOptimisticUserInputDelivered(context.chatId, submission.clientMessageId);
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
 		if (response.tagMutation) {

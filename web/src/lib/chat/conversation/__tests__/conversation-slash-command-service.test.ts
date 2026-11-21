@@ -210,6 +210,7 @@ function createDeps(chat = createChat()) {
 		supportsSteering: vi.fn(() => false),
 	};
 	const deps = {
+		pendingSettings: vi.fn<ConversationSlashCommandDeps['pendingSettings']>(() => null),
 		moveChatToBoundary: vi.fn<ConversationSlashCommandDeps['moveChatToBoundary']>().mockResolvedValue({
 			success: true,
 			chatId: chat.id,
@@ -302,6 +303,101 @@ describe('ConversationSlashCommandService', () => {
 		});
 
 		expect(result).toEqual({ kind: 'steer', content: 'Focus on the failing assertion' });
+	});
+
+	it.each(['/fork Continue', '/fork', '/handoff Continue', '/compact'])('does not dispatch %s past a rejected setting', async (text) => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const chat = deps.sessions.byId['chat-1'];
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text, images: [], ownsComposer: true,
+		});
+		if (result.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(deps.pendingSettings).toHaveBeenCalledWith(chat.id);
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(mockSelfHandoffRunChat).not.toHaveBeenCalled();
+		expect(mockCompactChat).not.toHaveBeenCalled();
+		gate.resolve(false);
+		expect(await result.outcome).toBe('rejected');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(mockSelfHandoffRunChat).not.toHaveBeenCalled();
+		expect(mockCompactChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['/fork Continue', 'submitForkCommand'],
+		['/fork', 'submitForkCommand'],
+		['/handoff Continue', 'submitHandoffCommand'],
+		['/compact', 'submitCompactCommand'],
+	] as const)('dispatches %s with the settled settings and preserves the immediate path', async (text, method) => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const service = new ConversationSlashCommandService(deps);
+		const submit = vi.spyOn(service, method).mockResolvedValue('accepted');
+		const chat = deps.sessions.byId['chat-1'];
+		const input = { chatId: chat.id, chat, text, images: [], ownsComposer: true };
+		const immediate = service.dispatchSubmission(input);
+		expect(submit).toHaveBeenCalledOnce();
+		if (immediate.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(await immediate.outcome).toBe('accepted');
+		submit.mockClear();
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const waiting = service.dispatchSubmission(input);
+		expect(submit).not.toHaveBeenCalled();
+		const current = { ...chat, agentSettings: { ...chat.agentSettings, values: { speed: 'ultrafast' } } };
+		deps.sessions.byId[chat.id] = current;
+		gate.resolve(true);
+		if (waiting.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(await waiting.outcome).toBe('accepted');
+		expect(submit).toHaveBeenCalledOnce();
+		expect(submit.mock.calls[0][1]).toBe(current);
+	});
+
+	it.each(['deleted', 'owner', 'executor', 'agent', 'selection', 'text'] as const)(
+		'does not submit a pending fork after its source changes: %s', async (change) => {
+			const { deps } = createDeps(createChat({ agentOwnershipEpoch: 'epoch-1', executorId: 'local' }));
+			deps.modelCatalog.supportsFork.mockReturnValue(true);
+			const gate = deferred<boolean>();
+			deps.pendingSettings.mockReturnValue(gate.promise);
+			const chat = deps.sessions.byId['chat-1'];
+			const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: chat.id, chat, text: '/fork Continue', images: [], ownsComposer: true,
+			});
+			if (result.kind !== 'handled') throw new Error('Expected a fork command');
+			if (change === 'deleted') delete deps.sessions.byId[chat.id];
+			if (change === 'owner') deps.sessions.byId[chat.id] = { ...chat, agentOwnershipEpoch: 'epoch-2' };
+			if (change === 'executor') deps.sessions.byId[chat.id] = { ...chat, executorId: '22222222-2222-4222-8222-222222222222' };
+			if (change === 'agent') deps.sessions.byId[chat.id] = { ...chat, agentId: 'codex' };
+			if (change === 'selection') deps.sessions.selectedChatId = 'chat-2';
+			if (change === 'text') deps.composerState.inputText = 'New draft';
+			gate.resolve(true);
+			expect(await result.outcome).toBe(change === 'selection' || change === 'text' ? 'no-op' : 'rejected');
+			expect(mockForkRunChat).not.toHaveBeenCalled();
+			expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		},
+	);
+
+	it('preserves new attachments while a fork is waiting for settings', async () => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const chat = deps.sessions.byId['chat-1'];
+		const text = '/fork Continue';
+		deps.composerState.inputText = text;
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({ chatId: chat.id, chat, text, images: [], ownsComposer: true });
+		if (result.kind !== 'handled') throw new Error('Expected a fork command');
+		deps.composerState.images = [new File([], 'attachment.txt')];
+		gate.resolve(true);
+		expect(await result.outcome).toBe('no-op');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
 
 	it('rejects steering when the capability is absent or attachments are present', () => {
@@ -1091,8 +1187,13 @@ describe('ConversationSlashCommandService', () => {
 		);
 	});
 
-	it('forks and runs in a view beside the source chat without replacing it', async () => {
-		const { deps } = createDeps();
+	it('forks and runs with confirmed settings beside the source chat after settlement', async () => {
+		const chat = createChat({ agentId: 'codex', model: 'previous-model',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'fast' } } });
+		const { deps } = createDeps(chat);
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
 		const forked = createServerEntry('chat-2');
 		mockForkRunChat.mockResolvedValueOnce({
 			success: true,
@@ -1105,16 +1206,20 @@ describe('ConversationSlashCommandService', () => {
 			chat: forked,
 		});
 
-		await new ConversationSlashCommandService(deps).submitForkCommand(
-			'chat-1',
-			deps.sessions.byId['chat-1'],
-			'continue here',
-			[],
-			true,
-		);
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text: '/fork continue here', images: [], ownsComposer: true,
+		});
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		const confirmed = { ...chat, model: 'confirmed-model',
+			agentSettings: { ...chat.agentSettings, values: { speed: 'ultrafast' } } };
+		deps.sessions.byId[chat.id] = confirmed;
+		gate.resolve(true);
+		if (dispatch.kind !== 'handled') throw new Error('Expected a fork command');
+		expect(await dispatch.outcome).toBe('accepted');
 
 		expect(mockForkRunChat).toHaveBeenCalledWith(
-			expect.objectContaining({ sourceChatId: 'chat-1', command: 'continue here' }),
+			expect.objectContaining({ sourceChatId: 'chat-1', command: 'continue here',
+			model: confirmed.model, agentSettings: confirmed.agentSettings }),
 		);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
 		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
@@ -1493,6 +1598,21 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
 		expect(deps.navigation.navigateToChat).not.toHaveBeenCalled();
 		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
+	});
+
+	it.each([true, false])('settles pending settings before a point fork: %s', async (accepted) => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		if (accepted) mockForkChat.mockResolvedValueOnce({ success: true, chat: createServerEntry('chat-2') });
+		const pending = new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(clearLocalNoticesForChat).not.toHaveBeenCalled();
+		gate.resolve(accepted);
+		await pending;
+		expect(mockForkChat).toHaveBeenCalledTimes(accepted ? 1 : 0);
+		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
 	});
 
 	it('shows fork progress on the source chat until the fork settles', async () => {

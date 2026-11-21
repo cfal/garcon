@@ -13,6 +13,8 @@ export type ExecutionControlInstanceDecision =
 export class ExecutionControlInstanceAuthority {
 	#currentInstanceId: string | null = null;
 	#confirmedSocketInstanceId: string | null = null;
+	#authorityRevision = 0;
+	#instanceObservedAt = -Infinity;
 	readonly #supersededInstanceIds = new Set<string>();
 
 	markSocketDisconnected(): void {
@@ -23,10 +25,22 @@ export class ExecutionControlInstanceAuthority {
 		return this.#confirmedSocketInstanceId === serverInstanceId;
 	}
 
-	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {
+	captureResponseFence(): (serverInstanceId: string) => boolean {
+		const revision = this.#authorityRevision;
+		return serverInstanceId => serverInstanceId === this.#currentInstanceId || revision === this.#authorityRevision;
+	}
+
+	confirmSocketInstance(serverInstanceId: string, probeStartedAt?: number): ExecutionControlInstanceAcceptance | null {
+		// An older probe cannot order a process observed while its response was in flight.
+		if (probeStartedAt !== undefined && !this.acceptsSocketObservation(serverInstanceId, probeStartedAt)) return null;
+		if (this.#confirmedSocketInstanceId !== serverInstanceId) this.#authorityRevision += 1;
 		this.#confirmedSocketInstanceId = serverInstanceId;
 		if (this.#currentInstanceId === serverInstanceId) return { kind: 'current' };
 		return this.#replaceCurrent(serverInstanceId);
+	}
+
+	acceptsSocketObservation(serverInstanceId: string, startedAt: number): boolean {
+		return serverInstanceId === this.#currentInstanceId || startedAt > this.#instanceObservedAt;
 	}
 
 	classifyNonAuthoritativeInstance(serverInstanceId: string): ExecutionControlInstanceDecision {
@@ -44,6 +58,8 @@ export class ExecutionControlInstanceAuthority {
 	}
 
 	#replaceCurrent(serverInstanceId: string): ExecutionControlInstanceAcceptance {
+		this.#authorityRevision += 1;
+		this.#instanceObservedAt = performance.now();
 		if (this.#currentInstanceId !== null) {
 			this.#supersededInstanceIds.add(this.#currentInstanceId);
 		}

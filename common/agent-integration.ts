@@ -27,7 +27,7 @@ export interface AgentSettingsEnvelope {
   readonly values: JsonObject;
 }
 
-export const AGENT_SETTING_LABEL_KEYS = ['thinking', 'mode'] as const;
+export const AGENT_SETTING_LABEL_KEYS = ['thinking', 'mode', 'speed'] as const;
 export type AgentSettingLabelKey = (typeof AGENT_SETTING_LABEL_KEYS)[number];
 
 export const AGENT_SETTING_OPTION_LABEL_KEYS = [

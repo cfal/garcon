@@ -21,7 +21,9 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Clock3 from '@lucide/svelte/icons/clock-3';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+	import type { InputStatus } from '$lib/chat/transcript/optimistic-user-input.js';
 	import {
 		getAppShell,
 		getChatSessions,
@@ -83,8 +85,7 @@
 	interface Props {
 		isVisible?: boolean;
 		message: ChatMessage;
-		/** Marks a submitted message whose request has not come back yet. */
-		awaitingDelivery?: boolean;
+		inputStatus?: InputStatus;
 		rowId?: string;
 		anchorId?: string;
 		forkUpToSeq?: number;
@@ -119,7 +120,7 @@
 	let {
 		isVisible = true,
 		message,
-		awaitingDelivery = false,
+		inputStatus,
 		rowId,
 		anchorId,
 		forkUpToSeq,
@@ -690,11 +691,18 @@
 				<div
 					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
 				>
-					{#if awaitingDelivery}
+					{#if inputStatus === 'sending'}
 						<LoaderCircle
 							class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
 							aria-label={m.chat_message_delivery_sending()}
 						/>
+					{:else if inputStatus === 'waiting-to-steer'}
+						<span
+							class="absolute bottom-0 right-0 text-muted-foreground"
+							role="img"
+							aria-label={m.chat_queue_pending_steer()}
+							title={m.chat_queue_pending_steer()}
+						><Clock3 class="size-3.5" aria-hidden="true" /></span>
 					{:else}
 						{@render floatingMessageMenuButton('bottom-0 right-0')}
 					{/if}

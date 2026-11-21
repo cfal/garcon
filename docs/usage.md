@@ -67,7 +67,12 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   including remote compaction, before that response's `token_count`. Once a
   rollout has records, only records are billed, keyed by `response_id`, and
   `token_count` only reports context size. Records with no response id or
-  usage, or with no known model, are malformed.
+  usage, or with no known model, are malformed. Records with a matching turn ID
+  use the speed at turn start, including compaction billed before `turn_context`.
+  Live edits do not reprice the active turn. When the record names a different turn,
+  the initial tier is ambiguous, or early compaction could have used either side of
+  a model switch, tokens still count but the cost is unknown.
+  The rollout does not record every one-turn override or the actual billed tier.
 - Rollouts written before records existed bill `token_count` events, which
   take their model from the latest `turn_context` and their tier from the
   latest `thread_settings_applied`. Cumulative counters reconcile each request
@@ -91,7 +96,10 @@ Costs are API list-price estimates from the built-in table in
 plans. Anthropic rates follow the official pricing page, including per-model
 cache-read rates, one-hour cache writes, fast mode, and Haiku 5.5's long-prompt
 tier. OpenAI rates follow LiteLLM's published table, including priority
-processing, flex processing, and the 272K-token long-context tier. Model names are matched after
+processing, flex processing, and the 272K-token long-context tier. Ultrafast estimates use
+[OpenAI’s published regular API rates](https://developers.openai.com/api/docs/pricing) for the model,
+excluding promotional discounts. Usage days use the recorded completion time. Ultrafast usage without a
+published rate counts toward tokens but is reported as unpriced. Model names are matched after
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens
 count, its cost is shown as unknown rather than zero, and totals note the

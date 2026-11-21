@@ -119,7 +119,7 @@ function chatSettingsPatchErrorResponse(error: unknown): Response {
   if (error instanceof AgentIntegrationError && error.code === 'INVALID_SETTINGS') {
     return jsonError(error.message, 422, error.code, error.retryable);
   }
-  return jsonErrorFromUnknown(error);
+  return commandHttpError(error);
 }
 
 export function createChatCommandRoutes({ commands, registry, agents, queue }: {

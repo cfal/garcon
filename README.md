@@ -74,6 +74,10 @@ Starting with v0.4.0, [GitHub releases](https://github.com/cfal/garcon/releases)
 2. Open **Settings**. Coding agents use their existing CLI login; sign in from the agent's settings page if it shows **Not connected**. Add API endpoints under **Providers**.
 3. Start a chat and pick a project folder under your `--project-base-dir`.
 
+### Steering a running chat
+
+Send guidance with `/steer` or the Ctrl+Enter steering shortcut. In the tab that sent it, the bubble shows **Sending** while submission is unresolved. **Waiting to steer** means the server queued the guidance, not that the agent received it. Edit or remove it in the queue tray while it waits. The committed message appears without a waiting indicator. After guidance leaves the queue or is accepted directly, the local bubble disappears without fetching history or changing cache freshness. If its committed message was missed, it may stay absent until ordinary history or reconnect recovery. Disappearance does not prove cancellation or delivery. Reloading the tab drops the local bubble; restarting the server clears the queue. Local and remote executors behave the same way.
+
 ## Where Things Live
 
 | What                | Default                          | Override                                            |
@@ -337,6 +341,12 @@ Garcon keeps that development loop coherent:
 **Provider presets and discovery:** Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom OpenAI or Anthropic compatible services.
 
 Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
+
+In a Codex composer, use **Selected speed** (the gauge) to choose **Standard**, **Fast**, or **Ultrafast**. Fast and Ultrafast request faster routing for the same model and reasoning effort and use more credits or incur higher API charges. A change applies to subsequent turns, including queued prompts. Existing chats without a selection use Standard, regardless of the executor's `service_tier` setting. Background generation such as chat titles also uses Standard.
+
+Availability depends on your model, account, and workspace policy. Speed is saved as a preference, then checked when starting a turn, fork, or compaction. Fast and Ultrafast freshly resume the native session each time, adding startup latency but verifying the effective tier before inference. Unavailable tiers fail without falling back to Standard. Choose Standard or select a supported model rather than changing the executor's config. See [Codex speed settings](https://developers.openai.com/codex/speed).
+
+Changing speed does not affect an active operation. After Codex exhausts its own capacity retries, Fast and Ultrafast fail without an additional Garcon retry; submit again to recheck availability. Standard retains bounded automatic retries at its admitted speed, unless the native model or tier changed. Stop and submit again to use a new speed.
 
 Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 

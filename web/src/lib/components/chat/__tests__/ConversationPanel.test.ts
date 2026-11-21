@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -418,7 +419,7 @@ describe('ConversationPanel', () => {
 	it('leaves remount scroll restoration to the panel registry', async () => {
 		runtime.autoScrollToBottom = true;
 		const { panel } = makePanel();
-		panel.transcript.replaceGeneration(
+		seedTranscript(panel.transcript,
 			'chat-1',
 			'view-1',
 			[

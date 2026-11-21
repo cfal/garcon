@@ -1,3 +1,4 @@
+import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
@@ -190,6 +191,7 @@ function installContext(chats: ChatSessionRecord[] = []): AppShellBreakpointWork
 	vi.spyOn(notifications, 'dismissKey');
 	let selectedChatId: string | null = null;
 	const sessions = {
+		settingsMutations: new ChatSettingsMutations(),
 		orderedChats: chats,
 		get selectedChatId() {
 			return selectedChatId;
@@ -231,6 +233,7 @@ function installContext(chats: ChatSessionRecord[] = []): AppShellBreakpointWork
 		| 'rememberSelectedChat'
 		| 'refreshChats'
 		| 'quietRefreshChats'
+		| 'settingsMutations'
 		| 'refreshOrderSnapshot'
 		| 'isChatOptimisticallyArchived'
 		| 'projectPathRevision'
