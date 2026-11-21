@@ -177,7 +177,7 @@ Compose uses named volumes for credentials, configuration, and native history. T
 | `codex-home` | `/home/garcon/.codex` | Codex credentials and native history |
 | `cursor-home` | `/home/garcon/.cursor` | Cursor credentials and native history |
 | `factory-home` | `/home/garcon/.factory` | Factory credentials and native history |
-| `gemini-home` | `/home/garcon/.gemini` | Antigravity settings, sign-in, and native history |
+| `gemini-home` | `/home/garcon/.gemini` | Antigravity settings and native history; Google sign-in uses the OS keyring |
 | `pi-home` | `/home/garcon/.pi` | Pi credentials, settings, and native history |
 | `opencode-data` | `/home/garcon/.local/share/opencode` | OpenCode credentials and session database |
 | `opencode-state` | `/home/garcon/.local/state/opencode` | OpenCode runtime state |
