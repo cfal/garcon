@@ -112,7 +112,7 @@
 					<input
 						id={id + '-path'}
 						bind:value={pathOverride}
-						disabled={isCreating}
+						readonly={isCreating}
 						placeholder={defaultPath || m.workspace_worktree_path_override_placeholder()}
 						class={fieldClass}
 					/>
@@ -122,7 +122,7 @@
 					<input
 						id={id + '-base'}
 						bind:value={baseRefOverride}
-						disabled={isCreating}
+						readonly={isCreating}
 						placeholder={m.workspace_worktree_base_ref_placeholder()}
 						class={fieldClass}
 					/>
@@ -144,8 +144,10 @@
 		</button>
 		<button
 			type="submit"
-			disabled={!canCreate}
-			class="inline-flex items-center gap-2 rounded-md bg-interactive-accent px-4 py-2 text-sm font-medium text-interactive-accent-foreground disabled:opacity-50"
+			disabled={!canCreate && !isCreating}
+			aria-disabled={!canCreate}
+			aria-busy={isCreating}
+			class="inline-flex items-center gap-2 rounded-md bg-interactive-accent px-4 py-2 text-sm font-medium text-interactive-accent-foreground aria-disabled:opacity-50"
 		>
 			{#if isCreating}
 				<LoaderCircle class="size-4 animate-spin" />

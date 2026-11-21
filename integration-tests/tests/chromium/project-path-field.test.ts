@@ -8,7 +8,7 @@ import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../comm
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`project path field retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
-    await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
+    await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors, consumeExpectedBrowserErrors }, phase) => {
       const project = join(integration.executionDirs.project, 'repository ');
       await mkdir(project);
       await mkdir(project.trimEnd());
@@ -142,6 +142,15 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           await browserExpect(create.getByRole('button', { name: 'Create worktree' })).toBeInViewport();
           await page.screenshot({ animations: 'disabled', path: join(artifacts, `worktree-create-${width}.png`) });
         }
+        phase('keyboard retry after a destination conflict');
+        await create.getByRole('button', { name: 'Advanced' }).click();
+        const location = create.getByRole('textbox', { name: 'Location' });
+        await location.fill(worktree);
+        await name.press('Enter');
+        await browserExpect(create.getByRole('alert')).toContainText('already registered');
+        await browserExpect(name).toBeFocused();
+        await location.fill('');
+        consumeExpectedBrowserErrors(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
       }
       await create.getByRole('button', { name: 'Create worktree' }).click();
       await browserExpect(input).toHaveValue(join(project, '.worktrees', 'picker-review'));

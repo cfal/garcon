@@ -103,7 +103,7 @@
 			bind:this={ref}
 			value={name}
 			{placeholder}
-			{disabled}
+			readonly={disabled}
 			autocomplete="off"
 			autocapitalize="off"
 			spellcheck="false"
