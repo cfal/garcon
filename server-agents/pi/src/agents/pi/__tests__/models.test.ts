@@ -2,6 +2,7 @@ import { expect, mock, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { getPiAvailableModels, parsePiModelListing, PiModelCatalogService } from '../pi-models.js';
 import { getPiAuthStatus } from '../pi-auth.js';
 import { testPiConfig } from './test-fixtures.js';
@@ -30,8 +31,11 @@ test.skipIf(process.platform === 'win32')('discovery times out when a descendant
   const dir = await mkdtemp(join(tmpdir(), 'pi-discovery-'));
   const binary = join(dir, 'pi');
   try {
-    await writeFile(binary, '#!/bin/sh\nsleep 1 &\nexit 0\n', { mode: 0o700 });
-    await expect(getPiAvailableModels(binary, AbortSignal.timeout(100))).rejects.toMatchObject({ name: 'TimeoutError' });
+    // The descendant holds both pipes until teardown removes the executable.
+    await writeFile(binary, '#!/bin/sh\nwhile [ -f "$0" ]; do sleep 0.1; done &\nprintf ready > "$0.ready"\n', { mode: 0o700 });
+    const probe = getPiAvailableModels(binary, AbortSignal.timeout(500));
+    await expect(Promise.race([probe, delay(3_000, 'still reading', { ref: false })])).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(await Bun.file(`${binary}.ready`).exists()).toBe(true);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
