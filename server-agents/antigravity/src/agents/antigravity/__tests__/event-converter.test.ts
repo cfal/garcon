@@ -27,8 +27,11 @@ describe('AntigravityAcpEventConverter', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
 
-    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Considering.' } }), context)).toEqual([]);
-    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Running ' } }), context)).toEqual([]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Consider' } }), context)).toEqual([]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'ing.' } }), context)).toEqual([]);
+    // Message text after thinking publishes the thinking first.
+    expect(plain(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Running ' } }), context)))
+      .toEqual([{ type: 'thinking', content: 'Considering.' }]);
     converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'it.' } }), context);
 
     const atTool = converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', {
@@ -37,7 +40,6 @@ describe('AntigravityAcpEventConverter', () => {
       WaitMsBeforeAsync: 5000,
     }), context);
     expect(plain(atTool)).toEqual([
-      { type: 'thinking', content: 'Considering.' },
       { type: 'assistant-message', content: 'Running it.' },
       { type: 'bash-tool-use', toolId: 'tool-1', command: 'echo synthetic', description: 'Echo text' },
     ]);
@@ -275,6 +277,42 @@ describe('AntigravityAcpEventConverter', () => {
     converter.releaseSession(SESSION);
     expect(converter.endTurn(SESSION, context)).toEqual([]);
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
+  it('keeps interleaved message and thought text in order', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = [
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'A' } }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'T' } }),
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'B' } }),
+    ].flatMap((row) => converter.fromSessionUpdate(row, context));
+    rows.push(...converter.endTurn(SESSION, context));
+    expect(plain(rows)).toEqual([
+      { type: 'assistant-message', content: 'A' },
+      { type: 'thinking', content: 'T' },
+      { type: 'assistant-message', content: 'B' },
+    ]);
+  });
+
+  it('publishes one result when a terminal update repeats', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'read_file', 'read', { Path: '/work/a' }), context);
+    const terminal = update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', name: 'read_file', status: 'completed' });
+    expect(plain(converter.fromSessionUpdate(terminal, context)).map((row) => row.type)).toEqual(['tool-result']);
+    expect(converter.fromSessionUpdate(terminal, context)).toEqual([]);
+  });
+
+  it('recognizes a multi-line executor error that opens its chunk', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: '\n⚠ agent executor error: Error 429\nDetails: quota\n' },
+    }), context);
+    expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429\nDetails: quota');
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
   });
 
   it('drops state for released sessions', () => {

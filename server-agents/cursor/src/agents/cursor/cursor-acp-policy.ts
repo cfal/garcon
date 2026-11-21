@@ -1,7 +1,7 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { CursorConfig } from '../../config.js';
-import type { AcpAgentPolicy } from '@garcon/server-agent-common/acp/agent-runtime';
+import type { AcpAgentPolicy } from '@garcon/server-agent-common/acp/policy';
 import type { AcpResumeRequest, AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { configureCursorAcpSession, cursorAcpModeForPermissionMode } from './cursor-acp-model-config.js';
 import { createCursorAcpNativePath } from './cursor-native-path.js';

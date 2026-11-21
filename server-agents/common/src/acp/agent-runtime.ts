@@ -33,13 +33,12 @@ import type {
 } from './protocol.js';
 import type { AcpAdvertisedCapabilities, ReconnectStrategy } from './reconnect-policy.js';
 import { reconnectAcpSession, reconnectOrder } from './reconnect-policy.js';
+import type { AcpAgentPolicy } from './policy.js';
 import { AcpTransport } from './transport.js';
-import type { AcpEventConverter, AcpSessionUpdateContext } from './event-converter.js';
+import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from './event-converter.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import {
   abortStrategy,
-  asObject,
-  asString,
   buildEnvFallback,
   buildPromptFallback,
   fallbackPermissionToolUse,
@@ -74,12 +73,15 @@ interface AcpAgentRuntimeSession {
   retired: boolean;
   activeTurn: AcpTurnContext | null;
   sourceTurn: AcpTurnContext | null;
-  // Set from admission until the prompt is sent, so a concurrent turn cannot
-  // pass the running check while this one is still being configured.
-  turnStarting: boolean;
+  // Held from admission until the prompt is sent, so the configure window
+  // counts as busy for concurrent turns, the idle purger, and path updates.
+  pendingTurn: object | null;
   permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
+  // The model the agent selected when this process opened the session; an empty
+  // request returns to it. After a reconnect it is the model the session resumed with.
+  agentDefaultModelId?: string;
   startedAt: string;
   lastActivityAt: number;
 }
@@ -101,46 +103,6 @@ interface AcpTurnContext {
 
 // How long a cancelled prompt may take to settle before the next turn replaces its process.
 const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 10_000;
-
-export type AcpAbortStrategy = 'cancel' | 'process-restart';
-
-export interface AcpSessionConfigurationContext {
-  client: AcpClient;
-  sessionId: string;
-  request: AcpStartRequest | AcpResumeRequest;
-  configOptions?: AcpSessionConfigOption[];
-  models?: AcpSessionModelState;
-}
-
-// The session state a configuration pass changed; omitted fields keep their value.
-export interface AcpSessionStatePatch {
-  configOptions?: AcpSessionConfigOption[];
-  models?: AcpSessionModelState;
-}
-
-export interface AcpAgentPolicy {
-  agentId: string;
-  command: string | (() => string);
-  args?: string[];
-  abortStrategy?: AcpAbortStrategy;
-  // Modes in which the runtime answers permission requests itself; agents that
-  // apply a mode natively leave the remaining requests to the user.
-  autoApprovePermissionModes?: readonly PermissionMode[];
-  authenticateMethodId?: string | (() => string);
-  mcpServers?: unknown[];
-  binaryVersion?: string;
-  reconnectAllowNewSession?: boolean;
-  clientCapabilities?: AcpInitializeParams['clientCapabilities'];
-  configureSession?: (context: AcpSessionConfigurationContext) => Promise<AcpSessionStatePatch | void>;
-  newSessionModelConfig?: boolean;
-  promptModelConfig?: boolean;
-  promptModeConfig?: boolean;
-  buildEnv?: (request: AcpStartRequest | AcpResumeRequest) => Record<string, string | undefined>;
-  buildPrompt?: (request: AcpStartRequest | AcpResumeRequest) => Array<{ type: string; text?: string; [key: string]: unknown }>;
-  mapPermissionMode?: (mode: PermissionMode) => string | undefined;
-  mapModel?: (model: string) => string | undefined;
-  resolveNativePath?: (sessionId: string) => string | null;
-}
 
 export interface AcpAgentRuntimeOptions {
   converter: AcpEventConverter;
@@ -168,7 +130,7 @@ export class AcpAgentRuntime {
   #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
-    isRunning: (session) => session.activeTurn?.running === true,
+    isRunning: (session) => this.#isBusy(session),
     lastActivityAt: (session) => session.lastActivityAt,
     purge: (_sessionId, session) => this.#retireSession(session, 'session-complete'),
   });
@@ -221,10 +183,11 @@ export class AcpAgentRuntime {
       retired: false,
       activeTurn: null,
       sourceTurn: null,
-      turnStarting: false,
+      pendingTurn: null,
       permissionMode: request.permissionMode,
       configOptions: created.configOptions,
       models: created.models,
+      agentDefaultModelId: created.models?.currentModelId,
       startedAt: now,
       lastActivityAt: Date.now(),
     };
@@ -271,15 +234,23 @@ export class AcpAgentRuntime {
       assertAcpExecutionOpen(request);
       if (session.retired) session = await this.#sessionForTurn(request);
     }
-    if (session.activeTurn?.running || session.turnStarting) {
+    if (this.#isBusy(session)) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
-    session.turnStarting = true;
+    const reservation = {};
+    session.pendingTurn = reservation;
+    const release = () => {
+      if (session.pendingTurn === reservation) session.pendingTurn = null;
+    };
     try {
-      await this.#runPrompt(session, request);
+      await this.#runPrompt(session, request, release);
     } finally {
-      session.turnStarting = false;
+      release();
     }
+  }
+
+  #isBusy(session: AcpAgentRuntimeSession): boolean {
+    return session.activeTurn?.running === true || session.pendingTurn !== null;
   }
 
   // A cooperative cancel settles when the agent answers the open prompt. An
@@ -305,7 +276,7 @@ export class AcpAgentRuntime {
     if (session.chatId !== request.chatId) {
       throw new AgentIntegrationError('SESSION_BUSY', 'Chat ID mismatch', false);
     }
-    if (session.activeTurn?.running) {
+    if (this.#isBusy(session)) {
       throw new AgentIntegrationError('SESSION_BUSY', `Session ${agentSessionId} is already running`, false);
     }
     if ((session.sourceTurn?.pendingPermissions.size ?? 0) > 0) {
@@ -351,12 +322,13 @@ export class AcpAgentRuntime {
   }
 
   isRunning(agentSessionId: string): boolean {
-    return this.#sessions.get(agentSessionId)?.activeTurn?.running === true;
+    const session = this.#sessions.get(agentSessionId);
+    return session ? this.#isBusy(session) : false;
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
     return Array.from(this.#sessions.values())
-      .filter((session) => session.activeTurn?.running)
+      .filter((session) => this.#isBusy(session))
       .map((session) => ({
         id: session.id,
         status: session.state,
@@ -459,7 +431,7 @@ export class AcpAgentRuntime {
       retired: false,
       activeTurn: null,
       sourceTurn: null,
-      turnStarting: false,
+      pendingTurn: null,
       permissionMode: request.permissionMode,
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
@@ -490,6 +462,7 @@ export class AcpAgentRuntime {
     session.remoteSessionId = restored.sessionId;
     session.configOptions = restored.configOptions;
     session.models = restored.models;
+    session.agentDefaultModelId ??= restored.models?.currentModelId;
     return true;
   }
 
@@ -939,6 +912,7 @@ export class AcpAgentRuntime {
       request,
       configOptions: session.configOptions,
       models: session.models,
+      agentDefaultModelId: session.agentDefaultModelId,
     });
     if (configured?.configOptions) session.configOptions = configured.configOptions;
     if (configured?.models) session.models = configured.models;

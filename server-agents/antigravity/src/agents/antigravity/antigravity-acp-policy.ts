@@ -4,7 +4,7 @@ import type {
   AcpAgentPolicy,
   AcpSessionConfigurationContext,
   AcpSessionStatePatch,
-} from '@garcon/server-agent-common/acp/agent-runtime';
+} from '@garcon/server-agent-common/acp/policy';
 import type { AcpResumeRequest, AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
@@ -50,7 +50,12 @@ export async function configureAntigravitySession(
   context: AcpSessionConfigurationContext,
 ): Promise<AcpSessionStatePatch> {
   const patch: AcpSessionStatePatch = {};
-  const models = await applyAntigravityModel(context.client, context.sessionId, context.models, context.request.model);
+  const models = await applyAntigravityModel(
+    context.client,
+    context.sessionId,
+    context.models,
+    context.request.model || context.agentDefaultModelId,
+  );
   if (models) patch.models = models;
 
   const configOptions = await applyAntigravityMode(
@@ -64,7 +69,8 @@ export async function configureAntigravitySession(
 }
 
 // Returns the updated model state, or undefined when the session already uses
-// the model or the request names none.
+// the model or none is named. Callers pass the agent's default for an empty
+// request, so choosing "default" after an explicit model switches back.
 export async function applyAntigravityModel(
   client: Pick<AcpSessionConfigurationContext['client'], 'setSessionModel'>,
   sessionId: string,

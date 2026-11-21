@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { isAutoApproveMode, permissionChoiceOutcome } from '../runtime-helpers.ts';
-import type { AcpAgentPolicy } from '../agent-runtime.ts';
+import type { AcpAgentPolicy } from '../policy.ts';
 
 const ANTIGRAVITY_OPTIONS = [
   { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
@@ -61,7 +61,11 @@ describe('permissionChoiceOutcome', () => {
   it('matches conventional ids when an agent omits kinds', () => {
     const untyped = [{ optionId: 'allow-once' }, { optionId: 'reject-once' }];
     expect(permissionChoiceOutcome(untyped, 'reject')).toEqual(selected('reject-once'));
-    expect(permissionChoiceOutcome([], 'allow-once')).toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+
+  it('answers an empty option list with the conventional id', () => {
+    expect(permissionChoiceOutcome([], 'allow-once')).toEqual(selected('allow-once'));
+    expect(permissionChoiceOutcome([], 'reject')).toEqual(selected('reject-once'));
   });
 });
 

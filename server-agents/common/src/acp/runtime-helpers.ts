@@ -2,18 +2,10 @@ import { UnknownToolUseMessage } from '@garcon/common/chat-types';
 import { normalizeToolInput } from '../shared/normalize-util.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AcpJsonRpcId } from './protocol.js';
-import type { AcpAbortStrategy, AcpAgentPolicy } from './agent-runtime.js';
+import { asString } from './event-converter.js';
+import type { AcpAbortStrategy, AcpAgentPolicy } from './policy.js';
 import type { AcpResumeRequest, AcpStartRequest } from './runtime-types.js';
 
-export function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-export function asString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
 
 export function buildPromptFallback(
   request: AcpStartRequest | AcpResumeRequest,
@@ -59,12 +51,14 @@ const CHOICE_FALLBACK_IDS: Record<AcpPermissionChoice, readonly string[]> = {
   reject: ['reject-once', 'reject_once', 'reject', 'deny'],
 };
 
-// Cancels instead of guessing when no option matches, so a denial can never
-// select an option whose meaning is unknown.
+// Cancels instead of guessing when no offered option matches, so a denial can
+// never select an option whose meaning is unknown. An agent that offers no
+// options at all gets the conventional ID for the choice.
 export function permissionChoiceOutcome(
   options: ReadonlyArray<Record<string, unknown>>,
   choice: AcpPermissionChoice,
 ): Record<string, unknown> {
+  if (options.length === 0) return permissionOutcome(CHOICE_FALLBACK_IDS[choice][0]!);
   for (const kind of CHOICE_KINDS[choice]) {
     const optionId = optionIdFrom(options.find((option) => option.kind === kind) ?? {});
     if (optionId) return permissionOutcome(optionId);

@@ -51,6 +51,8 @@ class FakeAntigravityAgent {
   modeOptions: Array<{ value: string }> = MODE_OPTION.options;
   // Whether `session/set_config_option` replies with the session's options.
   configReplyReportsOptions = true;
+  // When set, `session/set_config_option` replies only after this settles.
+  configReplyGate: Promise<void> | null = null;
 
   // Each spawn is a fresh process; later frames go to the newest one.
   process(): AcpProcess {
@@ -124,7 +126,14 @@ class FakeAntigravityAgent {
         }
         return reply(this.resumeReportsOptions ? { models: MODELS, configOptions: [MODE_OPTION] } : { models: MODELS });
       case 'session/set_config_option':
-        return reply(this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, currentValue: params.value }] } : {});
+      {
+        const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, currentValue: params.value }] } : {};
+        if (this.configReplyGate) {
+          void this.configReplyGate.then(() => reply(result));
+          return;
+        }
+        return reply(result);
+      }
       case 'session/prompt':
         this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
         return this.#script(this, String(params.sessionId));
@@ -422,6 +431,58 @@ describe('Antigravity ACP runtime', () => {
     await expect(second).rejects.toThrow('is already running');
     await first;
     expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
+  it('starts the next turn after Stop on a turn that runTurn started', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+
+    agent.onPrompt(() => {});
+    agent.cancelReply = 'deferred';
+    const second = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    await waitFor(() => runtime.isRunning(started.agentSessionId) && agent.requests('session/prompt').length === 2);
+    runtime.abort(started.agentSessionId);
+
+    agent.onPrompt((fake) => fake.endPrompt());
+    await runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    await second;
+    expect(agent.requests('session/prompt')).toHaveLength(3);
+    runtime.shutdown();
+  });
+
+  it('counts a turn that is still being configured as busy', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+
+    const gate = Promise.withResolvers<void>();
+    agent.configReplyGate = gate.promise;
+    const turn = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    expect(agent.requests('session/prompt')).toHaveLength(1);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    await expect(runtime.prepareProjectPathUpdate({
+      chatId: 'chat-1', agentSessionId: started.agentSessionId, previousProjectPath: '/work', nextProjectPath: '/next', nativePath: null,
+    })).rejects.toThrow('is already running');
+    gate.resolve();
+    await turn;
+    runtime.shutdown();
+  });
+
+  it('returns to the agent default model when the request names none', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request({ model: 'gemini-test-high' }));
+    await waitFor(() => runEnded(events).length === 1);
+
+    await runtime.runTurn({ ...request({ model: '' }), agentSessionId: started.agentSessionId });
+
+    expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
+      .toEqual(['gemini-test-high', 'gemini-test-low']);
     runtime.shutdown();
   });
 
