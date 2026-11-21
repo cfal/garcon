@@ -624,7 +624,8 @@ describe('GitWorktreePickerModal', () => {
 		expect(create.disabled).toBe(true);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
-		const location = screen.getByLabelText('Location');
+		const location = screen.getByLabelText<HTMLInputElement>('Location');
+		expect(location.placeholder).toBe('Path override');
 		await fireEvent.input(location, { target: { value: '/tmp/example2 ' } });
 		await fireEvent.click(create);
 		expect(onCreate).toHaveBeenLastCalledWith({
@@ -634,6 +635,7 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.input(location, { target: { value: '   ' } });
 		expect(create.disabled).toBe(true);
 		await view.rerender({ worktrees: [worktree('repo', null, { path: '/repo ', isMain: true })] });
+		expect(location.placeholder).toBe('/repo /.worktrees/example2');
 		await fireEvent.click(create);
 		expect(onCreate).toHaveBeenLastCalledWith({
 			worktreePath: '/repo /.worktrees/example2', branch: 'example2', baseRef: undefined,
