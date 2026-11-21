@@ -3,6 +3,7 @@
 import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
@@ -12,9 +13,10 @@ import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 interface AgentRouteDeps {
   agents: AgentRegistryServiceContract;
   apiProviders: ApiProviderService;
+  responseCache: ModelCatalogResponseCache;
 }
 
-export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDeps): RouteMap {
+export default function createAgentRoutes({ agents, apiProviders, responseCache }: AgentRouteDeps): RouteMap {
   function validateAuthLoginAgent(agentId: string, executorId: string): Response | null {
     agents.assertExecutorReady(executorId);
     if (!agents.hasAgent(agentId, executorId)) {
@@ -99,7 +101,9 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
       const executorId = executorIdFromUrl(url);
       const invalidAgent = validateAuthLoginAgent(agentId, executorId);
       if (invalidAgent) return invalidAgent;
-      return Response.json(await agents.getAgentAuthLoginStatus(agentId, expectedSessionId, executorId));
+      const status = await agents.getAgentAuthLoginStatus(agentId, expectedSessionId, executorId);
+      if (status.state === 'succeeded' && status.sessionId === expectedSessionId) responseCache.clear(executorId);
+      return Response.json(status);
     } catch (error) {
       return jsonErrorFromUnknown(error);
     }

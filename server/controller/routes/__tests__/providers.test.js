@@ -51,7 +51,7 @@ describe('agent auth login routes', () => {
   };
   const responseCache = new ModelCatalogResponseCache();
   const routes = {
-    ...createAgentRoutes({ agents, apiProviders }),
+    ...createAgentRoutes({ agents, apiProviders, responseCache }),
     ...createApiProviderRoutes(apiProviders, responseCache),
   };
 
@@ -139,6 +139,22 @@ describe('agent auth login routes', () => {
       const response = await routes['/api/v1/agents/auth/login'].GET(request, new URL(request.url));
       expect(await response.json()).toEqual(status);
     }
+  });
+
+  it('refreshes only the signed-in executor catalog after login succeeds, not while waiting for a code', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const catalog = { agents, apiProviders };
+    const localBefore = await responseCache.getSnapshot(catalog, 'local');
+    const remoteBefore = await responseCache.getSnapshot(catalog, executorId);
+    const url = new URL(`http://localhost/api/v1/agents/auth/login?agent=antigravity&session=session-a&executorId=${executorId}`);
+    const status = () => routes['/api/v1/agents/auth/login'].GET(new Request(url), url);
+    expect((await status()).status).toBe(200);
+    expect(await responseCache.getSnapshot(catalog, executorId)).toBe(remoteBefore);
+
+    agents.getAgentAuthLoginStatus.mockResolvedValueOnce({ state: 'succeeded', running: false, sessionId: 'session-a' });
+    expect((await status()).status).toBe(200);
+    expect(await responseCache.getSnapshot(catalog, executorId)).not.toBe(remoteBefore);
+    expect(await responseCache.getSnapshot(catalog, 'local')).toBe(localBefore);
   });
 
   it('returns a retryable validation response for an incomplete authorization code', async () => {

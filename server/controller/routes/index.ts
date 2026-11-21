@@ -202,7 +202,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createProjectResolutionRoutes({ registry, inspect: inspectProject }),
     createStaticRoutes(settings),
     authRoutes,
-    createAgentRoutes({ agents, apiProviders }),
+    createAgentRoutes({ agents, apiProviders, responseCache: modelCatalogResponseCache }),
     createApiProviderRoutes(apiProviders, modelCatalogResponseCache),
     createChatRoutes({
       registry,

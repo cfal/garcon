@@ -87,7 +87,7 @@ The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. 
 
 `agy models` prints `<id>\t<label>` lines such as `gemini-3.1-pro-high	Gemini 3.1 Pro (High)`. Each ID encodes the model and its thinking level, and the levels differ per model. Garcon therefore exposes these IDs directly as catalog models and declares no thinking modes. Discovery runs no session, so it leaves no empty conversation in the user's history. `session/set_model` accepts the same IDs and updates both the `model` and `thought_level` options.
 
-Choosing Default (an empty model) returns to the model agy picked when the process opened the session. A resumed session reports only its current model, so after a restart or reconnect Default keeps the last model in use. Learning agy's real default would take a `session/new`, which leaves an empty conversation in the user's history.
+The catalog always offers **Default** (`default`), even when model discovery returns no IDs. Like an omitted model, it selects the model agy picked when the process opened the session, not the first model printed by `agy models`. A resumed session reports only its current model, so after a restart or reconnect Default keeps the last model in use. Learning agy's original default would take a `session/new`, which leaves an empty conversation in the user's history.
 
 Permission modes:
 
@@ -116,6 +116,8 @@ Antigravity is not a default generation agent (`generation: null`, like Cursor),
 ## Tool Normalization
 
 Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `rawOutput`, `content` (text or diffs), and `status`.
+
+For `run_command`, ACP `completed` means the invocation finished, not that the command succeeded. A nonzero `rawOutput.exit_code` marks the tool result as an error; the enclosing agent turn may still finish normally.
 
 | Antigravity tool | Garcon message |
 | --- | --- |
@@ -162,3 +164,5 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 | Text generation | Disposable ACP session | `singleQuery` via a disposable ACP session |
 
 Gaps deliberately left for follow-up are steering, Reload from native history (`session/load` replay), quota reporting, and ACP elicitation for `ask_question`.
+
+In a held-model probe against 1.5.13, a second concurrent `session/prompt` did not acknowledge delivery while the first request was held. Both prompt RPCs later returned `end_turn`, and the second model request contained both inputs. Enabling Garcon steering therefore needs explicit ownership of those two terminal replies; a second prompt alone is not a safe delivery acknowledgement. Busy Antigravity chats keep the normal next-turn queue.

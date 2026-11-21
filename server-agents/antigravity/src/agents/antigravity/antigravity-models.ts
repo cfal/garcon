@@ -1,7 +1,8 @@
 import type { AgentModelOption } from '@garcon/common/agents';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
-import { sharedProbe } from '@garcon/server-agent-common/shared/shared-probe';
+import { sharedProbe, waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
 const MODELS_TIMEOUT_MS = 10_000;
 
@@ -99,7 +100,19 @@ export function antigravityCliFailure(result: AntigravityCliResult): string {
     || `agy models exited with code ${result.exitCode ?? 'unknown'}`;
 }
 
-export async function getAntigravityModels(
+export function createAntigravityCatalog(config: AntigravityConfig, logger: AgentLogger) {
+  return createModelCatalog({
+    logger,
+    defaultModel: 'default',
+    fallbackModels: [{ value: 'default', label: 'Default', supportsImages: true }],
+    requiresStrictModelDiscovery: false,
+    // Disposable generation sessions remain in agy's native history.
+    generation: null,
+    discover: ({ signal }) => waitUnlessAborted(getAntigravityModels(config, logger), signal),
+  });
+}
+
+async function getAntigravityModels(
   config: AntigravityConfig,
   logger: AgentLogger,
 ): Promise<AgentModelOption[]> {

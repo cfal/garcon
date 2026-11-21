@@ -2,11 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
 import { antigravityChildEnvironment, createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
 import {
+  antigravityLoginCommand,
   antigravityLoginEnvironment,
   getAntigravityAuthStatus,
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
-import { antigravityCliFailure, parseAntigravityModels } from '../antigravity-models.ts';
+import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels } from '../antigravity-models.ts';
 
 function environment(values: Record<string, string>): AgentEnvironmentReader {
   return { get: (name) => values[name] };
@@ -14,7 +15,7 @@ function environment(values: Record<string, string>): AgentEnvironmentReader {
 
 function config(overrides: Partial<AntigravityConfig> = {}): AntigravityConfig {
   return {
-    binary: () => 'agy',
+    binary: () => process.execPath,
     apiKey: () => null,
     hasApiKey: () => false,
     authMethod: () => 'oauth-personal',
@@ -42,6 +43,15 @@ describe('Antigravity configuration', () => {
 });
 
 describe('parseAntigravityModels', () => {
+  it('keeps the native Default selectable when agy lists no models', async () => {
+    const catalog = createAntigravityCatalog(config({ binary: () => '/synthetic/uninstalled/agy' }), {
+      debug() {}, info() {}, warn() {}, error() {},
+    });
+    const snapshot = await catalog.snapshot({ signal: new AbortController().signal, strict: false });
+    expect(snapshot.defaultModel).toBe('default');
+    expect(snapshot.models).toEqual([{ value: 'default', label: 'Default', supportsImages: true }]);
+  });
+
   it('reads tab-separated ids and labels and ignores status lines', () => {
     expect(parseAntigravityModels([
       'Fetching available models...',
@@ -65,6 +75,13 @@ describe('parseAntigravityModels', () => {
 });
 
 describe('getAntigravityAuthStatus', () => {
+  it('does not mark an executor ready from an API key alone when agy is missing', async () => {
+    const status = await getAntigravityAuthStatus(config({
+      binary: () => '/synthetic/uninstalled/agy', hasApiKey: () => true, authMethod: () => 'gemini-api-key',
+    }));
+    expect(status).toMatchObject({ authenticated: false, canReauth: false, detail: expect.stringContaining('Install agy') });
+  });
+
   it('reports an API key as environment authentication without spawning the CLI', async () => {
     const status = await getAntigravityAuthStatus(config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
     expect(status).toEqual({ authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' });
@@ -175,6 +192,13 @@ describe('getAntigravityAuthStatus', () => {
 });
 
 describe('Antigravity login', () => {
+  it('does not launch personal sign-in for API-key or enterprise authentication', () => {
+    expect(antigravityLoginCommand(config())).toEqual([process.execPath, 'acp', '--login']);
+    for (const method of ['gemini-api-key', 'oauth-business', 'agent-platform'] as const) {
+      expect(() => antigravityLoginCommand(config({ authMethod: () => method }))).toThrow('requires oauth-personal');
+    }
+  });
+
   it('removes display variables so the CLI prints its sign-in link', () => {
     const previous = { DISPLAY: process.env.DISPLAY, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY };
     process.env.DISPLAY = ':0';

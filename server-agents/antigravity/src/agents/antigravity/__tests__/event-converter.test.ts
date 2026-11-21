@@ -181,6 +181,21 @@ describe('AntigravityAcpEventConverter', () => {
     ]);
   });
 
+  it('preserves a command failure and its diagnostic even when agy completed the invocation', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('command', 'run_command', 'execute', { CommandLine: 'exit 9' }), context);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'command', status: 'completed',
+      rawOutput: { exit_code: 9, output: '' },
+      content: [{ type: 'content', content: { type: 'text', text: 'Command exited with code 9.' } }],
+    }), context);
+    expect(plain(rows)).toEqual([{
+      type: 'tool-result', toolId: 'command', content: { raw: 'Command exited with code 9.' }, isError: true,
+    }]);
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
   it('emits the tool row first when a terminal update is the first frame for a call', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
@@ -458,9 +473,9 @@ describe('AntigravityAcpEventConverter', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
     converter.fromSessionUpdate(update({
-      sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', kind: 'execute', status: 'pending', rawInput: {},
     }), context);
-    converter.permissionToolUse({ toolCallId: 'tool-1', kind: 'execute', rawInput: { CommandLine: 'echo stopped' } }, context);
+    converter.permissionToolUse({ toolCallId: 'tool-1', name: 'run_command', kind: 'execute', rawInput: { CommandLine: 'echo stopped' } }, context);
 
     expect(plain(converter.endTurn(SESSION, context))).toEqual([
       { type: 'bash-tool-use', toolId: 'tool-1', command: 'echo stopped', description: undefined },

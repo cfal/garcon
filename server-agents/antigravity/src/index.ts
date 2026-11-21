@@ -12,7 +12,6 @@ import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
-import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
@@ -36,7 +35,7 @@ import {
   getAntigravityAuthStatus,
   validateAntigravityLoginCode,
 } from './agents/antigravity/antigravity-auth.js';
-import { getAntigravityModels } from './agents/antigravity/antigravity-models.js';
+import { createAntigravityCatalog } from './agents/antigravity/antigravity-models.js';
 import { runAntigravitySingleQuery } from './agents/antigravity/run-single-query.js';
 
 const ANTIGRAVITY_DESCRIPTOR = {
@@ -136,16 +135,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
     this.producers = producer.producers;
     this.permissions = producer.permissions;
     this.nativeSessions = createAntigravityNativeSessions(nativeSessions, runtime);
-    this.catalog = createModelCatalog({
-      logger: host.logger,
-      defaultModel: '',
-      fallbackModels: [],
-      requiresStrictModelDiscovery: false,
-      // Each one-shot query opens a session that agy keeps in the user's
-      // conversation history, so Antigravity is not a default generation agent.
-      generation: null,
-      discover: () => getAntigravityModels(config, logger),
-    });
+    this.catalog = createAntigravityCatalog(config, logger);
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
     let lastProbed: AgentAuthStatus | null = null;
     this.auth = {

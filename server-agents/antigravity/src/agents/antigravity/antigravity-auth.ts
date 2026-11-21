@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 import type { AgentAuthStatus } from '@garcon/common/agent-execution';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AcpClient } from '@garcon/server-agent-common/acp/client';
 import { garconInitializeParams } from '@garcon/server-agent-common/acp/protocol';
 import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
@@ -62,11 +63,19 @@ export async function getAntigravityAuthStatus(
     lastProbed = null,
   }: AntigravityAuthStatusOptions = {},
 ): Promise<AgentAuthStatus> {
+  signal?.throwIfAborted();
   try {
     // Sessions authenticate with the configured method only, so status must not
     // fall back to another credential the CLI happens to hold. A Google sign-in
     // cannot change an API-key setup, so none is offered for it.
-    if (config.authMethod() === 'gemini-api-key') {
+    const method = config.authMethod();
+    if (!Bun.which(config.binary())) {
+      return {
+        authenticated: false, canReauth: false, label: '', source: 'none',
+        detail: 'Antigravity CLI not found on this executor. Install agy or set GARCON_ANTIGRAVITY_BINARY.',
+      };
+    }
+    if (method === 'gemini-api-key') {
       return config.hasApiKey()
         ? { authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' }
         : { authenticated: false, canReauth: false, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
@@ -78,7 +87,6 @@ export async function getAntigravityAuthStatus(
     // `agy models` proves usable. `agy models` accepts any credential the CLI
     // holds, so an enterprise method instead asks agy to authenticate with it
     // where that cannot open a browser, and falls back to `agy models` elsewhere.
-    const method = config.authMethod();
     const canReauth = method === 'oauth-personal';
     if (!canReauth && headlessAuthenticate) {
       await waitUnlessAborted(authenticate(config), signal);
@@ -111,6 +119,9 @@ export async function getAntigravityAuthStatus(
 
 // Remote-friendly Google sign-in: prints a link, then reads the pasted code.
 export function antigravityLoginCommand(config: AntigravityConfig): CliLoginCommand {
+  if (config.authMethod() !== 'oauth-personal') {
+    throw new AgentIntegrationError('OPERATION_UNSUPPORTED', 'In-app Antigravity sign-in requires oauth-personal.', false);
+  }
   return [config.binary(), 'acp', '--login'];
 }
 
