@@ -13,7 +13,7 @@ test('a fenced workflow store cannot break ordinary chat deletion or drop refere
   });
   try {
     await runtime.start();
-    const db = new Database(join(dir, 'workflow-runs.sqlite'), { readonly: false });
+    const db = new Database(join(dir, 'workflow-runs.sqlite'), { readwrite: true });
     try { db.exec('DROP TABLE workflow_attempts'); } finally { db.close(); }
     expect(() => runtime.handleChatRemoved('ordinary-chat')).not.toThrow();
     expect(() => runtime.service).toThrow('unavailable');
