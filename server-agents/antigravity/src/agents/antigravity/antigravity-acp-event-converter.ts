@@ -159,8 +159,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     if (parsed.name) this.#rememberToolName(session, parsed.toolCallId, parsed.name);
     const call = { ...parsed, name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null };
     if (session.emittedToolIds.has(call.toolCallId)) return [];
-    if (!terminal && Object.keys(call.input).length === 0) return [];
+    // Text before the call is flushed even while its row waits for arguments,
+    // so later text cannot move ahead of the tool row.
     const messages = this.#flush(session, timestamp);
+    if (!terminal && Object.keys(call.input).length === 0) return messages;
     this.#remember(session.emittedToolIds, call.toolCallId);
     messages.push(convertAntigravityToolUse(timestamp, call));
     return messages;

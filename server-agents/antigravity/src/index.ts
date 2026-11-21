@@ -113,7 +113,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
       command: () => antigravityLoginCommand(config),
       mode: 'browser-code',
       logger,
-      environment: antigravityLoginEnvironment,
+      environment: () => antigravityLoginEnvironment(config),
       validateCode: validateAntigravityLoginCode,
     });
 

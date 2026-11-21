@@ -5,8 +5,12 @@ export class AcpRestoreRegistry<T> {
   #pending = new Map<string, { readonly chatId: string; cancelled: boolean; promise?: Promise<T> }>();
 
   // Null when nothing is in flight, so callers add no await in the common case.
-  inFlight(sessionId: string): Promise<unknown> | null {
-    return this.#pending.get(sessionId)?.promise?.catch(() => {}) ?? null;
+  // `cancelled` tells a waiter that the restore it waited on was released, so it
+  // must not start a replacement for that session.
+  inFlight(sessionId: string): { readonly settled: Promise<unknown>; cancelled(): boolean } | null {
+    const entry = this.#pending.get(sessionId);
+    if (!entry?.promise) return null;
+    return { settled: entry.promise.catch(() => {}), cancelled: () => entry.cancelled };
   }
 
   async run(sessionId: string, chatId: string, restore: (isCancelled: () => boolean) => Promise<T>): Promise<T> {

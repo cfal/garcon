@@ -135,7 +135,7 @@ export function createAntigravityAcpPolicy(config: AntigravityConfig): AcpAgentP
     promptModeConfig: false,
     configureSession: configureAntigravitySession,
     buildPrompt: antigravityPrompt,
-    buildEnv: (request) => antigravityChildEnvironment(request.envOverrides),
+    buildEnv: (request) => antigravityChildEnvironment(config, request.envOverrides),
     resolveNativePath: createAntigravityNativePath,
   };
 }

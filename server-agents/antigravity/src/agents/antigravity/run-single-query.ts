@@ -40,7 +40,7 @@ export async function runAntigravitySingleQuery(
       command: config.binary(),
       args: ['acp'],
       cwd: options.projectPath,
-      env: antigravityChildEnvironment(),
+      env: antigravityChildEnvironment(config),
     },
     initialize: {
       protocolVersion: 1,

@@ -4,7 +4,6 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import {
   runtimeRows,
   type AgentRuntimeEvent,
@@ -24,7 +23,6 @@ import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-in
 import { AcpCapabilityCache } from './capability-cache.js';
 import { AcpClient } from './client.js';
 import type {
-  AcpInitializeParams,
   AcpJsonRpcId,
   AcpSessionConfigOption,
   AcpSessionModelState,
@@ -50,8 +48,6 @@ import {
   abortStrategy,
   unlessSettled,
   untilSettledOrClosed,
-  buildEnvFallback,
-  buildPromptFallback,
   fallbackPermissionToolUse,
   humanizeError,
   isAutoApproveMode,
@@ -139,6 +135,7 @@ export class AcpAgentRuntime {
   #cancelSettleTimeoutMs: number;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #restores = new AcpRestoreRegistry<AcpAgentRuntimeSession>();
+  #stopped = false;
   #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
@@ -173,6 +170,10 @@ export class AcpAgentRuntime {
       throw error;
     }
 
+    if (this.#stopped) {
+      client.close();
+      throw new Error(`The ${this.#policy.agentId} runtime stopped while the session was starting.`);
+    }
     const sessionId = created.sessionId;
     const existing = this.#sessions.get(sessionId);
     if (existing) {
@@ -368,6 +369,8 @@ export class AcpAgentRuntime {
   }
 
   shutdown(): void {
+    // Fences starts still connecting; restores are cancelled below.
+    this.#stopped = true;
     this.#idlePurger.stop();
     this.#restores.cancelAll();
     for (const session of [...this.#sessions.values()]) {
@@ -378,6 +381,7 @@ export class AcpAgentRuntime {
   }
 
   startPurgeTimer(): void {
+    this.#stopped = false;
     this.#idlePurger.start();
   }
 
@@ -421,7 +425,10 @@ export class AcpAgentRuntime {
     // another waiter's new restore already in flight.
     for (let restoring = this.#restores.inFlight(request.agentSessionId); restoring;
       restoring = this.#restores.inFlight(request.agentSessionId)) {
-      await restoring;
+      await restoring.settled;
+      if (restoring.cancelled()) {
+        throw new Error(`The ${this.#policy.agentId} session ${request.agentSessionId} was released while it was being restored.`);
+      }
     }
     const existing = this.#sessions.get(request.agentSessionId);
     if (existing) {
@@ -542,6 +549,9 @@ export class AcpAgentRuntime {
       }
     } catch (error) {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
+      // The transport failure is reported; an in-band failure the agent sent
+      // first must not add a second error row at the final flush.
+      this.#converter.takeTurnFailure?.(session.id);
       if (turn.aborted) {
         success = false;
       } else {

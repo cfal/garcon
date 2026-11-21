@@ -369,6 +369,16 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
+  it('flushes text before a call whose row waits for arguments', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Before.' } }), context);
+    const bare = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+    }), context);
+    expect(plain(bare)).toEqual([{ type: 'assistant-message', content: 'Before.' }]);
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

@@ -15,6 +15,7 @@ function environment(values: Record<string, string>): AgentEnvironmentReader {
 function config(overrides: Partial<AntigravityConfig> = {}): AntigravityConfig {
   return {
     binary: () => 'agy',
+    apiKey: () => null,
     hasApiKey: () => false,
     authMethod: () => 'oauth-personal',
     ...overrides,
@@ -117,6 +118,13 @@ describe('getAntigravityAuthStatus', () => {
       .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
   });
 
+  it('offers no personal sign-in when an enterprise probe fails', async () => {
+    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
+      runModels: async () => { throw new Error('spawn failed'); },
+    });
+    expect(status).toMatchObject({ authenticated: false, canReauth: false, detail: 'spawn failed' });
+  });
+
   it('uses the CLI model listing as the signed-in check', async () => {
     const signedIn = await getAntigravityAuthStatus(config(), { runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }) });
     expect(signedIn).toMatchObject({ authenticated: true, source: 'cli' });
@@ -142,10 +150,11 @@ describe('Antigravity login', () => {
     process.env.DISPLAY = ':0';
     process.env.WAYLAND_DISPLAY = 'wayland-0';
     try {
-      const env = antigravityLoginEnvironment();
+      const env = antigravityLoginEnvironment({ apiKey: () => 'synthetic-key' });
       expect(env.DISPLAY).toBeUndefined();
       expect(env.WAYLAND_DISPLAY).toBeUndefined();
       expect(env.AGY_CLI_DISABLE_AUTO_UPDATE).toBe('1');
+      expect(env.GEMINI_API_KEY).toBe('synthetic-key');
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key];

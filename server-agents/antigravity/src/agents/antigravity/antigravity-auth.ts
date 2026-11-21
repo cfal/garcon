@@ -64,11 +64,21 @@ export async function getAntigravityAuthStatus(
     if (signal?.aborted) throw error;
     return {
       authenticated: false,
-      canReauth: true,
+      // A failed probe or invalid setting is not fixed by a personal sign-in
+      // unless that is the configured method.
+      canReauth: offersPersonalSignIn(config),
       label: '',
       source: 'none',
       detail: error instanceof Error ? error.message : String(error),
     };
+  }
+}
+
+function offersPersonalSignIn(config: AntigravityConfig): boolean {
+  try {
+    return config.authMethod() === 'oauth-personal';
+  } catch {
+    return false;
   }
 }
 
@@ -79,9 +89,9 @@ export function antigravityLoginCommand(config: AntigravityConfig): CliLoginComm
 
 // Without a display the CLI prints its sign-in link instead of opening a browser
 // (t3code apps/server/src/provider/Drivers/AntigravityDriver.ts:402-474 at be91767).
-export function antigravityLoginEnvironment(): Record<string, string> {
+export function antigravityLoginEnvironment(config: Pick<AntigravityConfig, 'apiKey'>): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(antigravityChildEnvironment())) {
+  for (const [key, value] of Object.entries(antigravityChildEnvironment(config))) {
     if (value !== undefined && key !== 'DISPLAY' && key !== 'WAYLAND_DISPLAY') env[key] = value;
   }
   return env;

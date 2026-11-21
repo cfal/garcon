@@ -103,6 +103,13 @@ class FakeAntigravityAgent {
     });
   }
 
+  failPrompt(message: string): void {
+    const prompt = this.#openPrompt;
+    if (!prompt) throw new Error('No open prompt');
+    this.#openPrompt = null;
+    this.#send({ jsonrpc: '2.0', id: prompt.id, error: { code: -32603, message } });
+  }
+
   endPrompt(stopReason = 'end_turn'): void {
     const prompt = this.#openPrompt;
     if (!prompt) throw new Error('No open prompt');
@@ -173,6 +180,7 @@ class FakeAntigravityAgent {
 
 const CONFIG: AntigravityConfig = {
   binary: () => 'agy',
+  apiKey: () => null,
   hasApiKey: () => false,
   authMethod: () => 'oauth-personal',
 };
@@ -752,6 +760,54 @@ describe('Antigravity ACP runtime', () => {
 
     expect(agent.requests('session/resume')).toHaveLength(2);
     runtime.shutdown();
+  });
+
+  it('does not let a waiter resurrect a session released during its restore', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    const gate = Promise.withResolvers<void>();
+    agent.resumeGate = gate.promise;
+
+    const first = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }).then(() => null, (error: Error) => error);
+    await waitFor(() => agent.requests('session/resume').length === 1);
+    const waiter = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }).then(() => null, (error: Error) => error);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    agent.resumeGate = null;
+    gate.resolve();
+
+    expect((await first)?.message).toContain('was released while it was being restored');
+    expect((await waiter)?.message).toContain('was released while it was being restored');
+    expect(agent.requests('session/resume')).toHaveLength(1);
+  });
+
+  it('does not register a session that finishes starting after shutdown', async () => {
+    const { agent, runtime, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const start = runtime.startSession(request()).then(() => null, (error: Error) => error);
+    runtime.shutdown();
+    expect((await start)?.message).toContain('stopped while the session was starting');
+    expect(agent.requests('session/prompt')).toEqual([]);
+  });
+
+  it('passes the configured Gemini API key to the agent process', () => {
+    const policy = createAntigravityAcpPolicy({ ...CONFIG, apiKey: () => 'synthetic-key', hasApiKey: () => true });
+    expect(policy.buildEnv?.({ ...harness().request(), envOverrides: {} })?.GEMINI_API_KEY).toBe('synthetic-key');
+  });
+
+  it('reports one error row when the prompt fails after an in-band error', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, sessionId) => {
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: Error 500\n' } });
+      fake.failPrompt('Synthetic prompt failure');
+    });
+
+    await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    expect(rows).toEqual([expect.objectContaining({ type: 'error', content: 'Synthetic prompt failure' })]);
   });
 
   it('fails the run when agy reports an executor error in-band', async () => {

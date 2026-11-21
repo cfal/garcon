@@ -20,14 +20,14 @@ export function runAntigravityModels(config: AntigravityConfig): Promise<Antigra
   const binary = config.binary();
   const running = inFlightModels.get(binary);
   if (running) return running;
-  const started = spawnAntigravityModels(binary).finally(() => inFlightModels.delete(binary));
+  const started = spawnAntigravityModels(config, binary).finally(() => inFlightModels.delete(binary));
   inFlightModels.set(binary, started);
   return started;
 }
 
-async function spawnAntigravityModels(binary: string): Promise<AntigravityCliResult> {
+async function spawnAntigravityModels(config: AntigravityConfig, binary: string): Promise<AntigravityCliResult> {
   const proc = Bun.spawn([binary, 'models'], {
-    env: antigravityChildEnvironment(),
+    env: antigravityChildEnvironment(config),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

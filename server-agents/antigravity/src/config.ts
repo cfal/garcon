@@ -13,14 +13,17 @@ export type AntigravityAuthMethod = typeof ANTIGRAVITY_AUTH_METHODS[number];
 
 export interface AntigravityConfig {
   readonly binary: () => string;
+  readonly apiKey: () => string | null;
   readonly hasApiKey: () => boolean;
   readonly authMethod: () => AntigravityAuthMethod;
 }
 
 export function createAntigravityConfig(environment: AgentEnvironmentReader): AntigravityConfig {
-  const hasApiKey = () => readEnvironment(environment, 'GEMINI_API_KEY') !== null;
+  const apiKey = () => readEnvironment(environment, 'GEMINI_API_KEY');
+  const hasApiKey = () => apiKey() !== null;
   return Object.freeze({
     binary: () => readEnvironment(environment, 'GARCON_ANTIGRAVITY_BINARY') ?? 'agy',
+    apiKey,
     hasApiKey,
     authMethod: () => resolveAuthMethod(
       readEnvironment(environment, 'GARCON_ANTIGRAVITY_AUTH_METHOD'),
@@ -48,9 +51,13 @@ function isAntigravityAuthMethod(value: string): value is AntigravityAuthMethod 
   return (ANTIGRAVITY_AUTH_METHODS as readonly string[]).includes(value);
 }
 
-// The CLI's background updater would replace a binary that running sessions use.
+// The CLI's background updater would replace a binary that running sessions
+// use. The key comes from the integration's environment reader, the same source
+// auth status and the auth method use, rather than whatever process.env holds.
 export function antigravityChildEnvironment(
+  config: Pick<AntigravityConfig, 'apiKey'>,
   overrides: Readonly<Record<string, string>> = {},
 ): Record<string, string | undefined> {
-  return { ...process.env, AGY_CLI_DISABLE_AUTO_UPDATE: '1', ...overrides };
+  const apiKey = config.apiKey();
+  return { ...process.env, AGY_CLI_DISABLE_AUTO_UPDATE: '1', ...(apiKey ? { GEMINI_API_KEY: apiKey } : {}), ...overrides };
 }
