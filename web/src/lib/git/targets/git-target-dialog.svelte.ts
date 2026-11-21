@@ -30,7 +30,6 @@ export class GitTargetDialogState {
 	worktreePickerOpen = $state(false);
 	worktrees = $state<GitWorktreeItem[]>([]);
 	isLoadingWorktrees = $state(false);
-	isCreatingWorktree = $state(false);
 	worktreeError = $state<string | null>(null);
 	isConfirming = $state(false);
 
@@ -38,6 +37,7 @@ export class GitTargetDialogState {
 	#validationGeneration = 0;
 	#validationAbort: AbortController | null = null;
 	#worktreeGeneration = 0;
+	#pendingCreation = $state.raw<GitProjectTarget | null>(null);
 	#worktreeAbort: AbortController | null = null;
 	#targetAbort: AbortController | null = null;
 	#disposed = false;
@@ -48,6 +48,11 @@ export class GitTargetDialogState {
 
 	get nonblankPath(): string {
 		return this.candidatePath.trim() ? this.candidatePath : '';
+	}
+
+	get isCreatingWorktree(): boolean {
+		return this.#pendingCreation?.executorId === this.options.executorId
+			&& this.#pendingCreation.projectPath === this.nonblankPath;
 	}
 
 	get canConfirm(): boolean {
@@ -154,23 +159,24 @@ export class GitTargetDialogState {
 		const generation = this.#worktreeGeneration;
 		if (!projectPath || !this.options.available || this.isCreatingWorktree) return;
 
-		this.isCreatingWorktree = true;
+		const target = { executorId, projectPath };
+		this.#pendingCreation = target;
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
+			const result = await gitCreateWorktree(target, creation);
 			if (!result.success) {
 				throw new Error(result.error || result.message || m.git_target_load_worktrees_failed());
 			}
 			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.selectWorktree(result.worktreePath || creation.worktreePath);
 		} catch (error) {
-			this.options.onMutationError?.(error, { executorId, projectPath });
+			this.options.onMutationError?.(error, target);
 			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.worktreeError =
 				error instanceof Error ? error.message : m.git_target_load_worktrees_failed();
 		} finally {
-			if (generation === this.#worktreeGeneration) this.isCreatingWorktree = false;
+			if (this.#pendingCreation === target) this.#pendingCreation = null;
 		}
 	}
 
@@ -279,7 +285,6 @@ export class GitTargetDialogState {
 		this.#worktreeAbort = null;
 		this.#worktreeGeneration += 1;
 		this.isLoadingWorktrees = false;
-		this.isCreatingWorktree = false;
 	}
 
 	#captureContext(): () => boolean {

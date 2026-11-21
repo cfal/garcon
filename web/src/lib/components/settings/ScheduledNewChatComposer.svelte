@@ -289,9 +289,10 @@
 	</ScheduledPromptField>
 </div>
 
-{#if startup.gitAvailable && startup.worktreeModalOpen}
+{#if startup.worktreeModalOpen}
 	<GitWorktreePickerModal
-		contextKey={JSON.stringify([startup.pathContextKey, startup.nonblankPath])}
+		contextKey={JSON.stringify([startup.executorId, startup.nonblankPath])}
+		catalogContextKey={startup.gitAvailable ? startup.pathContextKey : null}
 		description={prompt}
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}

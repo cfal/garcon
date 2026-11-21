@@ -686,6 +686,40 @@ describe('GitWorktreePickerModal', () => {
 		expect(onCreate).toHaveBeenLastCalledWith({ worktreePath: '/workspace/main/.worktrees/manual', branch: 'manual', baseRef: undefined });
 	});
 
+	it('retains naming work offline and defers the reconnect refresh during creation', async () => {
+		const response = Promise.withResolvers<{ name: string }>();
+		vi.mocked(generateGitName).mockReturnValueOnce(response.promise);
+		const onCreate = vi.fn();
+		const onRefresh = vi.fn();
+		const view = renderPicker([worktree('main', null, { isMain: true })], {
+			contextKey: 'worker/repo', catalogContextKey: 'serving-1', onCreate, onRefresh,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		const field = screen.getByRole<HTMLInputElement>('textbox', { name: /branch name/i });
+		await fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
+		const request = vi.mocked(generateGitName).mock.lastCall![1];
+		await view.rerender({ catalogContextKey: null });
+		expect(screen.getByRole('textbox', { name: /branch name/i })).toBe(field);
+		expect(request.aborted).toBe(false);
+		response.resolve({ name: 'stable-draft' });
+		await waitFor(() => expect(field.value).toBe('stable-draft'));
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		expect(onCreate).not.toHaveBeenCalled();
+		expect(onRefresh).not.toHaveBeenCalled();
+		await view.rerender({ catalogContextKey: 'serving-2' });
+		expect(onRefresh).toHaveBeenCalledTimes(1);
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		expect(onCreate).toHaveBeenCalledTimes(1);
+		await view.rerender({ isCreating: true, catalogContextKey: null });
+		await view.rerender({ catalogContextKey: 'serving-3' });
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		expect(onCreate).toHaveBeenCalledTimes(1);
+		expect(onRefresh).toHaveBeenCalledTimes(1);
+		await view.rerender({ isCreating: false });
+		expect(onRefresh).toHaveBeenCalledTimes(2);
+		expect(screen.getByDisplayValue('stable-draft')).toBe(field);
+	});
+
 	it.each(['edit', 'back', 'executor'] as const)('discards a pending suggestion after %s', async (transition) => {
 		const response = Promise.withResolvers<{ name: string }>();
 		vi.mocked(generateGitName).mockReturnValueOnce(response.promise);

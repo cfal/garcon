@@ -136,6 +136,24 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await create.getByRole('button', { name: 'Generate name' }).click();
       await browserExpect(name).toHaveValue('picker-review');
       await browserExpect(input).toHaveValue(worktree);
+      if (executionBackend === 'remote-controller-dials') {
+        phase('the same executor reconnects without discarding the create draft');
+        const { client } = integration;
+        const location = create.getByRole('textbox', { name: 'Location' });
+        const base = create.getByRole('textbox', { name: 'Base ref' });
+        const submit = create.getByRole('button', { name: 'Create worktree' });
+        await create.getByRole('button', { name: 'Advanced' }).click();
+        const chosenPath = join(project, '.worktrees', 'picker-review');
+        await location.fill(chosenPath);
+        await base.fill('main');
+        await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+        await browserExpect(submit).toBeDisabled();
+        await browserExpect(name).toHaveValue('picker-review');
+        await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+        await browserExpect(submit).toBeEnabled({ timeout: 30_000 });
+        await browserExpect(location).toHaveValue(chosenPath);
+        await browserExpect(base).toHaveValue('main');
+      }
       if (executionBackend === 'in-process') {
         for (const width of [390, 1440]) {
           await page.setViewportSize({ width, height: 900 });

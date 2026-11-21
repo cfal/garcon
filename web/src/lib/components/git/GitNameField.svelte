@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
 	import { GIT_NAME_DESCRIPTION_LIMIT, GIT_NAME_LIMIT } from '$shared/git-name';
@@ -44,11 +44,15 @@
 		error = '';
 	}
 
+	let previousTarget = untrack(() => contextKey);
+	let previousDescription = untrack(() => description);
 	$effect(() => {
-		contextKey;
-		description;
-		return cancel;
+		if (previousTarget === contextKey && previousDescription === description) return;
+		previousTarget = contextKey;
+		previousDescription = description;
+		cancel();
 	});
+	onDestroy(cancel);
 
 	async function suggest(event: MouseEvent) {
 		if (disabled || request) return;

@@ -134,6 +134,28 @@ describe('GitTargetDialogState', () => {
 		},
 	);
 
+	it('keeps creation busy through reconnect until the original mutation settles', async () => {
+		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
+		const options = { executorId: 'remote', executorContextKey: 'first', available: true, initialPath: '/repo' };
+		const dialog = new GitTargetDialogState(options);
+		const draft = { worktreePath: '/repo/feature', newBranch: 'feature' };
+		const pending = dialog.createWorktree(draft);
+		options.available = false;
+		dialog.scheduleValidation();
+		options.available = true;
+		options.executorContextKey = 'replacement';
+		dialog.scheduleValidation();
+		expect(dialog.isCreatingWorktree).toBe(true);
+		await dialog.createWorktree(draft);
+		expect(gitApi.gitCreateWorktree).toHaveBeenCalledTimes(1);
+		creation.resolve({ success: true, worktreePath: draft.worktreePath });
+		await pending;
+		expect(dialog.isCreatingWorktree).toBe(false);
+		expect(dialog.candidatePath).toBe('/repo');
+		dialog.dispose();
+	});
+
 	it('debounces validation and ignores an aborted stale response', async () => {
 		const first = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
 		const second = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();

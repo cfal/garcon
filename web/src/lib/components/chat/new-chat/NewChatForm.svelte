@@ -955,7 +955,8 @@
 
 {#if form.worktreeModalOpen}
 	<GitWorktreePickerModal
-		contextKey={JSON.stringify([form.pathContextKey, form.nonblankPath])}
+		contextKey={JSON.stringify([form.executorId, form.nonblankPath])}
+		catalogContextKey={form.gitAvailable ? form.pathContextKey : null}
 		description={form.firstMessage}
 		worktrees={form.worktreeItems}
 		isLoading={form.isLoadingWorktrees}

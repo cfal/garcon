@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import GitWorktreeCreateForm from './GitWorktreeCreateForm.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -31,6 +31,7 @@
 	interface Props {
 		worktrees: GitWorktreeItem[];
 		contextKey?: string;
+		catalogContextKey?: string | null;
 		description?: string;
 		isLoading: boolean;
 		isCreating: boolean;
@@ -44,6 +45,7 @@
 	let {
 		worktrees,
 		contextKey = '',
+		catalogContextKey = '',
 		description = '',
 		isLoading,
 		isCreating,
@@ -68,6 +70,17 @@
 	let createTarget = $state<string | null>(null);
 	let showAdvanced = $state(false);
 	const createOpen = $derived(createTarget === contextKey);
+	const available = $derived(catalogContextKey !== null);
+	const canUseGit = $derived(available && !isCreating && !isLoading);
+	const catalogKey = $derived(available ? JSON.stringify([contextKey, catalogContextKey]) : null);
+	let previousCatalogKey = untrack(() => catalogKey);
+	// Reconnects invalidate the repository catalog, not the user's draft.
+	$effect(() => {
+		if (previousCatalogKey === catalogKey) return;
+		if (available && isCreating) return;
+		previousCatalogKey = catalogKey;
+		if (available) untrack(onRefresh);
+	});
 	const dialogHeight = $derived.by(() => {
 		if (!createOpen) return 'h-[min(36rem,calc(var(--app-height)-1rem))]';
 		if (showAdvanced) return 'h-[min(26rem,calc(var(--app-height)-1rem))]';
@@ -101,7 +114,7 @@
 	}
 
 	function handleFilterKeydown(event: KeyboardEvent): void {
-		if (isLoading || createTarget !== null || event.isComposing || event.keyCode === 229) return;
+		if (!canUseGit || createTarget !== null || event.isComposing || event.keyCode === 229) return;
 		if (event.key === 'ArrowDown') {
 			event.preventDefault();
 			picker.moveSelection(1);
@@ -121,17 +134,18 @@
 	function backToList(): void {
 		if (isCreating) return;
 		createTarget = null;
-		if (errorMessage) onRefresh();
+		if (errorMessage && canUseGit) onRefresh();
 		void tick().then(() => filterInputRef?.focus());
 	}
 
 	function selectVisibleWorktree(worktreePath: string): void {
+		if (!canUseGit) return;
 		const worktree = picker.visibleWorktrees.find((item) => item.path === worktreePath);
 		if (worktree && !worktree.isPathMissing) onSelect(worktreePath);
 	}
 
 	function openCreateForm(): void {
-		if (isLoading || isCreating) return;
+		if (!canUseGit) return;
 		showAdvanced = false;
 		createTarget = contextKey;
 	}
@@ -164,7 +178,7 @@
 						<button
 							type="button"
 							onclick={onRefresh}
-							disabled={isLoading || isCreating}
+							disabled={!canUseGit}
 							class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
 							title={m.workspace_worktree_refresh()}
 							aria-label={m.workspace_worktree_refresh()}
@@ -183,9 +197,14 @@
 				</div>
 			</div>
 
+			{#if !available}
+				<p role="status" class="shrink-0 border-b border-border px-4 py-2 text-sm text-muted-foreground">
+					{m.workspace_executor_unavailable()}
+				</p>
+			{/if}
 			<div
 				hidden={createOpen}
-				inert={createOpen}
+				inert={createOpen || !available}
 				class={createOpen ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}
 			>
 				{#if errorMessage}
@@ -197,7 +216,7 @@
 						<button
 							type="button"
 							onclick={onRefresh}
-							disabled={isLoading || isCreating}
+							disabled={!canUseGit}
 							class="shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
 						>
 							{m.common_retry()}
@@ -278,7 +297,7 @@
 					<button
 						type="button"
 						onclick={openCreateForm}
-						disabled={isLoading || isCreating}
+						disabled={!canUseGit}
 						class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
 					>
 						<Plus class="size-4" />{m.git_worktree_new()}
@@ -303,10 +322,11 @@
 						{contextKey}
 						{description}
 						{isCreating}
+						{canUseGit}
 						{errorMessage}
 						onBack={backToList}
 						onCreate={(creation) => {
-							if (createOpen && !isCreating) onCreate(creation);
+							if (createOpen && canUseGit) onCreate(creation);
 						}}
 					/>
 				</div>

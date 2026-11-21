@@ -173,7 +173,8 @@
 
 {#if isOpen && projectPathDialogState.worktreePickerOpen}
 	<GitWorktreePickerModal
-		contextKey={JSON.stringify([pathContextKey, projectPathDialogState.nonblankPath])}
+		contextKey={JSON.stringify([projectPathDialogState.executorId, projectPathDialogState.nonblankPath])}
+		catalogContextKey={projectPathDialogState.gitAvailable ? pathContextKey : null}
 		worktrees={projectPathDialogState.worktrees}
 		isLoading={projectPathDialogState.isLoadingWorktrees}
 		isCreating={projectPathDialogState.isCreatingWorktree}

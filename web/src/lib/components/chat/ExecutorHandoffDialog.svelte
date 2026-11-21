@@ -236,7 +236,8 @@
 		</form>
 		{#if destination.worktreePickerOpen}
 			<GitWorktreePickerModal
-				contextKey={JSON.stringify([executors.gitContextKey(executorId), destination.nonblankPath])}
+				contextKey={JSON.stringify([executorId, destination.nonblankPath])}
+				catalogContextKey={destination.gitAvailable ? executors.gitContextKey(executorId) : null}
 				worktrees={destination.worktrees}
 				isLoading={destination.isLoadingWorktrees}
 				isCreating={destination.isCreatingWorktree}

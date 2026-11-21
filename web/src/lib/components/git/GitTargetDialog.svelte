@@ -107,7 +107,8 @@
 
 {#if dialog.worktreePickerOpen}
 	<GitWorktreePickerModal
-		contextKey={JSON.stringify([executorContextKey, dialog.nonblankPath])}
+		contextKey={JSON.stringify([executorId, dialog.nonblankPath])}
+		catalogContextKey={executors.gitAvailable(executorId) ? executorContextKey : null}
 		worktrees={dialog.worktrees}
 		isLoading={dialog.isLoadingWorktrees}
 		isCreating={dialog.isCreatingWorktree}

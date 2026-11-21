@@ -12,6 +12,7 @@
 		contextKey: string;
 		description: string;
 		isCreating: boolean;
+		canUseGit: boolean;
 		errorMessage: string | null;
 		onBack: () => void;
 		onCreate: (creation: GitWorktreeCreation) => void;
@@ -22,6 +23,7 @@
 		contextKey,
 		description,
 		isCreating,
+		canUseGit,
 		errorMessage,
 		onBack,
 		onCreate,
@@ -38,7 +40,7 @@
 	const effectivePath = $derived(pathOverride.trim() ? pathOverride : defaultPath);
 	const name = $derived(branchName.trim());
 	const baseRef = $derived(baseRefOverride.trim() || undefined);
-	const canCreate = $derived(Boolean(name && effectivePath) && !isCreating && !generating);
+	const canCreate = $derived(Boolean(name && effectivePath) && canUseGit && !generating);
 	const currentBranch = $derived(worktrees.find((worktree) => worktree.isCurrent)?.branch);
 	const defaultBase = $derived(currentBranch && currentBranch !== '(detached)' ? currentBranch : 'HEAD');
 	const id = $props.id();
