@@ -15,7 +15,7 @@ import {
 	InactiveTranscriptWindowStore,
 	type InactiveTranscriptWindow,
 } from '$lib/chat/transcript/inactive-transcript-window-store.js';
-import type { DeliveredSteerReceipt, OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
@@ -36,7 +36,6 @@ import type {
 	ChatSurfaceTransferPort,
 } from '$lib/workspace/chat-surface-transfer.js';
 import type { WorkspacePublication } from '$lib/workspace/workspace-commit.js';
-import { SteerTranscriptRecovery } from './steer-transcript-recovery.js';
 
 export interface ConversationPanelDescriptor extends VisibleChatPresentation {
 	readonly snapshotAdmission: ConversationPanelSnapshotAdmission;
@@ -122,11 +121,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.publishSnapshotResendCandidates(chatId, candidates, frontier);
 	};
 	readonly observeRecoveredMessages = (chatId: string, messages: readonly TranscriptMessage[]): void => {
-		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages, this.#overlayRetirementOrdinal(chatId));
+		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages);
 		if (mutation) this.#applyOverlayMutation(chatId, mutation);
-		this.#steerRecovery.observe(chatId);
 	};
-	readonly #steerRecovery: SteerTranscriptRecovery;
 	#recoverTranscript = async (chatId: string, viewId: string): Promise<void> => {
 		if (this.resetForViewReplacement(chatId, viewId)) {
 			await this.loadChatSnapshot(chatId, { purpose: 'activation' });
@@ -149,7 +146,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			getComposerAnchorSurfaceId(): ChatViewSurfaceId | null;
 			getSelectedChatId(): string | null;
 			retainInactiveWindows?: () => boolean;
-			readSteerTranscriptHead?: (chatId: string, transcriptViewId: string) => Promise<number | null>;
 			combineMessages?: boolean;
 			loadTranscriptSnapshot?: (
 				transcript: ActiveTranscriptState,
@@ -157,17 +153,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				options: ChatLoadMessagesOptions,
 			) => Promise<void>;
 		},
-	) {
-		this.#steerRecovery = new SteerTranscriptRecovery({
-			inputs: chatId => options.overlays.viewFor(chatId)?.optimisticInputs ?? [],
-			cursor: chatId => {
-				const cursor = options.cache.readAppliedCursor(chatId);
-				return cursor && { ...cursor, lastOrdinal: Math.min(cursor.lastOrdinal, this.#overlayRetirementOrdinal(chatId)) };
-			},
-			clear: (chatId, id) => this.clearOptimisticInput(chatId, id),
-			readHead: options.readSteerTranscriptHead,
-		});
-	}
+	) {}
 
 	get transcriptCache(): ChatTranscriptCache {
 		return this.options.cache;
@@ -330,9 +316,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			});
 		}
 		this.#mounted = mounted;
-		for (const chatId of new Set([...previous.values()].map(item => item.chatId))) {
-			this.observeRecoveredMessages(chatId, []);
-		}
 		for (const chatId of admittedChatIds) {
 			void this.loadChatSnapshot(chatId).catch(() => {
 				this.options.cache.markStale(chatId);
@@ -541,6 +524,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult {
+		if (this.options.cache.readAppliedCursor(batch.chatId)?.transcriptViewId === batch.transcriptViewId) {
+			this.observeRecoveredMessages(batch.chatId, batch.messages);
+		}
 		const replay = this.#reconnectReplays.get(batch.chatId);
 		if (replay?.replay.buffer(batch.chatId, batch)) {
 			return { kind: 'applied', localRecoverySurfaceIds: [] };
@@ -557,7 +543,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (pending) pending.refreshRequired = true;
 			return { kind: 'chat-recovery-required', outcome };
 		}
-		const overlayMutation = this.options.overlays.applyCommittedBatch(batch, this.#overlayRetirementOrdinal(batch.chatId));
+		const overlayMutation = this.options.overlays.applyCommittedBatch(batch);
 		const commit: SharedTranscriptCommit = { ...batch, outcome, overlayMutation };
 		const localRecoverySurfaceIds: ChatViewSurfaceId[] = [];
 		for (const panel of this.#panels.values()) {
@@ -572,7 +558,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 		}
 		this.#inactiveWindows.applySharedCommit(commit, overlayMutation);
-		this.observeRecoveredMessages(batch.chatId, []);
 		return { kind: 'applied', localRecoverySurfaceIds };
 	}
 
@@ -603,16 +588,24 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	markOptimisticInputDelivered(chatId: string, clientMessageId: string): void {
+		if (this.#pendingOptimisticInput(chatId, clientMessageId)?.placement === 'live-tail') {
+			this.clearOptimisticInput(chatId, clientMessageId);
+			return;
+		}
 		const mutation = this.options.overlays.markOptimisticInputDelivered(chatId, clientMessageId);
-		if (!mutation) return;
+		if (!mutation?.feedStructureChanged) return;
 		this.#applyOverlayMutation(chatId, mutation);
 	}
 
-	acceptDeliveredSteer(chatId: string, receipt: DeliveredSteerReceipt): void {
-		const input = this.overlayFor(chatId)?.optimisticInputs.find(input => input.clientMessageId === receipt.clientMessageId);
-		if (input?.delivery !== 'pending') return;
-		this.upsertOptimisticInput(chatId, { ...input, delivery: receipt });
-		this.#steerRecovery.observe(chatId);
+	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void {
+		const input = this.#pendingOptimisticInput(chatId, clientMessageId);
+		if (input?.placement !== 'live-tail') return;
+		this.upsertOptimisticInput(chatId, { ...input, placement: undefined });
+	}
+
+	#pendingOptimisticInput(chatId: string, clientMessageId: string): OptimisticUserInput | undefined {
+		const input = this.overlayFor(chatId)?.optimisticInputs.find(input => input.clientMessageId === clientMessageId);
+		return input?.delivery === 'pending' ? input : undefined;
 	}
 
 	clearOptimisticInput(chatId: string, clientMessageId: string): void {
@@ -624,7 +617,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	reconcileQueuedSteers(chatId: string, control: ChatExecutionControlState | null, receipt?: QueuedSteerReceipt): void {
 		const mutation = this.options.overlays.reconcileQueuedSteers(chatId, control, receipt);
 		if (mutation) this.#applyOverlayMutation(chatId, mutation);
-		this.#steerRecovery.observe(chatId);
 	}
 
 	excludeResendCandidate(chatId: string, ordinal: number): void {
@@ -693,7 +685,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (!this.resetForViewReplacement(chatId, previousViewId)) return;
 			this.options.cache.replaceFromPage(chatId, page);
 			for (const panel of this.panelsForChat(chatId)) panel.transcript.installCachedSnapshot(chatId);
-			this.markChatValidated(chatId);
+			this.options.cache.markValidated(chatId);
 		};
 	}
 
@@ -712,11 +704,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.options.lifecycle.remove(chatId);
 	}
 
-	markChatValidated(chatId: string): void {
-		this.options.cache.markValidated(chatId);
-		this.#steerRecovery.observe(chatId);
-	}
-
 	markChatStale(chatId: string): void {
 		this.#discardHiddenPanels(chatId);
 		this.#inactiveWindows.removeChat(chatId);
@@ -728,23 +715,21 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	#discardHiddenPanels(chatId?: string): void {
-		const removedChatIds = new Set<string>();
+		let removed = false;
 		for (const [surfaceId, panel] of this.#panels) {
 			if (panel.isPresentationVisible || (chatId !== undefined && panel.chatId !== chatId)) continue;
 			this.#restoreTargets.set(surfaceId, { chatId: panel.chatId, target: panel.captureRestoreTarget() });
 			panel.destroy();
 			this.#panels.delete(surfaceId);
 			this.options.cache.markStale(panel.chatId);
-			removedChatIds.add(panel.chatId);
+			removed = true;
 		}
-		if (!removedChatIds.size) return;
+		if (!removed) return;
 		this.#mounted = this.#mounted.filter(item => this.#panels.has(item.surfaceId));
 		this.options.cache.setMountedChatIds(this.#mounted.map(item => item.chatId));
-		for (const removedChatId of removedChatIds) this.observeRecoveredMessages(removedChatId, []);
 	}
 
 	destroy(): void {
-		this.#steerRecovery.destroy();
 		this.#inactiveWindows.clear();
 		this.abortReconnectReplays();
 		for (const panel of this.#panels.values()) panel.destroy();
@@ -762,17 +747,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (panel.chatId === chatId) panel.transcript.applySharedOverlayMutation(mutation);
 		}
 		this.#inactiveWindows.applyOverlayMutation(chatId, mutation);
-	}
-
-	#overlayRetirementOrdinal(chatId: string): number {
-		const viewId = this.options.cache.readAppliedCursor(chatId)?.transcriptViewId;
-		let throughOrdinal = Infinity;
-		for (const panel of this.#panels.values()) {
-			if (panel.chatId !== chatId || panel.transcript.hasLaterMessages) continue;
-			if (panel.transcript.transcriptViewId !== viewId) return 0;
-			throughOrdinal = Math.min(throughOrdinal, panel.transcript.loadedThroughOrdinal, panel.transcript.lastOrdinal);
-		}
-		return throughOrdinal;
 	}
 
 	#reserveIncomingWindow(

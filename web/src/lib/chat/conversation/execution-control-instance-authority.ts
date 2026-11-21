@@ -30,20 +30,17 @@ export class ExecutionControlInstanceAuthority {
 		return serverInstanceId => serverInstanceId === this.#currentInstanceId || revision === this.#authorityRevision;
 	}
 
-	shouldDeferSteerAcknowledgement(acknowledgedInstance: string): boolean {
-		// A socket confirmed during submission cannot order an unseen HTTP process.
-		return this.#currentInstanceId !== null && acknowledgedInstance !== this.#currentInstanceId
-			&& !this.#supersededInstanceIds.has(acknowledgedInstance);
-	}
-
 	confirmSocketInstance(serverInstanceId: string, probeStartedAt?: number): ExecutionControlInstanceAcceptance | null {
 		// An older probe cannot order a process observed while its response was in flight.
-		if (serverInstanceId !== this.#currentInstanceId && probeStartedAt !== undefined
-			&& probeStartedAt <= this.#instanceObservedAt) return null;
+		if (probeStartedAt !== undefined && !this.acceptsSocketObservation(serverInstanceId, probeStartedAt)) return null;
 		if (this.#confirmedSocketInstanceId !== serverInstanceId) this.#authorityRevision += 1;
 		this.#confirmedSocketInstanceId = serverInstanceId;
 		if (this.#currentInstanceId === serverInstanceId) return { kind: 'current' };
 		return this.#replaceCurrent(serverInstanceId);
+	}
+
+	acceptsSocketObservation(serverInstanceId: string, startedAt: number): boolean {
+		return serverInstanceId === this.#currentInstanceId || startedAt > this.#instanceObservedAt;
 	}
 
 	classifyNonAuthoritativeInstance(serverInstanceId: string): ExecutionControlInstanceDecision {

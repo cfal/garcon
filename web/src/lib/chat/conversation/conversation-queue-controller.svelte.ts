@@ -38,7 +38,7 @@ export interface ConversationQueueControllerOptions {
 	get sessions(): Pick<SessionControllerDeps['sessions'], 'byId'>;
 	get chatState(): Pick<
 		SessionControllerDeps['chatState'],
-		'loadMessages' | 'clearLocalNoticesForChat' | 'appendLocalNoticeForChat' | 'getCursorForChat'
+		'clearLocalNoticesForChat' | 'appendLocalNoticeForChat' | 'getCursorForChat'
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
@@ -313,7 +313,6 @@ export class ConversationQueueController {
 					result.serverInstanceId,
 				);
 			if (!instanceConfirmed) {
-				await this.#reconcileSteerTranscript(chatId);
 				this.#appendUnconfirmedSteerNotice(chatId);
 			}
 		} catch (error) {
@@ -329,7 +328,6 @@ export class ConversationQueueController {
 				this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
 					failure.serverInstanceId,
 				);
-			if (!instanceConfirmed) await this.#reconcileSteerTranscript(chatId);
 			if (!this.#hasChat(chatId)) throw error;
 			this.options.chatState.appendLocalNoticeForChat(
 				chatId,
@@ -346,15 +344,6 @@ export class ConversationQueueController {
 		const transcriptViewId = this.options.chatState.getCursorForChat(chatId).transcriptViewId;
 		if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
 		return transcriptViewId;
-	}
-
-	async #reconcileSteerTranscript(chatId: string): Promise<void> {
-		if (!this.#hasChat(chatId)) return;
-		try {
-			await this.options.chatState.loadMessages(chatId);
-		} catch {
-			// A later WebSocket reconnect or chat activation retries the authoritative snapshot.
-		}
 	}
 
 	#appendUnconfirmedSteerNotice(chatId: string): void {

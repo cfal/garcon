@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -154,15 +155,16 @@ describe('reloadChatFromNative', () => {
 
 	it.each(['generation-2', 'generation-3'])('preserves newer inputs when %s is installed before the reload reply', async viewId => {
 		const { chat, panels } = fixture();
-		chat.replaceGeneration('chat-1', 'generation-1', [], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [], {
 			lastOrdinal: 0, pageOldestOrdinal: 0, nextBeforeOrdinal: null, hasMore: false,
 		});
 		const response = Promise.withResolvers<Record<string, unknown>>();
 		const reloading = reloadChatFromNative(wsWithResponse(response.promise), panels, 'chat-1', options());
 		panels.handleViewReplacement('chat-1');
-		chat.replaceGeneration('chat-1', viewId, [{ ordinal: 1, message: new AssistantMessage(TS, 'newer') }], {
-			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
-		});
+		expect(chat.setFromPage('chat-1', {
+			transcriptViewId: viewId, messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'newer') }],
+			lastOrdinal: 1, pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		}, chat.beginSnapshotLoad())).toBe('applied');
 		panels.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'new-input',
 			content: 'new guidance', createdAt: TS, delivery: 'pending', placement: 'live-tail' });
 		response.resolve({ type: 'chat-reloaded', clientRequestId: 'req-1', chatId: 'chat-1', transcriptViewId: 'generation-2',
@@ -191,7 +193,7 @@ describe('reloadChatFromNative', () => {
 			],
 		});
 		const { chat, panels } = fixture();
-		chat.replaceGeneration('chat-1', 'generation-1', [
+		seedTranscript(chat, 'chat-1', 'generation-1', [
 			{ ordinal: 1, message: new AssistantMessage(TS, 'current') },
 		], {
 			lastOrdinal: 1,

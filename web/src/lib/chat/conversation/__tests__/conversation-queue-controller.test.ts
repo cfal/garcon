@@ -226,8 +226,18 @@ describe('ConversationQueueController', () => {
 		vi.mocked(getChatExecutionControl).mockReturnValueOnce(reply.promise);
 		vi.mocked(pauseChatQueue).mockReturnValueOnce(reply.promise);
 		vi.mocked(resumeChatQueue).mockReturnValueOnce(reply.promise);
-		const request = source === 'refresh' ? controller.startControlRefresh('chat-1')
-			: source === 'mutation' ? controller.pauseForChat('chat-1') : controller.resumeForChat('chat-1', 'pause');
+		let request: Promise<void>;
+		switch (source) {
+			case 'refresh':
+				request = controller.startControlRefresh('chat-1');
+				break;
+			case 'mutation':
+				request = controller.pauseForChat('chat-1');
+				break;
+			case 'conflict':
+				request = controller.resumeForChat('chat-1', 'pause');
+				break;
+		}
 		ui.markExecutionControlSocketDisconnected();
 		const current = emptyChatExecutionControlState('third');
 		current.queue.entries = [queueEntry('own', 1)];
@@ -235,7 +245,7 @@ describe('ConversationQueueController', () => {
 		overlays.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'input', content: 'guidance',
 			createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending', placement: 'live-tail' }, 1);
 		overlays.reconcileQueuedSteers('chat-1', current, {
-			clientMessageId: 'input', entryId: 'own', serverInstanceId: 'third', transcriptViewId: 'view-1',
+			clientMessageId: 'input', entryId: 'own', serverInstanceId: 'third',
 		});
 		const intermediate = emptyChatExecutionControlState('second');
 		if (source === 'conflict') {
@@ -491,11 +501,10 @@ describe('ConversationQueueController', () => {
 		expect(chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
 	});
 
-	it('does not reclassify success when unconfirmed transcript reconciliation fails', async () => {
+	it('reports unconfirmed success without reading transcript history', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
 		conversationUi.isExecutionControlSocketInstanceConfirmed.mockReturnValue(false);
-		chatState.loadMessages.mockRejectedValueOnce(new Error('snapshot unavailable'));
 		acceptedInputs.steerQueuedEntry.mockReturnValue({
 			clientRequestId: 'request-steer',
 			clientMessageId: 'message-steer',
@@ -516,7 +525,7 @@ describe('ConversationQueueController', () => {
 			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).resolves.toBeUndefined();
 
-		expect(chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadMessages).not.toHaveBeenCalled();
 		expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
 			'error',
@@ -624,7 +633,7 @@ describe('ConversationQueueController', () => {
 		);
 	});
 
-	it('reconciles a successful queued-steer response from a superseded server instance', async () => {
+	it('fences a successful queued-steer response from a superseded server without reading history', async () => {
 		const harness = createHarness();
 		const conversationUi = new ConversationUiState();
 		const controller = controllerWithConversationUi(harness, conversationUi);
@@ -653,7 +662,7 @@ describe('ConversationQueueController', () => {
 		await controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7);
 
 		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
-		expect(harness.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(harness.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(harness.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
@@ -664,7 +673,7 @@ describe('ConversationQueueController', () => {
 		warn.mockRestore();
 	});
 
-	it('reconciles an unknown queued-steer response from a superseded server instance', async () => {
+	it('fences an unknown queued-steer response from a superseded server without reading history', async () => {
 		const harness = createHarness();
 		const conversationUi = new ConversationUiState();
 		const controller = controllerWithConversationUi(harness, conversationUi);
@@ -688,7 +697,7 @@ describe('ConversationQueueController', () => {
 		).rejects.toBe(error);
 
 		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
-		expect(harness.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(harness.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(harness.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
@@ -724,7 +733,7 @@ describe('ConversationQueueController', () => {
 		);
 	});
 
-	it('reconciles and warns after an unstructured ambiguous failure', async () => {
+	it('refreshes only execution control and warns after an unstructured ambiguous failure', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
 		const error = new Error('transport failed twice');
@@ -746,7 +755,7 @@ describe('ConversationQueueController', () => {
 		).rejects.toBe(error);
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
-		expect(chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadMessages).not.toHaveBeenCalled();
 		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
@@ -809,7 +818,7 @@ describe('ConversationQueueController', () => {
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 		expect(conversationUi.isExecutionControlSocketInstanceConfirmed).not.toHaveBeenCalled();
-		expect(chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadMessages).not.toHaveBeenCalled();
 		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
@@ -843,7 +852,7 @@ describe('ConversationQueueController', () => {
 		).rejects.toBe(error);
 
 		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
-		expect(harness.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
+		expect(harness.chatState.loadMessages).not.toHaveBeenCalled();
 		expect(harness.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
 			'error',

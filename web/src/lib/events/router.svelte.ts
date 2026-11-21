@@ -294,15 +294,17 @@ function buildDispatch(
 	const transientTranscriptViews = new Map<string, string>();
 
 	const refreshTransientFeed = (chatId: string, requestedTranscriptViewId: string) => {
-		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
-		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId) return;
-		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
 		const previousTranscriptViewId =
 			stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
+		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
+		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId
+			&& previousTranscriptViewId !== requestedTranscriptViewId) return;
+		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
 		const response = stores.conversationUi.captureExecutionResponse();
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
-				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
+				const currentView = transientTranscriptViews.get(chatId);
+				if (currentView !== requestedTranscriptViewId && currentView !== snapshot.transientFeed.transcriptViewId) return;
 				const result = response.setTransientFeedFromSnapshot(snapshot.transientFeed);
 				if (result.kind !== 'applied') return;
 				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;

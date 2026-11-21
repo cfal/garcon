@@ -463,59 +463,6 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		return 'applied';
 	}
 
-	replaceGeneration(
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		options: Pick<
-			TranscriptPage,
-			'lastOrdinal' | 'pageOldestOrdinal' | 'nextBeforeOrdinal' | 'hasMore'
-		> & {
-			pageNewestOrdinal?: number;
-			resendCandidates?: ResendCandidate[];
-		},
-	): void {
-		const { retainedMessages, nextBeforeOrdinal } = this.#snapshots.retainWindow(
-			messages,
-			'later',
-			options.nextBeforeOrdinal,
-		);
-		const pageNewestOrdinal = options.pageNewestOrdinal ?? options.lastOrdinal;
-		this.#invalidatePageLoad();
-		this.expandedVisibleStartOrdinal = null;
-		this.historyState = { kind: 'complete' };
-		this.activeChatId = chatId;
-		this.#loadEpoch += 1;
-		this.#commitBuffer = null;
-		this.#reconnectReplay.reset();
-		this.transcriptCache.replaceFromPage(chatId, {
-			transcriptViewId,
-			messages,
-			lastOrdinal: options.lastOrdinal,
-			pageOldestOrdinal: options.pageOldestOrdinal,
-			pageNewestOrdinal,
-			nextBeforeOrdinal: options.nextBeforeOrdinal,
-			hasMore: options.hasMore,
-		});
-		this.windowRevision += 1;
-		this.#windowSelectionRevision += 1;
-		this.transcriptViewId = transcriptViewId;
-		this.entries = retainedMessages;
-		this.lastOrdinal = options.lastOrdinal;
-		this.loadedThroughOrdinal = pageNewestOrdinal;
-		this.nextBeforeOrdinal = nextBeforeOrdinal;
-		this.hasEarlierMessages = nextBeforeOrdinal !== null;
-		this.hasLaterMessages = pageNewestOrdinal < options.lastOrdinal;
-		if (!this.usesSharedOverlay) this.optimisticInputs.clearAll();
-		this.#snapshots.publishResendCandidates(chatId, options.resendCandidates ?? [], { transcriptViewId, lastOrdinal: options.lastOrdinal });
-		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		if (!this.usesSharedOverlay) this.notices.reset();
-		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
-		this.loadError = null;
-		this.isLoadingMessages = false;
-		this.feedMutations.record('replacement');
-	}
-
 	setFromPage(
 		chatId: string,
 		page: TranscriptWindowPage,

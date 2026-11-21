@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { describe, expect, it } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, GrepToolUseMessage, ReadToolUseMessage, ThinkingMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
 import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, type ChatMessage } from '$shared/chat-types';
@@ -407,7 +408,7 @@ describe('ConversationFeedProjectionState', () => {
 					? new UserMessage(TS, `prompt ${index + 1}`)
 					: new AssistantMessage(TS, `response ${index + 1}`),
 		}));
-		transcript.replaceGeneration('chat-1', 'generation-1', deepEntries, {
+		seedTranscript(transcript, 'chat-1', 'generation-1', deepEntries, {
 			lastOrdinal: initialCount,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,

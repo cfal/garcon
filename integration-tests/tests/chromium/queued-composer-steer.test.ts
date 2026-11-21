@@ -3,6 +3,7 @@ import { expect as browserExpect } from 'playwright/test';
 import {
   parseSteerCommandRequest, type QueuedSteerCommandResponse, type SteerCommandResponse,
 } from '../../../common/chat-command-contracts.js';
+import { ChatMessagesMessage, parseServerWsMessage } from '../../../common/ws-events.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { ClaudeSessionStartGate } from '../../support/claude-session-start-gate.js';
 import { Deferred } from '../../support/deferred.js';
@@ -10,7 +11,7 @@ import { claudeText } from '../../support/fake-claude-model.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
-test('keeps a composer steer visible from submission through queue edits to its single committed echo', async () => {
+test.each([false, true])('keeps a composer steer visible through queue edits and ordinary recovery (missed echo: %s)', async missedEcho => {
   const environment = await startScriptedClaudeTestEnvironment();
   const gate = new ClaudeSessionStartGate();
   const held = environment.model.scriptHeldTurn([claudeText('Synthetic first reply.')]);
@@ -25,7 +26,20 @@ test('keeps a composer steer visible from submission through queue edits to its 
         permissionMode: 'bypassPermissions',
       }));
       const releasePost = new Deferred<void>();
+      let submittedMessageId: string | null = null;
+      let droppedEchoes = 0;
       try {
+        await page.routeWebSocket(/\/ws(?:\?|$)/, route => {
+          const server = route.connectToServer();
+          server.onMessage(raw => {
+            const message = parseServerWsMessage(JSON.parse(String(raw)));
+            if (missedEcho && message instanceof ChatMessagesMessage && message.chatId === chatId
+              && message.messages.some(row => row.message.type === 'user-message'
+                && row.message.metadata?.clientMessageId === submittedMessageId)) {
+              droppedEchoes++;
+            } else route.send(raw);
+          });
+        });
         await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
         await browserExpect(page.getByRole('button', { name: 'Queue message', exact: true })).toBeVisible();
         const editor = page.getByPlaceholder('Reply...', { exact: true });
@@ -37,8 +51,10 @@ test('keeps a composer steer visible from submission through queue edits to its 
         const requested = page.waitForRequest(endpoint);
         const text = 'Synthetic composer guidance.';
         await editor.fill(text);
+        await browserExpect(page.getByRole('button', { name: 'Queue message', exact: true })).toBeEnabled();
         await editor.press('Control+Enter');
         const { clientMessageId } = parseSteerCommandRequest((await requested).postDataJSON());
+        submittedMessageId = clientMessageId;
         const bubble = page.locator(`[data-chat-row-id="optimistic:${clientMessageId}"]`);
         await browserExpect(editor).toHaveValue('');
         await browserExpect(bubble).toContainText(text);
@@ -64,14 +80,25 @@ test('keeps a composer steer visible from submission through queue edits to its 
           message.type === 'user-message' && message.metadata?.clientMessageId === clientMessageId);
         expect(await messages()).toHaveLength(0);
 
+        let refreshRequests = 0;
+        page.on('request', request => {
+          const path = new URL(request.url()).pathname;
+          if (path === '/api/v1/chats/messages' || path === '/api/v1/chats/combined-messages') refreshRequests++;
+        });
         await gate.open();
         await held.requested;
         await client.waitForCommittedUserInput(chatId, edited, { afterIndex });
         const committed = page.locator('[data-chat-row-id]:not([data-chat-row-id^="optimistic:"])').filter({ hasText: edited });
-        await browserExpect(committed).toBeInViewport();
         await browserExpect(bubble).toHaveCount(0);
         await browserExpect(preview).toHaveCount(0);
         expect(await messages()).toHaveLength(1);
+        expect(droppedEchoes).toBe(missedEcho ? 1 : 0);
+        expect(refreshRequests).toBe(0);
+        if (missedEcho) {
+          await browserExpect(committed).toHaveCount(0);
+          await page.reload();
+        }
+        await browserExpect(committed).toBeInViewport();
         held.release();
         expect((await client.waitForTurnTerminal(chatId, active.turnId, { afterIndex })).type).toBe('agent-run-finished');
         environment.model.assertSettled();

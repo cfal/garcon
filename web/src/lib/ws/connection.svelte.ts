@@ -74,6 +74,8 @@ export interface WsMessageContext {
 	readonly processingSnapshotSource?: ChatProcessingSnapshotSource;
 	/** Monotonic request start retained locally, not echoed from the wire. */
 	readonly requestStartedAt?: number;
+	/** Monotonic socket-attempt start, retained even when open or message events are delayed. */
+	readonly connectionStartedAt?: number;
 }
 
 export type WsMessageConsumer = (
@@ -248,6 +250,7 @@ export class WsConnection {
 
 		try {
 			const wsUrl = buildWebSocketUrl();
+			const connectionStartedAt = performance.now();
 			const websocket = new WebSocket(wsUrl, webSocketProtocolsForAuth(token));
 			this.#activeSocket = websocket;
 			this.#connectStartedAt = Date.now();
@@ -290,7 +293,7 @@ export class WsConnection {
 							pending.progress.onProgress(data);
 							return;
 						}
-						this.#consumeMessage(data, pending.context);
+						this.#consumeMessage(data, { ...pending.context, connectionStartedAt });
 						this.#pendingRequests.delete(rid);
 						clearTimeout(pending.timer);
 
@@ -308,7 +311,7 @@ export class WsConnection {
 						return;
 					}
 
-					if (this.#consumeMessage(data, {})) return;
+					if (this.#consumeMessage(data, { connectionStartedAt })) return;
 
 					this.#messageLog.push({ data, timestamp: Date.now() });
 					this.messageVersion++;
