@@ -250,9 +250,9 @@ function createReconnectDeps(
 			setTransientFeedFromSnapshot: conversationUi.setTransientFeedFromSnapshot,
 		}),
 		executionControlChatIds: options.controlChatIds ?? [],
-		removeExecutionControl: vi.fn(),
+		removedControl: vi.fn(),
 		captureExecutionControlRemoval: (chatId: string) => () => {
-			conversationUi.removeExecutionControl(chatId);
+			conversationUi.removedControl(chatId);
 			return true;
 		},
 		setExecutionControlFromRefresh: vi.fn(),
@@ -397,7 +397,7 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.panels.abortReconnectReplays,
 		deps.panels.noticeRevisionFor,
 		deps.panels.applyCommittedBatch,
-		deps.conversationUi.removeExecutionControl,
+		deps.conversationUi.removedControl,
 		deps.conversationUi.setExecutionControlFromRefresh,
 		deps.conversationUi.markExecutionControlSocketDisconnected,
 		deps.conversationUi.confirmExecutionControlSocketInstance,
@@ -1546,7 +1546,7 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			controlState(true),
 		);
-		expect(deps.conversationUi.removeExecutionControl).toHaveBeenCalledWith('chat-2');
+		expect(deps.conversationUi.removedControl).toHaveBeenCalledWith('chat-2');
 		expect(deps.getExecutionControl).toHaveBeenCalledTimes(1);
 		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-3');
 		expect(deps.conversationUi.setExecutionControlFromRefresh).not.toHaveBeenCalledWith(
@@ -1588,7 +1588,7 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			controlState(true),
 		);
-		expect(deps.conversationUi.removeExecutionControl).toHaveBeenCalledWith('chat-2');
+		expect(deps.conversationUi.removedControl).toHaveBeenCalledWith('chat-2');
 		expect(deps.getExecutionControl).toHaveBeenCalledOnce();
 		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-3');
 	});

@@ -1538,7 +1538,7 @@ describe('ConversationPanelRegistry', () => {
 			clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server',
 		});
 		if (change === 'instance loss') ui.confirmExecutionControlSocketInstance('new-server');
-		else ui.removeExecutionControl(chatId);
+		else ui.captureExecutionControlRemoval(chatId)();
 		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
 		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
 		expect(cache.readAppliedCursor(chatId)?.stale).toBe(false);

@@ -167,7 +167,7 @@ function queueSteer(registry: ConversationPanelRegistry): () => void {
 	return () => registry.reconcileQueuedSteers(chatId, emptyChatExecutionControlState('server'));
 }
 
-it('yields steer presentation recovery to a held search-result navigation', async () => {
+it('preserves held search-result navigation when a queued steer departs', async () => {
 	const f = fixture();
 	f.attach();
 	f.panel.installInitialSnapshot();

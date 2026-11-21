@@ -227,7 +227,7 @@ describe('combined transcript intervals', () => {
 		expect(transcript.entries.some(entry => entry.ordinal === requested.messages[0].ordinal)).toBe(true);
 	});
 
-	it.each(['initial', 'latest'] as const)('yields steer presentation recovery to held %s navigation', async direction => {
+	it.each(['initial', 'latest'] as const)('preserves held %s navigation when a queued steer departs', async direction => {
 		const { registry, overlays, mount } = panelFixture();
 		const entries = Array.from({ length: 300 }, (_, index) => assistant(index + 1));
 		installHistory(entries);

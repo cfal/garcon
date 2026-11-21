@@ -313,7 +313,11 @@ export class ConversationQueueController {
 					result.serverInstanceId,
 				);
 			if (!instanceConfirmed) {
-				this.#appendUnconfirmedSteerNotice(chatId);
+				this.options.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					m.chat_notice_steer_outcome_unconfirmed(),
+				);
 			}
 		} catch (error) {
 			if (!this.#hasChat(chatId)) throw error;
@@ -344,15 +348,6 @@ export class ConversationQueueController {
 		const transcriptViewId = this.options.chatState.getCursorForChat(chatId).transcriptViewId;
 		if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
 		return transcriptViewId;
-	}
-
-	#appendUnconfirmedSteerNotice(chatId: string): void {
-		if (!this.#hasChat(chatId)) return;
-		this.options.chatState.appendLocalNoticeForChat(
-			chatId,
-			'error',
-			m.chat_notice_steer_outcome_unconfirmed(),
-		);
 	}
 
 	#applyMutationErrorControl(chatId: string, error: unknown, response: ExecutionResponseReceiver): void {
