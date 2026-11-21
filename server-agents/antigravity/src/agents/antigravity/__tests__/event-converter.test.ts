@@ -408,6 +408,16 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
+  it('publishes the result of a call that arrives already settled', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'echo synthetic' }, {
+      status: 'completed', rawOutput: { output: 'synthetic' },
+    }), context);
+
+    expect(rows.map((message) => message.type)).toEqual(['bash-tool-use', 'tool-result']);
+  });
+
   it('keeps a message whole across a progress update for an earlier call', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

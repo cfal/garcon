@@ -120,8 +120,12 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
         session.thinkingText += acpContentText(update.content);
         return flushed;
       }
+      // A call can arrive already settled, as a fast tool may; its result
+      // follows its row like a terminal update's.
       case 'tool_call':
-        return this.#toolCall(session, update, context.timestamp, false);
+        return ACP_TERMINAL_TOOL_STATUSES.has(asString(update.status) ?? '')
+          ? this.#toolCallUpdate(session, update, context.timestamp)
+          : this.#toolCall(session, update, context.timestamp, false);
       case 'tool_call_update':
         return this.#toolCallUpdate(session, update, context.timestamp);
       default:
