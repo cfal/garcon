@@ -41,7 +41,7 @@ For typed inputs, keyed verifier instances, a join, and a decision on the summar
 - A diagnostic opens the relevant line and column in the source. Invalid source can be saved to a draft file, but any last valid graph is stale and graph edits, publish, and test are disabled until the source is fixed. If removing a step leaves a dangling reference, the graph edit is rejected; remove the dependency first or fix both in YAML.
 - **Share YAML** previews exactly what **Copy YAML** and **Download YAML** export: the authored source, not run inputs, evidence, chats, or access grants. Literal secrets pasted into a prompt or default are still in that source. Review it before sharing. Executor IDs, folders, attachments, and provider references must resolve for the recipient; sharing does not transfer credentials or files.
 
-Closing or moving the Studio tab keeps unsaved draft edits in this browser workspace. Reopen **New Workflow** to continue. Save the file or publish before leaving the browser; drafts are not persisted across a reload.
+Moving the Studio tab or opening it from another chat preserves the current draft and its executor. Closing the tab keeps unsaved edits but releases an unchanged draft. If a launch finishes while the tab is closed, reopen **New Workflow** and use **Open started run** to see it without launching again. Drafts are not persisted across a browser reload.
 
 A file path or matching name does not identify a published definition. **Publish new definition** from a freshly opened file creates revision 1. To update an existing definition later, select its published revision under **New run** and choose **Edit definition**.
 

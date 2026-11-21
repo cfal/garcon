@@ -86,7 +86,6 @@
 			lifetime?.abort();
 			lifetime = null;
 			revisionRead?.abort();
-			if (!session.needsExitGuard) session.clear();
 		};
 	});
 
@@ -265,6 +264,18 @@
 			</div>
 		{/if}
 	</header>
+	{#if session.startedRun}
+		{@const run = session.startedRun}
+		<div role="status" class="shrink-0 border-b border-border px-3 py-1">
+			<Button
+				variant="link"
+				size="sm"
+				class="h-auto max-w-full justify-start whitespace-normal wrap-anywhere text-start"
+				onclick={() => onOpenRun(run.id)}
+				>{m.workflow_studio_open_started_run({ name: run.name })}</Button
+			>
+		</div>
+	{/if}
 	{#if session.error}
 		<div class="shrink-0 space-y-1 border-b border-border px-3 py-2">
 			<p role="alert" class="wrap-anywhere text-sm text-destructive">{session.error}</p>

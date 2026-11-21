@@ -15,7 +15,11 @@
 		context?: WorkflowLaunchContext | null;
 	} = $props();
 	setExecutors(new ExecutorsStore());
-	provideWorkflowStudioSession();
+	provideWorkflowStudioSession(() => open);
 </script>
 
-{#if open}<NewWorkflow {context} {onRunStarted} onOpenRun={() => {}} />{/if}
+{#if open}
+	{#key context}
+		<NewWorkflow {context} {onRunStarted} onOpenRun={onRunStarted} />
+	{/key}
+{/if}

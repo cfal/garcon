@@ -1,4 +1,4 @@
-import { createContext, onDestroy } from 'svelte';
+import { createContext, onDestroy, untrack } from 'svelte';
 import { ApiError } from '$lib/api/client';
 import {
 	getWorkflowRevision,
@@ -27,6 +27,7 @@ class WorkflowStudioSession {
 	error = $state<string | null>(null);
 	notice = $state<string | null>(null);
 	pendingLaunch = $state.raw<Launch | null>(null);
+	startedRun = $state.raw<{ id: string; name: string } | null>(null);
 	pendingPublish = $state.raw<{
 		request: WorkflowPublishRequest;
 		draft: WorkflowDraftState;
@@ -56,11 +57,13 @@ class WorkflowStudioSession {
 			return;
 		this.busy = true;
 		this.error = null;
+		this.startedRun = null;
 		try {
 			const run = await ('source' in request
 				? testWorkflowDraft(request)
 				: startWorkflowRun(request));
 			this.pendingLaunch = null;
+			this.startedRun = { id: run.id, name: run.name };
 			this.#observer?.launched(run.id);
 		} catch (error) {
 			this.pendingLaunch = isUnconfirmedWorkflowMutation(error) ? request : null;
@@ -144,8 +147,15 @@ function failure(error: unknown): string {
 const [getSession, setSession] = createContext<WorkflowStudioSession>();
 export { getSession as getWorkflowStudioSession };
 
-export function provideWorkflowStudioSession(): void {
+export function provideWorkflowStudioSession(isTabOpen: () => boolean): void {
 	const session = setSession(new WorkflowStudioSession());
+	const tabOpen = $derived(isTabOpen());
+	$effect(() => {
+		if (tabOpen) return;
+		untrack(() => {
+			if (!session.needsExitGuard) session.clear();
+		});
+	});
 	$effect(() => {
 		if (!session.needsExitGuard) return;
 		const warn = (event: BeforeUnloadEvent) => {

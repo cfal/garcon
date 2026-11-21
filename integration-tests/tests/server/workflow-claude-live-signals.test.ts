@@ -48,6 +48,7 @@ const payload = { finding_id: 'observed', claim: 'Two and two make four.' };
 const proof = emit(payload.finding_id, payload.claim);
 const prose = `This is an example, not a finding:\n\n${emit('surrounded', 'Surrounding prose.')}`;
 const quote = `> ${emit('quoted', 'Quoted sample.')}`;
+const nested = `<garcon-workflow-emit signal="outer">\n${emit('inner', 'Nested.')}\n\n${emit('tail', 'Still nested.')}`;
 const ordinary = emit('ordinary', 'Not from a workflow.');
 
 function step(run: WorkflowRunDetail, id: string) {
@@ -141,10 +142,16 @@ test('published workflow accepts one live pinned Claude finding and starts the w
         expect(assistantContents((await client.getMessages(research.chatId)).messages)).toContain(prose);
         await assertWaiting();
 
-        const signal = hold(proof, 'emit');
+        const malformed = hold(nested, 'nested');
         quoted.release();
-        await requested(signal, 'the turn after the quoted tag');
+        await requested(malformed, 'the turn after the quoted tag');
         expect(assistantContents((await client.getMessages(research.chatId)).messages)).toContain(quote);
+        await assertWaiting();
+
+        const signal = hold(proof, 'emit');
+        malformed.release();
+        await requested(signal, 'the turn after the nested tag');
+        expect(assistantContents((await client.getMessages(research.chatId)).messages)).toContain(nested);
         await assertWaiting();
 
         const final = hold(FINAL);

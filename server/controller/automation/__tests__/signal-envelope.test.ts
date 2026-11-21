@@ -39,6 +39,16 @@ test('rejects ambiguous raw emit delimiters without publishing partial text', ()
   ]);
 });
 
+test('a nested opener invalidates the entire batch, including apparent siblings', () => {
+  const start = '<garcon-workflow-emit signal="outer"';
+  const done = '<garcon-workflow-emit signal="done" />';
+  for (const malformed of [start + '>\n' + emit, start + ' ' + done]) {
+    expect(workflowSignalCandidates([done, malformed, done].join('\n\n'))).toEqual([
+      { kind: 'invalid', reason: expect.any(String) },
+    ]);
+  }
+});
+
 test.each([
   `> ${emit}`, `\`${emit}\``, `"${emit}"`, `    ${emit}`, `\\${emit}`,
   `~~~xml\n${emit}\n~~~`, `~~~xml\n${emit}`, `<!--\n${emit}\n-->`,

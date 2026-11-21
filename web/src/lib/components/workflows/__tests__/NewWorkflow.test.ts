@@ -124,6 +124,55 @@ steps:
 		await waitFor(() => expect(props.onRunStarted).toHaveBeenCalledExactlyOnceWith('run-a'));
 	});
 
+	it('links to the confirmed run when a launch finishes while the Studio is closed', async () => {
+		const reply = Promise.withResolvers<Awaited<ReturnType<typeof api.testWorkflowDraft>>>();
+		vi.mocked(api.testWorkflowDraft).mockReturnValueOnce(reply.promise);
+		const props = { onRunStarted: vi.fn(), open: true };
+		const host = render(NewWorkflowTestHost, props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Test run' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Test run' }));
+		await host.rerender({ ...props, open: false });
+		const canUnload = () => window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+		expect(canUnload()).toBe(false);
+		reply.resolve(workflowRun());
+		await waitFor(() => expect(canUnload()).toBe(true));
+		await host.rerender(props);
+		expect(props.onRunStarted).not.toHaveBeenCalled();
+		await fireEvent.click(await screen.findByRole('button', { name: /Open started run/ }));
+		expect(props.onRunStarted).toHaveBeenCalledExactlyOnceWith('run-a');
+		expect(api.testWorkflowDraft).toHaveBeenCalledOnce();
+	});
+
+	it('keeps a clean file draft on presentation replacement but releases it on tab close', async () => {
+		const path = '/project/review.workflow.yaml';
+		const read = vi.spyOn(files, 'readText').mockResolvedValue({
+			path,
+			content: workflowRevision().source,
+			revision: 'v1:read',
+		});
+		const props = {
+			onRunStarted: vi.fn(),
+			open: true,
+			context: { executorId: 'local', cwd: '/project' },
+		};
+		const host = render(NewWorkflowTestHost, { props });
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
+		const picker = within(screen.getByRole('dialog', { name: 'Open source file' }));
+		await fireEvent.input(picker.getByLabelText('File path'), { target: { value: path } });
+		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
+		await screen.findByRole('button', { name: 'Publish new definition' });
+		await host.rerender({ ...props, context: { executorId: 'remote', cwd: '/another' } });
+		expect(screen.getByRole('button', { name: 'Publish new definition' })).toBeTruthy();
+		expect(screen.getByText(path, { exact: false })).toBeTruthy();
+		expect(read).toHaveBeenCalledOnce();
+		await host.rerender({ ...props, open: false });
+		await host.rerender(props);
+		expect(screen.getByLabelText('Definition')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Publish new definition' })).toBeNull();
+	});
+
 	it('retains an unsaved draft when its presentation closes and protects it from page unload', async () => {
 		const path = '/project/review.workflow.yaml';
 		vi.spyOn(files, 'readText').mockResolvedValue({

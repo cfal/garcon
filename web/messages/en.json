@@ -3527,6 +3527,7 @@
 	"workflow_studio_open_chat": "Open chat",
 	"workflow_studio_open_file": "Open source file",
 	"workflow_studio_open_source_chat": "Open source chat",
+	"workflow_studio_open_started_run": "Open started run: {name}",
 	"workflow_studio_outline": "Outline",
 	"workflow_studio_override_folder": "Override the run's folder",
 	"workflow_studio_parent_folder": "Parent folder",

@@ -106,7 +106,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
-	provideWorkflowStudioSession();
+	provideWorkflowStudioSession(() => !!workspace.layout.surface('new-workflow'));
 	const hostGeometry = getWorkspaceHostGeometry();
 	const terminals = getTerminalRegistry();
 	const sessions = getChatSessions();

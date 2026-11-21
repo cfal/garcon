@@ -21,12 +21,11 @@ export function workflowSignalCandidates(content: string): readonly AutomationSi
   for (;;) {
     const openerEnd = garconEnvelopeOpenerEnd(text, start);
     if (openerEnd < 0) return [INVALID];
-    let end = openerEnd;
-    if (text[openerEnd - 2] !== '/') {
-      const close = text.indexOf(CLOSE, openerEnd);
-      if (close < 0) return [INVALID];
-      end = close + CLOSE.length;
-    }
+    const selfClosing = text[openerEnd - 2] === '/';
+    const bodyEnd = selfClosing ? openerEnd : text.indexOf(CLOSE, openerEnd);
+    // A nested opener makes the apparent closing tag and every later frame ambiguous.
+    if (bodyEnd < 0 || OPEN.test(text.slice(start + 1, bodyEnd))) return [INVALID];
+    const end = selfClosing ? openerEnd : bodyEnd + CLOSE.length;
     candidates.push(parseCandidate(text.slice(start, end)));
     if (end === text.length) return candidates;
     // Blank lines inside the raw body are data; only a gap between complete frames separates emits.
@@ -41,7 +40,7 @@ export function workflowSignalCandidates(content: string): readonly AutomationSi
 
 function parseCandidate(text: string): AutomationSignalCandidate {
   const frame = parseGarconEnvelopeFrame(text, TAG, ['signal', 'content-type']);
-  if (!frame?.attributes.signal || OPEN.test(frame.body)) return INVALID;
+  if (!frame?.attributes.signal) return INVALID;
   const contentType = frame.attributes['content-type'] ?? null;
   if (contentType !== null && contentType !== 'none' && contentType !== 'text' && contentType !== 'json') return INVALID;
   const body = normalizeGarconCommandBody(frame.body);
