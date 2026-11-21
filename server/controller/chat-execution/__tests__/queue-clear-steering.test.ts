@@ -19,6 +19,7 @@ function fixture() {
     chatExists: () => true,
     unsettledQueueReceiptKeys: () => new Set(),
     publish() {},
+    inputAccepted() {},
   }, { assertAvailable: async () => {} }, { assertSupported() {} });
   const ownership = new ExecutionOwnership();
   ownership.installAttempt(chatId, new QueueExecutionAttempt({ turnId: 'turn-1', clientRequestId: 'request-1' }));
