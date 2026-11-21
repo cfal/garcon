@@ -55,6 +55,7 @@ function manualScope(stepId: string): string {
 export class WorkflowGraph {
   readonly #steps: Map<string, StepState>;
   readonly #inputs: JsonObject;
+  #stepBytes: number | undefined;
   #signalBytes: number;
   #bindingBytes: number;
 
@@ -73,12 +74,24 @@ export class WorkflowGraph {
     const { step, location, settings } = captured;
     if (this.#steps.has(step.id)) throw workflowConflict(`Step "${step.id}" already exists in this run.`);
     if (this.#steps.size >= WORKFLOW_LIMITS.steps) throw workflowLimit('This run has reached its step limit.');
+    const stepJson = JSON.stringify(step);
+    const locationJson = location && JSON.stringify(location);
+    const settingsJson = settings && JSON.stringify(settings);
+    this.#stepBytes ??= this.db.query<{ bytes: number }, [string]>(`
+      SELECT coalesce(sum(length(CAST(step_json AS BLOB))
+        + coalesce(length(CAST(location_json AS BLOB)), 0)
+        + coalesce(length(CAST(settings_json AS BLOB)), 0)), 0) AS bytes
+      FROM workflow_run_steps WHERE run_id = ?
+    `).get(this.runId)!.bytes;
+    const bytes = Buffer.byteLength(stepJson) + Buffer.byteLength(locationJson ?? '') + Buffer.byteLength(settingsJson ?? '');
+    if (this.#stepBytes + bytes > WORKFLOW_LIMITS.stepBytesPerRun) throw workflowLimit('This run has reached its saved step data size limit.');
+    this.#stepBytes += bytes;
     const intake = step.on ? 'open' : 'closed';
     const state: StepState = { id: step.id, step, intake, added, reason: null, closeSequence: null, counts: {} };
     this.db.query(`INSERT INTO workflow_run_steps (
       run_id, id, step_json, location_json, settings_json, executor_id, provider_id, max_concurrency, intake, added
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      this.runId, step.id, JSON.stringify(step), location && JSON.stringify(location), settings && JSON.stringify(settings),
+      this.runId, step.id, stepJson, locationJson, settingsJson,
       location?.executorId ?? null, settings?.kind === 'agent' ? settings.apiProviderId ?? null : null,
       step.on?.kind === 'each' ? step.on.maxConcurrency : 1, intake, added ? 1 : 0,
     );

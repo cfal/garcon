@@ -461,6 +461,52 @@ test('appends a single evidence-backed step and a future listener without replay
   expect(step(service, id, 'verify').instances.map(instance => instance.key)).toEqual(['F1', 'F2']);
 });
 
+test('charges authored and resolved step bytes against one persisted run budget', () => {
+  const open = workspace();
+  const { service } = open();
+  const source = 'version: 1\nname: Bounds\nsteps:\n  - id: hold\n    kind: decision\n    prompt: Hold\n    choices: {done: Done}\n';
+  const { id } = service.testWorkflowDraft({ source, inputs: {}, executionContext: LOCAL }, parsed(source));
+  const payload = '\u00e9'.repeat(120 * 1024);
+  const addition = (index: number) => ({
+    runId: id, operationId: `op-${index}`,
+    source: `id: addition-${index}
+kind: agent
+agentId: codex
+prompt: Synthetic test
+agentSettings:
+  ownerId: codex
+  schemaVersion: 1
+  values:
+    synthetic: ${payload}
+`,
+  });
+  const first = service.addStep(addition(1), ACTOR);
+  for (let index = 2; index <= 4; index++) service.addStep(addition(index), ACTOR);
+  service.close();
+
+  const restored = open().service;
+  expect(restored.addStep(addition(1), ACTOR)).toEqual(first);
+  expect(() => restored.addStep(addition(5), ACTOR)).toThrow('saved step data size limit');
+  expect(restored.getRun(id).steps.map(step => step.step.id)).toEqual(['hold', 'addition-1', 'addition-2', 'addition-3', 'addition-4']);
+  expect(restored.getRun(id).amendments).toHaveLength(4);
+  expect(restored.addStep({ ...addition(5),
+    source: 'id: addition-5\nkind: decision\nprompt: Small\nchoices: {done: Done}\n',
+  }, ACTOR)).toMatchObject({ kind: 'add-step', stepId: 'addition-5' });
+});
+
+test('rolls back a launch when its resolved captures exceed the step data budget', () => {
+  const { service } = workspace()();
+  publish(service);
+  const request = { definitionId: 'research', inputs: { topic: 'synthetic' }, executionContext: LOCAL, operationId: 'budgeted-launch' };
+  const payload = 'x'.repeat(768 * 1024);
+  expect(() => service.startRun(request, () => ({
+    agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { synthetic: payload } },
+  }))).toThrow('saved step data size limit');
+  expect(service.listRuns().items).toEqual([]);
+  expect(service.replayStartRun(request)).toBeNull();
+  expect(service.startRun(request).revision).toBe(1);
+});
+
 test('rolls back both signal and eligible instance when the write does not commit', async () => {
   const open = workspace();
   let fail = false;

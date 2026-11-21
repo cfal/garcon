@@ -13,6 +13,7 @@ export const WORKFLOW_LIMITS = {
   sourceBytes: WORKFLOW_DEFINITION_LIMITS.sourceBytes,
   valueBytes: 64 * 1024,
   promptBytes: 128 * 1024,
+  stepBytesPerRun: 2 * 1024 * 1024,
   signalBytesPerRun: 2 * 1024 * 1024,
   bindingBytesPerRun: 2 * 1024 * 1024,
 } as const;
