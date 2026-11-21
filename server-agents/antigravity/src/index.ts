@@ -146,8 +146,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
     this.auth = {
       async status(signal) {
-        signal.throwIfAborted();
-        return getAntigravityAuthStatus(config);
+        return getAntigravityAuthStatus(config, undefined, signal);
       },
       launchLogin: () => login.launch(),
       completeLogin: (sessionId, code) => login.complete(sessionId, code),

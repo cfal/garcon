@@ -43,6 +43,7 @@ class FakeAntigravityAgent {
   cancelReply: 'immediate' | 'deferred' | 'ignored' = 'immediate';
   // Whether `session/resume` reports the session's config options.
   resumeReportsOptions = true;
+  modeOptions: Array<{ value: string }> = MODE_OPTION.options;
 
   // Each spawn is a fresh process; later frames go to the newest one.
   process(): AcpProcess {
@@ -111,7 +112,7 @@ class FakeAntigravityAgent {
       case 'session/new': {
         const sessionId = `session-${this.#nextSession++}`;
         this.sessions.add(sessionId);
-        return reply({ sessionId, models: MODELS, configOptions: [MODE_OPTION] });
+        return reply({ sessionId, models: MODELS, configOptions: [{ ...MODE_OPTION, options: this.modeOptions }] });
       }
       case 'session/resume':
         if (!this.sessions.has(String(params.sessionId))) {
@@ -336,6 +337,29 @@ describe('Antigravity ACP runtime', () => {
     expect(agent.requests('session/resume')[0]?.params).toMatchObject({ sessionId: started.agentSessionId });
     expect(agent.requests('session/prompt')).toHaveLength(2);
     runtime.shutdown();
+  });
+
+  it('retires a stopped turn the agent never settles, even without a next turn', async () => {
+    const { agent, runtime, request } = harness();
+    agent.onPrompt(() => {});
+    agent.cancelReply = 'ignored';
+    const started = await runtime.startSession(request());
+
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(true);
+    await waitFor(() => !runtime.isRunning(started.agentSessionId));
+    expect(runtime.getRunningSessions()).toEqual([]);
+  });
+
+  it('refuses a mode the session does not offer instead of running in another one', async () => {
+    const { agent, runtime, request } = harness();
+    agent.modeOptions = [{ value: 'default' }];
+    agent.onPrompt((fake) => fake.endPrompt());
+
+    await expect(runtime.startSession(request({ permissionMode: 'plan' }))).rejects.toThrow(
+      'Antigravity does not offer the plan mode for this session.',
+    );
+    expect(agent.requests('session/prompt')).toEqual([]);
   });
 
   it('fails the run when agy reports an executor error in-band', async () => {

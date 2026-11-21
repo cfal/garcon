@@ -7,15 +7,32 @@ import {
   type AntigravityCliResult,
 } from './antigravity-models.js';
 
+// The probe is shared with concurrent callers, so an abort stops waiting rather
+// than killing it.
+function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return operation;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
   runModels: (config: AntigravityConfig) => Promise<AntigravityCliResult> = runAntigravityModels,
+  signal?: AbortSignal,
 ): Promise<AgentAuthStatus> {
   try {
-    if (config.authMethod() === 'gemini-api-key' && config.hasApiKey()) {
-      return { authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' };
+    // Sessions authenticate with the configured method only, so status must not
+    // fall back to another credential the CLI happens to hold.
+    if (config.authMethod() === 'gemini-api-key') {
+      return config.hasApiKey()
+        ? { authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' }
+        : { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
     }
-    const result = await runModels(config);
+    const result = await abortable(runModels(config), signal);
     if (result.exitCode === 0) {
       return { authenticated: true, canReauth: true, label: 'Google', source: 'cli' };
     }
@@ -27,6 +44,7 @@ export async function getAntigravityAuthStatus(
       detail: antigravityCliFailure(result),
     };
   } catch (error) {
+    if (signal?.aborted) throw error;
     return {
       authenticated: false,
       canReauth: true,

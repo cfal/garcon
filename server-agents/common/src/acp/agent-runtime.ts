@@ -94,6 +94,7 @@ interface AcpTurnContext {
   sourceActive: boolean;
   sourceRetired: boolean;
   readonly settled: PromiseWithResolvers<void>;
+  cancelTimer: ReturnType<typeof setTimeout> | null;
 }
 
 // How long a cancelled prompt may take to settle before the next turn replaces its process.
@@ -263,7 +264,7 @@ export class AcpAgentRuntime {
     let session = await this.#sessionForTurn(request);
     const cancelled = session.activeTurn;
     if (cancelled?.running && cancelled.aborted) {
-      await this.#settleCancelledTurn(cancelled);
+      await cancelled.settled.promise;
       assertAcpExecutionOpen(request);
       if (session.retired) session = await this.#sessionForTurn(request);
     }
@@ -273,19 +274,18 @@ export class AcpAgentRuntime {
     await this.#runPrompt(session, request);
   }
 
-  // A cooperative cancel settles when the agent answers the open prompt; an
-  // agent that never does loses its process, and the next turn reconnects.
-  async #settleCancelledTurn(turn: AcpTurnContext): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, this.#cancelSettleTimeoutMs);
+  // A cooperative cancel settles when the agent answers the open prompt. An
+  // agent that never answers loses its process, so a stopped turn cannot stay
+  // running; the next turn reconnects.
+  #armCancelSettleTimeout(turn: AcpTurnContext): void {
+    if (turn.cancelTimer) return;
+    turn.cancelTimer = setTimeout(() => {
+      if (turn.running) this.#retireSession(turn.session, 'aborted');
+    }, this.#cancelSettleTimeoutMs);
+    turn.cancelTimer.unref?.();
+    void turn.settled.promise.then(() => {
+      if (turn.cancelTimer) clearTimeout(turn.cancelTimer);
     });
-    try {
-      await Promise.race([turn.settled.promise, timedOut]);
-    } finally {
-      clearTimeout(timer);
-    }
-    if (turn.running) this.#retireSession(turn.session, 'aborted');
   }
 
   async prepareProjectPathUpdate(request: AcpProjectPathUpdateRequest): Promise<void> {
@@ -338,6 +338,7 @@ export class AcpAgentRuntime {
         error: humanizeError(error),
       });
     }
+    this.#armCancelSettleTimeout(turn);
     return true;
   }
 
@@ -587,6 +588,7 @@ export class AcpAgentRuntime {
       sourceActive: false,
       sourceRetired: false,
       settled: Promise.withResolvers<void>(),
+      cancelTimer: null,
     };
   }
 

@@ -219,6 +219,33 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429');
   });
 
+  it('does not duplicate a tool row when a stopped turn reports late', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'sleep 5' }), context);
+    converter.beginTurn(SESSION);
+
+    const late = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', name: 'run_command', status: 'failed', rawOutput: { output: '' },
+    }), context);
+    expect(plain(late).map((row) => row.type)).toEqual(['tool-result']);
+  });
+
+  it('combines every region of a multi-region edit', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = converter.fromSessionUpdate(toolCall('multi', 'multi_replace_file_content', 'edit', {
+      TargetFile: '/work/a.ts',
+      ReplacementChunks: [
+        { TargetContent: 'one', ReplacementContent: 'uno' },
+        { TargetContent: 'two', ReplacementContent: 'dos' },
+      ],
+    }), context);
+    expect(plain(rows)).toEqual([{
+      type: 'edit-tool-use', toolId: 'multi', filePath: '/work/a.ts', oldString: 'one\n\ntwo', newString: 'uno\n\ndos', changes: undefined,
+    }]);
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

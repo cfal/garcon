@@ -26,6 +26,8 @@ interface SessionState {
   thinkingText: string;
   failure: string | null;
   readonly emittedToolIds: Set<string>;
+  // Tool rows already published; kept across turns because a stopped turn's
+  // late terminal update can arrive after the next turn begins.
   // Tool names by call ID; terminal updates need the name to normalize output.
   readonly toolNames: Map<string, string>;
 }
@@ -73,7 +75,6 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     session.assistantText = '';
     session.thinkingText = '';
     session.failure = null;
-    session.emittedToolIds.clear();
   }
 
   permissionToolUse(
@@ -132,6 +133,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const messages = this.#flush(session, timestamp);
     if (session.emittedToolIds.has(call.toolCallId)) return messages;
     session.emittedToolIds.add(call.toolCallId);
+    if (session.emittedToolIds.size > MAX_TOOL_NAMES_PER_SESSION) {
+      const oldest = session.emittedToolIds.values().next().value;
+      if (oldest !== undefined) session.emittedToolIds.delete(oldest);
+    }
     messages.push(convertAntigravityToolUse(timestamp, call));
     return messages;
   }

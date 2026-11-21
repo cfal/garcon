@@ -37,6 +37,22 @@ describe('permissionChoiceOutcome', () => {
     expect(permissionChoiceOutcome([{ optionId: 'allow-always' }], 'allow-once')).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 
+  it('never turns a one-time denial into a persistent deny rule', () => {
+    const persistentDenyOnly = [
+      { optionId: 'allow', kind: 'allow_once' },
+      { optionId: 'never', kind: 'reject_always' },
+    ];
+    expect(permissionChoiceOutcome(persistentDenyOnly, 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+
+  it('matches common untyped ids but never a typed option of another kind', () => {
+    const untyped = [{ optionId: 'allow' }, { optionId: 'deny' }];
+    expect(permissionChoiceOutcome(untyped, 'allow-once')).toEqual(selected('allow'));
+    expect(permissionChoiceOutcome(untyped, 'reject')).toEqual(selected('deny'));
+    const mislabeled = [{ optionId: 'deny', kind: 'reject_always' }];
+    expect(permissionChoiceOutcome(mislabeled, 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+
   it('never resolves a denial to an allow option', () => {
     const allowOnly = [{ optionId: 'allow', kind: 'allow_once' }];
     expect(permissionChoiceOutcome(allowOnly, 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });

@@ -48,18 +48,19 @@ function optionIdFrom(option: Record<string, unknown>): string | undefined {
 }
 
 // Option IDs are agent-defined (Antigravity offers `allow` and `deny`), so the
-// ACP `kind` decides; the hyphenated IDs cover agents that omit it. A one-time
-// approval never falls back to a persistent grant.
+// ACP `kind` decides; the conventional IDs cover agents that omit it. A
+// one-time choice never falls back to a persistent grant or a persistent deny
+// rule; a persistent grant may narrow to a one-time one.
 const CHOICE_KINDS: Record<AcpPermissionChoice, readonly string[]> = {
   'allow-once': ['allow_once'],
   'allow-always': ['allow_always', 'allow_once'],
-  reject: ['reject_once', 'reject_always'],
+  reject: ['reject_once'],
 };
 
 const CHOICE_FALLBACK_IDS: Record<AcpPermissionChoice, readonly string[]> = {
-  'allow-once': ['allow-once'],
-  'allow-always': ['allow-always', 'allow-once'],
-  reject: ['reject-once', 'reject-always'],
+  'allow-once': ['allow-once', 'allow_once', 'allow', 'approve'],
+  'allow-always': ['allow-always', 'allow_always', 'allow-once', 'allow_once', 'allow', 'approve'],
+  reject: ['reject-once', 'reject_once', 'reject', 'deny'],
 };
 
 // Cancels instead of guessing when no option matches, so a denial can never
@@ -72,7 +73,8 @@ export function permissionChoiceOutcome(
     const optionId = optionIdFrom(options.find((option) => option.kind === kind) ?? {});
     if (optionId) return permissionOutcome(optionId);
   }
-  const optionIds = new Set(options.map(optionIdFrom));
+  // Untyped options only; a typed option that did not match has another meaning.
+  const optionIds = new Set(options.filter((option) => option.kind === undefined).map(optionIdFrom));
   const fallback = CHOICE_FALLBACK_IDS[choice].find((id) => optionIds.has(id));
   return fallback ? permissionOutcome(fallback) : permissionCancelledOutcome();
 }

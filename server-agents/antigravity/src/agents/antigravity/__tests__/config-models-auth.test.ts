@@ -80,6 +80,23 @@ describe('getAntigravityAuthStatus', () => {
     expect(status.detail).toContain('GARCON_ANTIGRAVITY_AUTH_METHOD must be one of');
   });
 
+  it('reports the configured API-key method as signed out without a key', async () => {
+    const status = await getAntigravityAuthStatus(
+      config({ authMethod: () => 'gemini-api-key' }),
+      () => { throw new Error('must not run'); },
+    );
+    expect(status).toEqual({
+      authenticated: false, canReauth: true, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.',
+    });
+  });
+
+  it('stops waiting on the shared probe when the caller aborts', async () => {
+    const controller = new AbortController();
+    const pending = getAntigravityAuthStatus(config(), () => new Promise(() => {}), controller.signal);
+    controller.abort(new Error('caller left'));
+    await expect(pending).rejects.toThrow('caller left');
+  });
+
   it('uses the CLI model listing as the signed-in check', async () => {
     const signedIn = await getAntigravityAuthStatus(config(), async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }));
     expect(signedIn).toMatchObject({ authenticated: true, source: 'cli' });

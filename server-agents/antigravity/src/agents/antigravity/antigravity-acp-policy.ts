@@ -75,7 +75,9 @@ export async function configureAntigravitySession(
 }
 
 // Unknown options (a resume that returned none) still get the mode, since a
-// skipped mode would run the turn in whatever mode the session last had.
+// skipped mode would run the turn in whatever mode the session last had. A
+// session that does not offer a non-default mode fails rather than running in
+// another one; single queries rely on `plan`.
 export async function applyAntigravityMode(
   client: Pick<AcpSessionConfigurationContext['client'], 'setSessionConfigOption'>,
   sessionId: string,
@@ -83,7 +85,13 @@ export async function applyAntigravityMode(
   mode: AntigravityMode,
 ): Promise<AcpSessionConfigurationContext['configOptions'] | undefined> {
   const modeOption = configOptions?.find((option) => option.id === 'mode');
-  if (configOptions && !modeOption) return undefined;
+  if (configOptions) {
+    const offered = modeOption?.options?.some((option) => option.value === mode) ?? false;
+    if (!offered) {
+      if (mode === 'default' && !modeOption) return undefined;
+      throw new AgentIntegrationError('PROVIDER_FAILURE', `Antigravity does not offer the ${mode} mode for this session.`, false);
+    }
+  }
   if (modeOption?.currentValue === mode) return undefined;
   const result = await client.setSessionConfigOption({ sessionId, configId: 'mode', value: mode });
   return result.configOptions;
