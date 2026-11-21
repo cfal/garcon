@@ -44,7 +44,9 @@ export async function runBoundedCommand(
   const deadline = setTimeout(() => {
     timedOut = true;
     if (windows) {
-      Bun.spawn(['taskkill', '/PID', String(child.pid), '/T', '/F'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+      Bun.spawn(['taskkill', '/PID', String(child.pid), '/T', '/F'], {
+        env: options.env, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore',
+      });
       return;
     }
     signalGroup(child.pid, 'SIGTERM');
