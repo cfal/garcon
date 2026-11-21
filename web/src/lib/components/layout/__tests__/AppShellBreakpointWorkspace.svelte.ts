@@ -8,7 +8,8 @@ import {
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '$lib/workspace/canonical-layout';
-import type { PortableSingletonKind, WorkflowLaunchContext, WorkspaceWindowId } from '$lib/workspace/surface-types';
+import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
+import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy';
 import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
 import { collectWindowNodes, windowNodeById } from '$lib/workspace/window-tree';

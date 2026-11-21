@@ -21,6 +21,7 @@
 	} from '$shared/workflow-definition';
 	import {
 		nextWorkflowStepId,
+		workflowSignalSubscription,
 		workflowSignals,
 	} from '$lib/workflows/definition/workflow-step-options';
 	import { workflowEdges, type WorkflowGraphFocus } from '$lib/workflows/definition/workflow-graph';
@@ -154,14 +155,7 @@
 			...(kind === 'decision'
 				? { choices: { approve: m.workflow_studio_approve(), reject: m.workflow_studio_reject() } }
 				: {}),
-			...(signal
-				? {
-						on:
-							signal.delivery === 'many'
-								? { kind: 'each', signal: signal.value, maxConcurrency: 1 }
-								: { kind: 'once', signal: signal.value },
-					}
-				: {}),
+			...(signal && { on: workflowSignalSubscription(signal) }),
 		};
 		if (
 			draft.edit([

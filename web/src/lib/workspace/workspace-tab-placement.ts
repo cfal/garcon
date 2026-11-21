@@ -1,9 +1,9 @@
 import * as m from '$lib/paraglide/messages.js';
+import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 import {
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type PortableSingletonKind,
-	type WorkflowLaunchContext,
 	type WorkflowSurfaceDescriptor,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,

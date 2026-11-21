@@ -28,9 +28,6 @@ async function list<T>(path: string, options: ListOptions = {}): Promise<Workflo
 export const listWorkflowDefinitionsPage = (options?: ListOptions) => list<WorkflowDefinitionSummary>(workflowPaths.definitions, options);
 export const listWorkflowRunsPage = (options?: ListOptions) => list<WorkflowRunSummary>(workflowPaths.runs, options);
 export const listActiveWorkflowChatsPage = (options?: ListOptions) => list<WorkflowActiveChat>(workflowPaths.activeChats, options);
-export const listWorkflowDefinitions = async (options?: ListOptions) => (await listWorkflowDefinitionsPage(options)).items;
-export const listWorkflowRuns = async (options?: ListOptions) => (await listWorkflowRunsPage(options)).items;
-export const listActiveWorkflowChats = async (options?: ListOptions) => (await listActiveWorkflowChatsPage(options)).items;
 
 export async function getWorkflowRevision(definitionId: string, revision?: number, options?: ReadOptions): Promise<WorkflowRevision> {
 	const query = new URLSearchParams({ definitionId });

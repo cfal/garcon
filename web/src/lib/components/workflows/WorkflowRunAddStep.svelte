@@ -5,6 +5,7 @@
 	import type { WorkflowAddStepRequest, WorkflowRunDetail } from '$shared/workflow-runs';
 	import {
 		nextWorkflowStepId,
+		workflowSignalSubscription,
 		workflowSignals,
 	} from '$lib/workflows/definition/workflow-step-options';
 	import { createRandomId } from '$lib/utils/random-id';
@@ -66,6 +67,9 @@
 	);
 	const requiredPath = $derived(kind !== 'decision' && !inheritedPath);
 	const missingTarget = $derived(kind !== 'decision' && !target);
+	const stepBlocked = $derived(
+		disabled || configure || missingDependency || missingTarget || workflowRunFinished(run),
+	);
 	const seed = $derived(
 		kind === 'decision'
 			? null
@@ -83,25 +87,12 @@
 	function addStep(event: SubmitEvent) {
 		event.preventDefault();
 		problem = null;
-		if (
-			disabled ||
-			configure ||
-			missingDependency ||
-			missingTarget ||
-			!title.trim() ||
-			!instruction.trim() ||
-			(requiredPath && !path.trim()) ||
-			workflowRunFinished(run)
-		)
+		if (stepBlocked || !title.trim() || !instruction.trim() || (requiredPath && !path.trim())) {
 			return;
+		}
 		const selected = mode === 'result' ? evidence : undefined;
 		const bindResult = selected?.payload !== undefined && useResult && kind !== 'command';
-		const on =
-			mode === 'future' && signal
-				? signal.delivery === 'many'
-					? { kind: 'each', signal: signal.value, maxConcurrency: 1 }
-					: { kind: 'once', signal: signal.value }
-				: undefined;
+		const on = mode === 'future' && signal ? workflowSignalSubscription(signal) : undefined;
 		const source = JSON.stringify(
 			{
 				id: nextWorkflowStepId(base.steps, 'manual'),
@@ -273,15 +264,7 @@
 	</p>
 	{#if problem}<p role="alert" class="wrap-anywhere text-sm text-destructive">{problem}</p>{/if}
 	<div class="flex flex-wrap gap-2">
-		<Button
-			type="submit"
-			size="sm"
-			disabled={disabled ||
-				configure ||
-				missingDependency ||
-				missingTarget ||
-				workflowRunFinished(run)}>{m.workflow_studio_add_step()}</Button
-		>
+		<Button type="submit" size="sm" disabled={stepBlocked}>{m.workflow_studio_add_step()}</Button>
 		<Button size="sm" variant="ghost" onclick={onCancel}>{m.common_cancel()}</Button>
 	</div>
 </form>

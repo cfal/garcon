@@ -1,8 +1,10 @@
 import {
 	WORKFLOW_TURN_COMPLETED,
+	type WorkflowBinding,
 	type WorkflowSignalDefinition,
 	type WorkflowStep,
 } from '$shared/workflow-definition';
+import type { JsonObject } from '$shared/json';
 
 export interface WorkflowSignalOption {
 	value: string;
@@ -10,6 +12,25 @@ export interface WorkflowSignalOption {
 	delivery: WorkflowSignalDefinition['delivery'];
 	payload: WorkflowSignalDefinition['payload'];
 	fields: readonly string[];
+}
+
+export function workflowSignalSubscription(
+	option: WorkflowSignalOption,
+	maxConcurrency = 1,
+): JsonObject {
+	if (option.delivery === 'many') return { kind: 'each', signal: option.value, maxConcurrency };
+	return { kind: 'once', signal: option.value };
+}
+
+export function workflowBindingSource(binding: WorkflowBinding): string {
+	switch (binding.kind) {
+		case 'input':
+			return `inputs.${binding.input}`;
+		case 'all':
+			return `all.${binding.stepId}`;
+		case 'signal':
+			return binding.field === undefined ? 'signal' : `signal.${binding.field}`;
+	}
 }
 
 export function workflowSignals(steps: readonly WorkflowStep[]): WorkflowSignalOption[] {

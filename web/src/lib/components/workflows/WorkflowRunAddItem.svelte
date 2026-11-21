@@ -27,6 +27,7 @@
 	} = $props();
 
 	let itemKey = $state('');
+	const key = $derived(itemKey.trim());
 	let text = $state('{}');
 	let problem = $state<string | null>(null);
 	const shape = $derived.by(() => {
@@ -36,28 +37,24 @@
 		const signal = producer && getWorkflowStepSignal(producer.step, on.signal.signal);
 		return signal?.delivery === 'many' ? signal : null;
 	});
+	const itemBlocked = $derived(
+		disabled || workflowRunFinished(run) || target.intake !== 'open' || !key,
+	);
 
 	function addItem(event: SubmitEvent) {
 		event.preventDefault();
 		problem = null;
-		if (
-			disabled ||
-			workflowRunFinished(run) ||
-			target.intake !== 'open' ||
-			!shape ||
-			!itemKey.trim()
-		)
-			return;
+		if (itemBlocked || !shape) return;
 		let payload: JsonValue;
 		try {
 			const value = parseWorkflowJson(text);
 			if (!isRecord(value)) throw new Error();
-			payload = Object.hasOwn(value, shape.key) ? value : { ...value, [shape.key]: itemKey.trim() };
+			payload = Object.hasOwn(value, shape.key) ? value : { ...value, [shape.key]: key };
 		} catch {
 			problem = m.workflow_studio_json_object_required();
 			return;
 		}
-		if (payload[shape.key] !== itemKey.trim()) {
+		if (payload[shape.key] !== key) {
 			problem = m.workflow_studio_item_key_mismatch({ field: shape.key });
 			return;
 		}
@@ -65,7 +62,7 @@
 			runId: run.id,
 			operationId: createRandomId(),
 			stepId: target.step.id,
-			key: itemKey.trim(),
+			key,
 			payload,
 		});
 	}
@@ -92,21 +89,13 @@
 		</label>
 		<p class="wrap-anywhere text-xs text-muted-foreground">
 			{Object.entries(shape.fields)
-				.map(([key, value]) => `${key}: ${value}`)
+				.map(([field, type]) => `${field}: ${type}`)
 				.join(', ')}
 		</p>
 	{/if}
 	{#if problem}<p role="alert" class="text-sm text-destructive">{problem}</p>{/if}
 	<div class="flex flex-wrap gap-2">
-		<Button
-			type="submit"
-			size="sm"
-			disabled={disabled ||
-				!shape ||
-				target.intake !== 'open' ||
-				workflowRunFinished(run) ||
-				!itemKey.trim()}
-		>
+		<Button type="submit" size="sm" disabled={itemBlocked || !shape}>
 			{m.workflow_studio_add_item()}
 		</Button>
 		<Button size="sm" variant="ghost" onclick={onCancel}>{m.common_cancel()}</Button>

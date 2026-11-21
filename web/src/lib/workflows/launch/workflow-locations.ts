@@ -2,8 +2,8 @@ import type { WorkflowStep } from '$shared/workflow-definition';
 import type { WorkflowExecutionContext, WorkflowLocation } from '$shared/workflow-runs';
 
 export interface WorkflowLaunchContext {
-	executorId: string;
-	cwd: string;
+	readonly executorId: string;
+	readonly cwd: string;
 }
 
 export function workflowLocations(

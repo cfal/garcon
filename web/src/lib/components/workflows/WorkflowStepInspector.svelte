@@ -7,7 +7,11 @@
 	} from '$shared/workflow-definition';
 	import type { JsonValue } from '$shared/json';
 	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
-	import { workflowSignals } from '$lib/workflows/definition/workflow-step-options';
+	import {
+		workflowBindingSource,
+		workflowSignals,
+		workflowSignalSubscription,
+	} from '$lib/workflows/definition/workflow-step-options';
 	import { createRandomId } from '$lib/utils/random-id';
 	import * as m from '$lib/paraglide/messages.js';
 	import WorkflowChoicesEditor from './WorkflowChoicesEditor.svelte';
@@ -41,9 +45,10 @@
 	const index = $derived(definition.steps.findIndex(({ id }) => id === step.id));
 	let name = $derived(step.name ?? '');
 	let instruction = $derived(step.kind === 'command' ? step.command : step.prompt);
-	let mode = $derived<'root' | 'signal' | 'join'>(
-		step.on?.kind === 'all' ? 'join' : step.on ? 'signal' : 'root',
-	);
+	let mode = $derived.by((): 'root' | 'signal' | 'join' => {
+		if (!step.on) return 'root';
+		return step.on.kind === 'all' ? 'join' : 'signal';
+	});
 	let reference = $derived.by(() => {
 		const on = step.on;
 		const trigger = on?.kind === 'all' ? on.close : on?.signal;
@@ -53,21 +58,14 @@
 		step.on?.kind === 'each' ? step.on.maxConcurrency : 1,
 	);
 	let groups = $derived<string[]>(step.on?.kind === 'all' ? [...step.on.steps] : []);
-	let bindings = $derived.by(() =>
-		step.kind === 'command'
-			? []
-			: Object.entries(step.bindings ?? {}).map(([name, binding]) => {
-					const source =
-						binding.kind === 'input'
-							? `inputs.${binding.input}`
-							: binding.kind === 'all'
-								? `all.${binding.stepId}`
-								: binding.field === undefined
-									? 'signal'
-									: `signal.${binding.field}`;
-					return { id: `binding:${name}`, name, source };
-				}),
-	);
+	let bindings = $derived.by(() => {
+		if (step.kind === 'command') return [];
+		return Object.entries(step.bindings ?? {}).map(([name, binding]) => ({
+			id: `binding:${name}`,
+			name,
+			source: workflowBindingSource(binding),
+		}));
+	});
 	let showSettings = $state(false);
 	let branchSignal = $state('');
 	const available = $derived(
@@ -118,14 +116,9 @@
 	function applyStep(event: SubmitEvent) {
 		event.preventDefault();
 		if (!editing || !complete) return;
-		const on: JsonValue | undefined =
-			mode === 'root'
-				? undefined
-				: mode === 'join'
-					? { kind: 'all', close: reference, steps: groups }
-					: signal?.delivery === 'many'
-						? { kind: 'each', signal: reference, maxConcurrency: concurrency ?? 1 }
-						: { kind: 'once', signal: reference };
+		let on: JsonValue | undefined;
+		if (mode === 'join') on = { kind: 'all', close: reference, steps: groups };
+		else if (mode === 'signal' && signal) on = workflowSignalSubscription(signal, concurrency ?? 1);
 		applyFields({
 			name: name.trim() || undefined,
 			[step.kind === 'command' ? 'command' : 'prompt']: instruction,

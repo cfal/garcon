@@ -75,6 +75,13 @@ export class WorkflowFileState {
 		}
 	}
 
+	#acceptRevision(revision: FileRevision, source: string): void {
+		this.#revision = revision;
+		this.baseline = source;
+		this.reconcileRequired = false;
+		this.comparison = null;
+	}
+
 	async #save(source: string, revision: FileRevision): Promise<void> {
 		await this.#perform(async (request) => {
 			try {
@@ -90,10 +97,7 @@ export class WorkflowFileState {
 				if (this.#request !== request) return;
 				if (result.path !== this.target.filePath)
 					throw new Error(m.workflow_studio_file_identity_changed());
-				this.#revision = result.revision;
-				this.baseline = source;
-				this.reconcileRequired = false;
-				this.comparison = null;
+				this.#acceptRevision(result.revision, source);
 			} catch (error) {
 				if (
 					this.#request === request &&
@@ -123,10 +127,7 @@ export class WorkflowFileState {
 				throw new Error(m.workflow_studio_file_identity_changed());
 			const source = getSource();
 			if (disk.content === source || disk.revision === this.#revision) {
-				this.#revision = disk.revision;
-				this.baseline = disk.content;
-				this.reconcileRequired = false;
-				this.comparison = null;
+				this.#acceptRevision(disk.revision, disk.content);
 			} else {
 				this.reconcileRequired = true;
 				this.comparison = { source, disk: disk.content, revision: disk.revision };
@@ -137,10 +138,7 @@ export class WorkflowFileState {
 	acceptDisk(source: string): string | undefined {
 		const comparison = this.comparison;
 		if (this.busy || !comparison || comparison.source !== source) return;
-		this.#revision = comparison.revision;
-		this.baseline = comparison.disk;
-		this.reconcileRequired = false;
-		this.comparison = null;
+		this.#acceptRevision(comparison.revision, comparison.disk);
 		return comparison.disk;
 	}
 

@@ -1,4 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 import type { ForkOpenPlacementPreference } from '$lib/stores/local-settings.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
 import type {
@@ -19,7 +20,6 @@ import {
 	type FocusOwner,
 	type PortableSingletonKind,
 	type PresentationHostId,
-	type WorkflowLaunchContext,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 	type WorkspacePartitionId,

@@ -12,13 +12,15 @@ export class WorkflowRunController {
 	detail = $state.raw<WorkflowRunDetail | null>(null);
 	readError = $state<unknown>(null);
 	actionError = $state<unknown>(null);
-	actionUnconfirmed = $state(false);
 	mutating = $state(false);
 	#active = false;
 	#disposed = false;
 	#read: AbortController | null = null;
 	#timer: ReturnType<typeof setTimeout> | undefined;
-	#unconfirmed: Mutation | null = null;
+	#unconfirmed = $state.raw<Mutation | null>(null);
+	get actionUnconfirmed(): boolean {
+		return this.#unconfirmed !== null;
+	}
 
 	constructor(
 		readonly runId: string,
@@ -86,14 +88,11 @@ export class WorkflowRunController {
 			this.detail = result;
 			this.readError = null;
 			this.#unconfirmed = null;
-			this.actionUnconfirmed = false;
 			return true;
 		} catch (error) {
 			if (this.#disposed) return false;
 			this.actionError = error;
-			const uncertain = isUnconfirmedWorkflowMutation(error);
-			this.#unconfirmed = uncertain ? action : null;
-			this.actionUnconfirmed = uncertain;
+			this.#unconfirmed = isUnconfirmedWorkflowMutation(error) ? action : null;
 			return false;
 		} finally {
 			if (!this.#disposed) {

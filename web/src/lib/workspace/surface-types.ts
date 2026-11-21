@@ -1,3 +1,5 @@
+import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
+
 export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
 export const MAX_MOBILE_RETURN_TARGETS = 32;
 // Bounds visible transcript retention and stays within the restore depth and node budgets.
@@ -59,11 +61,6 @@ export interface ChatViewSurfaceDescriptor {
 	readonly id: ChatViewSurfaceId;
 	readonly type: 'chat';
 	readonly chatId: string | null;
-}
-
-export interface WorkflowLaunchContext {
-	readonly executorId: string;
-	readonly cwd: string;
 }
 
 export type WorkflowSurfaceDescriptor =

@@ -70,7 +70,7 @@ describe('Workflow run viewer', () => {
 		render(WorkflowRunViewer, { runId: 'run-a', onOpenChat: vi.fn() });
 		await fireEvent.click(await screen.findByRole('button', { name: /Verify findings/ }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
-		await fireEvent.input(screen.getByLabelText('Item key (id)'), { target: { value: 'F-03' } });
+		await fireEvent.input(screen.getByLabelText('Item key (id)'), { target: { value: ' F-03 ' } });
 		await fireEvent.input(screen.getByLabelText('JSON payload'), {
 			target: { value: '{"claim": "New claim"}' },
 		});
