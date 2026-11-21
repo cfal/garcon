@@ -100,14 +100,21 @@
 					onImport(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes));
 			} else if (mode === 'open' && path.trim()) {
 				const targetPath = path.trim();
+				const targetExecutor = executorId;
 				const relative = !/^(?:[a-z]:[\\/]|[\\/])/i.test(targetPath);
+				const directory =
+					tree?.directory.path ??
+					(context?.executorId === targetExecutor ? context.cwd : undefined);
+				const projectPath =
+					(relative ? directory : undefined) ??
+					tree?.fileRootPath ??
+					executors.get(targetExecutor)?.projectBasePath ??
+					(await files.getTree({ executorId: targetExecutor }, { signal: operation.signal }))
+						.fileRootPath;
+				operation.signal.throwIfAborted();
 				const file = await WorkflowFileState.open(
 					files,
-					{
-						executorId,
-						filePath: targetPath,
-						...(relative && context?.executorId === executorId ? { projectPath: context.cwd } : {}),
-					},
+					{ executorId: targetExecutor, projectPath, filePath: targetPath },
 					operation.signal,
 				);
 				if (operation.signal.aborted) file.dispose();

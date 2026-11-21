@@ -86,7 +86,7 @@ describe('workflow draft file', () => {
 		const save = vi.fn<typeof saveText>().mockRejectedValueOnce(new Error('Connection lost'));
 		const file = await WorkflowFileState.open(
 			{ readText: read, saveText: save },
-			{ executorId: 'local', filePath: path },
+			{ executorId: 'local', projectPath: '/workspace', filePath: path },
 		);
 		await file.save('saved');
 		expect(file.reconcileRequired).toBe(true);

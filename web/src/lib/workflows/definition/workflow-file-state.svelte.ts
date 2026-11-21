@@ -6,7 +6,7 @@ import type { FileRevision } from '$shared/file-contracts';
 
 export interface WorkflowFileTarget {
 	executorId: string;
-	projectPath?: string;
+	projectPath: string;
 	filePath: string;
 }
 

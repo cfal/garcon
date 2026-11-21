@@ -21,6 +21,17 @@ vi.mock('$lib/api/workflows', () => ({
 
 beforeEach(() => {
 	const revision = workflowRevision();
+	vi.spyOn(files, 'getTree').mockResolvedValue({
+		fileRootPath: '/project',
+		directory: {
+			path: '/project',
+			relativePath: '',
+			parentPath: null,
+			breadcrumbs: [{ name: 'project', path: '/project' }],
+		},
+		homeDirectory: null,
+		entries: [],
+	});
 	vi.mocked(api.listWorkflowDefinitionsPage).mockResolvedValue({
 		items: [
 			{
@@ -167,10 +178,41 @@ steps:
 		expect(screen.getByRole('button', { name: 'Publish new definition' })).toBeTruthy();
 		expect(screen.getByText(path, { exact: false })).toBeTruthy();
 		expect(read).toHaveBeenCalledOnce();
+		expect(read.mock.calls[0][0]).toEqual({
+			executorId: 'local',
+			projectPath: '/project',
+			filePath: path,
+		});
 		await host.rerender({ ...props, open: false });
 		await host.rerender(props);
 		expect(screen.getByLabelText('Definition')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Publish new definition' })).toBeNull();
+	});
+
+	it('opens a relative file against the selected executor and chat folder, without looking up a different root', async () => {
+		const path = '/worker/project/review.workflow.yaml';
+		const read = vi.spyOn(files, 'readText').mockResolvedValue({
+			path,
+			content: workflowRevision().source,
+			revision: 'v1:read',
+		});
+		render(NewWorkflowTestHost, {
+			props: { onRunStarted: vi.fn(), context: { executorId: 'remote', cwd: '/worker/project' } },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
+		const picker = within(screen.getByRole('dialog', { name: 'Open source file' }));
+		await fireEvent.input(picker.getByLabelText('File path'), {
+			target: { value: 'review.workflow.yaml' },
+		});
+		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
+		await screen.findByRole('button', { name: 'Publish new definition' });
+		expect(read.mock.calls[0][0]).toEqual({
+			executorId: 'remote',
+			projectPath: '/worker/project',
+			filePath: 'review.workflow.yaml',
+		});
+		expect(files.getTree).not.toHaveBeenCalled();
 	});
 
 	it('retains an unsaved draft when its presentation closes and protects it from page unload', async () => {
@@ -205,6 +247,7 @@ steps:
 		await fireEvent.click(screen.getByRole('button', { name: 'Save draft file' }));
 		expect(save.mock.calls[0]?.[0]).toMatchObject({
 			executorId: 'local',
+			projectPath: '/project',
 			filePath: path,
 			expectedRevision: 'v1:read',
 		});
@@ -219,7 +262,11 @@ steps:
 		const read = vi
 			.spyOn(files, 'readText')
 			.mockResolvedValue({ path, content: source, revision: 'v1:old' });
-		const file = await WorkflowFileState.open(files, { executorId: 'local', filePath: path });
+		const file = await WorkflowFileState.open(files, {
+			executorId: 'local',
+			projectPath: '/project',
+			filePath: path,
+		});
 		const draft = new WorkflowDraftState(source, { file });
 		draft.replaceSource(source + '# Local edit\n');
 		read.mockResolvedValue({ path, content: source + '# Disk edit\n', revision: 'v1:new' });
