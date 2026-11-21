@@ -89,6 +89,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly usageHistory = null;
+  readonly cliUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;

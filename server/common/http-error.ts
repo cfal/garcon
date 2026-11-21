@@ -51,7 +51,10 @@ export function jsonErrorFromUnknown(
       error.retryable,
     );
   }
-  if (error instanceof AgentIntegrationError && (error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_ENDPOINT')) {
+  // An integration's refusal, as opposed to an executor that lacks the capability (AgentCallError, 501).
+  if (error instanceof AgentIntegrationError && (
+    error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_ENDPOINT' || error.code === 'OPERATION_UNSUPPORTED'
+  )) {
     return jsonError(error.message, 422, error.code, false);
   }
   if (isDomainError(error)) {

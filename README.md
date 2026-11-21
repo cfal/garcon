@@ -338,7 +338,7 @@ Garcon keeps that development loop coherent:
 
 Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
 
-Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
+Claude Code 2.1.238 or newer is required. Settings > Agents shows the installed Claude Code and Codex CLI versions on each executor and can update them in place; see [agent CLI updates](docs/agent-cli-updates.md). Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 
 ## Automate And Delegate
 

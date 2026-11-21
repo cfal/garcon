@@ -34,6 +34,8 @@ vi.mock('$lib/api/agents.js', () => ({
 	launchAgentAuthLogin: vi.fn(),
 	getAgentAuthLoginStatus: vi.fn(),
 	completeAgentAuthLogin: vi.fn(),
+	getAgentCliUpdates: vi.fn(async () => ({ statuses: {}, failures: {} })),
+	startAgentCliUpdate: vi.fn(),
 }));
 
 vi.mock('$lib/notifications/completion-sound.js', () => ({
