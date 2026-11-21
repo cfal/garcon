@@ -149,14 +149,22 @@ describe('Docker contract', () => {
     }
   });
 
-  test('keeps coupled CLI versions aligned with the integration tier', () => {
+  test('keeps the OpenCode CLI, SDK, and integration supervisor aligned', () => {
     const openCodeVersion = integrationPackage.devDependencies['opencode-ai'];
     expect(dockerfile).toContain(`ARG OPENCODE_VERSION=${openCodeVersion}`);
     expect(opencodeAgentPackage.dependencies['@opencode-ai/sdk']).toBe(openCodeVersion);
     expect(opencodeSupervisor).toContain(`export const PINNED_OPENCODE_VERSION = '${openCodeVersion}';`);
+    expect(dockerfile).not.toContain('opencode-ai@latest');
+  });
+
+  test('provisions the integration-tested Codex and Pi versions outside the source workspace', async () => {
     expect(dockerfile).toContain(`ARG CODEX_VERSION=${integrationPackage.devDependencies['@openai/codex']}`);
     expect(dockerfile).toContain(`ARG PI_VERSION=${integrationPackage.devDependencies['@earendil-works/pi-coding-agent']}`);
-    expect(dockerfile).not.toContain('opencode-ai@latest');
+    const lock = Bun.JSONC.parse(await readFile(path.join(repositoryRoot, 'bun.lock'), 'utf8'));
+    expect(Object.keys(lock.workspaces)).not.toContain('integration-tests');
+    const providerPackages = Object.values(lock.packages).map(([locator]) => locator)
+      .filter(name => name.startsWith('@openai/codex@') || name.startsWith('@earendil-works/pi-'));
+    expect(providerPackages).toEqual([]);
   });
 
   test('copies declared patches before installing the workspace', () => {
