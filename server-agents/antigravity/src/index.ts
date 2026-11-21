@@ -140,7 +140,9 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
       defaultModel: '',
       fallbackModels: [],
       requiresStrictModelDiscovery: false,
-      generation: { priority: 90, model: '' },
+      // Each one-shot query opens a session that agy keeps in the user's
+      // conversation history, so Antigravity is not a default generation agent.
+      generation: null,
       discover: () => getAntigravityModels(config, logger),
     });
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });

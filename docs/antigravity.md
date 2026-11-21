@@ -57,6 +57,8 @@ ACP calls:
 
 A cooperative cancel settles only when the agent answers the open prompt. The next turn on that session waits for the cancelled prompt to settle before it sends a new `session/prompt`. Otherwise agy would treat the new prompt as a mid-turn steer. If the prompt has not settled after 10 s, the runtime retires the process, and the turn reconnects with `session/resume`. Content the agent streams between the cancel and its settlement belongs to the stopped turn and is published with it, because it is also in the agent's native history.
 
+Stop works the same way while a turn is still being configured (model and mode are applied before the prompt). The turn is reserved from admission, so that window counts as busy, and an abort there ends the turn before its prompt is sent. A follow-up that is waiting on a stopped turn gives up as soon as its own admission closes.
+
 After a cancelled turn, agy merges the next user message into the unanswered one, so the model sees both prompts as one request.
 
 ### Executor Errors
@@ -93,12 +95,12 @@ The selection rules:
 
 - A one-time choice never falls back to a persistent grant or a persistent deny rule. When nothing safe matches, the runtime answers `cancelled`.
 - Untyped options match conventional IDs (`allow`, `deny`, `allow-once`, `reject-once`), never a typed option of another kind.
-- Auto-approval is Garcon's policy for the turn, so bypass modes answer with the one-time option.
+- Auto-approval is Garcon's policy for the turn, so bypass modes answer with the one-time option. They take a persistent grant only when the agent offers nothing else, because bypass means the tool runs.
 - After Stop, any permission request that arrives before the cancelled prompt settles is answered `cancelled`.
 
 ## One-Shot Queries
 
-`singleQuery` runs one prompt in a disposable session started in a temporary directory, in `plan` mode. In `plan` mode agy asks before running even the commands its own rules would otherwise auto-approve; verified against 1.5.13 with `touch`. Every permission request is answered with the reject option, and an executor-error chunk fails the query. The CLI still records that session in its conversation store; Garcon does not delete native files.
+Antigravity is not a default generation agent (`generation: null`, like Cursor), because every one-shot session stays in the user's agy conversation history. When a caller does pick it, `singleQuery` runs one prompt in a disposable session started in a temporary directory, in `plan` mode. In `plan` mode agy asks before running even the commands its own rules would otherwise auto-approve; verified against 1.5.13 with `touch`. Every permission request is answered with the reject option, and an executor-error chunk fails the query. The CLI still records that session in its conversation store; Garcon does not delete native files.
 
 ## Tool Normalization
 

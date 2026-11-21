@@ -53,6 +53,12 @@ describe('permissionChoiceOutcome', () => {
     expect(permissionChoiceOutcome(mislabeled, 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 
+  it('auto-approves with a persistent grant only when nothing else is offered', () => {
+    expect(permissionChoiceOutcome(CURSOR_OPTIONS, 'auto-approve')).toEqual(selected('allow-once'));
+    const persistentOnly = [{ optionId: 'always', kind: 'allow_always' }, { optionId: 'never', kind: 'reject_always' }];
+    expect(permissionChoiceOutcome(persistentOnly, 'auto-approve')).toEqual(selected('always'));
+  });
+
   it('never resolves a denial to an allow option', () => {
     const allowOnly = [{ optionId: 'allow', kind: 'allow_once' }];
     expect(permissionChoiceOutcome(allowOnly, 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });

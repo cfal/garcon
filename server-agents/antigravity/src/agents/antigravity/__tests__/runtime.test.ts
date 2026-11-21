@@ -486,6 +486,59 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('stops the first turn while it is still being configured, before any prompt', async () => {
+    const { agent, runtime, request } = harness();
+    const gate = Promise.withResolvers<void>();
+    agent.configReplyGate = gate.promise;
+    agent.onPrompt((fake) => fake.endPrompt());
+
+    const start = runtime.startSession(request({ permissionMode: 'plan' }));
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    expect(runtime.isRunning('session-1')).toBe(true);
+    expect(runtime.abort('session-1')).toBe(true);
+    gate.resolve();
+
+    await expect(start).rejects.toThrow();
+    expect(agent.requests('session/prompt')).toEqual([]);
+  });
+
+  it('stops waiting on a stopped turn when the follow-up itself is cancelled', async () => {
+    const { agent, runtime, request } = harness();
+    agent.onPrompt(() => {});
+    agent.cancelReply = 'ignored';
+    const started = await runtime.startSession(request());
+    runtime.abort(started.agentSessionId);
+
+    const admission = new AbortController();
+    const followUp = runtime.runTurn({
+      ...request(),
+      agentSessionId: started.agentSessionId,
+      executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+    });
+    admission.abort(new Error('follow-up cancelled'));
+    await expect(followUp).rejects.toThrow('follow-up cancelled');
+    expect(agent.requests('session/prompt')).toHaveLength(1);
+    runtime.shutdown();
+  });
+
+  it('shares one restore between turns that arrive together', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+
+    const results = await Promise.allSettled([
+      runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }),
+      runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(agent.requests('session/resume')).toHaveLength(1);
+    expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
   it('fails the run when agy reports an executor error in-band', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => {

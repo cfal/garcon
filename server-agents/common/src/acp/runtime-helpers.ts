@@ -25,7 +25,10 @@ export function isAutoApproveMode(mode: PermissionMode, policy: AcpAgentPolicy):
   return (policy.autoApprovePermissionModes ?? DEFAULT_AUTO_APPROVE_MODES).includes(mode);
 }
 
-export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'reject';
+// `auto-approve` is Garcon's bypass policy for the turn: it prefers the
+// one-time option so no persistent grant is written, and takes a persistent one
+// only when the agent offers nothing else, since bypass means the tool runs.
+export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'auto-approve' | 'reject';
 
 export function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
   return typeof value === 'number' || typeof value === 'string';
@@ -42,12 +45,14 @@ function optionIdFrom(option: Record<string, unknown>): string | undefined {
 const CHOICE_KINDS: Record<AcpPermissionChoice, readonly string[]> = {
   'allow-once': ['allow_once'],
   'allow-always': ['allow_always', 'allow_once'],
+  'auto-approve': ['allow_once', 'allow_always'],
   reject: ['reject_once'],
 };
 
 const CHOICE_FALLBACK_IDS: Record<AcpPermissionChoice, readonly string[]> = {
   'allow-once': ['allow-once', 'allow_once', 'allow', 'approve'],
   'allow-always': ['allow-always', 'allow_always', 'allow-once', 'allow_once', 'allow', 'approve'],
+  'auto-approve': ['allow-once', 'allow_once', 'allow', 'approve', 'allow-always', 'allow_always'],
   reject: ['reject-once', 'reject_once', 'reject', 'deny'],
 };
 
@@ -102,4 +107,18 @@ export function fallbackPermissionToolUse(
     if (title) input.title = title;
   }
   return new UnknownToolUseMessage(timestamp, toolId, rawName, input);
+}
+
+// A follow-up waiting on a stopped turn stops waiting once its own admission closes.
+export function untilSettledOrClosed(settled: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return settled;
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    signal.addEventListener('abort', done, { once: true });
+    void settled.then(done);
+  });
 }

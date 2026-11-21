@@ -39,6 +39,7 @@ import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContex
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import {
   abortStrategy,
+  untilSettledOrClosed,
   buildEnvFallback,
   buildPromptFallback,
   fallbackPermissionToolUse,
@@ -73,9 +74,10 @@ interface AcpAgentRuntimeSession {
   retired: boolean;
   activeTurn: AcpTurnContext | null;
   sourceTurn: AcpTurnContext | null;
-  // Held from admission until the prompt is sent, so the configure window
-  // counts as busy for concurrent turns, the idle purger, and path updates.
-  pendingTurn: object | null;
+  // The turn between admission and its prompt being sent. Its configure
+  // window counts as busy for concurrent turns, the idle purger, and path
+  // updates, and Stop during it aborts the turn before the prompt goes out.
+  pendingTurn: AcpTurnContext | null;
   permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
@@ -127,6 +129,7 @@ export class AcpAgentRuntime {
   #logger: AgentLogger;
   #cancelSettleTimeoutMs: number;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
+  #restoring = new Map<string, Promise<AcpAgentRuntimeSession>>();
   #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
@@ -230,23 +233,14 @@ export class AcpAgentRuntime {
     let session = await this.#sessionForTurn(request);
     const cancelled = session.activeTurn;
     if (cancelled?.running && cancelled.aborted) {
-      await cancelled.settled.promise;
+      await untilSettledOrClosed(cancelled.settled.promise, request.executionAdmission?.signal);
       assertAcpExecutionOpen(request);
       if (session.retired) session = await this.#sessionForTurn(request);
     }
     if (this.#isBusy(session)) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
-    const reservation = {};
-    session.pendingTurn = reservation;
-    const release = () => {
-      if (session.pendingTurn === reservation) session.pendingTurn = null;
-    };
-    try {
-      await this.#runPrompt(session, request, release);
-    } finally {
-      release();
-    }
+    await this.#runPrompt(session, request);
   }
 
   #isBusy(session: AcpAgentRuntimeSession): boolean {
@@ -294,8 +288,13 @@ export class AcpAgentRuntime {
 
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
-    const turn = session?.activeTurn;
-    if (!session || !turn?.running) return false;
+    if (!session) return false;
+    const turn = session.activeTurn;
+    if (!turn?.running) {
+      if (!session.pendingTurn) return false;
+      session.pendingTurn.aborted = true;
+      return true;
+    }
 
     if (abortStrategy(this.#policy) === 'process-restart') {
       turn.aborted = true;
@@ -409,6 +408,8 @@ export class AcpAgentRuntime {
   }
 
   async #sessionForTurn(request: AcpResumeRequest): Promise<AcpAgentRuntimeSession> {
+    const restoring = this.#restoring.get(request.agentSessionId);
+    if (restoring) await restoring.catch(() => {});
     const existing = this.#sessions.get(request.agentSessionId);
     if (existing) {
       if (existing.chatId !== request.chatId) {
@@ -416,7 +417,17 @@ export class AcpAgentRuntime {
       }
       return existing;
     }
+    // Concurrent callers wait for one restore instead of using a half-restored record.
+    const restore = this.#restoreSession(request);
+    this.#restoring.set(request.agentSessionId, restore);
+    try {
+      return await restore;
+    } finally {
+      if (this.#restoring.get(request.agentSessionId) === restore) this.#restoring.delete(request.agentSessionId);
+    }
+  }
 
+  async #restoreSession(request: AcpResumeRequest): Promise<AcpAgentRuntimeSession> {
     const client = await this.#connectClient(request);
     const capabilities = client.getAdvertisedCapabilities();
     const order = reconnectOrder(capabilities);
@@ -473,6 +484,12 @@ export class AcpAgentRuntime {
   ): Promise<void> {
     assertAcpExecutionOpen(request);
     const turn = this.#createTurn(session, request);
+    // Reserved before the first await, so the busy check that admitted this
+    // turn cannot admit another one.
+    session.pendingTurn = turn;
+    const releasePending = () => {
+      if (session.pendingTurn === turn) session.pendingTurn = null;
+    };
     this.#bindTurnSource(turn);
     this.#converter.beginTurn?.(session.id);
 
@@ -487,11 +504,13 @@ export class AcpAgentRuntime {
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
       if (request.executionAdmission) await markAcpExecutionStarted(request);
+      if (turn.aborted) return;
       const promptRequest = session.client.promptSession({
         sessionId: session.remoteSessionId,
         prompt,
         ...(promptConfig ? { config: promptConfig } : {}),
       }, () => {
+        releasePending();
         if (!this.#activateTurnSource(turn, request.projectPath)) return;
         executionStarted = true;
         onExecutionStarted?.();
@@ -513,6 +532,7 @@ export class AcpAgentRuntime {
         failureMessage = humanizeError(error);
       }
     } finally {
+      releasePending();
       const finalMessages = executionStarted ? this.#emitFlushedMessages(turn)
         .filter((message) => message.type === 'assistant-message') : [];
       if (turn.aborted) {
@@ -679,10 +699,8 @@ export class AcpAgentRuntime {
       return;
     }
 
-    // Auto-approval is Garcon's policy for this turn, so it never writes a
-    // persistent grant into the agent's own configuration.
     if (isAutoApproveMode(turn.permissionMode, this.#policy)) {
-      session.client.respond(requestId, permissionChoiceOutcome(options, 'allow-once'));
+      session.client.respond(requestId, permissionChoiceOutcome(options, 'auto-approve'));
       return;
     }
 
