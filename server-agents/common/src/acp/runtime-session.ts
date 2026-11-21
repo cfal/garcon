@@ -38,8 +38,8 @@ export interface AcpAgentRuntimeSession {
   permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
-  // The model the agent selected when this process opened the session; an empty
-  // request returns to it. After a reconnect it is the model the session resumed with.
+  // The model an empty request returns to: the agent's own default when this
+  // process has seen it, otherwise the model a resumed session reported.
   agentDefaultModelId?: string;
   startedAt: string;
   lastActivityAt: number;

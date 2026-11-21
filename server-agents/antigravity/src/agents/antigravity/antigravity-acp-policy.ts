@@ -55,7 +55,7 @@ export async function configureAntigravitySession(
     context.client,
     context.sessionId,
     context.models,
-    context.request.model || context.agentDefaultModelId,
+    requestedAntigravityModel(context.request.model) ?? context.agentDefaultModelId,
   );
   if (models) context.applyState({ models });
 
@@ -66,6 +66,11 @@ export async function configureAntigravitySession(
     antigravityModeForPermissionMode(context.request.permissionMode),
   );
   if (configOptions) context.applyState({ configOptions });
+}
+
+// Garcon names the agent's default as an empty model or `default`.
+export function requestedAntigravityModel(model: string | undefined): string | undefined {
+  return !model || model === 'default' ? undefined : model;
 }
 
 // Returns the updated model state, or undefined when the session already uses

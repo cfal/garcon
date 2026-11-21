@@ -98,10 +98,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const update = asObject(notification.update);
     const session = this.#sessionFor(context.sessionId);
     const updateType = asString(update.sessionUpdate);
-    session.assistantText += session.failure.continueOn(updateType);
+    const outputType = this.#outputType(session, update, updateType);
+    session.assistantText += session.failure.continueOn(outputType);
     // New output publishes waiting rows first, so nothing moves ahead of a call
     // that started earlier.
-    const waiting = this.#emitDeferred(session, update, updateType, context.timestamp);
+    const waiting = this.#emitDeferred(session, update, outputType, context.timestamp);
     if (waiting.length > 0) return [...waiting, ...this.fromSessionUpdate(notification, context)];
     switch (updateType) {
       // Switching between thought and message text flushes the other buffer, so
@@ -153,6 +154,17 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   // A call's row waits for its arguments when the first frame carries none, so a
   // later frame can still give it its shared tool type; a terminal frame emits
   // it regardless.
+  // A tool_call_update reports on an earlier call, except when it is the first
+  // frame of a call, which is new output like a tool_call.
+  #outputType(session: SessionState, update: Record<string, unknown>, updateType: string | undefined): string | undefined {
+    if (updateType !== 'tool_call_update') return updateType;
+    const id = asString(update.toolCallId);
+    if (!id) return updateType;
+    const known = session.emittedToolIds.has(id) || session.deferredCalls.has(id)
+      || session.completedToolIds.has(id) || session.toolNames.has(id);
+    return known ? updateType : 'tool_call';
+  }
+
   // Records the frame, then fills the name and arguments it omits from earlier
   // frames of the same call.
   #resolvedCall(session: SessionState, call: AntigravityToolCall): AntigravityToolCall {

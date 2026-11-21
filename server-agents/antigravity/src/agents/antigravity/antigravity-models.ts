@@ -1,7 +1,7 @@
 import type { AgentModelOption } from '@garcon/common/agents';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
-import { sharedProbe } from './shared-probe.js';
+import { sharedProbe } from '@garcon/server-agent-common/shared/shared-probe';
 
 const MODELS_TIMEOUT_MS = 10_000;
 

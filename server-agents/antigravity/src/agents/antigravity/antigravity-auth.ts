@@ -10,19 +10,7 @@ import {
   runAntigravityModels,
   type AntigravityCliResult,
 } from './antigravity-models.js';
-import { sharedProbe } from './shared-probe.js';
-
-// The probe is shared with concurrent callers, so an abort stops waiting rather
-// than killing it.
-function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return operation;
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
-  });
-}
+import { sharedProbe, waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
 const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
 
@@ -93,10 +81,10 @@ export async function getAntigravityAuthStatus(
     const method = config.authMethod();
     const canReauth = method === 'oauth-personal';
     if (!canReauth && headlessAuthenticate) {
-      await abortable(authenticate(config), signal);
+      await waitUnlessAborted(authenticate(config), signal);
       return { authenticated: true, canReauth: false, label: method, source: 'cli' };
     }
-    const result = await abortable(runModels(config), signal);
+    const result = await waitUnlessAborted(runModels(config), signal);
     if (result.exitCode === 0) {
       return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
     }

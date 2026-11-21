@@ -41,6 +41,7 @@ class FakeAntigravityAgent {
   readonly received: AcpJsonRpcMessage[] = [];
   readonly sessions = new Set<string>();
   #nextSession = 1;
+  readonly #sessionModels = new Map<string, string>();
   #stdout!: ReadableStreamDefaultController<Uint8Array>;
   #openPrompt: { id: number | string; sessionId: string } | null = null;
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
@@ -132,7 +133,10 @@ class FakeAntigravityAgent {
       case 'initialize':
         return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } });
       case 'authenticate':
+        return reply({});
       case 'session/set_model':
+        // agy keeps the chosen model with the conversation, so a resume reports it.
+        this.#sessionModels.set(String(params.sessionId), String(params.modelId));
         return reply({});
       case 'session/new': {
         const sessionId = `session-${this.#nextSession++}`;
@@ -147,7 +151,8 @@ class FakeAntigravityAgent {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
         }
       {
-        const result = this.resumeReportsOptions ? { models: MODELS, configOptions: [MODE_OPTION] } : { models: MODELS };
+        const models = { ...MODELS, currentModelId: this.#sessionModels.get(String(params.sessionId)) ?? MODELS.currentModelId };
+        const result = this.resumeReportsOptions ? { models, configOptions: [MODE_OPTION] } : { models };
         if (this.resumeGate) {
           void this.resumeGate.then(() => reply(result));
           return;
@@ -371,6 +376,24 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('publishes no error row for a request that fails after Stop', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt(() => {});
+    const started = await runtime.startSession(request());
+
+    runtime.abort(started.agentSessionId);
+    await waitFor(() => !runtime.isRunning(started.agentSessionId));
+    agent.update(started.agentSessionId, {
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: '\n⚠ agent executor error: context canceled\n' },
+    });
+    await Bun.sleep(10);
+
+    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    expect(rows.filter((message) => message.type === 'error')).toEqual([]);
+    runtime.shutdown();
+  });
+
   it('cancels cooperatively and keeps the process for the next turn', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt(() => {});
@@ -566,6 +589,44 @@ describe('Antigravity ACP runtime', () => {
 
     expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
       .toEqual(['gemini-test-high', 'gemini-test-low']);
+    runtime.shutdown();
+  });
+
+  it('returns to the agent default after a resumed session reports another model', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request({ model: 'gemini-test-high' }));
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+
+    await runtime.runTurn({ ...request({ model: 'default' }), agentSessionId: started.agentSessionId });
+
+    expect(agent.requests('session/resume')).toHaveLength(1);
+    expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
+      .toEqual(['gemini-test-high', 'gemini-test-low']);
+    runtime.shutdown();
+  });
+
+  it('fails clearly when agy exits after configuration but before the prompt', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    const marked = Promise.withResolvers<void>();
+
+    const turn = runtime.runTurn({
+      ...request(),
+      agentSessionId: started.agentSessionId,
+      executionAdmission: { signal: new AbortController().signal, markStarted: () => marked.promise },
+    }).then(() => null, (error) => error);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
+    await Bun.sleep(5);
+    agent.crash();
+    await Bun.sleep(5);
+    marked.resolve();
+
+    expect(String(await turn)).toContain('antigravity ACP process exited before the prompt was sent');
+    expect(agent.requests('session/prompt')).toHaveLength(1);
     runtime.shutdown();
   });
 

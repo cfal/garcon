@@ -393,6 +393,21 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(rows)[0]).toEqual({ type: 'bash-tool-use', toolId: 'tool-1', command: 'echo permitted', description: undefined });
   });
 
+  it('releases held marker text ahead of a call whose first frame is an update', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'agy prints\n⚠ agent executor error: <detail>' },
+    }), context);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-9', name: 'run_command', kind: 'execute',
+      status: 'completed', rawInput: { CommandLine: 'echo synthetic' }, rawOutput: { output: 'synthetic' },
+    }), context);
+
+    expect(rows.map((message) => message.type)).toEqual(['assistant-message', 'bash-tool-use', 'tool-result']);
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
   it('keeps a message whole across a progress update for an earlier call', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

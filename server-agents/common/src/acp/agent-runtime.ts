@@ -88,6 +88,11 @@ export class AcpAgentRuntime {
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #restores = new AcpRestoreRegistry<AcpAgentRuntimeSession>();
   #stopped = false;
+  // The model a session opens with when session/new names none. It is the
+  // agent's own setting, shared by every session this process opens, and
+  // stands in for the default of a resumed session, which reports only its
+  // current model.
+  #agentDefaultModelId: string | undefined;
   #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
@@ -150,7 +155,7 @@ export class AcpAgentRuntime {
       permissionMode: request.permissionMode,
       configOptions: created.configOptions,
       models: created.models,
-      agentDefaultModelId: created.models?.currentModelId,
+      agentDefaultModelId: this.#learnAgentDefaultModel(request, created.models?.currentModelId),
     }, now);
     this.#registerSession(session);
     const result = {
@@ -468,8 +473,13 @@ export class AcpAgentRuntime {
     session.remoteSessionId = restored.sessionId;
     session.configOptions = restored.configOptions;
     session.models = restored.models;
-    session.agentDefaultModelId ??= restored.models?.currentModelId;
+    session.agentDefaultModelId = this.#agentDefaultModelId ?? restored.models?.currentModelId;
     return true;
+  }
+
+  #learnAgentDefaultModel(request: AcpStartRequest, currentModelId: string | undefined): string | undefined {
+    if (currentModelId && !newSessionModelFor(this.#policy, request)) this.#agentDefaultModelId = currentModelId;
+    return this.#agentDefaultModelId ?? currentModelId;
   }
 
   async #runPrompt(
@@ -503,6 +513,7 @@ export class AcpAgentRuntime {
       if (turn.aborted) return;
       if (request.executionAdmission) await markAcpExecutionStarted(request);
       if (turn.aborted) return;
+      if (session.retired) throw new Error(`${this.#policy.agentId} ACP process exited before the prompt was sent`);
       const promptRequest = session.client.promptSession({
         sessionId: session.remoteSessionId,
         prompt,
@@ -676,6 +687,8 @@ export class AcpAgentRuntime {
     const context = this.#sessionUpdateContext(turn);
     const converted = this.#converter.fromSessionUpdate(params, context);
     if (turn.completed) {
+      // An abandoned request can fail after Stop; the user ended that turn.
+      if (turn.aborted) this.#converter.takeTurnFailure?.(session.id);
       converted.push(...(this.#converter.endTurn?.(session.id, context) ?? []));
     }
     this.#publishMessages(turn, converted);
