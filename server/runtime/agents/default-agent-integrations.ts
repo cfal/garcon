@@ -1,6 +1,7 @@
 import ClaudeAgentIntegration from '@garcon/server-agent-claude';
 import CodexAgentIntegration from '@garcon/server-agent-codex';
 import CursorAgentIntegration from '@garcon/server-agent-cursor';
+import AntigravityAgentIntegration from '@garcon/server-agent-antigravity';
 import OpenCodeAgentIntegration from '@garcon/server-agent-opencode';
 import AmpAgentIntegration from '@garcon/server-agent-amp';
 import FactoryAgentIntegration from '@garcon/server-agent-factory';
@@ -20,6 +21,7 @@ export const defaultAgentIntegrations = [
   OpenCodeAgentIntegration,
   AmpAgentIntegration,
   CursorAgentIntegration,
+  AntigravityAgentIntegration,
   FactoryAgentIntegration,
   PiAgentIntegration,
   ...(process.platform === 'linux' || process.platform === 'darwin' ? [ShellIntegration] : []),

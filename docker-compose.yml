@@ -18,6 +18,7 @@ services:
       - codex-home:/home/garcon/.codex
       - cursor-home:/home/garcon/.cursor
       - factory-home:/home/garcon/.factory
+      - gemini-home:/home/garcon/.gemini
       - pi-home:/home/garcon/.pi
       - opencode-data:/home/garcon/.local/share/opencode
       - opencode-state:/home/garcon/.local/state/opencode
@@ -48,6 +49,7 @@ volumes:
   codex-home:
   cursor-home:
   factory-home:
+  gemini-home:
   pi-home:
   opencode-data:
   opencode-state:

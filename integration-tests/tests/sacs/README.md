@@ -58,8 +58,11 @@ creation, deterministic model scripting, request observation, and cleanup. A
 driver establishes provider-native barriers and translates provider requests;
 it does not choose an oracle.
 
-The reference scripted drivers are Claude, Codex, OpenCode, Pi, and the three
-Direct integrations. OpenCode's real-binary tier is Linux-only. New
+The reference scripted drivers are Claude, Codex, OpenCode, Pi, Antigravity,
+and the three Direct integrations. OpenCode's real-binary tier is Linux-only.
+Antigravity registers only when `ANTIGRAVITY_BIN` names the pinned `agy`
+binary, which CI installs; it has no history import facets, since it postdates
+the ledger and its native history cannot be parsed. New
 reference-tier integrations register in `drivers.ts`, after which every shared
 case runs automatically.
 

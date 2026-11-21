@@ -11,6 +11,7 @@
     "@cfal/noise-ws": "github:cfal/noise-ws#6cf4a4b2ab25d300316a21c23cbcef1bb3558556",
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-amp": "workspace:*",
+    "@garcon/server-agent-antigravity": "workspace:*",
     "@garcon/server-agent-claude": "workspace:*",
     "@garcon/server-agent-codex": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",

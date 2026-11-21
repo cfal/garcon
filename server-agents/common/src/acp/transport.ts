@@ -1,13 +1,13 @@
 import { EventEmitter } from 'events';
 import { AcpRpcError } from './errors.js';
-import type { AcpJsonRpcId, AcpJsonRpcMessage } from './protocol.js';
+import { isJsonRpcId, type AcpJsonRpcId, type AcpJsonRpcMessage } from './protocol.js';
 
 interface WritableProcessStdin {
   write(data: string | Uint8Array): unknown;
   end?(): unknown;
 }
 
-interface AcpProcess {
+export interface AcpProcess {
   stdin?: WritableProcessStdin | null;
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
@@ -34,10 +34,6 @@ export interface AcpTransportOptions {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
-
-function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
-  return typeof value === 'number' || typeof value === 'string';
-}
 
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
   const process = Bun.spawn([command, ...args], {
@@ -80,13 +76,19 @@ export class AcpTransport extends EventEmitter {
     void this.#watchExit(this.#process.exited);
   }
 
-  async request<T>(method: string, params?: unknown, onSent?: () => void): Promise<T> {
+  // `timeoutMs` overrides the transport default for one request; 0 disables it.
+  async request<T>(
+    method: string,
+    params?: unknown,
+    onSent?: () => void,
+    timeoutMs: number = this.#requestTimeoutMs,
+  ): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = this.#requestTimeoutMs > 0
+      const timer = timeoutMs > 0
         ? setTimeout(() => {
-          this.#rejectPending(id, new Error(`ACP request timed out after ${this.#requestTimeoutMs}ms: ${method}`));
-        }, this.#requestTimeoutMs)
+          this.#rejectPending(id, new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`));
+        }, timeoutMs)
         : null;
       timer?.unref?.();
       this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });

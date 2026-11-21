@@ -12,7 +12,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
+import { runIsolatedSingleQuery, singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
 import {
@@ -20,11 +20,11 @@ import {
   createNativeHistoryImport,
 } from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCursorConfig } from './config.js';
-import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
+import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
 import { getCursorAuthStatus } from './agents/cursor/cursor-auth.js';
 import { CursorAcpEventConverter } from './agents/cursor/cursor-acp-event-converter.js';
-import { CursorExecution } from './agents/cursor/execution.js';
+import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
 import { CursorTranscriptNotFoundError } from './agents/cursor/history-loader.js';
 import { getCursorModels } from './agents/cursor/cursor-models.js';
 import {
@@ -115,7 +115,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    const providerExecution = new CursorExecution(runtime, nativeSessions);
+    const providerExecution = new AcpExecution(runtime, nativeSessions);
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration) => (
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
@@ -156,23 +156,11 @@ export default class CursorAgentIntegration implements AgentIntegration {
       },
     };
     this.singleQuery = {
-      async run(request) {
-        request.signal.throwIfAborted();
-        try {
-          return await withSingleQueryDirectory(request.signal, (directory) => runSingleQuery(request.prompt, {
-            model: request.model,
-            ...singleQueryRuntimeOptions(request),
-            projectPath: directory,
-          }, config));
-        } catch (error) {
-          if (error instanceof AgentIntegrationError) throw error;
-          throw new AgentIntegrationError(
-            'PROVIDER_FAILURE',
-            error instanceof Error ? error.message : String(error),
-            false,
-          );
-        }
-      },
+      run: (request) => runIsolatedSingleQuery(request, (directory) => runSingleQuery(request.prompt, {
+        model: request.model,
+        ...singleQueryRuntimeOptions(request),
+        projectPath: directory,
+      }, config)),
     };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),

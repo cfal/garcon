@@ -22,6 +22,13 @@ import {
   scriptedPiStartRequest,
   startScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
+import { geminiText } from '../../support/fake-gemini-model.js';
+import {
+  ANTIGRAVITY_BINARY,
+  scriptedAntigravityRunRequest,
+  scriptedAntigravityStartRequest,
+  startScriptedAntigravityTestEnvironment,
+} from '../../support/scripted-antigravity.js';
 import {
   waitForPersistedChat,
   waitForPersistedNativeSession,
@@ -550,6 +557,42 @@ const piDriver: SacsDriverFactory = {
   },
 };
 
+// Antigravity has no pre-ledger chats to adopt and no parseable native history,
+// so it registers neither import facet; native forking is unavailable over ACP.
+const antigravityDriver: SacsDriverFactory = {
+  id: 'antigravity',
+  label: 'Antigravity',
+  steering: null,
+  nativeSessions: NATIVE_SESSIONS,
+  nativeHistoryImport: null,
+  legacyHistoryImport: null,
+  forking: null,
+  async start() {
+    const environment = startScriptedAntigravityTestEnvironment();
+    return {
+      id: 'antigravity',
+      label: 'Antigravity',
+      fixtureOptions: {
+        serverEnvironment: environment.serverEnvironment,
+        prepareWorkspace: environment.prepareWorkspace,
+      },
+      startRequest: (_fixture, input) => scriptedAntigravityStartRequest(input),
+      runRequest: (_fixture, input) => scriptedAntigravityRunRequest(input),
+      holdAssistant: (_fixture, content) => heldTurn(environment.model.scriptHeldTurn([geminiText(content)])),
+      // A cooperative cancel abandons the held model request, so no tool step is needed.
+      holdInterruptibleAssistant: (_fixture, content) => heldTurn(environment.model.scriptHeldTurn([geminiText(content)])),
+      scriptAssistant: (_fixture, content) => environment.model.scriptTurn([geminiText(content)]),
+      markRequests: () => environment.model.markRequests(),
+      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
+      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
+        .flatMap((request) => request.userTexts),
+      assertSettled: () => environment.model.assertSettled(),
+      reset: () => environment.model.reset(),
+      dispose: () => environment.dispose(),
+    } satisfies SacsDriverEnvironment;
+  },
+};
+
 const openCodeDriver: SacsDriverFactory = {
   id: 'opencode',
   label: 'OpenCode',
@@ -699,4 +742,6 @@ export const sacsScriptedDriverFactories: readonly SacsDriverFactory[] = [
   directAnthropicDriver,
   ...(process.platform === 'linux' ? [openCodeDriver] : []),
   piDriver,
+  // Runs wherever the pinned agy binary is installed; CI installs it.
+  ...(ANTIGRAVITY_BINARY ? [antigravityDriver] : []),
 ];
