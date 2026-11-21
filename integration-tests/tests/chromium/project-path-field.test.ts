@@ -92,10 +92,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         if (touch) {
           expect(await input.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
         }
-        const pathBounds = (await input.boundingBox())!;
-        const linkBounds = (await field.getByRole('button', { name: 'Select a different worktree' }).boundingBox())!;
-        expect(Math.abs(linkBounds.x - pathBounds.x)).toBeLessThan(1);
-        expect(linkBounds.y - (pathBounds.y + pathBounds.height)).toBe(4);
+        const link = field.getByRole('button', { name: 'Select a different worktree' });
+        const { leftOffset, verticalGap } = await link.evaluate(button => {
+          const path = button.closest('[data-slot="project-path-field"]')!.querySelector('input')!.getBoundingClientRect();
+          const bounds = button.getBoundingClientRect();
+          return { leftOffset: bounds.left - path.left, verticalGap: bounds.top - path.bottom };
+        });
+        expect(Math.abs(leftOffset)).toBeLessThan(1);
+        expect(verticalGap).toBe(4);
         expect(await field.evaluate(element => {
           const fieldBounds = element.getBoundingClientRect();
           const controls = [...element.querySelectorAll('input, button')]
