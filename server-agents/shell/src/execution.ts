@@ -265,7 +265,10 @@ export class ShellExecution {
         };
       }
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };
-      return { ...terminal, outcome: 'failed', failureCertainty: 'definite', error: { code: 'PROVIDER_FAILURE', message: message.content } };
+      return {
+        ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content },
+        ...(result.signal !== null || (result.exitCode !== null && result.exitCode !== 0) ? { failureCertainty: 'definite' } : {}),
+      };
     } catch (error) {
       publishOutput();
       let failure = failureDetail(error);

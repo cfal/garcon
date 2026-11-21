@@ -13,11 +13,39 @@ test('accepts only standalone envelopes and preserves unspecified payload text',
   ]);
 });
 
+test('frames a batch before interpreting the multiline bodies inside it', () => {
+  const report = '<garcon-workflow-emit signal="report" content-type="text">\r\nFirst.\r\n\r\nSecond.\r\n</garcon-workflow-emit>';
+  expect(workflowSignalCandidates(`\n${report}\r\n \r\n${emit}\n`)).toEqual([
+    { kind: 'emit', name: 'report', payload: { contentType: 'text', text: 'First.\r\n\r\nSecond.' } },
+    { kind: 'emit', name: 'research.finding_ready', payload: { contentType: 'json', text: '{"finding_id":"f1"}' } },
+  ]);
+});
+
+test('counts leading blank lines against the byte limit without treating indented examples as emits', () => {
+  const oversized = '\t\r\n' + emit.padEnd(65_536);
+  expect(workflowSignalCandidates(oversized)).toEqual([{ kind: 'invalid', reason: 'Workflow emit message is too large.' }]);
+  expect(workflowSignalCandidates('    ' + oversized.trimStart())).toEqual([]);
+  expect(workflowSignalCandidates('Example:\n' + oversized)).toEqual([]);
+});
+
+test('rejects ambiguous raw emit delimiters without publishing partial text', () => {
+  const start = '<garcon-workflow-emit signal="report">';
+  const close = '</garcon-workflow-emit>';
+  for (const content of [start + 'First.\n\n' + emit, start + 'First ' + close + ' second.' + close]) {
+    expect(workflowSignalCandidates(content)).toEqual([{ kind: 'invalid', reason: expect.any(String) }]);
+  }
+  expect(workflowSignalCandidates(start + '<garcon-workflow-emit-example>' + close)).toEqual([
+    { kind: 'emit', name: 'report', payload: { contentType: null, text: '<garcon-workflow-emit-example>' } },
+  ]);
+});
+
 test.each([
   `> ${emit}`, `\`${emit}\``, `"${emit}"`, `    ${emit}`, `\\${emit}`,
   `~~~xml\n${emit}\n~~~`, `~~~xml\n${emit}`, `<!--\n${emit}\n-->`,
   `<blockquote>\n\n${emit}\n\n</blockquote>`, `- Example\n\n  ${emit}`,
   `Example:\n\n${emit}`, `<garcon-other>\n\n${emit}\n\n</garcon-other>`,
+  `${emit} was the first example.\n\n${emit}`, `${emit}\n\n${emit}\nThese were examples.`,
+  `${emit}\n${emit}`, `${emit}\n\n  ${emit}`,
 ])('keeps quotation or snippet inert: %s', content => {
   expect(workflowSignalCandidates(content)).toEqual([]);
 });

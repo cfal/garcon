@@ -30,7 +30,8 @@ the supplied execution modes, permission grants, provider selection, or tags.
 
 Supply `onSignal` only when a step is authorized to emit custom signals. Claude
 and Codex advertise exact provenance for fresh starts. Claude binds to the first
-matched input on its new CLI process; Codex binds to the native turn named by
+matched input on its new CLI process. A Claude result may supply final text, but
+is not a live assistant message and cannot emit. Codex binds to the native turn named by
 the submission reply. Unsupported integrations, including Shell, are rejected
 before starting emit-enabled steps; use built-in completion signals with them.
 
@@ -43,7 +44,8 @@ fence. Separate multiple envelopes in one message with blank lines:
 
 `content-type` is `none`, `text`, or `json`. Omit it to defer interpretation
 to the signal definition. A self-closing envelope carries no body. Body text
-is raw, with one framing line break removed at each end. Quoted, nested, mixed
+is raw, with one framing line break removed at each end; the emit tag itself
+cannot be nested or used as a literal delimiter in the body. Quoted, nested, mixed
 prose, replayed history, retired turn, or command output text is not a signal.
 
 The callback receives `{ key, source: { transcriptViewId, ordinal, index }, candidate }`

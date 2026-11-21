@@ -115,11 +115,10 @@ function settleClaudeProviderIdle(
     protocol.backgroundContinuationPending && protocol.abortRequested;
   if (retireAfterSettlement) session.backgroundTaskCount = 0;
 
-  const nativeFailure = protocol.settlementFailureMessage();
-  const failure = nativeFailure ?? steering.settlementFailureMessage;
+  const failure = protocol.settlementFailureMessage() ?? steering.settlementFailureMessage;
   if (failure) {
     handlers.logger.warn('Claude CLI run settled with an error', details);
-    handlers.fail(failure, nativeFailure ? 'definite' : undefined);
+    handlers.fail(failure, protocol.recordedResultFailureMessage ? 'definite' : undefined);
     if (retireAfterSettlement) handlers.retire();
     return;
   }

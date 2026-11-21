@@ -27,6 +27,15 @@ for await (const line of createInterface({ input: process.stdin })) {
     }
     assistant('Before the input started');
     emit({ type: 'command_lifecycle', state: 'started', command_uuid: input.uuid });
+    if (prompt === 'tool only' || prompt === 'result only') {
+      if (prompt === 'tool only') emit({ type: 'assistant', message: { content: [
+        { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/synthetic/input' } },
+      ] } });
+      const result = prompt === 'tool only' ? '' : '    <garcon-workflow-emit signal="done" />';
+      emit({ type: 'result', is_error: false, user_message_uuid: input.uuid, result });
+      emit({ type: 'system', subtype: 'session_state_changed', state: 'idle' });
+      continue;
+    }
     assistant('History replay', { isReplay: true });
     assistant('Subagent output', { parent_tool_use_id: 'synthetic-subagent' });
     assistant('Owned text');
@@ -79,7 +88,19 @@ test.skipIf(process.platform === 'win32')('Claude attributes only fresh non-repl
   } finally { await dispose(); }
 });
 
+test.skipIf(process.platform === 'win32')('Claude result-only text remains visible without acquiring live assistant origin', async () => {
+  const { runtime, request, dispose } = await runtimeFixture();
+  const events: AgentRuntimeEvent[] = [];
+  try {
+    await runtime.startClaudeCliSession(request('result only', events));
+    const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => [row.message, event.originRunId]) : []);
+    expect(rows).toEqual([[expect.objectContaining({ type: 'assistant-message', content: '<garcon-workflow-emit signal="done" />' }), undefined]]);
+    expect(events.at(-1)).toMatchObject({ type: 'run-ended', outcome: 'finished', finalResponse: { text: '    <garcon-workflow-emit signal="done" />' } });
+  } finally { await dispose(); }
+});
+
 for (const [command, failure] of [
+  ['tool only', { error: { code: 'OUTCOME_UNKNOWN', message: 'Claude CLI completed the submitted message without producing a response.' } }],
   ['process lost', { error: { code: 'OUTCOME_UNKNOWN' } }],
   ['process lost after result', { error: { code: 'OUTCOME_UNKNOWN', message: 'Synthetic native failure' } }],
   ['native failure', { error: { code: 'PROVIDER_FAILURE', message: 'Synthetic native failure' }, failureCertainty: 'definite' }],

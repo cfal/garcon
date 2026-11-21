@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
 import { workflowPaths } from '../../../common/workflow-http.js';
 import type { WorkflowRevision, WorkflowRunDetail } from '../../../common/workflow-runs.js';
@@ -8,6 +10,7 @@ import { claudeText, claudeToolUse, type HeldClaudeTurn } from '../../support/fa
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
 const DEFINITION_ID = 'claude-live-signal';
@@ -177,3 +180,31 @@ test('published workflow accepts one live pinned Claude finding and starts the w
     environment.dispose();
   }
 }, 120_000);
+
+test('a successful Claude result without response text does not authorize workflow retry', async () => {
+  await withIntegrationFixture('workflow-claude-empty-result', async ({ client, executionDirs }) => {
+    const run = await client.post<WorkflowRunDetail>(workflowPaths.testDraft, {
+      source: SOURCE, inputs: {}, operationId: crypto.randomUUID(),
+      executionContext: { defaultTarget: { executorId: client.executorId, projectPath: executionDirs.project } },
+    });
+    const detail = await waitForRun(
+      () => client.get<WorkflowRunDetail>(`${workflowPaths.run}?runId=${run.id}`), 'Empty result',
+      candidate => Boolean(step(candidate, 'research').instances[0]?.attempts[0]?.finishedAt),
+    );
+    const instance = step(detail, 'research').instances[0]!;
+    expect(instance).toMatchObject({ status: 'unknown', reason: expect.stringContaining('without producing a response') });
+    expect(detail.signals).toEqual([]);
+    expect(await rejectionOf(client.post(workflowPaths.retry, {
+      runId: run.id, instanceId: instance.id, operationId: crypto.randomUUID(),
+    }))).toMatchObject({ status: 409, body: { errorCode: 'WORKFLOW_CONFLICT' } });
+  }, {
+    resolveServerEnvironment: dirs => ({
+      CLAUDE_BINARY: join(dirs.root, 'synthetic-claude'), CLAUDE_CONFIG_DIR: join(dirs.home, '.claude-integration'),
+      ANTHROPIC_API_KEY: 'integration-fake-claude-key', CLAUDE_TEST_EMPTY_SUCCESS: '1',
+    }),
+    async prepareWorkspace(dirs) {
+      const cli = new URL('../../support/fake-claude-cli.ts', import.meta.url);
+      await writeFile(join(dirs.root, 'synthetic-claude'), `#!${process.execPath}\nimport ${JSON.stringify(cli.href)};\n`, { mode: 0o755 });
+    },
+  });
+}, 60_000);
