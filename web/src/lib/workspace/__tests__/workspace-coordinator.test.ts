@@ -2450,6 +2450,16 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.focusedChatId).toBe('existing-chat');
 	});
 
+	it('updates the Studio launch location without allocating a second tab', async () => {
+		const { coordinator, layout } = createHarness();
+		const second = { executorId: 'remote', cwd: '/second' };
+		await coordinator.openNewWorkflow({ executorId: 'local', cwd: '/first' });
+		await coordinator.openNewWorkflow(second);
+		expect(layout.surface('new-workflow')).toMatchObject({ context: second });
+		expect(windowTabs(layout.snapshot, 'window-main').order.filter((id) => id === 'new-workflow'))
+			.toEqual(['new-workflow']);
+	});
+
 	it('rolls back a failed desktop return and remains retryable', async () => {
 		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 4 });
 		await coordinator.enterMobilePresentation();

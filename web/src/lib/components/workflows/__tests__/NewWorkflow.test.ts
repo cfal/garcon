@@ -2,9 +2,13 @@ import { EditorView } from '@codemirror/view';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/workflows';
+import * as files from '$lib/api/files';
 import { parseWorkflowDefinition } from '$shared/workflow-definition';
+import { WorkflowFileState } from '$lib/workflows/definition/workflow-file-state.svelte';
+import { WorkflowDraftState } from '$lib/workflows/definition/workflow-draft-state.svelte';
 import { workflowRevision, workflowRun } from '$lib/workflows/__tests__/workflow-fixtures';
 import NewWorkflowTestHost from './NewWorkflowTestHost.svelte';
+import WorkflowDefinitionEditor from '../WorkflowDefinitionEditor.svelte';
 
 vi.mock('$lib/api/workflows', () => ({
 	listWorkflowDefinitionsPage: vi.fn(),
@@ -36,10 +40,173 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 	vi.resetAllMocks();
 });
 
 describe('New Workflow', () => {
+	it('allows joining decisions but offers output bindings only for groups with final text', async () => {
+		const source = `version: 1
+name: Review each
+steps:
+  - {id: research, kind: agent, prompt: Find, signals: {item: {delivery: many, key: id, payload: json, fields: {id: string}}}}
+  - {id: check, kind: command, command: pwd, on: {kind: each, signal: research.item}}
+  - {id: approve, kind: decision, prompt: Review, choices: {ok: Approve}, on: {kind: each, signal: research.item}}
+  - {id: summary, kind: agent, prompt: Summarize, on: {kind: all, close: research.turn_completed, steps: [check, approve]}}
+`;
+		const draft = new WorkflowDraftState(source);
+		render(WorkflowDefinitionEditor, {
+			props: { draft, context: null, busy: false, onPublish: vi.fn(), onTest: vi.fn() },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /summary Agent/i }));
+		expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'approve' }).checked).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Add binding' }));
+		const choices = [...screen.getByLabelText<HTMLSelectElement>('Binding source').options].map(
+			(option) => option.value,
+		);
+		expect(choices).toContain('all.check');
+		expect(choices).not.toContain('all.approve');
+	});
+
+	it('keeps the draft test folder but uses the newly opened chat context for a published run', async () => {
+		const { source, definition } = workflowRun().pinnedRevision;
+		vi.mocked(api.getWorkflowRevision).mockResolvedValue({
+			...workflowRevision(),
+			source,
+			definition,
+		});
+		const props = {
+			onRunStarted: vi.fn(),
+			open: true,
+			context: { executorId: 'local', cwd: '/first' },
+		};
+		const host = render(NewWorkflowTestHost, { props });
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Paste definition' }));
+		const dialog = within(screen.getByRole('dialog', { name: 'Paste definition' }));
+		await fireEvent.input(dialog.getByLabelText('YAML source'), { target: { value: source } });
+		await fireEvent.click(dialog.getByRole('button', { name: 'Paste definition' }));
+		await host.rerender({ ...props, open: false });
+		await host.rerender({ ...props, context: { executorId: 'remote', cwd: '/second' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Test run' }));
+		expect(screen.getByDisplayValue('/first')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+		await screen.findByRole('option', { name: 'Review a report · Revision 3' });
+		await fireEvent.change(screen.getByLabelText('Definition'), {
+			target: { value: 'review-def:3' },
+		});
+		expect(await screen.findByDisplayValue('/second')).toBeTruthy();
+		expect(screen.queryByDisplayValue('/first')).toBeNull();
+	});
+
+	it('keeps an in-flight launch locked across remounts and retries the exact unconfirmed request', async () => {
+		const first = Promise.withResolvers<Awaited<ReturnType<typeof api.testWorkflowDraft>>>();
+		vi.mocked(api.testWorkflowDraft)
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce(workflowRun());
+		const props = { onRunStarted: vi.fn(), open: true };
+		const host = render(NewWorkflowTestHost, props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Test run' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Test run' }));
+		expect(api.testWorkflowDraft).toHaveBeenCalledOnce();
+		await host.rerender({ ...props, open: false });
+		await host.rerender(props);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'New run' }).disabled).toBe(true);
+		first.reject(new Error('Lost reply'));
+		await screen.findByRole('button', { name: 'Retry same launch' });
+		await host.rerender({ ...props, open: false });
+		await host.rerender(props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry same launch' }));
+		expect(vi.mocked(api.testWorkflowDraft).mock.calls[1]).toEqual(
+			vi.mocked(api.testWorkflowDraft).mock.calls[0],
+		);
+		await waitFor(() => expect(props.onRunStarted).toHaveBeenCalledExactlyOnceWith('run-a'));
+	});
+
+	it('retains an unsaved draft when its presentation closes and protects it from page unload', async () => {
+		const path = '/project/review.workflow.yaml';
+		vi.spyOn(files, 'readText').mockResolvedValue({
+			path,
+			content: workflowRevision().source,
+			revision: 'v1:read',
+		});
+		const save = vi
+			.spyOn(files, 'saveText')
+			.mockResolvedValue({ success: true, message: 'Saved', path, revision: 'v1:saved' });
+		const props = { onRunStarted: vi.fn(), open: true };
+		const host = render(NewWorkflowTestHost, props);
+		const unload = () => window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+		expect(unload()).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
+		const picker = within(screen.getByRole('dialog', { name: 'Open source file' }));
+		await fireEvent.input(picker.getByLabelText('File path'), { target: { value: path } });
+		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
+		expect(await screen.findByRole('button', { name: 'Publish new definition' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: /Review report/ }));
+		await fireEvent.input(screen.getByLabelText('Step name'), {
+			target: { value: 'Retained review' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply step edits' }));
+		await host.rerender({ ...props, open: false });
+		expect(unload()).toBe(false);
+		await host.rerender(props);
+		expect(screen.getByRole('button', { name: /Retained review/ })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Save draft file' }));
+		expect(save.mock.calls[0]?.[0]).toMatchObject({
+			executorId: 'local',
+			filePath: path,
+			expectedRevision: 'v1:read',
+		});
+		await waitFor(() => expect(unload()).toBe(true));
+		host.unmount();
+		expect(unload()).toBe(true);
+	});
+
+	it('blocks graph edits while comparing a file draft with disk', async () => {
+		const path = '/project/example.workflow.yaml';
+		const { source } = workflowRevision();
+		const read = vi
+			.spyOn(files, 'readText')
+			.mockResolvedValue({ path, content: source, revision: 'v1:old' });
+		const file = await WorkflowFileState.open(files, { executorId: 'local', filePath: path });
+		const draft = new WorkflowDraftState(source, { file });
+		draft.replaceSource(source + '# Local edit\n');
+		read.mockResolvedValue({ path, content: source + '# Disk edit\n', revision: 'v1:new' });
+		await file.compare(() => draft.source);
+		render(WorkflowDefinitionEditor, {
+			props: { draft, context: null, busy: false, onPublish: vi.fn(), onTest: vi.fn() },
+		});
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Edit graph' }).disabled).toBe(
+			true,
+		);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Add step' }).disabled).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Add step' }).disabled).toBe(
+			false,
+		);
+		expect(draft.source).toBe(source + '# Local edit\n');
+	});
+
+	it('keeps a valid input named constructor editable after validating other fields', async () => {
+		const revision = workflowRevision();
+		const source = revision.source.replace('  title:', '  constructor:');
+		const { definition } = parseWorkflowDefinition(source);
+		if (!definition) throw new Error('Invalid synthetic workflow');
+		vi.mocked(api.getWorkflowRevision).mockResolvedValue({ ...revision, definition, source });
+		render(NewWorkflowTestHost, { onRunStarted: vi.fn() });
+		await screen.findByRole('option', { name: 'Review a report · Revision 3' });
+		await fireEvent.change(screen.getByLabelText('Definition'), {
+			target: { value: 'review-def:3' },
+		});
+		const input = await screen.findByLabelText(/^constructor/);
+		await fireEvent.input(input, { target: { value: 'Review' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Start workflow' }));
+		expect(screen.getAllByText('Enter a value.')).toHaveLength(3);
+		expect(screen.getByLabelText(/^constructor/)).toBe(input);
+	});
+
 	it('requires an explicit revision and submits typed launch inputs with the pinned revision', async () => {
 		const open = vi.fn();
 		render(NewWorkflowTestHost, { onRunStarted: open });
@@ -143,6 +310,26 @@ describe('New Workflow', () => {
 		});
 	});
 
+	it('recovers the recent list on Refresh and ignores an older outstanding response', async () => {
+		const old = Promise.withResolvers<Awaited<ReturnType<typeof api.listWorkflowRunsPage>>>();
+		vi.mocked(api.listWorkflowRunsPage)
+			.mockReturnValueOnce(old.promise)
+			.mockRejectedValueOnce(new Error('Recent runs unavailable'))
+			.mockResolvedValueOnce({ items: [workflowRun()], nextCursor: null });
+		render(NewWorkflowTestHost, { onRunStarted: vi.fn() });
+		await screen.findByRole('option', { name: 'Review a report · Revision 3' });
+		const refresh = screen.getByRole('button', { name: 'Refresh' });
+		await fireEvent.click(refresh);
+		expect(await screen.findByText('Recent runs unavailable')).toBeTruthy();
+		await fireEvent.click(refresh);
+		const runButton = await screen.findByRole('button', { name: /Verify research/ });
+		old.resolve({ items: [], nextCursor: null });
+		await old.promise;
+		await Promise.resolve();
+		expect(screen.queryByText('Recent runs unavailable')).toBeNull();
+		expect(runButton.isConnected).toBe(true);
+	});
+
 	it('authors input defaults, choices, and single and keyed signals with form submission', async () => {
 		const { container } = render(NewWorkflowTestHost, { onRunStarted: vi.fn() });
 		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
@@ -158,12 +345,16 @@ describe('New Workflow', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: /review Human decision/i }));
 		await fireEvent.click(screen.getByText('Choices', { selector: 'summary' }));
+		await fireEvent.input(screen.getByLabelText('Prompt'), {
+			target: { value: 'Unapplied prompt' },
+		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Add choice' }));
 		await fireEvent.input(screen.getByLabelText('Choice ID'), { target: { value: 'defer' } });
 		await fireEvent.input(screen.getByLabelText('Choice label'), {
 			target: { value: 'Defer review' },
 		});
 		await fireEvent.submit(screen.getByRole('button', { name: 'Apply choice' }).closest('form')!);
+		expect(screen.getByLabelText<HTMLTextAreaElement>('Prompt').value).toBe('Unapplied prompt');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add step' }));
 		const picker = screen.getByRole('dialog', { name: 'Add step' });

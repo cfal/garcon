@@ -2,9 +2,20 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import * as api from '$lib/api/workflows';
+import { validateStart } from '$lib/api/chats';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { workflowRun } from '$lib/workflows/__tests__/workflow-fixtures';
 import WorkflowRunViewer from '../WorkflowRunViewer.svelte';
 
+vi.mock('../WorkflowStepSettings.svelte', () => import('./RunStepSettingsProbe.svelte'));
+vi.mock('$lib/context', async (original) => ({
+	...(await original<typeof import('$lib/context')>()),
+	getExecutors: () => new ExecutorsStore(),
+}));
+vi.mock('$lib/api/chats', async (original) => ({
+	...(await original<typeof import('$lib/api/chats')>()),
+	validateStart: vi.fn(),
+}));
 vi.mock('$lib/api/workflows', () => ({
 	getWorkflowRun: vi.fn(),
 	addWorkflowItem: vi.fn(),
@@ -103,6 +114,15 @@ describe('Workflow run viewer', () => {
 			target: { value: 'Review this result' },
 		});
 		await fireEvent.change(within(form).getByLabelText('Start condition'), {
+			target: { value: 'future' },
+		});
+		const signals = within(form).getByLabelText<HTMLSelectElement>('Signal');
+		expect([...signals.options].map((option) => option.value)).toEqual([
+			'',
+			'review.approve',
+			'review.reject',
+		]);
+		await fireEvent.change(within(form).getByLabelText('Start condition'), {
 			target: { value: 'result' },
 		});
 		await fireEvent.change(within(form).getByLabelText('Evidence'), {
@@ -127,6 +147,43 @@ describe('Workflow run viewer', () => {
 			bindings: { result: 'signal' },
 		});
 		expect(step).not.toHaveProperty('on');
+	});
+
+	it('previews the effective launch folder and restores applied settings when reopened', async () => {
+		vi.mocked(api.getWorkflowRun).mockResolvedValue({
+			...workflowRun(),
+			executionContext: {
+				defaultTarget: { executorId: 'local', projectPath: '/launch' },
+				projectPaths: { local: '/alternate' },
+			},
+		});
+		render(WorkflowRunViewer, { runId: 'run-a', onOpenChat: vi.fn() });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Add step' }));
+		const form = within(screen.getByRole('heading', { name: 'Add step' }).closest('form')!);
+		await fireEvent.change(form.getByLabelText('Step type'), { target: { value: 'command' } });
+		expect(form.getByPlaceholderText('/launch')).toBeTruthy();
+		const settings = form.getByRole('button', { name: 'Step settings' });
+		await fireEvent.click(settings);
+		await fireEvent.click(form.getByRole('button', { name: 'Choose bash' }));
+		await fireEvent.click(settings);
+		expect(form.getByRole('status').textContent).toBe('bash');
+		await fireEvent.click(form.getByRole('button', { name: 'Choose bash' }));
+		await fireEvent.input(form.getByLabelText('Step name'), { target: { value: 'Check folder' } });
+		await fireEvent.input(form.getByLabelText('Command'), { target: { value: 'pwd' } });
+		await fireEvent.input(form.getByPlaceholderText('/launch'), { target: { value: ' /folder ' } });
+		vi.mocked(validateStart).mockResolvedValueOnce({ valid: false, isGitRepo: false });
+		await fireEvent.click(form.getByRole('button', { name: 'Add step' }));
+		expect((await form.findByRole('alert')).textContent).toContain('/folder');
+		expect(api.addWorkflowStep).not.toHaveBeenCalled();
+		vi.mocked(validateStart).mockResolvedValueOnce({ valid: true, isGitRepo: false });
+		vi.mocked(api.addWorkflowStep).mockResolvedValue(workflowRun());
+		await fireEvent.click(form.getByRole('button', { name: 'Add step' }));
+		await waitFor(() => expect(api.addWorkflowStep).toHaveBeenCalledOnce());
+		expect(validateStart).toHaveBeenCalledWith('/folder', { executorId: 'local' });
+		expect(JSON.parse(vi.mocked(api.addWorkflowStep).mock.calls[0][0].source)).toMatchObject({
+			projectPath: '/folder',
+			shell: 'bash',
+		});
 	});
 
 	it('archives only after confirmation and leaves the run readable without mutation controls', async () => {

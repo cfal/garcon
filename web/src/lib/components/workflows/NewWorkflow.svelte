@@ -7,28 +7,22 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { ApiError } from '$lib/api/client';
 	import {
 		getWorkflowRevision,
 		listWorkflowDefinitionsPage,
 		listWorkflowRunsPage,
-		publishWorkflowDefinition,
-		startWorkflowRun,
-		testWorkflowDraft,
 	} from '$lib/api/workflows';
 	import type { JsonObject } from '$shared/json';
 	import type {
 		WorkflowDefinitionSummary,
 		WorkflowExecutionContext,
-		WorkflowPublishRequest,
 		WorkflowRevision,
-		WorkflowRunDetail,
 		WorkflowRunSummary,
 	} from '$shared/workflow-runs';
 	import { WorkflowDraftState } from '$lib/workflows/definition/workflow-draft-state.svelte';
+	import { getWorkflowStudioSession } from '$lib/workflows/definition/workflow-studio-session.svelte';
 	import type { WorkflowFileState } from '$lib/workflows/definition/workflow-file-state.svelte';
 	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
-	import { isUnconfirmedWorkflowMutation } from '$lib/workflows/workflow-mutation';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region';
 	import { createRandomId } from '$lib/utils/random-id';
 	import * as m from '$lib/paraglide/messages.js';
@@ -49,46 +43,50 @@
 	} = $props();
 
 	type Page = 'launch' | 'editor' | 'test';
-	type LaunchAction = () => Promise<WorkflowRunDetail>;
 	type SourceMode = 'open' | 'import' | 'paste';
-	const launchContext = untrack(() => (context ? { ...context } : null));
-	let page = $state<Page>('launch');
+	const session = getWorkflowStudioSession();
+	const retained = untrack(() => session.current);
+	const draftContext = $derived(session.current ? session.current.context : context);
+	let page = $state<Page>(retained ? 'editor' : 'launch');
 	let definitions = $state.raw<readonly WorkflowDefinitionSummary[]>([]);
 	let cursor = $state<string | null>(null);
 	let recentRuns = $state.raw<readonly WorkflowRunSummary[]>([]);
 	let chosen = $state('');
 	let revision = $state.raw<WorkflowRevision | null>(null);
-	let draft = $state.raw<WorkflowDraftState | null>(null);
+	let draft = $derived(session.current?.draft ?? null);
 	let testSource = $state('');
 	let chooser = $state<SourceMode | null>(null);
 	let replace = $state.raw<(() => void) | null>(null);
 	let loadError = $state<string | null>(null);
 	let revisionError = $state<string | null>(null);
 	let recentError = $state<string | null>(null);
-	let actionError = $state<string | null>(null);
-	let notice = $state<string | null>(null);
-	let busy = $state(false);
 	let loading = $state(false);
 	let loadingRevision = $state(false);
-	let pendingLaunch = $state.raw<LaunchAction | null>(null);
-	let pendingPublish = $state.raw<{
-		request: WorkflowPublishRequest;
-		draft: WorkflowDraftState;
-	} | null>(null);
 	let lifetime: AbortController | null = null;
 	let revisionRead: AbortController | null = null;
-	const locked = $derived(busy || Boolean(pendingLaunch) || Boolean(pendingPublish));
+	let recentRead = 0;
+	const locked = $derived(session.locked);
 	const id = $props.id();
 
 	onMount(() => {
 		lifetime = new AbortController();
+		const detach = session.observe({
+			launched(id) {
+				onRunStarted(id);
+				void loadRuns();
+			},
+			published() {
+				void loadDefinitions();
+			},
+		});
 		void loadDefinitions();
 		void loadRuns();
 		return () => {
+			detach();
 			lifetime?.abort();
 			lifetime = null;
 			revisionRead?.abort();
-			draft?.file?.dispose();
+			if (!session.needsExitGuard) session.clear();
 		};
 	});
 
@@ -122,10 +120,14 @@
 	async function loadRuns() {
 		if (!lifetime) return;
 		const { signal } = lifetime;
+		const read = ++recentRead;
 		try {
-			recentRuns = (await listWorkflowRunsPage({ signal, limit: 10 })).items;
+			const page = await listWorkflowRunsPage({ signal, limit: 10 });
+			if (signal.aborted || read !== recentRead) return;
+			recentRuns = page.items;
+			recentError = null;
 		} catch (error) {
-			if (!signal.aborted) recentError = failure(error);
+			if (!signal.aborted && read === recentRead) recentError = failure(error);
 		}
 	}
 
@@ -159,12 +161,9 @@
 	}
 
 	function installDraft(next: WorkflowDraftState) {
-		draft?.file?.dispose();
-		draft = next;
+		session.replace(next, context);
 		chooser = null;
 		page = 'editor';
-		actionError = null;
-		notice = null;
 	}
 
 	function blankDraft() {
@@ -195,106 +194,20 @@
 			);
 	}
 
-	async function performLaunch(action: LaunchAction) {
-		if (busy || !lifetime) return;
-		const { signal } = lifetime;
-		busy = true;
-		actionError = null;
-		try {
-			const run = await action();
-			if (signal.aborted) return;
-			pendingLaunch = null;
-			onRunStarted(run.id);
-			void loadRuns();
-		} catch (error) {
-			if (signal.aborted) return;
-			pendingLaunch = isUnconfirmedWorkflowMutation(error) ? action : null;
-			actionError = pendingLaunch ? m.workflow_studio_launch_unconfirmed() : failure(error);
-		} finally {
-			if (!signal.aborted) busy = false;
-		}
-	}
-
 	async function launch(inputs: JsonObject, executionContext: WorkflowExecutionContext) {
 		if (locked) return;
 		const operationId = createRandomId();
 		const launch = { operationId, inputs, executionContext };
 		if (page === 'test' && draft?.result.definition && draft.source === testSource) {
 			const request = { ...launch, source: testSource };
-			await performLaunch(() => testWorkflowDraft(request));
+			await session.launch(request);
 		} else if (page === 'launch' && revision?.definitionId && revision.revision !== null) {
 			const request = {
 				...launch,
 				definitionId: revision.definitionId,
 				revision: revision.revision,
 			};
-			await performLaunch(() => startWorkflowRun(request));
-		}
-	}
-
-	async function publish() {
-		const current = draft;
-		if (!current?.result.definition || locked || !lifetime) return;
-		const { signal } = lifetime;
-		const request = {
-			definitionId: current.definitionId,
-			expectedRevision: current.revision,
-			source: current.source,
-		};
-		busy = true;
-		actionError = null;
-		notice = null;
-		try {
-			const result = await publishWorkflowDefinition(request);
-			if (!signal.aborted) {
-				current.acceptPublished(result);
-				notice = m.workflow_studio_published({ revision: result.revision ?? '' });
-				void loadDefinitions();
-			}
-		} catch (error) {
-			if (signal.aborted) return;
-			if (isUnconfirmedWorkflowMutation(error)) {
-				pendingPublish = { draft: current, request };
-				actionError = m.workflow_studio_publish_unconfirmed();
-			} else {
-				actionError = failure(error);
-			}
-		} finally {
-			if (!signal.aborted) busy = false;
-		}
-	}
-
-	async function checkPublish() {
-		const pending = pendingPublish;
-		if (!pending || !lifetime || busy) return;
-		const { signal } = lifetime;
-		busy = true;
-		const { request } = pending;
-		try {
-			const latest = await getWorkflowRevision(request.definitionId, undefined, { signal });
-			if (signal.aborted) return;
-			pendingPublish = null;
-			actionError = null;
-			if (
-				latest.source === request.source &&
-				latest.revision !== null &&
-				latest.revision > (request.expectedRevision ?? 0)
-			) {
-				pending.draft.acceptPublished(latest);
-				notice = m.workflow_studio_published({ revision: latest.revision ?? '' });
-				void loadDefinitions();
-			} else if (latest.revision !== request.expectedRevision) {
-				actionError = m.workflow_studio_publish_conflict();
-				void loadDefinitions();
-			}
-		} catch (error) {
-			if (signal.aborted) return;
-			if (request.expectedRevision === null && error instanceof ApiError && error.status === 404) {
-				pendingPublish = null;
-				actionError = null;
-			} else actionError = failure(error);
-		} finally {
-			if (!signal.aborted) busy = false;
+			await session.launch(request);
 		}
 	}
 </script>
@@ -352,38 +265,41 @@
 			</div>
 		{/if}
 	</header>
-	{#if actionError}
+	{#if session.error}
 		<div class="shrink-0 space-y-1 border-b border-border px-3 py-2">
-			<p role="alert" class="wrap-anywhere text-sm text-destructive">{actionError}</p>
-			{#if pendingLaunch}
-				{@const action = pendingLaunch}
+			<p role="alert" class="wrap-anywhere text-sm text-destructive">{session.error}</p>
+			{#if session.pendingLaunch}
+				{@const action = session.pendingLaunch}
 				<Button
 					size="sm"
 					variant="outline"
-					disabled={busy}
-					onclick={() => void performLaunch(action)}>{m.workflow_studio_retry_launch()}</Button
+					disabled={session.busy}
+					onclick={() => void session.launch(action)}>{m.workflow_studio_retry_launch()}</Button
 				>
-			{:else if pendingPublish}
-				<Button size="sm" variant="outline" disabled={busy} onclick={checkPublish}
-					>{m.workflow_studio_check_published()}</Button
+			{:else if session.pendingPublish}
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={session.busy}
+					onclick={() => void session.checkPublish()}>{m.workflow_studio_check_published()}</Button
 				>
 			{/if}
 		</div>
 	{/if}
-	{#if notice}<p
+	{#if session.notice}<p
 			role="status"
 			class="shrink-0 border-b border-border px-3 py-2 text-sm text-status-success-foreground"
 		>
-			{notice}
+			{session.notice}
 		</p>{/if}
 
 	{#if page === 'editor' && draft}
 		{#key draft}
 			<WorkflowDefinitionEditor
 				{draft}
-				context={launchContext}
+				context={draftContext}
 				busy={locked}
-				onPublish={publish}
+				onPublish={() => draft && void session.publish(draft)}
 				onTest={() => {
 					if (!draft?.result.definition || locked) return;
 					testSource = draft.source;
@@ -406,7 +322,7 @@
 				</p>
 				<WorkflowLaunchForm
 					definition={draft.result.definition}
-					context={launchContext}
+					context={draftContext}
 					draftRun
 					disabled={locked}
 					onLaunch={launch}
@@ -456,7 +372,10 @@
 								title={m.workflow_studio_refresh()}
 								aria-label={m.workflow_studio_refresh()}
 								disabled={loading}
-								onclick={() => void loadDefinitions()}><RefreshCw class="size-4" /></Button
+								onclick={() => {
+									void loadDefinitions();
+									void loadRuns();
+								}}><RefreshCw class="size-4" /></Button
 							>
 						</div>
 						{#if cursor}<Button
@@ -493,7 +412,7 @@
 						{#key revision}
 							<WorkflowLaunchForm
 								definition={revision.definition}
-								context={launchContext}
+								{context}
 								draftRun={false}
 								disabled={locked}
 								onLaunch={launch}
@@ -540,7 +459,7 @@
 	{#key chooser}
 		<WorkflowSourcePicker
 			mode={chooser}
-			context={launchContext}
+			{context}
 			onOpen={(file: WorkflowFileState) =>
 				installDraft(new WorkflowDraftState(file.baseline, { file }))}
 			onImport={(source) => installDraft(new WorkflowDraftState(source))}

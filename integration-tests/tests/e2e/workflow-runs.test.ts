@@ -67,6 +67,11 @@ test('publishes and starts YAML in the browser, opens its Shell chat, and approv
     await app.fill('[role="dialog"] textarea', source);
     await app.clickDialogButton('Paste definition');
     await waitForText(`${studio} [aria-label="Definition editor"] h2`, 'Browser workflow acceptance');
+    await app.openWorkspaceWindowActions(await app.workspaceWindowIdForSurface('new-workflow'));
+    await app.clickMenuItem('Close tab');
+    await page.waitForSelector(studio, { hidden: true });
+    await click(`${sidebar} button[aria-label="New Workflow"]`);
+    await waitForText(`${studio} [aria-label="Definition editor"] h2`, 'Browser workflow acceptance');
     await app.clickButton('Publish');
     await waitForText(`${studio} [role="status"]`, 'Published revision 1.');
     await app.clickButton('New run');

@@ -2,10 +2,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Plus from '@lucide/svelte/icons/plus';
-	import type {
-		WorkflowRunDetail,
-		WorkflowRunStep,
-		WorkflowStepInstance,
+	import {
+		WORKFLOW_ATTEMPT_LIMIT,
+		type WorkflowRunDetail,
+		type WorkflowRunStep,
+		type WorkflowStepInstance,
 	} from '$shared/workflow-runs';
 	import { stepEvidence, workflowRunFinished } from '$lib/workflows/run/workflow-run-projection';
 	import * as m from '$lib/paraglide/messages.js';
@@ -110,7 +111,7 @@
 						>
 					{/each}
 				</div>
-			{:else if instance.status === 'failed' && canAmend}
+			{:else if instance.status === 'failed' && instance.attempts.length < WORKFLOW_ATTEMPT_LIMIT && canAmend}
 				<Button variant="outline" size="sm" {disabled} onclick={() => onRetry(instance.id)}
 					>{m.workflow_studio_retry_step()}</Button
 				>

@@ -2,9 +2,20 @@
 	import { setExecutors } from '$lib/context';
 	import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import NewWorkflow from '../NewWorkflow.svelte';
+	import { provideWorkflowStudioSession } from '$lib/workflows/definition/workflow-studio-session.svelte';
+	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 
-	let { onRunStarted }: { onRunStarted: (id: string) => void } = $props();
+	let {
+		onRunStarted,
+		open = true,
+		context = null,
+	}: {
+		onRunStarted: (id: string) => void;
+		open?: boolean;
+		context?: WorkflowLaunchContext | null;
+	} = $props();
 	setExecutors(new ExecutorsStore());
+	provideWorkflowStudioSession();
 </script>
 
-<NewWorkflow context={null} {onRunStarted} onOpenRun={() => {}} />
+{#if open}<NewWorkflow {context} {onRunStarted} onOpenRun={() => {}} />{/if}

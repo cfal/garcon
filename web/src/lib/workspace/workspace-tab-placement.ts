@@ -67,9 +67,13 @@ export class WorkspaceTabPlacementService {
 				const mutations: WorkspaceLayoutMutation[] = [];
 				if (!previous) mutations.push({ type: 'register-surface', surface, windowId });
 				else if (
-					previous.type === 'workflow-run' &&
-					surface.type === 'workflow-run' &&
-					previous.runId !== surface.runId
+					(previous.type === 'workflow-run' &&
+						surface.type === 'workflow-run' &&
+						previous.runId !== surface.runId) ||
+					(previous.type === 'new-workflow' &&
+						surface.type === 'new-workflow' &&
+						(previous.context?.executorId !== surface.context?.executorId ||
+							previous.context?.cwd !== surface.context?.cwd))
 				) {
 					mutations.push({ type: 'replace-surface', previousId: previous.id, surface });
 				}

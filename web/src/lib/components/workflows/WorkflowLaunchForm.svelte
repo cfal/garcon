@@ -5,7 +5,7 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
 	import { getExecutors } from '$lib/context';
-	import { validateStart } from '$lib/api/chats';
+	import { validateWorkflowLocation } from '$lib/workflows/launch/validate-workflow-location';
 	import type { WorkflowDefinition } from '$shared/workflow-definition';
 	import type { WorkflowExecutionContext } from '$shared/workflow-runs';
 	import type { JsonObject } from '$shared/json';
@@ -81,25 +81,8 @@
 				const key = JSON.stringify(location);
 				if (checked.has(key)) continue;
 				checked.add(key);
-				if (
-					executors.hasSnapshot &&
-					location.executorId !== 'local' &&
-					!executors.get(location.executorId)
-				) {
-					pathError = m.workflow_studio_unknown_executor({ executor: location.executorId });
-					return;
-				}
-				if (!executors.isReady(location.executorId)) continue;
-				const result = await validateStart(location.projectPath, {
-					executorId: location.executorId,
-				});
-				if (!result.valid) {
-					pathError = m.workflow_studio_invalid_folder({
-						path: location.projectPath,
-						executor: executors.label(location.executorId),
-					});
-					return;
-				}
+				pathError = await validateWorkflowLocation(location, executors);
+				if (pathError) return;
 			}
 			if (mounted && selectedDefinition === definition && !disabled) {
 				await onLaunch(decoded.inputs, captured.executionContext);
@@ -152,7 +135,7 @@
 								oninput={(event) => (fields = { ...fields, [key]: event.currentTarget.value })}
 							/>
 						{/if}
-						{#if submitted && values.errors[key]}
+						{#if submitted && Object.hasOwn(values.errors, key)}
 							<span class="block text-xs text-destructive">{errorLabels[values.errors[key]]()}</span
 							>
 						{/if}

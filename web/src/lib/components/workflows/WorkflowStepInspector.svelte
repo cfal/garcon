@@ -43,24 +43,35 @@
 	} = $props();
 
 	const index = $derived(definition.steps.findIndex(({ id }) => id === step.id));
-	let name = $derived(step.name ?? '');
-	let instruction = $derived(step.kind === 'command' ? step.command : step.prompt);
-	let mode = $derived.by((): 'root' | 'signal' | 'join' => {
+	// A CST edit reparses every step; only a change to the authored field resets its local edits.
+	const authoredName = $derived(step.name ?? '');
+	const authoredInstruction = $derived(step.kind === 'command' ? step.command : step.prompt);
+	const authoredMode = $derived.by((): 'root' | 'signal' | 'join' => {
 		if (!step.on) return 'root';
 		return step.on.kind === 'all' ? 'join' : 'signal';
 	});
-	let reference = $derived.by(() => {
+	const authoredReference = $derived.by(() => {
 		const on = step.on;
 		const trigger = on?.kind === 'all' ? on.close : on?.signal;
 		return trigger ? `${trigger.stepId}.${trigger.signal}` : '';
 	});
-	let concurrency = $derived<number | undefined>(
-		step.on?.kind === 'each' ? step.on.maxConcurrency : 1,
+	const authoredConcurrency = $derived(step.on?.kind === 'each' ? step.on.maxConcurrency : 1);
+	const authoredGroups = $derived(JSON.stringify(step.on?.kind === 'all' ? step.on.steps : []));
+	const authoredBindings = $derived(
+		JSON.stringify(step.kind === 'command' ? {} : (step.bindings ?? {})),
 	);
-	let groups = $derived<string[]>(step.on?.kind === 'all' ? [...step.on.steps] : []);
+	let name = $derived(authoredName);
+	let instruction = $derived(authoredInstruction);
+	let mode = $derived(authoredMode);
+	let reference = $derived(authoredReference);
+	let concurrency = $derived<number | undefined>(authoredConcurrency);
+	let groups = $derived(JSON.parse(authoredGroups) as string[]);
 	let bindings = $derived.by(() => {
-		if (step.kind === 'command') return [];
-		return Object.entries(step.bindings ?? {}).map(([name, binding]) => ({
+		const parsed = JSON.parse(authoredBindings) as Record<
+			string,
+			Parameters<typeof workflowBindingSource>[0]
+		>;
+		return Object.entries(parsed).map(([name, binding]) => ({
 			id: `binding:${name}`,
 			name,
 			source: workflowBindingSource(binding),
@@ -96,7 +107,11 @@
 	const branchOptions = $derived(step.on?.kind === 'each' ? [] : workflowSignals([step]));
 	const bindingSources = $derived([
 		...Object.keys(definition.inputs).map((key) => `inputs.${key}`),
-		...(mode === 'join' ? groups.map((key) => `all.${key}`) : []),
+		...(mode === 'join'
+			? groupOptions
+					.filter(({ id, kind }) => kind !== 'decision' && groups.includes(id))
+					.map(({ id }) => `all.${id}`)
+			: []),
 		...(mode !== 'root' && signal && signal.payload !== 'none'
 			? ['signal', ...signal.fields.map((key) => `signal.${key}`)]
 			: []),

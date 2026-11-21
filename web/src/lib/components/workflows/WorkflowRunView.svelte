@@ -36,7 +36,7 @@
 	import WorkflowRunAddItem from './WorkflowRunAddItem.svelte';
 	import WorkflowRunAddStep from './WorkflowRunAddStep.svelte';
 	import WorkflowRunInspector from './WorkflowRunInspector.svelte';
-	import WorkflowSplitView from './WorkflowSplitView.svelte';
+	import WorkflowSplitView, { focusWorkflowDetail } from './WorkflowSplitView.svelte';
 	import WorkflowStepList from './WorkflowStepList.svelte';
 	import { workflowStatusLabel } from './workflow-labels';
 
@@ -56,7 +56,6 @@
 		getWorkflowRun,
 	);
 	const run = $derived(controller.detail);
-	let width = $state(0);
 	let shell = $state<HTMLElement>();
 	let heading = $state<HTMLHeadingElement>();
 	let listMode = $state<'graph' | 'list'>('list');
@@ -107,7 +106,7 @@
 
 	function openDetail() {
 		detailOpen = true;
-		if (width < 688) void tick().then(() => heading?.focus());
+		void tick().then(() => focusWorkflowDetail(heading));
 	}
 
 	function selectStep(id: string) {
@@ -171,7 +170,6 @@
 	class="flex h-full min-h-0 min-w-0 flex-col"
 	aria-label={m.workflow_studio_run_viewer()}
 	bind:this={shell}
-	bind:clientWidth={width}
 >
 	<header class="grid shrink-0 gap-2 border-b border-border bg-card px-3 py-2 sm:px-4">
 		<div class="flex min-w-0 flex-wrap items-start justify-between gap-2">

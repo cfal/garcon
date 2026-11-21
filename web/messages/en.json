@@ -3535,6 +3535,7 @@
 	"workflow_studio_permissions": "Permission mode",
 	"workflow_studio_prompt": "Prompt",
 	"workflow_studio_publish": "Publish",
+	"workflow_studio_publish_new_definition": "Publish new definition",
 	"workflow_studio_publish_conflict": "A different revision was published. Your draft is kept.",
 	"workflow_studio_publish_unconfirmed": "Publish was not confirmed. Check the published revision before trying again.",
 	"workflow_studio_published": "Published revision {revision}.",

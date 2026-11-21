@@ -31,7 +31,7 @@
 	import { lazyRenderer } from '$lib/utils/lazy-renderer';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region';
 	import WorkflowShareDialog from './WorkflowShareDialog.svelte';
-	import WorkflowSplitView from './WorkflowSplitView.svelte';
+	import WorkflowSplitView, { focusWorkflowDetail } from './WorkflowSplitView.svelte';
 	import WorkflowStepInspector from './WorkflowStepInspector.svelte';
 	import WorkflowInputsEditor from './WorkflowInputsEditor.svelte';
 	import WorkflowStepList from './WorkflowStepList.svelte';
@@ -78,9 +78,10 @@
 		definition?.steps.map(({ id, name, kind }) => ({ id, title: name ?? id, kind })) ?? [],
 	);
 	const edges = $derived(workflowEdges(definition?.steps ?? []));
-	const editable = $derived(Boolean(current && editing && !busy));
+	const editable = $derived(Boolean(current && editing && !busy && !file?.comparison));
 	const canAdd = $derived(editable && steps.length < WORKFLOW_DEFINITION_LIMITS.steps);
-	let definitionName = $derived(current?.name ?? '');
+	const authoredName = $derived(current?.name ?? '');
+	let definitionName = $derived(authoredName);
 
 	function editInput(name: string, value: JsonValue | undefined): boolean {
 		if (!current || !editable) return false;
@@ -96,7 +97,7 @@
 	function select(id: string) {
 		selected = id;
 		detailOpen = true;
-		if (width < 688) void tick().then(() => heading?.focus());
+		void tick().then(() => focusWorkflowDetail(heading));
 	}
 
 	function back() {
@@ -221,7 +222,9 @@
 					>{m.workflow_studio_test_run()}</Button
 				>
 				<Button size="sm" disabled={!current || busy} onclick={onPublish}
-					>{m.workflow_studio_publish()}</Button
+					>{draft.file && draft.revision === null
+						? m.workflow_studio_publish_new_definition()
+						: m.workflow_studio_publish()}</Button
 				>
 			</div>
 		</div>
@@ -277,6 +280,7 @@
 					size="sm"
 					variant={editing ? 'secondary' : 'outline'}
 					aria-pressed={editing}
+					disabled={Boolean(file?.comparison)}
 					onclick={() => (editing = !editing)}>{m.workflow_studio_edit_graph()}</Button
 				>
 				{#if editing}
@@ -361,9 +365,10 @@
 				<Button
 					size="sm"
 					variant="ghost"
+					disabled={busy || Boolean(file?.comparison)}
 					onclick={() => {
 						const rejected = draft.rejected;
-						if (!rejected?.attemptedSource) return;
+						if (!rejected?.attemptedSource || busy || file?.comparison) return;
 						draft.replaceSource(rejected.attemptedSource);
 						view = 'source';
 						if (rejected.diagnostics[0]) reveal(rejected.diagnostics[0].range);

@@ -1,3 +1,10 @@
+<script module lang="ts">
+	export function focusWorkflowDetail(heading: HTMLElement | undefined): void {
+		const overview = heading?.closest('.workflow-split')?.querySelector('.workflow-overview');
+		if (overview && getComputedStyle(overview).display === 'none') heading?.focus();
+	}
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region';

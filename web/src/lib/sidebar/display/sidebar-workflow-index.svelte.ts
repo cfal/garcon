@@ -20,17 +20,38 @@ function sameRun(a: SidebarWorkflowRun, b: SidebarWorkflowRun): boolean {
 	return a.id === b.id && a.name === b.name && a.status === b.status;
 }
 
-function samePage<T>(
-	a: WorkflowPage<T> | null,
-	b: WorkflowPage<T>,
+function samePages<T>(
+	a: readonly WorkflowPage<T>[],
+	b: readonly WorkflowPage<T>[],
 	equal: (a: T, b: T) => boolean,
 ): boolean {
 	return (
-		a !== null &&
-		a.nextCursor === b.nextCursor &&
-		a.items.length === b.items.length &&
-		a.items.every((item, index) => equal(item, b.items[index]))
+		a.length === b.length &&
+		a.every((page, i) => {
+			const next = b[i];
+			return (
+				page.nextCursor === next.nextCursor &&
+				page.items.length === next.items.length &&
+				page.items.every((item, j) => equal(item, next.items[j]))
+			);
+		})
 	);
+}
+
+async function readLoadedPages<T>(
+	read: PageReader<T>,
+	limit: number,
+	count: number,
+	signal: AbortSignal,
+): Promise<WorkflowPage<T>[]> {
+	const pages: WorkflowPage<T>[] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await read({ cursor, limit, signal });
+		pages.push(page);
+		cursor = page.nextCursor ?? undefined;
+	} while (cursor && pages.length < count && !signal.aborted);
+	return pages;
 }
 
 function runFromMembership(chat: WorkflowActiveChat): SidebarWorkflowRun {
@@ -38,25 +59,31 @@ function runFromMembership(chat: WorkflowActiveChat): SidebarWorkflowRun {
 }
 
 export class SidebarWorkflowIndex {
-	#recentRuns = $state.raw<WorkflowPage<WorkflowRunSummary> | null>(null);
-	#olderRuns = $state.raw<WorkflowPage<WorkflowRunSummary> | null>(null);
-	#activeChats = $state.raw<WorkflowPage<WorkflowActiveChat> | null>(null);
+	#runPages = $state.raw<readonly WorkflowPage<WorkflowRunSummary>[]>([]);
+	#chatPages = $state.raw<readonly WorkflowPage<WorkflowActiveChat>[]>([]);
 	#selected = $state.raw<{ chatId: string; run: SidebarWorkflowRun } | null>(null);
 	#selectedChatId: string | null = null;
-	#activePageCount = 1;
 	#live = false;
 	#refreshPending = false;
 	#request: AbortController | null = null;
 	#timer: ReturnType<typeof setTimeout> | null = null;
-	#activeByChat = $derived(new Map(this.#activeChats?.items.map((chat) => [chat.chatId, chat])));
+	#activeByChat = $derived.by(() => {
+		const chats = new Map<string, WorkflowActiveChat>();
+		for (const page of this.#chatPages) {
+			for (const chat of page.items) chats.set(chat.chatId, chat);
+		}
+		return chats;
+	});
 	#runsById = $derived.by(() => {
 		const runs = new Map<string, SidebarWorkflowRun>();
-		for (const run of this.#recentRuns?.items ?? []) runs.set(run.id, run);
+		for (const run of this.#runPages[0]?.items ?? []) runs.set(run.id, run);
 		for (const chat of this.#activeByChat.values()) {
 			if (!runs.has(chat.runId)) runs.set(chat.runId, runFromMembership(chat));
 		}
-		for (const run of this.#olderRuns?.items ?? []) {
-			if (!runs.has(run.id)) runs.set(run.id, run);
+		for (const page of this.#runPages.slice(1)) {
+			for (const run of page.items) {
+				if (!runs.has(run.id)) runs.set(run.id, run);
+			}
 		}
 		const selected = this.#selected?.run;
 		if (selected && !runs.has(selected.id)) runs.set(selected.id, { ...selected, status: null });
@@ -70,8 +97,8 @@ export class SidebarWorkflowIndex {
 		if (this.#selected) ids.set(this.#selected.chatId, this.#selected.run.id);
 		return ids;
 	});
-	moreRuns = $derived(Boolean(this.#runCursor));
-	moreActiveChats = $derived(Boolean(this.#activeChats?.nextCursor));
+	moreRuns = $derived(Boolean(this.#runPages.at(-1)?.nextCursor));
+	moreActiveChats = $derived(Boolean(this.#chatPages.at(-1)?.nextCursor));
 	fetching = $state(false);
 	failed = $state(false);
 
@@ -81,10 +108,6 @@ export class SidebarWorkflowIndex {
 			activeChats: PageReader<WorkflowActiveChat>;
 		},
 	) {}
-
-	get #runCursor(): string | null {
-		return this.#olderRuns ? this.#olderRuns.nextCursor : (this.#recentRuns?.nextCursor ?? null);
-	}
 
 	runForChat(chatId: string, fromRunId?: string): SidebarWorkflowRun | undefined {
 		const active = this.#activeByChat.get(chatId);
@@ -131,14 +154,19 @@ export class SidebarWorkflowIndex {
 		}
 		void this.#fetch(async (signal) => {
 			const [runs, activeChats] = await Promise.all([
-				this.readers.runs({ limit: RUN_PAGE_SIZE, signal }),
-				this.#readActiveChats(signal),
+				readLoadedPages(this.readers.runs, RUN_PAGE_SIZE, this.#runPages.length, signal),
+				readLoadedPages(
+					this.readers.activeChats,
+					ACTIVE_CHAT_PAGE_SIZE,
+					this.#chatPages.length,
+					signal,
+				),
 			]);
 			if (signal.aborted) return;
-			if (!samePage(this.#recentRuns, runs, sameRun)) this.#recentRuns = runs;
+			if (!samePages(this.#runPages, runs, sameRun)) this.#runPages = runs;
 			if (
-				!samePage(
-					this.#activeChats,
+				!samePages(
+					this.#chatPages,
 					activeChats,
 					(a, b) =>
 						a.chatId === b.chatId &&
@@ -147,7 +175,7 @@ export class SidebarWorkflowIndex {
 						a.runStatus === b.runStatus,
 				)
 			)
-				this.#activeChats = activeChats;
+				this.#chatPages = activeChats;
 			this.selectChat(this.#selectedChatId);
 			for (const id of this.collapsedRunIds) {
 				if (!this.#runsById.has(id)) this.collapsedRunIds.delete(id);
@@ -157,16 +185,13 @@ export class SidebarWorkflowIndex {
 
 	loadMore(kind: SidebarWorkflowPageKind): void {
 		if (!this.#live || this.#request) return;
-		const cursor = kind === 'runs' ? this.#runCursor : this.#activeChats?.nextCursor;
+		const pages = kind === 'runs' ? this.#runPages : this.#chatPages;
+		const cursor = pages.at(-1)?.nextCursor;
 		if (!cursor) return;
 		void this.#fetch(async (signal) => {
 			if (kind === 'runs') {
 				const page = await this.readers.runs({ cursor, limit: RUN_PAGE_SIZE, signal });
-				if (!signal.aborted)
-					this.#olderRuns = {
-						items: [...(this.#olderRuns?.items ?? []), ...page.items],
-						nextCursor: page.nextCursor,
-					};
+				if (!signal.aborted) this.#runPages = [...this.#runPages, page];
 			} else {
 				const page = await this.readers.activeChats({
 					cursor,
@@ -174,30 +199,10 @@ export class SidebarWorkflowIndex {
 					signal,
 				});
 				if (signal.aborted) return;
-				this.#activePageCount++;
-				this.#activeChats = {
-					items: [...(this.#activeChats?.items ?? []), ...page.items],
-					nextCursor: page.nextCursor,
-				};
+				this.#chatPages = [...this.#chatPages, page];
 				this.selectChat(this.#selectedChatId);
 			}
 		});
-	}
-
-	async #readActiveChats(signal: AbortSignal): Promise<WorkflowPage<WorkflowActiveChat>> {
-		const items: WorkflowActiveChat[] = [];
-		let cursor: string | null = null;
-		for (let index = 0; index < this.#activePageCount; index++) {
-			const page = await this.readers.activeChats({
-				cursor: cursor ?? undefined,
-				limit: ACTIVE_CHAT_PAGE_SIZE,
-				signal,
-			});
-			items.push(...page.items);
-			cursor = page.nextCursor;
-			if (!cursor || signal.aborted) break;
-		}
-		return { items, nextCursor: cursor };
 	}
 
 	async #fetch(read: (signal: AbortSignal) => Promise<void>): Promise<void> {

@@ -149,6 +149,7 @@
 					original.apiProviderId !== undefined ||
 					original.modelEndpointId !== undefined
 				) {
+					form.selectAgent(agentId);
 					const model = original.model ?? pool.getDefaultModel(agentId);
 					const selection = pool.selectionFor(agentId, model, original.modelEndpointId);
 					const endpoint = original.modelEndpointId

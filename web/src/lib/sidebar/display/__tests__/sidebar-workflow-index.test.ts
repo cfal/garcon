@@ -108,7 +108,7 @@ describe('workflow sidebar index', () => {
 		const parent = run('run');
 		let later = [membership('second', parent)];
 		const activeChats = vi.fn<ConstructorParameters<typeof SidebarWorkflowIndex>[0]['activeChats']>(
-			async ({ cursor }) => cursor ? page(later) : page([membership('first', parent)], 'next'),
+			async ({ cursor }) => (cursor ? page(later) : page([membership('first', parent)], 'next')),
 		);
 		const index = create({ runs: async () => page([]), activeChats });
 		index.setLive(true);
@@ -121,8 +121,35 @@ describe('workflow sidebar index', () => {
 		await vi.waitFor(() => expect(index.runIdByChatId.has('second')).toBe(false));
 		expect(index.runIdByChatId.has('first')).toBe(true);
 		expect(activeChats.mock.calls.map(([options]) => options.cursor)).toEqual([
-			undefined, 'next', undefined, 'next',
+			undefined,
+			'next',
+			undefined,
+			'next',
 		]);
+	});
+
+	it('refreshes loaded history without skipping runs displaced from the first page', async () => {
+		const history = Array.from({ length: 40 }, (_, i) => run(String(40 - i)));
+		const index = create({
+			runs: async ({ cursor, limit = 20 }) => {
+				const start = cursor ? history.findIndex(({ id }) => id === cursor) + 1 : 0;
+				const items = history.slice(start, start + limit);
+				return page(items, start + limit < history.length ? items.at(-1)!.id : null);
+			},
+			activeChats: async () => page([]),
+		});
+		index.setLive(true);
+		await vi.waitFor(() => expect(index.runs).toHaveLength(20));
+		index.loadMore('runs');
+		await vi.waitFor(() => expect(index.runs).toEqual(history));
+		history[30] = run(history[30].id, 'archived');
+		history.unshift(run('41'));
+		index.invalidate();
+		await vi.waitFor(() => expect(index.runs[0].id).toBe('41'));
+		expect(index.runs).toEqual(history.slice(0, 40));
+		expect(index.moreRuns).toBe(true);
+		index.loadMore('runs');
+		await vi.waitFor(() => expect(index.runs).toEqual(history));
 	});
 
 	it('retains the last good snapshot on failure and aborts an obsolete request when hidden', async () => {
