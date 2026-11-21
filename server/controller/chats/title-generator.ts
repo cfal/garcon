@@ -1,4 +1,4 @@
-import { resolveTitleModelQuery, type TitleModelAgents, type TitleModelUse } from '../settings/title-model.js';
+import { resolveTitleModelQuery, TITLE_MODEL_UNAVAILABLE_MESSAGE, type TitleModelAgents, type TitleModelUse } from '../settings/title-model.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage } from '../../common/errors.js';
 import { DomainError } from '../../common/domain-error.js';
@@ -91,7 +91,7 @@ function normalizeTitle(text: unknown): string {
 function titleGenerationUnavailable(): TitleGenerationError {
   return new TitleGenerationError(
     'TITLE_GENERATION_UNAVAILABLE',
-    'Title generation is unavailable because no generation model is configured or ready.',
+    TITLE_MODEL_UNAVAILABLE_MESSAGE,
     409,
     false,
   );

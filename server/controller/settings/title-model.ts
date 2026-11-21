@@ -1,9 +1,13 @@
 import { isRecord } from '../../../common/json.js';
+import { createLogger } from '../../common/log.js';
 import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from './generation-config-source.js';
 import { resolveEffectiveGenerationConfig, type EffectiveGenerationConfig } from './generation-effective.js';
 import { createGenerationRequestSignal, GENERATION_PROVIDER_TIMEOUT_MS } from './generation-limits.js';
 
 export type TitleModelUse = 'automatic' | 'on-demand';
+export const TITLE_MODEL_UNAVAILABLE_MESSAGE = 'Title generation is unavailable because no generation model is configured or ready.';
+
+const logger = createLogger('settings:title-model');
 
 type TitleModelQuery = Omit<EffectiveGenerationConfig, 'enabled' | 'source'> & {
   permissionMode: 'default';
@@ -32,6 +36,10 @@ export async function resolveTitleModelQuery(
     selection = { ...selection, enabled: hasSavedTarget ? true : undefined };
   }
   const { enabled, source: _source, ...target } = resolveEffectiveGenerationConfig({ persisted: selection, ...context });
-  if (!enabled || !target.agentId || !target.model) return null;
+  if (!enabled) return null;
+  if (!target.agentId || !target.model) {
+    if (use === 'automatic') logger.warn('chat-title: generation failed:', TITLE_MODEL_UNAVAILABLE_MESSAGE);
+    return null;
+  }
   return { ...target, permissionMode: 'default', timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS, signal };
 }
