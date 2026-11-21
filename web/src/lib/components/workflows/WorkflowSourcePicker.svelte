@@ -147,7 +147,7 @@
 				</div>
 				<label class="block space-y-1 text-sm">
 					<span>{m.workflow_studio_file_path()}</span>
-					<input class="workflow-field" required disabled={loading} bind:value={path} />
+					<input class="workflow-field text-base" required disabled={loading} bind:value={path} />
 				</label>
 				<Button
 					size="sm"
@@ -204,7 +204,7 @@
 				<label class="block space-y-1 text-sm">
 					<span>{m.workflow_studio_source()}</span>
 					<textarea
-						class="workflow-field min-h-40 font-mono"
+						class="workflow-field min-h-40 font-mono text-base"
 						spellcheck={false}
 						required
 						bind:value={source}></textarea>

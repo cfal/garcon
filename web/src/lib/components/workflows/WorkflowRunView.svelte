@@ -358,7 +358,7 @@
 							<div class="mb-3 space-y-2">
 								<div class="grid gap-2 @min-[23rem]/detail:grid-cols-2">
 									<input
-										class="workflow-field"
+										class="workflow-field text-base"
 										type="search"
 										placeholder={m.workflow_studio_filter_instances()}
 										aria-label={m.workflow_studio_filter_instances()}
@@ -366,7 +366,7 @@
 										oninput={() => (instanceId = null)}
 									/>
 									<select
-										class="workflow-field"
+										class="workflow-field text-base"
 										aria-label={m.workflow_studio_instance_status()}
 										bind:value={status}
 										onchange={() => (instanceId = null)}
@@ -378,7 +378,7 @@
 									</select>
 								</div>
 								<select
-									class="workflow-field"
+									class="workflow-field text-base"
 									aria-label={m.workflow_studio_instance()}
 									value={instance?.id ?? ''}
 									onchange={(event) => (instanceId = event.currentTarget.value)}

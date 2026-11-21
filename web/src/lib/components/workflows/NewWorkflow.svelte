@@ -429,7 +429,7 @@
 						<div class="flex items-center gap-1">
 							<select
 								id={`${id}-definition`}
-								class="workflow-field flex-1"
+								class="workflow-field flex-1 text-base"
 								value={chosen}
 								disabled={locked}
 								onchange={(event) => void select(event.currentTarget.value)}

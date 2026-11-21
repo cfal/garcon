@@ -44,7 +44,7 @@
 		>
 		<input
 			type="search"
-			class="workflow-field"
+			class="workflow-field text-base"
 			aria-label={m.workflow_studio_find_step_type()}
 			placeholder={m.workflow_studio_find_step_type()}
 			bind:value={search}

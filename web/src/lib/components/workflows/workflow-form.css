@@ -3,3 +3,9 @@
 .workflow-field {
 	@apply block w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:text-sm;
 }
+
+@media (any-pointer: coarse) {
+	.workflow-field {
+		font-size: max(16px, calc(1rem * var(--text-scale, 1)));
+	}
+}
