@@ -214,9 +214,11 @@ describe('ConversationTranscriptOverlayStore', () => {
 		const view = overlays.forChat(input.chatId);
 		const queuedInputs = view.optimisticInputs;
 		const queuedReceipt = queuedInputs[0].delivery;
+		const queuedOrdinals = view.optimisticAfterOrdinals;
 
 		expect(overlays.reconcileQueuedSteers(input.chatId, control)?.feedStructureChanged).toBe(false);
 		expect(view.optimisticInputs).toBe(queuedInputs);
+		expect(view.optimisticAfterOrdinals).toBe(queuedOrdinals);
 		entry.content = 'edited guidance';
 		overlays.reconcileQueuedSteers(input.chatId, control);
 		expect(view.optimisticInputs[0].content).toBe(entry.content);

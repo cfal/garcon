@@ -44,6 +44,14 @@ class RouterTestSocket {
 	message(data: Record<string, unknown>) { this.onmessage?.({ data: JSON.stringify(data) }); }
 }
 
+async function confirmHeartbeat(connection: WsConnection, socket: RouterTestSocket, serverInstanceId: string): Promise<void> {
+	const pong = connection.requestProcessingSnapshot('heartbeat');
+	const ping = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; sentAt: number };
+	socket.message({ ...ping, type: 'ws-pong', serverTime: TS, serverInstanceId,
+		processing: { outcome: 'snapshot', chats: [] } });
+	await pong;
+}
+
 function executionControl(serverInstanceId: string, version: number, content: string): ChatExecutionControlState {
 	return {
 		serverInstanceId,
@@ -401,15 +409,8 @@ describe('event router integration', () => {
 			fallback.resolve({ control: empty });
 			await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual(empty));
 			clock.mockReturnValue(30);
-			const authorize = async () => {
-				const pong = connection.requestProcessingSnapshot('heartbeat');
-				const ping = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; sentAt: number };
-				socket.message({ ...ping, type: 'ws-pong', serverTime: TS, serverInstanceId: 'successor',
-					processing: { outcome: 'snapshot', chats: [] } });
-				await pong;
-			};
-			await authorize();
-			await authorize();
+			await confirmHeartbeat(connection, socket, 'successor');
+			await confirmHeartbeat(connection, socket, 'successor');
 			expect(getChatSnapshot).toHaveBeenCalledOnce();
 			if (completion === 'disconnect') {
 				connection.disconnect();
@@ -437,14 +438,14 @@ describe('event router integration', () => {
 			} else {
 				if (completion === 'retry') {
 					expect(ui.getExecutionControl('chat-a')).toEqual(empty);
-					await authorize();
+					await confirmHeartbeat(connection, socket, 'successor');
 				}
 				await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual({ ...latest,
 					version: completion === 'newer-live-update' ? 3 : latest.version }));
 				expect(ui.getTransientFeed('chat-a')).toEqual(latestTransient);
 			}
 			if (!['disconnect', 'unmount', 'view-change'].includes(completion)) {
-				await authorize();
+				await confirmHeartbeat(connection, socket, 'successor');
 				expect(getChatSnapshot).toHaveBeenCalledTimes(completion === 'retry' ? 2 : 1);
 			}
 		} finally {
@@ -512,20 +513,14 @@ describe('event router integration', () => {
 			flushSync();
 			expect(getChatSnapshot).toHaveBeenCalledOnce();
 			clock.mockReturnValue(30);
-			const authorize = async () => {
-				const pong = connection.requestProcessingSnapshot('heartbeat');
-				const ping = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; sentAt: number };
-				socket.message({ ...ping, type: 'ws-pong', serverTime: TS, serverInstanceId: 'successor', processing: { outcome: 'snapshot', chats: [] } });
-				await pong;
-			};
-			await authorize();
+			await confirmHeartbeat(connection, socket, 'successor');
 			await vi.waitFor(() => expect(ui.getTransientFeed('chat-a')).toEqual(current.transientFeed));
 			held.resolve(old);
 			await held.promise;
 			await Promise.resolve();
 			expect(ui.getTransientFeed('chat-a')).toEqual(current.transientFeed);
 			expect(ui.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-current']);
-			await authorize();
+			await confirmHeartbeat(connection, socket, 'successor');
 			expect(getChatSnapshot).toHaveBeenCalledTimes(2);
 			const latest = snapshot('view-current', 'permission-current', 3);
 			vi.mocked(getChatSnapshot).mockResolvedValue(latest);
@@ -607,13 +602,7 @@ describe('event router integration', () => {
 				processing: { outcome: 'snapshot', chats: [] }, controlResults: [] });
 			await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual(control));
 			clock.mockReturnValue(30);
-			const authorize = async () => {
-				const pong = connection.requestProcessingSnapshot('heartbeat');
-				const ping = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; sentAt: number };
-				socket.message({ ...ping, type: 'ws-pong', serverTime: TS, serverInstanceId: 'successor', processing: { outcome: 'snapshot', chats: [] } });
-				await pong;
-			};
-			await authorize();
+			await confirmHeartbeat(connection, socket, 'successor');
 			expect(getChatSnapshot).toHaveBeenCalledOnce();
 			socket.message({ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'view',
 				transcriptViewId: 'replacement', lastOrdinal: 1 });
@@ -626,7 +615,7 @@ describe('event router integration', () => {
 			expect(ui.pendingPermissionRequests).toEqual([]);
 			history.resolve({ ...page, transcriptViewId: 'replacement' });
 			await vi.waitFor(() => expect(panels.panel('chat-view:window-one')?.transcript.transcriptViewId).toBe('replacement'));
-			await authorize();
+			await confirmHeartbeat(connection, socket, 'successor');
 			await vi.waitFor(() => expect(ui.getTransientFeed('chat-a')).toEqual(replacementFeed));
 			expect(getChatSnapshot).toHaveBeenCalledTimes(2);
 			expect(ui.pendingPermissionRequests).toEqual([]);

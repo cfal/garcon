@@ -20,7 +20,7 @@ import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { getChatExecutionControl, getChatSnapshot } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
-import type { WsMessageConsumer } from './connection.svelte.js';
+import type { WsMessageConsumer, WsMessageContext } from './connection.svelte.js';
 import type {
 	CommittedTranscriptBatch,
 	ConversationPanelBatchApplyResult,
@@ -112,39 +112,9 @@ export class ChatReconnectCoordinator {
 
 	mount(): void {
 		$effect(() => {
-			const removeConsumer = this.options.ws.addMessageConsumer((data, context) => {
-				if (data.type === 'chat-session-deleted' && typeof data.chatId === 'string') {
-					this.#suppressedChats.delete(data.chatId);
-				}
-				if (data.type === 'chat-transcript-replaced') {
-					const message = parseServerWsMessage(data);
-					if (message instanceof ChatTranscriptReplacedMessage && this.#suppressedChats.has(message.chatId)) {
-						// A replacement invalidates snapshots before its new view reaches the cache.
-						this.#suppressedChats.set(message.chatId, Symbol());
-					}
-					return false;
-				}
-				if (data.type === 'ws-pong' && context.requestStartedAt !== undefined) {
-					const message = parseServerWsMessage(data);
-					if (message instanceof WsPongMessage) {
-						if (this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId, context.requestStartedAt)) {
-							void this.#refreshSuppressedChats(message.serverInstanceId);
-						}
-					}
-					return false;
-				}
-				if (context.connectionStartedAt === undefined
-					|| (data.type !== 'chat-execution-control-updated' && data.type !== 'chat-transient-feed-mutation')) return false;
-				const message = parseServerWsMessage(data);
-				let serverInstanceId: string;
-				if (message instanceof ChatExecutionControlUpdatedMessage) serverInstanceId = message.control.serverInstanceId;
-				else if (message instanceof ChatTransientFeedMutationMessage) serverInstanceId = message.serverInstanceId;
-				else return false;
-				// Ambiguous live frames cannot replace an instance observed after this socket began.
-				if (this.options.conversationUi.acceptsExecutionControlSocketObservation(serverInstanceId, context.connectionStartedAt)) return false;
-				this.#suppressedChats.set(message.chatId, Symbol());
-				return true;
-			});
+			const removeConsumer = this.options.ws.addMessageConsumer((data, context) =>
+				this.#consumeAuthorityFrame(data, context),
+			);
 			return () => {
 				removeConsumer();
 				this.#reconnectEpoch += 1;
@@ -157,6 +127,50 @@ export class ChatReconnectCoordinator {
 				void this.handleConnectionState(connected);
 			});
 		});
+	}
+
+	#consumeAuthorityFrame(data: Record<string, unknown>, context: WsMessageContext): boolean {
+		switch (data.type) {
+			case 'chat-session-deleted':
+				if (typeof data.chatId === 'string') this.#suppressedChats.delete(data.chatId);
+				return false;
+			case 'chat-transcript-replaced': {
+				const message = parseServerWsMessage(data);
+				if (message instanceof ChatTranscriptReplacedMessage && this.#suppressedChats.has(message.chatId)) {
+					// A replacement invalidates snapshots before its new view reaches the cache.
+					this.#suppressedChats.set(message.chatId, Symbol());
+				}
+				return false;
+			}
+			case 'ws-pong': {
+				if (context.requestStartedAt === undefined) return false;
+				const message = parseServerWsMessage(data);
+				if (message instanceof WsPongMessage
+					&& this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId, context.requestStartedAt)) {
+					void this.#refreshSuppressedChats(message.serverInstanceId);
+				}
+				return false;
+			}
+			case 'chat-execution-control-updated':
+			case 'chat-transient-feed-mutation': {
+				if (context.connectionStartedAt === undefined) return false;
+				const message = parseServerWsMessage(data);
+				let serverInstanceId: string;
+				if (message instanceof ChatExecutionControlUpdatedMessage) {
+					serverInstanceId = message.control.serverInstanceId;
+				} else if (message instanceof ChatTransientFeedMutationMessage) {
+					serverInstanceId = message.serverInstanceId;
+				} else {
+					return false;
+				}
+				// Ambiguous live frames cannot replace an instance observed after this socket began.
+				if (this.options.conversationUi.acceptsExecutionControlSocketObservation(serverInstanceId, context.connectionStartedAt)) return false;
+				this.#suppressedChats.set(message.chatId, Symbol());
+				return true;
+			}
+			default:
+				return false;
+		}
 	}
 
 	async handleConnectionState(connected: boolean): Promise<void> {
@@ -373,23 +387,24 @@ export class ChatReconnectCoordinator {
 		const isCurrent = () => epoch === this.#reconnectEpoch && this.#suppressedChats.get(chatId) === token;
 		if (!isCurrent()) return;
 		const response = ui.captureExecutionResponse();
-		const view = panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
-		const transientView = ui.getTransientFeed(chatId)?.transcriptViewId;
+		const capturedViewId = panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
+		const capturedTransientViewId = ui.getTransientFeed(chatId)?.transcriptViewId;
 		try {
 			const snapshot = await getChatSnapshot(chatId, 1);
 			if (!isCurrent() || snapshot.control.serverInstanceId !== serverInstanceId
 				|| !ui.isExecutionControlSocketInstanceConfirmed(serverInstanceId)) return;
 			response.setExecutionControlFromRefresh(chatId, snapshot.control);
-			if (panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId !== view
-				|| ui.getTransientFeed(chatId)?.transcriptViewId !== transientView) return;
+			if (panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId !== capturedViewId
+				|| ui.getTransientFeed(chatId)?.transcriptViewId !== capturedTransientViewId) return;
 			response.setTransientFeedFromSnapshot(snapshot.transientFeed);
 			// Unavailable history may carry only a placeholder view, not a replacement.
-			if (view && snapshot.transcript.availability === 'available' && snapshot.transcript.transcriptViewId !== view) {
+			if (capturedViewId && snapshot.transcript.availability === 'available' && snapshot.transcript.transcriptViewId !== capturedViewId) {
 				panels.handleViewReplacement(chatId);
 				if (panels.panelsForChat(chatId).length > 0) {
 					panels.invalidateChatSnapshot(chatId);
-					if (!await panels.loadChatSnapshot(chatId)
-						|| panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId !== snapshot.transcript.transcriptViewId) return;
+					const loaded = await panels.loadChatSnapshot(chatId);
+					if (!loaded) return;
+					if (panels.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId !== snapshot.transcript.transcriptViewId) return;
 				}
 			}
 			if (isCurrent()) this.#suppressedChats.delete(chatId);

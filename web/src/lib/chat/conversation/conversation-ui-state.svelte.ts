@@ -243,13 +243,13 @@ export class ConversationUiState implements ConversationUiPort {
 				if (accepts(control.serverInstanceId)) this.setExecutionControlFromRefresh(chatId, control);
 			},
 			setTransientFeedFromSnapshot: snapshot => {
+				if (!accepts(snapshot.serverInstanceId)) return { kind: 'stale' };
 				const captured = transientFeeds[snapshot.chatId];
 				const current = this.getTransientFeed(snapshot.chatId);
 				const capturedView = captured?.serverInstanceId === snapshot.serverInstanceId ? captured.transcriptViewId : undefined;
 				const currentView = current?.serverInstanceId === snapshot.serverInstanceId ? current.transcriptViewId : undefined;
 				// Same-view responses still converge through the feed's revision ordering.
-				if (!accepts(snapshot.serverInstanceId)
-					|| (currentView !== capturedView && currentView !== snapshot.transcriptViewId)) return { kind: 'stale' };
+				if (currentView !== capturedView && currentView !== snapshot.transcriptViewId) return { kind: 'stale' };
 				return this.setTransientFeedFromSnapshot(snapshot);
 			},
 		};
