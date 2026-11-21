@@ -42,6 +42,14 @@ test.each([false, true])('keeps a composer steer visible through queue edits and
         });
         await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
         await browserExpect(page.getByRole('button', { name: 'Queue message', exact: true })).toBeVisible();
+        await browserExpect(page.locator('[data-chat-row-id]:not([data-chat-row-id^="optimistic:"])')
+          .filter({ hasText: 'Synthetic first turn.' })).toBeVisible();
+        let refreshRequests = 0;
+        page.on('request', request => {
+          const path = new URL(request.url()).pathname;
+          if (path === '/api/v1/chats/messages' || path === '/api/v1/chats/combined-messages'
+            || path === '/api/v1/chats/snapshot') refreshRequests++;
+        });
         const editor = page.getByPlaceholder('Reply...', { exact: true });
         const endpoint = '**/api/v1/chats/steer';
         await page.route(endpoint, async route => {
@@ -76,15 +84,23 @@ test.each([false, true])('keeps a composer steer visible through queue edits and
           expectedRevision: 1, content: edited });
         await browserExpect(bubble).toContainText(edited);
         await browserExpect(preview).toHaveText(edited);
+        const observer = await page.context().newPage();
+        try {
+          await observer.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+          await browserExpect(observer.locator('[data-queue-preview]')).toHaveText(edited);
+          await browserExpect(observer.locator('[data-chat-row-id]:not([data-chat-row-id^="optimistic:"])')
+            .filter({ hasText: 'Synthetic first turn.' })).toBeVisible();
+          await browserExpect(observer.getByLabel('Waiting to steer', { exact: true })).toHaveCount(0);
+          await browserExpect(observer.locator('[data-chat-row-id^="optimistic:"]')).toHaveCount(0);
+          await browserExpect(observer.locator('[data-chat-row-id]').filter({ hasText: edited })).toHaveCount(0);
+          await browserExpect(bubble.getByLabel('Waiting to steer', { exact: true })).toBeVisible();
+        } finally {
+          await observer.close();
+        }
         const messages = async () => (await client.getMessages(chatId)).messages.filter(({ message }) =>
           message.type === 'user-message' && message.metadata?.clientMessageId === clientMessageId);
         expect(await messages()).toHaveLength(0);
 
-        let refreshRequests = 0;
-        page.on('request', request => {
-          const path = new URL(request.url()).pathname;
-          if (path === '/api/v1/chats/messages' || path === '/api/v1/chats/combined-messages') refreshRequests++;
-        });
         await gate.open();
         await held.requested;
         await client.waitForCommittedUserInput(chatId, edited, { afterIndex });
@@ -92,13 +108,17 @@ test.each([false, true])('keeps a composer steer visible through queue edits and
         await browserExpect(bubble).toHaveCount(0);
         await browserExpect(preview).toHaveCount(0);
         expect(await messages()).toHaveLength(1);
-        expect(droppedEchoes).toBe(missedEcho ? 1 : 0);
-        expect(refreshRequests).toBe(0);
+        await browserExpect.poll(() => droppedEchoes).toBe(missedEcho ? 1 : 0);
         if (missedEcho) {
           await browserExpect(committed).toHaveCount(0);
-          await page.reload();
+        } else {
+          await browserExpect(committed).toBeInViewport();
         }
-        await browserExpect(committed).toBeInViewport();
+        expect(refreshRequests).toBe(0);
+        if (missedEcho) {
+          await page.reload();
+          await browserExpect(committed).toBeInViewport();
+        }
         held.release();
         expect((await client.waitForTurnTerminal(chatId, active.turnId, { afterIndex })).type).toBe('agent-run-finished');
         environment.model.assertSettled();
