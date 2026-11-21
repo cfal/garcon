@@ -48,7 +48,7 @@ bun run setup
 bun run start --project-base-dir ~/repos
 ```
 
-Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C.
+Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C. Contributors running integration tests or the full `bun run check` also need `bun run setup:integration`; normal setup skips those test tools.
 
 Want to use your own domain, such as `https://garcon.example.com`? Interactive setup offers **Connect a custom domain with Cloudflare Tunnel** (optional, default No). The [Cloudflare Tunnel guide](docs/cloudflare-tunnel.md) covers prerequisites, background startup, Docker, and removal. You can also connect later, after starting Garcon and creating your account:
 

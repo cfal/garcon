@@ -1,5 +1,7 @@
 # Integration Tests
 
+From the repository root, run `bun run setup:integration` before running these suites. This separate frozen install provisions the pinned reference CLIs; normal Garcon setup skips it.
+
 This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda; the Chromium lane owns rendered layout and browser geometry.
 
 Integration coverage is required, not optional, when a change can fail only after multiple owners interact. Queueing, transcript stability, reconnect, restart recovery, command idempotency, concurrent chats, provider failures, forks, and deletion all belong here. A focused unit test should still cover the underlying component behavior.
