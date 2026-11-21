@@ -1,9 +1,14 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
+import type { AgentHost } from '@garcon/server-agent-interface';
+import { LazyPiRuntime } from '../agents/pi/lazy-runtime.js';
+import { PiModelCatalogService } from '../agents/pi/pi-models.js';
 import PiAgentIntegration from '../index.js';
 
 function createHost() {
   return {
     agentId: 'pi',
+    scope: { executorId: 'local', instanceId: 'test', integrationId: 'pi' },
+    migrations: { async getVersion() { return 1; }, async read() { return undefined; }, async commit() {} },
     logger: {
       debug: mock(() => undefined),
       info: mock(() => undefined),
@@ -17,7 +22,7 @@ function createHost() {
     },
     environment: { get: mock(() => undefined) },
     apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },
-  };
+  } satisfies AgentHost;
 }
 
 describe('PiAgentIntegration', () => {
@@ -31,7 +36,7 @@ describe('PiAgentIntegration', () => {
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
     expect(integration.descriptor.requiresNativePathForProjectPathUpdate).toBe(true);
     expect(integration.projectPathUpdates).toBeDefined();
-    expect(integration.transcriptSearch).toBeUndefined();
+    expect('transcriptSearch' in integration).toBe(false);
     expect(integration.forking).toBeNull();
     expect(integration.auth).toBeDefined();
     expect(integration.singleQuery).toBeDefined();
@@ -42,6 +47,30 @@ describe('PiAgentIntegration', () => {
     expect(integration.commands).toBeNull();
     expect(integration.endpoints).toBeNull();
     expect(host.environment.get).not.toHaveBeenCalled();
+  });
+
+  it('waits for catalog cleanup even when a session fails to shut down', async () => {
+    const cleanup = Promise.withResolvers<void>();
+    const failure = new Error('Synthetic session shutdown failure');
+    const catalog = spyOn(PiModelCatalogService.prototype, 'stop').mockReturnValue(cleanup.promise);
+    const sessions = spyOn(LazyPiRuntime.prototype, 'shutdown').mockRejectedValue(failure);
+    try {
+      const integration = new PiAgentIntegration(createHost());
+      await integration.lifecycle.start();
+      let observed: unknown;
+      const stopping = integration.lifecycle.stop().catch(error => { observed = error; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(catalog).toHaveBeenCalledTimes(1);
+      expect(sessions).toHaveBeenCalledTimes(1);
+      expect(observed).toBeUndefined();
+      cleanup.resolve();
+      await stopping;
+      expect(observed).toBe(failure);
+    } finally {
+      cleanup.resolve();
+      catalog.mockRestore();
+      sessions.mockRestore();
+    }
   });
 
   it('preserves version 1 settings and stable real native-session envelopes', async () => {
@@ -70,6 +99,7 @@ describe('PiAgentIntegration', () => {
         model: 'github-copilot/gpt-5.4',
         nativeSession,
         carryOverRevision: '',
+        nativeSeedReceipt: null,
         settings: integration.settings.defaults(),
       },
       signal,

@@ -123,13 +123,13 @@ export default class PiAgentIntegration implements AgentIntegration {
       fallbackModels: PI_MODELS.OPTIONS,
       requiresStrictModelDiscovery: true,
       generation: null,
-      discover: ({ strict }) => strict ? models.getModelsStrict() : models.getModels(),
+      discover: ({ strict, signal }) => strict ? models.getModelsStrict(signal) : models.getModels(signal),
     });
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
-        const status = await getPiAuthStatus(models);
+        const status = await getPiAuthStatus(models, signal);
         return {
           ...status,
           source: status.authenticated ? 'cli' : 'none',
@@ -161,8 +161,16 @@ export default class PiAgentIntegration implements AgentIntegration {
       steer: (request) => runtime.steer(request),
     });
     this.lifecycle = createIntegrationLifecycle({
-      start: () => runtime.startPurgeTimer(),
-      stop: () => runtime.shutdown(),
+      start: () => {
+        models.start();
+        return runtime.startPurgeTimer();
+      },
+      stop: async () => {
+        const stopped = await Promise.allSettled([models.stop(), runtime.shutdown()]);
+        for (const result of stopped) {
+          if (result.status === 'rejected') throw result.reason;
+        }
+      },
     });
   }
 }

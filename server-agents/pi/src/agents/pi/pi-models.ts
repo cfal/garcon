@@ -1,6 +1,8 @@
 import { buildPiCliEnv } from './pi-cli.js';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { SharedModelOption } from '@garcon/common/models';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 import type { PiConfig } from '../../config.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -44,9 +46,11 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
 
 export async function getPiAvailableModels(
   config: Pick<PiConfig, 'binary'>,
-  timeoutMs = 20_000,
+  lifetime?: AbortSignal,
 ): Promise<SharedModelOption[]> {
-  const signal = AbortSignal.timeout(timeoutMs);
+  const deadline = AbortSignal.timeout(20_000);
+  const signal = lifetime ? AbortSignal.any([lifetime, deadline]) : deadline;
+  signal.throwIfAborted();
   const env = buildPiCliEnv();
   delete env.FORCE_COLOR;
   const proc = Bun.spawn([config.binary(), '--list-models'], {
@@ -57,16 +61,14 @@ export async function getPiAvailableModels(
   // An extension subprocess can keep a pipe open after Pi exits. The deadline also cancels both reads.
   const read = (stream: ReadableStream<Uint8Array>) =>
     new Response(stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal })).text();
-  const [stdout, stderr, code] = await Promise.all([
-    read(proc.stdout), read(proc.stderr), proc.exited,
-  ]);
-  signal.throwIfAborted();
-  if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
-  return parsePiModelListing(stdout, stderr);
-}
-
-function delay(ms: number): Promise<void> {
-  return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    const [stdout, stderr, code] = await Promise.all([read(proc.stdout), read(proc.stderr), proc.exited]);
+    signal.throwIfAborted();
+    if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
+    return parsePiModelListing(stdout, stderr);
+  } finally {
+    if (signal.aborted) await proc.exited;
+  }
 }
 
 export class PiModelCatalogService {
@@ -74,39 +76,46 @@ export class PiModelCatalogService {
   #cachedAt = 0;
   #lastKnownGoodModels: SharedModelOption[] | null = null;
   #inflight: Promise<SharedModelOption[]> | null = null;
+  #lifetime = new AbortController();
 
   constructor(
     private readonly config: PiConfig,
-    private readonly discover: () => Promise<SharedModelOption[]> = () => getPiAvailableModels(config),
+    private readonly discover: (signal: AbortSignal) => Promise<SharedModelOption[]> = (signal) => getPiAvailableModels(config, signal),
   ) {}
 
-  async getModelsStrict(): Promise<SharedModelOption[]> {
+  async getModelsStrict(signal?: AbortSignal): Promise<SharedModelOption[]> {
+    signal?.throwIfAborted();
+    this.#lifetime.signal.throwIfAborted();
     const now = Date.now();
     if (this.#cachedModels && now - this.#cachedAt < MODEL_CACHE_TTL_MS) {
       return this.#cachedModels;
     }
-    if (this.#inflight) return this.#inflight;
-
-    this.#inflight = this.#discoverWithRetry().finally(() => {
+    this.#inflight ??= this.#discoverWithRetry(this.#lifetime.signal).finally(() => {
       this.#inflight = null;
     });
-    return this.#inflight;
+    return waitUnlessAborted(this.#inflight, signal);
   }
 
-  async getModels(): Promise<SharedModelOption[]> {
+  async getModels(signal?: AbortSignal): Promise<SharedModelOption[]> {
     try {
-      return await this.getModelsStrict();
+      return await this.getModelsStrict(signal);
     } catch (error) {
+      signal?.throwIfAborted();
+      this.#lifetime.signal.throwIfAborted();
       if (isPiModelDiscoveryUnavailableError(error)) return error.staleModels;
       return this.#lastKnownGoodModels ?? [];
     }
   }
 
-  clearForTests(): void {
+  start(): void {
+    if (this.#lifetime.signal.aborted) this.#lifetime = new AbortController();
+  }
+
+  async stop(): Promise<void> {
+    this.#lifetime.abort();
+    await this.#inflight?.catch(() => undefined);
     this.#cachedModels = null;
-    this.#cachedAt = 0;
     this.#lastKnownGoodModels = null;
-    this.#inflight = null;
   }
 
   expireForTests(): void {
@@ -120,17 +129,20 @@ export class PiModelCatalogService {
     return models;
   }
 
-  async #discoverWithRetry(): Promise<SharedModelOption[]> {
+  async #discoverWithRetry(signal: AbortSignal): Promise<SharedModelOption[]> {
     const retryDelays = this.config.isTestEnvironment() ? [0, 0] : [75, 250];
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
       try {
-        return this.#cache(await this.discover());
+        const models = await this.discover(signal);
+        signal.throwIfAborted();
+        return this.#cache(models);
       } catch (error) {
+        signal.throwIfAborted();
         lastError = error;
         const retryDelay = retryDelays[attempt];
         if (retryDelay === undefined) break;
-        await delay(retryDelay);
+        if (retryDelay > 0) await delay(retryDelay, undefined, { signal });
       }
     }
     throw new PiModelDiscoveryUnavailableError(
