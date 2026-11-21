@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { PiConfig } from '../../../config.js';
 import { findPiSessionFileBySessionId, nativePiWindowsPath } from '../pi-session-paths.js';
 
@@ -36,9 +37,12 @@ test('resolves env, project and global session directories in order, including r
   const projectFile = await put(path.join(project, 'local', 'date_test.jsonl'), projectHeader);
   await put(path.join(project, '.pi', 'settings.json'), { sessionDir: 'local' });
   expect(await lookup()).toBe(projectFile);
-  override = '~/explicit';
+  const explicitDir = path.join(home, 'explicit sessions');
+  override = pathToFileURL(explicitDir).href;
   expect(await lookup()).toBeNull();
-  const explicit = await put(path.join(home, 'explicit', 'date_test.jsonl'), projectHeader);
+  const timestamp = '2026-01-01T00-00-00-000Z';
+  await put(path.join(explicitDir, `${timestamp}_other_test.jsonl`), { ...projectHeader, id: 'other_test' });
+  const explicit = await put(path.join(explicitDir, `${timestamp}_test.jsonl`), projectHeader);
   expect(await lookup()).toBe(explicit);
 });
 

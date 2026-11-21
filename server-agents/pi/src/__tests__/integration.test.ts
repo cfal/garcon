@@ -109,7 +109,7 @@ describe('PiAgentIntegration', () => {
     })).resolves.toEqual(nativeSession);
   });
 
-  it('keeps an unresolved native ID for binding without treating it as a transcript on Reload', async () => {
+  it('distinguishes an unbound chat from an unresolved native ID on binding and import', async () => {
     await using directory = await mkdtempDisposable(join(tmpdir(), 'pi-unresolved-'));
     const integration = new PiAgentIntegration({
       ...createHost(),
@@ -123,6 +123,9 @@ describe('PiAgentIntegration', () => {
       },
       signal: new AbortController().signal,
     };
+    const unbound = { ...request, chat: { ...request.chat, agentSessionId: null } };
+    expect(await integration.nativeSessions.resolveNativeSession(unbound)).toBeNull();
+    expect(await integration.nativeSessions.describeSource(unbound)).toBeNull();
     expect(await integration.nativeSessions.resolveNativeSession(request)).toEqual({
       ownerId: 'pi', schemaVersion: 1, value: { path: '!pi:session-1', agentSessionId: 'session-1' },
     });
