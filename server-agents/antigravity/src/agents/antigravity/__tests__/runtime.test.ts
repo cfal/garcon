@@ -512,7 +512,7 @@ describe('Antigravity ACP runtime', () => {
     const gate = Promise.withResolvers<void>();
     agent.configReplyGate = gate.promise;
     const turn = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
-    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
     expect(agent.requests('session/prompt')).toHaveLength(1);
     expect(runtime.isRunning(started.agentSessionId)).toBe(true);
     await expect(runtime.prepareProjectPathUpdate({
@@ -638,7 +638,7 @@ describe('Antigravity ACP runtime', () => {
       agentSessionId: started.agentSessionId,
       executionAdmission: { signal: new AbortController().signal, markStarted: async () => { markedStarted = true; } },
     });
-    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
     expect(runtime.getRunningSessions()).toEqual([expect.objectContaining({ id: started.agentSessionId, status: 'running' })]);
     expect(runtime.abort(started.agentSessionId)).toBe(true);
     expect(runtime.getRunningSessions()).toEqual([expect.objectContaining({ id: started.agentSessionId, status: 'aborted' })]);
@@ -689,7 +689,7 @@ describe('Antigravity ACP runtime', () => {
     agent.configReplyGate = new Promise(() => {});
 
     const turn = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
-    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
     agent.crash();
     await expect(turn).rejects.toThrow();
     agent.configReplyGate = null;
@@ -709,7 +709,7 @@ describe('Antigravity ACP runtime', () => {
     agent.configReplyGate = gate.promise;
 
     const stopped = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
-    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
     runtime.abort(started.agentSessionId);
     const followUp = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
     agent.configReplyGate = null;
@@ -721,6 +721,42 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('does not restore a session its chat released while a follow-up waited', async () => {
+    const { agent, runtime, request } = harness();
+    agent.onPrompt(() => {});
+    agent.cancelReply = 'ignored';
+    const started = await runtime.startSession(request());
+    runtime.abort(started.agentSessionId);
+
+    const followUp = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }).then(() => null, (error) => error);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+
+    expect(String(await followUp)).toContain('was released');
+    expect(agent.requests('initialize')).toHaveLength(1);
+    expect(agent.requests('session/prompt')).toHaveLength(1);
+    runtime.shutdown();
+  });
+
+  it('rejects an unsupported attachment before changing the session model or mode', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+
+    await expect(runtime.runTurn({
+      ...request({
+        model: 'gemini-test-high',
+        permissionMode: 'plan',
+        images: [{ kind: 'image', name: 'notes.txt', mimeType: 'text/plain', data: 'data:text/plain;base64,AAAA' }],
+      }),
+      agentSessionId: started.agentSessionId,
+    })).rejects.toThrow('Antigravity cannot attach notes.txt');
+
+    expect(agent.requests('session/set_model')).toEqual([]);
+    expect(agent.requests('session/set_config_option')).toHaveLength(1);
+    runtime.shutdown();
+  });
+
   it('ends a configuring turn quietly when its chat is released', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());
@@ -729,7 +765,7 @@ describe('Antigravity ACP runtime', () => {
     agent.configReplyGate = new Promise(() => {});
 
     const turn = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
-    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
     runtime.releaseSession('chat-1', started.agentSessionId);
 
     await turn;
@@ -776,7 +812,7 @@ describe('Antigravity ACP runtime', () => {
     agent.configReplyGate = new Promise(() => {});
 
     const stopped = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
-    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    await waitFor(() => agent.requests('session/set_config_option').length === 2);
     runtime.abort(started.agentSessionId);
     await stopped;
     expect(runtime.isRunning(started.agentSessionId)).toBe(false);

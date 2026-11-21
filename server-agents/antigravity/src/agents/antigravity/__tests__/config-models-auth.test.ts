@@ -134,13 +134,11 @@ describe('getAntigravityAuthStatus', () => {
     });
   });
 
-  it('passes the status abort to the enterprise probe', async () => {
+  it('stops waiting on a shared enterprise probe when the status check is aborted', async () => {
     const controller = new AbortController();
     const pending = getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
       signal: controller.signal,
-      authenticate: (_config, signal) => new Promise((_, reject) => {
-        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
-      }),
+      authenticate: () => new Promise(() => {}),
     });
     controller.abort(new Error('stopped'));
     await expect(pending).rejects.toThrow('stopped');

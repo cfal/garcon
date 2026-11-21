@@ -7,6 +7,7 @@ import {
   geminiText,
   geminiThought,
 } from '../../support/fake-gemini-model.js';
+import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
 import {
@@ -318,6 +319,32 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       await waitForVisibleResponse({ fixture, chatId, turnId: second.turnId, marker: secondReply, afterIndex: secondCursor });
       expect(await antigravityAgentSessionId(fixture, chatId)).toBe(sessionId);
       expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([firstReply, secondReply]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedAntigravity());
+  }, TURN_TIMEOUT_MS);
+
+  // agy ignores the cwd passed to session/resume and keeps the directory
+  // recorded with the conversation, so Garcon refuses to move the chat.
+  test('refuses a project path update, which agy would not apply', async () => {
+    const testEnvironment = requireEnvironment();
+    const reply = marker('PATH_REPLY');
+    testEnvironment.model.scriptTurn([geminiText(reply)]);
+
+    await withIntegrationFixture('antigravity-scripted-project-path', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'establish the session',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: first.turnId, marker: reply, afterIndex: cursor });
+
+      const refused = await fixture.client.updateProjectPath({
+        chatId, projectPath: fixture.executionDirs.workspace,
+      }).then(() => null, (error: unknown) => error);
+      expect(refused).toBeInstanceOf(GarconApiError);
+      expect(refused).toMatchObject({ status: 422, body: { errorCode: 'PROJECT_PATH_UPDATE_UNSUPPORTED' } });
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId))
+        .toMatchObject({ projectPath: fixture.executionDirs.project });
       testEnvironment.model.assertSettled();
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);

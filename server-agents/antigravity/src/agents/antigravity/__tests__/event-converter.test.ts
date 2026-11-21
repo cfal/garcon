@@ -393,6 +393,20 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(rows)[0]).toEqual({ type: 'bash-tool-use', toolId: 'tool-1', command: 'echo permitted', description: undefined });
   });
 
+  it('keeps a message whole across a progress update for an earlier call', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'echo synthetic' }), context);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Here is the' } }), context);
+    const progress = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress',
+    }), context);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' result.' } }), context);
+
+    expect(progress).toEqual([]);
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Here is the result.' }]);
+  });
+
   it('keeps text that arrived before a call settles ahead of its result', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

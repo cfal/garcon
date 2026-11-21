@@ -61,6 +61,8 @@ Stop works the same way while a turn is still being configured (model and mode a
 
 After a cancelled turn, agy merges the next user message into the unanswered one, so the model sees both prompts as one request.
 
+A chat's project path cannot change. agy keeps the working directory recorded with the conversation and ignores the `cwd` that `session/resume` passes, even in a new process started in the new directory, so a moved chat would keep reading and editing the old one. The descriptor therefore declares `supportsProjectPathUpdate: false`, and the scripted tier asserts that Garcon refuses the move.
+
 ### Executor Errors
 
 Upstream model failures (invalid key, quota, HTTP 4xx/5xx) do not fail the ACP prompt. The CLI emits one complete `agent_message_chunk` whose text begins with `\n⚠ agent executor error: ` and then ends the turn normally with `end_turn`. The converter treats the marker as a failure only when two things hold:
@@ -84,6 +86,8 @@ The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. 
 ## Models And Modes
 
 `agy models` prints `<id>\t<label>` lines such as `gemini-3.1-pro-high	Gemini 3.1 Pro (High)`. Each ID encodes the model and its thinking level, and the levels differ per model. Garcon therefore exposes these IDs directly as catalog models and declares no thinking modes. Discovery runs no session, so it leaves no empty conversation in the user's history. `session/set_model` accepts the same IDs and updates both the `model` and `thought_level` options.
+
+Choosing Default (an empty model) returns to the model agy picked when the process opened the session. A resumed session reports only its current model, so after a restart or reconnect Default keeps the last model in use. Learning agy's real default would take a `session/new`, which leaves an empty conversation in the user's history.
 
 Permission modes:
 
@@ -131,7 +135,7 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 
 - **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, and tool and result normalization. They also cover executor-error detection and the login environment. A runtime suite drives the shared ACP runtime against a fake agent that speaks agy's wire shapes. It covers agent-defined permission option IDs, cancellation (prompt, late, and ignored), in-band executor errors, and resume in a new process.
 - **Shared ACP tests** in `server-agents/common/src/acp/__tests__` cover permission-option selection by kind and the cancel notification.
-- **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, the Gemini sibling of `FakeClaudeModel` and `FakeCodexModel`, in all three execution lanes with an isolated `HOME`. agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method and streams `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`. Requests without tool declarations are auxiliary (title generation, web-search grounding) and get a canned reply outside the script. The suite covers catalog discovery, command approval and denial, file edits in accept-edits mode, and model switching on resume. It also covers Stop, upstream API errors, and resume after a server restart.
+- **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, the Gemini sibling of `FakeClaudeModel` and `FakeCodexModel`, in all three execution lanes with an isolated `HOME`. agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method and streams `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`. Requests without tool declarations are auxiliary (title generation, web-search grounding) and get a canned reply outside the script. The suite covers catalog discovery, command approval and denial, file edits in accept-edits mode, and model switching on resume. It also covers Stop, upstream API errors, resume after a server restart, and the refused project path update.
   - agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`, so tool IDs are deterministic.
   - Scripted calls must satisfy agy's tool schema; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Otherwise the CLI rejects them without emitting a tool call. agy's own rules also auto-approve some commands, such as `touch`.
   - `ANTIGRAVITY_BIN` supplies the binary. `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. The suite is skipped when `ANTIGRAVITY_BIN` is unset.

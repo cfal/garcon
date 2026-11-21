@@ -697,6 +697,36 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('kills the Cursor ACP process at once when Stop lands during configuration', async () => {
+    const acp = createAcpHarness();
+    const configurationStarted = deferred();
+    const policy = {
+      ...createCursorAcpPolicy(TEST_CURSOR_CONFIG),
+      // A call the fake never answers; it ends only when the process does.
+      async configureSession(context) {
+        configurationStarted.resolve();
+        await context.client.setSessionModel({ sessionId: context.sessionId, modelId: 'unanswered' });
+      },
+    };
+    const runtime = new AcpAgentRuntime(policy, {
+      converter: new CursorAcpEventConverter(),
+      createTransport: acp.createTransport,
+    });
+    let agentSessionId = '';
+    const start = runtime.startSession(startRequest({
+      onSessionActivated: (session) => { agentSessionId = session.agentSessionId; },
+    })).then(() => null, (error) => error);
+    await configurationStarted.promise;
+
+    expect(runtime.abort(agentSessionId)).toBe(true);
+
+    expect(acp.killCount()).toBe(1);
+    expect(runtime.isRunning(agentSessionId)).toBe(false);
+    await start;
+    expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
+    runtime.shutdown();
+  });
+
   it('kills the Cursor ACP process and marks the session idle immediately on abort', async () => {
     const { acp, runtime } = createRuntimeHarness();
     const started = await runtime.startSession(startRequest());

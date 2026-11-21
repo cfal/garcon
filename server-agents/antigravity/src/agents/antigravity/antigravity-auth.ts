@@ -24,27 +24,37 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): P
 
 const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
 
+const inFlightAuthentication = new Map<string, Promise<void>>();
+
 // Runs the ACP authenticate call every session makes. It runs without a display,
 // so an OAuth method reports a missing sign-in instead of opening a browser.
-export async function probeAntigravityAuthentication(config: AntigravityConfig, signal?: AbortSignal): Promise<void> {
-  signal?.throwIfAborted();
+// Concurrent status checks share one probe, bounded by its request timeout.
+export function probeAntigravityAuthentication(config: AntigravityConfig): Promise<void> {
+  const binary = config.binary();
+  const method = config.authMethod();
+  const key = JSON.stringify([binary, method]);
+  const running = inFlightAuthentication.get(key);
+  if (running) return running;
+  const started = authenticateOnce(binary, method, config).finally(() => inFlightAuthentication.delete(key));
+  inFlightAuthentication.set(key, started);
+  return started;
+}
+
+async function authenticateOnce(binary: string, method: string, config: AntigravityConfig): Promise<void> {
   const client = new AcpClient(new AcpTransport({ requestTimeoutMs: AUTHENTICATE_PROBE_TIMEOUT_MS }), {
     initialize: { protocolVersion: 1, clientInfo: { name: 'garcon', version: '1.0.0' }, clientCapabilities: {} },
-    authenticateMethodId: config.authMethod(),
+    authenticateMethodId: method,
   });
-  const close = () => client.close();
-  signal?.addEventListener('abort', close, { once: true });
   try {
-    await client.connect({ command: config.binary(), args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config) });
+    await client.connect({ command: binary, args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config) });
   } finally {
-    signal?.removeEventListener('abort', close);
     client.close();
   }
 }
 
 export interface AntigravityAuthStatusOptions {
   readonly runModels?: (config: AntigravityConfig) => Promise<AntigravityCliResult>;
-  readonly authenticate?: (config: AntigravityConfig, signal?: AbortSignal) => Promise<void>;
+  readonly authenticate?: (config: AntigravityConfig) => Promise<void>;
   readonly signal?: AbortSignal;
   // Settings polls status while an in-app sign-in waits for its code. The CLI
   // cannot change state until that sign-in exits, so the last probed status
@@ -80,7 +90,7 @@ export async function getAntigravityAuthStatus(
     // holds, so an enterprise method instead asks agy to authenticate with it.
     const method = config.authMethod();
     if (method !== 'oauth-personal') {
-      await authenticate(config, signal);
+      await abortable(authenticate(config), signal);
       return { authenticated: true, canReauth: false, label: method, source: 'cli' };
     }
     const result = await abortable(runModels(config), signal);

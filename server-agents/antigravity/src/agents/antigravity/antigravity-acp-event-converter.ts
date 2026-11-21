@@ -171,10 +171,13 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null,
       input: Object.keys(parsed.input).length > 0 ? parsed.input : session.toolInputs.get(parsed.toolCallId) ?? {},
     };
-    // Text before any frame of the call is flushed first, so it stays ahead of
-    // the tool row, a row still waiting for arguments, and the call's result.
+    // A progress frame for a published call publishes nothing, so streamed text
+    // around it stays one message. Text before any other frame is flushed first,
+    // so it stays ahead of the tool row, a waiting row, and the call's result.
+    const emitted = session.emittedToolIds.has(call.toolCallId);
+    if (emitted && !terminal) return [];
     const messages = this.#flush(session, timestamp);
-    if (session.emittedToolIds.has(call.toolCallId)) return messages;
+    if (emitted) return messages;
     if (!terminal && Object.keys(call.input).length === 0) {
       session.deferredCalls.set(call.toolCallId, call);
       return messages;

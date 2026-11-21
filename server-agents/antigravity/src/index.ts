@@ -15,7 +15,6 @@ import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-c
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
@@ -49,7 +48,10 @@ const ANTIGRAVITY_DESCRIPTOR = {
   // Thinking levels are part of each model ID reported by `agy models`.
   supportedThinkingModes: [],
   supportsImages: true,
-  supportsProjectPathUpdate: true,
+  // agy keeps the working directory recorded with the conversation and ignores
+  // the cwd that session/resume passes, so a moved chat would keep working in
+  // its old directory. Verified against agy 1.5.13 by the scripted tier.
+  supportsProjectPathUpdate: false,
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: [],
   configuration: [
@@ -87,7 +89,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
   readonly nativeActivity = null;
   readonly nativeSessions: AgentNativeSessionAccess;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
-  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
+  readonly projectPathUpdates = null;
   readonly usageHistory = null;
   readonly catalog;
   readonly settings;
@@ -129,8 +131,6 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
       ),
     };
-    this.projectPathUpdates = createAgentProjectPathUpdates(host.scope,
-      (request) => providerExecution.prepareProjectPathUpdate(request));
     const producer = createAgentProducerAdapter(providerExecution, host);
     this.execution = producer.execution;
     this.producers = producer.producers;
