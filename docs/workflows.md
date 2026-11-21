@@ -37,7 +37,7 @@ For typed inputs, keyed verifier instances, a join, and a decision on the summar
 
 - **Open source file** edits the file on the selected executor. **Save draft file** uses [Files revision checks](executor/files.md) and is separate from publishing. If the file changed or a save could not be confirmed, use **Compare with disk** before saving again. Garcon keeps the draft for comparison.
 - **Import YAML** reads a browser file. **Paste definition** reads text. Both make a new draft, without changing a namesake, publishing, or starting work.
-- **Outline**, **Graph**, and **YAML source** show the same draft. Use **Edit graph** to add, branch, duplicate, or remove steps, or select a step to change its start condition and bindings. Use **Step settings** for executor and chat options. Use **YAML source** to declare inputs, custom signals, and decision choices. Graph edits preserve comments and text outside the edited fields. Undo and redo apply to the draft.
+- **Outline**, **Graph**, and **YAML source** show the same draft. Use **Edit graph** to add, branch, duplicate, or remove steps, or select a step to change its start condition and bindings. Use **Step settings** for executor and chat options. The outline's **Launch input schema** edits typed inputs and defaults. A step's **Emitted signals** and **Choices** edit custom signals and decision buttons. All of these edit the same YAML, preserving comments and text outside the edited fields. Undo and redo apply to the draft.
 - A diagnostic opens the relevant line and column in the source. Invalid source can be saved to a draft file, but any last valid graph is stale and graph edits, publish, and test are disabled until the source is fixed. If removing a step leaves a dangling reference, the graph edit is rejected; remove the dependency first or fix both in YAML.
 - **Share YAML** previews exactly what **Copy YAML** and **Download YAML** export: the authored source, not run inputs, evidence, chats, or access grants. Literal secrets pasted into a prompt or default are still in that source. Review it before sharing. Executor IDs, folders, attachments, and provider references must resolve for the recipient; sharing does not transfer credentials or files.
 
@@ -93,6 +93,8 @@ Claude Code (`claude`) and Codex (`codex`) support custom signals from fresh wor
 ```
 
 The envelope requires `signal`. If `content-type` is present, it must match the declared `payload`; otherwise Garcon uses the declaration. A self-closing envelope has no body.
+
+Garcon appends instructions for the step's declared signals to its resolved prompt. Authors specify when the results are ready; they need not teach the agent the envelope syntax. Both the run and the chat show the prompt that was actually sent.
 
 This is a Garcon assistant-message envelope, not a shell command or `garcon-cli` subcommand. Quoted examples, Shell stdout, tool output, user messages, ordinary assistant prose, and reloaded or late messages from an old turn do not trigger edges. Workflow chats still follow normal steering and permission rules. People or peers can influence what an agent replies; their messages themselves neither emit signals nor attest a human decision.
 
