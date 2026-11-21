@@ -1,5 +1,4 @@
 import os from 'node:os';
-import { CODEX_CLI_NOT_FOUND, resolveCodexCli } from './agents/codex/app-server/cli.js';
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
@@ -55,6 +54,7 @@ import {
   buildCodexHostProviderConfig,
 } from './agents/codex/app-server/endpoint-runtime.js';
 import { CodexAppServerClient } from './agents/codex/app-server/client.js';
+import { CODEX_CLI_NOT_FOUND, resolveCodexCli } from './agents/codex/app-server/cli.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
@@ -207,7 +207,13 @@ export default class CodexAgentIntegration implements AgentIntegration {
         signal.throwIfAborted();
         if (!Bun.which(resolveCodexCli().command)) {
           authStatus.invalidate();
-          return { authenticated: false, canReauth: false, label: 'Codex', source: 'none', detail: CODEX_CLI_NOT_FOUND };
+          return {
+            authenticated: false,
+            canReauth: false,
+            label: 'Codex',
+            source: 'none',
+            detail: CODEX_CLI_NOT_FOUND,
+          };
         }
         const status = await authStatus.refresh(signal);
         return {

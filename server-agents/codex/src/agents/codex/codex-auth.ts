@@ -84,7 +84,6 @@ async function runCodexLoginStatus(
   signal.throwIfAborted();
   const env = effectiveCodexEnvironment(config);
   const resolved = resolveCodexCli(env);
-  signal.throwIfAborted();
   const proc = Bun.spawn([resolved.command, 'login', 'status'], {
     stdin: 'ignore',
     stdout: 'pipe',
