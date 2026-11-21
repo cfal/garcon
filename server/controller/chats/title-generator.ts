@@ -1,7 +1,4 @@
-// Automatic chat title generation. Runs a one-shot LLM query to
-// produce a concise title from the first user prompt, then persists
-// via setSessionName (which emits 'session-name-changed' for broadcast).
-import { resolveTitleModelQuery, type TitleModelAgents } from '../settings/title-model.js';
+import { resolveTitleModelQuery, type TitleModelAgents, type TitleModelUse } from '../settings/title-model.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage } from '../../common/errors.js';
 import { DomainError } from '../../common/domain-error.js';
@@ -17,35 +14,17 @@ interface TitleGenerationSettings {
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
 }
 
-interface MaybeGenerateChatTitleInput {
+interface TitleGenerationContext {
   chatId: string;
-  firstPrompt: string;
   agents: TitleModelAgents;
   settings: TitleGenerationSettings;
   recentTitleIcons: RecentTitleIconSource;
   signal?: AbortSignal;
 }
 
-interface GenerateChatTitleFromMessageInput {
-  chatId: string;
+interface GenerateChatTitleFromMessageInput extends TitleGenerationContext {
   message: string;
   messageSeq?: number;
-  agents: TitleModelAgents;
-  settings: TitleGenerationSettings;
-  recentTitleIcons: RecentTitleIconSource;
-  signal?: AbortSignal;
-}
-
-interface RunTitleGenerationInput {
-  chatId: string;
-  sourceText: string;
-  agents: TitleModelAgents;
-  settings: TitleGenerationSettings;
-  recentTitleIcons: RecentTitleIconSource;
-  requireEnabled: boolean;
-  skipExistingTitle: boolean;
-  swallowErrors: boolean;
-  signal?: AbortSignal;
 }
 
 export interface GenerateChatTitleResult {
@@ -118,34 +97,28 @@ function titleGenerationUnavailable(): TitleGenerationError {
   );
 }
 
-async function runTitleGeneration({
-  chatId,
-  sourceText,
-  agents,
-  settings,
-  recentTitleIcons,
-  requireEnabled,
-  skipExistingTitle,
-  swallowErrors,
-  signal,
-}: RunTitleGenerationInput): Promise<GenerateChatTitleResult | null> {
+async function runTitleGeneration(
+  { chatId, agents, settings, recentTitleIcons, signal }: TitleGenerationContext,
+  sourceText: string,
+  use: TitleModelUse,
+): Promise<GenerateChatTitleResult | null> {
   const normalizedSource = (sourceText?.trim() ?? '').slice(0, TITLE_GENERATION_SOURCE_MAX_CHARS);
   if (!normalizedSource) return null;
   try {
     const ui = await settings.getUiSettings();
-    const query = await resolveTitleModelQuery(agents, ui?.chatTitle, requireEnabled ? 'automatic' : 'on-demand', signal);
+    const query = await resolveTitleModelQuery(agents, ui?.chatTitle, use, signal);
     if (!query) {
-      if (requireEnabled) return null;
+      if (use === 'automatic') return null;
       throw titleGenerationUnavailable();
     }
-    if (skipExistingTitle && settings.getChatName(chatId)) return null;
+    if (use === 'automatic' && settings.getChatName(chatId)) return null;
 
     const prompt = buildTitleGenerationPrompt(normalizedSource, recentTitleIcons);
     const titleRaw = await agents.runSingleQuery(prompt, query);
 
     const title = normalizeTitle(titleRaw);
     if (!title) {
-      if (swallowErrors) return null;
+      if (use === 'automatic') return null;
       throw new TitleGenerationError(
         'TITLE_GENERATION_EMPTY',
         'Title generation returned an empty title.',
@@ -154,65 +127,28 @@ async function runTitleGeneration({
       );
     }
 
-    if (skipExistingTitle) {
+    if (use === 'automatic') {
       const persisted = await settings.setSessionNameIfAbsent(chatId, title);
       return persisted ? { chatId, title } : null;
     }
     await settings.setSessionName(chatId, title);
     return { chatId, title };
   } catch (error) {
-    if (error instanceof TitleGenerationError) {
-      if (!swallowErrors) throw error;
+    if (use === 'automatic') {
       logger.warn('chat-title: generation failed:', errorMessage(error));
       return null;
     }
-    if (!swallowErrors) {
-      throw new TitleGenerationError(
-        'TITLE_GENERATION_FAILED',
-        'Title generation failed.',
-        502,
-        true,
-      );
-    }
-    logger.warn('chat-title: generation failed:', errorMessage(error));
-    return null;
+    if (error instanceof TitleGenerationError) throw error;
+    throw new TitleGenerationError('TITLE_GENERATION_FAILED', 'Title generation failed.', 502, true);
   }
 }
 
-export async function maybeGenerateChatTitle(input: MaybeGenerateChatTitleInput): Promise<void> {
-  await runTitleGeneration({
-    chatId: input.chatId,
-    sourceText: input.firstPrompt,
-    agents: input.agents,
-    settings: input.settings,
-    recentTitleIcons: input.recentTitleIcons,
-    requireEnabled: true,
-    skipExistingTitle: true,
-    swallowErrors: true,
-    signal: input.signal,
-  });
+export async function maybeGenerateChatTitle(input: TitleGenerationContext & { firstPrompt: string }): Promise<void> {
+  await runTitleGeneration(input, input.firstPrompt, 'automatic');
 }
 
-export async function generateChatTitleFromMessage({
-  chatId,
-  message,
-  agents,
-  settings,
-  recentTitleIcons,
-  signal,
-}: GenerateChatTitleFromMessageInput): Promise<GenerateChatTitleResult> {
-  const result = await runTitleGeneration({
-    chatId,
-    sourceText: message,
-    agents,
-    settings,
-    recentTitleIcons,
-    requireEnabled: false,
-    skipExistingTitle: false,
-    swallowErrors: false,
-    signal,
-  });
-
+export async function generateChatTitleFromMessage(input: GenerateChatTitleFromMessageInput): Promise<GenerateChatTitleResult> {
+  const result = await runTitleGeneration(input, input.message, 'on-demand');
   if (!result) {
     throw new TitleGenerationError(
       'TITLE_GENERATION_EMPTY',

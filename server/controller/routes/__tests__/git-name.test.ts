@@ -49,7 +49,10 @@ describe('Git name suggestions', () => {
   });
   it('fails explicitly for unavailable models, invalid output or a repeated suggestion', async () => {
     expect((await fixture('', {}).post({ description: '', previousName: '' })).status).toBe(409);
-    for (const output of ['', '../unsafe', 'my-name\nother-name', 'Name: picker-review', '"Previous-Name".']) {
+    const invalid = [
+      '', '../unsafe', 'my-name\nother-name', 'Name: picker-review', '"Previous-Name".', '\u212Aey-review',
+    ];
+    for (const output of invalid) {
       expect((await fixture(output).post({ description: '', previousName: 'previous-name' })).status).toBe(422);
     }
   });
