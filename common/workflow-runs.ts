@@ -157,6 +157,7 @@ export interface WorkflowAttempt {
   readonly id: string;
   readonly number: number;
   readonly status: 'running' | 'succeeded' | 'failed' | 'unknown' | 'unavailable';
+  // Reserved chat and turn IDs remain private until publication is confirmed.
   readonly chatId: string | null;
   readonly turnId: string | null;
   readonly chatAvailable: boolean;

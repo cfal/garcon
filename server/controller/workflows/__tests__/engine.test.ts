@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +10,7 @@ import type { WorkflowRunStep } from '../../../../common/workflow-runs.js';
 import { WorkflowEngine, type WorkflowEngineOptions } from '../engine.js';
 import { WORKFLOW_LIMITS } from '../limits.js';
 import type { WorkflowAttemptCallbacks, WorkflowAttemptRequest, WorkflowAttemptResult, WorkflowRunner } from '../runner.js';
+import { WORKFLOW_SCHEMA } from '../schema.js';
 import { WorkflowStore } from '../store.js';
 
 const ACTOR = { id: 'synthetic-person', name: 'Example Reader' };
@@ -25,12 +27,15 @@ class ControlledRunner implements WorkflowRunner {
     finish: (result: WorkflowAttemptResult) => void;
   }[] = [];
 
-  constructor(private readonly attach = true) {}
+  constructor(private readonly publishChat = true) {}
 
   run(request: WorkflowAttemptRequest, callbacks: WorkflowAttemptCallbacks): Promise<WorkflowAttemptResult> {
     const chatId = randomUUID();
     const turnId = randomUUID();
-    if (this.attach) callbacks.attachChat(chatId, turnId);
+    if (this.publishChat) {
+      callbacks.attachChat(chatId, turnId);
+      callbacks.confirmChat();
+    }
     const result = Promise.withResolvers<WorkflowAttemptResult>();
     this.attempts.push({ request, callbacks, chatId, turnId, finish: result.resolve });
     return result.promise;
@@ -458,6 +463,137 @@ test('retries only a known failure with a fresh chat and retains its prior signa
   ]);
 });
 
+test('never links a failed private start to the chat that collided with its reservation', async () => {
+  const { service, runner } = workspace()(new ControlledRunner(false), { hasChat: () => true });
+  publish(service);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'synthetic' }, executionContext: LOCAL });
+  const research = await runner.next('research');
+  expect(() => research.callbacks.confirmChat()).toThrow('no live chat reservation');
+  research.callbacks.attachChat(research.chatId, research.turnId);
+  expect(step(service, id, 'research').instances[0]?.attempts[0]).toMatchObject({
+    status: 'running', chatId: null, turnId: null, chatAvailable: false,
+  });
+  expect(service.listActiveChats().items).toEqual([]);
+  service.handleChatRemoved(research.chatId);
+  expect(research.callbacks.signal.aborted).toBe(false);
+  research.finish({ kind: 'failed', reason: 'CHAT_ID_COLLISION' });
+  await until(() => step(service, id, 'research').instances[0]?.status === 'failed');
+  expect(() => research.callbacks.confirmChat()).toThrow('no live chat reservation');
+  expect(step(service, id, 'research').instances[0]?.attempts[0]).toMatchObject({
+    status: 'failed', chatId: null, turnId: null, chatAvailable: false, reason: 'CHAT_ID_COLLISION',
+  });
+  expect(service.listActiveChats().items).toEqual([]);
+});
+
+test('restart between reservation and publication keeps the attempt unknown and unlinked', async () => {
+  const open = workspace();
+  const first = open(new ControlledRunner(false));
+  publish(first.service);
+  await first.service.start();
+  const { id } = first.service.startRun({ definitionId: 'research', inputs: { topic: 'synthetic' }, executionContext: LOCAL });
+  const research = await first.runner.next('research');
+  research.callbacks.attachChat(research.chatId, research.turnId);
+  first.service.close();
+
+  const second = open(new ControlledRunner(), { hasChat: id => id === research.chatId });
+  await second.service.start();
+  await drain();
+  expect(second.runner.attempts).toEqual([]);
+  expect(second.service.listActiveChats().items).toEqual([]);
+  expect(second.service.getRun(id).signals).toEqual([]);
+  expect(step(second.service, id, 'research').instances[0]).toMatchObject({ status: 'unknown', attempts: [
+    { status: 'unknown', chatId: null, turnId: null, chatAvailable: false, reason: expect.stringContaining('Check the chat list') },
+  ] });
+});
+
+test('can record an authorized early signal before confirmation without publishing a chat link', async () => {
+  const { service, runner } = workspace()(new ControlledRunner(false), { maxConcurrent: 1 });
+  publish(service);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'synthetic' }, executionContext: LOCAL });
+  const research = await runner.next('research');
+  research.callbacks.attachChat(research.chatId, research.turnId);
+  const accepted = research.callbacks.emit(finding('early'));
+  expect(service.getRun(id).signals).toEqual([accepted]);
+  expect(service.listActiveChats().items).toEqual([]);
+  research.callbacks.confirmChat();
+  research.callbacks.confirmChat();
+  expect(step(service, id, 'research').instances[0]?.attempts[0]).toMatchObject({
+    chatId: research.chatId, turnId: research.turnId, chatAvailable: true,
+  });
+  expect(service.listActiveChats().items).toMatchObject([{ chatId: research.chatId, attemptId: research.request.attemptId }]);
+});
+
+test('pages confirmed existing chats without spending visible slots on reservations, removals or missing chats', async () => {
+  const existing = new Set(['chat-01', 'chat-03', 'chat-05', 'chat-06']);
+  const { service, runner } = workspace()(new ControlledRunner(false), { maxConcurrent: 8, hasChat: id => existing.has(id) });
+  const source = 'version: 1\nname: Chats\nsteps:\n' + Array.from({ length: 6 }, (_, index) => `  - id: work-${index + 1}
+    kind: command
+    command: synthetic
+`).join('');
+  publish(service, source);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: {}, executionContext: LOCAL });
+  for (let index = 1; index <= 6; index++) {
+    const attempt = await runner.next(`work-${index}`);
+    const chatId = `chat-0${index}`;
+    attempt.callbacks.attachChat(chatId, attempt.turnId);
+    if (index >= 2) attempt.callbacks.confirmChat();
+    if (index === 3) service.handleChatRemoved(chatId);
+  }
+  const first = service.listActiveChats({ limit: 1 });
+  expect(first.items.map(row => row.chatId)).toEqual(['chat-05']);
+  expect(first.nextCursor).toBe('chat-05');
+  const next = service.listActiveChats({ limit: 1, cursor: first.nextCursor! });
+  expect(next.items.map(row => row.chatId)).toEqual(['chat-06']);
+  expect(next.nextCursor).toBeNull();
+  expect(step(service, id, 'work-2').instances[0]?.attempts[0]).toMatchObject({ chatId: 'chat-02', chatAvailable: false });
+  expect(step(service, id, 'work-3').instances[0]?.attempts[0]).toMatchObject({ chatId: 'chat-03', chatAvailable: false });
+  expect(step(service, id, 'work-5').instances[0]?.attempts[0]).toMatchObject({ chatId: 'chat-05', chatAvailable: true });
+});
+
+test('migrates only proven published chats and never infers publication from unknown or failed outcomes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'garcon-workflow-migration-'));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  const source = 'version: 1\nname: Old schema\nsteps:\n  - id: worker\n    kind: command\n    command: synthetic\n';
+  const definition = parsed(source);
+  {
+    using db = new Database(join(dir, 'workflow-runs.sqlite'));
+    db.exec(WORKFLOW_SCHEMA);
+    db.exec(`DROP INDEX workflow_attempts_active_chats;
+      ALTER TABLE workflow_attempts DROP COLUMN chat_confirmed;
+      CREATE INDEX workflow_attempts_active_chats ON workflow_attempts(chat_id)
+        WHERE chat_id IS NOT NULL AND chat_removed = 0 AND status IN ('running', 'failed', 'unknown');
+      PRAGMA user_version = 2;`);
+    for (const [id, status] of [['proven', 'succeeded'], ['unproven', 'succeeded'], ['failed', 'failed'], ['unknown', 'unknown']]) {
+      db.query(`INSERT INTO workflow_runs (id, name, draft_json, inputs_json, context_json, status, created_at, updated_at)
+        VALUES (?, 'Old schema', ?, '{}', '{}', ?, 'created', 'updated')`).run(id,
+        JSON.stringify({ definitionId: null, revision: null, source, definition, publishedAt: null }),
+        status === 'succeeded' ? status : 'attention',
+      );
+      db.query(`INSERT INTO workflow_run_steps (run_id, id, step_json, max_concurrency, intake, added)
+        VALUES (?, 'worker', ?, 1, 'closed', 0)`).run(id, JSON.stringify(definition.steps[0]));
+      db.query(`INSERT INTO workflow_instances (id, run_id, step_id, trigger_json, is_repeated, status, attempt_count)
+        VALUES (?, ?, 'worker', '{"kind":"root"}', 0, ?, 1)`).run(id, id, status);
+      db.query(`INSERT INTO workflow_attempts (id, instance_id, number, status, chat_id, turn_id, started_at)
+        VALUES (?, ?, 1, ?, ?, ?, 'started')`).run(id, id, status, `chat-${id}`, `turn-${id}`);
+      if (id !== 'unproven') db.query(`INSERT INTO workflow_signals
+        (id, run_id, step_id, instance_id, signal, key, scope, source_json, created_at)
+        VALUES (?, ?, 'worker', ?, 'turn_completed', '', ?, ?, 'finished')`).run(id, id, id, id,
+          JSON.stringify({ kind: 'completion', attemptId: id, chatId: `chat-${id}`, turnId: `turn-${id}` }),
+        );
+    }
+  }
+  const service = new WorkflowEngine({ store: new WorkflowStore(dir), runner: new ControlledRunner() });
+  cleanups.push(() => service.close());
+  expect(step(service, 'proven', 'worker').instances[0]?.attempts[0]).toMatchObject({ chatId: 'chat-proven', chatAvailable: true });
+  for (const id of ['unproven', 'failed', 'unknown']) {
+    expect(step(service, id, 'worker').instances[0]?.attempts[0]).toMatchObject({ chatId: null, turnId: null, chatAvailable: false });
+  }
+  expect(service.listActiveChats().items).toEqual([]);
+});
+
 test('restart holds in-flight work unknown without replay but runs persisted independent ready work', async () => {
   const open = workspace();
   const first = open(new ControlledRunner(), { maxConcurrent: 1 });
@@ -688,6 +824,7 @@ steps:
       providerRevision: 7, permissionMode: 'default', tags: ['synthetic-step'], attachments: [{ path: './reference.txt' }] } });
   const local = await runner.next('local');
   local.callbacks.attachChat(local.chatId, local.turnId);
+  local.callbacks.confirmChat();
   local.finish(success('local'));
   remote.finish({ kind: 'unavailable', reason: 'Awaiting remote executor' });
   await until(() => step(service, id, 'remote').instances[0]?.status === 'waiting-executor');
@@ -699,6 +836,7 @@ steps:
   expect(defaultResolutions).toBe(0);
   expect(recovered.request).toMatchObject({ settings: { model: 'initial', modelProtocol: 'openai-compatible' } });
   recovered.callbacks.attachChat(recovered.chatId, recovered.turnId);
+  recovered.callbacks.confirmChat();
   service.handleChatRemoved(recovered.chatId);
   expect(recovered.callbacks.signal.aborted).toBe(true);
   recovered.finish(success('late result'));

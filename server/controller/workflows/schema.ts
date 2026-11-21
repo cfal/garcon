@@ -1,13 +1,30 @@
-export const WORKFLOW_SCHEMA_VERSION = 2;
+export const WORKFLOW_SCHEMA_VERSION = 3;
 
 const WORKFLOW_READY_INDEX = `CREATE INDEX workflow_instances_ready ON workflow_instances(status)
   WHERE status IN ('ready', 'waiting-executor') AND retired = 0`;
+
+const WORKFLOW_ACTIVE_CHAT_INDEX = `CREATE INDEX workflow_attempts_active_chats ON workflow_attempts(chat_id)
+  WHERE chat_confirmed = 1 AND chat_id IS NOT NULL AND chat_removed = 0 AND status IN ('running', 'failed', 'unknown')`;
 
 export const WORKFLOW_ARCHIVE_MIGRATION = `
 ALTER TABLE workflow_runs ADD COLUMN archive_json TEXT;
 ALTER TABLE workflow_instances ADD COLUMN retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1));
 DROP INDEX workflow_instances_ready;
 ${WORKFLOW_READY_INDEX};
+`;
+
+export const WORKFLOW_CHAT_CONFIRMATION_MIGRATION = `
+ALTER TABLE workflow_attempts ADD COLUMN chat_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (chat_confirmed IN (0, 1));
+UPDATE workflow_attempts AS a SET chat_confirmed = 1
+WHERE a.status = 'succeeded' AND a.chat_id IS NOT NULL AND a.turn_id IS NOT NULL AND EXISTS (
+  SELECT 1 FROM workflow_signals s WHERE s.instance_id = a.instance_id AND s.signal = 'turn_completed'
+    AND json_extract(s.source_json, '$.kind') = 'completion'
+    AND json_extract(s.source_json, '$.attemptId') = a.id
+    AND json_extract(s.source_json, '$.chatId') = a.chat_id
+    AND json_extract(s.source_json, '$.turnId') = a.turn_id
+);
+DROP INDEX workflow_attempts_active_chats;
+${WORKFLOW_ACTIVE_CHAT_INDEX};
 `;
 
 export const WORKFLOW_SCHEMA = `
@@ -87,6 +104,7 @@ CREATE TABLE workflow_attempts (
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'unknown', 'unavailable')),
   chat_id TEXT UNIQUE,
   turn_id TEXT,
+  chat_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (chat_confirmed IN (0, 1)),
   chat_removed INTEGER NOT NULL DEFAULT 0 CHECK (chat_removed IN (0, 1)),
   started_at TEXT NOT NULL,
   finished_at TEXT,
@@ -94,8 +112,7 @@ CREATE TABLE workflow_attempts (
   UNIQUE (instance_id, number)
 ) STRICT;
 CREATE INDEX workflow_attempts_live ON workflow_attempts(status) WHERE status = 'running';
-CREATE INDEX workflow_attempts_active_chats ON workflow_attempts(chat_id)
-  WHERE chat_id IS NOT NULL AND chat_removed = 0 AND status IN ('running', 'failed', 'unknown');
+${WORKFLOW_ACTIVE_CHAT_INDEX};
 CREATE TABLE workflow_signals (
   sequence INTEGER PRIMARY KEY,
   id TEXT NOT NULL UNIQUE,

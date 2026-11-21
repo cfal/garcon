@@ -70,6 +70,7 @@ export interface AttemptRow {
   status: WorkflowAttempt['status'];
   chat_id: string | null;
   turn_id: string | null;
+  chat_confirmed: number;
   chat_removed: number;
   started_at: string;
   finished_at: string | null;
@@ -198,9 +199,10 @@ export function signalOccurrence(row: SignalRow): WorkflowSignalOccurrence {
   };
 }
 
-function attemptFromRow(row: AttemptRow): WorkflowAttempt {
-  return { id: row.id, number: row.number, status: row.status, chatId: row.chat_id, turnId: row.turn_id,
-    chatAvailable: row.chat_id !== null && row.chat_removed === 0,
+function attemptFromRow(row: AttemptRow, hasChat?: (chatId: string) => boolean): WorkflowAttempt {
+  const chatId = row.chat_confirmed ? row.chat_id : null;
+  return { id: row.id, number: row.number, status: row.status, chatId, turnId: row.chat_confirmed ? row.turn_id : null,
+    chatAvailable: chatId !== null && row.chat_removed === 0 && (hasChat?.(chatId) ?? true),
     startedAt: row.started_at, finishedAt: row.finished_at, reason: row.reason };
 }
 
@@ -215,7 +217,7 @@ function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, 
   return groups;
 }
 
-export function runDetail(db: Database, runId: string): WorkflowRunDetail {
+export function runDetail(db: Database, runId: string, hasChat?: (chatId: string) => boolean): WorkflowRunDetail {
   const run = requireRun(db, runId);
   const instances = groupBy(db.query<InstanceRow, [string]>(
     'SELECT * FROM workflow_instances WHERE run_id = ? ORDER BY rowid',
@@ -233,7 +235,7 @@ export function runDetail(db: Database, runId: string): WorkflowRunDetail {
     instances: (instances.get(row.id) ?? []).map((item): WorkflowStepInstance => ({
       id: item.id, key: item.key, status: item.status, trigger: JSON.parse(item.trigger_json) as WorkflowTrigger,
       bindings: item.bindings_json === null ? null : JSON.parse(item.bindings_json) as JsonObject,
-      prompt: item.prompt, reason: item.reason, attempts: (attempts.get(item.id) ?? []).map(attemptFromRow),
+      prompt: item.prompt, reason: item.reason, attempts: (attempts.get(item.id) ?? []).map(row => attemptFromRow(row, hasChat)),
     })),
   }));
   const signals = db.query<SignalRow, [string]>('SELECT * FROM workflow_signals WHERE run_id = ? ORDER BY sequence').all(runId);
@@ -246,16 +248,29 @@ export function runDetail(db: Database, runId: string): WorkflowRunDetail {
     steps, signals: signals.map(signalOccurrence), amendments: amendments.map(row => JSON.parse(row.amendment_json) as WorkflowRunAmendment) };
 }
 
-export function listActiveChats(db: Database, request: WorkflowPageRequest): WorkflowPage<WorkflowActiveChat> {
+export function listActiveChats(db: Database, request: WorkflowPageRequest, hasChat?: (chatId: string) => boolean): WorkflowPage<WorkflowActiveChat> {
   const { limit, cursor } = normalizePage(request, WORKFLOW_LIMITS.activeChatsPage);
-  const rows = db.query<WorkflowActiveChat, [string, number]>(`
+  const candidates = db.query<WorkflowActiveChat, [string, number]>(`
     SELECT a.chat_id AS chatId, i.run_id AS runId, i.step_id AS stepId, i.id AS instanceId, a.id AS attemptId,
       a.status, r.name AS runName, r.status AS runStatus, r.updated_at AS runUpdatedAt
     FROM workflow_attempts a JOIN workflow_instances i ON i.id = a.instance_id JOIN workflow_runs r ON r.id = i.run_id
-    WHERE a.chat_id IS NOT NULL AND a.chat_removed = 0 AND a.status IN ('running','failed','unknown')
+    WHERE a.chat_confirmed = 1 AND a.chat_id IS NOT NULL AND a.chat_removed = 0 AND a.status IN ('running','failed','unknown')
       AND r.archive_json IS NULL AND a.number = i.attempt_count AND a.status = i.status AND a.chat_id > ?
     ORDER BY a.chat_id LIMIT ?
-  `).all(cursor ?? '', limit + 1);
+  `);
+  const rows: WorkflowActiveChat[] = [];
+  let after = cursor ?? '';
+  do {
+    const batch = candidates.all(after, limit + 1);
+    for (const row of batch) {
+      if (hasChat && !hasChat(row.chatId)) continue;
+      rows.push(row);
+      if (rows.length > limit) break;
+    }
+    if (batch.length <= limit) break;
+    // The registry is not in SQLite. Skip missing chats without consuming a visible slot or cursor.
+    after = batch.at(-1)!.chatId;
+  } while (rows.length <= limit);
   return { items: rows.slice(0, limit), nextCursor: rows.length > limit ? rows[limit - 1]!.chatId : null };
 }
 

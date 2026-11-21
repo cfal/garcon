@@ -47,6 +47,7 @@ export interface WorkflowEngineOptions {
   readonly snapshotAgentSettings?: WorkflowSettingsResolver;
   readonly retainExecutorReferences?: RetainExecutorReferences;
   readonly retainProviderReferences?: RetainProviderReferences;
+  readonly hasChat?: (chatId: string) => boolean;
   readonly onRunChanged?: (runId: string) => void;
   readonly onDefinitionsChanged?: () => void;
 }
@@ -238,11 +239,11 @@ export class WorkflowEngine {
   }
 
   getRun(runId: string): WorkflowRunDetail {
-    return this.#store.read(db => runDetail(db, workflowIdentifier(runId, 'Run id')));
+    return this.#store.read(db => runDetail(db, workflowIdentifier(runId, 'Run id'), this.options.hasChat));
   }
 
   listActiveChats(request: WorkflowPageRequest = {}): WorkflowPage<WorkflowActiveChat> {
-    return this.#store.read(db => listActiveChats(db, request));
+    return this.#store.read(db => listActiveChats(db, request, this.options.hasChat));
   }
 
   archiveRun(raw: unknown, caller: WorkflowActor): WorkflowRunSummary {
@@ -409,7 +410,7 @@ export class WorkflowEngine {
     const removed = this.#store.write(db => {
       const attempt = db.query<{ id: string; run_id: string }, [string]>(`
         SELECT a.id, i.run_id FROM workflow_attempts a JOIN workflow_instances i ON i.id = a.instance_id
-        WHERE a.chat_id = ? AND a.chat_removed = 0
+        WHERE a.chat_id = ? AND a.chat_confirmed = 1 AND a.chat_removed = 0
       `).get(chatId);
       if (!attempt) return null;
       db.query('UPDATE workflow_attempts SET chat_removed = 1 WHERE id = ?').run(attempt.id);
@@ -442,7 +443,10 @@ export class WorkflowEngine {
         for (const { id } of rows) {
           const live = currentAttempt(db, id);
           if (!live) throw new Error('Workflow attempt does not match its instance.');
-          finishAttempt(db, live, 'unknown', 'The controller restarted before the exact turn settled.', now);
+          const reason = !live.chat_confirmed && live.chat_id
+            ? 'The controller restarted before chat publication was confirmed. Check the chat list before taking further action.'
+            : 'The controller restarted before the exact turn settled.';
+          finishAttempt(db, live, 'unknown', reason, now);
           runs.add(live.run_id);
         }
         for (const runId of runs) new WorkflowGraph(db, runId, now).reconcile();
@@ -516,6 +520,7 @@ export class WorkflowEngine {
         result = await this.options.runner.run(attempt, {
           signal: cancellation.signal,
           attachChat: (chatId, turnId) => this.#attachChat(attemptId, chatId, turnId),
+          confirmChat: () => this.#confirmChat(attemptId),
           emit: request => this.#emit(attemptId, request),
         });
       } catch {
@@ -537,18 +542,27 @@ export class WorkflowEngine {
     const chatId = workflowIdentifier(rawChatId, 'Chat id');
     const turnId = workflowIdentifier(rawTurnId, 'Turn id');
     if (this.#stopped) throw workflowConflict('Workflow admissions have stopped.');
-    const runId = this.#store.write(db => {
+    this.#store.write(db => {
       const row = currentAttempt(db, attemptId);
       if (!row || row.chat_removed) throw workflowConflict('This attempt is no longer live.');
-      if (row.chat_id === chatId && row.turn_id === turnId) return row.run_id;
+      if (row.chat_id === chatId && row.turn_id === turnId) return;
       if (row.chat_id !== null || db.query('SELECT 1 FROM workflow_attempts WHERE chat_id = ?').get(chatId)) {
         throw workflowConflict('Every attempt requires a fresh chat and exactly one turn.');
       }
       db.query('UPDATE workflow_attempts SET chat_id = ?, turn_id = ? WHERE id = ?').run(chatId, turnId, attemptId);
+    });
+  }
+
+  #confirmChat(attemptId: string): void {
+    const runId = this.#store.write(db => {
+      const row = currentAttempt(db, attemptId);
+      if (!row?.chat_id || !row.turn_id || row.chat_removed) throw workflowConflict('This attempt has no live chat reservation.');
+      if (row.chat_confirmed) return null;
+      db.query('UPDATE workflow_attempts SET chat_confirmed = 1 WHERE id = ?').run(attemptId);
       db.query('UPDATE workflow_runs SET updated_at = ? WHERE id = ?').run(this.#now(), row.run_id);
       return row.run_id;
     });
-    this.#changed(runId);
+    if (runId) this.#changed(runId);
   }
 
   #emit(attemptId: string, request: WorkflowEmitRequest): WorkflowSignalOccurrence {
@@ -583,7 +597,7 @@ export class WorkflowEngine {
       const graph = new WorkflowGraph(db, live.run_id, now);
       if (live.chat_removed) {
         finishAttempt(db, live, 'unknown', REMOVED_CHAT_OUTCOME, now);
-      } else if (result.kind === 'succeeded' && live.chat_id && live.turn_id) {
+      } else if (result.kind === 'succeeded' && live.chat_confirmed && live.chat_id && live.turn_id) {
         let output: string | null = null;
         let reason = result.output?.kind === 'incomplete' ? 'Final output was not captured completely.' : null;
         if (result.output?.kind === 'complete') {
@@ -603,7 +617,10 @@ export class WorkflowEngine {
         });
       } else {
         const kind = result.kind === 'succeeded' ? 'unknown' : result.kind;
-        const reason = result.kind === 'succeeded' ? UNKNOWN_OUTCOME : result.reason.slice(0, 512);
+        let reason = result.kind === 'succeeded' ? UNKNOWN_OUTCOME : result.reason.slice(0, 512);
+        if (kind === 'unknown' && live.chat_id && !live.chat_confirmed) {
+          reason = 'Chat publication could not be confirmed. Check the chat list before taking further action. ' + reason;
+        }
         finishAttempt(db, live, kind, reason, now);
       }
       graph.reconcile();

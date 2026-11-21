@@ -27,8 +27,10 @@ export interface WorkflowEmitRequest {
 
 export interface WorkflowAttemptCallbacks {
   readonly signal: AbortSignal;
-  // Records the exact fresh chat and turn before submission can have any side effect.
+  // Reserves the exact chat and turn before submission can have any side effect.
   attachChat(chatId: string, turnId: string): void;
+  // Records positive confirmation that this attempt's reserved chat was published.
+  confirmChat(): void;
   // The runner calls this only for an authorized emit on that exact live turn.
   emit(request: WorkflowEmitRequest): WorkflowSignalOccurrence;
 }
