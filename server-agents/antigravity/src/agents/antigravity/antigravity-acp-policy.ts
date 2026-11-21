@@ -56,7 +56,7 @@ export async function configureAntigravitySession(
     context.client,
     context.sessionId,
     context.models,
-    explicitAcpModel(context.request.model) ?? context.agentDefaultModelId,
+    explicitAcpModel(context.request.model) ?? offeredModel(context.models, context.agentDefaultModelId),
   );
   if (models) context.applyState({ models });
 
@@ -67,6 +67,16 @@ export async function configureAntigravitySession(
     antigravityModeForPermissionMode(context.request.permissionMode),
   );
   if (configOptions) context.applyState({ configOptions });
+}
+
+// A remembered default the session no longer offers, as after the account
+// changed, is left alone rather than failing every Default turn.
+function offeredModel(
+  models: AcpSessionConfigurationContext['models'],
+  model: string | undefined,
+): string | undefined {
+  const available = models?.availableModels ?? [];
+  return model && (available.length === 0 || available.some((entry) => entry.modelId === model)) ? model : undefined;
 }
 
 // Returns the updated model state, or undefined when the session already uses

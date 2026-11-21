@@ -42,6 +42,8 @@ class FakeAntigravityAgent {
   readonly sessions = new Set<string>();
   #nextSession = 1;
   readonly #sessionModels = new Map<string, string>();
+  // When set, sessions offer only these models, as another account would.
+  offeredModelIds: readonly string[] | null = null;
   #stdout!: ReadableStreamDefaultController<Uint8Array>;
   #openPrompt: { id: number | string; sessionId: string } | null = null;
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
@@ -151,7 +153,10 @@ class FakeAntigravityAgent {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
         }
       {
-        const models = { ...MODELS, currentModelId: this.#sessionModels.get(String(params.sessionId)) ?? MODELS.currentModelId };
+        const models = {
+          currentModelId: this.#sessionModels.get(String(params.sessionId)) ?? MODELS.currentModelId,
+          availableModels: MODELS.availableModels.filter((entry) => this.offeredModelIds?.includes(entry.modelId) ?? true),
+        };
         const result = this.resumeReportsOptions ? { models, configOptions: [MODE_OPTION] } : { models };
         if (this.resumeGate) {
           void this.resumeGate.then(() => reply(result));
@@ -631,6 +636,22 @@ describe('Antigravity ACP runtime', () => {
     expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
       .toEqual(['gemini-test-high', 'gemini-test-low']);
     restarted.shutdown();
+  });
+
+  it('leaves a remembered default alone when the resumed session no longer offers it', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request({ model: 'gemini-test-high' }));
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    agent.offeredModelIds = ['gemini-test-high'];
+
+    await runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+
+    expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
+      .toEqual(['gemini-test-high']);
+    expect(agent.requests('session/prompt')).toHaveLength(2);
+    runtime.shutdown();
   });
 
   it('fails clearly when agy exits after configuration but before the prompt', async () => {

@@ -104,7 +104,15 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     // New output publishes waiting rows first, so nothing moves ahead of a call
     // that started earlier.
     const waiting = this.#emitDeferred(session, update, outputType, context.timestamp);
-    if (waiting.length > 0) return [...waiting, ...this.fromSessionUpdate(notification, context)];
+    return [...waiting, ...this.#convertUpdate(session, update, updateType, context)];
+  }
+
+  #convertUpdate(
+    session: SessionState,
+    update: Record<string, unknown>,
+    updateType: string | undefined,
+    context: AcpSessionUpdateContext,
+  ): ChatMessage[] {
     switch (updateType) {
       // Switching between thought and message text flushes the other buffer, so
       // interleaved output keeps the order the agent produced it in.

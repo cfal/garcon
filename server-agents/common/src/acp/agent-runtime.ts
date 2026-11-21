@@ -88,11 +88,10 @@ export class AcpAgentRuntime {
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #restores = new AcpRestoreRegistry<AcpAgentRuntimeSession>();
   #stopped = false;
-  // The model a session opens with when session/new names none. It is the
-  // agent's own setting, shared by every session this process opens, and
-  // stands in for the default of a resumed session, which reports only its
-  // current model.
-  #agentDefaultModelId: string | undefined;
+  // The model a session opens with when session/new names none, per project
+  // path, since agent settings can differ by workspace. It stands in for the
+  // default of a resumed session, which reports only its current model.
+  #agentDefaultModels = new Map<string, string>();
   #pendingPermissions = new Set<PendingPermissionRequest>();
   #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
     sessions: () => this.#sessions.entries(),
@@ -475,13 +474,15 @@ export class AcpAgentRuntime {
     session.remoteSessionId = restored.sessionId;
     session.configOptions = restored.configOptions;
     session.models = restored.models;
-    session.agentDefaultModelId = this.#agentDefaultModelId ?? restored.models?.currentModelId;
+    session.agentDefaultModelId = this.#agentDefaultModels.get(request.projectPath) ?? restored.models?.currentModelId;
     return true;
   }
 
   #learnAgentDefaultModel(request: AcpStartRequest, currentModelId: string | undefined): string | undefined {
-    if (currentModelId && !newSessionModelFor(this.#policy, request)) this.#agentDefaultModelId = currentModelId;
-    return this.#agentDefaultModelId ?? currentModelId;
+    if (currentModelId && !newSessionModelFor(this.#policy, request)) {
+      this.#agentDefaultModels.set(request.projectPath, currentModelId);
+    }
+    return this.#agentDefaultModels.get(request.projectPath) ?? currentModelId;
   }
 
   async #runPrompt(
@@ -511,7 +512,7 @@ export class AcpAgentRuntime {
     try {
       const promptConfig = promptConfigFor(this.#policy, request);
       // A default learned after this session was resumed replaces its guess.
-      session.agentDefaultModelId = this.#agentDefaultModelId ?? session.agentDefaultModelId;
+      session.agentDefaultModelId = this.#agentDefaultModels.get(session.projectPath) ?? session.agentDefaultModelId;
       await configureSessionFor(this.#policy, session, request);
       // Stopped while configuring: end before admission records the turn as started.
       if (turn.aborted) return;
