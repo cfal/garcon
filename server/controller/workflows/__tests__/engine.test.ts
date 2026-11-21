@@ -157,6 +157,124 @@ steps:
   expect(service.getRun(first.id).pinnedRevision.source).toBe(source);
 });
 
+test('stores and dispatches one scoped signal instruction block without changing authored source', async () => {
+  const { service, runner } = workspace()();
+  const source = `version: 1
+name: Prompt instructions
+inputs:
+  topic: {type: string}
+  context: {type: string, default: "resolved"}
+steps:
+  - id: produce
+    kind: agent
+    prompt: "Review {{topic}} with {{context}}."
+    bindings: {topic: inputs.topic, context: inputs.context}
+    signals:
+      ready: {payload: none}
+      report: {payload: text}
+      totals: {payload: json, fields: {count: number}}
+      finding:
+        payload: json
+        delivery: many
+        key: id
+        fields: {id: string, verified: boolean, evidence: json}
+  - id: independent
+    kind: agent
+    prompt: Run independently.
+    signals:
+      other: {payload: none}
+  - id: plain
+    kind: agent
+    prompt: Agent without signals.
+    signals: {}
+  - id: literal
+    kind: command
+    command: 'printf "{{literal}}"'
+  - id: person
+    kind: decision
+    prompt: "Confirm {{context}}."
+    bindings: {context: inputs.context}
+    choices: {confirm: Confirm}
+`;
+  publish(service, source);
+  await service.start();
+  const { id } = service.startRun({ definitionId: 'research', inputs: { topic: '{{context}}' }, executionContext: LOCAL });
+  const produced = await runner.next('produce');
+  const saved = step(service, id, 'produce');
+  const prompt = saved.instances[0]!.prompt!;
+  expect(produced.request).toMatchObject({ kind: 'agent', prompt });
+  expect(prompt).toStartWith('Review {{context}} with resolved.\n\nGarcon workflow signals\n');
+  expect(prompt).toContain('standalone raw tags in assistant output');
+  expect(prompt).toContain('Never emit via Shell or tools.');
+  expect(prompt).toContain('Never emit turn_completed');
+  expect(prompt).toContain('produce.ready (none, once)\n<garcon-workflow-emit signal="produce.ready" content-type="none" />');
+  expect(prompt).toContain('produce.report (text, once)\n<garcon-workflow-emit signal="produce.report" content-type="text">TEXT_PAYLOAD</garcon-workflow-emit>');
+  expect(prompt).toContain('produce.totals (json, once; required fields: count: number)');
+  expect(prompt).toContain('produce.finding (json, many; key: id; required fields: id: string, verified: boolean, evidence: json)');
+  expect(prompt).toContain('<garcon-workflow-emit signal="produce.finding" content-type="json">JSON_PAYLOAD</garcon-workflow-emit>');
+  expect(Array.from(prompt.matchAll(/<garcon-workflow-emit signal="([^"]+)"/gu), match => match[1]))
+    .toEqual(['produce.ready', 'produce.report', 'produce.totals', 'produce.finding']);
+  expect(saved.step).toMatchObject({ prompt: 'Review {{topic}} with {{context}}.' });
+  expect(service.getRun(id).pinnedRevision.source).toBe(source);
+
+  const independent = await runner.next('independent');
+  expect(independent.request).toMatchObject({ prompt: expect.stringContaining('independent.other') });
+  expect(independent.request).not.toMatchObject({ prompt: expect.stringContaining('produce.finding') });
+  expect((await runner.next('plain')).request).toMatchObject({ prompt: 'Agent without signals.' });
+  expect((await runner.next('literal')).request).toMatchObject({ command: 'printf "{{literal}}"' });
+  expect(step(service, id, 'person').instances[0]?.prompt).toBe('Confirm resolved.');
+
+  produced.finish({ kind: 'failed', reason: 'Synthetic failure.' });
+  await until(() => step(service, id, 'produce').instances[0]?.status === 'failed');
+  service.retry({ runId: id, instanceId: produced.request.instanceId, operationId: 'retry-prompt' }, ACTOR);
+  expect((await runner.next('produce', 1)).request).toMatchObject({ prompt });
+});
+
+test('signal instructions count toward the rendered prompt limit', () => {
+  const { service } = workspace()();
+  const source = `version: 1
+name: Prompt limit
+inputs: {chunk: {type: string}}
+steps:
+  - id: plain
+    kind: agent
+    prompt: "{{chunk}}{{chunk}}"
+    bindings: {chunk: inputs.chunk}
+  - id: emitter
+    kind: agent
+    prompt: "{{chunk}}{{chunk}}"
+    bindings: {chunk: inputs.chunk}
+    signals: {ready: {payload: none}}
+`;
+  publish(service, source);
+  const chunk = 'a'.repeat(WORKFLOW_LIMITS.promptBytes / 2 - 64);
+  const { id } = service.startRun({ definitionId: 'research', inputs: { chunk }, executionContext: LOCAL });
+  expect(step(service, id, 'plain').instances[0]).toMatchObject({ status: 'ready', prompt: chunk + chunk });
+  expect(step(service, id, 'emitter').instances[0]).toMatchObject({
+    status: 'blocked', prompt: null, reason: 'Rendered prompt exceeds the size limit.',
+  });
+});
+
+test('signal instructions count toward the persisted run binding budget', () => {
+  const { service } = workspace()();
+  const count = WORKFLOW_LIMITS.steps;
+  const source = 'version: 1\nname: Run binding limit\ninputs: {chunk: {type: string}}\nsteps:\n'
+    + Array.from({ length: count }, (_, index) => `  - id: step-${index}
+    kind: agent
+    prompt: "{{chunk}}"
+    bindings: {chunk: inputs.chunk}
+${index === count - 1 ? '    signals: {ready: {payload: none}}\n' : ''}`).join('');
+  publish(service, source);
+  const plainBytes = Math.floor(WORKFLOW_LIMITS.bindingBytesPerRun / count);
+  const chunk = 'a'.repeat(Math.floor((plainBytes - Buffer.byteLength('{"chunk":""}')) / 2) - 1);
+  const { id } = service.startRun({ definitionId: 'research', inputs: { chunk }, executionContext: LOCAL });
+  const steps = service.getRun(id).steps;
+  expect(steps.slice(0, -1).every(step => step.instances[0]?.status === 'ready')).toBe(true);
+  expect(steps.at(-1)?.instances[0]).toMatchObject({
+    status: 'blocked', prompt: null, reason: 'Run has reached its bound input storage limit.',
+  });
+});
+
 test('schedules keyed signals early, respects running limits, includes queued manual items, and holds for an attributed decision', async () => {
   const { service, runner } = workspace()();
   publish(service, RESEARCH.replace('maxConcurrency: 2', 'maxConcurrency: 1'));

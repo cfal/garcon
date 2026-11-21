@@ -1,6 +1,6 @@
 import { isRecord, type JsonObject, type JsonValue } from '../../../common/json.js';
-import type {
-  WorkflowAgentStep, WorkflowDefinition, WorkflowSignalDefinition, WorkflowStep, WorkflowValueType,
+import {
+  WORKFLOW_TURN_COMPLETED, type WorkflowAgentStep, type WorkflowDefinition, type WorkflowSignalDefinition, type WorkflowStep, type WorkflowValueType,
 } from '../../../common/workflow-definition.js';
 import type {
   WorkflowAgentSettings, WorkflowExecutionContext, WorkflowLocation, WorkflowStepSettings,
@@ -88,6 +88,27 @@ export function validateSignal(
 
 export class WorkflowBindingError extends Error {}
 
+function signalInstructions(step: WorkflowAgentStep): string {
+  const signals = Object.entries(step.signals ?? {}).filter(([name]) => name !== WORKFLOW_TURN_COMPLETED);
+  if (!signals.length) return '';
+  const lines = [
+    'Garcon workflow signals',
+    'Emit only the signals below as standalone raw tags in assistant output, without surrounding prose, Markdown blockquotes, or code fences. Separate multiple tags with blank lines. Never emit via Shell or tools.',
+    `Replace TEXT_PAYLOAD with plain text or JSON_PAYLOAD with valid JSON. For many signals, use a distinct, stable string in the declared key field for each item. Never emit ${WORKFLOW_TURN_COMPLETED}; Garcon emits it on confirmed success.`,
+  ];
+  for (const [name, signal] of signals) {
+    const qualified = `${step.id}.${name}`;
+    const key = signal.delivery === 'many' ? `; key: ${signal.key}` : '';
+    const fields = signal.payload === 'json' ? Object.entries(signal.fields ?? {}) : [];
+    const required = fields.length ? `; required fields: ${fields.map(([field, type]) => `${field}: ${type}`).join(', ')}` : '';
+    const tag = `<garcon-workflow-emit signal="${qualified}" content-type="${signal.payload}"`;
+    lines.push('', `${qualified} (${signal.payload}, ${signal.delivery}${key}${required})`, signal.payload === 'none'
+      ? `${tag} />`
+      : `${tag}>${signal.payload === 'text' ? 'TEXT_PAYLOAD' : 'JSON_PAYLOAD'}</garcon-workflow-emit>`);
+  }
+  return '\n\n' + lines.join('\n');
+}
+
 export function bindPrompt(
   step: Exclude<WorkflowStep, { kind: 'command' }>,
   inputs: JsonObject,
@@ -111,13 +132,16 @@ export function bindPrompt(
     bindings.push([name, value]);
   }
   let promptBytes = Buffer.byteLength(step.prompt);
-  const prompt = step.prompt.replace(/\{\{[ \t]*([A-Za-z0-9][A-Za-z0-9_-]{0,127})[ \t]*\}\}/gu, (matched, name: string) => {
+  const authored = step.prompt.replace(/\{\{[ \t]*([A-Za-z0-9][A-Za-z0-9_-]{0,127})[ \t]*\}\}/gu, (matched, name: string) => {
     const replacement = replacements.get(name);
     if (!replacement) throw new WorkflowBindingError(`Missing binding "${name}".`);
     promptBytes += replacement.bytes - Buffer.byteLength(matched);
     if (promptBytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Rendered prompt exceeds the size limit.');
     return replacement.text;
   });
+  const instructions = step.kind === 'agent' ? signalInstructions(step) : '';
+  promptBytes += Buffer.byteLength(instructions);
+  if (promptBytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Rendered prompt exceeds the size limit.');
   const bindingsJson = JSON.stringify(Object.fromEntries(bindings));
-  return { prompt, bindingsJson, bytes: promptBytes + Buffer.byteLength(bindingsJson) };
+  return { prompt: authored + instructions, bindingsJson, bytes: promptBytes + Buffer.byteLength(bindingsJson) };
 }
