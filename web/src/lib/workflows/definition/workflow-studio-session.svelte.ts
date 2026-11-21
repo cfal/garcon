@@ -128,14 +128,14 @@ class WorkflowStudioSession {
 	}
 
 	replace(draft: WorkflowDraftState, context: WorkflowLaunchContext | null): void {
-		this.current?.draft.file?.dispose();
+		this.clear();
 		this.current = { draft, context };
-		this.notice = this.error = null;
 	}
 
 	clear(): void {
 		this.current?.draft.file?.dispose();
 		this.current = null;
+		this.startedRun = null;
 		this.notice = this.error = null;
 	}
 }

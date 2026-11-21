@@ -153,6 +153,9 @@ steps:
 		await fireEvent.click(await screen.findByRole('button', { name: /Open started run/ }));
 		expect(props.onRunStarted).toHaveBeenCalledExactlyOnceWith('run-a');
 		expect(api.testWorkflowDraft).toHaveBeenCalledOnce();
+		await host.rerender({ ...props, open: false });
+		await host.rerender(props);
+		expect(screen.queryByRole('button', { name: /Open started run/ })).toBeNull();
 	});
 
 	it('keeps a clean file draft on presentation replacement but releases it on tab close', async () => {
@@ -329,6 +332,8 @@ steps:
 			inputs: { title: 'A report', count: 0, failed: false, evidence: null },
 			executionContext: {},
 		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		expect(screen.queryByRole('button', { name: /Open started run/ })).toBeNull();
 	});
 
 	it('imports an independent draft, edits it from the outline, and blocks publishing or testing invalid source', async () => {
