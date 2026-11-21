@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { AgentIntegrationError, type AgentHost, type AgentSessionConfiguration } from '@garcon/server-agent-interface';
+import type { AgentHost, AgentSessionConfiguration } from '@garcon/server-agent-interface';
 import { createCodexConfig } from '../../../config.js';
 import { CodexAppServerRuntime } from '../app-server/runtime.js';
 import { CodexExecution } from '../execution.js';
@@ -36,10 +36,8 @@ function configurationFixture() {
 }
 
 describe('Codex speed preferences', () => {
-  it.each(['idle', 'running', 'fenced'] as const)('saves speed without touching a %s native source', async (status) => {
+  it('saves a speed-only change without checking run status or updating the native source', async () => {
     const { execution, previous, next, update, running } = configurationFixture();
-    running.mockReturnValue(status === 'running');
-    update.mockRejectedValue(new AgentIntegrationError('INVALID_SETTINGS', 'Native settings are fenced', false));
     await execution.applySessionConfiguration('thread-1', next, previous);
     expect(update).not.toHaveBeenCalled();
     expect(running).not.toHaveBeenCalled();

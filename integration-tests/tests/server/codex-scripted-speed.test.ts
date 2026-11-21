@@ -100,17 +100,14 @@ describe('Codex scripted per-chat speed', () => {
         expect(body).toMatchObject({ model: codexRequestModel(), reasoning: { effort: LIVE_CODEX_THINKING_MODE } });
         expect(body.service_tier).toBe(expectedTier);
       };
-      const patchSpeed = (chatId: string, speed: Speed, thinkingMode?: ExecutionSettingsPatchRequest['thinkingMode']) =>
-        fixture.client.fetch('/api/v1/chats/execution-settings', {
+      const changeSpeed = async (chatId: string, speed: Speed, thinkingMode?: ExecutionSettingsPatchRequest['thinkingMode']) => {
+        const response = await fixture.client.fetch('/api/v1/chats/execution-settings', {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ chatId, thinkingMode, agentSettingsPatch: { speed } } satisfies ExecutionSettingsPatchRequest),
         });
-      const changeSpeed = async (chatId: string, speed: Speed) => {
-        const response = await patchSpeed(chatId, speed);
-        expect({ status: response.status, body: await response.json() }).toMatchObject({
-          status: 200, body: { success: true, agentSettings: { values: { speed } } },
-        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ success: true, agentSettings: { values: { speed } } });
       };
 
       await expectTurnTier(startChat, standardChat, undefined);
@@ -157,8 +154,10 @@ describe('Codex scripted per-chat speed', () => {
       await expectTurnTier(resumeChat, fastChat, 'ultrafast');
       await expectTurnTier(resumeChat, standardChat, undefined);
 
-      for (const [sourceChatId, tier] of [[fastChat, 'ultrafast'], [standardChat, undefined]] as const) {
-        const child = sourceChatId === fastChat ? premiumChild : standardChild;
+      for (const [sourceChatId, child, tier] of [
+        [fastChat, premiumChild, 'ultrafast'],
+        [standardChat, standardChild, undefined],
+      ] as const) {
         const beforeFork = environment.model.requests().length;
         await fixture.client.forkChat({ sourceChatId, chatId: child });
         expect(environment.model.requests()).toHaveLength(beforeFork);
@@ -193,8 +192,7 @@ describe('Codex scripted per-chat speed', () => {
       await fixture.client.patch('/api/v1/chats/model', { chatId: fastChat, model: STANDARD_ONLY_MODEL });
       const beforeRejection = environment.model.requests().length;
       for (const thinkingMode of [undefined, 'none'] as const) {
-        const saved = await patchSpeed(fastChat, 'ultrafast', thinkingMode);
-        expect(saved.status).toBe(200);
+        await changeSpeed(fastChat, 'ultrafast', thinkingMode);
         expect((await savedSettings(fastChat)).values.speed).toBe('ultrafast');
         const cursor = fixture.client.markEvents();
         const denied = await fixture.client.runChat({

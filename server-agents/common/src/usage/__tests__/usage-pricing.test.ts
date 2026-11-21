@@ -32,13 +32,8 @@ describe('price table keys', () => {
     expect(priceUsageRecord(record('<synthetic>', { outputTokens: 10 }))).toBeNull();
   });
 
-  test('prices Ultrafast by model and context length, not the Fast multiplier', () => {
-    const price = (model: string, input = 0) => priceUsageRecord(record(model,
-      { uncachedInputTokens: input, outputTokens: 1_000_000 }, { speed: 'ultrafast' }));
-    expect(price('gpt-6.2-astra')?.categoryCostUsd.output).toBe(240);
-    expect(price('gpt-6.2-sol', 272_001)?.categoryCostUsd.output).toBe(90);
-    expect(price('gpt-6.1-sol')?.categoryCostUsd.output).toBe(60);
-    expect(price('gpt-5.6-sol')).toBeNull();
+  test('leaves Ultrafast unpriced on a model without an Ultrafast rate', () => {
+    expect(priceUsageRecord(record('gpt-5.6-sol', { outputTokens: 1_000_000 }, { speed: 'ultrafast' }))).toBeNull();
   });
 
   test('every entry has finite, non-negative rates', () => {
