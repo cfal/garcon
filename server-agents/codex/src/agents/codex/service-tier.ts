@@ -37,12 +37,9 @@ export function normalizeCodexServiceTier(tier: string | null): string {
   return tier === 'fast' ? 'priority' : tier ?? 'default';
 }
 
-function unavailableTier(tier: CodexServiceTier, model: string): AgentIntegrationError {
-  const { label } = SPEED_OPTION_BY_TIER[tier];
-  return new AgentIntegrationError('INVALID_SETTINGS',
-    `Codex ${label} speed is unavailable for ${model} on this executor. Check the model and workspace settings or choose Standard.`, false);
-}
-
 export function assertEffectiveTier(requested: CodexServiceTier, effective: string | null, model: string): void {
-  if (normalizeCodexServiceTier(effective) !== requested) throw unavailableTier(requested, model);
+  if (normalizeCodexServiceTier(effective) === requested) return;
+  const { label } = SPEED_OPTION_BY_TIER[requested];
+  throw new AgentIntegrationError('INVALID_SETTINGS',
+    `Codex ${label} speed is unavailable for ${model} on this executor. Check the model and workspace settings or choose Standard.`, false);
 }

@@ -883,10 +883,12 @@ export class CodexAppServerRuntime {
       }
       assertCodexExecutionOpen(request);
     }
+    const writerReady = (session: RunningCodexSession) => isTerminalSessionStatus(session.status)
+      || (session.status === 'interrupting' && interruptedWriterReady);
     const canReactivate = (session: RunningCodexSession) => this.#latestSourceByChat.get(request.chatId) === session
       && session.threadId === request.agentSessionId
       && !session.superseded
-      && (isTerminalSessionStatus(session.status) || (session.status === 'interrupting' && interruptedWriterReady))
+      && writerReady(session)
       && canReuseRuntime(session);
     let resumePathResolved = false;
     while (true) {
@@ -904,8 +906,7 @@ export class CodexAppServerRuntime {
         await retained.threadSettingsUpdateChain;
         assertCodexExecutionOpen(request);
         this.#assertSettingsSourceCurrent(retained);
-        if (!isTerminalSessionStatus(retained.status)
-          && !(retained.status === 'interrupting' && interruptedWriterReady)) {
+        if (!writerReady(retained)) {
           throw new AgentIntegrationError('SESSION_BUSY', 'Codex thread became active while settling settings', true);
         }
         continue;

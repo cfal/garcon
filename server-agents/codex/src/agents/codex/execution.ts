@@ -135,15 +135,13 @@ export class CodexExecution implements AgentRuntimeExecution {
       configuration.model,
     );
     if (previousEffort !== undefined && nextEffort === undefined) {
-      if (this.runtime.isRunning(agentSessionId)) {
-        throw new AgentIntegrationError(
-          'INVALID_SETTINGS',
-          'Codex cannot clear a concrete reasoning effort during an active turn',
-          false,
-        );
-      }
-      // A fresh resume clears explicit effort.
-      return;
+      // Defers the whole update because the runtime replaces explicit-effort sources before Default turns.
+      if (!this.runtime.isRunning(agentSessionId)) return;
+      throw new AgentIntegrationError(
+        'INVALID_SETTINGS',
+        'Codex cannot clear a concrete reasoning effort during an active turn',
+        false,
+      );
     }
     await this.runtime.updateSessionSettings(agentSessionId, {
       model: configuration.model,

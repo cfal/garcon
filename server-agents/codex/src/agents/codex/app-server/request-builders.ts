@@ -231,9 +231,11 @@ export function buildCodexEnv(
   return Object.keys(env).length > 0 ? env : undefined;
 }
 
+type ThreadActivationSettings = Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig' | 'speed'>;
+
 function appendCommonThreadParams(
   params: Record<string, unknown>,
-  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig' | 'speed'>,
+  request: ThreadActivationSettings,
 ): Record<string, unknown> {
   const { sandbox, approvalPolicy } = codexSandboxSettings(request.permissionMode);
   params.model = request.model;
@@ -257,10 +259,10 @@ export function buildThreadStartParams(request: CodexStartRequest): Record<strin
   }, request);
 }
 
-export function buildThreadResumeParams(request: {
+export function buildThreadResumeParams(request: ThreadActivationSettings & {
   agentSessionId: string;
   nativePath?: string | null;
-} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig' | 'speed'>): Record<string, unknown> {
+}): Record<string, unknown> {
   const params = appendCommonThreadParams({
     threadId: request.agentSessionId,
     excludeTurns: true,
