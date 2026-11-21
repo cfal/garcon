@@ -160,6 +160,10 @@ export class WorkflowField {
     return new WorkflowField(this.source, [...this.path, key], value);
   }
 
+  atPath(path: WorkflowFieldPath): WorkflowField {
+    return path.reduce<WorkflowField>((field, key) => field.at(key), this);
+  }
+
   optional<T>(read: (field: WorkflowField) => T | undefined): T | undefined {
     return this.value === undefined ? undefined : read(this);
   }

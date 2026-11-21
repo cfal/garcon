@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
-  WORKFLOW_DEFINITION_LIMITS, editWorkflowDefinition, getWorkflowStepSignal,
+  WORKFLOW_DEFINITION_LIMITS, editWorkflowDefinition, getWorkflowDefinitionFieldValue, getWorkflowStepSignal,
   parseWorkflowDefinition, parseWorkflowStepAddition, renderWorkflowPrompt,
   type WorkflowDefinition, type WorkflowDiagnosticCode, type WorkflowFieldPath,
-} from '../workflow-definition.js';
+} from '../../../../common/workflow-definition.js';
+import { isRecord } from '../../../../common/json.js';
 
-const fixture = (name: string) => readFileSync(new URL(`../workflow-definition/fixtures/${name}.workflow.yaml`, import.meta.url), 'utf8');
+const fixture = (name: string) => readFileSync(new URL(`../../../../common/workflow-definition/fixtures/${name}.workflow.yaml`, import.meta.url), 'utf8');
 const recipe = fixture('research');
 
 function validated(source = recipe): WorkflowDefinition {
@@ -213,5 +214,113 @@ describe('source-preserving workflow edits', () => {
     expect(rejected.source).toBe(recipe);
     expect(rejected.attemptedSource).toContain('id: "renamed"');
     expect(rejected.diagnostics.some((diagnostic) => diagnostic.code === 'unknown-step')).toBe(true);
+  });
+
+  test('inserts a duplicate and connects it to the join atomically, without reformatting existing steps', () => {
+    const source = recipe.replace('  - id: summary', '  # Keep this with the summary.\n  - id: summary');
+    const original = getWorkflowDefinitionFieldValue(source, ['steps', 1]);
+    if (!isRecord(original)) throw new Error('Expected a raw YAML mapping');
+    expect(original.on).toMatchObject({ signal: 'research.finding_ready' });
+    const edited = editWorkflowDefinition(source, [
+      { kind: 'insert', path: ['steps'], index: 2, value: { ...original, id: 'verify_again', name: 'Second verifier' } },
+      { kind: 'append', path: ['steps', 3, 'on', 'steps'], value: 'verify_again' },
+    ]);
+    expect(edited.diagnostics).toEqual([]);
+    expect(edited.definition?.steps.map(({ id }) => id)).toEqual(['research', 'verify', 'verify_again', 'summary', 'decide']);
+    expect(edited.definition?.steps[3].on).toMatchObject({ steps: ['verify', 'verify_again'] });
+    const addedStart = edited.source.indexOf('  - id: verify_again');
+    const addedEnd = edited.source.indexOf('\n\n  # Keep this with the summary.', addedStart);
+    expect(addedStart).toBeGreaterThan(0);
+    expect(addedEnd).toBeGreaterThan(addedStart);
+    expect((edited.source.slice(0, addedStart) + edited.source.slice(addedEnd + 1)).replace(', "verify_again"', '')).toBe(source);
+
+    const removed = editWorkflowDefinition(edited.source, [
+      { kind: 'delete', path: ['steps', 2] },
+      { kind: 'delete', path: ['steps', 2, 'on', 'steps', 1] },
+    ]);
+    expect(removed.diagnostics).toEqual([]);
+    expect(removed.source).toBe(source);
+  });
+
+  test('upserts absent settings in a CRLF block mapping without rewriting its prompt or comments', () => {
+    const source = recipe.replace('    prompt: |', '    prompt: | # Preserve this header').replaceAll('\n', '\r\n');
+    const edited = editWorkflowDefinition(source, [
+      { kind: 'upsert', path: ['steps', 0, 'thinkingMode'], value: 'high' },
+      { kind: 'upsert', path: ['steps', 0, 'orderedPreambleIds'], value: [] },
+    ]);
+    expect(edited.diagnostics).toEqual([]);
+    expect(edited.definition?.steps[0]).toMatchObject({ thinkingMode: 'high', orderedPreambleIds: [] });
+    expect(edited.source.replace('    thinkingMode: high\r\n    orderedPreambleIds: []\r\n', '')).toBe(source);
+  });
+
+  test('preserves the literal style and CRLF when updating a multiline prompt', () => {
+    const source = `version: 1
+name: Literal prompt
+steps:
+  - id: decide
+    kind: decision
+    prompt: | # Keep the header
+      Proceed?
+    choices: {stop: Stop}
+`.replaceAll('\n', '\r\n');
+    const edited = editWorkflowDefinition(source, [{ kind: 'upsert', path: ['steps', 0, 'prompt'], value: 'New line\nAnother line\n' }]);
+    expect(edited.diagnostics).toEqual([]);
+    expect(edited.source).toBe(source.replace('      Proceed?\r\n', '      New line\r\n      Another line\r\n'));
+    expect(edited.definition?.steps[0]).toMatchObject({ prompt: 'New line\nAnother line\n' });
+  });
+
+  test('removes an inline first block key and leaves an empty mapping when its last entry is removed', () => {
+    const source = `version: 1
+name: Remove settings
+inputs: {subject: {type: string}}
+steps:
+  - name: Optional name
+    id: decide
+    kind: decision
+    prompt: Proceed?
+    choices: {stop: Stop}
+    bindings: # Keep this comment
+      topic: inputs.subject
+`;
+    const edited = editWorkflowDefinition(source, [
+      { kind: 'delete', path: ['steps', 0, 'name'] },
+      { kind: 'delete', path: ['steps', 0, 'bindings', 'topic'] },
+    ]);
+    expect(edited.diagnostics).toEqual([]);
+    expect(edited.source).toBe(source.replace('name: Optional name', '').replace('topic: inputs.subject', '{}'));
+    expect(edited.definition?.steps[0]).toMatchObject({ id: 'decide', bindings: {} });
+  });
+
+  test('appends and removes a step in a multiline flow list without dropping comments', () => {
+    const source = `# Workflow header
+version: 1
+name: Flow
+steps: [
+  {id: one, kind: command, command: 'printf example'} # Keep original
+] # Keep the list
+`;
+    const edited = editWorkflowDefinition(source, [
+      { kind: 'append', path: ['steps'], value: { id: 'two', kind: 'command', command: 'printf next' } },
+      { kind: 'upsert', path: ['steps', 1, 'shell'], value: 'sh' },
+    ]);
+    expect(edited.diagnostics).toEqual([]);
+    expect(edited.definition?.steps[1]).toMatchObject({ id: 'two', shell: 'sh' });
+    expect(edited.source).toContain(`{id: one, kind: command, command: 'printf example'}, # Keep original`);
+    expect(edited.source).toContain('] # Keep the list');
+    const removed = editWorkflowDefinition(edited.source, [{ kind: 'delete', path: ['steps', 1] }]);
+    expect(removed.diagnostics).toEqual([]);
+    expect(removed.source).toContain(`{id: one, kind: command, command: 'printf example'} # Keep original`);
+    expect(removed.definition?.steps).toEqual(validated(source).steps);
+  });
+
+  test('rolls back every operation when a later edit fails', () => {
+    const edited = editWorkflowDefinition(recipe, [
+      { kind: 'upsert', path: ['name'], value: 'New title' },
+      { kind: 'delete', path: ['steps', 2, 'missing'] },
+    ]);
+    expect(edited.definition).toBeNull();
+    expect(edited.source).toBe(recipe);
+    expect(edited.attemptedSource).toContain('"New title"');
+    expect(edited.diagnostics[0]).toMatchObject({ code: 'invalid-edit', path: ['steps', 2, 'missing'] });
   });
 });

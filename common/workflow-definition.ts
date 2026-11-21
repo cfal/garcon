@@ -1,10 +1,12 @@
-import { applyWorkflowFieldEdits } from './workflow-definition/edit.js';
+import { applyWorkflowEdit } from './workflow-definition/edit.js';
 import { validateWorkflowGraph, validateWorkflowStepAddition } from './workflow-definition/graph.js';
 import { readWorkflowDefinition, readWorkflowStep } from './workflow-definition/schema.js';
-import { readWorkflowSource } from './workflow-definition/source.js';
-import type {
-  WorkflowDefinition, WorkflowDefinitionEditResult, WorkflowDefinitionParseResult, WorkflowFieldEdit,
-  WorkflowStepAdditionOptions, WorkflowStepAdditionParseResult,
+import { readWorkflowSource, type WorkflowField } from './workflow-definition/source.js';
+import type { JsonValue } from './json.js';
+import {
+  WORKFLOW_DEFINITION_LIMITS,
+  type WorkflowDefinition, type WorkflowDefinitionEdit, type WorkflowDefinitionEditResult, type WorkflowDefinitionParseResult,
+  type WorkflowFieldPath, type WorkflowStepAdditionOptions, type WorkflowStepAdditionParseResult,
 } from './workflow-definition/types.js';
 
 export { getWorkflowStepSignal } from './workflow-definition/graph.js';
@@ -17,6 +19,7 @@ export type {
   WorkflowCommandStep,
   WorkflowDecisionStep,
   WorkflowDefinition,
+  WorkflowDefinitionEdit,
   WorkflowDefinitionEditResult,
   WorkflowDefinitionParseResult,
   WorkflowDiagnostic,
@@ -35,16 +38,16 @@ export type {
   WorkflowValueType,
 } from './workflow-definition/types.js';
 
-function readValidatedDefinition(text: string) {
-  const { source, root } = readWorkflowSource(text, 'definition');
-  const definition = root && readWorkflowDefinition(root);
-  if (root && definition && !source.diagnostics.length) validateWorkflowGraph(definition, root);
-  return { definition: source.diagnostics.length ? null : definition, source };
+function validateDefinition(root: WorkflowField | null): WorkflowDefinition | null {
+  if (!root || root.source.diagnostics.length) return null;
+  const definition = readWorkflowDefinition(root);
+  if (definition && !root.source.diagnostics.length) validateWorkflowGraph(definition, root);
+  return root.source.diagnostics.length ? null : definition;
 }
 
 export function parseWorkflowDefinition(text: string): WorkflowDefinitionParseResult {
-  const { definition, source } = readValidatedDefinition(text);
-  return { definition, diagnostics: source.diagnostics };
+  const { root, source } = readWorkflowSource(text, 'definition');
+  return { definition: validateDefinition(root), diagnostics: source.diagnostics };
 }
 
 export function parseWorkflowStepAddition(
@@ -56,13 +59,31 @@ export function parseWorkflowStepAddition(
   return { step: source.diagnostics.length ? null : step, diagnostics: source.diagnostics };
 }
 
-/** Applies scalar edits atomically; invalid source or an invalid candidate is never rewritten. */
-export function editWorkflowDefinition(text: string, edits: readonly WorkflowFieldEdit[]): WorkflowDefinitionEditResult {
-  const { definition, source } = readValidatedDefinition(text);
-  if (!definition) return { source: text, definition, diagnostics: source.diagnostics };
-  const candidate = applyWorkflowFieldEdits(source, edits);
-  if (candidate === null) return { source: text, definition: null, diagnostics: source.diagnostics };
-  if (candidate === text) return { source: text, definition, diagnostics: [] };
-  const parsed = parseWorkflowDefinition(candidate);
-  return parsed.definition ? { ...parsed, source: candidate } : { ...parsed, source: text, attemptedSource: candidate };
+/** Reads the authored YAML shape, before references are normalized for execution. */
+export function getWorkflowDefinitionFieldValue(text: string, path: WorkflowFieldPath): JsonValue | undefined {
+  const { root } = readWorkflowSource(text, 'definition');
+  return root && validateDefinition(root) ? root.atPath(path).value : undefined;
+}
+
+/** Applies edits atomically; invalid source or an invalid candidate is never rewritten. */
+export function editWorkflowDefinition(text: string, edits: readonly WorkflowDefinitionEdit[]): WorkflowDefinitionEditResult {
+  let { root, source } = readWorkflowSource(text, 'definition');
+  const original = validateDefinition(root);
+  if (!original) return { source: text, definition: null, diagnostics: source.diagnostics };
+  if (edits.length > WORKFLOW_DEFINITION_LIMITS.steps * 2) {
+    source.issue('invalid-edit', [], `Use at most ${WORKFLOW_DEFINITION_LIMITS.steps * 2} operations in one transaction.`);
+    return { source: text, definition: null, diagnostics: source.diagnostics };
+  }
+  for (const edit of edits) {
+    if (!root) break;
+    const candidate = applyWorkflowEdit(root, edit);
+    if (candidate === null) break;
+    if (candidate !== source.text) ({ root, source } = readWorkflowSource(candidate, 'definition'));
+  }
+  const definition = source.text === text ? original : validateDefinition(root);
+  if (!definition || source.diagnostics.length) {
+    return { source: text, definition: null, diagnostics: source.diagnostics,
+      ...(source.text === text ? {} : { attemptedSource: source.text }) };
+  }
+  return { source: source.text, definition, diagnostics: [] };
 }

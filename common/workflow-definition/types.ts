@@ -174,6 +174,13 @@ export interface WorkflowFieldEdit {
   readonly value: JsonPrimitive;
 }
 
+/** Paths are evaluated against the candidate after earlier operations in the transaction. */
+export type WorkflowDefinitionEdit = WorkflowFieldEdit
+  | { readonly kind: 'upsert'; readonly path: WorkflowFieldPath; readonly value: JsonValue }
+  | { readonly kind: 'delete'; readonly path: WorkflowFieldPath }
+  | { readonly kind: 'append'; readonly path: WorkflowFieldPath; readonly value: JsonValue }
+  | { readonly kind: 'insert'; readonly path: WorkflowFieldPath; readonly index: number; readonly value: JsonValue };
+
 export interface WorkflowDefinitionEditResult extends WorkflowDefinitionParseResult {
   readonly source: string;
   /** When present, diagnostics refer to this rejected candidate, not source. */

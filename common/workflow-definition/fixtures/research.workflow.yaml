@@ -23,7 +23,7 @@ steps:
       report_ready: { payload: text }
     prompt: |
       Exercise the research workflow for {{topic}} using the two toy findings below.
-      Do not use tools. Emit these four tags in your own assistant response, each as a standalone top-level block, not in fences or quotes:
+      Do not use tools. Your assistant response must consist only of these four standalone tags:
 
       <garcon-workflow-emit signal="research.research_started" />
 
@@ -33,7 +33,7 @@ steps:
 
       <garcon-workflow-emit signal="research.report_ready" content-type="text">Two synthetic findings in geometry.</garcon-workflow-emit>
 
-      End with a plain sentence confirming that both findings were emitted.
+      End your response immediately after the last tag, without surrounding prose or fences.
 
   - id: verify
     name: Verify findings
