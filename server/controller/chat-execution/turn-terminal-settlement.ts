@@ -3,6 +3,7 @@ import type { WorkingDirectorySettlement, WorkingDirectorySettlementPort } from 
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.js';
 import type { ExecutionOwnership } from './execution-ownership.js';
 import type { QueueExecutionAttempt } from './execution-attempt.js';
+import type { ChatStopOutcome } from '../../../common/chat-types.js';
 
 interface TerminalSettlementDependencies {
   ownership: ExecutionOwnership;
@@ -11,6 +12,23 @@ interface TerminalSettlementDependencies {
   executionPolicy(chatId: string): 'conversation' | 'literal';
   retire(chatId: string, attempt: QueueExecutionAttempt): void;
   checkIdle(chatId: string): Promise<void>;
+}
+
+export async function interruptAgentTurn(
+  deps: Pick<TerminalSettlementDependencies, 'ownership'> & {
+    abortSession(chatId: string): Promise<boolean>;
+    retire(chatId: string, attempt: QueueExecutionAttempt, reason: Error): void;
+  },
+  chatId: string,
+): Promise<ChatStopOutcome> {
+  const attempt = deps.ownership.attempt(chatId);
+  if (attempt?.hasTerminalCommit) return 'already-idle';
+  const interruption = new Error('Turn interrupted by the user');
+  if (attempt) deps.ownership.abortAdmission(chatId, interruption);
+  const acknowledged = await deps.abortSession(chatId);
+  if (!acknowledged && !attempt) return 'already-idle';
+  if (attempt && deps.ownership.isCurrentAttempt(chatId, attempt)) deps.retire(chatId, attempt, interruption);
+  return 'interrupt-requested';
 }
 
 export async function settleAgentTurn(

@@ -12,6 +12,8 @@ import { createLogger } from '../../common/log.js';
 import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { isRecord } from '../../../common/json.js';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import type { ChatRunOutcome } from '../../../common/chat-activity.js';
+import { ChatActivityOutcomes, type ActivityOutcomeAttempt } from './chat-activity-outcomes.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -56,6 +58,7 @@ interface AgentPreviewMetadata {
 interface MetadataIndexOptions {
   metadataPath?: string | null;
   saveDelayMs?: number;
+  readRunOutcome?(chatId: string, transcriptViewId: string): Promise<ChatRunOutcome | null>;
 }
 
 interface MetadataTranscriptSource {
@@ -70,9 +73,10 @@ interface MetadataCarryOverSource {
 }
 
 export class MetadataIndex {
+  readonly #outcomes: ChatActivityOutcomes;
   #metadataByChatId = new Map<string, ChatMetadata>();
   #validatedChatIds = new Set<string>();
-  #registry: IChatRegistry;
+  #registry: Pick<IChatRegistry, 'listChatIds' | 'getChat' | 'onChatRemoved'>;
   #transcripts: MetadataTranscriptSource;
   #carryOver: MetadataCarryOverSource;
   #initialized = false;
@@ -82,9 +86,10 @@ export class MetadataIndex {
   #closed = false;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #savePromise: Promise<void> = Promise.resolve();
+  readonly #readRunOutcome: MetadataIndexOptions['readRunOutcome'];
 
   constructor(
-    registry: IChatRegistry,
+    registry: Pick<IChatRegistry, 'listChatIds' | 'getChat' | 'onChatRemoved'>,
     transcripts: MetadataTranscriptSource,
     carryOver: MetadataCarryOverSource,
     options: MetadataIndexOptions = {},
@@ -94,6 +99,16 @@ export class MetadataIndex {
     this.#carryOver = carryOver;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
+    this.#readRunOutcome = options.readRunOutcome;
+    this.#outcomes = new ChatActivityOutcomes(chatId => {
+      try {
+        return this.#transcripts.getExistingTranscriptViewId(chatId);
+      } catch (error) {
+        // Optional activity cannot interrupt admission or mandatory failure settlement.
+        logger.warn(`metadata: activity view unavailable for ${chatId}:`, errorMessage(error));
+        return null;
+      }
+    });
   }
 
   async init(): Promise<void> {
@@ -102,6 +117,7 @@ export class MetadataIndex {
       this.#registry.onChatRemoved((chatId) => {
         this.#metadataByChatId.delete(String(chatId));
         this.#validatedChatIds.delete(String(chatId));
+        this.deleteChatActivity(String(chatId));
         this.#scheduleSave();
       });
     }
@@ -114,7 +130,7 @@ export class MetadataIndex {
 
   repair(): Promise<void> {
     if (this.#closed) return Promise.resolve();
-    this.#repairPromise ??= this.#repairFromTranscriptPreviews().finally(() => {
+    this.#repairPromise ??= this.#repairFromTranscripts().finally(() => {
       this.#repairPromise = null;
     });
     return this.#repairPromise;
@@ -132,6 +148,7 @@ export class MetadataIndex {
 
   invalidateTranscriptView(chatId: string): void {
     this.#validatedChatIds.delete(String(chatId));
+    this.#outcomes.invalidateView(String(chatId));
   }
 
   listAllChatMetadata(): Map<string, ChatMetadata> {
@@ -179,6 +196,53 @@ export class MetadataIndex {
     });
     this.#validatedChatIds.add(key);
     this.#scheduleSave();
+  }
+
+  getRunOutcome(chatId: string): ChatRunOutcome | null {
+    return this.#outcomes.get(chatId);
+  }
+
+  clearRunOutcome(chatId: string, runId?: string): void {
+    this.#outcomes.clear(chatId, runId);
+  }
+
+  beginRunAttempt(chatId: string, runId: string): void {
+    this.#outcomes.begin(chatId, runId);
+  }
+
+  deleteChatActivity(chatId: string): void {
+    this.#outcomes.delete(chatId);
+  }
+
+  captureFailureAttempt(chatId: string, runId?: string): ActivityOutcomeAttempt | null {
+    return this.#outcomes.captureFailure(chatId, runId);
+  }
+
+  recordFailedAttempt(attempt: ActivityOutcomeAttempt | null): boolean {
+    return this.#outcomes.fail(attempt);
+  }
+
+  captureCommittedOutcome(chatId: string, viewId: string, runId: string): ActivityOutcomeAttempt | null {
+    return this.#outcomes.captureTerminal(chatId, viewId, runId);
+  }
+
+  recordCommittedOutcome(attempt: ActivityOutcomeAttempt | null, outcome: ChatRunOutcome): boolean {
+    return this.#outcomes.commit(attempt, outcome);
+  }
+
+  // Separates optional IO from publication on the per-chat lifecycle queue.
+  async prepareRunOutcomeRepair(chatId: string): Promise<(() => boolean) | null> {
+    if (this.#closed || !this.#readRunOutcome || !this.#registry.getChat(chatId)) return null;
+    const attempt = this.#outcomes.captureRepair(chatId);
+    if (!attempt) return null;
+    try {
+      const outcome = await this.#readRunOutcome(chatId, attempt.state.viewId);
+      return () => !this.#closed && this.#registry.getChat(chatId) !== null
+        && this.#outcomes.restore(attempt, outcome);
+    } catch (error) {
+      logger.warn(`metadata: failed to repair run outcome for ${chatId}:`, errorMessage(error));
+      return null;
+    }
   }
 
   // Recomputes the cached preview from the complete replacement view.
@@ -254,14 +318,23 @@ export class MetadataIndex {
     await this.#savePromise;
   }
 
-  async #repairFromTranscriptPreviews(): Promise<void> {
-    for (const chatId of this.#registry.listChatIds()) {
+  async #repairFromTranscripts(): Promise<void> {
+    const chatIds = this.#registry.listChatIds();
+    for (const chatId of chatIds) {
       // Timers cannot interrupt synchronous SQLite/JSON work. Yield between bounded reads.
       await Bun.sleep(0);
       if (this.#closed) break;
       const session = this.#registry.getChat(chatId);
       if (!session) continue;
       this.#repairChatMetadata(chatId, session);
+    }
+    // Bounded preview repair for later chats never waits on a long activity scan.
+    for (const chatId of chatIds) {
+      await Bun.sleep(0);
+      if (this.#closed) break;
+      if (!this.#registry.getChat(chatId)) continue;
+      const apply = await this.prepareRunOutcomeRepair(chatId);
+      apply?.();
     }
   }
 

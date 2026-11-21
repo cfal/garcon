@@ -43,7 +43,7 @@ import {
   isTranscriptSearchStatusV1,
   type TranscriptSearchStatusV1,
 } from './chat-search';
-import { InvalidChatIdError, parseChatId } from './chat-id';
+import { canonicalChatId, nonNegativeInt, requiredPath, requiredStr, str } from './ws-value-parsing.js';
 import {
   CHAT_BOARD_INVALIDATION_REASONS,
   type ChatBoardInvalidationReason,
@@ -53,6 +53,7 @@ import {
   type ProjectUnavailableReason,
 } from './project-resolution';
 import { isRecord } from './json';
+import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -204,6 +205,14 @@ export class ChatProcessingUpdatedMessage {
   constructor(
     public chatId: string,
     public phase: ChatProcessingPhase | null,
+  ) {}
+}
+
+export class ChatActivityUpdatedMessage {
+  readonly type = 'chat-activity-updated' as const;
+  constructor(
+    public chatId: string,
+    public activityStatus: ChatActivityStatus | null,
   ) {}
 }
 
@@ -466,6 +475,7 @@ export type ServerWsMessage =
   | ChatProjectPathUpdatedMessage
   | ChatSessionStoppedMessage
   | ChatProcessingUpdatedMessage
+  | ChatActivityUpdatedMessage
   | ChatExecutionControlUpdatedMessage
   | ChatOperationalNoticeMessage
   | ReconnectStateMessage
@@ -488,23 +498,6 @@ export type ServerWsMessage =
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
-
-function str(v: unknown): string {
-  return typeof v === 'string' ? v : '';
-}
-
-function requiredStr(v: unknown): string | null {
-  if (typeof v !== 'string') return null;
-  return v.trim() || null;
-}
-
-function requiredPath(v: unknown): string | null {
-  return typeof v === 'string' && v.trim().length > 0 ? v : null;
-}
-
-function nonNegativeInt(v: unknown): number | null {
-  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
-}
 
 function isValidTranscriptSpan(
   firstOrdinal: number,
@@ -799,6 +792,13 @@ export function parseServerWsMessage(
         ? new ChatProcessingUpdatedMessage(chatId, phase)
         : null;
     }
+    case 'chat-activity-updated': {
+      const chatId = requiredStr(data.chatId);
+      const activityStatus = data.activityStatus;
+      return chatId && (activityStatus === null || isChatActivityStatus(activityStatus))
+        ? new ChatActivityUpdatedMessage(chatId, activityStatus)
+        : null;
+    }
     case 'chat-execution-control-updated': {
       const chatId = requiredStr(data.chatId);
       const control = parseChatExecutionControlState(data.control);
@@ -981,14 +981,5 @@ export function parseServerWsMessage(
     }
     default:
       return null;
-  }
-}
-
-function canonicalChatId(value: unknown): string | null {
-  try {
-    return parseChatId(value);
-  } catch (error) {
-    if (error instanceof InvalidChatIdError) return null;
-    throw error;
   }
 }

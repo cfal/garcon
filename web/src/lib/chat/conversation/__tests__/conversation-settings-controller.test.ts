@@ -50,6 +50,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',

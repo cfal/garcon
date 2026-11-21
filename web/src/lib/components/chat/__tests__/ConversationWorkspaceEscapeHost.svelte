@@ -112,6 +112,7 @@
 		isProcessing: true,
 		processingPhase: 'running',
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',

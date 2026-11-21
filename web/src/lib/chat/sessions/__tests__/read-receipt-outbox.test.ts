@@ -178,6 +178,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: true,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 			},
 		]);
@@ -224,6 +225,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: true,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 			},
 			{
@@ -252,6 +254,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: false,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 			},
 		]);

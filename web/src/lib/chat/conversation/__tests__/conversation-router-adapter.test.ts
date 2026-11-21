@@ -41,6 +41,7 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],

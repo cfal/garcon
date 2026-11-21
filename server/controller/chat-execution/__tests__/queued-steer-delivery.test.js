@@ -23,7 +23,8 @@ function scaffold(overrides = {}) {
   const controls = new ChatExecutionControlOperations(repository, {
     runExclusive: (chatId, operation) => locks.runExclusive(chatId, operation),
     chatExists: () => true,
-    unsettledQueueReceiptKeys: () => new Set(),
+    inputAccepted: () => undefined,
+      unsettledQueueReceiptKeys: () => new Set(),
     // The coordinator observes every publication; most cases request passes explicitly.
     publish: (chatId, control) => {
       if (overrides.observePublications) delivery.observe(chatId, control);

@@ -185,6 +185,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		isProcessing,
 		processingPhase: isProcessing ? 'running' : null,
 		isUnread: true,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
@@ -287,6 +288,7 @@ function chatSnapshot(
 			thinkingMode: 'none',
 			projectPath: '/workspace/project',
 			tags: [],
+			activityStatus: null,
 			canReloadFromNativeHistory: false,
 			activity: {
 				createdAt: null,
@@ -345,6 +347,7 @@ function createServerEntry(id: string) {
 		processingPhase: null,
 		agentOwnershipEpoch: 'epoch-1',
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 	};
 }

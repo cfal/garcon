@@ -32,6 +32,7 @@ export interface QueueDispatchCallbacks {
   publishIdle(chatId: string): void;
   publishProjectUnavailable(chatId: string, error: ProjectUnavailableError): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
+  publishTurnStarted(chatId: string, runId: string): void;
   retireAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
 }
 
@@ -138,6 +139,7 @@ export class QueueDrainer {
           () => controls.dequeueNextTurn(chatId, (input) => {
             if (this.#shouldHalt(chatId)) throw halted;
             options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
+            callbacks.publishTurnStarted(chatId, options.turnId!);
             if (input.kind === 'control') {
               if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
                 logger.debug('queue: discarded stale control input', {

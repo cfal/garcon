@@ -220,7 +220,7 @@ describe('NewChatDialog', () => {
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null }, preview: { lastMessage: '' },
 			isPinned: false, isArchived: false, isActive: true, isProcessing: false, processingPhase: null,
-			isUnread: false, canReloadFromNativeHistory: false,
+			isUnread: false, activityStatus: null, canReloadFromNativeHistory: false,
 		}]);
 		const existing = sessions.byId[scheduledSeed.prospectiveChatId!];
 		const start = screen.getByRole('button', { name: 'Start session' });

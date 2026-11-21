@@ -30,6 +30,7 @@ export function chat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
     isActive: false,
     isProcessing: false,
     processingPhase: null,
+    activityStatus: null,
     canReloadFromNativeHistory: true,
     isUnread: false,
     ...overrides,

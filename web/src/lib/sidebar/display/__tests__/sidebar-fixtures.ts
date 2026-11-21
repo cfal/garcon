@@ -24,6 +24,7 @@ export function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): Ch
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',

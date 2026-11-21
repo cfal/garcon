@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ChatOperationalNoticeMessage,
+  ChatActivityUpdatedMessage,
   ChatListRefreshRequestedMessage,
   ChatBoardsInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
@@ -10,6 +11,17 @@ import {
   TranscriptSearchStatusMessage,
 } from '../ws-events.ts';
 import { ChatReloadCancelRequest, parseClientWsMessage } from '../ws-requests.ts';
+
+it('round-trips every chat activity status and rejects absent or unknown values', () => {
+  for (const status of [null, 'working', 'complete', 'error', 'pending-user-action']) {
+    const message = new ChatActivityUpdatedMessage('chat-1', status);
+    expect(parseServerWsMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+  }
+  for (const activityStatus of [undefined, 'idle', true, 1]) {
+    expect(parseServerWsMessage({ type: 'chat-activity-updated', chatId: 'chat-1', activityStatus })).toBeNull();
+  }
+  expect(parseServerWsMessage({ type: 'chat-activity-updated', chatId: '', activityStatus: null })).toBeNull();
+});
 
 it('round-trips execution settings invalidations', () => {
   const event = new ChatListRefreshRequestedMessage('execution-settings-updated', '1783725900000200');

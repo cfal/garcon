@@ -6,6 +6,7 @@ import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
 import type { ChatLineage } from '$shared/chat-parentage';
 import type { ChatProcessingPhase } from '$shared/chat-types';
+import type { ChatActivityStatus } from '$shared/chat-activity';
 
 export type ChatStatus = 'draft' | 'running';
 export type SessionAgentId = string;
@@ -53,6 +54,7 @@ export interface ChatSessionRecord {
 	isArchived: boolean;
 	isProcessing: boolean;
 	processingPhase: ChatProcessingPhase | null;
+	activityStatus: ChatActivityStatus | null;
 	canReloadFromNativeHistory: boolean;
 	isUnread: boolean;
 	status: ChatStatus;
