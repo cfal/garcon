@@ -34,7 +34,15 @@ import type {
 import type { AcpAdvertisedCapabilities, ReconnectStrategy } from './reconnect-policy.js';
 import { reconnectAcpSession, reconnectOrder } from './reconnect-policy.js';
 import { AcpRestoreRegistry } from './restore-registry.js';
-import type { AcpAgentPolicy } from './policy.js';
+import { isJsonRpcId } from './protocol.js';
+import {
+  childEnvironmentFor,
+  newSessionModelFor,
+  nativePathFor,
+  promptConfigFor,
+  promptFor,
+  type AcpAgentPolicy,
+} from './policy.js';
 import { AcpTransport } from './transport.js';
 import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from './event-converter.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
@@ -47,7 +55,6 @@ import {
   fallbackPermissionToolUse,
   humanizeError,
   isAutoApproveMode,
-  isJsonRpcId,
   permissionCancelledOutcome,
   permissionChoiceOutcome,
 } from './runtime-helpers.js';
@@ -155,7 +162,7 @@ export class AcpAgentRuntime {
     let created: Awaited<ReturnType<AcpClient['newSession']>>;
     try {
       assertAcpExecutionOpen(request);
-      const model = this.#newSessionModelForRequest(request);
+      const model = newSessionModelFor(this.#policy, request);
       created = await client.newSession({
         cwd: request.projectPath,
         mcpServers: this.#policy.mcpServers,
@@ -199,7 +206,7 @@ export class AcpAgentRuntime {
     this.#registerSession(session);
     const result = {
       agentSessionId: sessionId,
-      nativePath: this.#nativePathFor(sessionId),
+      nativePath: nativePathFor(this.#policy, sessionId),
     };
     request.onSessionActivated?.(result);
     let resolveStarted!: () => void;
@@ -255,7 +262,7 @@ export class AcpAgentRuntime {
   // running; the next turn reconnects.
   #armCancelSettleTimeout(turn: AcpTurnContext): void {
     turn.cancelTimer ??= unlessSettled(turn.settled.promise, this.#cancelSettleTimeoutMs, () => {
-      if (turn.running) this.#retireSession(turn.session, 'aborted');
+      if (!turn.completed) this.#retireSession(turn.session, 'aborted');
     });
   }
 
@@ -292,6 +299,8 @@ export class AcpAgentRuntime {
     if (!turn?.running) {
       if (!session.pendingTurn) return false;
       session.pendingTurn.aborted = true;
+      // A hung configure call is bounded like an unanswered cancel.
+      this.#armCancelSettleTimeout(session.pendingTurn);
       return true;
     }
 
@@ -393,7 +402,7 @@ export class AcpAgentRuntime {
         command,
         args: this.#policy.args ?? ['acp'],
         cwd: request.projectPath,
-        env: this.#buildEnv(request),
+        env: childEnvironmentFor(this.#policy, request),
       });
       assertAcpExecutionOpen(request);
     } catch (error) {
@@ -408,8 +417,12 @@ export class AcpAgentRuntime {
   }
 
   async #sessionForTurn(request: AcpResumeRequest): Promise<AcpAgentRuntimeSession> {
-    const restoring = this.#restores.inFlight(request.agentSessionId);
-    if (restoring) await restoring;
+    // Re-checked after each wait: a waiter woken by a failed restore may find
+    // another waiter's new restore already in flight.
+    for (let restoring = this.#restores.inFlight(request.agentSessionId); restoring;
+      restoring = this.#restores.inFlight(request.agentSessionId)) {
+      await restoring;
+    }
     const existing = this.#sessions.get(request.agentSessionId);
     if (existing) {
       if (existing.chatId !== request.chatId) {
@@ -469,7 +482,7 @@ export class AcpAgentRuntime {
       cwd: request.projectPath,
       mcpServers: this.#policy.mcpServers,
       allowNewSession: this.#policy.reconnectAllowNewSession === true,
-      newSessionModel: this.#newSessionModelForRequest(request),
+      newSessionModel: newSessionModelFor(this.#policy, request),
     }, order);
     if (!restored) return false;
     session.remoteSessionId = restored.sessionId;
@@ -503,8 +516,8 @@ export class AcpAgentRuntime {
 
     try {
       await this.#configureSession(session, request);
-      const prompt = this.#buildPrompt(request);
-      const promptConfig = this.#promptConfigForRequest(request);
+      const prompt = promptFor(this.#policy, request);
+      const promptConfig = promptConfigFor(this.#policy, request);
       // Stopped while configuring: end before admission records the turn as started.
       if (turn.aborted) return;
       if (request.executionAdmission) await markAcpExecutionStarted(request);
@@ -638,6 +651,8 @@ export class AcpAgentRuntime {
     turn.detachSourceListeners.push(session.client.onExit((exitCode) => {
       if (!this.#canRouteSource(turn)) return;
       if (turn.running && !turn.aborted) {
+        // Text streamed before the crash is published ahead of the failure.
+        this.#emitFlushedMessages(turn);
         const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
         this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), message)]);
         session.state = 'failed';
@@ -904,6 +919,8 @@ export class AcpAgentRuntime {
       (turn): turn is AcpTurnContext => turn !== null,
     ));
     for (const turn of turns) {
+      // Buffered text still belongs to the transcript; the agent kept it.
+      if (this.#canRouteSource(turn)) this.#emitFlushedMessages(turn);
       // A turn deliberately retired before its prompt went out never ran, so it
       // ends as aborted; a crash still fails it.
       if (reason === 'aborted' || (turn === session.pendingTurn && !processExited)) turn.aborted = true;
@@ -929,16 +946,6 @@ export class AcpAgentRuntime {
     });
   }
 
-  #mappedModel(model: string): string | undefined {
-    if (!model || model === 'default') return undefined;
-    return this.#policy.mapModel ? this.#policy.mapModel(model) : model;
-  }
-
-  #newSessionModelForRequest(request: AcpStartRequest | AcpResumeRequest): string | undefined {
-    if (this.#policy.newSessionModelConfig === false) return undefined;
-    return this.#mappedModel(request.model);
-  }
-
   async #configureSession(
     session: AcpAgentRuntimeSession,
     request: AcpStartRequest | AcpResumeRequest,
@@ -953,39 +960,6 @@ export class AcpAgentRuntime {
     });
     if (configured?.configOptions) session.configOptions = configured.configOptions;
     if (configured?.models) session.models = configured.models;
-  }
-
-  #buildPrompt(request: AcpStartRequest | AcpResumeRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {
-    const prompt = this.#policy.buildPrompt
-      ? this.#policy.buildPrompt(request)
-      : buildPromptFallback(request);
-    return prompt.length > 0 ? prompt : buildPromptFallback(request);
-  }
-
-  #buildEnv(request: AcpStartRequest | AcpResumeRequest): Record<string, string | undefined> {
-    return this.#policy.buildEnv
-      ? this.#policy.buildEnv(request)
-      : buildEnvFallback(request);
-  }
-
-  #promptConfigForRequest(request: AcpStartRequest | AcpResumeRequest): Record<string, unknown> | null {
-    const config: Record<string, unknown> = {};
-    const mode = this.#policy.promptModeConfig === false
-      ? undefined
-      : this.#policy.mapPermissionMode?.(request.permissionMode);
-    if (mode) config.mode = mode;
-    const model = this.#policy.promptModelConfig === false
-      ? undefined
-      : this.#mappedModel(request.model);
-    if (model) config.model = model;
-    return Object.keys(config).length > 0 ? config : null;
-  }
-
-  #nativePathFor(sessionId: string): string | null {
-    if (this.#policy.resolveNativePath) {
-      return this.#policy.resolveNativePath(sessionId);
-    }
-    return createArtificialNativePath(this.#policy.agentId, sessionId);
   }
 
   #sessionUpdateContext(turn: AcpTurnContext): AcpSessionUpdateContext {

@@ -190,7 +190,7 @@ Normal builds may reuse cached agent-installer layers. Run `docker compose build
 
 ## Agent And Git Setup
 
-Claude, Codex, and Antigravity login can be started from Settings. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
+Claude, Codex, and Antigravity login can be started from Settings. Antigravity stores a Google sign-in in the OS keyring, which a container may not provide; if the sign-in does not persist, start a session bus as described in [Antigravity](antigravity.md#authentication) or use `GEMINI_API_KEY`. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
 
 ```bash
 docker compose exec garcon bash -l

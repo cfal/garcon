@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { AcpRpcError } from './errors.js';
-import type { AcpJsonRpcId, AcpJsonRpcMessage } from './protocol.js';
+import { isJsonRpcId, type AcpJsonRpcId, type AcpJsonRpcMessage } from './protocol.js';
 
 interface WritableProcessStdin {
   write(data: string | Uint8Array): unknown;
@@ -35,9 +35,6 @@ export interface AcpTransportOptions {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
-function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
-  return typeof value === 'number' || typeof value === 'string';
-}
 
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
   const process = Bun.spawn([command, ...args], {

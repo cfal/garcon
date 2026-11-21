@@ -705,6 +705,55 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('publishes text streamed before an unanswered Stop retires the process', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.cancelReply = 'ignored';
+    agent.onPrompt((fake, sessionId) => {
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Partial reply.' } });
+    });
+    const started = await runtime.startSession(request());
+    await waitFor(() => agent.requests('session/prompt').length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    runtime.abort(started.agentSessionId);
+    await waitFor(() => !runtime.isRunning(started.agentSessionId));
+    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    expect(rows).toEqual([expect.objectContaining({ type: 'assistant-message', content: 'Partial reply.' })]);
+  });
+
+  it('bounds a configure call that hangs after Stop', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    agent.configReplyGate = new Promise(() => {});
+
+    const stopped = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    runtime.abort(started.agentSessionId);
+    await stopped;
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+  });
+
+  it('shares a replacement restore between waiters after a restore fails', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    agent.resumeFailure = 'Synthetic resume failure';
+
+    const first = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }).then(() => null, (error: Error) => error);
+    await waitFor(() => agent.requests('session/resume').length === 1);
+    agent.resumeFailure = null;
+    const waiters = [1, 2].map(() => runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }));
+    expect((await first)?.message).toBe('Synthetic resume failure');
+    await Promise.allSettled(waiters);
+
+    expect(agent.requests('session/resume')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
   it('fails the run when agy reports an executor error in-band', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => {

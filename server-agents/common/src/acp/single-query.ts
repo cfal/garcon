@@ -3,7 +3,8 @@ import { AcpClient } from './client.js';
 import { AcpInBandFailure, type AcpFailureSplitter } from './in-band-failure.js';
 import type { AcpInitializeParams, AcpSessionNewResult } from './protocol.js';
 import { acpContentText, asObject, asString } from './event-converter.js';
-import { isJsonRpcId, permissionChoiceOutcome } from './runtime-helpers.js';
+import { permissionChoiceOutcome } from './runtime-helpers.js';
+import { isJsonRpcId } from './protocol.js';
 import { AcpTransport, type AcpSpawnSpec } from './transport.js';
 
 export interface AcpSingleQueryOptions {

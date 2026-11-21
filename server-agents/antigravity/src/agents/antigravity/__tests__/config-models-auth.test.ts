@@ -109,6 +109,14 @@ describe('getAntigravityAuthStatus', () => {
     expect(status).toMatchObject({ authenticated: false, detail: 'Sign-in in progress.' });
   });
 
+  it('offers in-app sign-in only for the personal Google method', async () => {
+    const ok = async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 });
+    expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), { runModels: ok }))
+      .toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
+    expect(await getAntigravityAuthStatus(config(), { runModels: ok }))
+      .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
+  });
+
   it('uses the CLI model listing as the signed-in check', async () => {
     const signedIn = await getAntigravityAuthStatus(config(), { runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }) });
     expect(signedIn).toMatchObject({ authenticated: true, source: 'cli' });

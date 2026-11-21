@@ -45,13 +45,17 @@ export async function getAntigravityAuthStatus(
     if (signInRunning) {
       return lastProbed ?? { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
     }
+    // In-app sign-in (`agy acp --login`) is a personal Google login, so only that
+    // method offers it. Enterprise methods report the CLI's own sign-in check.
+    const method = config.authMethod();
+    const canReauth = method === 'oauth-personal';
     const result = await abortable(runModels(config), signal);
     if (result.exitCode === 0) {
-      return { authenticated: true, canReauth: true, label: 'Google', source: 'cli' };
+      return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
     }
     return {
       authenticated: false,
-      canReauth: true,
+      canReauth,
       label: '',
       source: 'none',
       detail: antigravityCliFailure(result),

@@ -6,6 +6,10 @@ export interface AcpJsonRpcError {
 
 export type AcpJsonRpcId = number | string;
 
+export function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
+  return typeof value === 'number' || typeof value === 'string';
+}
+
 export interface AcpClientCapabilities {
   fs?: { readTextFile?: boolean; writeTextFile?: boolean };
   terminal?: boolean;

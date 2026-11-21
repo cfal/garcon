@@ -30,9 +30,6 @@ export function isAutoApproveMode(mode: PermissionMode, policy: AcpAgentPolicy):
 // only when the agent offers nothing else, since bypass means the tool runs.
 export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'auto-approve' | 'reject';
 
-export function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
-  return typeof value === 'number' || typeof value === 'string';
-}
 
 function optionIdFrom(option: Record<string, unknown>): string | undefined {
   return asString(option.optionId ?? option.option_id ?? option.id);
