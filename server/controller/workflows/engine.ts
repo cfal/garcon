@@ -27,7 +27,7 @@ import {
 } from './records.js';
 import {
   normalizeActor, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
-  normalizeStart, normalizeTest, requestHash, workflowIdentifier, workflowJson,
+  mergeExecutionContext, normalizeStart, normalizeTest, requestHash, workflowIdentifier, workflowJson,
 } from './requests.js';
 import type { WorkflowAttemptRequest, WorkflowAttemptResult, WorkflowEmitRequest, WorkflowRunner } from './runner.js';
 import type { WorkflowStore } from './store.js';
@@ -48,8 +48,6 @@ export interface WorkflowEngineOptions {
   readonly retainExecutorReferences?: RetainExecutorReferences;
   readonly retainProviderReferences?: RetainProviderReferences;
   readonly hasChat?: (chatId: string) => boolean;
-  readonly onRunChanged?: (runId: string) => void;
-  readonly onDefinitionsChanged?: () => void;
 }
 
 type CurrentAttempt = AttemptRow & { run_id: string; step_id: string; attempt_count: number };
@@ -64,12 +62,14 @@ function currentAttempt(db: Database, id: string): CurrentAttempt | null {
 
 function finishAttempt(db: Database, row: CurrentAttempt, status: Exclude<AttemptRow['status'], 'running'>, reason: string | null, now: string): void {
   db.query('UPDATE workflow_attempts SET status = ?, reason = ?, finished_at = ? WHERE id = ?').run(status, reason, now, row.id);
-  const waiting = status === 'unavailable' && row.attempt_count < WORKFLOW_LIMITS.attemptsPerInstance;
-  db.query('UPDATE workflow_instances SET status = ?, reason = ? WHERE id = ?').run(
-    status !== 'unavailable' ? status : waiting ? 'waiting-executor' : 'failed',
-    status === 'unavailable' && !waiting ? 'Executor unavailable; attempt limit reached.' : reason,
-    row.instance_id,
-  );
+  const update = db.query('UPDATE workflow_instances SET status = ?, reason = ? WHERE id = ?');
+  if (status !== 'unavailable') {
+    update.run(status, reason, row.instance_id);
+  } else if (row.attempt_count < WORKFLOW_LIMITS.attemptsPerInstance) {
+    update.run('waiting-executor', reason, row.instance_id);
+  } else {
+    update.run('failed', 'Executor unavailable; attempt limit reached.', row.instance_id);
+  }
 }
 
 export class WorkflowEngine {
@@ -125,7 +125,7 @@ export class WorkflowEngine {
 
   publish(raw: unknown, definition: WorkflowDefinition): WorkflowRevision {
     const { definitionId, expectedRevision, source } = normalizePublish(raw);
-    const result = this.#store.write(db => {
+    return this.#store.write(db => {
       const head = revisionHead(db, definitionId);
       if (head?.deleted || (head?.latest_revision ?? null) !== expectedRevision) {
         throw workflowConflict('The published workflow changed. Reload it before publishing.');
@@ -139,8 +139,6 @@ export class WorkflowEngine {
       );
       return revisionByNumber(db, definitionId, revision)!;
     });
-    this.#notify(this.options.onDefinitionsChanged);
-    return result;
   }
 
   deleteDefinition(definitionId: string, expectedRevision: number): void {
@@ -150,7 +148,6 @@ export class WorkflowEngine {
       if (head.latest_revision !== expectedRevision) throw workflowConflict('The published workflow changed. Reload it before deleting.');
       db.query('UPDATE workflow_definitions SET deleted = 1 WHERE id = ?').run(definitionId);
     });
-    this.#notify(this.options.onDefinitionsChanged);
   }
 
   listDefinitions(request: WorkflowPageRequest = {}): WorkflowPage<WorkflowDefinitionSummary> {
@@ -230,7 +227,7 @@ export class WorkflowEngine {
       graph.reconcile();
       return runSummary(requireRun(db, id));
     }));
-    if (result.id === id) this.#changed(id);
+    if (result.id === id) this.#wake();
     return result;
   }
 
@@ -266,7 +263,7 @@ export class WorkflowEngine {
       db.query('INSERT INTO workflow_operations (run_id, id, request_hash, result_id) VALUES (?, ?, ?, ?)').run(runId, operationId, hash, runId);
       return { run: runSummary(requireRun(db, runId)), changed: true };
     });
-    if (result.changed) this.#changed(runId);
+    if (result.changed) this.#wake();
     return result.run;
   }
 
@@ -298,7 +295,7 @@ export class WorkflowEngine {
       if (prior) return signalOccurrence(signalById(db, runId, prior));
       requireUnarchivedRun(db, runId);
       const instance = requireInstance(db, runId, instanceId);
-      const step = JSON.parse(requireStep(db, runId, instance.step_id).step_json) as WorkflowStep;
+      const step = requireStep(db, runId, instance.step_id);
       if (step.kind !== 'decision' || !Object.hasOwn(step.choices, choice)) throw workflowInvalid('That choice is not defined for this decision.');
       if (instance.status !== 'awaiting-decision') throw workflowConflict('This decision is no longer open.');
       db.query("UPDATE workflow_instances SET status = 'succeeded', reason = NULL WHERE id = ?").run(instanceId);
@@ -311,7 +308,7 @@ export class WorkflowEngine {
       saveOperation(db, runId, operationId, hash, row.id);
       return signalOccurrence(row);
     });
-    this.#changed(runId);
+    this.#wake();
     return result;
   }
 
@@ -324,10 +321,10 @@ export class WorkflowEngine {
       const prior = priorOperation(db, runId, operationId, hash);
       if (prior) return signalOccurrence(signalById(db, runId, prior));
       requireUnarchivedRun(db, runId);
-      const step = JSON.parse(requireStep(db, runId, stepId).step_json) as WorkflowStep;
+      const step = requireStep(db, runId, stepId);
       if (step.on?.kind !== 'each') throw workflowInvalid('Only a repeated step can accept items.');
       const ref = step.on.signal;
-      const producer = JSON.parse(requireStep(db, runId, ref.stepId).step_json) as WorkflowStep;
+      const producer = requireStep(db, runId, ref.stepId);
       const definition = getWorkflowStepSignal(producer, ref.signal);
       if (!definition || definition.delivery !== 'many') throw workflowInvalid('This group has no keyed signal schema.');
       const now = this.#now();
@@ -338,7 +335,7 @@ export class WorkflowEngine {
         receipt.inserted ? { kind: 'add-item', operationId, actor, createdAt: now, stepId, signalId: receipt.row.id } : undefined);
       return signalOccurrence(receipt.row);
     });
-    this.#changed(runId);
+    this.#wake();
     return result;
   }
 
@@ -361,13 +358,8 @@ export class WorkflowEngine {
       const evidence = evidenceSignalId === undefined ? undefined : signalById(db, runId, evidenceSignalId);
       const parsed = parseWorkflowStepAddition(base, source, evidence ? { evidence: { stepId: evidence.step_id, signal: evidence.signal } } : {});
       if (!parsed.step) throw workflowInvalid(parsed.diagnostics[0]?.message ?? 'Invalid workflow step.');
-      if (evidence && parsed.step.on) throw workflowInvalid('A step with selected evidence must not also subscribe to future signals.');
       const previous = JSON.parse(run.context_json) as WorkflowExecutionContext;
-      const context = {
-        defaultTarget: request.executionContext?.defaultTarget ?? previous.defaultTarget,
-        projectPaths: { ...previous.projectPaths, ...request.executionContext?.projectPaths },
-      };
-      return { step: parsed.step, context, evidence };
+      return { step: parsed.step, context: mergeExecutionContext(previous, request.executionContext), evidence };
     });
     if (prepared.prior) return prepared.prior;
     const captured = this.#captureStep(prepared.step, prepared.context, snapshot);
@@ -382,7 +374,7 @@ export class WorkflowEngine {
       saveOperation(db, runId, operationId, hash, captured.step.id, amendment);
       return amendment;
     }));
-    this.#changed(runId);
+    this.#wake();
     return result;
   }
 
@@ -401,7 +393,7 @@ export class WorkflowEngine {
       new WorkflowGraph(db, runId, this.#now()).reconcile();
       saveOperation(db, runId, operationId, hash, instanceId);
     });
-    this.#changed(runId);
+    this.#wake();
     return { instanceId };
   }
 
@@ -425,7 +417,7 @@ export class WorkflowEngine {
     });
     if (!removed) return;
     this.#running.get(removed.id)?.abort();
-    this.#changed(removed.run_id);
+    this.#wake();
   }
 
   #captureStep(step: WorkflowStep, context: WorkflowExecutionContext, snapshot?: WorkflowSettingsResolver): CapturedStep {
@@ -436,9 +428,9 @@ export class WorkflowEngine {
 
   async #recover(): Promise<void> {
     while (!this.#stopped) {
-      const runs = new Set<string>();
       const count = this.#store.write(db => {
         const rows = db.query<{ id: string }, [number]>("SELECT id FROM workflow_attempts WHERE status = 'running' LIMIT ?").all(RECOVERY_BATCH);
+        const runs = new Set<string>();
         const now = this.#now();
         for (const { id } of rows) {
           const live = currentAttempt(db, id);
@@ -452,7 +444,6 @@ export class WorkflowEngine {
         for (const runId of runs) new WorkflowGraph(db, runId, now).reconcile();
         return rows.length;
       });
-      for (const runId of runs) this.#changed(runId);
       if (count < RECOVERY_BATCH) break;
       await yieldToLoop();
     }
@@ -466,7 +457,7 @@ export class WorkflowEngine {
         const attempt = this.#claim();
         if (!attempt) return;
         this.#dispatch(attempt);
-        this.#changed(attempt.runId);
+        this.#wake();
       } catch (error) {
         this.#ready = false;
         logger.warn('Workflow scheduling stopped.', { errorCode: diagnosticErrorCode(error) });
@@ -554,15 +545,15 @@ export class WorkflowEngine {
   }
 
   #confirmChat(attemptId: string): void {
-    const runId = this.#store.write(db => {
+    const confirmed = this.#store.write(db => {
       const row = currentAttempt(db, attemptId);
       if (!row?.chat_id || !row.turn_id || row.chat_removed) throw workflowConflict('This attempt has no live chat reservation.');
-      if (row.chat_confirmed) return null;
+      if (row.chat_confirmed) return false;
       db.query('UPDATE workflow_attempts SET chat_confirmed = 1 WHERE id = ?').run(attemptId);
       db.query('UPDATE workflow_runs SET updated_at = ? WHERE id = ?').run(this.#now(), row.run_id);
-      return row.run_id;
+      return true;
     });
-    if (runId) this.#changed(runId);
+    if (confirmed) this.#wake();
   }
 
   #emit(attemptId: string, request: WorkflowEmitRequest): WorkflowSignalOccurrence {
@@ -572,7 +563,7 @@ export class WorkflowEngine {
     const result = this.#store.write(db => {
       const live = currentAttempt(db, attemptId);
       if (!live?.chat_id || !live.turn_id || live.chat_removed) throw workflowConflict('This attempt has no live turn.');
-      const step = JSON.parse(requireStep(db, live.run_id, live.step_id).step_json) as WorkflowStep;
+      const step = requireStep(db, live.run_id, live.step_id);
       if (step.kind !== 'agent' || !step.signals || !Object.hasOwn(step.signals, signal)) {
         throw workflowInvalid('This agent step does not declare that signal.');
       }
@@ -585,14 +576,14 @@ export class WorkflowEngine {
       if (receipt.inserted) graph.reconcile();
       return { signal: signalOccurrence(receipt.row), inserted: receipt.inserted };
     });
-    if (result.inserted) this.#changed(result.signal.runId);
+    if (result.inserted) this.#wake();
     return result.signal;
   }
 
   #settle(attemptId: string, result: WorkflowAttemptResult): void {
-    const runId = this.#store.write(db => {
+    const settled = this.#store.write(db => {
       const live = currentAttempt(db, attemptId);
-      if (!live) return null;
+      if (!live) return false;
       const now = this.#now();
       const graph = new WorkflowGraph(db, live.run_id, now);
       if (live.chat_removed) {
@@ -624,21 +615,12 @@ export class WorkflowEngine {
         finishAttempt(db, live, kind, reason, now);
       }
       graph.reconcile();
-      return live.run_id;
+      return true;
     });
-    if (runId) this.#changed(runId);
+    if (settled) this.#wake();
   }
 
   #now(): string {
     return new Date(this.options.now?.() ?? Date.now()).toISOString();
-  }
-
-  #changed(runId: string): void {
-    this.#notify(this.options.onRunChanged, runId);
-    this.#wake();
-  }
-
-  #notify<T extends unknown[]>(callback: ((...args: T) => void) | undefined, ...args: T): void {
-    try { callback?.(...args); } catch { logger.warn('Workflow invalidation could not be delivered.'); }
   }
 }

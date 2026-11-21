@@ -96,8 +96,7 @@ export class WorkflowGraph {
       step.on?.kind === 'each' ? step.on.maxConcurrency : 1, intake, added ? 1 : 0,
     );
     this.#steps.set(step.id, state);
-    if (!step.on) this.#addInstance(state, evidence ? { kind: 'signal', signalId: evidence.id } : { kind: 'root' },
-      evidence, false, added);
+    if (!step.on) this.#addInstance(state, evidence, added ? 'reject' : 'block');
   }
 
   emit(input: SignalInput): { row: SignalRow; inserted: boolean } {
@@ -116,7 +115,7 @@ export class WorkflowGraph {
     const scope = manualScope(stepId);
     if (existing && existing.scope !== scope) throw workflowConflict('This key already names a producer item in the repeat group.');
     const receipt = this.#insertSignal({ ...input, scope, instanceId: null });
-    if (receipt.inserted) this.#addInstance(step, { kind: 'signal', signalId: receipt.row.id }, receipt.row, true, true);
+    if (receipt.inserted) this.#addInstance(step, receipt.row, 'reject');
     return receipt;
   }
 
@@ -146,7 +145,7 @@ export class WorkflowGraph {
     }
     this.#signalBytes += size;
     this.db.query('UPDATE workflow_runs SET signal_bytes = ? WHERE id = ?').run(this.#signalBytes, this.runId);
-    const row = this.db.query<SignalRow, string[] | (string | null)[]>(`
+    const row = this.db.query<SignalRow, (string | null)[]>(`
       INSERT INTO workflow_signals (id, run_id, step_id, instance_id, signal, key, scope, payload_json, source_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *
     `).get(randomUUID(), this.runId, ref.stepId, input.instanceId, ref.signal, key, scope, payloadJson, JSON.stringify(source), this.now)!;
@@ -171,7 +170,7 @@ export class WorkflowGraph {
           throw workflowConflict(`Repeat group "${state.id}" already has a manual item with that key.`);
         }
       } else this.#setIntake(state, 'closed', null);
-      this.#addInstance(state, { kind: 'signal', signalId: signal.id }, signal, on.kind === 'each');
+      this.#addInstance(state, signal);
     }
 
     for (const state of this.#steps.values()) {
@@ -196,16 +195,15 @@ export class WorkflowGraph {
     return true;
   }
 
-  #addInstance(
-    state: StepState, trigger: WorkflowTrigger, signal: SignalRow | undefined, repeated: boolean, strict = false,
-  ): void {
+  #addInstance(state: StepState, signal: SignalRow | undefined, onBindingError: 'block' | 'reject' = 'block'): void {
+    const step = state.step;
+    const repeated = step.on?.kind === 'each';
     if (repeated) {
       const { count } = this.db.query<{ count: number }, [string]>(
         'SELECT count(*) AS count FROM workflow_instances WHERE run_id = ? AND is_repeated = 1',
       ).get(this.runId)!;
       if (count >= WORKFLOW_LIMITS.repeatInstances) throw workflowLimit('This run has reached its repeat item limit.');
     }
-    const step = state.step;
     const id = randomUUID();
     let status: WorkflowInstanceStatus = step.kind === 'decision' ? 'awaiting-decision' : 'ready';
     let reason: string | null = null;
@@ -224,10 +222,14 @@ export class WorkflowGraph {
         bindings = result.bindingsJson;
       } catch (error) {
         if (!(error instanceof WorkflowBindingError)) throw error;
-        if (strict) throw workflowConflict(error.message);
+        if (onBindingError === 'reject') throw workflowConflict(error.message);
         status = 'blocked';
         reason = error.message;
       }
+    }
+    let trigger: WorkflowTrigger = { kind: 'root' };
+    if (signal) {
+      trigger = step.on?.kind === 'all' ? { kind: 'join', closeSignalId: signal.id } : { kind: 'signal', signalId: signal.id };
     }
     this.db.query(`INSERT INTO workflow_instances (
       id, run_id, step_id, key, trigger_json, trigger_sequence, is_repeated, status, reason, bindings_json, prompt
@@ -279,7 +281,7 @@ export class WorkflowGraph {
       }
       const close = this.db.query<SignalRow, [number]>('SELECT * FROM workflow_signals WHERE sequence = ?').get(state.closeSequence)!;
       this.#setIntake(state, 'closed', null);
-      this.#addInstance(state, { kind: 'join', closeSignalId: close.id }, close, false);
+      this.#addInstance(state, close);
       return true;
     }
 

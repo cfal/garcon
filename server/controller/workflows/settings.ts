@@ -60,11 +60,10 @@ export async function prepareWorkflowSettings(
     const agentId = step.agentId ?? recent?.agentId ?? DEFAULT_AGENT_ID;
     const entry = catalog?.catalog.agents.find(agent => agent.id === agentId);
     if (agentId === 'shell' || entry?.executionPolicy === 'literal') throw new ValidationDomainError(`Step "${step.id}": use a command step to run Shell.`);
-    const useRecentRoute = !step.model && step.apiProviderId === undefined && step.modelEndpointId === undefined;
-    const model = step.model ?? (useRecentRoute ? recent?.model : undefined) ?? entry?.defaultModel;
+    const recentRoute = !step.model && step.apiProviderId === undefined && step.modelEndpointId === undefined ? recent : undefined;
+    const model = step.model ?? recentRoute?.model ?? entry?.defaultModel;
     if (!model) throw new ValidationDomainError(`Step "${step.id}" needs a model on executor "${executorId}". Choose one explicitly or reconnect that executor.`);
-    const providerId = step.apiProviderId !== undefined ? step.apiProviderId : useRecentRoute ? recent?.apiProviderId : undefined;
-    const endpointId = step.modelEndpointId !== undefined ? step.modelEndpointId : useRecentRoute ? recent?.modelEndpointId : undefined;
+    const { apiProviderId: providerId, modelEndpointId: endpointId } = recentRoute ?? step;
     const configured = executionDefaultsForAgent(defaults, agentId);
     let selection: WorkflowAgentSettings;
     if (catalog) {

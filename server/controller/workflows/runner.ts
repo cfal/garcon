@@ -1,10 +1,8 @@
 import type { JsonValue } from '../../../common/json.js';
-import type { WorkflowAgentStep, WorkflowCommandStep, WorkflowSignalDefinition } from '../../../common/workflow-definition.js';
+import type { WorkflowSignalDefinition } from '../../../common/workflow-definition.js';
 import type {
   WorkflowAgentSettings, WorkflowLocation, WorkflowSignalOccurrence,
 } from '../../../common/workflow-runs.js';
-
-export type WorkflowExecutableStep = WorkflowAgentStep | WorkflowCommandStep;
 
 export type WorkflowAttemptRequest = {
   readonly runId: string;

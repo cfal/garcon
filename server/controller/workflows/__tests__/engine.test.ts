@@ -287,6 +287,7 @@ test('schedules keyed signals early, respects running limits, includes queued ma
   const { id } = service.startRun({ definitionId: 'research', inputs: { topic: 'toy geometry' }, executionContext: LOCAL });
   const research = await runner.next('research');
   const f1 = research.callbacks.emit(finding('F1'));
+  expect(step(service, id, 'research').instances[0]?.trigger).toEqual({ kind: 'root' });
   expect(f1.source).toEqual({ kind: 'attempt', attemptId: research.request.attemptId, chatId: research.chatId, turnId: research.turnId });
   expect(research.callbacks.emit({ signal: 'finding_ready', payload: { evidence: 'Synthetic evidence', claim: 'Synthetic claim', finding_id: 'F1' } }).id).toBe(f1.id);
   expect(() => research.callbacks.emit(finding('F1', 'Different'))).toThrow('different payload');
@@ -297,6 +298,8 @@ test('schedules keyed signals early, respects running limits, includes queued ma
   research.callbacks.emit(finding('F2'));
   const add = { runId: id, stepId: 'verify', operationId: 'manual-1', key: 'manual', payload: finding('manual').payload };
   const manual = service.addItem(add, ACTOR);
+  expect(step(service, id, 'verify').instances.find(item => item.key === 'manual')?.trigger)
+    .toEqual({ kind: 'signal', signalId: manual.id });
   expect(service.addItem(add, ACTOR).id).toBe(manual.id);
   expect(manual.source).toEqual({ kind: 'manual', actor: ACTOR, operationId: 'manual-1' });
   expect(() => service.addItem({ ...add, key: 'changed' }, ACTOR)).toThrow('different request');
@@ -322,6 +325,8 @@ test('schedules keyed signals early, respects running limits, includes queued ma
   expect(step(service, id, 'summary').instances).toEqual([]);
   v3.finish(success('manual verdict'));
   const summary = await runner.next('summary');
+  const close = service.getRun(id).signals.find(item => item.ref.stepId === 'research' && item.ref.signal === 'turn_completed')!;
+  expect(step(service, id, 'summary').instances[0]?.trigger).toEqual({ kind: 'join', closeSignalId: close.id });
   expect(summary.request).toMatchObject({ prompt: expect.stringContaining('["verdict 1","verdict 2","manual verdict"]') });
   summary.finish(success('Synthetic report'));
   await until(() => step(service, id, 'decide').instances.length === 1);

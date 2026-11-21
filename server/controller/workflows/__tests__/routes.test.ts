@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { workflowPaths } from '../../../../common/workflow-http.js';
+import type { WorkflowExecutionContext, WorkflowRunDetail } from '../../../../common/workflow-runs.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { LOCAL_SERVER_PRINCIPAL, type HttpRouteContext } from '../../lib/http-route-types.js';
 import { createWorkflowRoutes, type PrepareWorkflowSettings } from '../../routes/workflows.js';
@@ -54,6 +55,26 @@ test('repeated launch retains its first revision without consulting a new catalo
   expect(await replay.json()).toMatchObject({ id: first.id, revision: 1, name: 'Review' });
   expect(preparations).toBe(1);
   expect((await post(workflowPaths.runs, { ...request, revision: 2 })).status).toBe(409);
+});
+
+test('an added step prepares and records the same executor-qualified folder without changing launch defaults', async () => {
+  const contexts: WorkflowExecutionContext[] = [];
+  const { post, publish } = fixture(async (_steps, context) => { contexts.push(context); return () => ({}); });
+  const remote = '00000000-0000-4000-8000-000000000001';
+  const defaultTarget = { executorId: 'local', projectPath: '/local' };
+  const executionContext = { defaultTarget, projectPaths: { local: '/local', [remote]: '/original' } };
+  await publish(null);
+  const started = await post(workflowPaths.runs, { definitionId: 'review', inputs: {}, executionContext });
+  const { id } = await started.json() as WorkflowRunDetail;
+  const response = await post(workflowPaths.addStep, {
+    runId: id, operationId: 'append-command', executionContext: { projectPaths: { [remote]: '/override' } },
+    source: JSON.stringify({ id: 'inspect', kind: 'command', executorId: remote, command: 'pwd' }),
+  });
+  expect(response.status).toBe(200);
+  expect(contexts).toEqual([executionContext, { defaultTarget, projectPaths: { local: '/local', [remote]: '/override' } }]);
+  const run = await response.json() as WorkflowRunDetail;
+  expect(run.executionContext).toEqual(executionContext);
+  expect(run.steps.at(-1)?.location).toEqual({ executorId: remote, projectPath: '/override' });
 });
 
 test('handoffs cannot be approved by a local CLI or delegated executor; revoked launch never mutates', async () => {

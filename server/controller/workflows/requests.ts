@@ -58,6 +58,13 @@ export function normalizeExecutionContext(value: unknown): WorkflowExecutionCont
   return { ...(defaultTarget && { defaultTarget }), ...(projectPaths && { projectPaths }) };
 }
 
+export function mergeExecutionContext(base: WorkflowExecutionContext, overrides?: WorkflowExecutionContext): WorkflowExecutionContext {
+  return {
+    defaultTarget: overrides?.defaultTarget ?? base.defaultTarget,
+    projectPaths: { ...base.projectPaths, ...overrides?.projectPaths },
+  };
+}
+
 export function workflowSource(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) throw workflowInvalid('Workflow source must be a nonempty string.');
   if (Buffer.byteLength(value) > WORKFLOW_LIMITS.sourceBytes) throw workflowLimit('Workflow source exceeds the size limit.');

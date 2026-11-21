@@ -172,10 +172,12 @@ export function runSteps(db: Database, runId: string): RunStepRow[] {
   return db.query<RunStepRow, [string]>('SELECT * FROM workflow_run_steps WHERE run_id = ? ORDER BY rowid').all(runId);
 }
 
-export function requireStep(db: Database, runId: string, stepId: string): RunStepRow {
-  const row = db.query<RunStepRow, [string, string]>('SELECT * FROM workflow_run_steps WHERE run_id = ? AND id = ?').get(runId, stepId);
+export function requireStep(db: Database, runId: string, stepId: string): WorkflowStep {
+  const row = db.query<Pick<RunStepRow, 'step_json'>, [string, string]>(
+    'SELECT step_json FROM workflow_run_steps WHERE run_id = ? AND id = ?',
+  ).get(runId, stepId);
   if (!row) throw workflowNotFound('Workflow step');
-  return row;
+  return JSON.parse(row.step_json) as WorkflowStep;
 }
 
 export function requireInstance(db: Database, runId: string, instanceId: string): InstanceRow {
@@ -206,23 +208,12 @@ function attemptFromRow(row: AttemptRow, hasChat?: (chatId: string) => boolean):
     startedAt: row.started_at, finishedAt: row.finished_at, reason: row.reason };
 }
 
-function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
-  const groups = new Map<string, T[]>();
-  for (const item of items) {
-    const id = key(item);
-    const group = groups.get(id);
-    if (group) group.push(item);
-    else groups.set(id, [item]);
-  }
-  return groups;
-}
-
 export function runDetail(db: Database, runId: string, hasChat?: (chatId: string) => boolean): WorkflowRunDetail {
   const run = requireRun(db, runId);
-  const instances = groupBy(db.query<InstanceRow, [string]>(
+  const instances = Map.groupBy(db.query<InstanceRow, [string]>(
     'SELECT * FROM workflow_instances WHERE run_id = ? ORDER BY rowid',
   ).all(runId), row => row.step_id);
-  const attempts = groupBy(db.query<AttemptRow, [string]>(`
+  const attempts = Map.groupBy(db.query<AttemptRow, [string]>(`
     SELECT a.* FROM workflow_instances i JOIN workflow_attempts a ON a.instance_id = i.id
     WHERE i.run_id = ? ORDER BY a.number
   `).all(runId), row => row.instance_id);

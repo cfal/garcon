@@ -1,4 +1,4 @@
-import { parseWorkflowDefinition, parseWorkflowStepAddition, type WorkflowDefinition, type WorkflowStep } from '../../../common/workflow-definition.js';
+import { parseWorkflowDefinition, parseWorkflowStepAddition, type WorkflowDefinition, type WorkflowDiagnostic, type WorkflowStep } from '../../../common/workflow-definition.js';
 import { workflowPaths } from '../../../common/workflow-http.js';
 import type { WorkflowActor, WorkflowExecutionContext, WorkflowPageRequest } from '../../../common/workflow-runs.js';
 import { readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
@@ -9,7 +9,7 @@ import { markRouteNoStore } from '../lib/http-route.js';
 import type { HttpRouteContext, RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { WorkflowEngine, WorkflowSettingsResolver } from '../workflows/engine.js';
 import {
-  normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
+  mergeExecutionContext, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
   normalizeStart, normalizeTest, workflowIdentifier,
 } from '../workflows/requests.js';
 
@@ -70,16 +70,33 @@ function mutate(handler: (value: unknown, caller: WorkflowActor, assertCurrent: 
   });
 }
 
+function invalidSource(diagnostics: readonly WorkflowDiagnostic[], fallback: string): Response {
+  return Response.json({ success: false, errorCode: 'VALIDATION_FAILED',
+    error: diagnostics[0]?.message ?? fallback, retryable: false, diagnostics }, { status: 422 });
+}
+
 async function withDefinition(source: string, consume: (definition: WorkflowDefinition) => unknown): Promise<Response> {
   const { definition, diagnostics } = parseWorkflowDefinition(source);
-  if (!definition) return Response.json({ success: false, errorCode: 'VALIDATION_FAILED',
-    error: diagnostics[0]?.message ?? 'Invalid workflow definition.', retryable: false, diagnostics }, { status: 422 });
+  if (!definition) return invalidSource(diagnostics, 'Invalid workflow definition.');
   return Response.json(await consume(definition), { status: 201 });
 }
 
 export type PrepareWorkflowSettings = (steps: readonly WorkflowStep[], context: WorkflowExecutionContext) => Promise<WorkflowSettingsResolver>;
 
 export function createWorkflowRoutes(runtime: { readonly service: WorkflowHttpService; prepareSettings: PrepareWorkflowSettings }): RouteMap {
+  function changeRun<T extends { runId: string }>(
+    normalize: (raw: unknown) => T,
+    apply: (service: WorkflowHttpService, request: T, actor: WorkflowActor) => void,
+    requireHuman = false,
+  ): RouteHandler {
+    return mutate((raw, who) => {
+      const request = normalize(raw);
+      const service = runtime.service;
+      apply(service, request, who);
+      return Response.json(service.getRun(request.runId));
+    }, requireHuman);
+  }
+
   return {
     [workflowPaths.definitions]: {
       GET: read(url => runtime.service.listDefinitions(page(url.searchParams))),
@@ -123,18 +140,8 @@ export function createWorkflowRoutes(runtime: { readonly service: WorkflowHttpSe
         return service.getRun(service.testWorkflowDraft(request, def, snapshot).id);
       });
     }) },
-    [workflowPaths.decide]: { POST: mutate((raw, who) => {
-      const request = normalizeDecision(raw);
-      const service = runtime.service;
-      service.decide(request, who);
-      return Response.json(service.getRun(request.runId));
-    }, true) },
-    [workflowPaths.addItem]: { POST: mutate((raw, who) => {
-      const request = normalizeAddItem(raw);
-      const service = runtime.service;
-      service.addItem(request, who);
-      return Response.json(service.getRun(request.runId));
-    }) },
+    [workflowPaths.decide]: { POST: changeRun(normalizeDecision, (service, request, who) => service.decide(request, who), true) },
+    [workflowPaths.addItem]: { POST: changeRun(normalizeAddItem, (service, request, who) => service.addItem(request, who)) },
     [workflowPaths.addStep]: { POST: mutate(async (raw, who, assertCurrent) => {
       const request = normalizeAddStep(raw);
       const service = runtime.service;
@@ -147,25 +154,14 @@ export function createWorkflowRoutes(runtime: { readonly service: WorkflowHttpSe
       const evidence = request.evidenceSignalId ? run.signals.find(item => item.id === request.evidenceSignalId) : null;
       if (request.evidenceSignalId && !evidence) throw new ValidationDomainError('Select a signal occurrence from this run.');
       const parsed = parseWorkflowStepAddition({ ...run.pinnedRevision.definition, steps: run.steps.map(entry => entry.step) }, request.source, { evidence: evidence?.ref });
-      if (!parsed.step) return Response.json({ success: false, errorCode: 'VALIDATION_FAILED',
-        error: parsed.diagnostics[0]?.message ?? 'Invalid step.', retryable: false, diagnostics: parsed.diagnostics }, { status: 422 });
-      const ctx = { defaultTarget: request.executionContext?.defaultTarget ?? run.executionContext.defaultTarget,
-        projectPaths: { ...run.executionContext.projectPaths, ...request.executionContext?.projectPaths } };
-      const snapshot = await runtime.prepareSettings([parsed.step], ctx);
+      if (!parsed.step) return invalidSource(parsed.diagnostics, 'Invalid step.');
+      const context = mergeExecutionContext(run.executionContext, request.executionContext);
+      const snapshot = await runtime.prepareSettings([parsed.step], context);
       assertCurrent();
       service.addStep(request, who, snapshot);
       return Response.json(service.getRun(run.id));
     }) },
-    [workflowPaths.retry]: { POST: mutate((raw, who) => {
-      const request = normalizeRetry(raw);
-      const service = runtime.service;
-      service.retry(request, who);
-      return Response.json(service.getRun(request.runId));
-    }) },
-    [workflowPaths.archive]: { POST: mutate((raw, who) => {
-      const request = normalizeArchive(raw);
-      runtime.service.archiveRun(request, who);
-      return Response.json(runtime.service.getRun(request.runId));
-    }) },
+    [workflowPaths.retry]: { POST: changeRun(normalizeRetry, (service, request, who) => service.retry(request, who)) },
+    [workflowPaths.archive]: { POST: changeRun(normalizeArchive, (service, request, who) => service.archiveRun(request, who)) },
   };
 }
