@@ -1,25 +1,9 @@
 import type { GarconTestClient } from "../../support/garcon-client.js";
 import { describe, expect, test } from "bun:test";
-import { rm, writeFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { withIntegrationFixture } from "../../support/integration-fixture.js";
-import { initializeFixtureRepository } from "../../support/git-fixture.js";
-
-async function runGit(projectPath: string, args: string[]): Promise<void> {
-  const child = Bun.spawn(["git", ...args], {
-    cwd: projectPath,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stderr, exitCode] = await Promise.all([
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  if (exitCode !== 0) {
-    throw new Error(`git ${args[0]} failed: ${stderr.trim()}`);
-  }
-}
+import { initializeFixtureRepository, runFixtureGit } from "../../support/git-fixture.js";
 
 async function getJson<T>(client: GarconTestClient, endpoint: string): Promise<T> {
   const response = await client.fetch(endpoint);
@@ -39,28 +23,11 @@ describe("Git worktree HTTP API", () => {
       const linkedPath = join(projectPath, "linked");
       const missingPath = join(projectPath, "missing");
       const outsidePath = join(fixture.dirs.root, "outside");
-      await runGit(projectPath, ["init", "-b", "main"]);
-      await runGit(projectPath, ["config", "user.email", "test@example.com"]);
-      await runGit(projectPath, ["config", "user.name", "Integration Test"]);
-      await writeFile(join(projectPath, "tracked.txt"), "tracked\n", "utf8");
-      await runGit(projectPath, ["add", "tracked.txt"]);
-      await runGit(projectPath, ["commit", "-m", "initial"]);
-      await runGit(projectPath, [
-        "worktree",
-        "add",
-        "-b",
-        "feature",
-        linkedPath,
-      ]);
-      await runGit(projectPath, [
-        "worktree",
-        "add",
-        "-b",
-        "missing",
-        missingPath,
-      ]);
+      await initializeFixtureRepository(projectPath);
+      await runFixtureGit(projectPath, "worktree", "add", "-b", "feature", linkedPath);
+      await runFixtureGit(projectPath, "worktree", "add", "-b", "missing", missingPath);
       await rm(missingPath, { recursive: true, force: true });
-      await runGit(projectPath, ['worktree', 'add', '-b', 'outside', outsidePath]);
+      await runFixtureGit(projectPath, "worktree", "add", "-b", "outside", outsidePath);
 
       const query = new URLSearchParams({ executorId: fixture.client.executorId, project: projectPath });
       const { worktrees } = await getJson<{
@@ -129,7 +96,7 @@ describe("Git worktree HTTP API", () => {
           body: JSON.stringify({ executorId: fixture.client.executorId, project: projectPath, ...options }),
         });
       const suggestedPath = join(projectPath, 'suggested');
-      await runGit(projectPath, ['branch', 'unused-local']);
+      await runFixtureGit(projectPath, "branch", "unused-local");
       expect((await create({ worktreePath: suggestedPath, newBranch: 'unused-local' })).ok).toBe(false);
       expect((await create({ worktreePath: suggestedPath, newBranch: 'fresh-name' })).ok).toBe(true);
       expect((await create({ worktreePath: join(projectPath, 'manual'), branch: 'unused-local' })).ok).toBe(true);

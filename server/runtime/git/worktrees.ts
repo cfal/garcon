@@ -233,6 +233,15 @@ export function createWorktreeOperations(
     return { targets };
   }
 
+  async function localBranchExists(projectPath: string, name: string): Promise<boolean> {
+    try {
+      await runGit(projectPath, ["rev-parse", "--verify", `refs/heads/${name}`], readOnlyGitOptions());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function createWorktree({
     projectPath,
     baseRef,
@@ -247,27 +256,18 @@ export function createWorktreeOperations(
     if (name) await assertSafeBranchName(projectPath, name, "branch name");
 
     const args: string[] = ["worktree", "add"];
+    let checkoutRef = baseRef;
     if (detach) {
-      args.push("--detach", worktreePath);
-      if (baseRef) args.push(baseRef);
+      args.push("--detach");
     } else if (name) {
-      const reuseBranch = !newBranch && await runGit(
-        projectPath,
-        ["rev-parse", "--verify", `refs/heads/${name}`],
-        readOnlyGitOptions(),
-      )
-        .then(() => true)
-        .catch(() => false);
-      if (reuseBranch) {
-        args.push(worktreePath, name);
+      if (!newBranch && await localBranchExists(projectPath, name)) {
+        checkoutRef = name;
       } else {
-        args.push("--no-track", "-b", name, worktreePath);
-        if (baseRef) args.push(baseRef);
+        args.push("--no-track", "-b", name);
       }
-    } else {
-      args.push(worktreePath);
-      if (baseRef) args.push(baseRef);
     }
+    args.push(worktreePath);
+    if (checkoutRef) args.push(checkoutRef);
 
     const { stdout } = await runGit(projectPath, args);
     const resolvedPath = path.resolve(projectPath, worktreePath);

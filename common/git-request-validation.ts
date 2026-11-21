@@ -95,7 +95,7 @@ export function validateGitRequest<K extends GitMethod>(method: K, request: unkn
   if (new TextEncoder().encode(JSON.stringify(v)).length > GIT_MAX_REQUEST_BYTES) {
     throw new GitServiceError('GIT_REQUEST_TOO_LARGE', 'Git request is too large. Select fewer paths.');
   }
-  for (const key of ['file', 'worktreePath', 'branch', 'ref', 'baseRef', 'remote', 'remoteBranch', 'commit', 'stashRef']) {
+  for (const key of ['file', 'worktreePath', 'branch', 'newBranch', 'ref', 'baseRef', 'remote', 'remoteBranch', 'commit', 'stashRef']) {
     if (!optional(v[key], path)) fail();
   }
   if (!optional(v.message, text) || !optional(v.query, path) && v.query !== '') fail();
@@ -116,7 +116,8 @@ export function validateGitRequest<K extends GitMethod>(method: K, request: unkn
     case 'createBranch': if (!path(v.branch)) fail(); break;
     case 'revertCommit': case 'getCommitSnapshot': if (!path(v.commit)) fail(); break;
     case 'createWorktree':
-      if (!path(v.worktreePath) || v.newBranch !== undefined && (!path(v.newBranch) || v.branch !== undefined || v.detach)) fail();
+      if (!path(v.worktreePath)) fail();
+      if (v.newBranch !== undefined && (v.branch !== undefined || v.detach === true)) fail();
       break;
     case 'removeWorktree': if (!path(v.worktreePath)) fail(); break;
     case 'applyStash': case 'popStash': case 'dropStash': if (!path(v.stashRef) || !hash(v.expectedHash)) fail(); break;
