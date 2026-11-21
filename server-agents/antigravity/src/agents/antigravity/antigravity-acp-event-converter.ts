@@ -15,7 +15,7 @@ import {
   type AcpEventConverter,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
-import { ACP_NEW_OUTPUT_UPDATES, AcpInBandFailure } from '@garcon/server-agent-common/acp/in-band-failure';
+import { ACP_NEW_OUTPUT_UPDATES, AcpInBandFailure, acpOutputUpdateType } from '@garcon/server-agent-common/acp/in-band-failure';
 import {
   antigravityToolCall,
   antigravityToolResultText,
@@ -98,7 +98,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const update = asObject(notification.update);
     const session = this.#sessionFor(context.sessionId);
     const updateType = asString(update.sessionUpdate);
-    const outputType = this.#outputType(session, update, updateType);
+    const outputType = acpOutputUpdateType(update, (id) => session.emittedToolIds.has(id)
+      || session.deferredCalls.has(id) || session.completedToolIds.has(id) || session.toolNames.has(id));
     session.assistantText += session.failure.continueOn(outputType);
     // New output publishes waiting rows first, so nothing moves ahead of a call
     // that started earlier.
@@ -154,17 +155,6 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   // A call's row waits for its arguments when the first frame carries none, so a
   // later frame can still give it its shared tool type; a terminal frame emits
   // it regardless.
-  // A tool_call_update reports on an earlier call, except when it is the first
-  // frame of a call, which is new output like a tool_call.
-  #outputType(session: SessionState, update: Record<string, unknown>, updateType: string | undefined): string | undefined {
-    if (updateType !== 'tool_call_update') return updateType;
-    const id = asString(update.toolCallId);
-    if (!id) return updateType;
-    const known = session.emittedToolIds.has(id) || session.deferredCalls.has(id)
-      || session.completedToolIds.has(id) || session.toolNames.has(id);
-    return known ? updateType : 'tool_call';
-  }
-
   // Records the frame, then fills the name and arguments it omits from earlier
   // frames of the same call.
   #resolvedCall(session: SessionState, call: AntigravityToolCall): AntigravityToolCall {

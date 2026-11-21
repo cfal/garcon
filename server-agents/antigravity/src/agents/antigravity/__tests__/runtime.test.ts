@@ -607,6 +607,32 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('gives a session resumed first the default a later new session reveals', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request({ model: 'gemini-test-high' }));
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.shutdown();
+    // A server restart: a new runtime whose first act is resuming the chat.
+    const restarted = new AcpAgentRuntime(createAntigravityAcpPolicy(CONFIG), {
+      converter: new AntigravityAcpEventConverter(),
+      createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+    });
+    await restarted.runTurn({ ...request({ model: 'gemini-test-high' }), agentSessionId: started.agentSessionId });
+    const other = await restarted.startSession(request({ chatId: 'chat-2' }));
+    await waitFor(() => runEnded(events).length === 3);
+    // The fake serves one process at a time, so both chats let go of theirs.
+    restarted.releaseSession('chat-2', other.agentSessionId);
+    restarted.releaseSession('chat-1', started.agentSessionId);
+
+    await restarted.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+
+    expect(other.agentSessionId).not.toBe(started.agentSessionId);
+    expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
+      .toEqual(['gemini-test-high', 'gemini-test-low']);
+    restarted.shutdown();
+  });
+
   it('fails clearly when agy exits after configuration but before the prompt', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());
@@ -1125,6 +1151,21 @@ describe('Antigravity one-shot query', () => {
     agent.onPrompt((fake, sessionId) => {
       fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: quoted\n' } });
       fake.update(sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking' } });
+      setTimeout(() => fake.endPrompt(), 20);
+    });
+    const result = await runAntigravitySingleQuery('Name this chat.', {
+      projectPath: '/work',
+      signal: new AbortController().signal,
+      createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+    }, CONFIG);
+    expect(result).toBe('⚠ agent executor error: quoted');
+  });
+
+  it('treats a marker followed by a call whose first frame is an update as ordinary text', async () => {
+    const agent = new FakeAntigravityAgent();
+    agent.onPrompt((fake, sessionId) => {
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: quoted\n' } });
+      fake.update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'tool-9', status: 'in_progress' });
       setTimeout(() => fake.endPrompt(), 20);
     });
     const result = await runAntigravitySingleQuery('Name this chat.', {

@@ -1,6 +1,6 @@
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AcpClient } from './client.js';
-import { AcpInBandFailure, type AcpFailureSplitter } from './in-band-failure.js';
+import { acpOutputUpdateType, AcpInBandFailure, type AcpFailureSplitter } from './in-band-failure.js';
 import type { AcpInitializeParams, AcpSessionNewResult } from './protocol.js';
 import { acpContentText, asObject, asString } from './event-converter.js';
 import { permissionChoiceOutcome } from './runtime-helpers.js';
@@ -37,6 +37,8 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     authenticateMethodId: options.authenticateMethodId,
   });
   const assistantChunks: string[] = [];
+  // Calls already seen, so a call's first update frame counts as new output.
+  const seenCalls = new Set<string>();
   const failure = new AcpInBandFailure(options.splitFailure ?? ((chunk) => ({ text: chunk, failure: null })));
   const abort = () => client.close();
   options.signal.addEventListener('abort', abort, { once: true });
@@ -57,7 +59,9 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     if (message.method !== 'session/update') return;
     const update = asObject(asObject(message.params).update);
     const updateType = asString(update.sessionUpdate);
-    assistantChunks.push(failure.continueOn(updateType));
+    assistantChunks.push(failure.continueOn(acpOutputUpdateType(update, (id) => seenCalls.has(id))));
+    const toolCallId = asString(update.toolCallId);
+    if (toolCallId && (updateType === 'tool_call' || updateType === 'tool_call_update')) seenCalls.add(toolCallId);
     if (updateType !== 'agent_message_chunk' && updateType !== 'agent_message') return;
     assistantChunks.push(failure.offer(acpContentText(update.content)));
   });

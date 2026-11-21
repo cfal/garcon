@@ -16,6 +16,18 @@ export const ACP_NEW_OUTPUT_UPDATES: ReadonlySet<string> = new Set([
   'tool_call',
 ]);
 
+// The update type that new-output checks see: a tool_call_update reports on an
+// earlier call, except when it is the first frame of a call.
+export function acpOutputUpdateType(
+  update: Record<string, unknown>,
+  isKnownCall: (toolCallId: string) => boolean,
+): string | undefined {
+  const updateType = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined;
+  if (updateType !== 'tool_call_update') return updateType;
+  const toolCallId = typeof update.toolCallId === 'string' ? update.toolCallId : '';
+  return !toolCallId || isKnownCall(toolCallId) ? updateType : 'tool_call';
+}
+
 export class AcpInBandFailure {
   #pending: { readonly failure: string; readonly text: string } | null = null;
 

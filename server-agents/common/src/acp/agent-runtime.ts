@@ -508,6 +508,8 @@ export class AcpAgentRuntime {
 
     try {
       const promptConfig = promptConfigFor(this.#policy, request);
+      // A default learned after this session was resumed replaces its guess.
+      session.agentDefaultModelId = this.#agentDefaultModelId ?? session.agentDefaultModelId;
       await configureSessionFor(this.#policy, session, request);
       // Stopped while configuring: end before admission records the turn as started.
       if (turn.aborted) return;
