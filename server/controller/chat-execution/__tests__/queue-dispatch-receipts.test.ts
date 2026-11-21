@@ -8,11 +8,18 @@ import { QueueExecutionAttempt } from '../execution-attempt.js';
 import { SteerInputDelivery } from '../steer-input-delivery.js';
 import { QueueDrainer } from '../queue-drainer.js';
 
-test('draining rejects a preamble input without a receipt but preserves an already-committed receipt', async () => {
-  const controls = new ChatExecutionControlOperations(new InMemoryChatExecutionControlRepository('instance'), {
-    runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
-    unsettledQueueReceiptKeys: () => new Set(), publish() {}, inputAccepted() {},
+function createControls(): ChatExecutionControlOperations {
+  return new ChatExecutionControlOperations(new InMemoryChatExecutionControlRepository('instance'), {
+    runExclusive: (_chatId, operation) => operation(),
+    chatExists: () => true,
+    unsettledQueueReceiptKeys: () => new Set(),
+    publish() {},
+    inputAccepted() {},
   }, { assertAvailable: async () => {} }, { assertSupported() {} });
+}
+
+test('draining rejects a preamble input without a receipt but preserves an already-committed receipt', async () => {
+  const controls = createControls();
   const chatId = 'chat-1';
   const discarded = await controls.create(chatId, { content: '/blocked', images: [] });
   const committed = await controls.create(chatId, { content: 'Already committed', images: [] });
@@ -50,13 +57,7 @@ test('draining rejects a preamble input without a receipt but preserves an alrea
 });
 
 test('discarding a dequeue preserves earlier dispatch receipts without adding one for the discard', async () => {
-  const controls = new ChatExecutionControlOperations(new InMemoryChatExecutionControlRepository('instance'), {
-    runExclusive: (_chatId, operation) => operation(),
-    chatExists: () => true,
-    unsettledQueueReceiptKeys: () => new Set(),
-    publish() {},
-    inputAccepted() {},
-  }, { assertAvailable: async () => {} }, { assertSupported() {} });
+  const controls = createControls();
   const chatId = 'chat-1';
   const first = await controls.create(chatId, { content: 'first input', images: [] });
   await controls.create(chatId, { content: 'second input', images: [] });
@@ -72,10 +73,7 @@ test('discarding a dequeue preserves earlier dispatch receipts without adding on
 
 test('a manually steered input can commit before rejection and later leave the queue without a receipt', async () => {
   const chatId = 'chat-1';
-  const controls = new ChatExecutionControlOperations(new InMemoryChatExecutionControlRepository('instance'), {
-    runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
-    unsettledQueueReceiptKeys: () => new Set(), publish() {}, inputAccepted() {},
-  }, { assertAvailable: async () => {} }, { assertSupported() {} });
+  const controls = createControls();
   const ownership = new ExecutionOwnership();
   ownership.installAttempt(chatId, new QueueExecutionAttempt({ turnId: 'turn', clientRequestId: 'request' }));
   const committed: string[] = [];
