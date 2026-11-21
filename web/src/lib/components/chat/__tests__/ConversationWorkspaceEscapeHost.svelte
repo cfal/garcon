@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
@@ -145,6 +146,7 @@
 	setConversationUi(conversationUi);
 
 	const sessions = {
+		settingsMutations: new ChatSettingsMutations(),
 		get selectedChatId() {
 			return selectedChat.id;
 		},

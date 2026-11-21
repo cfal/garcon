@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfigObject } from '../runtime-types.js';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import { appendCodexConfigArgs } from './config-overrides.js';
@@ -206,9 +207,9 @@ export class CodexAppServerClient extends EventEmitter {
     return this.#ready;
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     await this.connect();
-    return this.#withRequestMetric(method, () => this.#sendRequest<T>(method, params));
+    return this.#withRequestMetric(method, () => this.#sendRequest<T>(method, params, timeoutMs));
   }
 
   async #withRequestMetric<T>(method: string, operation: () => Promise<T>): Promise<T> {
@@ -368,16 +369,20 @@ export class CodexAppServerClient extends EventEmitter {
     this.emit('metric', metric);
   }
 
-  #sendRequest<T>(method: string, params?: unknown): Promise<T> {
+  #sendRequest<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     const id = this.#nextId++;
     const payload = params === undefined ? { id, method } : { id, method, params };
     const promise = new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new AgentIntegrationError('TIMEOUT', `Codex ${method} timed out`, true));
+      }, timeoutMs);
+      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
     });
     try {
       this.#write(payload);
     } catch (error) {
-      this.#pending.delete(id);
+      this.#clearPendingRequest(id);
       throw error;
     }
     return promise;

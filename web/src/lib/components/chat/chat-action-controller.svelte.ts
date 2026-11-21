@@ -22,6 +22,7 @@ export interface ChatActionControllerDeps {
 	get displayedChatIds(): readonly string[];
 	get selectedChatId(): string | null;
 	projectPathRevision: (chatId: string) => number;
+	pendingSettings: (chatId: string) => Promise<boolean> | null;
 	onQuietRefresh: () => Promise<void> | void;
 	isArchiveMutationPending: (chatId: string) => boolean;
 	startArchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
@@ -212,6 +213,16 @@ export class ChatActionController {
 		this.#pendingForks.add(sourceChatId);
 		const dismiss = this.deps.showProgress(`fork:${sourceChatId}`, m.chat_notice_forking_chat());
 		try {
+			const pending = this.deps.pendingSettings(sourceChatId);
+			if (pending) {
+				const source = this.deps.chats.find((chat) => chat.id === sourceChatId);
+				if (!source) return;
+				const { agentId, executorId, agentOwnershipEpoch } = source;
+				if (!(await pending)) return;
+				const current = this.deps.chats.find((chat) => chat.id === sourceChatId);
+				if (!current || current.agentId !== agentId || current.executorId !== executorId
+					|| current.agentOwnershipEpoch !== agentOwnershipEpoch) return;
+			}
 			const result = await requestChatFork(
 				{ sourceChatId, chatId: createClientChatId() },
 				() => this.handoffForkConfirmation.ask(),

@@ -8,7 +8,7 @@ import {
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { JsonObject, JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import type { ChatSetting, ChatSettingsPatch as SettingsPatch } from '$lib/chat/sessions/chat-settings-mutations.js';
 import type {
 	AgentSwitchSelection,
 	ConversationAgentSwitchService,
@@ -27,6 +27,7 @@ export interface ConversationSettingsControllerOptions {
 		| 'patchDraftStartup'
 		| 'patchChat'
 		| 'quietRefreshChats'
+		| 'settingsMutations'
 	>;
 	get agentState(): Pick<
 		SessionControllerDeps['agentState'],
@@ -55,122 +56,22 @@ export interface ConversationSettingsControllerOptions {
 	get agentSwitch(): Pick<ConversationAgentSwitchService, 'switchAgent'>;
 }
 
-type SettingsPatch = Partial<
-	Pick<
-		ChatSessionRecord,
-		| 'model'
-		| 'apiProviderId'
-		| 'modelEndpointId'
-		| 'modelProtocol'
-		| 'permissionMode'
-		| 'thinkingMode'
-		| 'agentSettings'
-	>
->;
-
-interface SettingMutation {
-	epoch: string | undefined;
-	confirmed: SettingsPatch;
-	latest: symbol;
-}
-
 export class ConversationSettingsController {
-	#pendingMutations = new Map<string, SettingMutation>();
-	#pendingRequests = new Map<string, Promise<boolean>>();
-
 	constructor(private readonly options: ConversationSettingsControllerOptions) {}
-
-	hasPending(chatId: string): boolean {
-		return this.#pendingRequests.has(chatId);
-	}
-
-	async settlePending(chatId: string): Promise<boolean> {
-		let accepted = true;
-		while (this.#pendingRequests.has(chatId)) {
-			accepted = await this.#pendingRequests.get(chatId)!;
-		}
-		return accepted;
-	}
-
-	#send(chatId: string, request: () => Promise<void>): void {
-		const previous = this.#pendingRequests.get(chatId);
-		const run = async () => {
-			try {
-				await request();
-				return true;
-			} catch {
-				return false;
-			}
-		};
-		const pending = previous ? previous.then(run) : run();
-		this.#pendingRequests.set(chatId, pending);
-		void pending.then(() => {
-			if (this.#pendingRequests.get(chatId) === pending) this.#pendingRequests.delete(chatId);
-		});
-	}
 
 	#changeSetting(
 		chatId: string,
-		setting: 'model' | 'permissionMode' | 'thinkingMode' | 'agentSettings',
+		setting: ChatSetting,
 		patch: SettingsPatch,
 		request: (epoch: string | undefined) => Promise<SettingsPatch>,
 		failureMessage: (detail: string) => string,
 	): void {
 		const { sessions, chatState } = this.options;
-		const chat = sessions.byId[chatId];
-		if (!chat) return;
-		const key = `${chatId}:${setting}`;
-		const epoch = chat.agentOwnershipEpoch ?? undefined;
-		const previous = this.#pendingMutations.get(key);
-		const token = Symbol(key);
-		const mutation =
-			previous && previous.epoch === epoch
-				? previous
-				: {
-						epoch,
-						confirmed: this.#readPatch(chat, patch),
-						latest: token,
-					};
-		mutation.latest = token;
-		this.#pendingMutations.set(key, mutation);
-		const isCurrent = () =>
-			this.#pendingMutations.get(key) === mutation &&
-			mutation.latest === token &&
-			!!sessions.byId[chatId] &&
-			sessions.byId[chatId].agentOwnershipEpoch === epoch;
-		this.#applyPatch(chatId, patch);
-		this.#send(chatId, async () => {
-			try {
-				// Superseded successes still advance the rollback baseline for the next request.
-				mutation.confirmed = await request(epoch);
-				if (isCurrent()) this.#applyPatch(chatId, mutation.confirmed);
-			} catch (error) {
-				if (isCurrent()) {
-					this.#applyPatch(chatId, mutation.confirmed);
-					chatState.appendLocalNoticeForChat(chatId, 'error', failureMessage(errorDetail(error)));
-				}
-				throw error;
-			} finally {
-				try {
-					if (isCurrent()) {
-						// A lost reply may follow a durable write, so rollback alone is not authority.
-						await sessions.quietRefreshChats();
-						if (isCurrent())
-							this.#applyPatch(chatId, this.#readPatch(sessions.byId[chatId], patch));
-					}
-				} finally {
-					if (this.#pendingMutations.get(key) === mutation && mutation.latest === token) {
-						this.#pendingMutations.delete(key);
-					}
-				}
-			}
+		sessions.settingsMutations.change(chatId, setting, patch, {
+			sessions, request,
+			apply: (next) => this.#applyPatch(chatId, next),
+			onFailure: (error) => chatState.appendLocalNoticeForChat(chatId, 'error', failureMessage(errorDetail(error))),
 		});
-	}
-
-	#readPatch(chat: ChatSessionRecord, fields: SettingsPatch): SettingsPatch {
-		return Object.fromEntries(
-			Object.keys(fields).map((key) => [key, chat[key as keyof SettingsPatch]]),
-		);
 	}
 
 	#applyPatch(chatId: string, patch: SettingsPatch): void {

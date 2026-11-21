@@ -148,6 +148,7 @@ describe('CodexExecution', () => {
     const events = [];
     const publish = (event) => events.push(event);
     const request = startRequest({
+      settings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'ultrafast' } },
       endpoint: {
         apiProviderId: 'provider-1',
         endpointId: 'endpoint-1',
@@ -181,6 +182,7 @@ describe('CodexExecution', () => {
     });
     expect(request.admission.markStarted).toHaveBeenCalledTimes(1);
     expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      speed: 'ultrafast',
       operation: expect.objectContaining({
         chatId: 'chat-1',
         runId: 'run-1',
@@ -411,6 +413,7 @@ describe('CodexExecution', () => {
       model: 'gpt-5.4-mini',
       permissionMode: 'manualBypass',
       thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'fast' } },
     };
 
     await execution.applySessionConfiguration('thread-1', next, previous);
@@ -470,6 +473,7 @@ describe('CodexExecution', () => {
     await execution.applySessionConfiguration('thread-1', {
       ...previous,
       thinkingMode: 'none',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'ultrafast' } },
     }, previous);
 
     expect(runtime.isRunning).toHaveBeenCalledWith('thread-1');

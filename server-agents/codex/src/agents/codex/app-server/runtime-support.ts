@@ -101,10 +101,11 @@ export type RetainedSourceUsage = Pick<
   | 'interruptAcknowledgement'
   | 'pendingThreadSettings'
   | 'activeDeliveryReservations'
+  | 'configurationReservations'
 >;
 
 // A retained source is safe for the idle sweep to retire only once every
-// admission handshake (interrupt ack, settings confirmation) and
+// admission handshake (interrupt ack, configuration work) and
 // in-flight delivery has settled; otherwise the sweep would yank a writer the
 // runtime is actively re-arming or delivering through.
 export function isRetainedSourceInUse(
@@ -115,7 +116,8 @@ export function isRetainedSourceInUse(
     || isActiveSessionStatus(session.status)
     || session.interruptAcknowledgement !== null
     || session.pendingThreadSettings !== null
-    || session.activeDeliveryReservations > 0;
+    || session.activeDeliveryReservations > 0
+    || session.configurationReservations > 0;
 }
 
 export function delay(ms: number): Promise<void> {

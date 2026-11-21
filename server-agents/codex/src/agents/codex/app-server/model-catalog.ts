@@ -12,6 +12,8 @@ export const COMPILED_CODEX_MODEL_CATALOG_PATH = Symbol.for(
 // GPT-6.2 entries preserve native ModelInfo fields from the catalog retrieved 2026-11-17,
 // including model-owned instructions and Ultra effort:
 // https://chatgpt.com/backend-api/codex/models?client_version=0.169.0
+// Ultrafast metadata for API-key models follows the published Responses tier:
+// https://developers.openai.com/api/docs/guides/ultrafast-mode
 export function resolveCodexModelCatalogPath(): string {
   const compiledPath = Reflect.get(globalThis, COMPILED_CODEX_MODEL_CATALOG_PATH);
   const catalogPath = typeof compiledPath === 'string'

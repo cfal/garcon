@@ -16,6 +16,7 @@ import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-
 import type { CodexConfig } from '../../config.js';
 import type { CodexAuthStatus } from './codex-auth.js';
 import { codexQuestionReplyInput } from './async-questions.js';
+import { codexSpeed } from './service-tier.js';
 import {
   assertCodexSessionEndpoint,
   buildCodexAppServerEndpointRuntime,
@@ -120,6 +121,11 @@ export class CodexExecution implements AgentRuntimeExecution {
     const sourceEndpointId = this.runtime.sourceEndpointId(agentSessionId);
     if (sourceEndpointId === undefined) return;
     assertCodexSessionEndpoint(sourceEndpointId, configuration.endpoint?.endpointId ?? null);
+    // Speed is a next-operation preference; saving it never changes the loaded thread.
+    if (configuration.model === previousConfiguration.model
+      && configuration.permissionMode === previousConfiguration.permissionMode
+      && configuration.thinkingMode === previousConfiguration.thinkingMode
+      && configuration.endpoint?.endpointId === previousConfiguration.endpoint?.endpointId) return;
     const previousEffort = mapThinkingModeToCodexEffort(
       previousConfiguration.thinkingMode,
       previousConfiguration.model,
@@ -202,6 +208,7 @@ function executionFields(
     modelEndpointId: request.endpoint?.endpointId ?? null,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
+    speed: codexSpeed(request.settings),
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
