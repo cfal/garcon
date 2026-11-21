@@ -56,8 +56,7 @@ import { PermissionControlEvents, type PermissionActionabilityChange } from './p
 import { inputDetail } from './input-submission.js';
 export type { PermissionActionabilityChange } from './permission-control-events.js';
 import { ProducerLease } from './producer-lease.js';
-import { projectFinalResponse } from './final-response.js';
-import { parseCommandOutcome, parseCommandWorkingDirectory } from '../../../common/command-output.js';
+import { projectProviderTerminal } from './provider-terminal.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
@@ -834,18 +833,7 @@ export class TranscriptLedgerService {
       case 'run-ended': {
         if (this.#activeRuns.get(chatId) !== event.runId) return;
         this.#activeRuns.delete(chatId);
-        this.#appendRunEnd(
-          chatId,
-          event.runId,
-          event.outcome,
-          'provider',
-          event.error,
-          {
-            finalResponse: event.outcome === 'finished' ? projectFinalResponse(event.finalResponse) : null,
-            workingDirectory: parseCommandWorkingDirectory(event.workingDirectory) ?? undefined,
-            commandOutcome: parseCommandOutcome(event.commandOutcome) ?? undefined,
-          },
-        );
+        this.#appendRunEnd(chatId, event.runId, event.outcome, 'provider', event.error, projectProviderTerminal(event));
       }
     }
   }

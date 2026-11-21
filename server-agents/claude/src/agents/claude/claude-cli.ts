@@ -10,6 +10,7 @@ import { configureClaudeSessionModel } from './session-model.js';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   AgentIntegrationError,
+  type AgentRunFailureCertainty,
   type AgentSteerResult,
 } from '@garcon/server-agent-interface';
 import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
@@ -42,6 +43,7 @@ import {
   ClaudeProcessTransport,
   type ClaudeProcessExit,
   type ClaudeTransportFailure,
+  type ClaudeWriteLineOptions,
 } from './cli-process-transport.js';
 import {
   claudeResultFailureMessage,
@@ -80,6 +82,7 @@ import {
 
 class ClaudeCliRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
+  readonly #submittedOperations = new WeakSet<AgentRuntimeOperation>();
   #resumeOwners = new WeakMap<ClaudeRunningSession, symbol>();
   #processRetirements = new ClaudeProcessRetirementTracker();
   #pendingPermissions = new Set<PendingPermission>();
@@ -140,12 +143,12 @@ class ClaudeCliRuntime {
     return activeTurn;
   }
 
-  async #writeToCLI(sessionId: string, jsonl: string): Promise<void> {
+  async #writeToCLI(sessionId: string, jsonl: string, options?: ClaudeWriteLineOptions): Promise<void> {
     const session = this.#runningSessions.get(sessionId);
     if (!session?.transport) {
       throw new Error(`Claude session ${sessionId} has no writable process`);
     }
-    await session.transport.writeLine(jsonl);
+    await session.transport.writeLine(jsonl, options);
   }
 
   #trySendToCLI(sessionId: string, jsonl: string): void {
@@ -354,7 +357,7 @@ class ClaudeCliRuntime {
     return {
       logger: this.#dependencies.logger,
       finish: () => this.#finishTurn(session),
-      fail: message => this.#failSession(session, message),
+      fail: (message, certainty) => this.#failSession(session, message, certainty),
       retire: () => this.#retireSessionProcessInBackground(session),
       steeringIdleFenceTimeoutMs:
         this.#dependencies.steerIdleFenceTimeoutMs ?? CLAUDE_STEER_IDLE_FENCE_TIMEOUT_MS,
@@ -509,15 +512,16 @@ class ClaudeCliRuntime {
       return;
     }
     this.#dependencies.logger.warn('Claude CLI submitted input ended before starting', details);
+    const certainty = state === 'completed' ? undefined : 'not-started';
     if (result?.is_error) {
-      this.#failSession(session, claudeResultFailureMessage(result));
+      this.#failSession(session, claudeResultFailureMessage(result), certainty);
       return;
     }
 
     const failure = state === 'completed'
       ? 'Claude CLI marked the submitted message complete without starting it or producing a response.'
       : `Claude CLI ${state} the submitted message before it started.`;
-    this.#failSession(session, failure);
+    this.#failSession(session, failure, certainty);
   }
 
   #cancelPendingPermissions(session: ClaudeRunningSession): void {
@@ -682,7 +686,7 @@ class ClaudeCliRuntime {
     complete?.();
   }
 
-  #failSession(session: ClaudeRunningSession, message: string): void {
+  #failSession(session: ClaudeRunningSession, message: string, certainty?: AgentRunFailureCertainty): void {
     const activeTurn = session.activeTurn;
     if (!activeTurn) return;
     message = activeTurn.protocol.recordedResultFailureMessage ?? message;
@@ -691,7 +695,7 @@ class ClaudeCliRuntime {
     this.#controlBroker.rejectSession(session.id, 'Claude turn settled', 'interrupt');
     this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
-    this.#turnPublisher.failed(session, activeTurn, message);
+    this.#turnPublisher.failed(session, activeTurn.operation, message, certainty ?? this.#preDispatchEvidence(activeTurn.operation));
     activeTurn.finish();
   }
 
@@ -807,11 +811,15 @@ class ClaudeCliRuntime {
     command: string,
     images?: readonly AgentAttachment[],
   ): Promise<void> {
-    await this.#writeToCLI(session.id, buildClaudeUserInputFrame({
+    const frame = buildClaudeUserInputFrame({
       content: buildClaudeInitialUserContent(command, images),
       sessionId: session.id || '',
       uuid: activeTurn.protocol.inputUuid,
-    }));
+    });
+    await this.#writeToCLI(session.id, frame, {
+      // Once writing was attempted, a closed pipe is not proof of non-delivery.
+      beforeWrite: () => this.#submittedOperations.add(activeTurn.operation),
+    });
   }
 
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
@@ -1409,25 +1417,17 @@ class ClaudeCliRuntime {
   ): void {
     const session = this.#runningSessions.get(agentSessionId);
     if (session) {
-      this.#failSession(session, message);
-      this.#retireSessionProcessInBackground(session);
+      if (session.activeTurn?.operation === operation) {
+        this.#failSession(session, message);
+        this.#retireSessionProcessInBackground(session);
+      }
       return;
     }
-    try {
-      operation.publish({
-        type: 'run-ended',
-        runId: operation.runId,
-        outcome: 'failed',
-        error: { code: 'PROVIDER_FAILURE', message },
-      });
-    } catch (error) {
-      this.#dependencies.logger.warn('Claude publisher rejected a failed start event', {
-        agentSessionId,
-        chatId,
-        eventType: 'run-ended',
-        error: errorMessage(error),
-      });
-    }
+    this.#turnPublisher.failed({ id: agentSessionId, chatId }, operation, message, this.#preDispatchEvidence(operation));
+  }
+
+  #preDispatchEvidence(operation: AgentRuntimeOperation): 'not-started' | undefined {
+    return this.#submittedOperations.has(operation) ? undefined : 'not-started';
   }
 
   isClaudeInternalSessionRunning(agentSessionId: string): boolean {

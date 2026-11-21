@@ -77,14 +77,14 @@ export function mergeFinishOptions(
   next: FinishSessionOptions,
 ): FinishSessionOptions {
   return {
-    failedMessage: next.failedMessage ?? current?.failedMessage,
+    failure: next.failure ?? current?.failure,
     aborted: Boolean(next.aborted || current?.aborted),
     emitFinishedOnAbort: Boolean(next.emitFinishedOnAbort || current?.emitFinishedOnAbort),
   };
 }
 
 export function hasTerminalPendingFinish(session: RunningCodexSession): boolean {
-  return Boolean(session.pendingFinish?.failedMessage || session.pendingFinish?.aborted);
+  return Boolean(session.pendingFinish?.failure || session.pendingFinish?.aborted);
 }
 
 export function isTerminalSessionStatus(status: RunningStatus): boolean {

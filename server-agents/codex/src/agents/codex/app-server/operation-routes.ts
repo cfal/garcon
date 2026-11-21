@@ -5,6 +5,7 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import {
+  runtimeFailure,
   runtimeRows,
   type AgentRuntimeEvent,
   type AgentRuntimePublisher,
@@ -12,6 +13,7 @@ import {
 import type {
   AgentFinalResponse,
   AgentLogger,
+  AgentRunFailureCertainty,
 } from '@garcon/server-agent-interface';
 import type { RuntimePermissionResponse as AgentPermissionResponseCapability } from '@garcon/server-agent-common/execution/runtime-events';
 import type { CodexRuntimeOperation } from '../runtime-types.js';
@@ -19,6 +21,11 @@ import type { CodexRuntimeOperation } from '../runtime-types.js';
 // A Codex call together with the capability core handed it. Each operation captures its own
 // publisher so later events cannot resolve through mutable session or chat state.
 export type CodexOperation = CodexRuntimeOperation;
+
+export interface CodexTurnFailure {
+  readonly message: string;
+  readonly certainty?: AgentRunFailureCertainty;
+}
 
 export function codexOperation(
   request: { readonly chatId: string; readonly runId: string },
@@ -113,15 +120,10 @@ export function publishFinished(
 export function publishFailed(
   logger: AgentLogger,
   chatId: string,
-  message: string,
+  failure: CodexTurnFailure,
   operation: CodexOperation | undefined,
 ): void {
-  publish(logger, chatId, operation, (runId) => ({
-    type: 'run-ended',
-    runId,
-    outcome: 'failed',
-    error: { code: 'PROVIDER_FAILURE', message },
-  }));
+  publish(logger, chatId, operation, (runId) => runtimeFailure(runId, failure.message, failure.certainty));
 }
 
 // The operation holds the only route it has to a transcript, so an event Codex did not name has

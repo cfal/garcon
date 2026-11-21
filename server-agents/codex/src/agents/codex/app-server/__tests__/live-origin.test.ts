@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
-import type { AgentRuntimeEvent } from '@garcon/server-agent-common/execution/runtime-events';
-import { CodexAppServerClient } from '../client.js';
+import type { AgentRuntimeEvent, AgentRuntimePublisher } from '@garcon/server-agent-common/execution/runtime-events';
+import { CodexAppServerClient, CodexAppServerDeliveryError } from '../client.js';
 import { CodexAppServerRuntime } from '../runtime.js';
 import type { CodexThread, CodexTurn, ThreadStartResponse, TurnStartResponse } from '../protocol.js';
 
@@ -43,20 +43,23 @@ class TestAppServer extends CodexAppServerClient {
   }
 }
 
+function start(runtime: CodexAppServerRuntime, publish: AgentRuntimePublisher) {
+  return runtime.startSession({
+    chatId: 'chat', command: 'Synthetic prompt', projectPath: '/project',
+    model: 'gpt-5.4-codex', modelEndpointId: null, permissionMode: 'default', thinkingMode: 'low',
+    captureLiveOrigin: true, operation: { chatId: 'chat', runId: 'managed', publish },
+  });
+}
+
 test('fresh Codex provenance follows the turn named by the request reply, not the first notification', async () => {
   const client = new TestAppServer();
   const runtime = new CodexAppServerRuntime({ createClient: () => client });
   const events: AgentRuntimeEvent[] = [];
   const ended = Promise.withResolvers<void>();
   try {
-    await runtime.startSession({
-      chatId: 'chat', command: 'Synthetic prompt', projectPath: '/project',
-      model: 'gpt-5.4-codex', modelEndpointId: null, permissionMode: 'default', thinkingMode: 'low',
-      captureLiveOrigin: true,
-      operation: { chatId: 'chat', runId: 'managed', publish(event) {
-        events.push(event);
-        if (event.type === 'run-ended') ended.resolve();
-      } },
+    await start(runtime, event => {
+      events.push(event);
+      if (event.type === 'run-ended') ended.resolve();
     });
     expect(events.some(event => event.type === 'run-ended')).toBe(false);
     client.end('submitted');
@@ -66,4 +69,52 @@ test('fresh Codex provenance follows the turn named by the request reply, not th
       ? [[row.message.content, event.originRunId]] : []) : []))
       .toEqual([['matched output before receipt', 'managed'], ['background async message', undefined], ['late output', undefined]]);
   } finally { await runtime.shutdown(); }
+});
+
+test('a failure before native Codex turn dispatch carries not-started evidence', async () => {
+  const client = new TestAppServer();
+  const runtime = new CodexAppServerRuntime({ createClient: () => client });
+  const events: AgentRuntimeEvent[] = [];
+  spyOn(client, 'startThread').mockRejectedValue(new Error('Synthetic thread start refusal'));
+  try {
+    await expect(start(runtime, event => { events.push(event); })).rejects.toThrow('Synthetic thread start refusal');
+    expect(events).toEqual([{
+      type: 'run-ended', outcome: 'failed', runId: 'managed', failureCertainty: 'not-started',
+      error: { code: 'PROVIDER_FAILURE', message: 'Codex error: Synthetic thread start refusal' },
+    }]);
+  } finally { await runtime.shutdown(); }
+});
+
+test.each(['post-start loss', 'explicit terminal failure'] as const)('Codex preserves %s when exit races an outstanding delivery', async kind => {
+  const client = new TestAppServer();
+  const runtime = new CodexAppServerRuntime({ createClient: () => client });
+  const release = Promise.withResolvers<void>();
+  const events: AgentRuntimeEvent[] = [];
+  spyOn(client, 'steerTurn').mockImplementation(async () => {
+    await release.promise;
+    throw new CodexAppServerDeliveryError('unknown', new Error('Synthetic process loss'));
+  });
+  try {
+    await start(runtime, event => { events.push(event); });
+    const steering = runtime.steer({
+      chatId: 'chat', projectPath: '/project', agentSessionId: 'thread', nativeSession: null,
+      target: runtime.captureSteerTarget('thread'), input: 'Synthetic steer', clientMessageId: 'message',
+      prepareDelivery: async () => undefined,
+    });
+    if (kind === 'explicit terminal failure') {
+      client.emit('notification', { method: 'turn/completed', params: { threadId: 'thread', turn: turn('submitted', 'failed') } });
+    }
+    client.emit('exit', 137);
+    const terminals = () => events.filter(event => event.type === 'run-ended');
+    expect(terminals()).toEqual([]);
+    expect(runtime.captureSteerTarget('thread')).toBeNull();
+    release.resolve();
+    expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+    expect(terminals()).toEqual([{
+      type: 'run-ended', outcome: 'failed', runId: 'managed',
+      ...(kind === 'explicit terminal failure'
+        ? { failureCertainty: 'definite', error: { code: 'PROVIDER_FAILURE', message: 'Codex turn failed' } }
+        : { error: { code: 'OUTCOME_UNKNOWN', message: 'Codex app-server exited with code 137' } }),
+    }]);
+  } finally { release.resolve(); await runtime.shutdown(); }
 });

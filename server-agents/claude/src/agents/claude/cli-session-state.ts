@@ -1,4 +1,4 @@
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentLogger, AgentRunFailureCertainty } from '@garcon/server-agent-interface';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   claudeBackgroundTaskCount,
@@ -29,7 +29,7 @@ export interface ClaudeProviderStateSession {
 export interface ClaudeProviderStateHandlers {
   readonly logger: AgentLogger;
   readonly finish: () => void;
-  readonly fail: (message: string) => void;
+  readonly fail: (message: string, certainty?: AgentRunFailureCertainty) => void;
   readonly retire: () => void;
   readonly steeringIdleFenceTimeoutMs: number;
 }
@@ -115,11 +115,11 @@ function settleClaudeProviderIdle(
     protocol.backgroundContinuationPending && protocol.abortRequested;
   if (retireAfterSettlement) session.backgroundTaskCount = 0;
 
-  const failure = protocol.settlementFailureMessage()
-    ?? steering.settlementFailureMessage;
+  const nativeFailure = protocol.settlementFailureMessage();
+  const failure = nativeFailure ?? steering.settlementFailureMessage;
   if (failure) {
     handlers.logger.warn('Claude CLI run settled with an error', details);
-    handlers.fail(failure);
+    handlers.fail(failure, nativeFailure ? 'definite' : undefined);
     if (retireAfterSettlement) handlers.retire();
     return;
   }

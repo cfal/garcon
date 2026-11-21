@@ -191,6 +191,13 @@ new ID and requires restarting its worker. The controller rejects an identity
 mismatch rather than replacing that worker's still-running native work.
 Replacing the socket for the same executor does not stop it.
 
+A failed `run-ended` producer notification may carry `failureCertainty`:
+`not-started` proves the requested native turn did not start and `definite` records an
+exact native failure. Without either, a managed turn does not permit a retry
+based on the notification alone. Native process loss after dispatch without
+terminal evidence uses `OUTCOME_UNKNOWN`; it ends observation, not necessarily
+the work's effects. The certainty marker is live evidence, not transcript data.
+
 Producer notifications resume at the application layer, in the manner of
 XEP-0198 stream management applied to one message kind rather than to transport
 frames. The worker's process-level `ProducerRelay` outlives sessions. It numbers

@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import type { AgentIntegration, ExecutionRuntimeApi } from '@garcon/server-agent-interface';
+import { AgentCallError, type AgentIntegration, type ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import type { AgentRuntimeEvent } from '@garcon/server-agent-common/execution/runtime-events';
 import type { AutomationSignal } from '../../../../common/automation.js';
 import { AssistantMessage } from '../../../../common/chat-types.js';
@@ -114,7 +114,35 @@ for (const backend of RUNTIME_BACKENDS) {
       expect(f.chats.listChatIds()).toHaveLength(3);
     } finally { await f.dispose(); await runtime.dispose(); await workspace.dispose(); }
   });
+
+  test(`unqualified producer failures cannot prove a retryable outcome (${backend})`, async () => {
+    const f = await syntheticFixture(backend);
+    try {
+      const turn = prepared(await f.automation.prepare(f.input));
+      expect(await turn.start()).toEqual({ kind: 'published' });
+      await f.queue.waitForDispatches();
+      f.fixture.nativePublishers[0]!({
+        type: 'run-ended', outcome: 'failed', runId: turn.key.turnId,
+        error: { code: 'PROVIDER_FAILURE', message: 'The synthetic provider stopped without terminal evidence.' },
+      });
+      expect(await f.automation.waitForTerminal(turn.key, timeout())).toMatchObject({
+        kind: 'failed', certainty: 'unknown', receipt: { state: 'failed', turnId: turn.key.turnId },
+      });
+    } finally { await f.cleanup(); }
+  });
 }
+
+test('an exact not-dispatched rejection is not mistaken for post-start loss', async () => {
+  const f = await syntheticFixture('local');
+  f.fixture.hooks.start = async () => { throw new AgentCallError('not-dispatched', 'Synthetic pre-dispatch rejection'); };
+  try {
+    const turn = prepared(await f.automation.prepare(f.input));
+    expect(await turn.start()).toEqual({ kind: 'published' });
+    expect(await f.automation.waitForTerminal(turn.key, timeout())).toMatchObject({
+      kind: 'failed', certainty: 'not-started', receipt: { state: 'failed', turnId: turn.key.turnId },
+    });
+  } finally { await f.cleanup(); }
+});
 
 test('cancel and exact Stop cannot launch or stop a substitute turn', async () => {
   const f = await syntheticFixture('local');

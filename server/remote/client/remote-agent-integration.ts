@@ -8,6 +8,7 @@ import {
   AgentIntegrationError,
   assertAgentResourceScope,
   isAgentResourceRef,
+  isAgentRunFailureCertainty,
   type AgentHistoryImport,
   type AgentIntegration,
   type AgentImportedTranscriptRow,
@@ -594,6 +595,10 @@ function decodeProducerEvent(
   scope: AgentResourceScope,
 ): AgentProducerNotification['event'] {
   if (event.type === 'run-ended') {
+    if ('failureCertainty' in event && event.failureCertainty !== undefined
+      && (event.outcome !== 'failed' || !isAgentRunFailureCertainty(event.failureCertainty))) {
+      throw new Error('Invalid producer terminal failure certainty');
+    }
     const workingDirectory = event.workingDirectory === undefined ? undefined : parseCommandWorkingDirectory(event.workingDirectory);
     if (workingDirectory === null) throw new Error('Invalid completion working directory');
     const commandOutcome = event.commandOutcome === undefined ? undefined : parseCommandOutcome(event.commandOutcome);

@@ -81,6 +81,12 @@ export interface AgentRunFailureDetail {
   readonly message?: string;
 }
 
+export type AgentRunFailureCertainty = 'not-started' | 'definite';
+
+export function isAgentRunFailureCertainty(value: unknown): value is AgentRunFailureCertainty {
+  return value === 'not-started' || value === 'definite';
+}
+
 export interface AgentFinalResponse {
   readonly type: 'text' | 'literal-text';
   readonly text: string;
@@ -103,6 +109,8 @@ export type AgentRunEndedEvent = {
       readonly runId: string;
       readonly outcome: 'failed';
       readonly error?: AgentRunFailureDetail;
+      // Omitted when native work may have started but no exact terminal was observed.
+      readonly failureCertainty?: AgentRunFailureCertainty;
       readonly finalResponse?: never;
     }
   | {

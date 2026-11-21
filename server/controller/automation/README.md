@@ -16,6 +16,11 @@ the supplied execution modes, permission grants, provider selection, or tags.
   `null` when text is missing, incomplete, too large, expired, or gapped; an empty
   string is a complete empty response. The receipt may still carry best-effort
   display text. An interrupted terminal can describe only a requested Stop.
+  Failure permits retry only with exact evidence of a native failure or proof
+  that execution did not start. Losing a native process after dispatch without
+  a terminal settles observation with `OUTCOME_UNKNOWN`, not proof of failure
+  or permission to retry. Codex, Claude, and Shell report exact failure when
+  they observe it; an unqualified failure from any integration is unknown.
 - `stop(key)` targets only the matching attempt and reports delivery uncertainty
   for best-effort aborts; a key from another controller lifetime requires explicit
   chat Stop. No receipt or unknown outcome is replayed. Call `release()` after

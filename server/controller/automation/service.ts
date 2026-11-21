@@ -314,7 +314,7 @@ function terminalResult(entry: Entry, record: CommandLedgerRecord): AutomationRe
       return { kind: 'completed', receipt, completeText, commandOutcome };
     }
     case 'failed': {
-      const certainty = terminal?.row.origin === 'provider' ? 'definite'
+      const certainty = receipt.errorCode === 'OUTCOME_UNKNOWN' ? 'unknown'
         : terminal?.failureCertainty ?? entry.dispatchFailure ?? 'unknown';
       return { kind: 'failed', certainty, receipt, detail: receipt.error, commandOutcome };
     }
