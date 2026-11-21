@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
 import { CODEX_BINARY } from '../../support/live-codex.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
+
+async function rpcFailure(request: Promise<unknown>): Promise<CodexAppServerRpcError> {
+  const failure = await rejectionOf(request);
+  if (!(failure instanceof CodexAppServerRpcError)) throw new Error('Expected a Codex RPC failure', { cause: failure });
+  return failure;
+}
 
 describe('pinned Codex history API compatibility', () => {
   it('recognizes paginated turn and item list methods', async () => {
-    const home = await realpath(await mkdtemp(join(tmpdir(), 'garcon-codex-handshake-')));
+    await using directory = await mkdtempDisposable(join(tmpdir(), 'garcon-codex-handshake-'));
+    const home = await realpath(directory.path);
     const client = new CodexAppServerClient({
       env: { GARCON_CODEX_CLI: CODEX_BINARY, CODEX_HOME: home, HOME: home },
       shutdownGraceMs: 100,
@@ -21,40 +29,14 @@ describe('pinned Codex history API compatibility', () => {
       expect(initialized.userAgent.length).toBeGreaterThan(0);
       expect(initialized.codexHome).toBe(home);
 
-      let failure;
-      try {
-        await client.listThreadTurns({
-          threadId: '00000000-0000-0000-0000-000000000000',
-          limit: 1,
-          sortDirection: 'asc',
-          itemsView: 'full',
-        });
-      } catch (error) {
-        failure = error;
-      }
-      expect(failure).toBeInstanceOf(CodexAppServerRpcError);
-      if (!(failure instanceof CodexAppServerRpcError)) throw new Error('Expected a Codex RPC failure');
-      expect(failure.code).not.toBe(-32601);
+      const page = { threadId: '00000000-0000-0000-0000-000000000000', limit: 1, sortDirection: 'asc' } as const;
+      const turnsError = await rpcFailure(client.listThreadTurns({ ...page, itemsView: 'full' }));
+      expect(turnsError.code).not.toBe(-32601);
 
-      failure = undefined;
-      try {
-        await client.listThreadItems({
-          threadId: '00000000-0000-0000-0000-000000000000',
-          limit: 1,
-          sortDirection: 'asc',
-        });
-      } catch (error) {
-        failure = error;
-      }
-      expect(failure).toBeInstanceOf(CodexAppServerRpcError);
-      if (!(failure instanceof CodexAppServerRpcError)) throw new Error('Expected a Codex RPC failure');
-      expect(failure.message).not.toMatch(/^method not found$/i);
+      const itemsError = await rpcFailure(client.listThreadItems(page));
+      expect(itemsError.message).not.toMatch(/^method not found$/i);
     } finally {
-      try {
-        await client.shutdown();
-      } finally {
-        await rm(home, { recursive: true, force: true });
-      }
+      await client.shutdown();
     }
   });
 });
