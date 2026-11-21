@@ -15,9 +15,12 @@ export interface AcpSessionConfigurationContext {
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
   agentDefaultModelId?: string;
+  // Records state an agent call just changed, so a later failure in the same
+  // pass cannot leave the session believing the earlier change never happened.
+  applyState(patch: AcpSessionStatePatch): void;
 }
 
-// The session state a configuration pass changed; omitted fields keep their value.
+// Omitted fields keep their value.
 export interface AcpSessionStatePatch {
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
@@ -36,7 +39,7 @@ export interface AcpAgentPolicy {
   binaryVersion?: string;
   reconnectAllowNewSession?: boolean;
   clientCapabilities?: AcpInitializeParams['clientCapabilities'];
-  configureSession?: (context: AcpSessionConfigurationContext) => Promise<AcpSessionStatePatch | void>;
+  configureSession?: (context: AcpSessionConfigurationContext) => Promise<void>;
   newSessionModelConfig?: boolean;
   promptModelConfig?: boolean;
   promptModeConfig?: boolean;
@@ -57,6 +60,34 @@ function mappedModel(policy: AcpAgentPolicy, model: string): string | undefined 
 export function newSessionModelFor(policy: AcpAgentPolicy, request: AcpRequest): string | undefined {
   if (policy.newSessionModelConfig === false) return undefined;
   return mappedModel(policy, request.model);
+}
+
+// The session state a configuration pass reads and updates.
+interface AcpConfigurableSession {
+  readonly client: AcpClient;
+  readonly remoteSessionId: string;
+  configOptions?: AcpSessionConfigOption[];
+  models?: AcpSessionModelState;
+  readonly agentDefaultModelId?: string;
+}
+
+export async function configureSessionFor(
+  policy: AcpAgentPolicy,
+  session: AcpConfigurableSession,
+  request: AcpRequest,
+): Promise<void> {
+  await policy.configureSession?.({
+    client: session.client,
+    sessionId: session.remoteSessionId,
+    request,
+    configOptions: session.configOptions,
+    models: session.models,
+    agentDefaultModelId: session.agentDefaultModelId,
+    applyState(patch) {
+      if (patch.configOptions) session.configOptions = patch.configOptions;
+      if (patch.models) session.models = patch.models;
+    },
+  });
 }
 
 export function promptFor(policy: AcpAgentPolicy, request: AcpRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {

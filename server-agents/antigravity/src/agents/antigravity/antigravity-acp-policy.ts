@@ -3,7 +3,6 @@ import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type {
   AcpAgentPolicy,
   AcpSessionConfigurationContext,
-  AcpSessionStatePatch,
 } from '@garcon/server-agent-common/acp/policy';
 import type { AcpResumeRequest, AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
@@ -48,15 +47,14 @@ export function antigravityPrompt(
 
 export async function configureAntigravitySession(
   context: AcpSessionConfigurationContext,
-): Promise<AcpSessionStatePatch> {
-  const patch: AcpSessionStatePatch = {};
+): Promise<void> {
   const models = await applyAntigravityModel(
     context.client,
     context.sessionId,
     context.models,
     context.request.model || context.agentDefaultModelId,
   );
-  if (models) patch.models = models;
+  if (models) context.applyState({ models });
 
   const configOptions = await applyAntigravityMode(
     context.client,
@@ -64,8 +62,7 @@ export async function configureAntigravitySession(
     context.configOptions,
     antigravityModeForPermissionMode(context.request.permissionMode),
   );
-  if (configOptions) patch.configOptions = configOptions;
-  return patch;
+  if (configOptions) context.applyState({ configOptions });
 }
 
 // Returns the updated model state, or undefined when the session already uses

@@ -35,9 +35,10 @@ export function createCursorAcpPolicy(config: CursorConfig, logger?: AgentLogger
     newSessionModelConfig: false,
     promptModelConfig: false,
     promptModeConfig: false,
-    configureSession: async (context) => ({
-      configOptions: await configureCursorAcpSession(context, logger),
-    }),
+    configureSession: async (context) => {
+      const configOptions = await configureCursorAcpSession(context, logger);
+      if (configOptions) context.applyState({ configOptions });
+    },
     buildPrompt: promptForRequest,
     buildEnv(request) {
       const apiKey = config.apiKey();

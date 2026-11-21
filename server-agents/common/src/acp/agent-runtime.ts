@@ -39,6 +39,7 @@ import {
   nativePathFor,
   promptConfigFor,
   promptFor,
+  configureSessionFor,
   type AcpAgentPolicy,
 } from './policy.js';
 import { AcpTransport } from './transport.js';
@@ -535,7 +536,7 @@ export class AcpAgentRuntime {
     let admissionClosed = false;
 
     try {
-      await this.#configureSession(session, request);
+      await configureSessionFor(this.#policy, session, request);
       const prompt = promptFor(this.#policy, request);
       const promptConfig = promptConfigFor(this.#policy, request);
       // Stopped while configuring: end before admission records the turn as started.
@@ -972,22 +973,6 @@ export class AcpAgentRuntime {
       if (turn && this.#canRouteSource(turn)) return;
       this.#retireSession(session, 'cancelled', true);
     });
-  }
-
-  async #configureSession(
-    session: AcpAgentRuntimeSession,
-    request: AcpStartRequest | AcpResumeRequest,
-  ): Promise<void> {
-    const configured = await this.#policy.configureSession?.({
-      client: session.client,
-      sessionId: session.remoteSessionId,
-      request,
-      configOptions: session.configOptions,
-      models: session.models,
-      agentDefaultModelId: session.agentDefaultModelId,
-    });
-    if (configured?.configOptions) session.configOptions = configured.configOptions;
-    if (configured?.models) session.models = configured.models;
   }
 
   #sessionUpdateContext(turn: AcpTurnContext): AcpSessionUpdateContext {

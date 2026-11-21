@@ -516,6 +516,24 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('remembers a model switch made before a later configuration step failed', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.modeOptions = [{ value: 'default' }];
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request({ model: '' }));
+    await waitFor(() => runEnded(events).length === 1);
+
+    await expect(runtime.runTurn({
+      ...request({ model: 'gemini-test-high', permissionMode: 'plan' }),
+      agentSessionId: started.agentSessionId,
+    })).rejects.toThrow('Antigravity does not offer the plan mode for this session.');
+    await runtime.runTurn({ ...request({ model: '' }), agentSessionId: started.agentSessionId });
+
+    expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
+      .toEqual(['gemini-test-high', 'gemini-test-low']);
+    runtime.shutdown();
+  });
+
   it('stops the first turn while it is still being configured, before any prompt', async () => {
     const { agent, runtime, request } = harness();
     const gate = Promise.withResolvers<void>();

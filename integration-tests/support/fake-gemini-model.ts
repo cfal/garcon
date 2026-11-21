@@ -168,6 +168,20 @@ export class FakeGeminiModel {
     return this.#requests.slice();
   }
 
+  markRequests(): number {
+    return this.#requests.length;
+  }
+
+  requestsSince(index: number): readonly RecordedGeminiRequest[] {
+    return this.#requests.slice(index);
+  }
+
+  // Drops unrequested turns and releases held ones, for drivers shared across fixtures.
+  reset(): void {
+    this.#turns.length = 0;
+    for (const release of [...this.#pendingReleases]) release();
+  }
+
   auxiliaryRequests(): readonly string[] {
     return this.#auxiliaryRequests.slice();
   }

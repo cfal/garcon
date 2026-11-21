@@ -222,6 +222,17 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Partial answer.' }]);
   });
 
+  it('publishes a whole agent_message like streamed chunks', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message',
+      content: { type: 'text', text: 'Complete answer.' },
+    }), context);
+
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Complete answer.' }]);
+  });
+
   it('does not duplicate a tool row when a stopped turn reports late', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
