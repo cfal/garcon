@@ -96,10 +96,14 @@
     "./transcript-projection": "./transcript-projection.ts",
     "./transcript-seed": "./transcript-seed.ts",
     "./usage": "./usage.ts",
+    "./workflow-definition": "./workflow-definition.ts",
     "./workspace-layout": "./workspace-layout.ts",
     "./ws-auth": "./ws-auth.ts",
     "./ws-events": "./ws-events.ts",
     "./ws-protocol": "./ws-protocol.ts",
     "./ws-requests": "./ws-requests.ts"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
   }
 }
