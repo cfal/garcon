@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/workflows';
 import * as files from '$lib/api/files';
+import type { FileTreeResponse } from '$shared/file-contracts';
 import { parseWorkflowDefinition } from '$shared/workflow-definition';
 import { WorkflowFileState } from '$lib/workflows/definition/workflow-file-state.svelte';
 import { WorkflowDraftState } from '$lib/workflows/definition/workflow-draft-state.svelte';
@@ -19,19 +20,33 @@ vi.mock('$lib/api/workflows', () => ({
 	testWorkflowDraft: vi.fn(),
 }));
 
-beforeEach(() => {
-	const revision = workflowRevision();
-	vi.spyOn(files, 'getTree').mockResolvedValue({
+function listing(...folders: string[]): FileTreeResponse {
+	const breadcrumbs = ['project', ...folders].map((name, index, names) => ({
+		name,
+		path: '/' + names.slice(0, index + 1).join('/'),
+	}));
+	return {
 		fileRootPath: '/project',
 		directory: {
-			path: '/project',
-			relativePath: '',
-			parentPath: null,
-			breadcrumbs: [{ name: 'project', path: '/project' }],
+			path: breadcrumbs.at(-1)!.path,
+			relativePath: folders.join('/'),
+			parentPath: breadcrumbs.at(-2)?.path ?? null,
+			breadcrumbs,
 		},
 		homeDirectory: null,
 		entries: [],
-	});
+	};
+}
+
+async function openFilePicker() {
+	await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+	await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
+	return within(screen.getByRole('dialog', { name: 'Open source file' }));
+}
+
+beforeEach(() => {
+	const revision = workflowRevision();
+	vi.spyOn(files, 'getTree').mockResolvedValue(listing());
 	vi.mocked(api.listWorkflowDefinitionsPage).mockResolvedValue({
 		items: [
 			{
@@ -168,12 +183,10 @@ steps:
 		const props = {
 			onRunStarted: vi.fn(),
 			open: true,
-			context: { executorId: 'local', cwd: '/project' },
+			context: { executorId: 'local', cwd: '/project/chat' },
 		};
 		const host = render(NewWorkflowTestHost, { props });
-		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
-		const picker = within(screen.getByRole('dialog', { name: 'Open source file' }));
+		const picker = await openFilePicker();
 		await fireEvent.input(picker.getByLabelText('File path'), { target: { value: path } });
 		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
 		await screen.findByRole('button', { name: 'Publish new definition' });
@@ -202,9 +215,7 @@ steps:
 		render(NewWorkflowTestHost, {
 			props: { onRunStarted: vi.fn(), context: { executorId: 'remote', cwd: '/worker/project' } },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
-		const picker = within(screen.getByRole('dialog', { name: 'Open source file' }));
+		const picker = await openFilePicker();
 		await fireEvent.input(picker.getByLabelText('File path'), {
 			target: { value: 'review.workflow.yaml' },
 		});
@@ -216,6 +227,57 @@ steps:
 			filePath: 'review.workflow.yaml',
 		});
 		expect(files.getTree).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['review.yaml', '/project/team'],
+		['/project/shared/review.yaml', '/project'],
+	])('qualifies %s after browsing away from the launch folder', async (filePath, projectPath) => {
+		const chat = listing('team', 'chat');
+		const parent = listing('team');
+		const tree = vi.mocked(files.getTree).mockResolvedValueOnce(chat).mockResolvedValueOnce(parent);
+		const read = vi.spyOn(files, 'readText').mockResolvedValue({
+			path: filePath.startsWith('/') ? filePath : parent.directory.path + '/' + filePath,
+			content: workflowRevision().source,
+			revision: 'v1:read',
+		});
+		render(NewWorkflowTestHost, {
+			props: { onRunStarted: vi.fn(), context: { executorId: 'local', cwd: chat.directory.path } },
+		});
+		const picker = await openFilePicker();
+		await fireEvent.click(picker.getByRole('button', { name: 'Browse files' }));
+		await fireEvent.click(await picker.findByRole('button', { name: 'Parent folder' }));
+		await picker.findByText(parent.directory.path);
+		await fireEvent.input(picker.getByLabelText('File path'), { target: { value: filePath } });
+		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
+		await screen.findByRole('button', { name: 'Publish new definition' });
+		expect(tree.mock.calls.map(([params]) => params)).toEqual(
+			[chat, parent].map(({ directory }) => ({
+				executorId: 'local',
+				directoryPath: directory.path,
+			})),
+		);
+		expect(read.mock.calls[0][0]).toEqual({ executorId: 'local', projectPath, filePath });
+	});
+
+	it('does not read the file if the picker closes during root discovery', async () => {
+		const lookup = Promise.withResolvers<FileTreeResponse>();
+		const tree = vi.mocked(files.getTree).mockReturnValueOnce(lookup.promise);
+		const read = vi.spyOn(files, 'readText').mockRejectedValue(new Error('Unexpected file read'));
+		render(NewWorkflowTestHost, { onRunStarted: vi.fn() });
+		const picker = await openFilePicker();
+		await fireEvent.input(picker.getByLabelText('File path'), {
+			target: { value: '/project/review.yaml' },
+		});
+		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
+		const signal = tree.mock.calls[0][1]?.signal;
+		expect(signal?.aborted).toBe(false);
+		await fireEvent.click(picker.getByRole('button', { name: 'Cancel' }));
+		expect(signal?.aborted).toBe(true);
+		lookup.resolve(listing());
+		await lookup.promise;
+		await fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+		expect(read).not.toHaveBeenCalled();
 	});
 
 	it('retains an unsaved draft when its presentation closes and protects it from page unload', async () => {
@@ -232,9 +294,7 @@ steps:
 		const host = render(NewWorkflowTestHost, props);
 		const unload = () => window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
 		expect(unload()).toBe(true);
-		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Open source file' }));
-		const picker = within(screen.getByRole('dialog', { name: 'Open source file' }));
+		const picker = await openFilePicker();
 		await fireEvent.input(picker.getByLabelText('File path'), { target: { value: path } });
 		await fireEvent.click(picker.getByRole('button', { name: 'Open source file' }));
 		expect(await screen.findByRole('button', { name: 'Publish new definition' })).toBeTruthy();
