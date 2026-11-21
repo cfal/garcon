@@ -5,10 +5,11 @@
 
 export type AcpFailureSplitter = (chunk: string) => { readonly text: string; readonly failure: string | null };
 
-// New agent output after a candidate failure shows the agent kept working. A
-// tool_call_update does not: it reports on a call made earlier, and an agent
-// can settle an in-flight call after the model request fails.
-const CONTINUATION_UPDATES: ReadonlySet<string> = new Set([
+// Updates that are new agent output. Output after a candidate failure shows the
+// agent kept working. A tool_call_update is not new output: it reports on a
+// call made earlier, and an agent can settle an in-flight call after the model
+// request fails.
+export const ACP_NEW_OUTPUT_UPDATES: ReadonlySet<string> = new Set([
   'agent_message_chunk',
   'agent_message',
   'agent_thought_chunk',
@@ -22,7 +23,7 @@ export class AcpInBandFailure {
 
   // Returns held-back text that turned out to be ordinary output, or ''.
   continueOn(updateType: string | undefined): string {
-    if (!this.#pending || !CONTINUATION_UPDATES.has(updateType ?? '')) return '';
+    if (!this.#pending || !ACP_NEW_OUTPUT_UPDATES.has(updateType ?? '')) return '';
     const text = this.#pending.text;
     this.#pending = null;
     return text;

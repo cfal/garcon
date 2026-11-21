@@ -112,17 +112,38 @@ describe('getAntigravityAuthStatus', () => {
 
   it('offers in-app sign-in only for the personal Google method', async () => {
     const ok = async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 });
-    expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), { runModels: ok }))
-      .toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
-    expect(await getAntigravityAuthStatus(config(), { runModels: ok }))
+    const mustNotRun = () => { throw new Error('must not run'); };
+    expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
+      runModels: mustNotRun, authenticate: async () => {},
+    })).toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
+    expect(await getAntigravityAuthStatus(config(), { runModels: ok, authenticate: mustNotRun }))
       .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
   });
 
-  it('offers no personal sign-in when an enterprise probe fails', async () => {
-    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
-      runModels: async () => { throw new Error('spawn failed'); },
+  // `agy models` succeeds on any credential the CLI holds, such as a personal
+  // login left over from before the method changed.
+  it('checks an enterprise method by authenticating with it, not by listing models', async () => {
+    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
+      runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }),
+      authenticate: async () => { throw new Error('GOOGLE_CLOUD_PROJECT must be set for Agent Platform authentication.'); },
     });
-    expect(status).toMatchObject({ authenticated: false, canReauth: false, detail: 'spawn failed' });
+    expect(status).toMatchObject({
+      authenticated: false,
+      canReauth: false,
+      detail: 'GOOGLE_CLOUD_PROJECT must be set for Agent Platform authentication.',
+    });
+  });
+
+  it('passes the status abort to the enterprise probe', async () => {
+    const controller = new AbortController();
+    const pending = getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
+      signal: controller.signal,
+      authenticate: (_config, signal) => new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    });
+    controller.abort(new Error('stopped'));
+    await expect(pending).rejects.toThrow('stopped');
   });
 
   it('uses the CLI model listing as the signed-in check', async () => {

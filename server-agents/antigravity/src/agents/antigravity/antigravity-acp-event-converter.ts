@@ -7,13 +7,15 @@ import {
   type ToolUseChatMessage,
 } from '@garcon/common/chat-types';
 import {
+  ACP_TERMINAL_TOOL_STATUSES,
   acpContentText,
   asObject,
   asString,
+  evictOldestToolEntry,
   type AcpEventConverter,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
-import { AcpInBandFailure } from '@garcon/server-agent-common/acp/in-band-failure';
+import { ACP_NEW_OUTPUT_UPDATES, AcpInBandFailure } from '@garcon/server-agent-common/acp/in-band-failure';
 import {
   antigravityToolCall,
   antigravityToolResultText,
@@ -23,18 +25,6 @@ import {
 
 const WARNING_MARKER = '\n⚠ ';
 const EXECUTOR_ERROR = 'agent executor error: ';
-// Statuses that settle a call; every one but `completed` is an error.
-const TERMINAL_TOOL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
-
-// Bounds each per-session tool collection; the oldest entry is evicted first.
-const MAX_TOOL_ENTRIES_PER_SESSION = 512;
-
-function evictOldest(entries: Set<string> | Map<string, unknown>): void {
-  if (entries.size <= MAX_TOOL_ENTRIES_PER_SESSION) return;
-  const oldest = entries.keys().next().value;
-  if (oldest !== undefined) entries.delete(oldest);
-}
-
 interface SessionState {
   assistantText: string;
   thinkingText: string;
@@ -181,10 +171,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null,
       input: Object.keys(parsed.input).length > 0 ? parsed.input : session.toolInputs.get(parsed.toolCallId) ?? {},
     };
-    if (session.emittedToolIds.has(call.toolCallId)) return [];
-    // Text before the call is flushed even while its row waits for arguments,
-    // so later text cannot move ahead of the tool row.
+    // Text before any frame of the call is flushed first, so it stays ahead of
+    // the tool row, a row still waiting for arguments, and the call's result.
     const messages = this.#flush(session, timestamp);
+    if (session.emittedToolIds.has(call.toolCallId)) return messages;
     if (!terminal && Object.keys(call.input).length === 0) {
       session.deferredCalls.set(call.toolCallId, call);
       return messages;
@@ -197,7 +187,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
 
   #toolCallUpdate(session: SessionState, update: Record<string, unknown>, timestamp: string): ChatMessage[] {
     const status = asString(update.status);
-    if (!status || !TERMINAL_TOOL_STATUSES.has(status)) return this.#toolCall(session, update, timestamp, false);
+    if (!status || !ACP_TERMINAL_TOOL_STATUSES.has(status)) return this.#toolCall(session, update, timestamp, false);
     const toolCallId = asString(update.toolCallId);
     if (!toolCallId || session.completedToolIds.has(toolCallId)) return [];
     this.#remember(session.completedToolIds, toolCallId);
@@ -226,8 +216,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     if (update) {
       const ownFrame = (updateType === 'tool_call' || updateType === 'tool_call_update')
         && session.deferredCalls.has(asString(update.toolCallId) ?? '');
-      const output = ['agent_message_chunk', 'agent_message', 'agent_thought_chunk', 'tool_call'].includes(updateType ?? '');
-      if (ownFrame || !output) return [];
+      if (ownFrame || !ACP_NEW_OUTPUT_UPDATES.has(updateType ?? '')) return [];
     }
     const rows: ChatMessage[] = [];
     for (const call of session.deferredCalls.values()) {
@@ -240,18 +229,18 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
 
   #remember(ids: Set<string>, toolCallId: string): void {
     ids.add(toolCallId);
-    evictOldest(ids);
+    evictOldestToolEntry(ids);
   }
 
   // A later frame without a name or arguments must not replace what the call started with.
   #rememberCall(session: SessionState, call: { readonly toolCallId: string; readonly name: string | null; readonly input: Record<string, unknown> }): void {
     if (call.name) {
       session.toolNames.set(call.toolCallId, call.name);
-      evictOldest(session.toolNames);
+      evictOldestToolEntry(session.toolNames);
     }
     if (Object.keys(call.input).length > 0) {
       session.toolInputs.set(call.toolCallId, call.input);
-      evictOldest(session.toolInputs);
+      evictOldestToolEntry(session.toolInputs);
     }
   }
 

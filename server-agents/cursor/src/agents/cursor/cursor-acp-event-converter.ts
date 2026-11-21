@@ -18,16 +18,16 @@ import {
 import { normalizeCursorToolResultContent } from './tool-result-converter.js';
 import { convertCursorToolUse } from './tool-use-converter.js';
 import {
+  ACP_TERMINAL_TOOL_STATUSES,
   asObject,
   asString,
+  evictOldestToolEntry,
   type AcpBlockingRequestToolUse,
   type AcpCustomRequest,
   type AcpEventConverter,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
 
-const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
-const MAX_TOOL_SNAPSHOTS_PER_SESSION = 512;
 
 interface TurnBuffer {
   assistantText: string;
@@ -166,7 +166,7 @@ function toolOutputFromSnapshot(snapshot: ToolCallSnapshot): unknown {
 
 function hasTerminalToolStatus(status: string | undefined): boolean {
   if (!status) return false;
-  return TERMINAL_TOOL_STATUSES.has(status);
+  return ACP_TERMINAL_TOOL_STATUSES.has(status);
 }
 
 function hasToolError(update: Record<string, unknown>): boolean {
@@ -483,10 +483,7 @@ export class CursorAcpEventConverter implements AcpEventConverter {
     }
 
     session.toolCalls.set(toolCallId, snapshot);
-    if (session.toolCalls.size > MAX_TOOL_SNAPSHOTS_PER_SESSION) {
-      const oldestToolCallId = session.toolCalls.keys().next().value;
-      if (typeof oldestToolCallId === 'string') session.toolCalls.delete(oldestToolCallId);
-    }
+    evictOldestToolEntry(session.toolCalls);
     return snapshot;
   }
 

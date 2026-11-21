@@ -23,7 +23,7 @@ import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import {
   singleQueryRuntimeOptions,
-  withSingleQueryDirectory,
+  runIsolatedSingleQuery,
 } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAntigravityConfig } from './config.js';
 import { AntigravityAcpEventConverter } from './agents/antigravity/antigravity-acp-event-converter.js';
@@ -160,23 +160,11 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
       loginStatus: async (expectedSessionId) => login.status(expectedSessionId),
     };
     this.singleQuery = {
-      async run(request) {
-        request.signal.throwIfAborted();
-        try {
-          return await withSingleQueryDirectory(request.signal, (directory) => runAntigravitySingleQuery(
-            request.prompt,
-            { ...singleQueryRuntimeOptions(request), model: request.model, projectPath: directory },
-            config,
-          ));
-        } catch (error) {
-          if (error instanceof AgentIntegrationError) throw error;
-          throw new AgentIntegrationError(
-            'PROVIDER_FAILURE',
-            error instanceof Error ? error.message : String(error),
-            false,
-          );
-        }
-      },
+      run: (request) => runIsolatedSingleQuery(request, (directory) => runAntigravitySingleQuery(
+        request.prompt,
+        { ...singleQueryRuntimeOptions(request), model: request.model, projectPath: directory },
+        config,
+      )),
     };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),

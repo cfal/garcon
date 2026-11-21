@@ -49,7 +49,7 @@ ACP calls:
 | `session/new` | Starts a chat. The result carries `models.availableModels`, `models.currentModelId`, and the `mode` config option. |
 | `session/resume` | Reopens a session after process loss without replaying history ([t3code AntigravityAdapterV2.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts#L237)). The CLI advertises `sessionCapabilities.resume`, so the shared reconnect order already prefers it. |
 | `session/set_model` | Selects a model before a prompt when the request differs from the session's current model. |
-| `session/set_config_option` (`mode`) | Applies the mapped permission mode before a prompt when it differs. |
+| `session/set_config_option` (`mode`) | Applies the mapped permission mode before every prompt. The agent can change its own mode, so a cached value does not prove the session is still in it. |
 | `session/prompt` | Text, plus inline base64 `image` blocks; `promptCapabilities.image` is true. |
 | `session/cancel` | A notification, per the ACP specification. The open prompt resolves with `stopReason: "cancelled"`, so Antigravity aborts cooperatively and keeps its process. Cursor keeps `process-restart`. |
 
@@ -79,7 +79,7 @@ The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. 
 - **Credential storage:** the CLI stores Google sign-in in the OS keyring (Secret Service over D-Bus on Linux). On a headless executor without a running Secret Service, Antigravity's documented fix is to start a session bus (`export $(dbus-launch)`) before `agy` runs. The Docker image persists `~/.gemini` so CLI settings and history survive container recreation.
 - **Gemini API key / Agent Platform:** the key and Google Cloud variables pass to the child through the inherited environment. Antigravity documents that `agy models` needs `"modelProvider": "gemini"` in `~/.gemini/antigravity-cli/settings.json` for API-key accounts. Without that setting, model discovery returns no models and chats use the CLI's default model.
 
-`auth.status` reports `GEMINI_API_KEY` as environment authentication. Otherwise it runs `agy models` with a 10 s timeout, the CLI's own signed-in check: exit 0 means authenticated, and anything else is reported with its stderr.
+`auth.status` reports `GEMINI_API_KEY` as environment authentication. For `oauth-personal` it runs `agy models` with a 10 s timeout, the CLI's own signed-in check: exit 0 means authenticated, and anything else is reported with its stderr. `agy models` succeeds on any credential the CLI holds, so `oauth-business` and `agent-platform` are checked by starting `agy acp` and calling `authenticate` with that method, as every session does. The probe runs without a display, so a missing OAuth sign-in fails fast instead of opening a browser, and a missing Google Cloud project is reported in agy's own words.
 
 ## Models And Modes
 
@@ -135,6 +135,7 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
   - agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`, so tool IDs are deterministic.
   - Scripted calls must satisfy agy's tool schema; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Otherwise the CLI rejects them without emitting a tool call. agy's own rules also auto-approve some commands, such as `touch`.
   - `ANTIGRAVITY_BIN` supplies the binary. `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. The suite is skipped when `ANTIGRAVITY_BIN` is unset.
+- **Server agent compatibility suite** (`integration-tests/tests/sacs`) registers an Antigravity driver on the same binary and fake model whenever `ANTIGRAVITY_BIN` is set, so every shared transcript, interrupt, crash, and executor-disconnect case runs against agy in all three lanes. The driver has no steering, history-import, or native-forking facets.
 
 ## Comparison With t3code
 

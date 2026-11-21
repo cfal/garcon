@@ -42,6 +42,18 @@ export interface AcpEventConverter {
   releaseSession?(sessionId: string): void;
 }
 
+// Tool call statuses that settle a call; every one but `completed` is an error.
+export const ACP_TERMINAL_TOOL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
+
+// Bounds a converter's per-session tool collections; the oldest entry goes first.
+const MAX_TOOL_ENTRIES_PER_SESSION = 512;
+
+export function evictOldestToolEntry(entries: Set<string> | Map<string, unknown>): void {
+  if (entries.size <= MAX_TOOL_ENTRIES_PER_SESSION) return;
+  const oldest = entries.keys().next().value;
+  if (oldest !== undefined) entries.delete(oldest);
+}
+
 export function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>

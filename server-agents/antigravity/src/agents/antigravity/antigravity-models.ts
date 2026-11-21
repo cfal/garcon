@@ -39,28 +39,42 @@ async function spawnAntigravityModels(
     stderr: 'pipe',
     signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
   });
+  const stdout = pipeText(proc.stdout);
+  const stderr = pipeText(proc.stderr);
   // The signal kills only agy; a descendant holding its pipes would keep the
-  // reads open, so the shared probe also has its own deadline.
+  // reads open, so the shared probe has its own deadline that releases them.
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<never>((_, reject) => {
     deadline = setTimeout(() => {
       proc.kill();
+      stdout.cancel();
+      stderr.cancel();
       reject(new Error(`agy models did not finish within ${MODELS_TIMEOUT_MS / 1000} s`));
     }, MODELS_TIMEOUT_MS + 1_000);
   });
   try {
-    const [stdout, stderr, exitCode] = await Promise.race([
-      Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited.catch(() => null),
-      ]),
+    const [stdoutText, stderrText, exitCode] = await Promise.race([
+      Promise.all([stdout.text, stderr.text, proc.exited.catch(() => null)]),
       timedOut,
     ]);
-    return { stdout, stderr, exitCode };
+    return { stdout: stdoutText, stderr: stderrText, exitCode };
   } finally {
     clearTimeout(deadline);
   }
+}
+
+function pipeText(stream: ReadableStream<Uint8Array>): { readonly text: Promise<string>; cancel(): void } {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const text = (async () => {
+    let output = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return output + decoder.decode();
+      output += decoder.decode(value, { stream: true });
+    }
+  })();
+  return { text, cancel: () => void reader.cancel().catch(() => {}) };
 }
 
 // Each line is `<id>\t<label>`, where the id encodes the model and its

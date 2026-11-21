@@ -735,6 +735,11 @@ export class AcpAgentRuntime {
 
     const options = (Array.isArray(params.options) ? params.options : [])
       .map((option) => asObject(option));
+    const toolCall = asObject(params.toolCall);
+    const context = this.#sessionUpdateContext(turn);
+    // The converter sees requests the runtime answers itself too, since one can
+    // carry arguments that no earlier frame of its call had.
+    const convertedTool = this.#converter.permissionToolUse?.(toolCall, context) ?? null;
 
     // A cooperative cancel keeps the turn routable until the prompt settles;
     // nothing the agent asks for after Stop may run.
@@ -749,9 +754,7 @@ export class AcpAgentRuntime {
     }
 
     const permissionOccurrenceId = crypto.randomUUID();
-    const toolCall = asObject(params.toolCall);
-    const context = this.#sessionUpdateContext(turn);
-    const requestedTool = this.#converter.permissionToolUse?.(toolCall, context)
+    const requestedTool = convertedTool
       ?? fallbackPermissionToolUse(toolCall, permissionOccurrenceId, context.timestamp);
 
     const pending = this.#registerPendingPermission(

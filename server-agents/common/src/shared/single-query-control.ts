@@ -20,6 +20,21 @@ export async function withSingleQueryDirectory<T>(
   }
 }
 
+// Runs a one-shot query in a disposable directory. A failure that is not
+// already an integration error becomes a non-retryable provider failure.
+export async function runIsolatedSingleQuery<T>(
+  request: AgentSingleQueryRequest,
+  operation: (directory: string) => Promise<T>,
+): Promise<T> {
+  request.signal.throwIfAborted();
+  try {
+    return await withSingleQueryDirectory(request.signal, operation);
+  } catch (error) {
+    if (error instanceof AgentIntegrationError) throw error;
+    throw new AgentIntegrationError('PROVIDER_FAILURE', error instanceof Error ? error.message : String(error), false);
+  }
+}
+
 export interface SingleQueryControlOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;

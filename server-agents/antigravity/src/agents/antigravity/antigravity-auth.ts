@@ -1,4 +1,7 @@
+import { tmpdir } from 'node:os';
 import type { AgentAuthStatus } from '@garcon/common/agent-execution';
+import { AcpClient } from '@garcon/server-agent-common/acp/client';
+import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import type { CliLoginCommand } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
 import {
@@ -19,8 +22,29 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): P
   });
 }
 
+const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
+
+// Runs the ACP authenticate call every session makes. It runs without a display,
+// so an OAuth method reports a missing sign-in instead of opening a browser.
+export async function probeAntigravityAuthentication(config: AntigravityConfig, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const client = new AcpClient(new AcpTransport({ requestTimeoutMs: AUTHENTICATE_PROBE_TIMEOUT_MS }), {
+    initialize: { protocolVersion: 1, clientInfo: { name: 'garcon', version: '1.0.0' }, clientCapabilities: {} },
+    authenticateMethodId: config.authMethod(),
+  });
+  const close = () => client.close();
+  signal?.addEventListener('abort', close, { once: true });
+  try {
+    await client.connect({ command: config.binary(), args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config) });
+  } finally {
+    signal?.removeEventListener('abort', close);
+    client.close();
+  }
+}
+
 export interface AntigravityAuthStatusOptions {
   readonly runModels?: (config: AntigravityConfig) => Promise<AntigravityCliResult>;
+  readonly authenticate?: (config: AntigravityConfig, signal?: AbortSignal) => Promise<void>;
   readonly signal?: AbortSignal;
   // Settings polls status while an in-app sign-in waits for its code. The CLI
   // cannot change state until that sign-in exits, so the last probed status
@@ -31,7 +55,13 @@ export interface AntigravityAuthStatusOptions {
 
 export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
-  { runModels = runAntigravityModels, signal, signInRunning = false, lastProbed = null }: AntigravityAuthStatusOptions = {},
+  {
+    runModels = runAntigravityModels,
+    authenticate = probeAntigravityAuthentication,
+    signal,
+    signInRunning = false,
+    lastProbed = null,
+  }: AntigravityAuthStatusOptions = {},
 ): Promise<AgentAuthStatus> {
   try {
     // Sessions authenticate with the configured method only, so status must not
@@ -45,17 +75,21 @@ export async function getAntigravityAuthStatus(
     if (signInRunning) {
       return lastProbed ?? { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
     }
-    // In-app sign-in (`agy acp --login`) is a personal Google login, so only that
-    // method offers it. Enterprise methods report the CLI's own sign-in check.
+    // In-app sign-in (`agy acp --login`) stores a personal Google login, which
+    // `agy models` proves usable. `agy models` accepts any credential the CLI
+    // holds, so an enterprise method instead asks agy to authenticate with it.
     const method = config.authMethod();
-    const canReauth = method === 'oauth-personal';
+    if (method !== 'oauth-personal') {
+      await authenticate(config, signal);
+      return { authenticated: true, canReauth: false, label: method, source: 'cli' };
+    }
     const result = await abortable(runModels(config), signal);
     if (result.exitCode === 0) {
-      return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
+      return { authenticated: true, canReauth: true, label: 'Google', source: 'cli' };
     }
     return {
       authenticated: false,
-      canReauth,
+      canReauth: true,
       label: '',
       source: 'none',
       detail: antigravityCliFailure(result),

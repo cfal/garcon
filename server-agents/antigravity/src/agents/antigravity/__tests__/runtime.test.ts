@@ -156,7 +156,7 @@ class FakeAntigravityAgent {
       }
       case 'session/set_config_option':
       {
-        const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, currentValue: params.value }] } : {};
+        const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, options: this.modeOptions, currentValue: params.value }] } : {};
         if (this.configReplyGate) {
           void this.configReplyGate.then(() => reply(result));
           return;
@@ -255,7 +255,7 @@ describe('Antigravity ACP runtime', () => {
     }]);
   });
 
-  it('skips model and mode calls that would not change the session', async () => {
+  it('skips a model call that would not change the session but always sets the mode', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());
 
@@ -263,7 +263,8 @@ describe('Antigravity ACP runtime', () => {
     await waitFor(() => runEnded(events).length === 1);
 
     expect(agent.requests('session/set_model')).toEqual([]);
-    expect(agent.requests('session/set_config_option')).toEqual([]);
+    expect(agent.requests('session/set_config_option').map((message) => (message.params as { value: string }).value))
+      .toEqual(['default']);
   });
 
   it('rejects a model the account does not offer before prompting', async () => {
@@ -316,6 +317,7 @@ describe('Antigravity ACP runtime', () => {
     await runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
 
     expect(agent.requests('session/set_config_option').map((message) => message.params)).toEqual([
+      { sessionId: started.agentSessionId, configId: 'mode', value: 'default' },
       { sessionId: started.agentSessionId, configId: 'mode', value: 'plan' },
     ]);
     runtime.shutdown();
@@ -331,8 +333,27 @@ describe('Antigravity ACP runtime', () => {
       outcome: { outcome: 'selected', optionId: 'allow' },
     });
     expect(events.some((event) => event.type === 'permission')).toBe(false);
-    expect(agent.requests('session/set_config_option')).toEqual([]);
+    // Bypass runs in agy's default mode; the runtime answers its requests.
+    expect(agent.requests('session/set_config_option').map((message) => (message.params as { value: string }).value))
+      .toEqual(['default']);
     agent.endPrompt();
+  });
+
+  it('keeps the arguments an auto-approved permission request carried', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, sessionId) => {
+      fake.update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending' });
+      fake.requestPermission(sessionId, 'tool-1');
+      fake.update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: { output: 'synthetic' } });
+      fake.endPrompt();
+    });
+
+    await runtime.startSession(request({ permissionMode: 'bypassPermissions' }));
+    await waitFor(() => runEnded(events).length === 1);
+
+    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    expect(rows.find((message) => message.type === 'bash-tool-use')).toMatchObject({ command: 'echo synthetic' });
+    runtime.shutdown();
   });
 
   it('cancels cooperatively and keeps the process for the next turn', async () => {
@@ -435,17 +456,16 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('switches back to a mode when the config reply omitted the options', async () => {
+  it('sets the mode again on a turn whose cached mode already matches', async () => {
     const { agent, runtime, events, request } = harness();
-    agent.configReplyReportsOptions = false;
     agent.onPrompt((fake) => fake.endPrompt());
     const started = await runtime.startSession(request({ permissionMode: 'plan' }));
     await waitFor(() => runEnded(events).length === 1);
 
-    await runtime.runTurn({ ...request({ permissionMode: 'default' }), agentSessionId: started.agentSessionId });
+    await runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
 
     expect(agent.requests('session/set_config_option').map((message) => (message.params as { value: string }).value))
-      .toEqual(['plan', 'default']);
+      .toEqual(['plan', 'plan']);
     runtime.shutdown();
   });
 

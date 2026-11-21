@@ -87,10 +87,12 @@ export async function applyAntigravityModel(
   return { ...models, currentModelId: model };
 }
 
-// Unknown options (a resume that returned none) still get the mode, since a
-// skipped mode would run the turn in whatever mode the session last had. A
-// session that does not offer a non-default mode fails rather than running in
-// another one; single queries rely on `plan`.
+// The mode is set before every turn, even when the cached options already show
+// it: the agent can change its own mode, and Garcon tracks no notification
+// that would prove the session is still in the cached one. Unknown
+// options (a resume that returned none) still get the mode. A session that does
+// not offer a non-default mode fails rather than running in another one; single
+// queries rely on `plan`.
 export async function applyAntigravityMode(
   client: Pick<AcpSessionConfigurationContext['client'], 'setSessionConfigOption'>,
   sessionId: string,
@@ -105,13 +107,8 @@ export async function applyAntigravityMode(
       throw new AgentIntegrationError('PROVIDER_FAILURE', `Antigravity does not offer the ${mode} mode for this session.`, false);
     }
   }
-  if (modeOption?.currentValue === mode) return undefined;
   const result = await client.setSessionConfigOption({ sessionId, configId: 'mode', value: mode });
-  // A reply without options must still move the cached mode, or a later turn
-  // would skip switching back to a mode the cache wrongly reports as current.
-  return result.configOptions ?? configOptions?.map((option) => (
-    option.id === 'mode' ? { ...option, currentValue: mode } : option
-  ));
+  return result.configOptions;
 }
 
 export function createAntigravityNativePath(agentSessionId: string): string | null {
