@@ -67,17 +67,14 @@ test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] disables Direct legacy migration and re
     'native-history-import',
     'native-sessions',
   ]));
-  // Antigravity postdates the ledger, so it has no legacy history to adopt.
+  // A non-Direct provider adopts legacy history from the native history it
+  // reads; one without readable native history, such as Antigravity, has neither.
   expect(sacsScriptedDriverFactories
     .filter((driver) => !DIRECT_DRIVER_IDS.includes(
       driver.id as typeof DIRECT_DRIVER_IDS[number],
-    ) && driver.id !== 'antigravity')
-    .every((driver) => driver.legacyHistoryImport !== null))
+    ))
+    .every((driver) => (driver.legacyHistoryImport !== null) === (driver.nativeHistoryImport !== null)))
     .toBe(true);
-  expect(sacsScriptedDriverFactories
-    .filter((driver) => driver.id === 'antigravity')
-    .map((driver) => driver.legacyHistoryImport))
-    .toEqual(ANTIGRAVITY_BINARY ? [null] : []);
   expect(sacsScriptedDriverFactories
     .filter((driver) => Boolean(driver.legacyHistoryImport?.directoryScoped))
     .map((driver) => driver.id))

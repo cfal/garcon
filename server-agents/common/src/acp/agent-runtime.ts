@@ -29,7 +29,7 @@ import type {
 import type { ReconnectStrategy } from './reconnect-policy.js';
 import { reconnectAcpSession, reconnectOrder } from './reconnect-policy.js';
 import { AcpRestoreRegistry } from './restore-registry.js';
-import { isJsonRpcId } from './protocol.js';
+import { garconInitializeParams, isJsonRpcId } from './protocol.js';
 import {
   childEnvironmentFor,
   newSessionModelFor,
@@ -365,12 +365,10 @@ export class AcpAgentRuntime {
       : this.#policy.command;
     const transport = this.#createTransport();
     const client = new AcpClient(transport, {
-      initialize: {
-        protocolVersion: 1,
-        clientInfo: { name: 'garcon', version: '1.0.0' },
-        clientCapabilities: this.#policy.clientCapabilities ?? {},
+      initialize: garconInitializeParams({
+        clientCapabilities: this.#policy.clientCapabilities,
         mcpServers: this.#policy.mcpServers ?? [],
-      },
+      }),
       authenticateMethodId: typeof this.#policy.authenticateMethodId === 'function'
         ? this.#policy.authenticateMethodId()
         : this.#policy.authenticateMethodId,

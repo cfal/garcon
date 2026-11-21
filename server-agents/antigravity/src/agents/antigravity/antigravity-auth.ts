@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os';
 import type { AgentAuthStatus } from '@garcon/common/agent-execution';
 import { AcpClient } from '@garcon/server-agent-common/acp/client';
+import { garconInitializeParams } from '@garcon/server-agent-common/acp/protocol';
 import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import type { CliLoginCommand } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { antigravityChildEnvironment, authMethodOrNull, type AntigravityConfig } from '../../config.js';
@@ -38,7 +39,7 @@ export function probeAntigravityAuthentication(config: AntigravityConfig): Promi
 
 async function authenticateOnce(binary: string, method: string, config: AntigravityConfig): Promise<void> {
   const client = new AcpClient(new AcpTransport({ requestTimeoutMs: AUTHENTICATE_PROBE_TIMEOUT_MS }), {
-    initialize: { protocolVersion: 1, clientInfo: { name: 'garcon', version: '1.0.0' }, clientCapabilities: {} },
+    initialize: garconInitializeParams(),
     authenticateMethodId: method,
   });
   try {

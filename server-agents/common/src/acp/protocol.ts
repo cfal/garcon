@@ -33,6 +33,19 @@ export interface AcpInitializeParams {
   mcpServers?: unknown[];
 }
 
+// The handshake every Garcon ACP client sends: chat sessions, one-shot queries,
+// and auth probes negotiate identically.
+export function garconInitializeParams(
+  options: Pick<AcpInitializeParams, 'clientCapabilities' | 'mcpServers'> = {},
+): AcpInitializeParams {
+  return {
+    protocolVersion: 1,
+    clientInfo: { name: 'garcon', version: '1.0.0' },
+    clientCapabilities: options.clientCapabilities ?? {},
+    ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+  };
+}
+
 export interface AcpInitializeResult {
   protocolVersion: number;
   agentCapabilities?: {

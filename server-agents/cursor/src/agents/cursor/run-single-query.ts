@@ -1,4 +1,5 @@
 import type { CursorConfig } from '../../config.js';
+import { garconInitializeParams } from '@garcon/server-agent-common/acp/protocol';
 import type { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import { asObject } from '@garcon/server-agent-common/acp/event-converter';
 import { runAcpSingleQuery } from '@garcon/server-agent-common/acp/single-query';
@@ -75,12 +76,10 @@ export async function runSingleQuery(
       : undefined;
     return runAcpSingleQuery({
       spawn: { command: config.binary(), args: ['acp'], cwd, env: optionsEnv(options, config) },
-      initialize: {
-        protocolVersion: 1,
-        clientInfo: { name: 'garcon', version: '1.0.0' },
+      initialize: garconInitializeParams({
         clientCapabilities: { _meta: { parameterizedModelPicker: true } },
         mcpServers: [],
-      },
+      }),
       authenticateMethodId: 'cursor_login',
       prompt,
       signal,

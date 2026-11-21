@@ -1,4 +1,5 @@
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
+import { garconInitializeParams } from '@garcon/server-agent-common/acp/protocol';
 import {
   AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
   AgentIntegrationError,
@@ -42,11 +43,7 @@ export async function runAntigravitySingleQuery(
       cwd: options.projectPath,
       env: antigravityChildEnvironment(config),
     },
-    initialize: {
-      protocolVersion: 1,
-      clientInfo: { name: 'garcon', version: '1.0.0' },
-      clientCapabilities: {},
-    },
+    initialize: garconInitializeParams(),
     authenticateMethodId: config.authMethod(),
     prompt,
     signal,
