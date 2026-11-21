@@ -115,6 +115,7 @@ export class AcpAgentRuntime {
     // Built first, so an unusable attachment fails before any process or native
     // conversation exists.
     const prompt = promptFor(this.#policy, request);
+    if (this.#stopped) throw new Error(`The ${this.#policy.agentId} runtime is shutting down.`);
     const client = await this.#connectClient(request);
     let created: Awaited<ReturnType<AcpClient['newSession']>>;
     try {
@@ -421,6 +422,7 @@ export class AcpAgentRuntime {
   }
 
   async #restoreSession(request: AcpResumeRequest, isCancelled: () => boolean): Promise<AcpAgentRuntimeSession> {
+    if (this.#stopped) throw new Error(`The ${this.#policy.agentId} runtime is shutting down.`);
     const client = await this.#connectClient(request);
     // A release during connect stops the restore before it resumes the session.
     if (isCancelled() || this.#stopped) {

@@ -12,6 +12,9 @@ export function sharedProbe<T>(inFlight: Map<string, Promise<T>>, key: string, s
 // probe for the other callers that share it.
 export function waitUnlessAborted<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return operation;
+  // A caller that stops waiting leaves the probe running; its failure must not
+  // surface as an unhandled rejection.
+  operation.catch(() => undefined);
   signal.throwIfAborted();
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);

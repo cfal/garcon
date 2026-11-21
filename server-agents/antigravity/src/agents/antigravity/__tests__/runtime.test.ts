@@ -1092,9 +1092,18 @@ describe('Antigravity ACP runtime', () => {
     await waitFor(() => runEnded(events).length === 1);
     runtime.shutdown();
 
-    await expect(runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId })).rejects.toThrow('was released while it was being restored');
+    await expect(runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId })).rejects.toThrow('runtime is shutting down');
     expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+    expect(agent.requests('initialize')).toHaveLength(1);
     expect(agent.requests('session/prompt')).toHaveLength(1);
+  });
+
+  it('does not spawn agy for a start that arrives after shutdown', async () => {
+    const { agent, runtime, request } = harness();
+    runtime.shutdown();
+
+    await expect(runtime.startSession(request())).rejects.toThrow('runtime is shutting down');
+    expect(agent.requests('initialize')).toEqual([]);
   });
 
   it('fails the run when agy reports an executor error in-band', async () => {

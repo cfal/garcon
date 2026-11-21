@@ -22,6 +22,23 @@ describe('sharedProbe', () => {
 });
 
 describe('waitUnlessAborted', () => {
+  it('leaves no unhandled rejection when the caller had already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('closed'));
+    const operation = Promise.withResolvers<string>();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      expect(() => waitUnlessAborted(operation.promise, controller.signal)).toThrow('closed');
+      operation.reject(new Error('probe failed'));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('rejects with the abort reason while the shared operation keeps running', async () => {
     const controller = new AbortController();
     const operation = Promise.withResolvers<string>();
