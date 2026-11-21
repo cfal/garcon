@@ -154,7 +154,7 @@ export default function createAllRoutes(workspaceDir: string, {
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
   pullRequestReviews: PullRequestReviewsRuntime;
-  workflows: WorkflowRuntime;
+  workflows: Pick<WorkflowRuntime, 'service' | 'prepareSettings'>;
   snippets: SnippetService;
   preambles: PreambleService;
   chatPreambleSelection: ChatPreambleSelectionService;
