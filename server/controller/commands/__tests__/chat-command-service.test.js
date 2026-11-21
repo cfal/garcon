@@ -7875,26 +7875,6 @@ describe('ChatCommandService', () => {
     expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
-  it('clears a steering queue entry after a project path update commits', async () => {
-    const { service, queue, agents } = makeService();
-    const nextPath = path.join(projectBaseDir, 'repo-worktree');
-    await fs.mkdir(nextPath, { recursive: true });
-    queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue([
-      queueEntry('steering-1', 'continue', 'steering'),
-    ]));
-
-    await expect(service.updateProjectPath({
-      expectedExecutorId: "local",
-      expectedAgentOwnershipEpoch: "epoch-1",
-      expectedProjectPath: "/repo",
-      chatId: SOURCE_CHAT_ID,
-      projectPath: nextPath,
-    })).resolves.toMatchObject({ success: true });
-
-    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
-    expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
-  });
-
   it('clears private control input after a project path update commits', async () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');

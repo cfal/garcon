@@ -120,7 +120,7 @@
 			{isVisible}
 			{message}
 			rowId={item.id}
-			awaitingDelivery={item.awaitingDelivery}
+			inputStatus={item.inputStatus}
 			anchorId={item.ordinal === undefined ? undefined : item.id}
 			forkUpToSeq={item.ordinal}
 			{toolResult}

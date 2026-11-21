@@ -43,7 +43,7 @@ interface TranscriptPageLoaderOptions {
 		chatId: string,
 		historyState: Exclude<ChatHistoryState, { kind: 'complete' }>,
 	): void;
-	onPageApplied(direction: TranscriptPageDirection): void;
+	onPageApplied(direction: TranscriptPageDirection, messages: readonly TranscriptMessage[]): void;
 	onEarlierPageProgress(chatId: string, requestBeforeOrdinal: number, page: TranscriptPage): void;
 }
 
@@ -274,7 +274,7 @@ export class TranscriptPageLoader {
 				if (progressed) this.host.entries = [...this.host.entries, ...page.messages];
 			}
 			this.#pending[direction] = transcriptAnchorContinuation(page);
-			if (progressed) this.options.onPageApplied(direction);
+			if (progressed) this.options.onPageApplied(direction, page.messages);
 			if (!this.#pending[direction]) {
 				return progressed || page.pageStatus === 'complete' ? 'loaded' : 'exhausted';
 			}
@@ -371,7 +371,7 @@ export class TranscriptPageLoader {
 	#applyEarlierMessages(messages: TranscriptMessage[]): TranscriptPageLoadResult {
 		this.host.entries = [...messages, ...this.host.entries];
 		this.host.visibleMessageCount += messages.length;
-		this.options.onPageApplied('earlier');
+		this.options.onPageApplied('earlier', messages);
 		return 'loaded';
 	}
 
@@ -396,7 +396,7 @@ export class TranscriptPageLoader {
 				this.host.displayMessageCount,
 			);
 		}
-		this.options.onPageApplied('later');
+		this.options.onPageApplied('later', messages);
 		return 'loaded';
 	}
 

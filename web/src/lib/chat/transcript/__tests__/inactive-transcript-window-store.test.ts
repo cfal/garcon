@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
@@ -12,7 +13,7 @@ function transcript(chatId: string, content = 'message'): ActiveTranscriptState 
 		{ ordinal: 1, message: new AssistantMessage('2026-08-30T00:00:00.000Z', content) },
 		{ ordinal: 2, message: new AssistantMessage('2026-08-30T00:00:00.000Z', content) },
 	];
-	window.replaceGeneration(chatId, 'view-1', messages, {
+	seedTranscript(window, chatId, 'view-1', messages, {
 		lastOrdinal: 2,
 		pageOldestOrdinal: 1,
 		nextBeforeOrdinal: null,
@@ -58,7 +59,7 @@ describe('InactiveTranscriptWindowStore', () => {
 		const window = new ActiveTranscriptState(cache, null, { combineMessages: true });
 		const messages = Array.from({ length: count }, (_, i) => ({ ordinal: i + 1,
 			message: new AssistantMessage('2026-01-01T00:00:00.000Z', 'synthetic') }));
-		window.replaceGeneration('wide', 'view', messages, {
+		seedTranscript(window, 'wide', 'view', messages, {
 			lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 		});
 		park(store, 'left', 'wide', window);

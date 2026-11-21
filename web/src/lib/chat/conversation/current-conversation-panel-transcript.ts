@@ -9,14 +9,13 @@ import {
 	type ChatRestoreResult,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
-import { echoedClientMessageIds } from '$lib/chat/transcript/transcript-row-projection.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
 export class CurrentConversationPanelTranscript implements ActiveTranscriptPort {
 	readonly transcriptCache;
 	readonly #fallback;
-	readonly #optimisticChatIds = new Map<string, string>();
 	#fallbackLoadEpoch = 0;
 
 	constructor(
@@ -27,6 +26,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	) {
 		this.transcriptCache = options.panels.transcriptCache;
 		this.#fallback = new ActiveTranscriptState(this.transcriptCache, null, {
+			onRecoveredMessages: options.panels.observeRecoveredMessages,
 			onSnapshotResendCandidates: (chatId, candidates, frontier) => {
 				options.panels.publishSnapshotResendCandidates(chatId, candidates, frontier);
 			},
@@ -143,11 +143,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 			noticeRevision: this.options.panels.noticeRevisionFor(chatId),
 		});
 		if (result.kind === 'applied') {
-			for (const clientMessageId of echoedClientMessageIds(messages)) {
-				if (this.#optimisticChatIds.get(clientMessageId) === chatId) {
-					this.#optimisticChatIds.delete(clientMessageId);
-				}
-			}
 			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
 		}
 		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
@@ -223,28 +218,26 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	upsertOptimisticUserInput(input: OptimisticUserInput): void {
-		this.#optimisticChatIds.set(input.clientMessageId, input.chatId);
 		this.options.panels.upsertOptimisticInput(input.chatId, input);
 	}
 
-	markOptimisticUserInputDelivered(clientMessageId: string): void {
-		const chatId = this.#optimisticChatIds.get(clientMessageId);
-		if (!chatId) return;
-		this.#optimisticChatIds.delete(clientMessageId);
+	markOptimisticUserInputDelivered(chatId: string, clientMessageId: string): void {
 		this.options.panels.markOptimisticInputDelivered(chatId, clientMessageId);
 	}
 
-	clearOptimisticUserInput(clientMessageId: string): void {
-		const chatId = this.#optimisticChatIds.get(clientMessageId);
-		if (!chatId) return;
-		this.#optimisticChatIds.delete(clientMessageId);
+	acceptQueuedSteer(chatId: string, receipt: QueuedSteerReceipt, control: ChatExecutionControlState | null): void {
+		this.options.panels.reconcileQueuedSteers(chatId, control, receipt);
+	}
+
+	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void {
+		this.options.panels.anchorUnconfirmedSteer(chatId, clientMessageId);
+	}
+
+	clearOptimisticUserInput(chatId: string, clientMessageId: string): void {
 		this.options.panels.clearOptimisticInput(chatId, clientMessageId);
 	}
 
 	discardChat(chatId: string): void {
-		for (const [clientMessageId, optimisticChatId] of this.#optimisticChatIds) {
-			if (optimisticChatId === chatId) this.#optimisticChatIds.delete(clientMessageId);
-		}
 		if (this.#fallback.activeChatId === chatId) this.#activateFallback(null);
 	}
 
