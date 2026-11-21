@@ -31,7 +31,7 @@ test.skipIf(process.platform === 'win32')('discovery times out when a descendant
   const binary = join(dir, 'pi');
   try {
     await writeFile(binary, '#!/bin/sh\nsleep 1 &\nexit 0\n', { mode: 0o700 });
-    await expect(getPiAvailableModels({ binary: () => binary }, AbortSignal.timeout(100))).rejects.toMatchObject({ name: 'TimeoutError' });
+    await expect(getPiAvailableModels(binary, AbortSignal.timeout(100))).rejects.toMatchObject({ name: 'TimeoutError' });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -81,6 +81,11 @@ test('retries transient errors, caches success, and preserves last-known-good on
   service.expireForTests();
   await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: expected });
   expect(await service.getModels()).toEqual(expected);
+
+  discover.mockResolvedValueOnce([]);
+  expect(await service.getModelsStrict()).toEqual([]);
+  service.expireForTests();
+  await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: [] });
 });
 
 test('a missing Pi executable fails discovery once and is checked again on the next request', async () => {

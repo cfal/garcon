@@ -1,9 +1,9 @@
-import { buildPiCliEnv } from './pi-cli.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SharedModelOption } from '@garcon/common/models';
 import { errorMessage, hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 import type { PiConfig } from '../../config.js';
+import { buildPiCliEnv } from './pi-cli.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -45,16 +45,16 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
 }
 
 export async function getPiAvailableModels(
-  config: Pick<PiConfig, 'binary'>,
+  binary: string,
   lifetime?: AbortSignal,
 ): Promise<SharedModelOption[]> {
   const deadline = AbortSignal.timeout(20_000);
   const signal = lifetime ? AbortSignal.any([lifetime, deadline]) : deadline;
   signal.throwIfAborted();
-  const env = buildPiCliEnv();
+  const env = buildPiCliEnv({ NO_COLOR: '1' });
   delete env.FORCE_COLOR;
-  const proc = Bun.spawn([config.binary(), '--list-models'], {
-    env: { ...env, NO_COLOR: '1' },
+  const proc = Bun.spawn([binary, '--list-models'], {
+    env,
     stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     signal, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL',
   });
@@ -74,13 +74,12 @@ export async function getPiAvailableModels(
 export class PiModelCatalogService {
   #cachedModels: SharedModelOption[] | null = null;
   #cachedAt = 0;
-  #lastKnownGoodModels: SharedModelOption[] | null = null;
   #inflight: Promise<SharedModelOption[]> | null = null;
   #lifetime = new AbortController();
 
   constructor(
     private readonly config: PiConfig,
-    private readonly discover: (signal: AbortSignal) => Promise<SharedModelOption[]> = (signal) => getPiAvailableModels(config, signal),
+    private readonly discover: (signal: AbortSignal) => Promise<SharedModelOption[]> = (signal) => getPiAvailableModels(config.binary(), signal),
   ) {}
 
   async getModelsStrict(signal?: AbortSignal): Promise<SharedModelOption[]> {
@@ -103,7 +102,7 @@ export class PiModelCatalogService {
       signal?.throwIfAborted();
       this.#lifetime.signal.throwIfAborted();
       if (isPiModelDiscoveryUnavailableError(error)) return error.staleModels;
-      return this.#lastKnownGoodModels ?? [];
+      return this.#staleModels();
     }
   }
 
@@ -115,40 +114,34 @@ export class PiModelCatalogService {
     this.#lifetime.abort();
     await this.#inflight?.catch(() => undefined);
     this.#cachedModels = null;
-    this.#lastKnownGoodModels = null;
   }
 
   expireForTests(): void {
     this.#cachedAt = 0;
   }
 
-  #cache(models: SharedModelOption[]): SharedModelOption[] {
-    this.#cachedModels = models;
-    this.#cachedAt = Date.now();
-    this.#lastKnownGoodModels = models.length > 0 ? models : null;
-    return models;
+  #staleModels(): SharedModelOption[] {
+    return this.#cachedModels?.length ? this.#cachedModels : [];
   }
 
   async #discoverWithRetry(signal: AbortSignal): Promise<SharedModelOption[]> {
     const retryDelays = this.config.isTestEnvironment() ? [0, 0] : [75, 250];
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    for (let attempt = 0; ; attempt += 1) {
       try {
         const models = await this.discover(signal);
         signal.throwIfAborted();
-        return this.#cache(models);
+        this.#cachedAt = Date.now();
+        this.#cachedModels = models;
+        return models;
       } catch (error) {
         signal.throwIfAborted();
-        lastError = error;
         const retryDelay = retryDelays[attempt];
-        if (retryDelay === undefined || hasNodeErrorCode(error, 'ENOENT')) break;
+        if (retryDelay === undefined || hasNodeErrorCode(error, 'ENOENT')) {
+          throw new PiModelDiscoveryUnavailableError(errorMessage(error), this.#staleModels());
+        }
         if (retryDelay > 0) await delay(retryDelay, undefined, { signal });
       }
     }
-    throw new PiModelDiscoveryUnavailableError(
-      errorMessage(lastError),
-      this.#lastKnownGoodModels ?? [],
-    );
   }
 }
 
