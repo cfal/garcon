@@ -1,6 +1,6 @@
 # Google Antigravity Agent
 
-Status: implemented, 2026-11-20. Garcon hosts Google's Antigravity CLI (`agy`) as the `antigravity` agent through the Agent Client Protocol (ACP). The behavior below was verified against `agy` 1.5.13 (linux_amd64, SHA-512 `014b3738...c68f`) driven by a scripted Gemini model.
+Status: implemented, 2026-11-20. Garcon hosts Google's Antigravity CLI (`agy`) as the `antigravity` agent through the Agent Client Protocol (ACP). The behavior below was verified against `agy` 1.5.13 (linux_amd64, SHA-512 `014b3738...c68f`) driven by a scripted Gemini model during development.
 
 Gemini models remain separately reachable without an agent through the `gemini` API-provider preset (`common/api-provider-templates.ts`). This document covers only the agent.
 
@@ -14,11 +14,31 @@ Gemini models remain separately reachable without an agent through the `gemini` 
 - `server-agents/antigravity/` owns the Antigravity policy: launch and authentication, model discovery, mode mapping, tool normalization, executor-error detection, login, and one-shot queries.
 - Core never branches on `antigravity`. The web layer adds only its label, provider color tokens, and its Settings card.
 
+## Why ACP
+
+agy 1.5.13 has three surfaces, and ACP is the only one that covers Garcon's needs.
+
+| Capability | `agy acp` | `agy -p --input-format stream-json --output-format stream-json` | TUI |
+| --- | --- | --- | --- |
+| Permission requests | `session/request_permission` (Allow/Deny) | None: actions that need approval are soft-denied with a stderr notice | Interactive |
+| Cancel | `session/cancel` | None documented; closing stdin ends the session after the turn | Interactive |
+| Resume | `session/resume` | `--conversation <id>`, one process per session | `/resume` |
+| Model and mode | `session/set_model`, `mode` config option | Process flags | Interactive |
+| Mid-turn steering | A second `session/prompt` | Undocumented | `queuedMessages` setting |
+| Fork / rewind | Absent (`session/fork` returns -32601; `/fork` is sent to the model as text) | Rejected: "/fork is not available in print mode" | `/fork` (alias `/branch`), `/rewind` (alias `/undo`) |
+
+The engine implements `ForkConversation` (with a step index) and `RewindConversation` internally, but only the TUI exposes them. Garcon therefore forks Antigravity chats through its provider-neutral path: the fork seeds a new chat from the Garcon ledger, and the first turn carries that transcript as a prefix into a fresh agy session. Fork-at-message works the same way. What is lost compared with a native fork is agy's internal state (cached reads, plan state) rather than the conversation itself.
+
+Native storage cannot back a file-level fork the way Claude's JSONL does:
+
+- **`~/.gemini/antigravity-cli/conversations/<id>.db`** is the store agy resumes from. It is SQLite, with protobuf step payloads in `steps`, and it is also indexed outside the file. A copy under a new ID fails to resume with `trajectory not found`.
+- **`brain/<id>/.system_generated/logs/transcript.jsonl`** and **`transcript_full.jsonl`** are derived step logs. They carry no tool-call IDs, and tool results are untyped `GENERIC` steps with no link to their call. They could support a lossy Reload, but they are not a resume source.
+
 ## Process And Transport
 
 Each Garcon session owns one `agy acp` child process, started in the chat's project directory. The executor's ambient `PATH`, `HOME`, and Antigravity configuration apply, so the agent uses the same sign-in, settings, skills, and conversation store as the user's interactive `agy`. This matches how Claude, Codex, and Cursor use their native homes.
 
-The binary resolves from `GARCON_ANTIGRAVITY_BINARY`, then `AGY_BINARY`, then `agy` on `PATH`. Garcon sets `AGY_CLI_DISABLE_AUTO_UPDATE=1` on its children so the CLI's background updater cannot replace a binary that running sessions use.
+The binary resolves from `GARCON_ANTIGRAVITY_BINARY`, then `agy` on `PATH`. Garcon sets `AGY_CLI_DISABLE_AUTO_UPDATE=1` on its children so the CLI's background updater cannot replace a binary that running sessions use.
 
 ACP calls:
 
@@ -93,9 +113,11 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 
 ## Testing
 
-- **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, tool and result normalization, executor-error detection, and the login environment.
+Antigravity is a best-effort provider like Cursor: unit coverage only, with no scripted-model tier.
+
+- **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, and tool and result normalization. They also cover executor-error detection and the login environment. A runtime suite drives the shared ACP runtime against a fake agent that speaks agy's wire shapes. It covers agent-defined permission option IDs, cancellation (prompt, late, and ignored), in-band executor errors, and resume in a new process.
 - **Shared ACP tests** in `server-agents/common/src/acp/__tests__` cover permission-option selection by kind and the cancel notification.
-- **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, an SSE `streamGenerateContent` server reached through `GOOGLE_GEMINI_BASE_URL`, with an isolated `HOME`, in all three execution lanes. It covers catalog discovery, command approval and denial, file edits in accept-edits mode, model switching on resume, Stop, executor errors, and resume after a server restart. The fake sets `functionCall.id`, which agy keeps as the ACP `toolCallId`, so tool IDs are deterministic. Scripted calls must satisfy agy's tool schema (for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`); otherwise the CLI rejects them without emitting a tool call. The binary is supplied by `ANTIGRAVITY_BIN`; `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. The suite is skipped when `ANTIGRAVITY_BIN` is unset.
+- **Manual verification** when bumping agy: agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method, so a local server that answers `POST /v1beta/models/<model>:streamGenerateContent?alt=sse` can drive the real CLI without a Google account. Requests without tool declarations are auxiliary: title generation and web-search grounding. agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`. It rejects calls that miss required schema fields without emitting a tool call; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Its own rules auto-approve some commands, such as `touch`.
 
 ## Comparison With t3code
 
@@ -105,7 +127,7 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 | Google sign-in | `agy acp --login` code paste; loopback replay for `oauth-business` | Code paste for the default account; other methods via the CLI |
 | API key / Vertex | Per-instance secret and settings file | Executor environment |
 | Account isolation | Private `GEMINI_HOME` per provider instance | User's native `agy` home (one account per executor) |
-| CLI install | Managed, checksummed download with version leases | User-installed `agy` on the executor; pinned download for tests |
+| CLI install | Managed, checksummed download with version leases | User-installed `agy` on the executor |
 | Models | `session/new` config options, probed per model for thinking levels | `agy models` flattened IDs |
 | Permission modes | default, auto, plan via `/plan`; full access by policy | default, accept-edits, plan; bypass by policy |
 | Steering mid-turn | Yes (second `session/prompt`) | No (queued as the next turn) |
