@@ -154,7 +154,8 @@ describe('Docker contract', () => {
     expect(env.GEMINI_API_KEY).toBeNull();
     expect(env.GARCON_ANTIGRAVITY_AUTH_METHOD).toBeNull();
     expect(env.GOOGLE_CLOUD_PROJECT).toBeNull();
-    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeNull();
+    expect(env.GOOGLE_CLOUD_LOCATION).toBeNull();
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
   });
 
   test('keeps coupled CLI versions aligned with the integration tier', () => {

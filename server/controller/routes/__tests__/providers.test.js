@@ -63,14 +63,15 @@ describe('agent auth login routes', () => {
     responseCache.clear();
   });
 
-  it('preserves the configured-method diagnostic for an unsupported login', async () => {
+  it.each([
+    ['OPERATION_UNSUPPORTED', 'In-app Antigravity sign-in requires oauth-personal.', 501],
+    ['BINARY_NOT_FOUND', 'Install agy on this executor.', 503],
+  ])('preserves the login diagnostic for %s', async (code, message, status) => {
     parseJsonBody.mockResolvedValueOnce({ agentId: 'antigravity' });
-    agents.launchAgentAuthLogin.mockRejectedValueOnce(new AgentIntegrationError(
-      'OPERATION_UNSUPPORTED', 'In-app Antigravity sign-in requires oauth-personal.', false,
-    ));
+    agents.launchAgentAuthLogin.mockRejectedValueOnce(new AgentIntegrationError(code, message, false));
     const response = await routes['/api/v1/agents/auth/login'].POST(new Request('http://localhost/api/v1/agents/auth/login', { method: 'POST' }));
-    expect(response.status).toBe(501);
-    expect(await response.json()).toMatchObject({ error: expect.stringContaining('oauth-personal'), errorCode: 'OPERATION_UNSUPPORTED', retryable: false });
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ error: message, errorCode: code, retryable: false });
   });
 
   it('launches Claude login via the agent auth route', async () => {

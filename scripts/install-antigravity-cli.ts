@@ -6,8 +6,8 @@
 //   export ANTIGRAVITY_BIN="$(bun scripts/install-antigravity-cli.ts)"
 
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { constants, createReadStream } from 'node:fs';
+import { access, chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,15 +40,17 @@ async function run(command: string[]): Promise<Uint8Array> {
   return stdout;
 }
 
-export async function installAntigravityCli(cacheRoot: string): Promise<string> {
-  const release = ANTIGRAVITY_CLI_RELEASE;
+type CliRelease = Readonly<Record<keyof typeof ANTIGRAVITY_CLI_RELEASE, string>>;
+
+export async function installAntigravityCli(cacheRoot: string, release: CliRelease = ANTIGRAVITY_CLI_RELEASE): Promise<string> {
   if (`${process.platform}-${process.arch}` !== release.platform) {
     throw new Error(`The pinned Antigravity CLI is only installed for ${release.platform}.`);
   }
   const directory = join(cacheRoot, release.version);
   const binary = join(directory, 'agy');
   if (await Bun.file(binary).exists() && await fileSha512(binary) === release.binarySha512) {
-    await chmod(binary, 0o755);
+    // Verified executables are usable even on read-only shared caches.
+    await access(binary, constants.X_OK).catch(() => chmod(binary, 0o755));
     return binary;
   }
 

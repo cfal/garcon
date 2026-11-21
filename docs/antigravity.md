@@ -83,7 +83,16 @@ The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. 
 
 `auth.status` checks that the CLI exists before reporting an API key as environment authentication. On Linux, OAuth and Agent Platform status use the same ACP `authenticate` method as a session, without a display, so another cached credential cannot make the selected method appear ready. On macOS, agy can open a browser even without display variables. There, status uses the noninteractive `agy models` check, which cannot distinguish among cached CLI credentials; the session still enforces the configured method.
 
-Compose forwards `GOOGLE_CLOUD_PROJECT` for Agent Platform. When using a credentials file, mount it read-only and set `GOOGLE_APPLICATION_CREDENTIALS` to its **container** path. Passing the variable does not mount the file.
+Agent Platform requires a project, location, and Application Default Credentials. Compose forwards `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`, but not a host credentials path. To use a credentials file, add its mount and its **container** path together in a Compose override:
+
+```yaml
+services:
+  garcon:
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/run/secrets/google-adc.json:ro
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-adc.json
+```
 
 ## Models And Modes
 

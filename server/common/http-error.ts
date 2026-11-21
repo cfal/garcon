@@ -46,6 +46,9 @@ export function jsonErrorFromUnknown(
   if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
     return jsonError(error.message, 501, error.code, false);
   }
+  if (error instanceof AgentIntegrationError && error.code === 'BINARY_NOT_FOUND') {
+    return jsonError(error.message, 503, error.code, false);
+  }
   if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
     return jsonError(
       transcriptUnavailableMessage(error.retryable),

@@ -7,6 +7,7 @@ import { assistantContents, messagesOfType, userContents } from '../../support/c
 import { withTimeout } from '../../support/deferred.js';
 import {
   FAKE_GEMINI_API_KEY,
+  FakeGeminiModel,
   geminiFunctionCall,
   geminiText,
   geminiThought,
@@ -461,32 +462,45 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
   }, TURN_TIMEOUT_MS);
 
   test('generates a title on the selected executor without publishing the one-shot reply to the chat', async () => {
-    const { model } = requireEnvironment();
+    const generationModel = requireEnvironment().model;
+    const localModel = FakeGeminiModel.start();
     const reply = marker('CHAT_REPLY');
     const title = marker('GENERATED_TITLE');
-    model.scriptTurn([geminiText(reply)]);
-    model.scriptTurn([geminiText(title)]);
 
-    await withIntegrationFixture('antigravity-scripted-title', async (fixture) => {
-      await fixture.client.updateSettings({ ui: { chatTitle: {
-        executorId: fixture.client.executorId, enabled: false, agentId: 'antigravity', model: 'default',
-        apiProviderId: null, modelEndpointId: null, modelProtocol: null, thinkingMode: 'none',
-      } } });
-      const chatId = fixture.newChatId();
-      const cursor = fixture.client.markEvents();
-      const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
-        chatId, projectPath: fixture.executionDirs.project, command: 'Discuss the sample project.',
-      }));
-      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
-      const sessionId = await antigravityAgentSessionId(fixture, chatId);
+    try {
+      await withIntegrationFixture('antigravity-scripted-title', async (fixture) => {
+        // In the remote lanes the chat stays Local and only its title runs on the worker.
+        const chatModel = fixture.client.executorId === 'local' ? generationModel : localModel;
+        chatModel.scriptTurn([geminiText(reply)]);
+        generationModel.scriptTurn([geminiText(title)]);
+        await fixture.client.updateSettings({ ui: { chatTitle: {
+          executorId: fixture.client.executorId, enabled: false, agentId: 'antigravity', model: 'default',
+          apiProviderId: null, modelEndpointId: null, modelProtocol: null, thinkingMode: 'none',
+        } } });
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat({ ...scriptedAntigravityStartRequest({
+          chatId, projectPath: fixture.dirs.project, command: 'Discuss the sample project.',
+        }), executorId: 'local' });
+        await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+        const sessionId = await antigravityAgentSessionId(fixture, chatId);
 
-      const generated = await fixture.client.generateChatTitle({ chatId, message: 'Discuss the sample project.' });
-      expect(generated.success).toBe(true);
-      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)?.title).toContain(title);
-      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([reply]);
-      expect(await antigravityAgentSessionId(fixture, chatId)).toBe(sessionId);
-      model.assertSettled();
-    }, withScriptedAntigravity());
+        const generated = await fixture.client.generateChatTitle({ chatId, message: 'Discuss the sample project.' });
+        expect(generated.success).toBe(true);
+        expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId)?.title).toContain(title);
+        expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([reply]);
+        expect(await antigravityAgentSessionId(fixture, chatId)).toBe(sessionId);
+        generationModel.assertSettled();
+        localModel.assertSettled();
+      }, {
+        ...withScriptedAntigravity(),
+        prepareControllerWorkspace: requireEnvironment().prepareWorkspace,
+        serverEnvironment: { ...requireEnvironment().serverEnvironment, GOOGLE_GEMINI_BASE_URL: localModel.baseUrl },
+        executorEnvironment: { GOOGLE_GEMINI_BASE_URL: generationModel.baseUrl },
+      });
+    } finally {
+      localModel.stop();
+    }
   }, TURN_TIMEOUT_MS);
 });
 

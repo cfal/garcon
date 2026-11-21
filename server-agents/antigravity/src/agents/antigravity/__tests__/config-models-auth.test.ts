@@ -91,9 +91,9 @@ describe('parseAntigravityModels', () => {
 });
 
 describe('getAntigravityAuthStatus', () => {
-  it('does not mark an executor ready from an API key alone when agy is missing', async () => {
+  it.each(['oauth-personal', 'gemini-api-key'])('does not offer sign-in or report ready for %s when agy is missing', async (method) => {
     const status = await getAntigravityAuthStatus(createAntigravityConfig(environment({
-      GARCON_ANTIGRAVITY_BINARY: '/synthetic/uninstalled/agy', GEMINI_API_KEY: 'synthetic-key',
+      GARCON_ANTIGRAVITY_BINARY: '/synthetic/uninstalled/agy', GARCON_ANTIGRAVITY_AUTH_METHOD: method, GEMINI_API_KEY: 'synthetic-key',
     })));
     expect(status).toMatchObject({ authenticated: false, canReauth: false, detail: expect.stringContaining('Install agy') });
   });
