@@ -267,6 +267,7 @@
 						<AgentSettingsControls
 							descriptors={startup.agentSettingDescriptors}
 							envelope={startup.agentSettings}
+							defaults={modelCatalog.forExecutor(startup.executorId).getDefaultAgentSettings(startup.agentId)}
 							onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}

@@ -1,6 +1,6 @@
 # Agent CLI Updates
 
-Settings > Agents shows the Claude Code and Codex CLI versions on the selected
+Settings > Providers shows the Claude Code and Codex CLI versions on the selected
 executor. When a newer release exists, it either updates the CLI in place or
 shows the command to run. Detection and installer selection are ported from T3
 Code's provider maintenance resolver at
@@ -9,7 +9,7 @@ Code's provider maintenance resolver at
 ## Data Flow
 
 ```text
-Settings > Agents -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&agent=<id>...]
+Settings > Providers -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&agent=<id>...]
                      POST /api/v1/agents/cli-updates { agentId, executorId }
   -> AgentCliUpdateService (controller): one call per integration with the facet
     -> AgentIntegration.cliUpdates on the executor (Local or remote)

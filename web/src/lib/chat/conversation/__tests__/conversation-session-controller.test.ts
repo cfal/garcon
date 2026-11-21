@@ -1,3 +1,4 @@
+import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -556,6 +557,7 @@ function createDeps(chat = createRunningChat()) {
 			changed: true,
 		}),
 		sessions: {
+			settingsMutations: new ChatSettingsMutations(),
 			selectedChatId: chat.id,
 			selectedChat: chat,
 			byId: { [chat.id]: chat },

@@ -32,6 +32,10 @@ describe('price table keys', () => {
     expect(priceUsageRecord(record('<synthetic>', { outputTokens: 10 }))).toBeNull();
   });
 
+  test('leaves Ultrafast unpriced on a model without an Ultrafast rate', () => {
+    expect(priceUsageRecord(record('gpt-5.6-sol', { outputTokens: 1_000_000 }, { speed: 'ultrafast' }))).toBeNull();
+  });
+
   test('every entry has finite, non-negative rates', () => {
     for (const [model, price] of MODEL_PRICES) {
       const tiers = [price.rates, ...(price.longContext ? [price.longContext.rates] : [])];
@@ -46,6 +50,48 @@ describe('price table keys', () => {
 });
 
 describe('pricing', () => {
+  test.each([
+    ['gpt-6.2-astra', 8, 40, 0.4, 10],
+    ['gpt-6.2-sol', 2, 10, 0.1, 2.5],
+    ['gpt-6-astra', 10, 50, 1, 12.5],
+    ['gpt-6.1-sol', 2, 10, 0.1, 2.5],
+  ] as const)('prices every Ultrafast token category and cache savings for %s', (model, input, output, cached, write) => {
+    for (const promptTokens of [272_000, 272_001]) {
+      const long = promptTokens > 272_000;
+      const priced = priceUsageRecord(record(model, {
+        uncachedInputTokens: promptTokens - 200_000, cachedInputTokens: 100_000,
+        cacheWriteTokens: 100_000, outputTokens: 1_000_000, reasoningTokens: 200_000,
+      }, { speed: 'ultrafast', cacheWrite1hTokens: 40_000 }))!;
+      const promptMultiplier = 6 * (long ? 2 : 1);
+      const categories = {
+        input: (promptTokens - 200_000) / 1_000_000 * input * promptMultiplier,
+        cacheRead: 0.1 * cached * promptMultiplier,
+        cacheWrite: 0.1 * write * promptMultiplier,
+        output: output * 6 * (long ? 1.5 : 1),
+      };
+      for (const [category, cost] of Object.entries(categories)) {
+        expect(priced.categoryCostUsd[category as keyof typeof categories]).toBeCloseTo(cost, 10);
+      }
+      expect(priced.costUsd).toBeCloseTo(Object.values(categories).reduce((sum, cost) => sum + cost, 0), 10);
+      expect(priced.cacheSavingsUsd).toBeCloseTo(0.1 * (input - cached) * promptMultiplier, 10);
+    }
+  });
+
+  test.each(['2026-11-20T00:00:00Z', '2030-01-01T00:00:00Z'])(
+    'uses regular Ultrafast rates regardless of the usage date: %s', (timestamp) => {
+      for (const [model, outputCost] of [['gpt-6.2-astra', 240], ['gpt-6.2-sol', 60]] as const) {
+        const priced = priceUsageRecord(record(model, { outputTokens: 1_000_000 }, {
+          speed: 'ultrafast', timestampMs: Date.parse(timestamp),
+        }));
+        expect(priced?.costUsd).toBe(outputCost);
+      }
+    },
+  );
+
+  test('keeps a response with ambiguous speed unpriced even for a known model', () => {
+    expect(priceUsageRecord(record('gpt-6.2-sol', { outputTokens: 100 }, { speed: 'unknown' }))).toBeNull();
+  });
+
   test('bills each Claude token type at its own rate, including one-hour cache writes', () => {
     // Opus 5.5 has no long-context tier, so a 3M-token prompt stays at standard rates.
     const priced = priceUsageRecord(record('claude-opus-5-5', {

@@ -1,6 +1,6 @@
 import type { UsageCategoryCost } from '@garcon/common/usage';
 import { MODEL_PRICES, type ModelPrice } from './model-prices.js';
-import type { UsageRecord } from './usage-record.js';
+import type { UsageRecord, UsageSpeed } from './usage-record.js';
 
 export interface PricedUsage {
   readonly costUsd: number;
@@ -37,18 +37,28 @@ export function lookupModelPrice(model: string): ModelPrice | null {
   return price;
 }
 
-/** Returns null for models without a known price. Reasoning tokens are already part of output. */
+function speedMultiplier(price: ModelPrice, speed: Exclude<UsageSpeed, 'unknown'>): number | null {
+  switch (speed) {
+    case 'fast': return price.fastMultiplier ?? 1;
+    case 'flex': return price.flexMultiplier ?? 1;
+    case 'ultrafast': return price.ultrafastMultiplier ?? null;
+    default: return 1;
+  }
+}
+
+/** Returns null when the rate is unknown. Reasoning tokens are already part of output. */
 export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 'cacheWrite1hTokens' | 'speed'>): PricedUsage | null {
+  if (record.speed === 'unknown') return null;
   const price = lookupModelPrice(record.model);
   if (!price) return null;
+  const multiplier = speedMultiplier(price, record.speed);
+  if (multiplier === null) return null;
   const { uncachedInputTokens, cachedInputTokens, cacheWriteTokens, outputTokens } = record.totals;
   const promptTokens = uncachedInputTokens + cachedInputTokens + cacheWriteTokens;
   const rates = price.longContext && promptTokens > price.longContext.promptTokensAbove
     ? price.longContext.rates
     : price.rates;
-  const tier = record.speed === 'fast' ? price.fastMultiplier : record.speed === 'flex' ? price.flexMultiplier : null;
-  // A tier the table does not price for this model bills at standard rates.
-  const scale = (tier ?? 1) / 1_000_000;
+  const scale = multiplier / 1_000_000;
   const write1h = Math.min(record.cacheWrite1hTokens, cacheWriteTokens);
   const categoryCostUsd = {
     input: uncachedInputTokens * rates.input * scale,

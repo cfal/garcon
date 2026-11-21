@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
+import { CODEX_SPEED_SETTING, codexSpeed } from './agents/codex/service-tier.js';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
@@ -145,8 +146,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.settings = createVersionedSettings({
       ownerId: 'codex',
       schemaVersion: 1,
-      defaults: {},
-      descriptors: [],
+      defaults: { speed: 'standard' },
+      descriptors: [CODEX_SPEED_SETTING],
     });
     const execution = new CodexExecution(
       host,
@@ -299,6 +300,9 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     this.singleQuery = {
       async run(request) {
+        if (codexSpeed(request.settings) !== 'standard') {
+          throw new AgentIntegrationError('INVALID_SETTINGS', 'Codex background generation supports Standard speed only.', false);
+        }
         const runtimeOptions = singleQueryRuntimeOptions(request);
         try {
           return await withSingleQueryControl(runtimeOptions, async (signal) => {
@@ -376,9 +380,10 @@ async function forkCodexNativeSession(
   let result;
   try {
     result = await runtime.forkSession({
+      speed: codexSpeed(request.settings),
       sourceSession: {
         projectPath: request.source.projectPath,
-        model: request.source.model,
+        model: request.model,
         agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
         nativePath: source.path,
       },

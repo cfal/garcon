@@ -103,8 +103,13 @@ describe('CodexAgentIntegration', () => {
     expect(integration.settings.defaults()).toEqual({
       ownerId: 'codex',
       schemaVersion: 1,
-      values: {},
+      values: { speed: 'standard' },
     });
+    expect(integration.settings.parse({ ownerId: 'codex', schemaVersion: 1, values: {} }).values).toEqual({});
+    expect(() => integration.settings.applyPatch(integration.settings.defaults(), { speed: 'turbo' }))
+      .toThrow('Invalid value for setting speed');
+    await expect(integration.singleQuery.run({ settings: integration.settings.applyPatch(integration.settings.defaults(), { speed: 'ultrafast' }) }))
+      .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
     await expect(integration.migration.translateLegacyNativeSession({
       chatId: 'chat-1',
       projectPath: '/repo',
