@@ -82,3 +82,14 @@ test('retries transient errors, caches success, and preserves last-known-good on
   await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: expected });
   expect(await service.getModels()).toEqual(expected);
 });
+
+test('a missing Pi executable fails discovery once and is checked again on the next request', async () => {
+  const discover = mock<() => Promise<[]>>()
+    .mockRejectedValueOnce(Object.assign(new Error('Pi executable not found'), { code: 'ENOENT' }))
+    .mockResolvedValue([]);
+  const service = new PiModelCatalogService(testPiConfig, discover);
+  await expect(service.getModelsStrict()).rejects.toMatchObject({ code: 'PI_MODEL_DISCOVERY_UNAVAILABLE' });
+  expect(discover).toHaveBeenCalledTimes(1);
+  expect(await service.getModelsStrict()).toEqual([]);
+  expect(discover).toHaveBeenCalledTimes(2);
+});

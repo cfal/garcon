@@ -1,7 +1,7 @@
 import { buildPiCliEnv } from './pi-cli.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SharedModelOption } from '@garcon/common/models';
-import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { errorMessage, hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 import type { PiConfig } from '../../config.js';
 
@@ -141,7 +141,7 @@ export class PiModelCatalogService {
         signal.throwIfAborted();
         lastError = error;
         const retryDelay = retryDelays[attempt];
-        if (retryDelay === undefined) break;
+        if (retryDelay === undefined || hasNodeErrorCode(error, 'ENOENT')) break;
         if (retryDelay > 0) await delay(retryDelay, undefined, { signal });
       }
     }
