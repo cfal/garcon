@@ -23,6 +23,7 @@ export function createCursorAcpPolicy(config: CursorConfig, logger?: AgentLogger
     command: config.binary,
     args: ['acp'],
     abortStrategy: 'process-restart',
+    acceptsEditsOnClient: true,
     authenticateMethodId: 'cursor_login',
     clientCapabilities: {
       _meta: {

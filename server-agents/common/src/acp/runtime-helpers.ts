@@ -17,16 +17,16 @@ export function buildEnvFallback(
   return { ...process.env, ...request.envOverrides };
 }
 
-export const DEFAULT_AUTO_APPROVE_MODES: readonly PermissionMode[] = ['acceptEdits', 'manualBypass', 'bypassPermissions'];
-
-export function isAutoApproveMode(mode: PermissionMode, policy: AcpAgentPolicy): boolean {
-  return (policy.autoApprovePermissionModes ?? DEFAULT_AUTO_APPROVE_MODES).includes(mode);
+export function automaticPermissionChoice(mode: PermissionMode, kind: unknown, policy: AcpAgentPolicy): AcpPermissionChoice | null {
+  if (mode === 'manualBypass' || mode === 'bypassPermissions') return 'auto-approve';
+  return mode === 'acceptEdits' && policy.acceptsEditsOnClient && kind === 'edit' ? 'allow-once' : null;
 }
 
 // `auto-approve` is Garcon's bypass policy for the turn: it prefers the
 // one-time option so no persistent grant is written, and takes a persistent one
 // only when the agent offers nothing else, since bypass means the tool runs.
 export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'auto-approve' | 'reject';
+type AcpPermissionResponse = { outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' } };
 
 function optionIdFrom(option: Record<string, unknown>): string | undefined {
   return asString(option.optionId ?? option.option_id ?? option.id);
@@ -36,43 +36,43 @@ function optionIdFrom(option: Record<string, unknown>): string | undefined {
 // ACP `kind` decides; the conventional IDs cover agents that omit it. A
 // one-time choice never falls back to a persistent grant or a persistent deny
 // rule; a persistent grant may narrow to a one-time one.
-const CHOICE_KINDS: Record<AcpPermissionChoice, readonly string[]> = {
+type ChoiceKind = 'allow_once' | 'allow_always' | 'reject_once';
+const CHOICE_KINDS: Record<AcpPermissionChoice, readonly ChoiceKind[]> = {
   'allow-once': ['allow_once'],
   'allow-always': ['allow_always', 'allow_once'],
   'auto-approve': ['allow_once', 'allow_always'],
   reject: ['reject_once'],
 };
 
-const CHOICE_FALLBACK_IDS: Record<AcpPermissionChoice, readonly string[]> = {
-  'allow-once': ['allow-once', 'allow_once', 'allow', 'approve'],
-  'allow-always': ['allow-always', 'allow_always', 'allow-once', 'allow_once', 'allow', 'approve'],
-  'auto-approve': ['allow-once', 'allow_once', 'allow', 'approve', 'allow-always', 'allow_always'],
-  reject: ['reject-once', 'reject_once', 'reject', 'deny'],
+const UNTYPED_IDS: Record<ChoiceKind, readonly string[]> = {
+  allow_once: ['allow-once', 'allow_once', 'allow', 'approve'],
+  allow_always: ['allow-always', 'allow_always'],
+  reject_once: ['reject-once', 'reject_once', 'reject', 'deny'],
 };
 
 // Cancels instead of guessing when no offered option matches, so a denial can
-// never select an option whose meaning is unknown. An agent that offers no
-// options at all gets the conventional ID for the choice.
+// never select an option whose meaning is unknown.
 export function permissionChoiceOutcome(
   options: ReadonlyArray<Record<string, unknown>>,
   choice: AcpPermissionChoice,
-): Record<string, unknown> {
-  if (options.length === 0) return permissionOutcome(CHOICE_FALLBACK_IDS[choice][0]!);
+): AcpPermissionResponse {
+  const untyped = new Set(options.filter((option) => option.kind === undefined).map(optionIdFrom));
   for (const kind of CHOICE_KINDS[choice]) {
-    const optionId = optionIdFrom(options.find((option) => option.kind === kind) ?? {});
-    if (optionId) return permissionOutcome(optionId);
+    for (const option of options) {
+      const id = optionIdFrom(option);
+      if (option.kind === kind && id) return permissionOutcome(id);
+    }
+    const conventional = UNTYPED_IDS[kind].find((id) => untyped.has(id));
+    if (conventional) return permissionOutcome(conventional);
   }
-  // Untyped options only; a typed option that did not match has another meaning.
-  const optionIds = new Set(options.filter((option) => option.kind === undefined).map(optionIdFrom));
-  const fallback = CHOICE_FALLBACK_IDS[choice].find((id) => optionIds.has(id));
-  return fallback ? permissionOutcome(fallback) : permissionCancelledOutcome();
+  return permissionCancelledOutcome();
 }
 
-export function permissionOutcome(optionId: string): Record<string, unknown> {
+export function permissionOutcome(optionId: string): AcpPermissionResponse {
   return { outcome: { outcome: 'selected', optionId } };
 }
 
-export function permissionCancelledOutcome(): Record<string, unknown> {
+export function permissionCancelledOutcome(): AcpPermissionResponse {
   return { outcome: { outcome: 'cancelled' } };
 }
 

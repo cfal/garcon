@@ -14,11 +14,6 @@ export const ANTIGRAVITY_AGENT_ID = 'antigravity';
 
 export type AntigravityMode = 'default' | 'accept-edits' | 'plan';
 
-// Bypass modes keep the CLI's `default` mode; the shared runtime answers its
-// permission requests instead. In `accept-edits` agy approves edits itself, so
-// the requests it still sends (commands, network) go to the user.
-export const ANTIGRAVITY_AUTO_APPROVE_MODES: readonly PermissionMode[] = ['manualBypass', 'bypassPermissions'];
-
 export function antigravityModeForPermissionMode(permissionMode: PermissionMode): AntigravityMode {
   if (permissionMode === 'plan') return 'plan';
   if (permissionMode === 'acceptEdits') return 'accept-edits';
@@ -122,6 +117,10 @@ export async function applyAntigravityMode(
     }
   }
   const result = await client.setSessionConfigOption({ sessionId, configId: 'mode', value: mode });
+  const applied = result.configOptions?.find((option) => option.id === 'mode')?.currentValue;
+  if (applied !== undefined && applied !== mode) {
+    throw new AgentIntegrationError('PROVIDER_FAILURE', `Antigravity did not apply the requested mode: expected ${mode}, got ${applied}.`, false);
+  }
   return result.configOptions;
 }
 
@@ -135,7 +134,6 @@ export function createAntigravityAcpPolicy(config: AntigravityConfig): AcpAgentP
     command: config.binary,
     args: ['acp'],
     abortStrategy: 'cancel',
-    autoApprovePermissionModes: ANTIGRAVITY_AUTO_APPROVE_MODES,
     authenticateMethodId: config.authMethod,
     clientCapabilities: {},
     newSessionModelConfig: false,

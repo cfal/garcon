@@ -3,7 +3,6 @@ import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 import type { AcpClient } from './client.js';
 import type { AcpJsonRpcId, AcpSessionConfigOption, AcpSessionModelState } from './protocol.js';
-import type { AcpAdvertisedCapabilities } from './reconnect-policy.js';
 
 export type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -20,22 +19,17 @@ export interface PendingPermissionRequest {
 
 export interface AcpAgentRuntimeSession {
   id: string;
-  remoteSessionId: string;
   chatId: string;
   projectPath: string;
   client: AcpClient;
-  capabilities: AcpAdvertisedCapabilities;
   state: RuntimeSessionState;
   retired: boolean;
-  // Set when the owning chat let go of the session, which no queued turn may undo.
-  released?: boolean;
   activeTurn: AcpTurnContext | null;
   sourceTurn: AcpTurnContext | null;
   // The turn between admission and its prompt being sent. Its configure
   // window counts as busy for concurrent turns, the idle purger, and path
   // updates, and Stop during it aborts the turn before the prompt goes out.
   pendingTurn: AcpTurnContext | null;
-  permissionMode: PermissionMode;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
   // The model an empty request returns to: the agent's own default when this
@@ -61,7 +55,7 @@ export interface AcpTurnContext {
 }
 
 type AcpRuntimeSessionIdentity = Pick<AcpAgentRuntimeSession,
-  'id' | 'remoteSessionId' | 'chatId' | 'projectPath' | 'client' | 'capabilities' | 'permissionMode'
+  'id' | 'chatId' | 'projectPath' | 'client'
   | 'configOptions' | 'models' | 'agentDefaultModelId'>;
 
 // An idle, unregistered session for a process that just opened or resumed it.

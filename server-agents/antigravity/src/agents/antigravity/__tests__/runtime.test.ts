@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AcpJsonRpcMessage } from '@garcon/server-agent-common/acp/protocol';
+import type { AcpInitializeResult, AcpJsonRpcMessage } from '@garcon/server-agent-common/acp/protocol';
 import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import type { AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { AcpTransport, type AcpProcess } from '@garcon/server-agent-common/acp/transport';
@@ -54,10 +54,15 @@ class FakeAntigravityAgent {
   modeOptions: Array<{ value: string }> = MODE_OPTION.options;
   // Whether `session/set_config_option` replies with the session's options.
   configReplyReportsOptions = true;
+  reportedMode?: string;
   // When set, `session/resume` fails with this internal error.
   resumeFailure: string | null = null;
   // When set, `session/resume` replies only after this settles.
   resumeGate: Promise<void> | null = null;
+  newSessionGate: Promise<void> | null = null;
+  processesKilled = 0;
+  capabilities: AcpInitializeResult['agentCapabilities'] = { loadSession: true, sessionCapabilities: { resume: {} } };
+  resumeErrorCode = -32603;
   // When set, `session/set_config_option` replies only after this settles.
   configReplyGate: Promise<void> | null = null;
 
@@ -77,7 +82,7 @@ class FakeAntigravityAgent {
       stdout: new ReadableStream<Uint8Array>({ start: (controller) => { this.#stdout = controller; } }),
       stderr: new ReadableStream<Uint8Array>(),
       exited: exited.promise,
-      kill: () => exited.resolve(143),
+      kill: () => { this.processesKilled++; exited.resolve(143); },
     };
   }
 
@@ -133,7 +138,7 @@ class FakeAntigravityAgent {
     const reply = (result: unknown) => this.#send({ jsonrpc: '2.0', id: message.id, result });
     switch (message.method) {
       case 'initialize':
-        return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } });
+        return reply({ protocolVersion: 1, agentCapabilities: this.capabilities });
       case 'authenticate':
         return reply({});
       case 'session/set_model':
@@ -143,11 +148,16 @@ class FakeAntigravityAgent {
       case 'session/new': {
         const sessionId = `session-${this.#nextSession++}`;
         this.sessions.add(sessionId);
-        return reply({ sessionId, models: MODELS, configOptions: [{ ...MODE_OPTION, options: this.modeOptions }] });
+        const result = { sessionId, models: MODELS, configOptions: [{ ...MODE_OPTION, options: this.modeOptions }] };
+        if (this.newSessionGate) {
+          void this.newSessionGate.then(() => reply(result));
+          return;
+        }
+        return reply(result);
       }
       case 'session/resume':
         if (this.resumeFailure) {
-          return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: this.resumeFailure } });
+          return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: this.resumeErrorCode, message: this.resumeFailure } });
         }
         if (!this.sessions.has(String(params.sessionId))) {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
@@ -166,7 +176,7 @@ class FakeAntigravityAgent {
       }
       case 'session/set_config_option':
       {
-        const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, options: this.modeOptions, currentValue: params.value }] } : {};
+        const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, options: this.modeOptions, currentValue: this.reportedMode ?? params.value }] } : {};
         if (this.configReplyGate) {
           void this.configReplyGate.then(() => reply(result));
           return;
@@ -233,6 +243,145 @@ function runEnded(events: readonly AgentRuntimeEvent[]) {
 }
 
 describe('Antigravity ACP runtime', () => {
+  it.each(['shutdown', 'cancel'] as const)('closes an unregistered start on %s without activating it', async (cause) => {
+    const { runtime, agent, request } = harness();
+    const admission = new AbortController();
+    const activated: string[] = [];
+    const gate = Promise.withResolvers<void>();
+    agent.newSessionGate = gate.promise;
+    agent.onPrompt((fake) => fake.endPrompt());
+    const start = runtime.startSession(request({
+      executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+      onSessionActivated: (session) => activated.push(session.agentSessionId),
+    }));
+    await waitFor(() => agent.requests('session/new').length === 1);
+    if (cause === 'cancel') admission.abort(new Error('admission closed'));
+    else {
+      runtime.shutdown();
+      runtime.startPurgeTimer();
+    }
+    const killedBeforeReply = agent.processesKilled;
+    gate.resolve();
+    try {
+      await expect(start).rejects.toThrow();
+      expect(killedBeforeReply).toBe(1);
+      expect(activated).toEqual([]);
+      expect(agent.requests('session/prompt')).toEqual([]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('cancels a cold restore without retaining its process or blocking a fresh turn', async () => {
+    const { runtime, agent, request } = harness();
+    agent.sessions.add('saved');
+    const admission = new AbortController();
+    const gate = Promise.withResolvers<void>();
+    agent.resumeGate = gate.promise;
+    const turn = runtime.runTurn({ ...request({
+      executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+    }), agentSessionId: 'saved' });
+    await waitFor(() => agent.requests('session/resume').length === 1);
+    admission.abort(new Error('restore cancelled'));
+    const killedBeforeReply = agent.processesKilled;
+    gate.resolve();
+    await expect(turn).rejects.toThrow('restore cancelled');
+    expect(killedBeforeReply).toBe(1);
+    expect(agent.requests('session/prompt')).toEqual([]);
+    agent.resumeGate = null;
+    agent.onPrompt((fake) => fake.endPrompt());
+    await runtime.runTurn({ ...request(), agentSessionId: 'saved' });
+    expect(agent.requests('session/resume')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
+  it('does not try an unadvertised load or substitute a new session when resume is unavailable', async () => {
+    const { runtime, agent, request } = harness({ requestTimeoutMs: 100 });
+    agent.capabilities = { sessionCapabilities: { resume: {} } };
+    agent.resumeFailure = 'Method not found';
+    agent.resumeErrorCode = -32601;
+
+    await expect(runtime.runTurn({ ...request(), agentSessionId: 'saved' })).rejects.toThrow('Unable to restore');
+    expect(agent.requests('session/resume')).toHaveLength(1);
+    expect(agent.requests('session/load')).toEqual([]);
+    expect(agent.requests('session/new')).toEqual([]);
+    expect(agent.processesKilled).toBe(1);
+  });
+
+  it('never writes a prompt if admission closes while markStarted is pending', async () => {
+    const { runtime, agent, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const admission = new AbortController();
+    const marking = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const start = runtime.startSession(request({
+      executionAdmission: { signal: admission.signal, markStarted: () => { marking.resolve(); return gate.promise; } },
+    }));
+    await marking.promise;
+    admission.abort(new Error('admission closed'));
+    gate.resolve();
+    await expect(start).rejects.toThrow('admission closed');
+    expect(agent.requests('session/prompt')).toEqual([]);
+    runtime.shutdown();
+  });
+
+  it('closes the first process when admission ends with its configuration RPC unanswered', async () => {
+    const { runtime, agent, request } = harness();
+    const admission = new AbortController();
+    agent.configReplyGate = new Promise(() => {});
+    const start = runtime.startSession(request({
+      executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+    }));
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    admission.abort(new Error('start cancelled'));
+    expect(agent.processesKilled).toBe(1);
+    await expect(start).rejects.toThrow('start cancelled');
+    expect(runtime.getRunningSessions()).toEqual([]);
+    expect(agent.requests('session/prompt')).toEqual([]);
+  });
+
+  it('fences both restore waiters at every handoff from native reply through prompt reservation', async () => {
+    for (let handoff = 0; handoff <= 24; handoff++) {
+      const { runtime, agent, request } = harness();
+      const gate = Promise.withResolvers<void>();
+      agent.sessions.add('saved');
+      agent.resumeGate = gate.promise;
+      const resume = () => runtime.runTurn({ ...request(), agentSessionId: 'saved' });
+      const turns = Promise.allSettled([resume(), resume()]);
+      await waitFor(() => agent.requests('session/resume').length === 1);
+      gate.resolve();
+      for (let i = 0; i < handoff; i++) await Promise.resolve();
+      runtime.releaseSession('chat-1', 'saved');
+      // Any resurrected prompt settles too, so the assertion reports the extra restore.
+      agent.onPrompt((fake) => fake.endPrompt());
+      await turns;
+      expect(agent.requests('session/resume')).toHaveLength(1);
+      runtime.shutdown();
+    }
+  });
+
+  it('leaves the replacement process failure with its owning prompt', async () => {
+    const { runtime, agent, request } = harness();
+    agent.sessions.add('saved');
+    const marking = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const retired = runtime.runTurn({ ...request({
+      executionAdmission: { signal: new AbortController().signal, markStarted: () => { marking.resolve(); return gate.promise; } },
+    }), agentSessionId: 'saved' });
+    await marking.promise;
+    runtime.releaseSession('chat-1', 'saved');
+
+    agent.onPrompt((fake, id) => {
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { text: '\n\u26a0 agent executor error: synthetic failure' } });
+      fake.requestPermission(id, 'test-command');
+    });
+    const replacement = runtime.runTurn({ ...request({ permissionMode: 'manualBypass' }), agentSessionId: 'saved' });
+    await waitFor(() => agent.received.some((message) => message.id === 'permission-1' && 'result' in message));
+    gate.reject(new Error('Retired admission'));
+    await retired;
+    agent.endPrompt();
+    await expect(replacement).rejects.toThrow('synthetic failure');
+    runtime.shutdown();
+  });
+
   it('authenticates, applies model and mode, and sends images inline', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => {
@@ -1165,6 +1314,17 @@ describe('Antigravity ACP runtime', () => {
 });
 
 describe('Antigravity one-shot query', () => {
+  it('sends no prompt when the agent reports that plan mode did not take effect', async () => {
+    const agent = new FakeAntigravityAgent();
+    agent.reportedMode = 'default';
+    agent.onPrompt((fake) => fake.endPrompt());
+    await expect(runAntigravitySingleQuery('Name this chat.', {
+      projectPath: '/work',
+      createTransport: () => new AcpTransport({ spawn: () => agent.process() }),
+    }, CONFIG)).rejects.toThrow('expected plan, got default');
+    expect(agent.requests('session/prompt')).toEqual([]);
+    expect(agent.processesKilled).toBe(1);
+  });
   it('bounds the one-shot prompt by the query timeout', async () => {
     const agent = new FakeAntigravityAgent();
     agent.onPrompt(() => {});
