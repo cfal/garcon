@@ -18,6 +18,7 @@ import {
   antigravityToolCall,
   antigravityToolResultText,
   convertAntigravityToolUse,
+  type AntigravityToolCall,
 } from './tool-use-converter.js';
 
 const WARNING_MARKER = '\n⚠ ';
@@ -44,6 +45,8 @@ interface SessionState {
   // Arguments seen on any frame of a call, including its permission request,
   // for a row that waited on a frame without them.
   readonly toolInputs: Map<string, Record<string, unknown>>;
+  // Calls whose row is still waiting for arguments; the turn's end emits them.
+  readonly deferredCalls: Map<string, AntigravityToolCall>;
 }
 
 // Upstream model failures (bad key, quota, HTTP errors) do not fail the ACP
@@ -136,6 +139,16 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessions.get(sessionId);
     if (!session) return [];
     const messages = this.#flush(session, context.timestamp);
+    // A stopped turn may never send the frame a waiting row needed; the call
+    // still happened, so its row is published with what is known.
+    for (const call of session.deferredCalls.values()) {
+      this.#remember(session.emittedToolIds, call.toolCallId);
+      messages.push(convertAntigravityToolUse(context.timestamp, {
+        ...call,
+        input: session.toolInputs.get(call.toolCallId) ?? call.input,
+      }));
+    }
+    session.deferredCalls.clear();
     const late = session.failure.take();
     if (late) messages.push(new ErrorMessage(context.timestamp, late));
     return messages;
@@ -170,7 +183,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     // Text before the call is flushed even while its row waits for arguments,
     // so later text cannot move ahead of the tool row.
     const messages = this.#flush(session, timestamp);
-    if (!terminal && Object.keys(call.input).length === 0) return messages;
+    if (!terminal && Object.keys(call.input).length === 0) {
+      session.deferredCalls.set(call.toolCallId, call);
+      return messages;
+    }
+    session.deferredCalls.delete(call.toolCallId);
     this.#remember(session.emittedToolIds, call.toolCallId);
     messages.push(convertAntigravityToolUse(timestamp, call));
     return messages;
@@ -186,6 +203,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const messages = this.#toolCall(session, update, timestamp, true);
     const name = asString(update.name) ?? session.toolNames.get(toolCallId) ?? '';
     session.toolNames.delete(toolCallId);
+    session.toolInputs.delete(toolCallId);
     const text = antigravityToolResultText(name, toolResultText(update));
     const failed = status === 'failed';
     const content = text.trim() ? { raw: text } : failed ? { status } : {};
@@ -232,6 +250,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       completedToolIds: new Set(),
       toolNames: new Map(),
       toolInputs: new Map(),
+      deferredCalls: new Map(),
     };
     this.#sessions.set(sessionId, created);
     return created;

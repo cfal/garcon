@@ -392,6 +392,22 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(bare)).toEqual([{ type: 'assistant-message', content: 'Before.' }]);
   });
 
+  it('publishes a waiting row when the turn ends before its arguments arrive', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+    }), context);
+    converter.permissionToolUse({ toolCallId: 'tool-1', kind: 'execute', rawInput: { CommandLine: 'echo stopped' } }, context);
+
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([
+      { type: 'bash-tool-use', toolId: 'tool-1', command: 'echo stopped', description: undefined },
+    ]);
+    expect(converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress', rawInput: { CommandLine: 'echo stopped' },
+    }), context)).toEqual([]);
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

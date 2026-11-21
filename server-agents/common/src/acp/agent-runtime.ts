@@ -271,6 +271,9 @@ export class AcpAgentRuntime {
     const agentSessionId = request.agentSessionId;
     if (!agentSessionId) return;
 
+    if (this.#restores.inFlight(agentSessionId)) {
+      throw new AgentIntegrationError('SESSION_BUSY', `Session ${agentSessionId} is being restored`, false);
+    }
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
     if (session.chatId !== request.chatId) {
@@ -340,7 +343,7 @@ export class AcpAgentRuntime {
       .filter((session) => this.#isBusy(session))
       .map((session) => ({
         id: session.id,
-        status: session.activeTurn?.running || session.state === 'aborted' ? session.state : 'running',
+        status: session.state,
         startedAt: session.startedAt,
       }));
   }
@@ -426,8 +429,11 @@ export class AcpAgentRuntime {
     // another waiter's new restore already in flight.
     for (let restoring = this.#restores.inFlight(request.agentSessionId); restoring;
       restoring = this.#restores.inFlight(request.agentSessionId)) {
+      // Only a waiter that joined before the release fails with it; a turn that
+      // arrives afterwards starts a fresh restore once the cancelled one settles.
+      const joinedBeforeRelease = !restoring.cancelled();
       await restoring.settled;
-      if (restoring.cancelled()) {
+      if (joinedBeforeRelease && restoring.cancelled()) {
         throw new Error(`The ${this.#policy.agentId} session ${request.agentSessionId} was released while it was being restored.`);
       }
     }
@@ -472,7 +478,7 @@ export class AcpAgentRuntime {
     if (!connected) {
       throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
     }
-    if (isCancelled()) {
+    if (isCancelled() || this.#stopped) {
       client.close();
       throw new Error(`The ${this.#policy.agentId} session ${request.agentSessionId} was released while it was being restored.`);
     }
@@ -510,6 +516,7 @@ export class AcpAgentRuntime {
     // Reserved before the first await, so the busy check that admitted this
     // turn cannot admit another one.
     session.pendingTurn = turn;
+    session.state = 'running';
     const releasePending = () => {
       if (session.pendingTurn === turn) session.pendingTurn = null;
     };
@@ -662,7 +669,8 @@ export class AcpAgentRuntime {
     turn.detachSourceListeners.push(session.client.onExit((exitCode) => {
       if (!this.#canRouteSource(turn)) return;
       if (turn.running && !turn.aborted) {
-        // Text streamed before the crash is published ahead of the failure.
+        // Text streamed before the crash is published ahead of the one failure row.
+        this.#converter.takeTurnFailure?.(session.id);
         this.#emitFlushedMessages(turn);
         const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
         this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), message)]);
@@ -930,8 +938,12 @@ export class AcpAgentRuntime {
       (turn): turn is AcpTurnContext => turn !== null,
     ));
     for (const turn of turns) {
-      // Buffered text still belongs to the transcript; the agent kept it.
-      if (this.#canRouteSource(turn)) this.#emitFlushedMessages(turn);
+      // Buffered text still belongs to the transcript; the agent kept it. A held
+      // in-band failure does not: the stop or crash is what ended the turn.
+      if (this.#canRouteSource(turn)) {
+        this.#converter.takeTurnFailure?.(session.id);
+        this.#emitFlushedMessages(turn);
+      }
       // A turn deliberately retired before its prompt went out never ran, so it
       // ends as aborted; a crash still fails it.
       if (reason === 'aborted' || (turn === session.pendingTurn && !processExited)) turn.aborted = true;

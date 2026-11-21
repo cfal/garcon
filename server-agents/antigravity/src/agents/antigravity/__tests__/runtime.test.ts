@@ -811,6 +811,75 @@ describe('Antigravity ACP runtime', () => {
     expect(rows).toEqual([expect.objectContaining({ type: 'error', content: 'Synthetic prompt failure' })]);
   });
 
+  it('publishes no in-band error row when Stop retires an unanswered turn', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.cancelReply = 'ignored';
+    agent.onPrompt((fake, sessionId) => {
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Partial.\n⚠ agent executor error: cancelled upstream\n' } });
+    });
+    const started = await runtime.startSession(request());
+    await waitFor(() => agent.requests('session/prompt').length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    runtime.abort(started.agentSessionId);
+    await waitFor(() => !runtime.isRunning(started.agentSessionId));
+    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message.type) : []);
+    expect(rows).toEqual(['assistant-message']);
+  });
+
+  it('lets a turn that arrives after a release restore the session afresh', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    const gate = Promise.withResolvers<void>();
+    agent.resumeGate = gate.promise;
+
+    const released = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId }).then(() => null, (error: Error) => error);
+    await waitFor(() => agent.requests('session/resume').length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    const later = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    agent.resumeGate = null;
+    gate.resolve();
+
+    expect((await released)?.message).toContain('was released while it was being restored');
+    await later;
+    expect(agent.requests('session/resume')).toHaveLength(2);
+    runtime.shutdown();
+  });
+
+  it('reports a session being restored as busy to project-path updates', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    const gate = Promise.withResolvers<void>();
+    agent.resumeGate = gate.promise;
+
+    const turn = runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/resume').length === 1);
+    await expect(runtime.prepareProjectPathUpdate({
+      chatId: 'chat-1', agentSessionId: started.agentSessionId, previousProjectPath: '/work', nextProjectPath: '/next', nativePath: null,
+    })).rejects.toThrow('is being restored');
+    gate.resolve();
+    await turn;
+    runtime.shutdown();
+  });
+
+  it('does not register a restore that starts after shutdown', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.shutdown();
+
+    await expect(runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId })).rejects.toThrow('was released while it was being restored');
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+    expect(agent.requests('session/prompt')).toHaveLength(1);
+  });
+
   it('fails the run when agy reports an executor error in-band', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => {
