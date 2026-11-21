@@ -77,6 +77,8 @@ export interface IntegrationFixtureOptions {
   ) => Record<string, string>;
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
+  // Applied only on the machine hosting the selected executor, including Local.
+  executorEnvironment?: Record<string, string>;
   namedWorkspace?: string;
 }
 
@@ -287,7 +289,9 @@ export class IntegrationFixture {
         ...(options.serverEnvironment ?? {}),
         ...resolvedEnvironment,
       };
-      backend = new ExecutionBackendFixture(backendKind, executionDirs, serverEnvironment, options.interceptExecutorConnection);
+      const executionEnvironment = { ...serverEnvironment, ...options.executorEnvironment };
+      const controllerEnvironment = backendKind === 'in-process' ? executionEnvironment : serverEnvironment;
+      backend = new ExecutionBackendFixture(backendKind, executionDirs, executionEnvironment, options.interceptExecutorConnection);
       garcon = await backend.start({
         repoRoot: REPO_ROOT,
         configDir: dirs.config,
@@ -295,7 +299,7 @@ export class IntegrationFixture {
         workspaceName: options.namedWorkspace,
         projectDir: dirs.project,
         homeDir: dirs.home,
-        environment: serverEnvironment,
+        environment: controllerEnvironment,
         redactEnvironmentValues: options.redactSensitiveDiagnostics,
       });
       client = await GarconTestClient.connect(garcon.baseUrl, {
@@ -347,9 +351,11 @@ export class IntegrationFixture {
         garcon,
         client,
         directAgents,
-        forbiddenPersistedValues: options.forbiddenPersistedValues,
+        forbiddenPersistedValues: [
+          ...(options.forbiddenPersistedValues ?? []), ...sensitiveEnvironmentValues(options.executorEnvironment ?? {}),
+        ],
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
-        serverEnvironment,
+        serverEnvironment: controllerEnvironment,
         workspaceName: options.namedWorkspace,
         afterGarconStop: options.afterGarconStop ? () => options.afterGarconStop!(executionDirs) : undefined,
         extraDiagnostics: options.extraDiagnostics ? () => options.extraDiagnostics!(executionDirs) : undefined,

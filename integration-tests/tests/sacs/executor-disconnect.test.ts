@@ -58,12 +58,12 @@ for (const factory of sacsScriptedDriverFactories) {
           expect(after.transcriptViewId).toBe(before.transcriptViewId);
           expect(assistantContents(after.messages)).toEqual(['Synthetic initial reply', 'Synthetic resumed reply']);
           expect(new Set(after.messages.map(row => row.ordinal)).size).toBe(after.messages.length);
-          expect(driver.requestCountSince(fixture, cursor)).toBe(1);
+          expect(driver.requestBodiesSince(fixture, cursor)).toHaveLength(1);
 
           driver.scriptAssistant(fixture, 'Synthetic explicit followup reply');
           const followup = await fixture.client.runChat(driver.runRequest(fixture, { chatId, command: 'Synthetic explicit followup' }));
           expect(await fixture.client.waitForTurnTerminal(chatId, followup.turnId)).toMatchObject({ type: 'agent-run-finished' });
-          expect(driver.requestCountSince(fixture, cursor)).toBe(2);
+          expect(driver.requestBodiesSince(fixture, cursor)).toHaveLength(2);
           for (const { turnId } of [initial, running, followup]) expect(terminals(turnId)).toHaveLength(1);
           await waitForBulk(fixture);
           expect(proxy!.connections).toBe(4);

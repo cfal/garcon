@@ -97,7 +97,7 @@ export interface SacsDriverEnvironment {
   holdInterruptibleAssistant(fixture: IntegrationFixture, content: string): SacsHeldTurn;
   scriptAssistant(fixture: IntegrationFixture, content: string): void;
   markRequests(fixture: IntegrationFixture): number;
-  requestCountSince(fixture: IntegrationFixture, cursor: number): number;
+  requestBodiesSince(fixture: IntegrationFixture, cursor: number): readonly unknown[];
   userTextsSince(fixture: IntegrationFixture, cursor: number): readonly string[];
   assertSettled(fixture: IntegrationFixture): void;
   reset(): void;
