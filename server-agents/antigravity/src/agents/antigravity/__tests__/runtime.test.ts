@@ -674,6 +674,37 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('ends a configuring turn quietly when its chat is released', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    agent.configReplyGate = new Promise(() => {});
+
+    const turn = runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+    await waitFor(() => agent.requests('session/set_config_option').length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+
+    await turn;
+    expect(events.filter((event) => event.type === 'rows')).toHaveLength(0);
+    expect(runEnded(events)).toHaveLength(1);
+  });
+
+  it('retires an idle session whose process dies', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+
+    agent.crash();
+    // Lets the transport observe the exit before the next turn looks the session up.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
+    expect(agent.requests('initialize')).toHaveLength(2);
+    expect(agent.requests('session/resume')).toHaveLength(1);
+    runtime.shutdown();
+  });
+
   it('fails the run when agy reports an executor error in-band', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => {

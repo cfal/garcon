@@ -202,10 +202,11 @@ describe('AntigravityAcpEventConverter', () => {
       content: { type: 'text', text: '\n⚠ agent executor error: generating and executing: Error 400, Message: API key not valid., Status: INVALID_ARGUMENT\n' },
     }), context);
 
-    expect(converter.endTurn(SESSION, context)).toEqual([]);
+    // The runtime takes the failure before the final flush.
     expect(converter.takeTurnFailure(SESSION)).toBe(
       'Antigravity agent executor error: generating and executing: Error 400, Message: API key not valid., Status: INVALID_ARGUMENT',
     );
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
@@ -217,8 +218,8 @@ describe('AntigravityAcpEventConverter', () => {
       content: { type: 'text', text: 'Partial answer.\n⚠ agent executor error: Error 429\n' },
     }), context);
 
-    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Partial answer.' }]);
     expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429');
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Partial answer.' }]);
   });
 
   it('does not duplicate a tool row when a stopped turn reports late', () => {
@@ -346,6 +347,26 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(rows)).toEqual([{
       type: 'edit-tool-use', toolId: 'multi', filePath: '/work/a.ts', oldString: 'old', newString: 'new', changes: undefined,
     }]);
+  });
+
+  it('publishes an executor error that arrives after the turn ended as an error row', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: Error 429\n' },
+    }), context);
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'error', content: 'Antigravity agent executor error: Error 429' }]);
+  });
+
+  it('treats tool progress after a marker chunk as continued work', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'sleep 1' }), context);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Note:\n⚠ agent executor error: quoted\n' },
+    }), context);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress' }), context);
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
   it('drops state for released sessions', () => {

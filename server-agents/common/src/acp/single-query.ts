@@ -1,5 +1,6 @@
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AcpClient } from './client.js';
+import { AcpInBandFailure, type AcpFailureSplitter } from './in-band-failure.js';
 import type { AcpInitializeParams, AcpSessionNewResult } from './protocol.js';
 import { acpContentText, asObject, asString } from './event-converter.js';
 import { isJsonRpcId, permissionChoiceOutcome } from './runtime-helpers.js';
@@ -17,9 +18,8 @@ export interface AcpSingleQueryOptions {
   readonly configure?: (client: AcpClient, created: AcpSessionNewResult) => Promise<void>;
   // Answers an agent request other than a permission; null rejects it as unsupported.
   readonly respondToRequest?: (method: string) => Record<string, unknown> | null;
-  // Splits a message chunk into its text and an in-band failure it reports. As
-  // in a chat turn, the failure counts only if nothing follows it.
-  readonly splitFailure?: (chunk: string) => { readonly text: string; readonly failure: string | null };
+  // Splits a message chunk into its text and an in-band failure it reports.
+  readonly splitFailure?: AcpFailureSplitter;
 }
 
 const DEFAULT_SINGLE_QUERY_PROMPT_TIMEOUT_MS = 120_000;
@@ -36,8 +36,7 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     authenticateMethodId: options.authenticateMethodId,
   });
   const assistantChunks: string[] = [];
-  // Assigned from the message listener, so its declared type must not narrow to null.
-  let pendingFailure = null as { readonly failure: string; readonly text: string } | null;
+  const failure = new AcpInBandFailure(options.splitFailure ?? ((chunk) => ({ text: chunk, failure: null })));
   const abort = () => client.close();
   options.signal.addEventListener('abort', abort, { once: true });
 
@@ -57,17 +56,9 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     if (message.method !== 'session/update') return;
     const update = asObject(asObject(message.params).update);
     const updateType = asString(update.sessionUpdate);
-    // As in a chat turn, any further message, thought, or new tool call means a
-    // marker chunk was ordinary text.
-    if (pendingFailure && ['agent_message_chunk', 'agent_message', 'agent_thought_chunk', 'tool_call'].includes(updateType ?? '')) {
-      assistantChunks.push(pendingFailure.text);
-      pendingFailure = null;
-    }
+    assistantChunks.push(failure.continueOn(updateType));
     if (updateType !== 'agent_message_chunk' && updateType !== 'agent_message') return;
-    const chunk = acpContentText(update.content);
-    const { text, failure } = options.splitFailure?.(chunk) ?? { text: chunk, failure: null };
-    assistantChunks.push(text);
-    if (failure) pendingFailure = { failure, text: chunk.slice(text.length) };
+    assistantChunks.push(failure.offer(acpContentText(update.content)));
   });
 
   try {
@@ -80,7 +71,8 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
       sessionId: created.sessionId,
       prompt: [{ type: 'text', text: options.prompt.trim() }],
     }, undefined, options.requestTimeoutMs ?? DEFAULT_SINGLE_QUERY_PROMPT_TIMEOUT_MS);
-    if (pendingFailure) throw new AgentIntegrationError('PROVIDER_FAILURE', pendingFailure.failure, false);
+    const reported = failure.take();
+    if (reported) throw new AgentIntegrationError('PROVIDER_FAILURE', reported, false);
     return assistantChunks.join('').trim();
   } finally {
     options.signal.removeEventListener('abort', abort);

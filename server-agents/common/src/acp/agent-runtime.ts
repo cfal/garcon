@@ -40,6 +40,7 @@ import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContex
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import {
   abortStrategy,
+  unlessSettled,
   untilSettledOrClosed,
   buildEnvFallback,
   buildPromptFallback,
@@ -195,7 +196,7 @@ export class AcpAgentRuntime {
       startedAt: now,
       lastActivityAt: Date.now(),
     };
-    this.#sessions.set(sessionId, session);
+    this.#registerSession(session);
     const result = {
       agentSessionId: sessionId,
       nativePath: this.#nativePathFor(sessionId),
@@ -253,13 +254,8 @@ export class AcpAgentRuntime {
   // agent that never answers loses its process, so a stopped turn cannot stay
   // running; the next turn reconnects.
   #armCancelSettleTimeout(turn: AcpTurnContext): void {
-    if (turn.cancelTimer) return;
-    turn.cancelTimer = setTimeout(() => {
+    turn.cancelTimer ??= unlessSettled(turn.settled.promise, this.#cancelSettleTimeoutMs, () => {
       if (turn.running) this.#retireSession(turn.session, 'aborted');
-    }, this.#cancelSettleTimeoutMs);
-    turn.cancelTimer.unref?.();
-    void turn.settled.promise.then(() => {
-      if (turn.cancelTimer) clearTimeout(turn.cancelTimer);
     });
   }
 
@@ -459,7 +455,7 @@ export class AcpAgentRuntime {
       client.close();
       throw new Error(`The ${this.#policy.agentId} session ${request.agentSessionId} was released while it was being restored.`);
     }
-    this.#sessions.set(request.agentSessionId, baseSession);
+    this.#registerSession(baseSession);
     return baseSession;
   }
 
@@ -640,12 +636,7 @@ export class AcpAgentRuntime {
     }));
 
     turn.detachSourceListeners.push(session.client.onExit((exitCode) => {
-      // A turn still configuring is not routable yet, but the dead process
-      // must not stay registered for later turns.
-      if (!this.#canRouteSource(turn)) {
-        if (!turn.sourceRetired) this.#retireSession(session, 'cancelled');
-        return;
-      }
+      if (!this.#canRouteSource(turn)) return;
       if (turn.running && !turn.aborted) {
         const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
         this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), message)]);
@@ -904,15 +895,18 @@ export class AcpAgentRuntime {
   #retireSession(
     session: AcpAgentRuntimeSession,
     reason: 'cancelled' | 'session-complete' | 'aborted',
+    processExited = false,
   ): void {
     if (session.retired) return;
     session.retired = true;
     session.lastActivityAt = Date.now();
-    const turns = new Set([session.activeTurn, session.sourceTurn].filter(
+    const turns = new Set([session.activeTurn, session.sourceTurn, session.pendingTurn].filter(
       (turn): turn is AcpTurnContext => turn !== null,
     ));
     for (const turn of turns) {
-      if (reason === 'aborted') turn.aborted = true;
+      // A turn deliberately retired before its prompt went out never ran, so it
+      // ends as aborted; a crash still fails it.
+      if (reason === 'aborted' || (turn === session.pendingTurn && !processExited)) turn.aborted = true;
       this.#completeTurn(turn);
       this.#retireTurnSource(turn, reason);
     }
@@ -921,6 +915,18 @@ export class AcpAgentRuntime {
       this.#converter.releaseSession?.(session.id);
     }
     session.client.close();
+  }
+
+  // Each session watches its own process, so a death while no turn is routing
+  // (idle, restored, or still configuring) still retires it. A routable turn's
+  // own listener reports the failure first and retires the session.
+  #registerSession(session: AcpAgentRuntimeSession): void {
+    this.#sessions.set(session.id, session);
+    session.client.onExit(() => {
+      const turn = session.activeTurn;
+      if (turn && this.#canRouteSource(turn)) return;
+      this.#retireSession(session, 'cancelled', true);
+    });
   }
 
   #mappedModel(model: string): string | undefined {

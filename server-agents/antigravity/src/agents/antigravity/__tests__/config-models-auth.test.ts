@@ -66,7 +66,7 @@ describe('parseAntigravityModels', () => {
 describe('getAntigravityAuthStatus', () => {
   it('reports an API key as environment authentication without spawning the CLI', async () => {
     const status = await getAntigravityAuthStatus(config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
-    expect(status).toEqual({ authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' });
+    expect(status).toEqual({ authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' });
   });
 
   it('reports an invalid auth-method setting instead of throwing', async () => {
@@ -80,7 +80,7 @@ describe('getAntigravityAuthStatus', () => {
   it('reports the configured API-key method as signed out without a key', async () => {
     const status = await getAntigravityAuthStatus(config({ authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
     expect(status).toEqual({
-      authenticated: false, canReauth: true, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.',
+      authenticated: false, canReauth: false, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.',
     });
   });
 

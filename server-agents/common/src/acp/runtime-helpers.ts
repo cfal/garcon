@@ -122,3 +122,11 @@ export function untilSettledOrClosed(settled: Promise<void>, signal: AbortSignal
     void settled.then(done);
   });
 }
+
+// Runs `onTimeout` if `settled` has not resolved within `ms`.
+export function unlessSettled(settled: Promise<void>, ms: number, onTimeout: () => void): ReturnType<typeof setTimeout> {
+  const timer = setTimeout(onTimeout, ms);
+  timer.unref?.();
+  void settled.then(() => clearTimeout(timer));
+  return timer;
+}

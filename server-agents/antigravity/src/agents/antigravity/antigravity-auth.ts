@@ -35,11 +35,12 @@ export async function getAntigravityAuthStatus(
 ): Promise<AgentAuthStatus> {
   try {
     // Sessions authenticate with the configured method only, so status must not
-    // fall back to another credential the CLI happens to hold.
+    // fall back to another credential the CLI happens to hold. A Google sign-in
+    // cannot change an API-key setup, so none is offered for it.
     if (config.authMethod() === 'gemini-api-key') {
       return config.hasApiKey()
-        ? { authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' }
-        : { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
+        ? { authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' }
+        : { authenticated: false, canReauth: false, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
     }
     if (signInRunning) {
       return lastProbed ?? { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };

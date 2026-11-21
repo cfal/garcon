@@ -1,5 +1,6 @@
 import {
   AssistantMessage,
+  ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
   type ChatMessage,
@@ -12,6 +13,7 @@ import {
   type AcpEventConverter,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
+import { AcpInBandFailure } from '@garcon/server-agent-common/acp/in-band-failure';
 import {
   antigravityToolCall,
   antigravityToolResultText,
@@ -20,15 +22,19 @@ import {
 
 const WARNING_MARKER = '\n⚠ ';
 const EXECUTOR_ERROR = 'agent executor error: ';
-const MAX_TOOL_NAMES_PER_SESSION = 512;
+// Bounds each per-session tool collection; the oldest entry is evicted first.
+const MAX_TOOL_ENTRIES_PER_SESSION = 512;
+
+function evictOldest(entries: Set<string> | Map<string, string>): void {
+  if (entries.size <= MAX_TOOL_ENTRIES_PER_SESSION) return;
+  const oldest = entries.keys().next().value;
+  if (oldest !== undefined) entries.delete(oldest);
+}
 
 interface SessionState {
   assistantText: string;
   thinkingText: string;
-  // An executor-error chunk is a failure only if nothing follows it before the
-  // turn ends, since agy ends the turn right after it; later output means the
-  // chunk was ordinary text that happened to quote the marker.
-  pendingFailure: { readonly failure: string; readonly text: string } | null;
+  readonly failure: AcpInBandFailure;
   // Tool rows and results already published; kept across turns because a
   // stopped turn's late terminal update can arrive after the next turn begins.
   readonly emittedToolIds: Set<string>;
@@ -74,7 +80,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(sessionId);
     session.assistantText = '';
     session.thinkingText = '';
-    session.pendingFailure = null;
+    session.failure.reset();
   }
 
   permissionToolUse(
@@ -94,26 +100,22 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   ): ChatMessage[] {
     const update = asObject(notification.update);
     const session = this.#sessionFor(context.sessionId);
-    switch (asString(update.sessionUpdate)) {
+    const updateType = asString(update.sessionUpdate);
+    session.assistantText += session.failure.continueOn(updateType);
+    switch (updateType) {
       // Switching between thought and message text flushes the other buffer, so
       // interleaved output keeps the order the agent produced it in.
       case 'agent_message_chunk': {
-        this.#continueAfterFailureCandidate(session);
-        const chunk = acpContentText(update.content);
-        const { text, failure } = splitExecutorError(chunk);
         const flushed = session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
-        session.assistantText += text;
-        if (failure) session.pendingFailure = { failure, text: chunk.slice(text.length) };
+        session.assistantText += session.failure.offer(acpContentText(update.content));
         return flushed;
       }
       case 'agent_thought_chunk': {
-        this.#continueAfterFailureCandidate(session);
         const flushed = session.assistantText.trim() ? this.#flush(session, context.timestamp) : [];
         session.thinkingText += acpContentText(update.content);
         return flushed;
       }
       case 'tool_call':
-        this.#continueAfterFailureCandidate(session);
         return this.#toolCall(session, update, context.timestamp, false);
       case 'tool_call_update':
         return this.#toolCallUpdate(session, update, context.timestamp);
@@ -122,10 +124,16 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     }
   }
 
-  // A retired session's final flush must not recreate state the runtime released.
+  // A retired session's final flush must not recreate state the runtime
+  // released. The runtime takes a turn's failure before this flush, so one still
+  // held here arrived after the turn ended and is published as an error row.
   endTurn(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[] {
     const session = this.#sessions.get(sessionId);
-    return session ? this.#flush(session, context.timestamp) : [];
+    if (!session) return [];
+    const messages = this.#flush(session, context.timestamp);
+    const late = session.failure.take();
+    if (late) messages.push(new ErrorMessage(context.timestamp, late));
+    return messages;
   }
 
   releaseSession(sessionId: string): void {
@@ -133,10 +141,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   }
 
   takeTurnFailure(sessionId: string): string | null {
-    const session = this.#sessions.get(sessionId);
-    const failure = session?.pendingFailure?.failure ?? null;
-    if (session) session.pendingFailure = null;
-    return failure;
+    return this.#sessions.get(sessionId)?.failure.take() ?? null;
   }
 
   // A call's row waits for its arguments when the first frame carries none, so a
@@ -178,24 +183,14 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     return messages;
   }
 
-  #continueAfterFailureCandidate(session: SessionState): void {
-    if (!session.pendingFailure) return;
-    session.assistantText += session.pendingFailure.text;
-    session.pendingFailure = null;
-  }
-
   #remember(ids: Set<string>, toolCallId: string): void {
     ids.add(toolCallId);
-    if (ids.size <= MAX_TOOL_NAMES_PER_SESSION) return;
-    const oldest = ids.values().next().value;
-    if (oldest !== undefined) ids.delete(oldest);
+    evictOldest(ids);
   }
 
   #rememberToolName(session: SessionState, toolCallId: string, name: string): void {
     session.toolNames.set(toolCallId, name);
-    if (session.toolNames.size <= MAX_TOOL_NAMES_PER_SESSION) return;
-    const oldest = session.toolNames.keys().next().value;
-    if (oldest !== undefined) session.toolNames.delete(oldest);
+    evictOldest(session.toolNames);
   }
 
   #flush(session: SessionState, timestamp: string): ChatMessage[] {
@@ -215,7 +210,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const created: SessionState = {
       assistantText: '',
       thinkingText: '',
-      pendingFailure: null,
+      failure: new AcpInBandFailure(splitExecutorError),
       emittedToolIds: new Set(),
       completedToolIds: new Set(),
       toolNames: new Map(),
