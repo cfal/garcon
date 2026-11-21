@@ -8,7 +8,7 @@ import {
 } from '../../../common/workflow-definition.js';
 import type {
   WorkflowActiveChat, WorkflowActor, WorkflowAgentSettings, WorkflowDefinitionSummary, WorkflowExecutionContext,
-  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRunAmendment, WorkflowRunDetail,
+  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRunAmendment, WorkflowRunArchive, WorkflowRunDetail,
   WorkflowRunSummary, WorkflowSignalOccurrence,
 } from '../../../common/workflow-runs.js';
 import { DomainError } from '../../common/domain-error.js';
@@ -21,12 +21,12 @@ import { workflowConflict, workflowInvalid, workflowNotFound, workflowLimit } fr
 import { WorkflowGraph, type CapturedStep } from './graph.js';
 import { WORKFLOW_LIMITS } from './limits.js';
 import {
-  listActiveChats, listDefinitions, listRuns, pinnedRevision, priorOperation, referencesTarget, requireInstance,
-  requireRun, requireStep, revisionByNumber, revisionHead, runDetail, runSteps, runSummary, saveOperation,
-  signalById, signalOccurrence, type AttemptRow, type InstanceRow, type RunRow,
+  listActiveChats, listDefinitions, listRuns, pinnedRevision, priorOperation, referencesTarget, replayLaunch, requireInstance,
+  requireRun, requireStep, requireUnarchivedRun, revisionByNumber, revisionHead, runDetail, runSteps, runSummary, saveOperation,
+  signalById, signalOccurrence, type AttemptRow, type InstanceRow,
 } from './records.js';
 import {
-  normalizeActor, normalizeAddItem, normalizeAddStep, normalizeDecision, normalizePublish, normalizeRetry,
+  normalizeActor, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
   normalizeStart, normalizeTest, requestHash, workflowIdentifier, workflowJson,
 } from './requests.js';
 import type { WorkflowAttemptRequest, WorkflowAttemptResult, WorkflowEmitRequest, WorkflowRunner } from './runner.js';
@@ -166,9 +166,28 @@ export class WorkflowEngine {
     });
   }
 
-  startRun(raw: unknown, snapshot?: WorkflowSettingsResolver): WorkflowRunSummary {
+  replayStartRun(raw: unknown): WorkflowRunSummary | null {
     const request = normalizeStart(raw);
-    return this.#launch(request, requestHash('start', request), () => this.getRevision(request.definitionId, request.revision), snapshot);
+    return this.#replayLaunch(request.operationId, requestHash('start', request));
+  }
+
+  replayTestWorkflowDraft(raw: unknown): WorkflowRunSummary | null {
+    const request = normalizeTest(raw);
+    return this.#replayLaunch(request.operationId, requestHash('test', request));
+  }
+
+  startRun(
+    raw: unknown, snapshot?: WorkflowSettingsResolver, preparedRevision?: Pick<WorkflowRevision, 'definitionId' | 'revision'>,
+  ): WorkflowRunSummary {
+    const request = normalizeStart(raw);
+    return this.#launch(request, requestHash('start', request), () => {
+      if (!preparedRevision) return this.getRevision(request.definitionId, request.revision);
+      const { definitionId, revision } = preparedRevision;
+      if (definitionId !== request.definitionId || revision === null || request.revision !== undefined && request.revision !== revision) {
+        throw workflowConflict('The prepared revision does not match this workflow launch.');
+      }
+      return this.getRevision(definitionId, revision);
+    }, snapshot);
   }
 
   testWorkflowDraft(raw: unknown, definition: WorkflowDefinition, snapshot?: WorkflowSettingsResolver): WorkflowRunSummary {
@@ -178,20 +197,17 @@ export class WorkflowEngine {
     }), snapshot);
   }
 
+  #replayLaunch(operationId: string | undefined, hash: string): WorkflowRunSummary | null {
+    return operationId ? this.#store.read(db => replayLaunch(db, operationId, hash)) : null;
+  }
+
   #launch(
     request: { operationId?: string; inputs: JsonObject; executionContext?: WorkflowExecutionContext },
     hash: string,
     revision: () => WorkflowRevision,
     snapshot?: WorkflowSettingsResolver,
   ): WorkflowRunSummary {
-    const prior = this.#store.read(db => {
-      if (!request.operationId) return null;
-      const row = db.query<RunRow & { request_hash: string }, [string]>(
-        'SELECT * FROM workflow_runs WHERE operation_id = ?',
-      ).get(request.operationId);
-      if (row && row.request_hash !== hash) throw workflowConflict('This operation id was already used for a different launch.');
-      return row && runSummary(row);
-    });
+    const prior = this.#replayLaunch(request.operationId, hash);
     if (prior) return prior;
     const pinned = revision();
     const inputs = captureInputs(pinned.definition, request.inputs);
@@ -200,6 +216,8 @@ export class WorkflowEngine {
     const id = randomUUID();
     const now = this.#now();
     const result = this.#withReferences(steps, () => this.#store.write(db => {
+      const replay = request.operationId && replayLaunch(db, request.operationId, hash);
+      if (replay) return replay;
       db.query(`INSERT INTO workflow_runs (
         id, name, definition_id, revision, draft_json, inputs_json, context_json, status, created_at, updated_at, operation_id, request_hash
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)`).run(
@@ -211,7 +229,7 @@ export class WorkflowEngine {
       graph.reconcile();
       return runSummary(requireRun(db, id));
     }));
-    this.#changed(id);
+    if (result.id === id) this.#changed(id);
     return result;
   }
 
@@ -225,6 +243,30 @@ export class WorkflowEngine {
 
   listActiveChats(request: WorkflowPageRequest = {}): WorkflowPage<WorkflowActiveChat> {
     return this.#store.read(db => listActiveChats(db, request));
+  }
+
+  archiveRun(raw: unknown, caller: WorkflowActor): WorkflowRunSummary {
+    const request = normalizeArchive(raw);
+    const actor = normalizeActor(caller);
+    const { runId, operationId } = request;
+    const hash = requestHash('archive', request, actor);
+    const result = this.#store.write(db => {
+      const run = requireRun(db, runId);
+      if (priorOperation(db, runId, operationId, hash) || run.archive_json !== null) {
+        return { run: runSummary(run), changed: false };
+      }
+      if (db.query("SELECT 1 FROM workflow_instances WHERE run_id = ? AND status = 'running' LIMIT 1").get(runId)) {
+        throw workflowConflict('A live workflow attempt must settle before the run can be archived.');
+      }
+      const archive: WorkflowRunArchive = { operationId, actor, createdAt: this.#now() };
+      db.query('UPDATE workflow_runs SET archive_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(archive), archive.createdAt, runId);
+      db.query("UPDATE workflow_instances SET retired = 1 WHERE run_id = ? AND status IN ('ready', 'waiting-executor')").run(runId);
+      // Archiving remains available even when the run has reached its normal operation limit.
+      db.query('INSERT INTO workflow_operations (run_id, id, request_hash, result_id) VALUES (?, ?, ?, ?)').run(runId, operationId, hash, runId);
+      return { run: runSummary(requireRun(db, runId)), changed: true };
+    });
+    if (result.changed) this.#changed(runId);
+    return result.run;
   }
 
   referencesExecutor(id: string): boolean { return this.#references('executor_id', id); }
@@ -253,6 +295,7 @@ export class WorkflowEngine {
     const result = this.#store.write(db => {
       const prior = priorOperation(db, runId, operationId, hash);
       if (prior) return signalOccurrence(signalById(db, runId, prior));
+      requireUnarchivedRun(db, runId);
       const instance = requireInstance(db, runId, instanceId);
       const step = JSON.parse(requireStep(db, runId, instance.step_id).step_json) as WorkflowStep;
       if (step.kind !== 'decision' || !Object.hasOwn(step.choices, choice)) throw workflowInvalid('That choice is not defined for this decision.');
@@ -279,6 +322,7 @@ export class WorkflowEngine {
     const result = this.#store.write(db => {
       const prior = priorOperation(db, runId, operationId, hash);
       if (prior) return signalOccurrence(signalById(db, runId, prior));
+      requireUnarchivedRun(db, runId);
       const step = JSON.parse(requireStep(db, runId, stepId).step_json) as WorkflowStep;
       if (step.on?.kind !== 'each') throw workflowInvalid('Only a repeated step can accept items.');
       const ref = step.on.signal;
@@ -309,7 +353,7 @@ export class WorkflowEngine {
         ).get(runId, operationId)!;
         return { prior: JSON.parse(prior.amendment_json) as WorkflowRunAmendment };
       }
-      const run = requireRun(db, runId);
+      const run = requireUnarchivedRun(db, runId);
       if (run.status === 'succeeded') throw workflowConflict('This run has finished. Start a follow-up run instead.');
       const stored = runSteps(db, runId).map(row => JSON.parse(row.step_json) as WorkflowStep);
       const base = { ...pinnedRevision(db, run).definition, steps: stored };
@@ -328,6 +372,7 @@ export class WorkflowEngine {
     const captured = this.#captureStep(prepared.step, prepared.context, snapshot);
     const now = this.#now();
     const result = this.#withReferences([captured], () => this.#store.write(db => {
+      requireUnarchivedRun(db, runId);
       const graph = new WorkflowGraph(db, runId, now);
       graph.insertStep(captured, true, prepared.evidence);
       graph.reconcile();
@@ -347,6 +392,7 @@ export class WorkflowEngine {
     const { runId, instanceId, operationId } = request;
     this.#store.write(db => {
       if (priorOperation(db, runId, operationId, hash)) return;
+      requireUnarchivedRun(db, runId);
       const instance = requireInstance(db, runId, instanceId);
       if (instance.status !== 'failed') throw workflowConflict('Only a definitively failed attempt can be retried.');
       if (instance.attempt_count >= WORKFLOW_LIMITS.attemptsPerInstance) throw workflowLimit('This instance has reached its attempt limit.');
@@ -429,7 +475,7 @@ export class WorkflowEngine {
       const row = db.query<InstanceRow & { step_json: string; location_json: string; settings_json: string }, [string]>(`
         SELECT i.*, s.step_json, s.location_json, s.settings_json
         FROM workflow_instances i JOIN workflow_run_steps s ON s.run_id = i.run_id AND s.id = i.step_id
-        WHERE i.status IN ('ready', 'waiting-executor')
+        WHERE i.status IN ('ready', 'waiting-executor') AND i.retired = 0
           AND (i.status = 'ready' OR s.executor_id IN (SELECT value FROM json_each(?)))
           AND (SELECT count(*) FROM workflow_instances live WHERE live.run_id = i.run_id AND live.step_id = i.step_id
             AND live.status = 'running') < s.max_concurrency

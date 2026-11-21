@@ -45,9 +45,11 @@ export function captureSettings(
   if (step.kind === 'command') return { kind: 'command', shell: step.shell };
   const {
     id: _id, name: _name, kind: _kind, on: _on, executorId: _executor, projectPath: _path,
-    signals: _signals, prompt: _prompt, bindings: _bindings, ...authored
+    signals: _signals, prompt: _prompt, bindings: _bindings, attachments, tags, ...authored
   } = step;
-  return { kind: 'agent', ...snapshot?.(step, location), ...authored };
+  const resolved = Object.fromEntries(Object.entries(snapshot?.(step, location) ?? {}).filter(([, value]) => value !== undefined));
+  return { kind: 'agent', ...authored, ...resolved,
+    ...(attachments !== undefined && { attachments }), ...(tags !== undefined && { tags }) };
 }
 
 export function validateSignal(

@@ -1,4 +1,14 @@
-export const WORKFLOW_SCHEMA_VERSION = 1;
+export const WORKFLOW_SCHEMA_VERSION = 2;
+
+const WORKFLOW_READY_INDEX = `CREATE INDEX workflow_instances_ready ON workflow_instances(status)
+  WHERE status IN ('ready', 'waiting-executor') AND retired = 0`;
+
+export const WORKFLOW_ARCHIVE_MIGRATION = `
+ALTER TABLE workflow_runs ADD COLUMN archive_json TEXT;
+ALTER TABLE workflow_instances ADD COLUMN retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1));
+DROP INDEX workflow_instances_ready;
+${WORKFLOW_READY_INDEX};
+`;
 
 export const WORKFLOW_SCHEMA = `
 CREATE TABLE workflow_definitions (
@@ -27,6 +37,7 @@ CREATE TABLE workflow_runs (
   updated_at TEXT NOT NULL,
   operation_id TEXT UNIQUE,
   request_hash TEXT,
+  archive_json TEXT,
   signal_bytes INTEGER NOT NULL DEFAULT 0,
   binding_bytes INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (definition_id, revision) REFERENCES workflow_revisions(definition_id, revision),
@@ -63,10 +74,11 @@ CREATE TABLE workflow_instances (
   bindings_json TEXT,
   prompt TEXT,
   attempt_count INTEGER NOT NULL DEFAULT 0,
+  retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
   FOREIGN KEY (run_id, step_id) REFERENCES workflow_run_steps(run_id, id)
 ) STRICT;
 CREATE INDEX workflow_instances_step ON workflow_instances(run_id, step_id);
-CREATE INDEX workflow_instances_ready ON workflow_instances(status) WHERE status IN ('ready', 'waiting-executor');
+${WORKFLOW_READY_INDEX};
 CREATE INDEX workflow_instances_running ON workflow_instances(run_id, step_id) WHERE status = 'running';
 CREATE TABLE workflow_attempts (
   id TEXT PRIMARY KEY,

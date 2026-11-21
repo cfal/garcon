@@ -1,3 +1,4 @@
+import type { ApiProtocol } from './api-providers.js';
 import type { ExecutorId } from './executors.js';
 import type { JsonObject, JsonValue } from './json.js';
 import type { WorkflowAgentStep, WorkflowDefinition, WorkflowInput, WorkflowSignalReference, WorkflowStep } from './workflow-definition.js';
@@ -14,6 +15,7 @@ export interface WorkflowExecutionContext {
 
 export type WorkflowAgentSettings = Pick<WorkflowAgentStep, 'agentId' | 'apiProviderId' | 'modelEndpointId'
   | 'model' | 'permissionMode' | 'thinkingMode' | 'agentSettings' | 'orderedPreambleIds' | 'attachments' | 'tags'> & {
+    readonly modelProtocol?: ApiProtocol | null;
     readonly providerRevision?: number | null;
   };
 
@@ -68,6 +70,8 @@ export interface WorkflowRetryRequest extends WorkflowMutationRequest {
   readonly instanceId: string;
 }
 
+export type WorkflowArchiveRequest = WorkflowMutationRequest;
+
 export interface WorkflowDefinitionSummary {
   readonly id: string;
   readonly name: string;
@@ -85,7 +89,7 @@ export interface WorkflowRevision {
   readonly publishedAt: string | null;
 }
 
-export type WorkflowRunStatus = 'running' | 'waiting' | 'attention' | 'succeeded';
+export type WorkflowRunStatus = 'running' | 'waiting' | 'attention' | 'succeeded' | 'archived';
 export type WorkflowInstanceStatus =
   | 'ready'
   | 'running'
@@ -120,6 +124,12 @@ export interface WorkflowPage<T> {
 export interface WorkflowActor {
   readonly id: string;
   readonly name: string;
+}
+
+export interface WorkflowRunArchive {
+  readonly operationId: string;
+  readonly actor: WorkflowActor;
+  readonly createdAt: string;
 }
 
 export type WorkflowSignalSource =
@@ -185,6 +195,7 @@ export type WorkflowRunAmendment = {
 );
 
 export interface WorkflowRunDetail extends WorkflowRunSummary {
+  readonly archive: WorkflowRunArchive | null;
   readonly pinnedRevision: WorkflowRevision;
   readonly inputs: JsonObject;
   readonly executionContext: WorkflowExecutionContext;

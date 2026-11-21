@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isExecutorId } from '../../../common/executors.js';
 import { isRecord, stableJsonStringify, type JsonObject, type JsonValue } from '../../../common/json.js';
 import type {
-  WorkflowActor, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowDecisionRequest, WorkflowExecutionContext,
+  WorkflowActor, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowArchiveRequest, WorkflowDecisionRequest, WorkflowExecutionContext,
   WorkflowLocation, WorkflowPageRequest, WorkflowPublishRequest, WorkflowRetryRequest, WorkflowStartRequest, WorkflowTestRequest,
 } from '../../../common/workflow-runs.js';
 import { workflowInvalid, workflowLimit } from './errors.js';
@@ -162,6 +162,10 @@ export function normalizeAddStep(value: unknown): WorkflowAddStepRequest {
 export function normalizeRetry(value: unknown): WorkflowRetryRequest {
   const body = record(value, 'Workflow retry', [...operationKeys, 'instanceId']);
   return { ...operation(body), instanceId: workflowIdentifier(body.instanceId, 'Instance id') };
+}
+
+export function normalizeArchive(value: unknown): WorkflowArchiveRequest {
+  return operation(record(value, 'Workflow archive', operationKeys));
 }
 
 export function normalizeActor(actor: WorkflowActor): WorkflowActor {

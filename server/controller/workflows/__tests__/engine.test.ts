@@ -116,15 +116,28 @@ steps:
     definitionId: 'research', inputs: { title: 'test' }, executionContext: { defaultTarget: { executorId: 'bogus', projectPath: '/test' } },
   })).toThrow('valid executor id');
   const start = { definitionId: 'research', inputs: { title: 'Synthetic' }, operationId: 'launch-1' };
-  const first = service.startRun(start);
+  expect(service.replayStartRun(start)).toBeNull();
+  const prepared = service.getRevision(start.definitionId);
   expect(() => publish(service, source)).toThrow('published workflow changed');
   const revised = source.replace('name: Example', 'name: Later');
-  expect(publish(service, revised, 'research', 1)).toMatchObject({ revision: 2, source: revised });
+  const latest = publish(service, revised, 'research', 1);
+  expect(latest).toMatchObject({ revision: 2, source: revised });
+  expect(() => service.startRun({ ...start, revision: 2 }, undefined, prepared)).toThrow('prepared revision does not match');
+  expect(() => service.startRun(start, undefined, { ...prepared, definitionId: 'wrong' })).toThrow('prepared revision does not match');
+  const first = service.startRun(start, undefined, prepared);
+  expect(service.replayStartRun(start)).toEqual(first);
   expect(service.startRun(start).id).toBe(first.id);
-  expect(() => service.startRun({ ...start, inputs: { title: 'Different' } })).toThrow('different launch');
+  expect(service.startRun(start, undefined, latest).id).toBe(first.id);
+  const changed = { ...start, inputs: { title: 'Different' } };
+  expect(() => service.replayStartRun(changed)).toThrow('different launch');
+  expect(() => service.startRun(changed)).toThrow('different launch');
 
   const testRequest = { source, inputs: { title: 'Draft' }, operationId: 'draft-1' };
+  expect(service.replayTestWorkflowDraft(testRequest)).toBeNull();
   const draft = service.testWorkflowDraft(testRequest, parsed(source));
+  expect(service.replayTestWorkflowDraft(testRequest)).toEqual(draft);
+  expect(() => service.replayTestWorkflowDraft({ ...testRequest, source: revised })).toThrow('different launch');
+  expect(() => service.replayTestWorkflowDraft({ ...testRequest, operationId: start.operationId })).toThrow('different launch');
   expect(service.testWorkflowDraft(testRequest, parsed(source)).id).toBe(draft.id);
   expect(service.getRun(draft.id)).toMatchObject({ kind: 'test', definitionId: null, pinnedRevision: { source, revision: null } });
   expect(service.getRun(first.id)).toMatchObject({
@@ -139,6 +152,8 @@ steps:
   service.deleteDefinition('research', 2);
   expect(service.listDefinitions().items).toEqual([]);
   expect(() => service.startRun({ definitionId: 'research', inputs: {} })).toThrow('not found');
+  expect(service.replayStartRun(start)).toEqual(first);
+  expect(service.startRun(start, undefined, prepared)).toEqual(first);
   expect(service.getRun(first.id).pinnedRevision.source).toBe(source);
 });
 
@@ -349,6 +364,74 @@ test('restart holds in-flight work unknown without replay but runs persisted ind
   expect(second.runner.attempts.map(attempt => attempt.request.stepId)).toEqual(['verify']);
 });
 
+test('archives only after live attempts settle, preserving evidence while retiring work and releasing references', async () => {
+  const create = workspace();
+  const { service, runner } = create(new ControlledRunner(), {
+    snapshotAgentSettings: () => ({ apiProviderId: 'synthetic-provider' }),
+  });
+  publish(service, RESEARCH + `
+  - id: choose
+    kind: decision
+    prompt: Proceed?
+    choices: {yes: Proceed}
+`);
+  const launch = { definitionId: 'research', inputs: { topic: 'synthetic' },
+    executionContext: { defaultTarget: { executorId: REMOTE, projectPath: '/synthetic/remote' } } };
+  await service.start();
+  const { id } = service.startRun(launch);
+  const request = { runId: id, operationId: 'archive-1' };
+  const research = await runner.next('research');
+  expect(() => service.archiveRun(request, ACTOR)).toThrow('live workflow attempt');
+  expect(research.callbacks.signal.aborted).toBe(false);
+
+  const receipt = research.callbacks.emit(finding('F1'));
+  const manual = { runId: id, stepId: 'verify', key: 'human', payload: finding('human').payload, operationId: 'prior-item' };
+  service.addItem(manual, ACTOR);
+  const verifier = await runner.next('verify');
+  const manualVerifier = await runner.next('verify', 1);
+  research.finish({ kind: 'unknown', reason: 'Controller cannot prove an outcome.' });
+  verifier.finish({ kind: 'failed', reason: 'Definite failure.' });
+  manualVerifier.finish(success('verified'));
+  await until(() => service.getRun(id).status === 'attention');
+  const decision = step(service, id, 'choose').instances[0]!;
+  const before = service.getRun(id);
+  expect(service.referencesExecutor(REMOTE)).toBe(true);
+  expect(service.referencesApiProvider('synthetic-provider')).toBe(true);
+  expect(service.listActiveChats().items.map(chat => chat.status).sort()).toEqual(['failed', 'unknown']);
+  expect(() => service.archiveRun({ ...request, operationId: manual.operationId }, ACTOR)).toThrow('different request');
+  const archived = service.archiveRun(request, ACTOR);
+  expect(archived.status).toBe('archived');
+  expect(service.archiveRun(request, ACTOR)).toEqual(archived);
+  expect(() => service.archiveRun(request, { id: 'another-person', name: 'Other person' })).toThrow('different request');
+  expect(service.listRuns().items).toEqual([archived]);
+  const after = service.getRun(id);
+  expect(after).toMatchObject({ archive: { actor: ACTOR, operationId: request.operationId, createdAt: archived.updatedAt } });
+  expect(after.steps).toEqual(before.steps);
+  expect(after.signals).toEqual(before.signals);
+  expect(after.signals).toContainEqual(receipt);
+  expect(after.amendments).toEqual(before.amendments);
+  expect(service.referencesExecutor(REMOTE)).toBe(false);
+  expect(service.referencesApiProvider('synthetic-provider')).toBe(false);
+  expect(service.listActiveChats().items).toEqual([]);
+  expect(() => service.retry({ runId: id, instanceId: verifier.request.instanceId, operationId: 'retry' }, ACTOR)).toThrow('run is archived');
+  expect(() => service.decide({ runId: id, instanceId: decision.id, operationId: 'decision', choice: 'yes' }, ACTOR)).toThrow('run is archived');
+  expect(() => service.addItem({ ...manual, operationId: 'late' }, ACTOR)).toThrow('run is archived');
+  expect(() => service.addStep({ runId: id, operationId: 'amend', source: 'id: late' }, ACTOR)).toThrow('run is archived');
+  expect(service.addItem(manual, ACTOR)).toEqual(before.signals.find(signal => signal.key === 'human')!);
+
+  const queued = service.startRun(launch);
+  service.archiveRun({ runId: queued.id, operationId: 'archive-queued' }, ACTOR);
+  service.close();
+  const restored = create();
+  restored.service.wakeExecutor(REMOTE);
+  await restored.service.start();
+  await drain();
+  expect(restored.service.getRun(id)).toEqual(after);
+  expect(restored.service.getRun(queued.id).status).toBe('archived');
+  expect(step(restored.service, queued.id, 'research').instances[0]).toMatchObject({ status: 'ready', attempts: [] });
+  expect(restored.runner.attempts).toEqual([]);
+});
+
 test('appends a single evidence-backed step and a future listener without replay or a revision edit', async () => {
   const { service, runner } = workspace()();
   publish(service);
@@ -411,6 +494,12 @@ steps:
   - id: remote
     kind: agent
     executorId: ${REMOTE}
+    model: model-alias
+    apiProviderId: provider-alias
+    modelEndpointId: endpoint-alias
+    permissionMode: default
+    attachments: [{ path: ./reference.txt }]
+    tags: [synthetic-step]
     prompt: Perform the synthetic task.
   - id: local
     kind: command
@@ -421,15 +510,18 @@ steps:
   expect(() => service.startRun({ definitionId: 'research', inputs: {}, executionContext: LOCAL })).toThrow('requires a folder');
   const { id } = service.startRun({ definitionId: 'research', inputs: {},
     executionContext: { ...LOCAL, projectPaths: { [REMOTE]: '/synthetic/remote' } } },
-  () => ({ model, apiProviderId: 'synthetic-provider', providerRevision: 7 }));
+  () => ({ model, apiProviderId: 'synthetic-provider', modelEndpointId: 'canonical-endpoint', modelProtocol: 'openai-compatible',
+    providerRevision: 7, permissionMode: undefined, tags: ['resolver-tag'], attachments: [] }));
   model = 'changed';
   expect(guarded).toEqual([[REMOTE, 'local'], ['synthetic-provider']]);
   expect(service.referencesExecutor(REMOTE)).toBe(true);
   expect(service.referencesApiProvider('synthetic-provider')).toBe(true);
+  expect(service.referencesApiProvider('provider-alias')).toBe(false);
   await service.start();
   const remote = await runner.next('remote');
   expect(remote.request).toMatchObject({ location: { executorId: REMOTE, projectPath: '/synthetic/remote' },
-    settings: { model: 'initial', apiProviderId: 'synthetic-provider', providerRevision: 7 } });
+    settings: { model: 'initial', apiProviderId: 'synthetic-provider', modelEndpointId: 'canonical-endpoint', modelProtocol: 'openai-compatible',
+      providerRevision: 7, permissionMode: 'default', tags: ['synthetic-step'], attachments: [{ path: './reference.txt' }] } });
   const local = await runner.next('local');
   local.callbacks.attachChat(local.chatId, local.turnId);
   local.finish(success('local'));
@@ -441,7 +533,7 @@ steps:
   service.wakeExecutor(REMOTE);
   const recovered = await runner.next('remote', 1);
   expect(defaultResolutions).toBe(0);
-  expect(recovered.request).toMatchObject({ settings: { model: 'initial' } });
+  expect(recovered.request).toMatchObject({ settings: { model: 'initial', modelProtocol: 'openai-compatible' } });
   recovered.callbacks.attachChat(recovered.chatId, recovered.turnId);
   service.handleChatRemoved(recovered.chatId);
   expect(recovered.callbacks.signal.aborted).toBe(true);

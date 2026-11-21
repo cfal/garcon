@@ -3,7 +3,7 @@ import type { JsonObject, JsonValue } from '../../../common/json.js';
 import type { WorkflowDefinition, WorkflowInput, WorkflowStep } from '../../../common/workflow-definition.js';
 import type {
   WorkflowActiveChat, WorkflowAttempt, WorkflowDefinitionSummary, WorkflowExecutionContext, WorkflowInstanceStatus,
-  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRunAmendment, WorkflowRunDetail,
+  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRunAmendment, WorkflowRunArchive, WorkflowRunDetail,
   WorkflowRunStatus, WorkflowRunStep, WorkflowRunSummary, WorkflowSignalOccurrence, WorkflowSignalSource,
   WorkflowStepInstance, WorkflowStepSettings, WorkflowTrigger,
 } from '../../../common/workflow-runs.js';
@@ -27,12 +27,16 @@ export interface RunRow {
   draft_json: string | null;
   inputs_json: string;
   context_json: string;
-  status: WorkflowRunStatus;
+  status: Exclude<WorkflowRunStatus, 'archived'>;
+  archive_json: string | null;
   created_at: string;
   updated_at: string;
   signal_bytes: number;
   binding_bytes: number;
 }
+
+type RunSummaryRow = Pick<RunRow, 'id' | 'name' | 'definition_id' | 'revision' | 'status' | 'archive_json' | 'created_at' | 'updated_at'>;
+const RUN_SUMMARY_COLUMNS = 'id, name, definition_id, revision, status, archive_json, created_at, updated_at';
 
 export interface RunStepRow {
   id: string;
@@ -119,20 +123,28 @@ export function listDefinitions(db: Database, request: WorkflowPageRequest): Wor
   return { items, nextCursor: rows.length > limit ? items.at(-1)!.id : null };
 }
 
-export function runSummary(row: RunRow): WorkflowRunSummary {
+export function runSummary(row: RunSummaryRow): WorkflowRunSummary {
   return {
     id: row.id, name: row.name, kind: row.definition_id === null ? 'test' : 'published',
-    definitionId: row.definition_id, revision: row.revision, status: row.status,
+    definitionId: row.definition_id, revision: row.revision, status: row.archive_json === null ? row.status : 'archived',
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
+}
+
+export function replayLaunch(db: Database, operationId: string, fingerprint: string): WorkflowRunSummary | null {
+  const row = db.query<RunSummaryRow & { request_hash: string }, [string]>(
+    `SELECT ${RUN_SUMMARY_COLUMNS}, request_hash FROM workflow_runs WHERE operation_id = ?`,
+  ).get(operationId);
+  if (row && row.request_hash !== fingerprint) throw workflowConflict('This operation id was already used for a different launch.');
+  return row && runSummary(row);
 }
 
 export function listRuns(db: Database, request: WorkflowPageRequest): WorkflowPage<WorkflowRunSummary> {
   const { limit, cursor } = normalizePage(request, WORKFLOW_LIMITS.runsPage);
   const before = cursor === null ? Number.MAX_SAFE_INTEGER : Number(cursor);
   if (!Number.isSafeInteger(before) || before < 1) throw workflowInvalid('Invalid workflow run page cursor.');
-  const rows = db.query<RunRow & { sequence: number }, [number, number]>(`
-    SELECT rowid AS sequence, id, name, definition_id, revision, status, created_at, updated_at
+  const rows = db.query<RunSummaryRow & { sequence: number }, [number, number]>(`
+    SELECT rowid AS sequence, ${RUN_SUMMARY_COLUMNS}
     FROM workflow_runs WHERE rowid < ? ORDER BY rowid DESC LIMIT ?
   `).all(before, limit + 1);
   return { items: rows.slice(0, limit).map(runSummary), nextCursor: rows.length > limit ? String(rows[limit - 1]!.sequence) : null };
@@ -142,6 +154,12 @@ export function requireRun(db: Database, id: string): RunRow {
   const row = db.query<RunRow, [string]>('SELECT * FROM workflow_runs WHERE id = ?').get(id);
   if (!row) throw workflowNotFound('Workflow run');
   return row;
+}
+
+export function requireUnarchivedRun(db: Database, id: string): RunRow {
+  const run = requireRun(db, id);
+  if (run.archive_json !== null) throw workflowConflict('This workflow run is archived.');
+  return run;
 }
 
 export function pinnedRevision(db: Database, run: RunRow): WorkflowRevision {
@@ -223,6 +241,7 @@ export function runDetail(db: Database, runId: string): WorkflowRunDetail {
     SELECT amendment_json FROM workflow_operations WHERE run_id = ? AND amendment_json IS NOT NULL ORDER BY rowid
   `).all(runId);
   return { ...runSummary(run), pinnedRevision: pinnedRevision(db, run),
+    archive: run.archive_json === null ? null : JSON.parse(run.archive_json) as WorkflowRunArchive,
     inputs: JSON.parse(run.inputs_json) as JsonObject, executionContext: JSON.parse(run.context_json) as WorkflowExecutionContext,
     steps, signals: signals.map(signalOccurrence), amendments: amendments.map(row => JSON.parse(row.amendment_json) as WorkflowRunAmendment) };
 }
@@ -234,7 +253,7 @@ export function listActiveChats(db: Database, request: WorkflowPageRequest): Wor
       a.status, r.name AS runName, r.status AS runStatus, r.updated_at AS runUpdatedAt
     FROM workflow_attempts a JOIN workflow_instances i ON i.id = a.instance_id JOIN workflow_runs r ON r.id = i.run_id
     WHERE a.chat_id IS NOT NULL AND a.chat_removed = 0 AND a.status IN ('running','failed','unknown')
-      AND a.number = i.attempt_count AND a.status = i.status AND a.chat_id > ?
+      AND r.archive_json IS NULL AND a.number = i.attempt_count AND a.status = i.status AND a.chat_id > ?
     ORDER BY a.chat_id LIMIT ?
   `).all(cursor ?? '', limit + 1);
   return { items: rows.slice(0, limit), nextCursor: rows.length > limit ? rows[limit - 1]!.chatId : null };
@@ -260,7 +279,8 @@ export function saveOperation(
 
 export function referencesTarget(db: Database, column: 'executor_id' | 'provider_id', id: string): boolean {
   return db.query(`
-    SELECT 1 FROM workflow_run_steps s WHERE s.${column} = ? AND (
+    SELECT 1 FROM workflow_run_steps s JOIN workflow_runs r ON r.id = s.run_id
+    WHERE s.${column} = ? AND r.archive_json IS NULL AND (
       s.intake = 'open' OR EXISTS (
         SELECT 1 FROM workflow_instances i WHERE i.run_id = s.run_id AND i.step_id = s.id
           AND i.status IN ('ready', 'running', 'waiting-executor', 'failed', 'unknown')
