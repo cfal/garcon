@@ -13,6 +13,28 @@ export interface WorkflowGraphEdge {
 	label: string;
 }
 
+export interface WorkflowGraphFocus {
+	stepId: string;
+	complete: () => void;
+}
+
+type Bounds = Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'>;
+
+export function workflowGraphFocusOffset(frame: Bounds, node: Bounds): { x: number; y: number } {
+	const inset = 8;
+	function offset(start: number, end: number, low: number, high: number): number {
+		if (start >= low && end <= high) return 0;
+		const min = Math.min(low + inset, (low + high) / 2);
+		const max = Math.max(high - inset, (low + high) / 2);
+		if (end - start > max - min) return (min + max - start - end) / 2;
+		return start < low ? min - start : max - end;
+	}
+	return {
+		x: offset(node.left, node.right, frame.left, frame.right),
+		y: offset(node.top, node.bottom, frame.top, frame.bottom),
+	};
+}
+
 export function workflowEdges(steps: readonly WorkflowStep[]): WorkflowGraphEdge[] {
 	return steps.flatMap(({ id, on }): WorkflowGraphEdge[] => {
 		if (!on) return [];

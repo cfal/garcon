@@ -5,22 +5,27 @@
 	import {
 		workflowGraphPositions,
 		type WorkflowGraphEdge,
+		type WorkflowGraphFocus,
 		type WorkflowGraphNode,
 	} from '$lib/workflows/definition/workflow-graph';
 	import StepNode, { type StepGraphNode } from './WorkflowGraphNode.svelte';
+	import WorkflowGraphCamera from './WorkflowGraphCamera.svelte';
 
 	let {
 		steps,
 		connections,
 		selected,
 		onSelect,
+		focusRequest = null,
 	}: {
 		steps: readonly WorkflowGraphNode[];
 		connections: readonly WorkflowGraphEdge[];
 		selected: string | null;
 		onSelect: (id: string) => void;
+		focusRequest?: WorkflowGraphFocus | null;
 	} = $props();
 
+	let surface = $state<HTMLDivElement>();
 	const positions = $derived(workflowGraphPositions(steps, connections));
 	const nodeTypes = { step: StepNode };
 	const nodes = $derived<StepGraphNode[]>(
@@ -54,6 +59,7 @@
 	class="workflow-graph h-full min-h-60 w-full bg-background"
 	role="group"
 	aria-label={m.workflow_studio_graph()}
+	bind:this={surface}
 >
 	<SvelteFlow
 		{nodes}
@@ -71,6 +77,7 @@
 	>
 		<Background patternColor="hsl(var(--border))" gap={20} />
 		<Controls showLock={false} />
+		<WorkflowGraphCamera {surface} {focusRequest} />
 	</SvelteFlow>
 </div>
 

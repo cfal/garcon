@@ -23,7 +23,7 @@
 		nextWorkflowStepId,
 		workflowSignals,
 	} from '$lib/workflows/definition/workflow-step-options';
-	import { workflowEdges } from '$lib/workflows/definition/workflow-graph';
+	import { workflowEdges, type WorkflowGraphFocus } from '$lib/workflows/definition/workflow-graph';
 	import { workflowFieldEdits } from '$lib/workflows/definition/workflow-field-edits';
 	import type { WorkflowDraftState } from '$lib/workflows/definition/workflow-draft-state.svelte';
 	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
@@ -65,6 +65,7 @@
 	let root = $state<HTMLElement>();
 	let heading = $state<HTMLHeadingElement>();
 	let selected = $state<string | null>(null);
+	let focusRequest = $state.raw<WorkflowGraphFocus | null>(null);
 	let location = $state.raw<WorkflowSourceRange | null>(null);
 	let picker = $state<{ signal?: string; after?: string } | null>(null);
 	let sharing = $state(false);
@@ -99,6 +100,16 @@
 
 	function back() {
 		detailOpen = false;
+		if (view === 'graph' && active) {
+			const request: WorkflowGraphFocus = {
+				stepId: active.id,
+				complete: () => {
+					if (focusRequest === request) focusRequest = null;
+				},
+			};
+			focusRequest = request;
+			return;
+		}
 		void tick().then(() => {
 			const buttons = root?.querySelectorAll<HTMLButtonElement>('[data-workflow-step]');
 			const button =
@@ -414,7 +425,7 @@
 							{m.workflow_studio_loading_graph()}
 						</p>
 					{:then Graph}
-						<Graph {steps} connections={edges} {selected} onSelect={select} />
+						<Graph {steps} connections={edges} {selected} {focusRequest} onSelect={select} />
 					{:catch}
 						<p class="p-4 text-sm text-destructive" role="alert">
 							{m.workflow_studio_graph_failed()}
