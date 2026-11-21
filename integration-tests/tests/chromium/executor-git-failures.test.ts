@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import { chmod, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
@@ -124,6 +125,53 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
       expect(await runFixtureGit(project, 'worktree', 'list', '--porcelain')).toContain(`worktree ${join(project, 'feature')}`);
       assertOnlyExpectedHttpErrors(fixture, calls);
     } finally { release.resolve(); }
+  }, undefined, remoteOptions);
+}, 120_000);
+
+test('repository reconnect preserves the worktree result and filter focus', async () => {
+  await withChromiumFixture('worktree-reconnect-error-focus', async ({ page, integration, consumeExpectedBrowserErrors }) => {
+    const { client } = integration;
+    const project = integration.executionDirs.project;
+    const setEnabled = (enabled: boolean) => client.patch(`/api/v1/executors/${client.executorId}`, { enabled });
+    await initializeFixtureRepository(project);
+    await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+    await page.getByRole('dialog').locator('[data-executor-picker]').click();
+    await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
+    const input = page.locator('#project-path-input');
+    await input.fill(project);
+    await page.locator('[data-slot="project-path-field"] .text-status-success-foreground').waitFor();
+    await input.press('Enter');
+    await page.getByRole('button', { name: 'Select a different worktree' }).click();
+    const newWorktree = page.getByRole('button', { name: 'New worktree', exact: true });
+    await newWorktree.click();
+    const create = page.getByRole('dialog', { name: 'New worktree', exact: true });
+    const name = create.getByRole('textbox', { name: /branch name/i });
+    const message = 'Worktree outcome unknown; inspect the repository.';
+    await page.route('**/api/v1/git/worktrees/create', route => route.fulfill({
+      status: 503, json: { error: message, errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN' },
+    }));
+    await name.fill('keyboard-reconnect');
+    await name.press('Enter');
+    const alert = create.getByRole('alert').filter({ hasText: message });
+    await alert.waitFor();
+    await setEnabled(false);
+    await create.getByText('Executor unavailable').waitFor();
+    await setEnabled(true);
+    await browserExpect(create.getByRole('button', { name: 'Create worktree' })).toBeEnabled({ timeout: 30_000 });
+    const errorRetained = await alert.isVisible();
+    await create.getByRole('button', { name: 'Back', exact: true }).click();
+    const filter = page.getByRole('combobox', { name: 'Filter worktrees' });
+    await browserExpect(filter).toBeFocused();
+    await filter.fill('main');
+    await setEnabled(false);
+    await page.getByRole('dialog', { name: 'Select worktree' }).getByText('Executor unavailable').waitFor();
+    await setEnabled(true);
+    await browserExpect(newWorktree).toBeEnabled({ timeout: 30_000 });
+    expect(await filter.inputValue()).toBe('main');
+    const filterFocused = await filter.evaluate(element => document.activeElement === element);
+    consumeExpectedBrowserErrors(['console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
+    expect({ errorRetained, filterFocused }).toEqual({ errorRetained: true, filterFocused: true });
   }, undefined, remoteOptions);
 }, 120_000);
 

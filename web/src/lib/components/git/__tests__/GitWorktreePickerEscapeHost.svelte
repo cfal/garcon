@@ -32,7 +32,8 @@
 		]}
 		isLoading={false}
 		isCreating={false}
-		errorMessage={null}
+		loadError={null}
+		createError={null}
 		onSelect={() => {}}
 		onCreate={() => {}}
 		onRefresh={() => {}}

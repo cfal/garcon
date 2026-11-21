@@ -35,7 +35,8 @@
 		description?: string;
 		isLoading: boolean;
 		isCreating: boolean;
-		errorMessage: string | null;
+		loadError: string | null;
+		createError: string | null;
 		onSelect: (worktreePath: string) => void;
 		onCreate: (creation: GitWorktreeCreation) => void;
 		onRefresh: () => void;
@@ -49,7 +50,8 @@
 		description = '',
 		isLoading,
 		isCreating,
-		errorMessage,
+		loadError,
+		createError,
 		onSelect,
 		onCreate,
 		onRefresh,
@@ -68,6 +70,7 @@
 	const transientLayers = getOptionalTransientLayers();
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let createTarget = $state<string | null>(null);
+	let submitted = $state(false);
 	let showAdvanced = $state(false);
 	const createOpen = $derived(createTarget === contextKey);
 	const available = $derived(catalogContextKey !== null);
@@ -134,7 +137,7 @@
 	function backToList(): void {
 		if (isCreating) return;
 		createTarget = null;
-		if (errorMessage && canUseGit) onRefresh();
+		if ((loadError || (submitted && createError)) && canUseGit) onRefresh();
 		void tick().then(() => filterInputRef?.focus());
 	}
 
@@ -147,6 +150,7 @@
 	function openCreateForm(): void {
 		if (!canUseGit) return;
 		showAdvanced = false;
+		submitted = false;
 		createTarget = contextKey;
 	}
 </script>
@@ -204,15 +208,15 @@
 			{/if}
 			<div
 				hidden={createOpen}
-				inert={createOpen || !available}
+				inert={createOpen}
 				class={createOpen ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}
 			>
-				{#if errorMessage}
+				{#if loadError}
 					<div
 						class="flex min-w-0 shrink-0 items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
 					>
 						<AlertTriangle class="h-3.5 w-3.5 shrink-0 text-destructive" />
-						<span class="min-w-0 flex-1 break-words text-destructive">{errorMessage}</span>
+						<span class="min-w-0 flex-1 break-words text-destructive">{loadError}</span>
 						<button
 							type="button"
 							onclick={onRefresh}
@@ -283,7 +287,8 @@
 					selectedIndex={picker.selectedIndex}
 					selectedPath={picker.selectedWorktree?.path}
 					{isLoading}
-					hasLoadError={Boolean(errorMessage)}
+					disabled={!canUseGit}
+					hasLoadError={Boolean(loadError)}
 					onActivate={(worktreePath) => picker.selectPath(worktreePath)}
 					onSelect={selectVisibleWorktree}
 					onActiveOptionIdChange={(optionId) => {
@@ -323,10 +328,12 @@
 						{description}
 						{isCreating}
 						{canUseGit}
-						{errorMessage}
+						errorMessage={submitted ? createError : null}
 						onBack={backToList}
 						onCreate={(creation) => {
-							if (createOpen && canUseGit) onCreate(creation);
+							if (!createOpen || !canUseGit) return;
+							submitted = true;
+							onCreate(creation);
 						}}
 					/>
 				</div>

@@ -30,7 +30,8 @@ export class GitTargetDialogState {
 	worktreePickerOpen = $state(false);
 	worktrees = $state<GitWorktreeItem[]>([]);
 	isLoadingWorktrees = $state(false);
-	worktreeError = $state<string | null>(null);
+	worktreeLoadError = $state<string | null>(null);
+	worktreeCreateError = $state<string | null>(null);
 	isConfirming = $state(false);
 
 	#validationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,7 +72,7 @@ export class GitTargetDialogState {
 	setCandidatePath(path: string): void {
 		this.candidatePath = path;
 		this.validationError = null;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 	}
 
 	scheduleValidation(): void {
@@ -102,13 +103,14 @@ export class GitTargetDialogState {
 
 	openWorktreePicker(): void {
 		if (!this.canSelectWorktree) return;
+		this.worktreeCreateError = null;
 		this.worktreePickerOpen = true;
 		void this.loadWorktrees();
 	}
 
 	closeWorktreePicker(): void {
 		this.worktreePickerOpen = false;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 		this.#cancelWorktreeLoad();
 	}
 
@@ -132,7 +134,7 @@ export class GitTargetDialogState {
 		this.#worktreeAbort = abort;
 		const generation = ++this.#worktreeGeneration;
 		this.isLoadingWorktrees = true;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 
 		try {
 			const result = await getGitWorktrees({ executorId, projectPath: path }, { signal: abort.signal });
@@ -145,7 +147,7 @@ export class GitTargetDialogState {
 				!this.#isCurrentWorktreeLoad(generation, abort.signal)
 			)
 				return;
-			this.worktreeError = m.git_target_load_worktrees_failed();
+			this.worktreeLoadError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
 		} finally {
 			if (this.#isCurrentWorktreeLoad(generation, abort.signal)) this.isLoadingWorktrees = false;
@@ -161,7 +163,7 @@ export class GitTargetDialogState {
 
 		const target = { executorId, projectPath };
 		this.#pendingCreation = target;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
 
 		try {
 			const result = await gitCreateWorktree(target, creation);
@@ -173,7 +175,7 @@ export class GitTargetDialogState {
 		} catch (error) {
 			this.options.onMutationError?.(error, target);
 			if (!current() || generation !== this.#worktreeGeneration) return;
-			this.worktreeError =
+			this.worktreeCreateError =
 				error instanceof Error ? error.message : m.git_target_load_worktrees_failed();
 		} finally {
 			if (this.#pendingCreation === target) this.#pendingCreation = null;

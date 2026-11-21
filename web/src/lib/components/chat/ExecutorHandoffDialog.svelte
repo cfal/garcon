@@ -241,7 +241,8 @@
 				worktrees={destination.worktrees}
 				isLoading={destination.isLoadingWorktrees}
 				isCreating={destination.isCreatingWorktree}
-				errorMessage={destination.worktreeError}
+				loadError={destination.worktreeLoadError}
+				createError={destination.worktreeCreateError}
 				onSelect={(path) => destination.selectWorktree(path)}
 				onCreate={(creation) => destination.createWorktree(creation)}
 				onRefresh={() => void destination.loadWorktrees()}

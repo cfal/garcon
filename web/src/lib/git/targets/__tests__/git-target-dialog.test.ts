@@ -128,7 +128,7 @@ describe('GitTargetDialogState', () => {
 				executorId: 'remote',
 				projectPath: '/repo',
 			});
-			expect(dialog.worktreeError).toBeNull();
+			expect(dialog.worktreeCreateError).toBeNull();
 			expect(dialog.candidatePath).toBe(transition === 'switch' ? '/other' : '/repo');
 			dialog.dispose();
 		},
@@ -298,7 +298,7 @@ describe('GitTargetDialogState', () => {
 
 		expect(dialog.isLoadingWorktrees).toBe(false);
 		expect(dialog.worktrees).toEqual([]);
-		expect(dialog.worktreeError).toBe(m.git_target_load_worktrees_failed());
+		expect(dialog.worktreeLoadError).toBe(m.git_target_load_worktrees_failed());
 	});
 
 	it('selects a successfully created worktree and preserves server failures', async () => {
@@ -334,7 +334,7 @@ describe('GitTargetDialogState', () => {
 			error: 'branch already exists',
 		});
 		await dialog.createWorktree({ worktreePath: '/workspace/other' });
-		expect(dialog.worktreeError).toBe('branch already exists');
+		expect(dialog.worktreeCreateError).toBe('branch already exists');
 		expect(dialog.candidatePath).toBe('/workspace/canonical-feature');
 	});
 

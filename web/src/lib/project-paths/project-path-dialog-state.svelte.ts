@@ -24,7 +24,8 @@ export class ProjectPathDialogState {
 	worktrees = $state<GitWorktreeItem[]>([]);
 	isLoadingWorktrees = $state(false);
 	isCreatingWorktree = $state(false);
-	worktreeError = $state<string | null>(null);
+	worktreeLoadError = $state<string | null>(null);
+	worktreeCreateError = $state<string | null>(null);
 
 	currentProjectPath = '';
 
@@ -88,7 +89,8 @@ export class ProjectPathDialogState {
 		this.gitRepoStatus = 'unknown';
 		this.worktreePickerOpen = false;
 		this.worktrees = [];
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
+		this.worktreeLoadError = null;
 		this.isLoadingWorktrees = false;
 		this.isCreatingWorktree = false;
 		this.#clearPendingValidation();
@@ -101,7 +103,8 @@ export class ProjectPathDialogState {
 		this.submitError = null;
 		this.isSubmitting = false;
 		this.worktreePickerOpen = false;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
+		this.worktreeLoadError = null;
 		this.#clearPendingValidation();
 		this.#clearPendingWorktreeLoad();
 	}
@@ -110,7 +113,7 @@ export class ProjectPathDialogState {
 		this.candidatePath = path;
 		this.validationError = null;
 		this.submitError = null;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 	}
 
 	scheduleValidation(executorContextKey = ''): void {
@@ -149,14 +152,15 @@ export class ProjectPathDialogState {
 	openWorktreePicker(): void {
 		if (!this.canSelectWorktree) return;
 		this.worktreePickerOpen = true;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
+		this.worktreeLoadError = null;
 		this.worktrees = [];
 		void this.loadWorktrees();
 	}
 
 	closeWorktreePicker(): void {
 		this.worktreePickerOpen = false;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 		this.#clearPendingWorktreeLoad();
 		this.isLoadingWorktrees = false;
 	}
@@ -190,7 +194,7 @@ export class ProjectPathDialogState {
 			path === this.nonblankPath &&
 			contextKey === this.executors?.gitContextKey(executorId);
 		this.isLoadingWorktrees = true;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 
 		try {
 			const result = await getGitWorktrees(
@@ -201,7 +205,7 @@ export class ProjectPathDialogState {
 			this.worktrees = result.worktrees;
 		} catch (error) {
 			if (isAbortError(error) || !current()) return;
-			this.worktreeError = m.git_target_load_worktrees_failed();
+			this.worktreeLoadError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
 		} finally {
 			if (this.#isCurrentWorktreeLoad(generation, abort.signal)) {
@@ -224,20 +228,20 @@ export class ProjectPathDialogState {
 		if (!projectPath) return;
 
 		this.isCreatingWorktree = true;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
 
 		try {
 			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
 			if (!current()) return;
 			if (!result.success) {
-				this.worktreeError =
+				this.worktreeCreateError =
 					result.error || result.message || m.chat_new_chat_create_worktree_failed();
 				return;
 			}
 			this.selectWorktree(result.worktreePath || creation.worktreePath);
 		} catch (error) {
 			if (!current()) return;
-			this.worktreeError =
+			this.worktreeCreateError =
 				error instanceof Error ? error.message : m.chat_new_chat_create_worktree_failed();
 		} finally {
 			if (generation === this.#worktreeGeneration) this.isCreatingWorktree = false;

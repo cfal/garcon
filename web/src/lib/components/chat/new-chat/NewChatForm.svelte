@@ -961,7 +961,8 @@
 		worktrees={form.worktreeItems}
 		isLoading={form.isLoadingWorktrees}
 		isCreating={form.isCreatingWorktree}
-		errorMessage={form.worktreeError}
+		loadError={form.worktreeLoadError}
+		createError={form.worktreeCreateError}
 		onSelect={(path) => form.selectWorktree(path)}
 		onCreate={(creation) => form.createWorktree(creation)}
 		onRefresh={() => {

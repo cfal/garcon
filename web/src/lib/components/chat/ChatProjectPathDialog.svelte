@@ -178,7 +178,8 @@
 		worktrees={projectPathDialogState.worktrees}
 		isLoading={projectPathDialogState.isLoadingWorktrees}
 		isCreating={projectPathDialogState.isCreatingWorktree}
-		errorMessage={projectPathDialogState.worktreeError}
+		loadError={projectPathDialogState.worktreeLoadError}
+		createError={projectPathDialogState.worktreeCreateError}
 		onSelect={(path) => projectPathDialogState.selectWorktree(path)}
 		onCreate={(creation) => projectPathDialogState.createWorktree(creation)}
 		onRefresh={() => {

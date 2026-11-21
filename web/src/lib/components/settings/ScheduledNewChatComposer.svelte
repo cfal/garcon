@@ -297,7 +297,8 @@
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}
 		isCreating={startup.isCreatingWorktree}
-		errorMessage={startup.worktreeError}
+		loadError={startup.worktreeLoadError}
+		createError={startup.worktreeCreateError}
 		onSelect={(path) => startup.selectWorktree(path)}
 		onCreate={(creation) => startup.createWorktree(creation)}
 		onRefresh={() => {

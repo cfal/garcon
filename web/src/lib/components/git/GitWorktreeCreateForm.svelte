@@ -33,7 +33,6 @@
 	let baseRefOverride = $state('');
 	let suggested = $state(false);
 	let generating = $state(false);
-	let submitted = $state(false);
 	let nameInput = $state<HTMLInputElement | null>(null);
 	const repositoryPath = $derived(worktrees.find((worktree) => worktree.isMain)?.path ?? '');
 	const defaultPath = $derived(deriveWorktreePath(repositoryPath, branchName));
@@ -53,7 +52,6 @@
 
 	function create() {
 		if (!canCreate) return;
-		submitted = true;
 		onCreate({
 			worktreePath: effectivePath,
 			...(suggested ? { newBranch: name } : { branch: name }),
@@ -131,7 +129,7 @@
 				</label>
 			</div>
 		{/if}
-		{#if submitted && errorMessage}
+		{#if errorMessage}
 			<p role="alert" class="text-sm text-destructive">{errorMessage}</p>
 		{/if}
 	</div>

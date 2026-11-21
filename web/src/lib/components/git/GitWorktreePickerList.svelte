@@ -24,6 +24,7 @@
 		selectedIndex: number;
 		selectedPath: string | undefined;
 		isLoading: boolean;
+		disabled?: boolean;
 		hasLoadError: boolean;
 		onActivate: (worktreePath: string) => void;
 		onSelect: (worktreePath: string) => void;
@@ -37,6 +38,7 @@
 		selectedIndex,
 		selectedPath,
 		isLoading,
+		disabled = false,
 		hasLoadError,
 		onActivate,
 		onSelect,
@@ -199,6 +201,7 @@
 	role="listbox"
 	aria-label={m.workspace_worktree_select()}
 	aria-busy={isLoading}
+	aria-disabled={disabled}
 	data-worktree-list-viewport
 >
 	{#if isLoading}

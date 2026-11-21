@@ -30,7 +30,8 @@ function renderPicker(worktrees: GitWorktreeItem[], overrides: Record<string, un
 		worktrees,
 		isLoading: false,
 		isCreating: false,
-		errorMessage: null,
+		loadError: null,
+		createError: null,
 		onSelect: vi.fn(),
 		onCreate: vi.fn(),
 		onRefresh: vi.fn(),
@@ -51,7 +52,7 @@ function renderedWorktreeNames(): string[] {
 
 it('disables both refresh entry points while a worktree is being created', async () => {
 	const onRefresh = vi.fn();
-	renderPicker([], { isCreating: true, errorMessage: 'Previous list failed', onRefresh });
+	renderPicker([], { isCreating: true, loadError: 'Previous list failed', onRefresh });
 	for (const name of ['Refresh worktrees', 'Retry']) {
 		const button = screen.getByRole('button', { name }) as HTMLButtonElement;
 		expect(button.disabled).toBe(true);
@@ -329,7 +330,7 @@ describe('GitWorktreePickerModal', () => {
 	});
 
 	it('does not report an API failure as an empty filter result', () => {
-		renderPicker([], { errorMessage: 'Unable to load worktrees' });
+		renderPicker([], { loadError: 'Unable to load worktrees' });
 
 		expect(screen.getByText('Unable to load worktrees')).toBeTruthy();
 		expect(screen.queryByText('No matching worktrees')).toBeNull();
@@ -337,7 +338,7 @@ describe('GitWorktreePickerModal', () => {
 
 	it('shows creation failures in the form, not an earlier list error', async () => {
 		const view = renderPicker([worktree('main', null, { isMain: true })], {
-			errorMessage: 'Refresh failed',
+			loadError: 'Refresh failed',
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
 		expect(screen.queryByRole('alert')).toBeNull();
@@ -345,7 +346,7 @@ describe('GitWorktreePickerModal', () => {
 			target: { value: 'existing-path' },
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
-		await view.rerender({ errorMessage: 'Destination already exists' });
+		await view.rerender({ createError: 'Destination already exists' });
 		expect(screen.getByRole('alert').textContent).toBe('Destination already exists');
 		expect(screen.getByDisplayValue('existing-path')).toBeTruthy();
 	});
@@ -715,8 +716,10 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.keyDown(field, { key: 'Enter' });
 		expect(onCreate).toHaveBeenCalledTimes(1);
 		expect(onRefresh).toHaveBeenCalledTimes(1);
-		await view.rerender({ isCreating: false });
+		await view.rerender({ isCreating: false, createError: 'Outcome unknown' });
 		expect(onRefresh).toHaveBeenCalledTimes(2);
+		await view.rerender({ loadError: 'Catalog unavailable' });
+		expect(screen.getByRole('alert').textContent).toBe('Outcome unknown');
 		expect(screen.getByDisplayValue('stable-draft')).toBe(field);
 	});
 

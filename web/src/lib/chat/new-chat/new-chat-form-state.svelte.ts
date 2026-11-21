@@ -122,7 +122,8 @@ export class NewChatFormState {
 	worktreeItems = $state<GitWorktreeItem[]>([]);
 	isLoadingWorktrees = $state(false);
 	isCreatingWorktree = $state(false);
-	worktreeError = $state<string | null>(null);
+	worktreeLoadError = $state<string | null>(null);
+	worktreeCreateError = $state<string | null>(null);
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();
 
@@ -561,14 +562,16 @@ export class NewChatFormState {
 	openWorktreeModal(): void {
 		if (!this.gitAvailable) return;
 		this.worktreeModalOpen = true;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
+		this.worktreeLoadError = null;
 		this.worktreeItems = [];
 		void this.loadWorktrees();
 	}
 
 	closeWorktreeModal(): void {
 		this.worktreeModalOpen = false;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
+		this.worktreeLoadError = null;
 		this.#cancelWorktreeLoad();
 	}
 
@@ -589,7 +592,7 @@ export class NewChatFormState {
 			projectPath === this.nonblankPath &&
 			contextKey === this.pathContextKey;
 		this.isLoadingWorktrees = true;
-		this.worktreeError = null;
+		this.worktreeLoadError = null;
 
 		try {
 			const result = await getGitWorktrees({ executorId, projectPath }, { signal: abort.signal });
@@ -597,7 +600,7 @@ export class NewChatFormState {
 			this.worktreeItems = result.worktrees;
 		} catch (error) {
 			if (isAbortError(error) || !current()) return;
-			this.worktreeError = m.git_target_load_worktrees_failed();
+			this.worktreeLoadError = m.git_target_load_worktrees_failed();
 			this.worktreeItems = [];
 		} finally {
 			if (this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) {
@@ -639,13 +642,13 @@ export class NewChatFormState {
 			projectPath === this.nonblankPath &&
 			contextKey === this.pathContextKey;
 		this.isCreatingWorktree = true;
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
 
 		try {
 			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
 			if (!current()) return false;
 			if (!result.success) {
-				this.worktreeError =
+				this.worktreeCreateError =
 					result.error || result.message || m.chat_new_chat_create_worktree_failed();
 				return false;
 			}
@@ -653,7 +656,7 @@ export class NewChatFormState {
 			return true;
 		} catch (err) {
 			if (!current()) return false;
-			this.worktreeError =
+			this.worktreeCreateError =
 				err instanceof Error ? err.message : m.chat_new_chat_create_worktree_failed();
 			return false;
 		} finally {
@@ -834,7 +837,8 @@ export class NewChatFormState {
 		this.gitRepoStatus = 'unknown';
 		this.worktreeModalOpen = false;
 		this.worktreeItems = [];
-		this.worktreeError = null;
+		this.worktreeCreateError = null;
+		this.worktreeLoadError = null;
 		this.chatTags = [];
 		this.showTagInput = false;
 		this.#permissionModeTouched = false;

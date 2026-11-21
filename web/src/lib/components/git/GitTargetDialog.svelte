@@ -112,7 +112,8 @@
 		worktrees={dialog.worktrees}
 		isLoading={dialog.isLoadingWorktrees}
 		isCreating={dialog.isCreatingWorktree}
-		errorMessage={dialog.worktreeError}
+		loadError={dialog.worktreeLoadError}
+		createError={dialog.worktreeCreateError}
 		onSelect={(path) => dialog.selectWorktree(path)}
 		onCreate={(creation) => dialog.createWorktree(creation)}
 		onRefresh={() => dialog.loadWorktrees()}
@@ -167,7 +168,7 @@
 							}}
 							oninput={() => {
 								dialog.validationError = null;
-								dialog.worktreeError = null;
+								dialog.worktreeLoadError = null;
 							}}
 							onkeydown={(event) => {
 								if (event.key === 'Enter') {
