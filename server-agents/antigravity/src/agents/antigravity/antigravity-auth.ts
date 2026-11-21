@@ -11,10 +11,10 @@ export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
   runModels: (config: AntigravityConfig) => Promise<AntigravityCliResult> = runAntigravityModels,
 ): Promise<AgentAuthStatus> {
-  if (config.authMethod() === 'gemini-api-key' && config.hasApiKey()) {
-    return { authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' };
-  }
   try {
+    if (config.authMethod() === 'gemini-api-key' && config.hasApiKey()) {
+      return { authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' };
+    }
     const result = await runModels(config);
     if (result.exitCode === 0) {
       return { authenticated: true, canReauth: true, label: 'Google', source: 'cli' };

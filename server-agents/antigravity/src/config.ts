@@ -1,4 +1,4 @@
-import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentEnvironmentReader } from '@garcon/server-agent-interface';
 import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
 // The ACP auth methods agy advertises in its `initialize` result.
@@ -35,8 +35,10 @@ export function resolveAuthMethod(
 ): AntigravityAuthMethod {
   if (configured !== null) {
     if (isAntigravityAuthMethod(configured)) return configured;
-    throw new Error(
+    throw new AgentIntegrationError(
+      'INVALID_SETTINGS',
       `GARCON_ANTIGRAVITY_AUTH_METHOD must be one of ${ANTIGRAVITY_AUTH_METHODS.join(', ')}; received ${configured}.`,
+      false,
     );
   }
   return hasApiKey ? 'gemini-api-key' : 'oauth-personal';

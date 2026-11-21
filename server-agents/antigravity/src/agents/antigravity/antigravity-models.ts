@@ -10,10 +10,23 @@ export interface AntigravityCliResult {
   readonly exitCode: number | null;
 }
 
+const inFlightModels = new Map<string, Promise<AntigravityCliResult>>();
+
 // `agy models` is the CLI's signed-in check as well as its catalog; unlike
-// `session/new`, it leaves no empty conversation in the user's history.
-export async function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
-  const proc = Bun.spawn([config.binary(), 'models'], {
+// `session/new`, it leaves no empty conversation in the user's history. Auth
+// status and catalog discovery run together, so concurrent callers share one
+// process.
+export function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
+  const binary = config.binary();
+  const running = inFlightModels.get(binary);
+  if (running) return running;
+  const started = spawnAntigravityModels(binary).finally(() => inFlightModels.delete(binary));
+  inFlightModels.set(binary, started);
+  return started;
+}
+
+async function spawnAntigravityModels(binary: string): Promise<AntigravityCliResult> {
+  const proc = Bun.spawn([binary, 'models'], {
     env: antigravityChildEnvironment(),
     stdin: 'ignore',
     stdout: 'pipe',

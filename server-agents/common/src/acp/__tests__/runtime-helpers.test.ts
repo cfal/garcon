@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { autoApproveChoice, permissionChoiceOutcome } from '../runtime-helpers.ts';
+import { autoApproveChoice, isAutoApproveMode, permissionChoiceOutcome } from '../runtime-helpers.ts';
+import type { AcpAgentPolicy } from '../agent-runtime.ts';
 
 const ANTIGRAVITY_OPTIONS = [
   { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
@@ -27,6 +28,15 @@ describe('permissionChoiceOutcome', () => {
     expect(permissionChoiceOutcome(CURSOR_OPTIONS, 'allow-always')).toEqual(selected('allow-always'));
   });
 
+  it('never turns a one-time approval into a persistent grant', () => {
+    const persistentOnly = [
+      { optionId: 'always', kind: 'allow_always' },
+      { optionId: 'reject', kind: 'reject_once' },
+    ];
+    expect(permissionChoiceOutcome(persistentOnly, 'allow-once')).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect(permissionChoiceOutcome([{ optionId: 'allow-always' }], 'allow-once')).toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+
   it('never resolves a denial to an allow option', () => {
     const allowOnly = [{ optionId: 'allow', kind: 'allow_once' }];
     expect(permissionChoiceOutcome(allowOnly, 'reject')).toEqual({ outcome: { outcome: 'cancelled' } });
@@ -36,6 +46,17 @@ describe('permissionChoiceOutcome', () => {
     const untyped = [{ optionId: 'allow-once' }, { optionId: 'reject-once' }];
     expect(permissionChoiceOutcome(untyped, 'reject')).toEqual(selected('reject-once'));
     expect(permissionChoiceOutcome([], 'allow-once')).toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+});
+
+describe('isAutoApproveMode', () => {
+  it('follows the policy when an agent applies a mode natively', () => {
+    const native = { agentId: 'native', command: 'agent', autoApprovePermissionModes: ['bypassPermissions'] } satisfies AcpAgentPolicy;
+    const standard = { agentId: 'standard', command: 'agent' } satisfies AcpAgentPolicy;
+    expect(isAutoApproveMode('acceptEdits', native)).toBe(false);
+    expect(isAutoApproveMode('bypassPermissions', native)).toBe(true);
+    expect(isAutoApproveMode('acceptEdits', standard)).toBe(true);
+    expect(isAutoApproveMode('default', standard)).toBe(false);
   });
 });
 

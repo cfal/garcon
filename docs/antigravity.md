@@ -83,7 +83,7 @@ Permission modes:
 | Garcon | `mode` option | Approval handling |
 | --- | --- | --- |
 | `default` | `default` | Requests go to the user. |
-| `acceptEdits` | `accept-edits` | Requests are auto-approved. |
+| `acceptEdits` | `accept-edits` | agy approves edits itself; the requests it still sends, such as commands, go to the user. |
 | `plan` | `plan` | Requests go to the user. |
 | `manualBypass`, `bypassPermissions` | `default` | Requests are auto-approved. |
 
@@ -91,7 +91,7 @@ Permission options are chosen by their ACP `kind` (`allow_once`, `allow_always`,
 
 ## One-Shot Queries
 
-`singleQuery` runs one prompt in a disposable session started in a temporary directory, using `default` mode. Every permission request is answered with the reject option, and an executor-error chunk fails the query. The CLI still records that session in its conversation store; Garcon does not delete native files.
+`singleQuery` runs one prompt in a disposable session started in a temporary directory, in `plan` mode. In `plan` mode agy asks before running even the commands its own rules would otherwise auto-approve; verified against 1.5.13 with `touch`. Every permission request is answered with the reject option, and an executor-error chunk fails the query. The CLI still records that session in its conversation store; Garcon does not delete native files.
 
 ## Tool Normalization
 
@@ -100,14 +100,16 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 | Antigravity tool | Garcon message |
 | --- | --- |
 | `run_command` | `bash-tool-use` (`CommandLine`, `toolSummary`) |
-| `read_file` | `read-tool-use` (`Path`, `StartLine`, `EndLine`) |
-| `write_file` | `write-tool-use` (`Path`, `Content`) |
-| `edit_file` | `edit-tool-use` (`Path`, `Target`, `Replacement`) |
+| `read_file`, `view_file` | `read-tool-use` (`Path`/`AbsolutePath`, `StartLine`, `EndLine`) |
+| `write_file`, `write_to_file` | `write-tool-use` (`Path`/`TargetFile`, `Content`/`CodeContent`) |
+| `edit_file`, `replace_file_content`, `multi_replace_file_content` | `edit-tool-use` (`Path`/`TargetFile`, `Target`/`TargetContent`, `Replacement`/`ReplacementContent`) |
+| `grep_search`, `find_by_name`, `list_dir` | `grep-tool-use`, `glob-tool-use`, `list-tool-use` |
+| `read_url_content` | `web-fetch-tool-use` (`Url`) |
 | `search_web` | `web-search-tool-use` (`query`) |
 | `invoke_subagent` | `task-tool-use` (`Role`/`TypeName`, `Prompt`, `Model`) |
-| `ask_question`, `manage_task`, `send_message`, `schedule`, `define_subagent`, `manage_subagents`, `run_workflow`, `swarm` | `external-tool-use` with namespace `antigravity` |
 | MCP calls (`rawInput.server` + `rawInput.tool`) | `mcp-tool-use` |
-| Anything else | `unknown-tool-use` |
+| Any other named agy tool, such as `ask_question`, `manage_task`, `run_workflow`, or `command_status` | `external-tool-use` with namespace `antigravity` |
+| A call without a tool name | `unknown-tool-use` |
 
 `ask_question` is not interactive over ACP without elicitation support. The CLI prints the question as assistant text and ends the turn, so the user answers in the next message.
 

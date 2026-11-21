@@ -72,6 +72,14 @@ describe('getAntigravityAuthStatus', () => {
     expect(status).toEqual({ authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' });
   });
 
+  it('reports an invalid auth-method setting instead of throwing', async () => {
+    const status = await getAntigravityAuthStatus(config({
+      authMethod: () => resolveAuthMethod('password', false),
+    }), () => { throw new Error('must not run'); });
+    expect(status).toMatchObject({ authenticated: false, source: 'none' });
+    expect(status.detail).toContain('GARCON_ANTIGRAVITY_AUTH_METHOD must be one of');
+  });
+
   it('uses the CLI model listing as the signed-in check', async () => {
     const signedIn = await getAntigravityAuthStatus(config(), async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }));
     expect(signedIn).toMatchObject({ authenticated: true, source: 'cli' });

@@ -8,6 +8,7 @@ import type { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
 import { antigravityExecutorError } from './antigravity-acp-event-converter.js';
+import { applyAntigravityMode } from './antigravity-acp-policy.js';
 
 export interface AntigravitySingleQueryOptions {
   readonly projectPath: string;
@@ -51,10 +52,13 @@ export async function runAntigravitySingleQuery(
     signal,
     ...(options.timeoutMs === undefined ? {} : { requestTimeoutMs: options.timeoutMs }),
     ...(options.createTransport ? { createTransport: options.createTransport } : {}),
+    // Plan mode keeps the disposable session from running commands that agy's
+    // own rules would approve without a permission request.
     configure: async (client, created) => {
       if (options.model && options.model !== created.models?.currentModelId) {
         await client.setSessionModel({ sessionId: created.sessionId, modelId: options.model });
       }
+      await applyAntigravityMode(client, created.sessionId, created.configOptions, 'plan');
     },
     failureFromChunk: antigravityExecutorError,
   }));

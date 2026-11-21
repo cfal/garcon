@@ -120,6 +120,9 @@ export interface AcpAgentPolicy {
   command: string | (() => string);
   args?: string[];
   abortStrategy?: AcpAbortStrategy;
+  // Modes in which the runtime answers permission requests itself; agents that
+  // apply a mode natively leave the remaining requests to the user.
+  autoApprovePermissionModes?: readonly PermissionMode[];
   authenticateMethodId?: string | (() => string);
   mcpServers?: unknown[];
   binaryVersion?: string;
@@ -685,7 +688,7 @@ export class AcpAgentRuntime {
     const options = (Array.isArray(params.options) ? params.options : [])
       .map((option) => asObject(option));
 
-    if (isAutoApproveMode(turn.permissionMode)) {
+    if (isAutoApproveMode(turn.permissionMode, this.#policy)) {
       session.client.respond(
         requestId,
         permissionChoiceOutcome(options, autoApproveChoice(turn.permissionMode)),

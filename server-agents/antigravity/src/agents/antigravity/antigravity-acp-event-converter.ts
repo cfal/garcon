@@ -32,10 +32,19 @@ interface SessionState {
 
 // Upstream model failures (bad key, quota, HTTP errors) do not fail the ACP
 // prompt: agy streams one complete chunk carrying this marker, then ends the
-// turn with `end_turn`. Verified against agy 1.5.13.
+// turn with `end_turn`. Verified against agy 1.5.13. Text the chunk carries
+// before the marker stays assistant output.
+export function splitExecutorError(text: string): { readonly text: string; readonly failure: string | null } {
+  const index = text.indexOf(WARNING_MARKER + EXECUTOR_ERROR);
+  if (index < 0) return { text, failure: null };
+  return {
+    text: text.slice(0, index),
+    failure: `Antigravity ${text.slice(index + WARNING_MARKER.length).trim()}`,
+  };
+}
+
 export function antigravityExecutorError(text: string): string | null {
-  if (!text.startsWith(WARNING_MARKER + EXECUTOR_ERROR)) return null;
-  return `Antigravity ${text.slice(WARNING_MARKER.length).trim()}`;
+  return splitExecutorError(text).failure;
 }
 
 function chunkText(value: unknown): string {
@@ -83,10 +92,9 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(context.sessionId);
     switch (asString(update.sessionUpdate)) {
       case 'agent_message_chunk': {
-        const text = chunkText(update.content);
-        const failure = antigravityExecutorError(text);
+        const { text, failure } = splitExecutorError(chunkText(update.content));
         if (failure) session.failure ??= failure;
-        else session.assistantText += text;
+        session.assistantText += text;
         return [];
       }
       case 'agent_thought_chunk':
@@ -119,7 +127,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   #toolCall(session: SessionState, update: Record<string, unknown>, timestamp: string): ChatMessage[] {
     const call = antigravityToolCall(update);
     if (!call) return [];
-    this.#rememberToolName(session, call.toolCallId, call.name);
+    // A later frame without a name must not replace the name the call started with.
+    if (call.name) this.#rememberToolName(session, call.toolCallId, call.name);
     const messages = this.#flush(session, timestamp);
     if (session.emittedToolIds.has(call.toolCallId)) return messages;
     session.emittedToolIds.add(call.toolCallId);

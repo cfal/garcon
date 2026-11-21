@@ -2,10 +2,14 @@ import {
   BashToolUseMessage,
   EditToolUseMessage,
   ExternalToolUseMessage,
+  GlobToolUseMessage,
+  GrepToolUseMessage,
+  ListToolUseMessage,
   McpToolUseMessage,
   ReadToolUseMessage,
   TaskToolUseMessage,
   UnknownToolUseMessage,
+  WebFetchToolUseMessage,
   WebSearchToolUseMessage,
   WriteToolUseMessage,
   type ToolUseChatMessage,
@@ -14,22 +18,11 @@ import { asObject, asString } from '@garcon/server-agent-common/acp/event-conver
 
 export const ANTIGRAVITY_TOOL_NAMESPACE = 'antigravity';
 
-// Native tools with no shared counterpart. They render as named provider tools
-// rather than unknown ones.
-const NATIVE_EXTERNAL_TOOLS = new Set([
-  'ask_question',
-  'define_subagent',
-  'manage_subagents',
-  'manage_task',
-  'run_workflow',
-  'schedule',
-  'send_message',
-  'swarm',
-]);
-
 export interface AntigravityToolCall {
   readonly toolCallId: string;
-  readonly name: string;
+  // Null when the frame names no tool; `kind` then only describes the category.
+  readonly name: string | null;
+  readonly kind: string | null;
   readonly input: Record<string, unknown>;
 }
 
@@ -57,7 +50,8 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
   if (!toolCallId) return null;
   return {
     toolCallId,
-    name: asString(raw.name) ?? asString(raw.kind) ?? 'unknown',
+    name: asString(raw.name) ?? null,
+    kind: asString(raw.kind) ?? null,
     input: asObject(raw.rawInput ?? raw.args),
   };
 }
@@ -73,7 +67,8 @@ export function convertAntigravityToolUse(
       if (command === undefined) break;
       return new BashToolUseMessage(timestamp, id, command, stringField(input, 'toolSummary'));
     }
-    case 'read_file': {
+    case 'read_file':
+    case 'view_file': {
       const path = stringField(input, 'Path', 'path', 'AbsolutePath', 'file_path');
       if (path === undefined) break;
       return new ReadToolUseMessage(
@@ -85,12 +80,14 @@ export function convertAntigravityToolUse(
         lineField(input, 'EndLine', 'end_line'),
       );
     }
-    case 'write_file': {
+    case 'write_file':
+    case 'write_to_file': {
       const path = stringField(input, 'Path', 'path', 'TargetFile', 'file_path');
       if (path === undefined) break;
       return new WriteToolUseMessage(timestamp, id, path, stringField(input, 'Content', 'content', 'CodeContent'));
     }
-    case 'edit_file': {
+    case 'edit_file':
+    case 'replace_file_content': {
       const path = stringField(input, 'Path', 'path', 'TargetFile', 'file_path');
       if (path === undefined) break;
       return new EditToolUseMessage(
@@ -100,6 +97,36 @@ export function convertAntigravityToolUse(
         stringField(input, 'Target', 'target', 'TargetContent'),
         stringField(input, 'Replacement', 'replacement', 'ReplacementContent'),
       );
+    }
+    case 'multi_replace_file_content': {
+      const path = stringField(input, 'TargetFile', 'Path', 'path', 'file_path');
+      if (path === undefined) break;
+      const chunks = Array.isArray(input.ReplacementChunks) ? input.ReplacementChunks.map(asObject) : [];
+      const only = chunks.length === 1 ? chunks[0]! : {};
+      return new EditToolUseMessage(
+        timestamp,
+        id,
+        path,
+        stringField(only, 'TargetContent', 'target_content'),
+        stringField(only, 'ReplacementContent', 'replacement_content'),
+      );
+    }
+    case 'grep_search': {
+      const pattern = stringField(input, 'Query', 'query', 'Pattern');
+      if (pattern === undefined) break;
+      return new GrepToolUseMessage(timestamp, id, pattern, stringField(input, 'SearchPath', 'SearchDirectory', 'path'));
+    }
+    case 'find_by_name': {
+      const pattern = stringField(input, 'Pattern', 'pattern');
+      if (pattern === undefined) break;
+      return new GlobToolUseMessage(timestamp, id, pattern, stringField(input, 'SearchDirectory', 'path'));
+    }
+    case 'list_dir':
+      return new ListToolUseMessage(timestamp, id, stringField(input, 'DirectoryPath', 'Path', 'path'));
+    case 'read_url_content': {
+      const url = stringField(input, 'Url', 'url');
+      if (url === undefined) break;
+      return new WebFetchToolUseMessage(timestamp, id, url);
     }
     case 'search_web': {
       const query = stringField(input, 'query', 'Query');
@@ -129,10 +156,10 @@ export function convertAntigravityToolUse(
   if (mcpServer && mcpTool) {
     return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, asObject(input.arguments ?? input.args));
   }
-  if (NATIVE_EXTERNAL_TOOLS.has(name)) {
-    return new ExternalToolUseMessage(timestamp, id, name, input, ANTIGRAVITY_TOOL_NAMESPACE);
-  }
-  return new UnknownToolUseMessage(timestamp, id, name, input);
+  // Every named tool comes from agy's own registry, so tools without a shared
+  // counterpart render as named provider tools; only an unnamed call is unknown.
+  if (name !== null) return new ExternalToolUseMessage(timestamp, id, name, input, ANTIGRAVITY_TOOL_NAMESPACE);
+  return new UnknownToolUseMessage(timestamp, id, call.kind ?? 'unknown', input);
 }
 
 // Command results lead with `Created At:`/`Completed At:` timestamps that carry

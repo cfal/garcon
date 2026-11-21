@@ -105,7 +105,57 @@ describe('AntigravityAcpEventConverter', () => {
         input: { questions: [{ question: 'Pick one?', options: ['A', 'B'] }] },
         namespace: 'antigravity',
       },
-      { type: 'unknown-tool-use', toolId: 'future', rawName: 'future_tool', input: { value: 1 } },
+      { type: 'external-tool-use', toolId: 'future', name: 'future_tool', input: { value: 1 }, namespace: 'antigravity' },
+    ]);
+  });
+
+  it('maps alternate file, search, and fetch tools from other agy agents', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = [
+      toolCall('view', 'view_file', 'read', { AbsolutePath: '/work/a.ts', StartLine: 2 }),
+      toolCall('write', 'write_to_file', 'edit', { TargetFile: '/work/b.ts', CodeContent: 'b\n' }),
+      toolCall('replace', 'replace_file_content', 'edit', { TargetFile: '/work/a.ts', TargetContent: 'x', ReplacementContent: 'y' }),
+      toolCall('multi', 'multi_replace_file_content', 'edit', {
+        TargetFile: '/work/a.ts', ReplacementChunks: [{ TargetContent: 'p', ReplacementContent: 'q' }],
+      }),
+      toolCall('grep', 'grep_search', 'search', { Query: 'needle', SearchPath: '/work' }),
+      toolCall('glob', 'find_by_name', 'search', { Pattern: '*.ts', SearchDirectory: '/work' }),
+      toolCall('list', 'list_dir', 'read', { DirectoryPath: '/work' }),
+      toolCall('fetch', 'read_url_content', 'fetch', { Url: 'https://example.com' }),
+    ].flatMap((row) => converter.fromSessionUpdate(row, context));
+
+    expect(plain(rows)).toEqual([
+      { type: 'read-tool-use', toolId: 'view', filePath: '/work/a.ts', offset: 2, limit: undefined, endLine: undefined },
+      { type: 'write-tool-use', toolId: 'write', filePath: '/work/b.ts', content: 'b\n' },
+      { type: 'edit-tool-use', toolId: 'replace', filePath: '/work/a.ts', oldString: 'x', newString: 'y', changes: undefined },
+      { type: 'edit-tool-use', toolId: 'multi', filePath: '/work/a.ts', oldString: 'p', newString: 'q', changes: undefined },
+      { type: 'grep-tool-use', toolId: 'grep', pattern: 'needle', path: '/work' },
+      { type: 'glob-tool-use', toolId: 'glob', pattern: '*.ts', path: '/work' },
+      { type: 'list-tool-use', toolId: 'list', path: '/work' },
+      { type: 'web-fetch-tool-use', toolId: 'fetch', url: 'https://example.com', prompt: undefined },
+    ]);
+  });
+
+  it('reports a call without a tool name as unknown, keyed by its kind', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'anon', status: 'in_progress', kind: 'other', rawInput: { value: 1 },
+    }), context);
+    expect(plain(rows)).toEqual([{ type: 'unknown-tool-use', toolId: 'anon', rawName: 'other', input: { value: 1 } }]);
+  });
+
+  it('keeps the original tool name when a terminal update omits it', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', { CommandLine: 'echo x' }), context);
+    const output = 'Created At: 2026-01-01T00:00:00Z\nCompleted At: 2026-01-01T00:00:01Z\nCommand output:\nx\n';
+    const completed = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', kind: 'execute', rawOutput: { output },
+    }), context);
+    expect(plain(completed)).toEqual([
+      { type: 'tool-result', toolId: 'tool-1', content: { raw: 'Command output:\nx\n' }, isError: false },
     ]);
   });
 
@@ -157,6 +207,18 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
+  it('keeps text that precedes the executor error in the same chunk', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Partial answer.\n⚠ agent executor error: Error 429\n' },
+    }), context);
+
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Partial answer.' }]);
+    expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429');
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
@@ -169,7 +231,7 @@ describe('AntigravityAcpEventConverter', () => {
 describe('antigravityExecutorError', () => {
   it('matches only the complete marker chunk', () => {
     expect(antigravityExecutorError('agent executor error: quoted by the model')).toBeNull();
-    expect(antigravityExecutorError('Note: ⚠ agent executor error: inline')).toBeNull();
+    expect(antigravityExecutorError('Note: ⚠ agent executor error: not at a line start')).toBeNull();
     expect(antigravityExecutorError('\n⚠ agent executor error: Error 429\n')).toBe('Antigravity agent executor error: Error 429');
   });
 });

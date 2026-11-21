@@ -27,8 +27,10 @@ export function buildEnvFallback(
   return { ...process.env, ...request.envOverrides };
 }
 
-export function isAutoApproveMode(mode: PermissionMode): boolean {
-  return mode === 'acceptEdits' || mode === 'manualBypass' || mode === 'bypassPermissions';
+export const DEFAULT_AUTO_APPROVE_MODES: readonly PermissionMode[] = ['acceptEdits', 'manualBypass', 'bypassPermissions'];
+
+export function isAutoApproveMode(mode: PermissionMode, policy: AcpAgentPolicy): boolean {
+  return (policy.autoApprovePermissionModes ?? DEFAULT_AUTO_APPROVE_MODES).includes(mode);
 }
 
 export type AcpPermissionChoice = 'allow-once' | 'allow-always' | 'reject';
@@ -46,15 +48,16 @@ function optionIdFrom(option: Record<string, unknown>): string | undefined {
 }
 
 // Option IDs are agent-defined (Antigravity offers `allow` and `deny`), so the
-// ACP `kind` decides; the hyphenated IDs cover agents that omit it.
+// ACP `kind` decides; the hyphenated IDs cover agents that omit it. A one-time
+// approval never falls back to a persistent grant.
 const CHOICE_KINDS: Record<AcpPermissionChoice, readonly string[]> = {
-  'allow-once': ['allow_once', 'allow_always'],
+  'allow-once': ['allow_once'],
   'allow-always': ['allow_always', 'allow_once'],
   reject: ['reject_once', 'reject_always'],
 };
 
 const CHOICE_FALLBACK_IDS: Record<AcpPermissionChoice, readonly string[]> = {
-  'allow-once': ['allow-once', 'allow-always'],
+  'allow-once': ['allow-once'],
   'allow-always': ['allow-always', 'allow-once'],
   reject: ['reject-once', 'reject-always'],
 };

@@ -10,6 +10,7 @@ import {
 import type { AntigravityConfig } from '../../../config.ts';
 import { AntigravityAcpEventConverter } from '../antigravity-acp-event-converter.ts';
 import { createAntigravityAcpPolicy } from '../antigravity-acp-policy.ts';
+import { runAntigravitySingleQuery } from '../run-single-query.ts';
 
 const MODELS = {
   currentModelId: 'gemini-test-low',
@@ -40,6 +41,8 @@ class FakeAntigravityAgent {
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
   // Delays or drops the reply to `session/cancel`, as a slow or unresponsive agent would.
   cancelReply: 'immediate' | 'deferred' | 'ignored' = 'immediate';
+  // Whether `session/resume` reports the session's config options.
+  resumeReportsOptions = true;
 
   // Each spawn is a fresh process; later frames go to the newest one.
   process(): AcpProcess {
@@ -114,7 +117,7 @@ class FakeAntigravityAgent {
         if (!this.sessions.has(String(params.sessionId))) {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
         }
-        return reply({ models: MODELS, configOptions: [MODE_OPTION] });
+        return reply(this.resumeReportsOptions ? { models: MODELS, configOptions: [MODE_OPTION] } : { models: MODELS });
       case 'session/set_config_option':
         return reply({ configOptions: [{ ...MODE_OPTION, currentValue: params.value }] });
       case 'session/prompt':
@@ -246,6 +249,34 @@ describe('Antigravity ACP runtime', () => {
     await waitFor(() => runEnded(events).length === 1);
   });
 
+  it('leaves non-edit requests to the user in accept-edits, where agy approves edits itself', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1'));
+
+    await runtime.startSession(request({ permissionMode: 'acceptEdits' }));
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+
+    expect(agent.received.some((message) => message.id === 'permission-1')).toBe(false);
+    expect(agent.requests('session/set_config_option')[0]?.params).toMatchObject({ value: 'accept-edits' });
+    runtime.shutdown();
+  });
+
+  it('applies the mode after a resume that reports no config options', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+    const started = await runtime.startSession(request());
+    await waitFor(() => runEnded(events).length === 1);
+    runtime.releaseSession('chat-1', started.agentSessionId);
+    agent.resumeReportsOptions = false;
+
+    await runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
+
+    expect(agent.requests('session/set_config_option').map((message) => message.params)).toEqual([
+      { sessionId: started.agentSessionId, configId: 'mode', value: 'plan' },
+    ]);
+    runtime.shutdown();
+  });
+
   it('auto-approves with the allow option in bypass modes', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1'));
@@ -341,5 +372,28 @@ describe('Antigravity ACP runtime', () => {
     expect(agent.requests('session/resume')[0]?.params).toEqual({ sessionId: 'session-1', cwd: '/work', mcpServers: [] });
     expect(agent.requests('session/new')).toHaveLength(1);
     runtime.shutdown();
+  });
+});
+
+describe('Antigravity one-shot query', () => {
+  it('runs in plan mode and rejects every permission request', async () => {
+    const agent = new FakeAntigravityAgent();
+    agent.onPrompt((fake, sessionId) => {
+      fake.requestPermission(sessionId, 'tool-1');
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Title' } });
+      setTimeout(() => fake.endPrompt(), 20);
+    });
+
+    const result = await runAntigravitySingleQuery('Name this chat.', {
+      projectPath: '/work',
+      signal: new AbortController().signal,
+      createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+    }, CONFIG);
+
+    expect(result).toBe('Title');
+    expect(agent.requests('session/set_config_option')[0]?.params).toMatchObject({ configId: 'mode', value: 'plan' });
+    expect(agent.received.find((message) => message.id === 'permission-1')?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'deny' },
+    });
   });
 });

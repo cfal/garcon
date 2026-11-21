@@ -15,7 +15,10 @@ export const ANTIGRAVITY_AGENT_ID = 'antigravity';
 export type AntigravityMode = 'default' | 'accept-edits' | 'plan';
 
 // Bypass modes keep the CLI's `default` mode; the shared runtime answers its
-// permission requests instead.
+// permission requests instead. In `accept-edits` agy approves edits itself, so
+// the requests it still sends (commands, network) go to the user.
+export const ANTIGRAVITY_AUTO_APPROVE_MODES: readonly PermissionMode[] = ['manualBypass', 'bypassPermissions'];
+
 export function antigravityModeForPermissionMode(permissionMode: PermissionMode): AntigravityMode {
   if (permissionMode === 'plan') return 'plan';
   if (permissionMode === 'acceptEdits') return 'accept-edits';
@@ -61,17 +64,29 @@ export async function configureAntigravitySession(
     patch.models = { ...context.models, currentModelId: model };
   }
 
-  const mode = antigravityModeForPermissionMode(context.request.permissionMode);
-  const modeOption = context.configOptions?.find((option) => option.id === 'mode');
-  if (modeOption && modeOption.currentValue !== mode) {
-    const result = await context.client.setSessionConfigOption({
-      sessionId: context.sessionId,
-      configId: modeOption.id,
-      value: mode,
-    });
-    if (result.configOptions) patch.configOptions = result.configOptions;
-  }
+  const configOptions = await applyAntigravityMode(
+    context.client,
+    context.sessionId,
+    context.configOptions,
+    antigravityModeForPermissionMode(context.request.permissionMode),
+  );
+  if (configOptions) patch.configOptions = configOptions;
   return patch;
+}
+
+// Unknown options (a resume that returned none) still get the mode, since a
+// skipped mode would run the turn in whatever mode the session last had.
+export async function applyAntigravityMode(
+  client: Pick<AcpSessionConfigurationContext['client'], 'setSessionConfigOption'>,
+  sessionId: string,
+  configOptions: AcpSessionConfigurationContext['configOptions'],
+  mode: AntigravityMode,
+): Promise<AcpSessionConfigurationContext['configOptions'] | undefined> {
+  const modeOption = configOptions?.find((option) => option.id === 'mode');
+  if (configOptions && !modeOption) return undefined;
+  if (modeOption?.currentValue === mode) return undefined;
+  const result = await client.setSessionConfigOption({ sessionId, configId: 'mode', value: mode });
+  return result.configOptions;
 }
 
 export function createAntigravityNativePath(agentSessionId: string): string | null {
@@ -84,6 +99,7 @@ export function createAntigravityAcpPolicy(config: AntigravityConfig): AcpAgentP
     command: config.binary,
     args: ['acp'],
     abortStrategy: 'cancel',
+    autoApprovePermissionModes: ANTIGRAVITY_AUTO_APPROVE_MODES,
     authenticateMethodId: config.authMethod,
     clientCapabilities: {},
     newSessionModelConfig: false,

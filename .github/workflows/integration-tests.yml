@@ -69,7 +69,11 @@ jobs:
           key: antigravity-cli-${{ hashFiles('scripts/install-antigravity-cli.ts') }}
 
       - name: Install pinned Antigravity CLI
-        run: echo "ANTIGRAVITY_BIN=$(bun scripts/install-antigravity-cli.ts)" >> "$GITHUB_ENV"
+        run: |
+          # A failed install must fail the job rather than silently skip the scripted tier.
+          antigravity_bin="$(bun scripts/install-antigravity-cli.ts)"
+          test -x "$antigravity_bin"
+          echo "ANTIGRAVITY_BIN=$antigravity_bin" >> "$GITHUB_ENV"
 
       - name: Run server integration tests
         working-directory: integration-tests
