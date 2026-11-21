@@ -777,6 +777,13 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('rejects a message with neither text nor an image before spawning agy', async () => {
+    const { agent, runtime, request } = harness();
+
+    await expect(runtime.startSession(request({ command: '  ' }))).rejects.toThrow('Antigravity needs a message or an image to send.');
+    expect(agent.requests('initialize')).toEqual([]);
+  });
+
   it('rejects an unsupported attachment on start before spawning agy', async () => {
     const { agent, runtime, request } = harness();
 

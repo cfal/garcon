@@ -18,18 +18,15 @@ import {
   type AcpStartedSession,
   type AcpStartRequest,
 } from './runtime-types.js';
-import type { PermissionMode } from '@garcon/common/chat-modes';
 import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import { AcpCapabilityCache } from './capability-cache.js';
 import { AcpClient } from './client.js';
 import type {
   AcpJsonRpcId,
-  AcpSessionConfigOption,
-  AcpSessionModelState,
   AcpSessionRequestPermission,
   AcpSessionUpdateNotification,
 } from './protocol.js';
-import type { AcpAdvertisedCapabilities, ReconnectStrategy } from './reconnect-policy.js';
+import type { ReconnectStrategy } from './reconnect-policy.js';
 import { reconnectAcpSession, reconnectOrder } from './reconnect-policy.js';
 import { AcpRestoreRegistry } from './restore-registry.js';
 import { isJsonRpcId } from './protocol.js';
@@ -844,6 +841,9 @@ export class AcpAgentRuntime {
   }
 
   #emitFlushedMessages(turn: AcpTurnContext): ChatMessage[] {
+    // Retiring flushed the turn and released the converter's session; flushing
+    // again would recreate converter state for a session that is gone.
+    if (turn.sourceRetired) return [];
     const messages = this.#converter.endTurn?.(
       turn.session.id,
       this.#sessionUpdateContext(turn),

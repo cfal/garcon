@@ -29,6 +29,9 @@ export function antigravityPrompt(
 ): Array<{ type: string; [key: string]: unknown }> {
   // An image-only message sends no empty text part, which Gemini rejects.
   const text = request.command.trim();
+  if (!text && !request.images?.length) {
+    throw new AgentIntegrationError('PROVIDER_FAILURE', 'Antigravity needs a message or an image to send.', false);
+  }
   const prompt: Array<{ type: string; [key: string]: unknown }> = text ? [{ type: 'text', text }] : [];
   for (const attachment of request.images ?? []) {
     const parts = parseAttachmentDataUrl(attachment.data);

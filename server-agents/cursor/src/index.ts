@@ -1,6 +1,5 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import {
-  AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
   type AgentIntegration,

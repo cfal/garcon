@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { PERMISSION_MODE_VALUES } from '@garcon/common/chat-modes';
 import type { AgentAuthStatus } from '@garcon/common/agent-execution';
 import {
-  AgentIntegrationError,
   type AgentChatReference,
   type AgentHost,
   type AgentIntegration,
