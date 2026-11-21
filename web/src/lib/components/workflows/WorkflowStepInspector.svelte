@@ -10,6 +10,8 @@
 	import { workflowSignals } from '$lib/workflows/definition/workflow-step-options';
 	import { createRandomId } from '$lib/utils/random-id';
 	import * as m from '$lib/paraglide/messages.js';
+	import WorkflowChoicesEditor from './WorkflowChoicesEditor.svelte';
+	import WorkflowSignalsEditor from './WorkflowSignalsEditor.svelte';
 	import WorkflowStepSettings from './WorkflowStepSettings.svelte';
 
 	let {
@@ -317,7 +319,14 @@
 {:else}
 	<pre class="whitespace-pre-wrap wrap-anywhere bg-muted p-2 text-sm">{instruction}</pre>
 {/if}
-{#if step.kind === 'decision'}
+{#if editing && step.kind === 'decision'}
+	<WorkflowChoicesEditor choices={step.choices} onChange={(choices) => applyFields({ choices })} />
+{:else if editing && step.kind === 'agent'}
+	<WorkflowSignalsEditor
+		signals={step.signals ?? {}}
+		onChange={(signals) => applyFields({ signals })}
+	/>
+{:else if step.kind === 'decision'}
 	<div class="space-y-1">
 		<h3 class="text-xs font-medium text-muted-foreground">
 			{m.workflow_studio_decision_choices()}

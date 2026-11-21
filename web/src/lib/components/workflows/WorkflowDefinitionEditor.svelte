@@ -32,6 +32,7 @@
 	import WorkflowShareDialog from './WorkflowShareDialog.svelte';
 	import WorkflowSplitView from './WorkflowSplitView.svelte';
 	import WorkflowStepInspector from './WorkflowStepInspector.svelte';
+	import WorkflowInputsEditor from './WorkflowInputsEditor.svelte';
 	import WorkflowStepList from './WorkflowStepList.svelte';
 	import WorkflowStepPicker from './WorkflowStepPicker.svelte';
 	import { workflowStepKindLabel } from './workflow-labels';
@@ -78,6 +79,17 @@
 	const editable = $derived(Boolean(current && editing && !busy));
 	const canAdd = $derived(editable && steps.length < WORKFLOW_DEFINITION_LIMITS.steps);
 	let definitionName = $derived(current?.name ?? '');
+
+	function editInput(name: string, value: JsonValue | undefined): boolean {
+		if (!current || !editable) return false;
+		const existing = getWorkflowDefinitionFieldValue(draft.source, ['inputs']);
+		const next = { ...(isRecord(existing) ? existing : {}) };
+		if (value === undefined) delete next[name];
+		else next[name] = value;
+		return draft.edit(
+			workflowFieldEdits(['inputs'], existing, Object.keys(next).length ? next : undefined),
+		);
+	}
 
 	function select(id: string) {
 		selected = id;
@@ -409,27 +421,30 @@
 						</p>
 					{/await}
 				{:else}
-					{#if editable}
-						<form
-							class="flex flex-wrap items-end gap-2 border-b border-border p-3"
-							onsubmit={(event) => {
-								event.preventDefault();
-								if (editable && definitionName.trim())
-									draft.edit([{ kind: 'upsert', path: ['name'], value: definitionName.trim() }]);
-							}}
-						>
-							<label class="min-w-0 flex-1 space-y-1 text-sm">
-								<span>{m.workflow_studio_definition_name()}</span>
-								<input class="workflow-field" bind:value={definitionName} maxlength="256" />
-							</label>
-							<Button
-								type="submit"
-								variant="outline"
-								size="sm"
-								disabled={!definitionName.trim() || definitionName === current?.name}
-								>{m.workflow_studio_apply_name()}</Button
+					{#if editable && current}
+						<div class="space-y-2 border-b border-border px-3 pt-3">
+							<form
+								class="flex flex-wrap items-end gap-2"
+								onsubmit={(event) => {
+									event.preventDefault();
+									if (editable && definitionName.trim())
+										draft.edit([{ kind: 'upsert', path: ['name'], value: definitionName.trim() }]);
+								}}
 							>
-						</form>
+								<label class="min-w-0 flex-1 space-y-1 text-sm">
+									<span>{m.workflow_studio_definition_name()}</span>
+									<input class="workflow-field" bind:value={definitionName} maxlength="256" />
+								</label>
+								<Button
+									type="submit"
+									variant="outline"
+									size="sm"
+									disabled={!definitionName.trim() || definitionName === current.name}
+									>{m.workflow_studio_apply_name()}</Button
+								>
+							</form>
+							<WorkflowInputsEditor inputs={current.inputs} onChange={editInput} />
+						</div>
 					{/if}
 					<WorkflowStepList {steps} {edges} {selected} onSelect={select} />
 				{/if}

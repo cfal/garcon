@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/workflows';
+import { parseWorkflowDefinition } from '$shared/workflow-definition';
 import { workflowRevision, workflowRun } from '$lib/workflows/__tests__/workflow-fixtures';
 import NewWorkflowTestHost from './NewWorkflowTestHost.svelte';
 
@@ -141,4 +142,64 @@ describe('New Workflow', () => {
 			source: testRequest.source,
 		});
 	});
+
+	it('authors input defaults, choices, and single and keyed signals with form submission', async () => {
+		const { container } = render(NewWorkflowTestHost, { onRunStarted: vi.fn() });
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+		await fireEvent.click(screen.getByText('Launch input schema'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add input' }));
+		await fireEvent.input(screen.getByLabelText('Input name'), { target: { value: 'topic' } });
+		await fireEvent.change(screen.getByLabelText('Value type'), { target: { value: 'json' } });
+		await fireEvent.click(screen.getByLabelText('Supply a default'));
+		await fireEvent.input(screen.getByLabelText('Default value'), {
+			target: { value: '{"title":"Synthetic"}' },
+		});
+		await fireEvent.submit(screen.getByRole('button', { name: 'Apply input' }).closest('form')!);
+
+		await fireEvent.click(screen.getByRole('button', { name: /review Human decision/i }));
+		await fireEvent.click(screen.getByText('Choices', { selector: 'summary' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add choice' }));
+		await fireEvent.input(screen.getByLabelText('Choice ID'), { target: { value: 'defer' } });
+		await fireEvent.input(screen.getByLabelText('Choice label'), {
+			target: { value: 'Defer review' },
+		});
+		await fireEvent.submit(screen.getByRole('button', { name: 'Apply choice' }).closest('form')!);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add step' }));
+		const picker = screen.getByRole('dialog', { name: 'Add step' });
+		await fireEvent.click(within(picker).getByRole('button', { name: 'Agent' }));
+		await fireEvent.click(screen.getByText('Emitted signals', { selector: 'summary' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add signal' }));
+		await fireEvent.input(screen.getByLabelText('Signal name'), { target: { value: 'ready' } });
+		await fireEvent.submit(screen.getByRole('button', { name: 'Apply signal' }).closest('form')!);
+		await fireEvent.click(screen.getByRole('button', { name: 'Add signal' }));
+		await fireEvent.input(screen.getByLabelText('Signal name'), { target: { value: 'finding' } });
+		await fireEvent.change(screen.getByLabelText('Signal payload'), { target: { value: 'json' } });
+		await fireEvent.click(screen.getByLabelText('Repeat per key'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+		await fireEvent.input(screen.getByLabelText('Field name'), { target: { value: 'id' } });
+		await fireEvent.change(screen.getByLabelText('Repeat key'), { target: { value: 'id' } });
+		await fireEvent.submit(screen.getByRole('button', { name: 'Apply signal' }).closest('form')!);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'YAML source' }));
+		await waitFor(() => expect(container.querySelector('.cm-editor')).toBeTruthy(), {
+			timeout: 10_000,
+		});
+		const editor = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)!;
+		const parsed = parseWorkflowDefinition(editor.state.doc.toString());
+		expect(parsed.diagnostics).toEqual([]);
+		expect(parsed.definition).toMatchObject({
+			inputs: { topic: { type: 'json', default: { title: 'Synthetic' } } },
+			steps: [
+				{ id: 'review', choices: { defer: 'Defer review' } },
+				{
+					id: 'agent',
+					signals: {
+						ready: { payload: 'none', delivery: 'once' },
+						finding: { payload: 'json', delivery: 'many', key: 'id', fields: { id: 'string' } },
+					},
+				},
+			],
+		});
+	}, 20_000);
 });
