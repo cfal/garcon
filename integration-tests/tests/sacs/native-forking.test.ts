@@ -6,6 +6,7 @@ import {
   userContents,
 } from '../../support/chat-assertions.js';
 import { GarconApiError } from '../../support/garcon-client.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -162,6 +163,59 @@ for (const driverFactory of sacsScriptedDriverFactories) {
       }, activeDriver.fixtureOptions);
     }, SACS_TIMEOUT_MS);
   });
+}
+
+for (const factory of sacsScriptedDriverFactories) {
+  if (!factory.nativeSessions || factory.forking) continue;
+  test(`handoff point fork carries only the selected prefix into a fresh session (${factory.label})`, async () => {
+    const driver = await factory.start();
+    try {
+      await withIntegrationFixture(`${driver.id}-sacs-handoff-point`, async (fixture) => {
+        const source = await twoTurnChat(fixture, driver, 'HANDOFF');
+        const sourceBinding = await waitForPersistedNativeSession({
+          directories: fixture.dirs, agentId: driver.id, chatId: source.chatId,
+        });
+        const transcript = await fixture.client.getMessages(source.chatId);
+        const anchor = transcript.messages.find((entry) => entry.message.type === 'assistant-message');
+        if (!anchor) throw new Error('Source transcript has no assistant row.');
+
+        const chatId = fixture.newChatId();
+        const forked = await fixture.client.forkChat({
+          sourceChatId: source.chatId, chatId, transcriptViewId: transcript.transcriptViewId, upToOrdinal: anchor.ordinal,
+        });
+        expect(forked.chat.executorId ?? 'local').toBe(fixture.client.executorId);
+        expect(await readRegistryAgentSessionId(fixture, chatId)).toBeNull();
+        const fork = await fixture.client.getMessages(chatId);
+        expect(userContents(fork.messages)).toEqual([source.firstPrompt]);
+        expect(assistantContents(fork.messages)).toEqual([source.firstReply]);
+
+        const prompt = marker(driver.id, 'FORK_INPUT');
+        const reply = marker(driver.id, 'FORK_REPLY');
+        const cursor = driver.markRequests(fixture);
+        driver.scriptAssistant(fixture, reply);
+        const turn = await fixture.client.runChat(driver.runRequest(fixture, { chatId, command: prompt }));
+        expect((await fixture.client.waitForTurnTerminal(chatId, turn.turnId)).type).toBe('agent-run-finished');
+        const requests = driver.requestBodiesSince(fixture, cursor);
+        expect(requests).toHaveLength(1);
+        const context = driver.userTextsSince(fixture, cursor).join('\n');
+        expect(context).toContain(source.firstPrompt);
+        expect(context).toContain(source.firstReply);
+        expect(context).toContain(prompt);
+        const request = JSON.stringify(requests[0]);
+        expect(request).not.toContain(source.secondPrompt);
+        expect(request).not.toContain(source.secondReply);
+        const binding = await waitForPersistedNativeSession({ directories: fixture.dirs, agentId: driver.id, chatId });
+        expect(binding.agentSessionId).not.toBe(sourceBinding.agentSessionId);
+        expect(assistantContents((await fixture.client.getMessages(chatId)).messages))
+          .toEqual([source.firstReply, reply]);
+        expect(assistantContents((await fixture.client.getMessages(source.chatId)).messages))
+          .toEqual([source.firstReply, source.secondReply]);
+        driver.assertSettled(fixture);
+      }, driver.fixtureOptions);
+    } finally {
+      await driver.dispose();
+    }
+  }, SACS_TIMEOUT_MS);
 }
 
 interface TwoTurnChat {

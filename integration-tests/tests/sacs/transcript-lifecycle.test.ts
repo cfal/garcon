@@ -83,7 +83,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
             status: 'duplicate',
             turnId: first.turnId,
           });
-          expect(activeDriver.requestCountSince(fixture, requestCursor)).toBe(1);
+          expect(activeDriver.requestBodiesSince(fixture, requestCursor)).toHaveLength(1);
           expect(activeDriver.userTextsSince(fixture, requestCursor).join('\n')).toContain(prompt);
           const whileHeld = await fixture.client.getMessages(chatId);
           expect(userContents(whileHeld.messages)).toEqual([prompt]);

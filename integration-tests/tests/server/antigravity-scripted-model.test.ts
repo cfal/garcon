@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { AgentAuthStatus } from '../../../common/agent-execution.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
+import { withTimeout } from '../../support/deferred.js';
 import {
+  FAKE_GEMINI_API_KEY,
   geminiFunctionCall,
   geminiText,
   geminiThought,
@@ -61,10 +65,31 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(antigravity.models.find((model) => model.value === ANTIGRAVITY_TEST_MODEL)?.label)
         .toBe('Gemini 3.1 Pro (Low)');
       expect(antigravity.authLoginSupported).toBe(true);
+      const auth = await fixture.client.get<Record<string, AgentAuthStatus>>(
+        `/api/v1/agents/auth?agent=antigravity&executorId=${encodeURIComponent(fixture.client.executorId)}`,
+      );
+      expect(auth.antigravity).toMatchObject({
+        authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment',
+      });
+      if (fixture.client.executorId !== 'local') {
+        const local = await fixture.client.get<Record<string, AgentAuthStatus>>(
+          '/api/v1/agents/auth?agent=antigravity&executorId=local',
+        );
+        expect(local.antigravity).toMatchObject({ authenticated: false, source: 'none' });
+      }
       // agy honors only AGY_CLI_DISABLE_AUTO_UPDATE=true; any other value lets
       // `agy models` start the updater, which replaced the pinned binary.
       expect(await antigravityUpdaterSpawns(fixture.executionDirs)).toBe(0);
-    }, withScriptedAntigravity());
+      requireEnvironment().model.assertSettled();
+      expect(antigravity.defaultModel).toBe('default');
+      expect(antigravity.models).toContainEqual(expect.objectContaining({ value: 'default', label: 'Default' }));
+    }, {
+      ...withScriptedAntigravity(),
+      serverEnvironment: {
+        ...requireEnvironment().serverEnvironment, GARCON_ANTIGRAVITY_AUTH_METHOD: 'gemini-api-key', GEMINI_API_KEY: '',
+      },
+      executorEnvironment: { GEMINI_API_KEY: FAKE_GEMINI_API_KEY },
+    });
   }, TURN_TIMEOUT_MS);
 
   test('runs an approved command and resumes the same session with another model', async () => {
@@ -138,10 +163,64 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       const transcript = (await fixture.client.getMessages(chatId)).messages;
       expect(userContents(transcript)).toEqual(['run the scripted command', secondPrompt]);
       expect(assistantContents(transcript)).toEqual([firstReply, secondReply]);
-      // agy reports the switch to the model as a settings change on the next request.
-      expect(testEnvironment.model.requests().at(-1)?.lastUserText).toContain('Gemini 3.1 Pro (High)');
+      const requests = testEnvironment.model.requests();
+      // agy 1.5.13 sends the same Gemini model with different thinking budgets for Low and High.
+      expect(requests.map((request) => request.body.generationConfig)).toMatchObject(
+        [1024, 1024, -1].map((thinkingBudget) => ({ thinkingConfig: { thinkingBudget } })),
+      );
       expect(await antigravityUpdaterSpawns(fixture.executionDirs)).toBe(0);
       testEnvironment.model.assertSettled();
+    }, withScriptedAntigravity());
+  }, TURN_TIMEOUT_MS);
+
+  test('delivers a queued image to agy on the next turn', async () => {
+    const { model } = requireEnvironment();
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOod9ACAAIrAOpAC706AAAAAElFTkSuQmCC';
+    const firstPrompt = marker('FIRST_INPUT');
+    const queuedPrompt = marker('IMAGE_INPUT');
+    const held = model.scriptHeldTurn([geminiText('First reply')]);
+    model.scriptTurn([geminiText('Image reply')]);
+
+    await withIntegrationFixture('antigravity-scripted-queued-image', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const first = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: firstPrompt, model: 'default',
+      }));
+      const initial = await withTimeout(held.requested, LIVE_TURN_TIMEOUT_MS, () => 'agy did not dispatch the Default turn');
+      // Native Default on 1.5.13 is Pro Low, not the first entry in `agy models`.
+      expect(initial.model).toBe('gemini-3.1-pro-preview');
+      expect(initial.body.generationConfig).toMatchObject({ thinkingConfig: { thinkingBudget: 1024 } });
+      const cursor = fixture.client.markEvents();
+      const queued = await fixture.client.enqueue({
+        chatId, clientRequestId: crypto.randomUUID(), content: queuedPrompt,
+        images: [{ name: 'pixel.png', mimeType: 'image/png', data: `data:image/png;base64,${png}` }],
+      });
+      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([queuedPrompt]);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([firstPrompt]);
+      expect(model.requests()).toHaveLength(1);
+
+      held.release();
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, first.turnId, { afterIndex: cursor });
+      expect(terminal.type).toBe('agent-run-finished');
+      const successor = await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(terminal) + 1,
+      });
+      expect(successor.type).toBe('agent-run-finished');
+      expect(successor.turnId).not.toBe(first.turnId);
+      const requests = model.requests();
+      expect(requests).toHaveLength(2);
+      expect(requests[1]?.userTexts.join('\n')).toContain(queuedPrompt);
+      expect(requests[1]?.body.contents).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          role: 'user',
+          parts: expect.arrayContaining([expect.objectContaining({ inlineData: { mimeType: 'image/png', data: png } })]),
+        }),
+      ]));
+      const { messages } = await fixture.client.getMessages(chatId);
+      expect(userContents(messages)).toEqual([firstPrompt, queuedPrompt]);
+      expect(assistantContents(messages)).toEqual(['First reply', 'Image reply']);
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+      model.assertSettled();
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
@@ -236,14 +315,11 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
-  // The held response is released only after the assertions: whether agy aborts
-  // the in-flight stream on cancel or the runtime replaces a process that does
-  // not settle, the stopped turn must not deliver it.
   test('stops a running turn and continues the session', async () => {
     const testEnvironment = requireEnvironment();
     const held = testEnvironment.model.scriptHeldTurn([geminiText('never delivered')]);
     const reply = marker('AFTER_STOP');
-    testEnvironment.model.scriptTurn([geminiText(reply)]);
+    const successor = testEnvironment.model.scriptHeldTurn([geminiText(reply)]);
 
     await withIntegrationFixture('antigravity-scripted-stop', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -251,7 +327,14 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       await fixture.client.startChat(scriptedAntigravityStartRequest({
         chatId, projectPath: fixture.executionDirs.project, command: 'start a long turn',
       }));
-      await held.requested;
+      const stoppedRequest = await withTimeout(
+        held.requested, LIVE_TURN_TIMEOUT_MS, () => 'agy did not dispatch the interruptible turn',
+      );
+      expect(stoppedRequest.signal.aborted).toBe(false);
+      const aborted = once(stoppedRequest.signal, 'abort');
+      const launches = join(fixture.executionDirs.home, 'acp-launches');
+      const firstLaunch = await readFile(launches, 'utf8');
+      expect(firstLaunch).toMatch(/^\d+\n$/);
       const sessionId = await antigravityAgentSessionId(fixture, chatId);
 
       const stopCursor = fixture.client.markEvents();
@@ -261,15 +344,33 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
 
       const nextCursor = fixture.client.markEvents();
       const next = await fixture.client.runChat(scriptedAntigravityRunRequest({ chatId, command: 'continue after stop' }));
+      await withTimeout(successor.requested, LIVE_TURN_TIMEOUT_MS, () => 'agy did not dispatch the successor turn');
+      await withTimeout(aborted, LIVE_TURN_TIMEOUT_MS, () => 'agy did not abort the stopped model request');
+      expect(await readFile(launches, 'utf8')).toBe(firstLaunch);
+      // Offers the stopped reply while the successor is still active.
+      held.release();
+      successor.release();
       await waitForVisibleResponse({ fixture, chatId, turnId: next.turnId, marker: reply, afterIndex: nextCursor });
       expect(await antigravityAgentSessionId(fixture, chatId)).toBe(sessionId);
       expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([reply]);
       expect(fixture.client.eventsSince(cursor).some((event) => event.type === 'chat-messages'
         && event.messages.some((entry) => entry.message.type === 'assistant-message'
           && entry.message.content.includes('never delivered')))).toBe(false);
-      held.release();
       testEnvironment.model.assertSettled();
-    }, withScriptedAntigravity());
+    }, {
+      serverEnvironment: { ...testEnvironment.serverEnvironment, SCRIPTED_AGY: ANTIGRAVITY_BINARY },
+      resolveServerEnvironment: (dirs) => ({ GARCON_ANTIGRAVITY_BINARY: join(dirs.home, 'record-agy') }),
+      async prepareWorkspace(dirs) {
+        await testEnvironment.prepareWorkspace(dirs);
+        // Records launches without interposing on real ACP traffic.
+        await writeFile(join(dirs.home, 'record-agy'), [
+          '#!/bin/sh',
+          'if [ "$1" = acp ]; then echo "$$" >> "$HOME/acp-launches"; fi',
+          'exec "$SCRIPTED_AGY" "$@"',
+          '',
+        ].join('\n'), { mode: 0o700 });
+      },
+    });
   }, TURN_TIMEOUT_MS);
 
   test('fails the turn when the model API rejects the request', async () => {
@@ -316,6 +417,11 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       }));
       await waitForVisibleResponse({ fixture, chatId, turnId: first.turnId, marker: firstReply, afterIndex: firstCursor });
       const sessionId = await antigravityAgentSessionId(fixture, chatId);
+      const nativeDb = join('.gemini', 'antigravity-cli', 'conversations', `${sessionId}.db`);
+      expect(await Bun.file(join(fixture.executionDirs.home, nativeDb)).exists()).toBe(true);
+      if (fixture.executionDirs.home !== fixture.dirs.home) {
+        expect(await Bun.file(join(fixture.dirs.home, nativeDb)).exists()).toBe(false);
+      }
 
       await fixture.restartGarcon();
 

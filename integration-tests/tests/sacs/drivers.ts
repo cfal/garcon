@@ -464,7 +464,7 @@ const claudeDriver: SacsDriverFactory = {
       ),
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([claudeText(content)]),
       markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
+      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
       userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
         .flatMap((request) => request.userTexts),
       assertSettled: () => environment.model.assertSettled(),
@@ -503,7 +503,7 @@ const codexDriver: SacsDriverFactory = {
         codexAssistantMessage(content),
       ]),
       markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
+      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
       userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
         .flatMap((request) => request.userTexts),
       assertSettled: () => environment.model.assertSettled(),
@@ -547,7 +547,7 @@ const piDriver: SacsDriverFactory = {
         chatCompletionsText(content),
       ]),
       markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
+      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
       userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
         .flatMap((request) => request.userTexts),
       assertSettled: () => environment.model.assertSettled(),
@@ -583,7 +583,7 @@ const antigravityDriver: SacsDriverFactory = {
       holdInterruptibleAssistant: (_fixture, content) => heldTurn(environment.model.scriptHeldTurn([geminiText(content)])),
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([geminiText(content)]),
       markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
+      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
       userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
         .flatMap((request) => request.userTexts),
       assertSettled: () => environment.model.assertSettled(),
@@ -624,7 +624,7 @@ const openCodeDriver: SacsDriverFactory = {
         chatCompletionsText(content),
       ]),
       markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
+      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
       userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
         .flatMap((request) => request.userTexts),
       assertSettled: () => environment.model.assertSettled(),
@@ -636,6 +636,7 @@ const openCodeDriver: SacsDriverFactory = {
 
 interface DirectRequest {
   readonly id: number;
+  readonly rawBody: unknown;
   readonly lastUserText: string;
 }
 
@@ -700,8 +701,8 @@ function directDriver(
           held.releaseText(content);
         },
         markRequests: (fixture) => selectProvider(fixture).requests().at(-1)?.id ?? 0,
-        requestCountSince: (fixture, cursor) => selectProvider(fixture).requests()
-          .filter((request) => request.id > cursor).length,
+        requestBodiesSince: (fixture, cursor) => selectProvider(fixture).requests()
+          .filter((request) => request.id > cursor).map((request) => request.rawBody),
         userTextsSince: (fixture, cursor) => selectProvider(fixture).requests()
           .filter((request) => request.id > cursor)
           .map((request) => request.lastUserText),
