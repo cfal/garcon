@@ -91,6 +91,16 @@ describe('getAntigravityAuthStatus', () => {
     await expect(pending).rejects.toThrow('caller left');
   });
 
+  it('keeps the last probed status during a sign-in and ignores it for the API-key method', async () => {
+    const signedIn = { authenticated: true, canReauth: true, label: 'Google', source: 'cli' as const };
+    expect(await getAntigravityAuthStatus(config(), {
+      runModels: () => { throw new Error('must not run'); }, signInRunning: true, lastProbed: signedIn,
+    })).toEqual(signedIn);
+    expect(await getAntigravityAuthStatus(config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }), {
+      runModels: () => { throw new Error('must not run'); }, signInRunning: true,
+    })).toMatchObject({ authenticated: true, source: 'environment' });
+  });
+
   it('does not probe the CLI while an in-app sign-in is running', async () => {
     const status = await getAntigravityAuthStatus(config(), {
       runModels: () => { throw new Error('must not run'); },

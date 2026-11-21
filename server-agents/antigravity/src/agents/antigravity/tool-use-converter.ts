@@ -99,10 +99,11 @@ export function convertAntigravityToolUse(
       );
     }
     case 'multi_replace_file_content': {
-      const path = stringField(input, 'TargetFile', 'Path', 'path', 'file_path');
+      const path = stringField(input, 'TargetFile', 'target_file', 'Path', 'path', 'file_path');
       if (path === undefined) break;
       // Each chunk replaces one region; the regions render as one combined edit.
-      const chunks = Array.isArray(input.ReplacementChunks) ? input.ReplacementChunks.map(asObject) : [];
+      const rawChunks = field(input, 'ReplacementChunks', 'replacement_chunks');
+      const chunks = Array.isArray(rawChunks) ? rawChunks.map(asObject) : [];
       const join = (...names: string[]) => {
         const parts = chunks.map((chunk) => stringField(chunk, ...names));
         return parts.every((part) => part !== undefined) && parts.length > 0 ? parts.join('\n\n') : undefined;

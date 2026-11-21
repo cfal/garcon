@@ -23,17 +23,16 @@ export interface AntigravityAuthStatusOptions {
   readonly runModels?: (config: AntigravityConfig) => Promise<AntigravityCliResult>;
   readonly signal?: AbortSignal;
   // Settings polls status while an in-app sign-in waits for its code. The CLI
-  // cannot become signed in until that sign-in exits, so no probe runs.
+  // cannot change state until that sign-in exits, so the last probed status
+  // stands in for the probe meanwhile.
   readonly signInRunning?: boolean;
+  readonly lastProbed?: AgentAuthStatus | null;
 }
 
 export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
-  { runModels = runAntigravityModels, signal, signInRunning = false }: AntigravityAuthStatusOptions = {},
+  { runModels = runAntigravityModels, signal, signInRunning = false, lastProbed = null }: AntigravityAuthStatusOptions = {},
 ): Promise<AgentAuthStatus> {
-  if (signInRunning) {
-    return { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
-  }
   try {
     // Sessions authenticate with the configured method only, so status must not
     // fall back to another credential the CLI happens to hold.
@@ -41,6 +40,9 @@ export async function getAntigravityAuthStatus(
       return config.hasApiKey()
         ? { authenticated: true, canReauth: true, label: 'GEMINI_API_KEY', source: 'environment' }
         : { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
+    }
+    if (signInRunning) {
+      return lastProbed ?? { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
     }
     const result = await abortable(runModels(config), signal);
     if (result.exitCode === 0) {

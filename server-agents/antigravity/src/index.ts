@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PERMISSION_MODE_VALUES } from '@garcon/common/chat-modes';
+import type { AgentAuthStatus } from '@garcon/common/agent-execution';
 import {
   AgentIntegrationError,
   type AgentChatReference,
@@ -146,9 +147,13 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
       discover: () => getAntigravityModels(config, logger),
     });
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    let lastProbed: AgentAuthStatus | null = null;
     this.auth = {
       async status(signal) {
-        return getAntigravityAuthStatus(config, { signal, signInRunning: login.status().state === 'running' });
+        const signInRunning = login.status().state === 'running';
+        const status = await getAntigravityAuthStatus(config, { signal, signInRunning, lastProbed });
+        if (!signInRunning) lastProbed = status;
+        return status;
       },
       launchLogin: () => login.launch(),
       completeLogin: (sessionId, code) => login.complete(sessionId, code),

@@ -712,6 +712,32 @@ describe('Antigravity ACP runtime', () => {
 });
 
 describe('Antigravity one-shot query', () => {
+  it('bounds the one-shot prompt by the query timeout', async () => {
+    const agent = new FakeAntigravityAgent();
+    agent.onPrompt(() => {});
+    await expect(runAntigravitySingleQuery('Name this chat.', {
+      projectPath: '/work',
+      signal: new AbortController().signal,
+      createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+      timeoutMs: 50,
+    }, CONFIG)).rejects.toThrow();
+  });
+
+  it('treats a marker followed by thoughts or tool calls as ordinary text', async () => {
+    const agent = new FakeAntigravityAgent();
+    agent.onPrompt((fake, sessionId) => {
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: quoted\n' } });
+      fake.update(sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking' } });
+      setTimeout(() => fake.endPrompt(), 20);
+    });
+    const result = await runAntigravitySingleQuery('Name this chat.', {
+      projectPath: '/work',
+      signal: new AbortController().signal,
+      createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
+    }, CONFIG);
+    expect(result).toBe('⚠ agent executor error: quoted');
+  });
+
   it('fails only when the executor error is the final output, keeping earlier text', async () => {
     const run = async (chunks: readonly string[]) => {
       const agent = new FakeAntigravityAgent();

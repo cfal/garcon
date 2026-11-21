@@ -22,6 +22,8 @@ export interface AcpSingleQueryOptions {
   readonly splitFailure?: (chunk: string) => { readonly text: string; readonly failure: string | null };
 }
 
+const DEFAULT_SINGLE_QUERY_PROMPT_TIMEOUT_MS = 120_000;
+
 // Runs one prompt in a disposable ACP session that denies every permission,
 // and returns the agent's concatenated message text.
 export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise<string> {
@@ -55,9 +57,13 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     if (message.method !== 'session/update') return;
     const update = asObject(asObject(message.params).update);
     const updateType = asString(update.sessionUpdate);
+    // As in a chat turn, any further message, thought, or new tool call means a
+    // marker chunk was ordinary text.
+    if (pendingFailure && ['agent_message_chunk', 'agent_message', 'agent_thought_chunk', 'tool_call'].includes(updateType ?? '')) {
+      assistantChunks.push(pendingFailure.text);
+      pendingFailure = null;
+    }
     if (updateType !== 'agent_message_chunk' && updateType !== 'agent_message') return;
-    if (pendingFailure) assistantChunks.push(pendingFailure.text);
-    pendingFailure = null;
     const chunk = acpContentText(update.content);
     const { text, failure } = options.splitFailure?.(chunk) ?? { text: chunk, failure: null };
     assistantChunks.push(text);
@@ -68,10 +74,12 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     await client.connect(options.spawn);
     const created = await client.newSession({ cwd: options.spawn.cwd, mcpServers: [] });
     await options.configure?.(client, created);
+    // Chat prompts have no transport deadline, but a one-shot query keeps one
+    // even when the caller sets no timeout.
     await client.promptSession({
       sessionId: created.sessionId,
       prompt: [{ type: 'text', text: options.prompt.trim() }],
-    });
+    }, undefined, options.requestTimeoutMs ?? DEFAULT_SINGLE_QUERY_PROMPT_TIMEOUT_MS);
     if (pendingFailure) throw new AgentIntegrationError('PROVIDER_FAILURE', pendingFailure.failure, false);
     return assistantChunks.join('').trim();
   } finally {

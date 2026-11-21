@@ -78,10 +78,10 @@ export class AcpClient {
     sessionId: string;
     prompt: Array<{ type: string; text?: string; [key: string]: unknown }>;
     config?: Record<string, unknown>;
-  }, onSent?: () => void): Promise<AcpSessionPromptResult> {
-    // A prompt lasts as long as the agent's turn, so it has no transport
-    // deadline; Stop, process exit, and caller timeouts end it instead.
-    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params, onSent, 0);
+  }, onSent?: () => void, timeoutMs = 0): Promise<AcpSessionPromptResult> {
+    // A prompt lasts as long as the agent's turn, so by default it has no
+    // transport deadline; Stop, process exit, and caller timeouts end it.
+    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params, onSent, timeoutMs);
   }
 
   async setSessionConfigOption(params: {

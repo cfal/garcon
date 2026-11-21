@@ -327,6 +327,27 @@ describe('AntigravityAcpEventConverter', () => {
     }]);
   });
 
+  it('names a permission request from an earlier frame of the same call', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', name: 'run_command', kind: 'execute', status: 'pending', rawInput: {},
+    }), context);
+    const requested = converter.permissionToolUse({ toolCallId: 'tool-1', kind: 'execute', rawInput: { CommandLine: 'echo named' } }, context);
+    expect(requested).toMatchObject({ type: 'bash-tool-use', command: 'echo named' });
+  });
+
+  it('reads snake_case multi-region edits from older agy builds', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = converter.fromSessionUpdate(toolCall('multi', 'multi_replace_file_content', 'edit', {
+      target_file: '/work/a.ts', replacement_chunks: [{ target_content: 'old', replacement_content: 'new' }],
+    }), context);
+    expect(plain(rows)).toEqual([{
+      type: 'edit-tool-use', toolId: 'multi', filePath: '/work/a.ts', oldString: 'old', newString: 'new', changes: undefined,
+    }]);
+  });
+
   it('drops state for released sessions', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

@@ -82,7 +82,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     context: AcpSessionUpdateContext,
   ): ToolUseChatMessage | null {
     const call = antigravityToolCall(toolCall);
-    return call ? convertAntigravityToolUse(context.timestamp, call) : null;
+    if (!call) return null;
+    // The request may omit the name an earlier frame of the same call carried.
+    const name = call.name ?? this.#sessions.get(context.sessionId)?.toolNames.get(call.toolCallId) ?? null;
+    return convertAntigravityToolUse(context.timestamp, { ...call, name });
   }
 
   fromSessionUpdate(
