@@ -47,11 +47,13 @@ export function resolveAuthMethod(
   return hasApiKey ? 'gemini-api-key' : 'oauth-personal';
 }
 
-function usesApiKey(config: Pick<AntigravityConfig, 'authMethod'>): boolean {
+// The configured method, or null when the setting is invalid; callers that
+// only ask whether a method applies treat an invalid setting as none.
+export function authMethodOrNull(config: Pick<AntigravityConfig, 'authMethod'>): AntigravityAuthMethod | null {
   try {
-    return config.authMethod() === 'gemini-api-key';
+    return config.authMethod();
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -69,6 +71,6 @@ export function antigravityChildEnvironment(
   // Only the API-key method sees a key, so neither sessions nor the status probe
   // can succeed on a credential other than the configured one.
   const { GEMINI_API_KEY: _ambient, ...env } = process.env;
-  const apiKey = usesApiKey(config) ? config.apiKey() : null;
+  const apiKey = authMethodOrNull(config) === 'gemini-api-key' ? config.apiKey() : null;
   return { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: '1', ...(apiKey ? { GEMINI_API_KEY: apiKey } : {}), ...overrides };
 }

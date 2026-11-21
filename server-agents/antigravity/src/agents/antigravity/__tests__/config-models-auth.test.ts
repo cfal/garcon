@@ -114,7 +114,7 @@ describe('getAntigravityAuthStatus', () => {
     const ok = async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 });
     const mustNotRun = () => { throw new Error('must not run'); };
     expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
-      runModels: mustNotRun, authenticate: async () => {},
+      runModels: mustNotRun, authenticate: async () => {}, headlessAuthenticate: true,
     })).toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
     expect(await getAntigravityAuthStatus(config(), { runModels: ok, authenticate: mustNotRun }))
       .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
@@ -126,6 +126,7 @@ describe('getAntigravityAuthStatus', () => {
     const status = await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
       runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }),
       authenticate: async () => { throw new Error('GOOGLE_CLOUD_PROJECT must be set for Agent Platform authentication.'); },
+      headlessAuthenticate: true,
     });
     expect(status).toMatchObject({
       authenticated: false,
@@ -134,11 +135,21 @@ describe('getAntigravityAuthStatus', () => {
     });
   });
 
+  it('checks an enterprise method with agy models where authenticate could open a browser', async () => {
+    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
+      headlessAuthenticate: false,
+      runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }),
+      authenticate: () => { throw new Error('must not run'); },
+    });
+    expect(status).toEqual({ authenticated: true, canReauth: false, label: 'oauth-business', source: 'cli' });
+  });
+
   it('stops waiting on a shared enterprise probe when the status check is aborted', async () => {
     const controller = new AbortController();
     const pending = getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
       signal: controller.signal,
       authenticate: () => new Promise(() => {}),
+      headlessAuthenticate: true,
     });
     controller.abort(new Error('stopped'));
     await expect(pending).rejects.toThrow('stopped');

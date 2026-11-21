@@ -27,9 +27,9 @@ export function antigravityModeForPermissionMode(permissionMode: PermissionMode)
 export function antigravityPrompt(
   request: AcpStartRequest | AcpResumeRequest,
 ): Array<{ type: string; [key: string]: unknown }> {
-  const prompt: Array<{ type: string; [key: string]: unknown }> = [
-    { type: 'text', text: request.command.trim() },
-  ];
+  // An image-only message sends no empty text part, which Gemini rejects.
+  const text = request.command.trim();
+  const prompt: Array<{ type: string; [key: string]: unknown }> = text ? [{ type: 'text', text }] : [];
   for (const attachment of request.images ?? []) {
     const parts = parseAttachmentDataUrl(attachment.data);
     const mimeType = parts?.mimeType ?? attachment.mimeType;

@@ -3,7 +3,7 @@ import type { AgentAuthStatus } from '@garcon/common/agent-execution';
 import { AcpClient } from '@garcon/server-agent-common/acp/client';
 import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import type { CliLoginCommand } from '@garcon/server-agent-common/auth/cli-login-controller';
-import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
+import { antigravityChildEnvironment, authMethodOrNull, type AntigravityConfig } from '../../config.js';
 import {
   antigravityCliFailure,
   runAntigravityModels,
@@ -51,6 +51,9 @@ async function authenticateOnce(binary: string, method: string, config: Antigrav
 export interface AntigravityAuthStatusOptions {
   readonly runModels?: (config: AntigravityConfig) => Promise<AntigravityCliResult>;
   readonly authenticate?: (config: AntigravityConfig) => Promise<void>;
+  // Dropping the display keeps agy from opening a browser only on Linux; on
+  // macOS it would open one on every status check of a signed-out OAuth method.
+  readonly headlessAuthenticate?: boolean;
   readonly signal?: AbortSignal;
   // Settings polls status while an in-app sign-in waits for its code. The CLI
   // cannot change state until that sign-in exits, so the last probed status
@@ -64,6 +67,7 @@ export async function getAntigravityAuthStatus(
   {
     runModels = runAntigravityModels,
     authenticate = probeAntigravityAuthentication,
+    headlessAuthenticate = process.platform === 'linux',
     signal,
     signInRunning = false,
     lastProbed = null,
@@ -83,19 +87,21 @@ export async function getAntigravityAuthStatus(
     }
     // In-app sign-in (`agy acp --login`) stores a personal Google login, which
     // `agy models` proves usable. `agy models` accepts any credential the CLI
-    // holds, so an enterprise method instead asks agy to authenticate with it.
+    // holds, so an enterprise method instead asks agy to authenticate with it
+    // where that cannot open a browser, and falls back to `agy models` elsewhere.
     const method = config.authMethod();
-    if (method !== 'oauth-personal') {
+    const canReauth = method === 'oauth-personal';
+    if (!canReauth && headlessAuthenticate) {
       await abortable(authenticate(config), signal);
       return { authenticated: true, canReauth: false, label: method, source: 'cli' };
     }
     const result = await abortable(runModels(config), signal);
     if (result.exitCode === 0) {
-      return { authenticated: true, canReauth: true, label: 'Google', source: 'cli' };
+      return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
     }
     return {
       authenticated: false,
-      canReauth: true,
+      canReauth,
       label: '',
       source: 'none',
       detail: antigravityCliFailure(result),
@@ -106,19 +112,11 @@ export async function getAntigravityAuthStatus(
       authenticated: false,
       // A failed probe or invalid setting is not fixed by a personal sign-in
       // unless that is the configured method.
-      canReauth: offersPersonalSignIn(config),
+      canReauth: authMethodOrNull(config) === 'oauth-personal',
       label: '',
       source: 'none',
       detail: error instanceof Error ? error.message : String(error),
     };
-  }
-}
-
-function offersPersonalSignIn(config: AntigravityConfig): boolean {
-  try {
-    return config.authMethod() === 'oauth-personal';
-  } catch {
-    return false;
   }
 }
 

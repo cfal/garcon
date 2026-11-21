@@ -88,11 +88,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const call = antigravityToolCall(toolCall);
     if (!call) return null;
     const session = this.#sessionFor(context.sessionId);
-    this.#rememberCall(session, call);
-    // The request may omit the name or arguments an earlier frame of the call carried.
-    const name = call.name ?? session.toolNames.get(call.toolCallId) ?? null;
-    const input = Object.keys(call.input).length > 0 ? call.input : session.toolInputs.get(call.toolCallId) ?? {};
-    return convertAntigravityToolUse(context.timestamp, { ...call, name, input });
+    return convertAntigravityToolUse(context.timestamp, this.#resolvedCall(session, call));
   }
 
   fromSessionUpdate(
@@ -157,6 +153,17 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   // A call's row waits for its arguments when the first frame carries none, so a
   // later frame can still give it its shared tool type; a terminal frame emits
   // it regardless.
+  // Records the frame, then fills the name and arguments it omits from earlier
+  // frames of the same call.
+  #resolvedCall(session: SessionState, call: AntigravityToolCall): AntigravityToolCall {
+    this.#rememberCall(session, call);
+    return {
+      ...call,
+      name: call.name ?? session.toolNames.get(call.toolCallId) ?? null,
+      input: Object.keys(call.input).length > 0 ? call.input : session.toolInputs.get(call.toolCallId) ?? {},
+    };
+  }
+
   #toolCall(
     session: SessionState,
     update: Record<string, unknown>,
@@ -165,12 +172,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   ): ChatMessage[] {
     const parsed = antigravityToolCall(update);
     if (!parsed) return [];
-    this.#rememberCall(session, parsed);
-    const call = {
-      ...parsed,
-      name: parsed.name ?? session.toolNames.get(parsed.toolCallId) ?? null,
-      input: Object.keys(parsed.input).length > 0 ? parsed.input : session.toolInputs.get(parsed.toolCallId) ?? {},
-    };
+    const call = this.#resolvedCall(session, parsed);
     // A progress frame for a published call publishes nothing, so streamed text
     // around it stays one message. Text before any other frame is flushed first,
     // so it stays ahead of the tool row, a waiting row, and the call's result.

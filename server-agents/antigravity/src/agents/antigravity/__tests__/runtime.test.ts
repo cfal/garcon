@@ -255,6 +255,21 @@ describe('Antigravity ACP runtime', () => {
     }]);
   });
 
+  it('sends an image-only message without an empty text part', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake) => fake.endPrompt());
+
+    await runtime.startSession(request({
+      command: '  ',
+      images: [{ kind: 'image', name: 'dot.png', mimeType: 'image/png', data: 'data:image/png;base64,AAAA' }],
+    }));
+    await waitFor(() => runEnded(events).length === 1);
+
+    expect((agent.requests('session/prompt')[0]?.params as { prompt: unknown }).prompt).toEqual([
+      { type: 'image', mimeType: 'image/png', data: 'AAAA' },
+    ]);
+  });
+
   it('skips a model call that would not change the session but always sets the mode', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());
