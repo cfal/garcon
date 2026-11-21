@@ -11,7 +11,7 @@ import {
 	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
-import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
+import { getGitWorktrees, gitCreateWorktree, type GitWorktreeCreation } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
@@ -626,7 +626,7 @@ export class NewChatFormState {
 		this.worktreeModalOpen = false;
 	}
 
-	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
+	async createWorktree(creation: GitWorktreeCreation): Promise<boolean> {
 		if (!this.gitAvailable || this.isCreatingWorktree) return false;
 		const projectPath = this.nonblankPath;
 		const executorId = this.executorId;
@@ -642,17 +642,14 @@ export class NewChatFormState {
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
-				branch,
-				baseRef,
-			});
+			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
 			if (!current()) return false;
 			if (!result.success) {
 				this.worktreeError =
 					result.error || result.message || m.chat_new_chat_create_worktree_failed();
 				return false;
 			}
-			this.selectWorktree(result.worktreePath || worktreePath);
+			this.selectWorktree(result.worktreePath || creation.worktreePath);
 			return true;
 		} catch (err) {
 			if (!current()) return false;

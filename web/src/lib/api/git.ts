@@ -703,15 +703,15 @@ export async function getGitWorktrees(
 	);
 }
 
+export type GitWorktreeCreation = Omit<Wire.CreateWorktreeOptions, 'projectPath'>;
+
 export async function gitCreateWorktree(
 	target: GitProjectTarget,
-	worktreePath: string,
-	options: { baseRef?: string; branch?: string; detach?: boolean } = {},
+	creation: GitWorktreeCreation,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/worktrees/create', {
 		...gitProjectFields(target),
-		worktreePath,
-		...options,
+		...creation,
 	});
 }
 

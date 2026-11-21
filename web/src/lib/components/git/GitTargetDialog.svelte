@@ -107,12 +107,13 @@
 
 {#if dialog.worktreePickerOpen}
 	<GitWorktreePickerModal
+		contextKey={JSON.stringify([executorContextKey, dialog.nonblankPath])}
 		worktrees={dialog.worktrees}
 		isLoading={dialog.isLoadingWorktrees}
 		isCreating={dialog.isCreatingWorktree}
 		errorMessage={dialog.worktreeError}
 		onSelect={(path) => dialog.selectWorktree(path)}
-		onCreate={(path, branch, baseRef) => dialog.createWorktree(path, branch, baseRef)}
+		onCreate={(creation) => dialog.createWorktree(creation)}
 		onRefresh={() => dialog.loadWorktrees()}
 		onClose={() => dialog.closeWorktreePicker()}
 	/>

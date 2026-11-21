@@ -2,7 +2,7 @@ import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import {
 	getGitTargetCandidates,
 	getGitWorktrees,
-	gitCreateWorktree,
+	gitCreateWorktree, type GitWorktreeCreation,
 	type GitTargetCandidate,
 	type GitWorktreeItem,
 } from '$lib/api/git.js';
@@ -147,7 +147,7 @@ export class GitTargetDialogState {
 		}
 	}
 
-	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
+	async createWorktree(creation: GitWorktreeCreation): Promise<void> {
 		const projectPath = this.nonblankPath;
 		const executorId = this.options.executorId;
 		const current = this.#captureContext();
@@ -158,15 +158,12 @@ export class GitTargetDialogState {
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
-				branch,
-				baseRef,
-			});
+			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
 			if (!result.success) {
 				throw new Error(result.error || result.message || m.git_target_load_worktrees_failed());
 			}
 			if (!current() || generation !== this.#worktreeGeneration) return;
-			this.selectWorktree(result.worktreePath || worktreePath);
+			this.selectWorktree(result.worktreePath || creation.worktreePath);
 		} catch (error) {
 			this.options.onMutationError?.(error, { executorId, projectPath });
 			if (!current() || generation !== this.#worktreeGeneration) return;

@@ -80,7 +80,7 @@ describe('GitTargetDialogState', () => {
 			available: true,
 			initialPath: '/repo',
 		});
-		const pending = dialog.createWorktree('/repo/feature', 'feature');
+		const pending = dialog.createWorktree({ worktreePath: '/repo/feature', branch: 'feature' });
 		await dialog.loadWorktrees();
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		expect(dialog.isCreatingWorktree).toBe(true);
@@ -109,7 +109,7 @@ describe('GitTargetDialogState', () => {
 				initialPath: '/repo',
 				onMutationError,
 			});
-			const pending = dialog.createWorktree('/repo/feature', 'feature');
+			const pending = dialog.createWorktree({ worktreePath: '/repo/feature', branch: 'feature' });
 			if (transition === 'disconnect') available = false;
 			else if (transition === 'dispose') dialog.dispose();
 			else {
@@ -292,12 +292,12 @@ describe('GitTargetDialogState', () => {
 			worktreePath: '/workspace/canonical-feature',
 		});
 
-		await dialog.createWorktree('/workspace/feature', 'feature', 'main');
+		await dialog.createWorktree({ worktreePath: '/workspace/feature', branch: 'feature', baseRef: 'main' });
 
 		expect(gitApi.gitCreateWorktree).toHaveBeenCalledWith(
 			expect.objectContaining({ executorId: 'local', projectPath: '/workspace/repo' }),
-			'/workspace/feature',
 			{
+				worktreePath: '/workspace/feature',
 				branch: 'feature',
 				baseRef: 'main',
 			},
@@ -311,7 +311,7 @@ describe('GitTargetDialogState', () => {
 			success: false,
 			error: 'branch already exists',
 		});
-		await dialog.createWorktree('/workspace/other');
+		await dialog.createWorktree({ worktreePath: '/workspace/other' });
 		expect(dialog.worktreeError).toBe('branch already exists');
 		expect(dialog.candidatePath).toBe('/workspace/canonical-feature');
 	});

@@ -23,8 +23,8 @@ interface GitWorktreePickerStateOptions {
 	get repositoryWorktreePath(): string;
 }
 
-function displayName(worktree: GitWorktreeItem): string {
-	return worktree.branch || worktree.name;
+export function worktreeDisplayName(worktree: GitWorktreeItem): string {
+	return worktree.branch && worktree.branch !== '(detached)' ? worktree.branch : worktree.name;
 }
 
 function worktreePathBasename(worktreePath: string): string {
@@ -57,7 +57,7 @@ export function filterAndSortWorktrees(
 		: [...worktrees];
 
 	const compareAlphabetically = (left: GitWorktreeItem, right: GitWorktreeItem): number => {
-		const nameComparison = collator.compare(displayName(left), displayName(right));
+		const nameComparison = collator.compare(worktreeDisplayName(left), worktreeDisplayName(right));
 		return nameComparison || collator.compare(left.path, right.path);
 	};
 

@@ -553,7 +553,7 @@ describe('git API contract', () => {
 	it('gitCreateWorktree sends POST with worktreePath and options', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateWorktree({ executorId: 'remote-executor', projectPath: '/project' }, '/tmp/wt', {
+		await gitCreateWorktree({ executorId: 'remote-executor', projectPath: '/project' }, { worktreePath: '/tmp/wt',
 			branch: 'feat',
 			baseRef: 'main',
 		});

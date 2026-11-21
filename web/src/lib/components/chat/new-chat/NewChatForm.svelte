@@ -955,14 +955,14 @@
 
 {#if form.worktreeModalOpen}
 	<GitWorktreePickerModal
+		contextKey={JSON.stringify([form.pathContextKey, form.nonblankPath])}
+		description={form.firstMessage}
 		worktrees={form.worktreeItems}
 		isLoading={form.isLoadingWorktrees}
 		isCreating={form.isCreatingWorktree}
 		errorMessage={form.worktreeError}
 		onSelect={(path) => form.selectWorktree(path)}
-		onCreate={async (path, branch, baseRef) => {
-			await form.createWorktree(path, branch, baseRef);
-		}}
+		onCreate={(creation) => form.createWorktree(creation)}
 		onRefresh={() => {
 			void form.loadWorktrees();
 		}}

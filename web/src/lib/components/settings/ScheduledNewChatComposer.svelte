@@ -291,14 +291,14 @@
 
 {#if startup.gitAvailable && startup.worktreeModalOpen}
 	<GitWorktreePickerModal
+		contextKey={JSON.stringify([startup.pathContextKey, startup.nonblankPath])}
+		description={prompt}
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}
 		isCreating={startup.isCreatingWorktree}
 		errorMessage={startup.worktreeError}
 		onSelect={(path) => startup.selectWorktree(path)}
-		onCreate={async (path, branch, baseRef) => {
-			await startup.createWorktree(path, branch, baseRef);
-		}}
+		onCreate={(creation) => startup.createWorktree(creation)}
 		onRefresh={() => {
 			void startup.loadWorktrees();
 		}}

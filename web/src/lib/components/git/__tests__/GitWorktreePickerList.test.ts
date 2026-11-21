@@ -5,6 +5,7 @@ import GitWorktreePickerList from '../GitWorktreePickerList.svelte';
 import { WORKTREE_ROW_HEIGHT, worktreeOptionId } from '../git-worktree-picker-list.js';
 
 const LISTBOX_ID = 'worktree-list';
+const LARGE_ROW_HEIGHT = Math.ceil(WORKTREE_ROW_HEIGHT * 20 / 14);
 
 let resizeCallback: ResizeObserverCallback | undefined;
 let resizeDisconnect: ReturnType<typeof vi.fn<() => void>>;
@@ -87,16 +88,16 @@ describe('GitWorktreePickerList', () => {
 			viewport.scrollTop = 2_500 * WORKTREE_ROW_HEIGHT + WORKTREE_ROW_HEIGHT / 2;
 			await fireEvent.scroll(viewport);
 			document.documentElement.dataset.interfaceFontSize = '20';
-			await waitFor(() => expect(viewport.scrollTop).toBe(2_500 * 98 + 49));
+			await waitFor(() => expect(viewport.scrollTop).toBe(2_500.5 * LARGE_ROW_HEIGHT));
 			expect(screen.getByRole('option', { name: /worktree-2500/ })).toBeTruthy();
 			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
 
-			viewport.scrollTop = 2_500 * 98 + 84;
+			viewport.scrollTop = 2_500.75 * LARGE_ROW_HEIGHT;
 			await fireEvent.scroll(viewport);
 			document.documentElement.dataset.interfaceFontSize = 'default';
 			await waitFor(() =>
 				expect(viewport.scrollTop).toBeCloseTo(
-					2_500 * WORKTREE_ROW_HEIGHT + (84 / 98) * WORKTREE_ROW_HEIGHT,
+					2_500.75 * WORKTREE_ROW_HEIGHT,
 				),
 			);
 			expect(screen.getByRole('option', { name: /worktree-2500/ })).toBeTruthy();
@@ -110,11 +111,11 @@ describe('GitWorktreePickerList', () => {
 		const view = renderList(makeWorktrees(100));
 		try {
 			document.documentElement.dataset.interfaceFontSize = '20';
-			await waitFor(() => expect(virtualRows()[0]?.style.height).toBe('98px'));
-			expect(virtualRows()[1]?.style.transform).toBe('translateY(98px)');
+			await waitFor(() => expect(virtualRows()[0]?.style.height).toBe(`${LARGE_ROW_HEIGHT}px`));
+			expect(virtualRows()[1]?.style.transform).toBe(`translateY(${LARGE_ROW_HEIGHT}px)`);
 			expect(
 				view.container.querySelector<HTMLElement>('[data-worktree-virtual-list]')?.style.height,
-			).toBe('9800px');
+			).toBe(`${100 * LARGE_ROW_HEIGHT}px`);
 		} finally {
 			view.unmount();
 			delete document.documentElement.dataset.interfaceFontSize;
@@ -227,7 +228,7 @@ describe('GitWorktreePickerList', () => {
 		});
 
 		await waitFor(() => {
-			expect(viewport.scrollTop).toBeGreaterThan(290_000);
+			expect(viewport.scrollTop).toBeGreaterThan(4_900 * WORKTREE_ROW_HEIGHT);
 			const activeId = worktreeOptionId(LISTBOX_ID, selectedPath);
 			expect(document.getElementById(activeId)).toBeTruthy();
 			expect(onActiveOptionIdChange).toHaveBeenLastCalledWith(activeId);

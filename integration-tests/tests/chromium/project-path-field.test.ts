@@ -60,6 +60,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect(selection.getByRole('switch', { name: 'Remove Exact project', exact: true })).toBeEnabled();
         await browserExpect(selection.getByRole('switch', { name: 'Add Sibling project', exact: true })).toBeDisabled();
         await selection.locator('[data-slot="new-chat-preamble-cancel"]').click();
+        await browserExpect(selection).toBeHidden();
       };
       await assertExactPreambleScope();
 
@@ -92,12 +93,13 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           expect(await input.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
         }
         expect(await field.evaluate(element => {
-          const feedback = element.nextElementSibling!;
-          return feedback.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+          const path = element.querySelector('input')!.getBoundingClientRect();
+          const link = [...element.querySelectorAll('button')].find(button => button.textContent?.includes('Select a different worktree'))!.getBoundingClientRect();
+          return Math.abs(link.left - path.left) < 1 ? link.top - path.bottom : -1;
         })).toBe(4);
         expect(await field.evaluate(element => {
           const fieldBounds = element.getBoundingClientRect();
-          const controls = [...element.firstElementChild!.children]
+          const controls = [...element.querySelectorAll('input, button')]
             .filter(child => child.checkVisibility({ checkVisibilityCSS: true }))
             .map(child => child.getBoundingClientRect());
           return controls.every((rect, index) => {
@@ -110,9 +112,37 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
             });
           });
         })).toBe(true);
-        await page.screenshot({ path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
+        await page.screenshot({ animations: 'disabled', path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
       }
       await cdp.detach();
+
+      phase('explicit name generation creates only on confirmation');
+      await prompt.fill('Synthetic worktree naming task');
+      let requests = 0;
+      await page.route('**/api/v1/git/generate-name', async route => {
+        requests++;
+        expect(route.request().postDataJSON()).toEqual({ description: 'Synthetic worktree naming task', previousName: '' });
+        await route.fulfill({ json: { name: 'picker-review' } });
+      });
+      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+      await picker.getByRole('button', { name: 'New worktree', exact: true }).click();
+      const create = page.getByRole('dialog', { name: 'New worktree', exact: true });
+      const name = create.getByRole('textbox', { name: /branch name/i });
+      await browserExpect(name).toHaveValue('');
+      expect(requests).toBe(0);
+      await create.getByRole('button', { name: 'Generate name' }).click();
+      await browserExpect(name).toHaveValue('picker-review');
+      await browserExpect(input).toHaveValue(worktree);
+      if (executionBackend === 'in-process') {
+        for (const width of [390, 1440]) {
+          await page.setViewportSize({ width, height: 900 });
+          await browserExpect(create.getByRole('button', { name: 'Create worktree' })).toBeInViewport();
+          await page.screenshot({ animations: 'disabled', path: join(artifacts, `worktree-create-${width}.png`) });
+        }
+      }
+      await create.getByRole('button', { name: 'Create worktree' }).click();
+      await browserExpect(input).toHaveValue(join(project, '.worktrees', 'picker-review'));
+      expect(requests).toBe(1);
       assertNoBrowserErrors();
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 120_000);

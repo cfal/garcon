@@ -693,15 +693,14 @@ describe('NewChatFormState', () => {
 
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = formState.createWorktree('/worker/feature', 'feature');
+		const creating = formState.createWorktree({ worktreePath: '/worker/feature', branch: 'feature' });
 		formState.selectExecutor('local');
 		formState.projectPath = '/local/draft';
 		creation.resolve({ success: true, worktreePath: '/worker/feature' });
 		await expect(creating).resolves.toBe(false);
 		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
-			'/worker/feature',
-			{ branch: 'feature', baseRef: undefined },
+			{ worktreePath: '/worker/feature', branch: 'feature' },
 		);
 		expect(formState.projectPath).toBe('/local/draft');
 	});

@@ -236,12 +236,13 @@
 		</form>
 		{#if destination.worktreePickerOpen}
 			<GitWorktreePickerModal
+				contextKey={JSON.stringify([executors.gitContextKey(executorId), destination.nonblankPath])}
 				worktrees={destination.worktrees}
 				isLoading={destination.isLoadingWorktrees}
 				isCreating={destination.isCreatingWorktree}
 				errorMessage={destination.worktreeError}
 				onSelect={(path) => destination.selectWorktree(path)}
-				onCreate={(path, branch, baseRef) => destination.createWorktree(path, branch, baseRef)}
+				onCreate={(creation) => destination.createWorktree(creation)}
 				onRefresh={() => void destination.loadWorktrees()}
 				onClose={() => destination.closeWorktreePicker()}
 			/>

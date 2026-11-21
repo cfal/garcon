@@ -4,6 +4,9 @@ import type { GitWorktreeItem } from '$lib/api/git.js';
 import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 import GitWorktreePickerModal from '../GitWorktreePickerModal.svelte';
 import GitWorktreePickerEscapeHost from './GitWorktreePickerEscapeHost.svelte';
+import { generateGitName } from '$lib/api/git-name.js';
+
+vi.mock('$lib/api/git-name.js', () => ({ generateGitName: vi.fn() }));
 
 function worktree(
 	name: string,
@@ -100,7 +103,7 @@ describe('GitWorktreePickerModal', () => {
 		expect(screen.getByRole('option', { name: /loaded/ })).toBeTruthy();
 	});
 
-	it('uses mobile-safe input text and compact three-line row metadata', () => {
+	it('uses mobile-safe input text and compact two-line row metadata', () => {
 		renderPicker([worktree('mobile', '2026-07-15T10:00:00.000Z')]);
 
 		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
@@ -112,13 +115,8 @@ describe('GitWorktreePickerModal', () => {
 		const timestamp = screen.getByRole('time');
 		const path = screen.getByText('/workspace/mobile');
 		expect(timestamp.className).toContain('text-xs');
-		expect(timestamp.className).toContain('leading-4');
-		expect(timestamp.className).not.toContain('text-right');
-		expect(timestamp.previousElementSibling?.textContent).toContain('mobile');
-		expect(timestamp.nextElementSibling).toBe(path);
-		expect(path.className).toContain('text-[11px]');
-		expect(screen.getByRole('option', { name: /mobile/ }).className).toContain('py-2');
-		expect(screen.getByText('|').className).toContain('hidden');
+		expect(timestamp.parentElement?.nextElementSibling).toBe(path);
+		expect(path.title).toBe('/workspace/mobile');
 	});
 
 	it('labels the repository worktree without conflating it with a main branch', () => {
@@ -196,7 +194,7 @@ describe('GitWorktreePickerModal', () => {
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 
-	it('keeps a deep virtual selection mounted when the create form shrinks the list', async () => {
+	it('keeps a deep virtual selection mounted after returning from the create form', async () => {
 		let resizeCallback!: ResizeObserverCallback;
 		class TestResizeObserver {
 			constructor(callback: ResizeObserverCallback) {
@@ -225,6 +223,7 @@ describe('GitWorktreePickerModal', () => {
 			});
 
 			await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+			await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 			resizeCallback(
 				[{ contentRect: { height: 120 } } as ResizeObserverEntry],
 				{} as ResizeObserver,
@@ -334,6 +333,21 @@ describe('GitWorktreePickerModal', () => {
 
 		expect(screen.getByText('Unable to load worktrees')).toBeTruthy();
 		expect(screen.queryByText('No matching worktrees')).toBeNull();
+	});
+
+	it('shows creation failures in the form, not an earlier list error', async () => {
+		const view = renderPicker([worktree('main', null, { isMain: true })], {
+			errorMessage: 'Refresh failed',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		expect(screen.queryByRole('alert')).toBeNull();
+		await fireEvent.input(screen.getByRole('textbox', { name: /branch name/i }), {
+			target: { value: 'existing-path' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
+		await view.rerender({ errorMessage: 'Destination already exists' });
+		expect(screen.getByRole('alert').textContent).toBe('Destination already exists');
+		expect(screen.getByDisplayValue('existing-path')).toBeTruthy();
 	});
 
 	it('selects the effective filtered row with Enter and navigates with arrow keys', async () => {
@@ -551,11 +565,7 @@ describe('GitWorktreePickerModal', () => {
 		expect(document.activeElement).toBe(branchInput);
 		await fireEvent.input(branchInput, { target: { value: 'feature/search' } });
 		await fireEvent.keyDown(branchInput, { key: 'Enter' });
-		expect(onCreate).toHaveBeenCalledWith(
-			'/workspace/repo/.worktrees/feature-search',
-			'feature/search',
-			undefined,
-		);
+		expect(onCreate).toHaveBeenCalledWith({ worktreePath: '/workspace/repo/.worktrees/feature-search', branch: 'feature/search', baseRef: undefined });
 		expect(onSelect).not.toHaveBeenCalled();
 
 		await fireEvent.keyDown(branchInput, { key: 'Escape' });
@@ -589,9 +599,9 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'example2' },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
 
-		expect(onCreate).toHaveBeenCalledWith('/repo/.worktrees/example2', 'example2', undefined);
+		expect(onCreate).toHaveBeenCalledWith({ worktreePath: '/repo/.worktrees/example2', branch: 'example2', baseRef: undefined });
 	});
 
 	it('requires repository metadata for a default path but permits an explicit override', async () => {
@@ -610,7 +620,7 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'example2' },
 		});
-		expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(
+		expect((screen.getByRole('button', { name: 'Create worktree' }) as HTMLButtonElement).disabled).toBe(
 			true,
 		);
 
@@ -618,9 +628,9 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Path override'), {
 			target: { value: '/tmp/example2' },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
 
-		expect(onCreate).toHaveBeenCalledWith('/tmp/example2', 'example2', undefined);
+		expect(onCreate).toHaveBeenCalledWith({ worktreePath: '/tmp/example2', branch: 'example2', baseRef: undefined });
 	});
 
 	it('gives the create form first refusal on app-level capture-phase Escape', async () => {
@@ -645,50 +655,75 @@ describe('GitWorktreePickerModal', () => {
 		);
 	});
 
-	it('closes the sort menu before the create form and dialog on Escape', async () => {
-		render(GitWorktreePickerEscapeHost);
-
+	it('requests a suggestion only on click and creates it only on explicit submission', async () => {
+		const onCreate = vi.fn();
+		const response = Promise.withResolvers<{ name: string }>();
+		vi.mocked(generateGitName).mockReturnValueOnce(response.promise);
+		renderPicker([worktree('main', null, { isMain: true })], { onCreate, description: 'Improve picker' });
 		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
-		await openSortMenu(screen.getByRole('button', { name: 'Sort worktrees' }));
-		const sortOption = await screen.findByRole('menuitemradio', {
-			name: 'Alphabetical (ascending)',
-		});
-
-		await fireEvent.keyDown(sortOption, { key: 'Escape' });
-		await waitFor(() =>
-			expect(
-				screen.queryByRole('menuitemradio', { name: 'Alphabetical (ascending)' }),
-			).toBeNull(),
-		);
-		expect(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)')).toBeTruthy();
-
-		await fireEvent.keyDown(window, { key: 'Escape' });
-		expect(screen.queryByPlaceholderText('Branch name (e.g. fix/login-bug)')).toBeNull();
-		expect(screen.getByRole('dialog', { name: 'Select worktree' })).toBeTruthy();
-
-		await fireEvent.keyDown(window, { key: 'Escape' });
-		await waitFor(() =>
-			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull(),
-		);
+		const field = screen.getByRole<HTMLInputElement>('textbox', { name: /branch name/i });
+		expect(field.value).toBe('');
+		expect(generateGitName).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
+		expect(generateGitName).toHaveBeenCalledExactlyOnceWith({ description: 'Improve picker', previousName: '' }, expect.any(AbortSignal));
+		response.resolve({ name: 'picker-polish' });
+		await waitFor(() => expect(field.value).toBe('picker-polish'));
+		await fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+		expect(onCreate).not.toHaveBeenCalled();
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		expect(onCreate).toHaveBeenCalledWith({ worktreePath: '/workspace/main/.worktrees/picker-polish', newBranch: 'picker-polish', baseRef: undefined });
+		await fireEvent.input(field, { target: { value: 'manual' } });
+		await fireEvent.keyDown(field, { key: 'Enter' });
+		expect(onCreate).toHaveBeenLastCalledWith({ worktreePath: '/workspace/main/.worktrees/manual', branch: 'manual', baseRef: undefined });
 	});
 
-	it('does not select a worktree from the filter while the create form is open', async () => {
-		const onSelect = vi.fn();
-		renderPicker([worktree('main', '2026-07-15T10:00:00.000Z')], { onSelect });
-
+	it.each(['edit', 'back', 'executor'] as const)('discards a pending suggestion after %s', async (transition) => {
+		const response = Promise.withResolvers<{ name: string }>();
+		vi.mocked(generateGitName).mockReturnValueOnce(response.promise);
+		const view = renderPicker([worktree('main', null, { isMain: true })], { contextKey: 'worker-A' });
 		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
-		const branchInput = screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)');
-		await fireEvent.input(branchInput, { target: { value: 'feature/in-progress' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
+		const signal = vi.mocked(generateGitName).mock.lastCall![1];
+		if (transition === 'edit') await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'typed' } });
+		if (transition === 'back') await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		if (transition === 'executor') await view.rerender({ contextKey: 'worker-B' });
+		expect(signal.aborted).toBe(true);
+		response.resolve({ name: 'late-answer' });
+		await response.promise;
+		expect(screen.queryByDisplayValue('late-answer')).toBeNull();
+		if (transition === 'edit') expect(screen.getByDisplayValue('typed')).toBeTruthy();
+	});
 
-		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
-		await fireEvent.click(filter);
-		await fireEvent.keyDown(filter, { key: 'Enter' });
+	it('keeps manual creation and its overrides available when generation fails', async () => {
+		const onCreate = vi.fn();
+		vi.mocked(generateGitName).mockRejectedValueOnce(new Error('Model unavailable'));
+		renderPicker([worktree('main', null, { isMain: true })], { onCreate });
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		const field = screen.getByRole('textbox', { name: /branch name/i });
+		await fireEvent.input(field, { target: { value: 'release/preview' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
+		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: '/repo/custom' } });
+		await fireEvent.input(screen.getByLabelText('Base ref'), { target: { value: 'v2' } });
+		expect(generateGitName).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
+		expect((await screen.findByRole('alert')).textContent).toContain('type a name');
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
+		expect(onCreate).toHaveBeenCalledWith({
+			worktreePath: '/repo/custom', branch: 'release/preview', baseRef: 'v2',
+		});
+	});
 
-		expect(onSelect).not.toHaveBeenCalled();
-		expect(screen.getByDisplayValue('feature/in-progress')).toBeTruthy();
-
-		await fireEvent.keyDown(filter, { key: 'Escape' });
-		expect(screen.queryByDisplayValue('feature/in-progress')).toBeNull();
+	it('returns to the same filter without selecting or creating a worktree', async () => {
+		const onSelect = vi.fn();
+		renderPicker([worktree('feature', null)], { onSelect });
+		const filter = screen.getByRole('combobox');
+		await fireEvent.input(filter, { target: { value: 'feat' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		expect(screen.queryByRole('combobox')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Sort worktrees' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await waitFor(() => expect(document.activeElement).toBe(filter));
+		expect(screen.getByDisplayValue('feat')).toBe(filter);
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 });

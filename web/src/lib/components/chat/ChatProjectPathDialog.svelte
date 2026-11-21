@@ -173,13 +173,13 @@
 
 {#if isOpen && projectPathDialogState.worktreePickerOpen}
 	<GitWorktreePickerModal
+		contextKey={JSON.stringify([pathContextKey, projectPathDialogState.nonblankPath])}
 		worktrees={projectPathDialogState.worktrees}
 		isLoading={projectPathDialogState.isLoadingWorktrees}
 		isCreating={projectPathDialogState.isCreatingWorktree}
 		errorMessage={projectPathDialogState.worktreeError}
 		onSelect={(path) => projectPathDialogState.selectWorktree(path)}
-		onCreate={(path, branch, baseRef) =>
-			projectPathDialogState.createWorktree(path, branch, baseRef)}
+		onCreate={(creation) => projectPathDialogState.createWorktree(creation)}
 		onRefresh={() => {
 			void projectPathDialogState.loadWorktrees();
 		}}

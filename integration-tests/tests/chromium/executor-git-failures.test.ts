@@ -108,13 +108,12 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
       await page.getByRole('button', { name: 'New worktree', exact: true }).click();
       await page.getByPlaceholder('Branch name (e.g. fix/login-bug)').fill('feature');
       await page.getByRole('button', { name: 'Advanced', exact: true }).click();
-      await page.getByPlaceholder('Path override').fill(join(project, 'feature'));
-      await page.getByRole('button', { name: 'Create', exact: true }).click();
+      await page.getByRole('textbox', { name: 'Location', exact: true }).fill(join(project, 'feature'));
+      await page.getByRole('button', { name: 'Create worktree', exact: true }).click();
       await dispatched.promise;
       const count = lists;
       const refresh = page.getByRole('button', { name: 'Refresh worktrees', exact: true });
-      expect(await refresh.isDisabled()).toBe(true);
-      await refresh.evaluate(element => (element as HTMLButtonElement).click());
+      expect(await refresh.count()).toBe(0);
       expect(lists).toBe(count);
       phase('disconnect after worktree creation');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });

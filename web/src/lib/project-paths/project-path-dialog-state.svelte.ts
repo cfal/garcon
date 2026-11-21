@@ -1,6 +1,6 @@
 import { ApiError } from '$lib/api/client.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
-import { getGitWorktrees, gitCreateWorktree, type GitWorktreeItem } from '$lib/api/git.js';
+import { getGitWorktrees, gitCreateWorktree, type GitWorktreeCreation, type GitWorktreeItem } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { effectiveExecutorId } from '$shared/executors';
@@ -210,7 +210,7 @@ export class ProjectPathDialogState {
 		}
 	}
 
-	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
+	async createWorktree(creation: GitWorktreeCreation): Promise<void> {
 		if (!this.gitAvailable || this.isCreatingWorktree) return;
 		const projectPath = this.nonblankPath;
 		const executorId = this.executorId;
@@ -227,17 +227,14 @@ export class ProjectPathDialogState {
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
-				branch,
-				baseRef,
-			});
+			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
 			if (!current()) return;
 			if (!result.success) {
 				this.worktreeError =
 					result.error || result.message || m.chat_new_chat_create_worktree_failed();
 				return;
 			}
-			this.selectWorktree(result.worktreePath || worktreePath);
+			this.selectWorktree(result.worktreePath || creation.worktreePath);
 		} catch (error) {
 			if (!current()) return;
 			this.worktreeError =

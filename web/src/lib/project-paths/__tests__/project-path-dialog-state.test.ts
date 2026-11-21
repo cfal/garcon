@@ -77,15 +77,14 @@ describe('ProjectPathDialogState', () => {
 
 		const creation = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = dialog.createWorktree('/worker/feature', 'feature');
+		const creating = dialog.createWorktree({ worktreePath: '/worker/feature', branch: 'feature' });
 		dialog.open('/local/project', 'local');
 		creation.resolve({ success: true, worktreePath: '/worker/feature' });
 		await creating;
 		expect(dialog.candidatePath).toBe('/local/project');
 		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
-			'/worker/feature',
-			{ branch: 'feature', baseRef: undefined },
+			{ worktreePath: '/worker/feature', branch: 'feature' },
 		);
 		dialog.close();
 	});

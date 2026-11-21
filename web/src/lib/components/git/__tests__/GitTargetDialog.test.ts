@@ -105,10 +105,8 @@ describe('GitTargetDialog', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'feature' },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-		expect((screen.getByRole('button', { name: 'Refresh worktrees' }) as HTMLButtonElement).disabled).toBe(
-			true,
-		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
+		expect(screen.queryByRole('button', { name: 'Refresh worktrees' })).toBeNull();
 		flushSync(() =>
 			executors.applySnapshot([localExecutor, { ...remote, availability: 'offline' }]),
 		);
@@ -149,7 +147,7 @@ describe('GitTargetDialog', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'feature' },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
 		expect(gitApi.gitCreateWorktree).toHaveBeenCalledOnce();
 		const validations = vi.mocked(chatsApi.validateStart).mock.calls.length;
 		flushSync(() =>
