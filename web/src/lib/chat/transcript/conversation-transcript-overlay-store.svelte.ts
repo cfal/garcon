@@ -1,7 +1,8 @@
 import { SvelteMap } from 'svelte/reactivity';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
-import type { OptimisticUserInput } from './optimistic-user-input.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from './optimistic-user-input.js';
 import { echoedClientMessageOrdinals } from './transcript-row-projection.js';
 import { createRandomId } from '$lib/utils/random-id';
 
@@ -163,6 +164,54 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return feedMutation(true);
 	}
 
+	reconcileQueuedSteers(
+		control: ChatExecutionControlState | null,
+		receipt?: QueuedSteerReceipt,
+	) {
+		const needsReconciliation = this.#optimisticInputs.some(input =>
+			typeof input.delivery === 'object'
+			|| input.clientMessageId === receipt?.clientMessageId,
+		);
+		if (!needsReconciliation) return feedMutation(false);
+		const entries = new Map(control?.queue.entries.map(entry => [entry.id, entry.content]));
+		const next: OptimisticUserInput[] = [];
+		const ordinals = new Map(this.#optimisticAfterOrdinals);
+		let changed = false;
+		for (const input of this.#optimisticInputs) {
+			if (
+				(receipt && receipt.clientMessageId !== input.clientMessageId)
+				|| input.delivery === 'delivered'
+			) {
+				next.push(input);
+				continue;
+			}
+			const previous = typeof input.delivery === 'object' ? input.delivery : null;
+			const binding = previous ?? receipt;
+			if (!binding) {
+				next.push(input);
+				continue;
+			}
+			const sameInstance = binding.serverInstanceId === control?.serverInstanceId;
+			const content = sameInstance ? entries.get(binding.entryId) : undefined;
+			if (content === undefined) {
+				ordinals.delete(input.clientMessageId);
+				changed = true;
+				continue;
+			}
+			const delivery = previous ?? { ...binding, kind: 'queued' as const };
+			if (delivery === input.delivery && content === input.content) {
+				next.push(input);
+			} else {
+				next.push({ ...input, content, delivery });
+				changed = true;
+			}
+		}
+		if (!changed) return feedMutation(false);
+		this.#optimisticInputs = next;
+		this.#optimisticAfterOrdinals = ordinals;
+		return feedMutation(true);
+	}
+
 	replaceResendCandidates(
 		candidates: readonly ResendCandidate[],
 	): ConversationTranscriptOverlayMutation {
@@ -201,42 +250,40 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	}
 
 	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
-		let feedStructureChanged = false;
-		const notices = this.#notices.filter((notice) => notice.revision > batch.noticeRevision);
-		if (notices.length !== this.#notices.length) {
-			this.#notices = notices;
-			feedStructureChanged = true;
-		}
-
-		const echoed = echoedClientMessageOrdinals(batch.messages);
-		if (echoed.size > 0) {
-			const ordinals = new Map(this.#optimisticAfterOrdinals);
-			const remaining: OptimisticUserInput[] = [];
-			let latestPriorEchoOrdinal: number | undefined;
-			for (const input of this.#optimisticInputs) {
-				const echoOrdinal = echoed.get(input.clientMessageId);
-				if (echoOrdinal !== undefined) {
-					latestPriorEchoOrdinal = Math.max(latestPriorEchoOrdinal ?? 0, echoOrdinal);
-					ordinals.delete(input.clientMessageId);
-					continue;
-				}
-				if (latestPriorEchoOrdinal !== undefined) {
-					ordinals.set(
-						input.clientMessageId,
-						Math.max(ordinals.get(input.clientMessageId) ?? 0, latestPriorEchoOrdinal),
-					);
-				}
-				remaining.push(input);
-			}
-			if (remaining.length !== this.#optimisticInputs.length) {
-				this.#optimisticInputs = remaining;
-				this.#optimisticAfterOrdinals = ordinals;
-				feedStructureChanged = true;
-			}
-		}
-
+		const notices = this.clearNoticesThrough(batch.noticeRevision);
+		const echoes = this.clearEchoedInputs(batch.messages);
 		this.publishSnapshotResendCandidates(batch.resendCandidates, batch);
-		return feedMutation(feedStructureChanged);
+		return feedMutation(notices.feedStructureChanged || echoes.feedStructureChanged);
+	}
+
+	clearEchoedInputs(
+		messages: readonly TranscriptMessage[],
+	): ConversationTranscriptOverlayMutation {
+		if (!this.#optimisticInputs.length) return feedMutation(false);
+		const echoed = echoedClientMessageOrdinals(messages);
+		if (echoed.size === 0) return feedMutation(false);
+		const ordinals = new Map(this.#optimisticAfterOrdinals);
+		const remaining: OptimisticUserInput[] = [];
+		let latestPriorEchoOrdinal: number | undefined;
+		for (const input of this.#optimisticInputs) {
+			const echoOrdinal = echoed.get(input.clientMessageId);
+			if (echoOrdinal !== undefined) {
+				latestPriorEchoOrdinal = Math.max(latestPriorEchoOrdinal ?? 0, echoOrdinal);
+				ordinals.delete(input.clientMessageId);
+				continue;
+			}
+			if (latestPriorEchoOrdinal !== undefined) {
+				ordinals.set(
+					input.clientMessageId,
+					Math.max(ordinals.get(input.clientMessageId) ?? 0, latestPriorEchoOrdinal),
+				);
+			}
+			remaining.push(input);
+		}
+		if (remaining.length === this.#optimisticInputs.length) return feedMutation(false);
+		this.#optimisticInputs = remaining;
+		this.#optimisticAfterOrdinals = ordinals;
+		return feedMutation(true);
 	}
 
 	#installResendCandidates(candidates: readonly ResendCandidate[]): void {
@@ -319,6 +366,14 @@ export class ConversationTranscriptOverlayStore {
 		clientMessageId: string,
 	): ConversationTranscriptOverlayMutation | null {
 		return this.#entries.get(chatId)?.clearOptimisticInput(clientMessageId) ?? null;
+	}
+
+	reconcileQueuedSteers(chatId: string, control: ChatExecutionControlState | null, receipt?: QueuedSteerReceipt) {
+		return this.#entries.get(chatId)?.reconcileQueuedSteers(control, receipt) ?? null;
+	}
+
+	clearEchoedInputs(chatId: string, messages: readonly TranscriptMessage[]) {
+		return this.#entries.get(chatId)?.clearEchoedInputs(messages) ?? null;
 	}
 
 	replaceResendCandidates(

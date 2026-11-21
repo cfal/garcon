@@ -74,6 +74,10 @@ Starting with v0.4.0, [GitHub releases](https://github.com/cfal/garcon/releases)
 2. Open **Settings**. Coding agents use their existing CLI login; sign in from the agent's settings page if it shows **Not connected**. Add API endpoints under **Providers**.
 3. Start a chat and pick a project folder under your `--project-base-dir`.
 
+### Steering a running chat
+
+Send guidance with `/steer` or the Ctrl+Enter steering shortcut. In the tab that sent it, the bubble shows **Sending** while submission is unresolved. **Waiting to steer** means the server queued the guidance, not that the agent received it. Edit or remove it in the queue tray while it waits. The committed message appears without a waiting indicator. After guidance leaves the queue or is accepted directly, the local bubble disappears without fetching history or changing cache freshness. If its committed message was missed, it may stay absent until ordinary history or reconnect recovery. Disappearance does not prove cancellation or delivery. Reloading the tab drops the local bubble; restarting the server clears the queue. Local and remote executors behave the same way.
+
 ## Where Things Live
 
 | What                | Default                          | Override                                            |

@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { expect as browserExpect } from "playwright/test";
 import type { Locator } from "playwright";
+import { parseSteerCommandRequest, type QueuedSteerCommandResponse, type SteerCommandResponse } from "../../../common/chat-command-contracts.js";
+import { ChatMessagesMessage, parseServerWsMessage } from "../../../common/ws-events.js";
 import { authenticateChromiumContext, withChromiumFixture } from "../../support/chromium-fixture.js";
+import { Deferred } from "../../support/deferred.js";
 import { seedLocalSettings } from "../../support/local-settings-seed.js";
 import { codexAssistantMessage } from "../../support/fake-codex-model.js";
 import { liveCodexStartRequest } from "../../support/live-codex.js";
@@ -369,7 +372,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
   }
 }, 120_000);
 
-test("Control-Enter steers the composer while ordinary queued work remains paused", async () => {
+test.each([false, true])("Control-Enter retires an accepted steer without refreshing paused work (missed echo: %s)", async missedEcho => {
   const environment = await startScriptedCodexTestEnvironment();
   const held = environment.model.scriptHeldTurn([
     codexAssistantMessage("Synthetic active shortcut turn completed."),
@@ -381,36 +384,93 @@ test("Control-Enter steers the composer while ordinary queued work remains pause
     await withChromiumFixture(
       "inline-queue-steer-shortcut",
       async ({ page, integration, assertNoBrowserErrors }) => {
-        const chatId = integration.newChatId();
-        const active = await integration.client.startChat(liveCodexStartRequest({
-          chatId,
-          projectPath: integration.dirs.project,
-          command: "Synthetic active shortcut prompt.",
-        }));
-        await held.requested;
-        await integration.client.enqueueNew(chatId, "Synthetic future work.");
-        await integration.client.pauseQueue(chatId);
-        const before = (await integration.client.getExecutionControl(chatId)).queue;
-        await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
-        const tray = page.locator("[data-queue-status-summary]");
-        await browserExpect(tray.getByRole("button", { name: "Resume queue", exact: true })).toBeVisible();
-        const composer = page.getByPlaceholder("Reply...", { exact: true });
-        await composer.fill("Synthetic shortcut guidance.");
-        const submitted = page.waitForResponse((response) =>
-          response.url().endsWith("/api/v1/chats/steer") && response.request().method() === "POST",
-        );
-        await composer.press("Control+Enter");
-        expect((await submitted).status()).toBe(202);
-        await browserExpect(composer).toHaveValue("");
-        const after = (await integration.client.getExecutionControl(chatId)).queue;
-        expect(after.entries).toEqual(before.entries);
-        expect(after.pause).toEqual(before.pause);
-        held.release();
-        if (!active.turnId) throw new Error("Missing active turn");
-        await integration.client.waitForTurnTerminal(chatId, active.turnId);
-        await browserExpect(page.getByText("Synthetic shortcut guidance received.", { exact: true })).toBeVisible();
-        environment.model.assertSettled();
-        assertNoBrowserErrors();
+        const releasePost = new Deferred<void>();
+        try {
+          const chatId = integration.newChatId();
+          const active = await integration.client.startChat(liveCodexStartRequest({
+            chatId,
+            projectPath: integration.dirs.project,
+            command: "Synthetic active shortcut prompt.",
+          }));
+          await held.requested;
+          await integration.client.enqueueNew(chatId, "Synthetic future work.");
+          await integration.client.pauseQueue(chatId);
+          const before = (await integration.client.getExecutionControl(chatId)).queue;
+          let submittedMessageId: string | null = null;
+          let droppedEchoes = 0;
+          await page.routeWebSocket(/\/ws(?:\?|$)/, route => {
+            const server = route.connectToServer();
+            server.onMessage(raw => {
+              const message = parseServerWsMessage(JSON.parse(String(raw)));
+              if (missedEcho && message instanceof ChatMessagesMessage && message.chatId === chatId
+                && message.messages.some(row => row.message.type === "user-message"
+                  && row.message.metadata?.clientMessageId === submittedMessageId)) {
+                droppedEchoes++;
+              } else route.send(raw);
+            });
+          });
+          await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+          const tray = page.locator("[data-queue-status-summary]");
+          await browserExpect(tray.getByRole("button", { name: "Resume queue", exact: true })).toBeVisible();
+          await browserExpect(page.locator('[data-chat-row-id]:not([data-chat-row-id^="optimistic:"])')
+            .filter({ hasText: "Synthetic active shortcut prompt." })).toBeVisible();
+          const composer = page.getByPlaceholder("Reply...", { exact: true });
+          await composer.fill("Synthetic shortcut guidance.");
+          await browserExpect(page.getByRole("button", { name: "Queue message", exact: true })).toBeEnabled();
+          const endpoint = "**/api/v1/chats/steer";
+          await page.route(endpoint, async route => {
+            await releasePost.promise;
+            await route.continue();
+          }, { times: 1 });
+          let refreshRequests = 0;
+          page.on("request", request => {
+            const path = new URL(request.url()).pathname;
+            if (path === "/api/v1/chats/messages" || path === "/api/v1/chats/combined-messages"
+              || path === "/api/v1/chats/snapshot") refreshRequests++;
+          });
+          const requested = page.waitForRequest(endpoint);
+          const submitted = page.waitForResponse((response) =>
+            response.url().endsWith("/api/v1/chats/steer") && response.request().method() === "POST",
+          );
+          await composer.press("Control+Enter");
+          const { clientMessageId } = parseSteerCommandRequest((await requested).postDataJSON());
+          submittedMessageId = clientMessageId;
+          const bubble = page.locator(`[data-chat-row-id="optimistic:${clientMessageId}"]`);
+          await browserExpect(bubble.getByLabel("Sending", { exact: true })).toBeInViewport();
+          releasePost.resolve();
+          const response = await submitted;
+          expect(response.status()).toBe(202);
+          const receipt: SteerCommandResponse | QueuedSteerCommandResponse = await response.json();
+          if (receipt.delivery === "queued") throw new Error("Expected direct steering into the active turn");
+          expect(receipt.turnId).toBe(active.turnId);
+          await browserExpect(composer).toHaveValue("");
+          await browserExpect(bubble).toHaveCount(0);
+          const after = (await integration.client.getExecutionControl(chatId)).queue;
+          expect(after.entries).toEqual(before.entries);
+          expect(after.pause).toEqual(before.pause);
+          const committed = page.locator('[data-chat-row-id]:not([data-chat-row-id^="optimistic:"])')
+            .filter({ hasText: "Synthetic shortcut guidance." });
+          if (missedEcho) {
+            await browserExpect.poll(() => droppedEchoes).toBe(1);
+            await browserExpect(committed).toHaveCount(0);
+          } else {
+            await browserExpect(committed).toBeInViewport();
+          }
+          expect(refreshRequests).toBe(0);
+          if (missedEcho) {
+            await page.reload();
+            await browserExpect(committed).toBeInViewport();
+          }
+          held.release();
+          if (!active.turnId) throw new Error("Missing active turn");
+          await integration.client.waitForTurnTerminal(chatId, active.turnId);
+          await browserExpect(page.getByText("Synthetic shortcut guidance received.", { exact: true })).toBeVisible();
+          environment.model.assertSettled();
+          assertNoBrowserErrors();
+        } finally {
+          releasePost.resolve();
+          held.release();
+        }
       },
       undefined,
       { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace },

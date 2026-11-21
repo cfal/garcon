@@ -98,6 +98,112 @@ function makeTransientFeed(chatId: string): ChatTransientFeedSnapshot {
 }
 
 describe('ConversationUiState', () => {
+	it('fences delayed HTTP transient snapshots against newer execution authority', () => {
+		const changed = vi.fn();
+		const ui = new ConversationUiState(changed);
+		ui.confirmExecutionControlSocketInstance('first');
+		const response = ui.captureExecutionResponse();
+		ui.markExecutionControlSocketDisconnected();
+		const current = makeControl(makeQueue(), { serverInstanceId: 'third', version: 2 });
+		ui.setExecutionControlFromRefresh('chat', current);
+		changed.mockClear();
+		expect(response.setTransientFeedFromSnapshot({ ...makeTransientFeed('chat'), serverInstanceId: 'second' })).toEqual({ kind: 'stale' });
+		expect(ui.getExecutionControl('chat')).toEqual(current);
+		expect(changed).not.toHaveBeenCalled();
+		response.setExecutionControlFromLiveUpdate('chat', { ...current, version: 3 });
+		response.setExecutionControlFromRefresh('chat', current);
+		expect(ui.getExecutionControl('chat')?.version).toBe(3);
+	});
+
+	it.each(['replacement', 'removal'] as const)('fences captured transient responses after feed %s', change => {
+		const ui = new ConversationUiState();
+		const initial = makeTransientFeed('chat');
+		ui.setTransientFeedFromSnapshot(initial);
+		const response = ui.captureExecutionResponse();
+		const current = { ...initial, transcriptViewId: 'view-current', rows: [] };
+		if (change === 'replacement') ui.setTransientFeedFromSnapshot(current);
+		else ui.removeTransientFeed('chat');
+		expect(response.setTransientFeedFromSnapshot(initial)).toEqual({ kind: 'stale' });
+		expect(ui.getTransientFeed('chat')).toEqual(change === 'replacement' ? current : null);
+	});
+
+	it.each([false, true])('orders concurrent same-view responses by revision (newer first: %s)', newerFirst => {
+		const ui = new ConversationUiState();
+		const older = ui.captureExecutionResponse();
+		const newer = ui.captureExecutionResponse();
+		const initial = { ...makeTransientFeed('chat'), rows: [] };
+		const current = { ...makeTransientFeed('chat'), transientRevision: 2 };
+		const applyOlder = () => older.setTransientFeedFromSnapshot(initial);
+		const applyNewer = () => newer.setTransientFeedFromSnapshot(current);
+		if (newerFirst) { applyNewer(); applyOlder(); }
+		else { applyOlder(); applyNewer(); }
+		expect(ui.getTransientFeed('chat')).toEqual(current);
+		expect(ui.pendingPermissionsFor('chat').map(request => request.permissionOccurrenceId)).toEqual(['permission-live']);
+	});
+
+	it.each([false, true])('accepts a successor feed without comparing predecessor views (confirmed: %s)', confirmed => {
+		const ui = new ConversationUiState();
+		ui.setTransientFeedFromSnapshot(makeTransientFeed('chat'));
+		const response = ui.captureExecutionResponse();
+		ui.markExecutionControlSocketDisconnected();
+		if (confirmed) ui.confirmExecutionControlSocketInstance('successor');
+		const current = { ...makeTransientFeed('chat'), serverInstanceId: 'successor', transcriptViewId: 'view-current', rows: [] };
+		expect(response.setTransientFeedFromSnapshot(current)).toMatchObject({ kind: 'applied' });
+		expect(ui.getTransientFeed('chat')).toEqual(current);
+	});
+
+	it('does not replay a rejected queued acknowledgement after later socket confirmation', () => {
+		const ui = new ConversationUiState();
+		ui.confirmExecutionControlSocketInstance('previous');
+		const response = ui.captureExecutionResponse();
+		const ack = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { serverInstanceId: 'successor' });
+		response.setExecutionControlFromLiveUpdate('chat', ack);
+		expect(ui.getExecutionControl('chat')).toBeNull();
+		ui.markExecutionControlSocketDisconnected();
+		ui.confirmExecutionControlSocketInstance('successor');
+		expect(ui.getExecutionControl('chat')).toBeNull();
+		ui.captureExecutionResponse().setExecutionControlFromRefresh('chat', ack);
+		expect(ui.getExecutionControl('chat')).toEqual(ack);
+	});
+
+	it('does not let a delayed intermediate acknowledgement clear a later process while the socket is down', () => {
+		const changed = vi.fn();
+		const ui = new ConversationUiState(changed);
+		ui.confirmExecutionControlSocketInstance('first');
+		const response = ui.captureExecutionResponse();
+		ui.markExecutionControlSocketDisconnected();
+		const current = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { serverInstanceId: 'third' });
+		ui.setExecutionControlFromRefresh('chat', current);
+		changed.mockClear();
+		response.setExecutionControlFromLiveUpdate('chat', makeControl(makeQueue(), { serverInstanceId: 'second' }));
+		expect(ui.getExecutionControl('chat')).toEqual(current);
+		expect(changed).not.toHaveBeenCalled();
+	});
+
+	it('does not remove a control installed after a not-found request started', () => {
+		const ui = new ConversationUiState();
+		ui.setExecutionControlFromRefresh('chat', makeControl());
+		const remove = ui.captureExecutionControlRemoval('chat');
+		const current = makeControl(makeQueue({ entries: [makeEntry('own', 'guidance')] }), { version: 1 });
+		ui.setExecutionControlFromLiveUpdate('chat', current);
+		expect(remove()).toBe(false);
+		expect(ui.getExecutionControl('chat')).toEqual(current);
+		expect(ui.captureExecutionControlRemoval('chat')()).toBe(true);
+		expect(ui.getExecutionControl('chat')).toBeNull();
+	});
+
+	it('notifies queue projections only for accepted controls and authoritative removal', () => {
+		const changed = vi.fn();
+		const ui = new ConversationUiState(changed);
+		const newer = makeControl(makeQueue(), { version: 2 });
+		ui.setExecutionControlFromRefresh('chat-1', newer);
+		ui.setExecutionControlFromLiveUpdate('chat-1', makeControl());
+		ui.setExecutionControlFromRefresh('chat-1', makeControl());
+		ui.markExecutionControlSocketDisconnected();
+		expect(changed.mock.calls).toEqual([['chat-1', newer]]);
+		ui.confirmExecutionControlSocketInstance('replacement');
+		expect(changed.mock.calls).toEqual([['chat-1', newer], ['chat-1', null]]);
+	});
 	it('updates pending permission requests through values or updater functions', () => {
 		const store = new ConversationUiState();
 		const first = makePermissionRequest('one');

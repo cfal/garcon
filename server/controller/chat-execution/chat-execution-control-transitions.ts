@@ -490,6 +490,9 @@ export function clearQueue(
   current: StoredChatExecutionControlState,
   context: TransitionContext,
 ): ControlTransition<void> {
+  // A reserved entry may already be committed but lack its final dispatch receipt.
+  const steering = current.entries.find((entry) => entry.status === 'steering');
+  if (steering) return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: steering.id });
   const next = cloneStoredChatExecutionControl(current);
   next.entries = [];
   next.pause = null;

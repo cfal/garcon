@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
 function candidate(ordinal: number): ResendCandidate {
@@ -50,6 +51,40 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(overlays.viewFor('chat-1')?.notices).toHaveLength(1);
 	});
 
+	it('retires observed echoes immediately without retaining presentation evidence', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chatId = 'chat-1';
+		const control = emptyChatExecutionControlState('server');
+		const input = optimistic('own');
+		control.queue.entries = [{ id: 'entry', kind: 'steer', attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
+		overlays.upsertOptimisticInput(chatId, input, 1);
+		overlays.reconcileQueuedSteers(chatId, control, {
+			clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server',
+		});
+		overlays.upsertOptimisticInput(chatId, optimistic('later'), 1);
+		overlays.clearEchoedInputs(chatId, [echoed('own', 2), echoed('not-local', 3)]);
+		overlays.reconcileQueuedSteers(chatId, null);
+		expect(overlays.forChat(chatId).optimisticInputs.map(input => input.clientMessageId)).toEqual(['later']);
+		expect(overlays.forChat(chatId).optimisticAfterOrdinals.get('later')).toBe(2);
+		overlays.upsertOptimisticInput(chatId, optimistic('not-local'), 3);
+		overlays.clearEchoedInputs(chatId, []);
+		expect(overlays.forChat(chatId).optimisticInputs).toHaveLength(2);
+	});
+
+	it.each(['clear', 'replacement', 'prune'] as const)('clears optimistic inputs on %s without affecting later submissions', cleanup => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chatId = 'chat-1', input = optimistic('own');
+		overlays.upsertOptimisticInput(chatId, input, 1);
+		if (cleanup === 'clear') overlays.clearOptimisticInput(chatId, 'own');
+		else if (cleanup === 'replacement') overlays.resetForTranscriptReplacement(chatId);
+		else overlays.prune(new Set());
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([]);
+		overlays.upsertOptimisticInput(chatId, input, 1);
+		overlays.clearEchoedInputs(chatId, []);
+		expect(overlays.forChat(chatId).optimisticInputs).toEqual([input]);
+	});
+
 	it('returns one stable chat-qualified view', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		const first = overlays.forChat('chat-1');
@@ -90,6 +125,113 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(view.optimisticInputs.map((input) => input.clientMessageId)).toEqual(['input-2']);
 		expect(view.optimisticAfterOrdinals.get('input-2')).toBe(3);
 		expect(view.resendCandidates).toEqual([candidate(3)]);
+	});
+
+	it('follows only its own queued steer across edits and dispatch before echo', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chatId = 'chat-1';
+		const receipt = { clientMessageId: 'input-1', entryId: 'entry-1', serverInstanceId: 'server-1' };
+		const input = optimistic(receipt.clientMessageId);
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		const entry = { id: receipt.entryId, content: 'edited guidance', kind: 'steer' as const,
+			attachments: [], revision: 2, createdAt: input.createdAt, updatedAt: input.createdAt };
+		control.queue.entries = [entry, { ...entry, id: 'from-another-tab' }];
+		overlays.upsertOptimisticInput(chatId, input, 7);
+		const view = overlays.forChat(chatId);
+		overlays.reconcileQueuedSteers(chatId, control);
+		expect(view.optimisticInputs).toEqual([input]);
+		overlays.reconcileQueuedSteers(chatId, control, receipt);
+		expect(view.optimisticInputs).toEqual([{ ...input, delivery: { ...receipt, kind: 'queued' }, content: entry.content }]);
+		expect(view.optimisticAfterOrdinals.get(input.clientMessageId)).toBe(7);
+		expect(overlays.reconcileQueuedSteers(chatId, control)?.feedStructureChanged).toBe(false);
+
+		control.queue.entries = [];
+		control.queue.recentlyDispatched = [{ entryId: entry.id, revision: 2, dispatchedAt: input.createdAt }];
+		overlays.reconcileQueuedSteers(chatId, control);
+		expect(view.optimisticInputs).toEqual([]);
+		overlays.applyCommittedBatch({ chatId, transcriptViewId: 'view', lastOrdinal: 8,
+			messages: [echoed(input.clientMessageId, 8)], resendCandidates: [], noticeRevision: 0 });
+		overlays.reconcileQueuedSteers(chatId, control, receipt);
+		expect(view.optimisticInputs).toEqual([]);
+		expect(view.optimisticAfterOrdinals.size).toBe(0);
+	});
+
+	it.each(['removed', 'restart', 'control cleared'] as const)('reconciles only the queued row when its entry is %s', reason => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const receipt = { clientMessageId: 'own', entryId: 'entry', serverInstanceId: 'server' };
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		const input = optimistic(receipt.clientMessageId);
+		const other = optimistic('still-in-flight');
+		const delivered = { ...optimistic('immediate'), delivery: 'delivered' as const };
+		control.queue.entries = [{ id: receipt.entryId, kind: 'steer', attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
+		for (const row of [input, other, delivered]) overlays.upsertOptimisticInput(row.chatId, row, 3);
+		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
+		if (reason === 'removed') control.queue.entries = [];
+		if (reason === 'restart') control.serverInstanceId = 'new-server';
+		const latest = reason === 'control cleared' ? null : control;
+		overlays.reconcileQueuedSteers(input.chatId, latest);
+		overlays.reconcileQueuedSteers(input.chatId, latest, receipt);
+		const view = overlays.forChat(input.chatId);
+		expect(view.optimisticInputs).toEqual([other, delivered]);
+		expect([...view.optimisticAfterOrdinals]).toEqual([[other.clientMessageId, 3], [delivered.clientMessageId, 3]]);
+	});
+
+	it('retires after receipt-less removal regardless of queue version', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const input = optimistic('own');
+		const receipt = { clientMessageId: input.clientMessageId, entryId: 'entry', serverInstanceId: 'server' };
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		control.queue.entries = [{ id: receipt.entryId, kind: 'steer', attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt }];
+		overlays.upsertOptimisticInput(input.chatId, input, 3);
+		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
+		control.version += 100;
+		expect(overlays.reconcileQueuedSteers(input.chatId, control)?.feedStructureChanged).toBe(false);
+		control.version++;
+		control.queue.entries = [];
+		expect(overlays.reconcileQueuedSteers(input.chatId, control)?.feedStructureChanged).toBe(true);
+		expect(overlays.reconcileQueuedSteers(input.chatId, control)?.feedStructureChanged).toBe(false);
+		expect(overlays.forChat(input.chatId).optimisticInputs).toEqual([]);
+	});
+
+	it('ignores unrelated queue versions and forgets a departed binding', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const input = optimistic('own');
+		const receipt = {
+			clientMessageId: input.clientMessageId,
+			entryId: 'entry',
+			serverInstanceId: 'server',
+		};
+		const control = emptyChatExecutionControlState(receipt.serverInstanceId);
+		const entry = {
+			id: receipt.entryId, kind: 'steer' as const, attachments: [], content: input.content,
+			revision: 1, createdAt: input.createdAt, updatedAt: input.createdAt,
+		};
+		control.queue.entries = [entry];
+		overlays.upsertOptimisticInput(input.chatId, input, 3);
+		overlays.reconcileQueuedSteers(input.chatId, control, receipt);
+		const view = overlays.forChat(input.chatId);
+		const queuedInputs = view.optimisticInputs;
+		const queuedReceipt = queuedInputs[0].delivery;
+		const queuedOrdinals = view.optimisticAfterOrdinals;
+
+		expect(overlays.reconcileQueuedSteers(input.chatId, control)?.feedStructureChanged).toBe(false);
+		expect(view.optimisticInputs).toBe(queuedInputs);
+		expect(view.optimisticAfterOrdinals).toBe(queuedOrdinals);
+		entry.content = 'edited guidance';
+		overlays.reconcileQueuedSteers(input.chatId, control);
+		expect(view.optimisticInputs[0].content).toBe(entry.content);
+		expect(view.optimisticInputs[0].delivery).toBe(queuedReceipt);
+
+		control.version++;
+		overlays.reconcileQueuedSteers(input.chatId, control);
+		expect(view.optimisticInputs[0].delivery).toBe(queuedReceipt);
+		overlays.reconcileQueuedSteers(input.chatId, null);
+		expect(view.optimisticInputs).toEqual([]);
+		expect(overlays.reconcileQueuedSteers(input.chatId, null)?.feedStructureChanged).toBe(false);
+		overlays.reconcileQueuedSteers(input.chatId, control);
+		expect(view.optimisticInputs).toEqual([]);
 	});
 
 	it('clears prior notices only when a new optimistic submission begins', () => {

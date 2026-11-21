@@ -15,7 +15,8 @@ import {
 	InactiveTranscriptWindowStore,
 	type InactiveTranscriptWindow,
 } from '$lib/chat/transcript/inactive-transcript-window-store.js';
-import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { OptimisticUserInput, QueuedSteerReceipt } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
 	TranscriptReconnectReplayState,
@@ -27,7 +28,7 @@ import {
 	type ConversationTranscriptOverlayMutation,
 } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptMessage, TranscriptPage } from '$shared/chat-view';
 import type { ChatViewSurfaceId, WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 import type {
@@ -118,6 +119,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	// Parked transcripts must not retain the reconciliation scope and its retired panels.
 	#onSnapshotResendCandidates: NonNullable<ActiveTranscriptStateOptions['onSnapshotResendCandidates']> = (chatId, candidates, frontier) => {
 		this.publishSnapshotResendCandidates(chatId, candidates, frontier);
+	};
+	readonly observeRecoveredMessages = (chatId: string, messages: readonly TranscriptMessage[]): void => {
+		const mutation = this.options.overlays.clearEchoedInputs(chatId, messages);
+		if (mutation) this.#applyOverlayMutation(chatId, mutation);
 	};
 	#recoverTranscript = async (chatId: string, viewId: string): Promise<void> => {
 		if (this.resetForViewReplacement(chatId, viewId)) {
@@ -284,6 +289,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.overlays,
 				{
 					onSnapshotResendCandidates: this.#onSnapshotResendCandidates,
+					onRecoveredMessages: this.observeRecoveredMessages,
 					combineMessages: this.options.combineMessages,
 					recoverTranscript: this.#recoverTranscript,
 				},
@@ -518,6 +524,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult {
+		if (this.options.cache.readAppliedCursor(batch.chatId)?.transcriptViewId === batch.transcriptViewId) {
+			this.observeRecoveredMessages(batch.chatId, batch.messages);
+		}
 		const replay = this.#reconnectReplays.get(batch.chatId);
 		if (replay?.replay.buffer(batch.chatId, batch)) {
 			return { kind: 'applied', localRecoverySurfaceIds: [] };
@@ -579,15 +588,36 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	markOptimisticInputDelivered(chatId: string, clientMessageId: string): void {
+		// Direct acceptance retires a live-tail steer without waiting for its echo.
+		if (this.#pendingOptimisticInput(chatId, clientMessageId)?.placement === 'live-tail') {
+			this.clearOptimisticInput(chatId, clientMessageId);
+			return;
+		}
 		const mutation = this.options.overlays.markOptimisticInputDelivered(chatId, clientMessageId);
 		if (!mutation) return;
 		this.#applyOverlayMutation(chatId, mutation);
+	}
+
+	anchorUnconfirmedSteer(chatId: string, clientMessageId: string): void {
+		const input = this.#pendingOptimisticInput(chatId, clientMessageId);
+		if (input?.placement !== 'live-tail') return;
+		this.upsertOptimisticInput(chatId, { ...input, placement: undefined });
+	}
+
+	#pendingOptimisticInput(chatId: string, clientMessageId: string): OptimisticUserInput | undefined {
+		const input = this.overlayFor(chatId)?.optimisticInputs.find(input => input.clientMessageId === clientMessageId);
+		return input?.delivery === 'pending' ? input : undefined;
 	}
 
 	clearOptimisticInput(chatId: string, clientMessageId: string): void {
 		const mutation = this.options.overlays.clearOptimisticInput(chatId, clientMessageId);
 		if (!mutation) return;
 		this.#applyOverlayMutation(chatId, mutation);
+	}
+
+	reconcileQueuedSteers(chatId: string, control: ChatExecutionControlState | null, receipt?: QueuedSteerReceipt): void {
+		const mutation = this.options.overlays.reconcileQueuedSteers(chatId, control, receipt);
+		if (mutation) this.#applyOverlayMutation(chatId, mutation);
 	}
 
 	excludeResendCandidate(chatId: string, ordinal: number): void {
@@ -645,6 +675,19 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.options.cache.remove(chatId);
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.clearMessages();
 		return true;
+	}
+
+	captureNativeReload(chatId: string): (page: TranscriptPage) => void {
+		const previousViewId = this.options.cache.readAppliedCursor(chatId)?.transcriptViewId
+			?? this.panelsForChat(chatId)[0]?.transcript.transcriptViewId ?? '';
+		return page => {
+			// A broadcast may have installed this view and newer commits before the reply.
+			if (this.options.cache.readAppliedCursor(chatId)?.transcriptViewId === page.transcriptViewId) return;
+			if (!this.resetForViewReplacement(chatId, previousViewId)) return;
+			this.options.cache.replaceFromPage(chatId, page);
+			for (const panel of this.panelsForChat(chatId)) panel.transcript.installCachedSnapshot(chatId);
+			this.options.cache.markValidated(chatId);
+		};
 	}
 
 	removeChat(chatId: string): void {
