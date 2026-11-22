@@ -30,7 +30,7 @@
     },
     "native": {
       "name": "garcon-native",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@tauri-apps/api": "2.12.4",
       },
