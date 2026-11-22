@@ -1,5 +1,5 @@
 import { expect, mock, spyOn, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -32,18 +32,18 @@ test('accepts only a clean empty listing, not failed or unrecognized discovery',
   expect(() => parsePiModelListing('', '')).toThrow();
 });
 
-test.skipIf(process.platform === 'win32')('discovery times out when a descendant inherits the CLI output pipes', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-discovery-'));
-  const binary = join(dir, 'pi');
-  try {
-    // The descendant holds both pipes until teardown removes the executable.
-    await writeFile(binary, '#!/bin/sh\nwhile [ -f "$0" ]; do sleep 0.1; done &\nprintf ready > "$0.ready"\n', { mode: 0o700 });
-    const probe = getPiAvailableModels(binary, AbortSignal.timeout(500));
-    await expect(Promise.race([probe, delay(3_000, 'still reading', { ref: false })])).rejects.toMatchObject({ name: 'TimeoutError' });
-    expect(await Bun.file(`${binary}.ready`).exists()).toBe(true);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+test.skipIf(process.platform === 'win32')('a discovery timeout stops a descendant holding pipes after the CLI exits', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-discovery-'));
+  const binary = join(dir.path, 'pi');
+  // Removing the executable also stops the fixture if group termination regresses.
+  await writeFile(binary, '#!/bin/sh\nwhile [ -f "$0" ]; do sleep 0.1; done &\nprintf "%s" "$!" > "$0.ready"\n', { mode: 0o700 });
+  const probe = getPiAvailableModels(binary, AbortSignal.timeout(500));
+  await expect(Promise.race([probe, delay(3_000, 'still reading', { ref: false })])).rejects.toMatchObject({ name: 'TimeoutError' });
+  const pid = (await Bun.file(`${binary}.ready`).text()).trim();
+  expect(pid).toMatch(/^[1-9]\d*$/);
+  const status = Bun.spawnSync(['ps', '-p', pid, '-o', 'stat=']).stdout.toString().trim();
+  // The system may not have reaped an orphan that has already terminated.
+  expect(status).toMatch(/^(Z.*)?$/);
 });
 
 test('caller cancellation leaves a shared probe running; shutdown drains it without retrying', async () => {

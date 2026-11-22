@@ -1,3 +1,4 @@
+import { win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SharedModelOption } from '@garcon/common/models';
 import { errorMessage, hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
@@ -65,18 +66,39 @@ export async function getPiAvailableModels(
   const proc = Bun.spawn([binary, '--list-models'], {
     env,
     stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
-    signal, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL',
+    detached: process.platform !== 'win32', maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL',
   });
   // An extension subprocess can keep a pipe open after Pi exits. The deadline also cancels both reads.
   const read = (stream: ReadableStream<Uint8Array>) =>
     new Response(stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal })).text();
   try {
-    const [stdout, stderr, code] = await Promise.all([read(proc.stdout), read(proc.stderr), proc.exited]);
+    const [stdout, stderr, code] = await waitUnlessAborted(
+      Promise.all([read(proc.stdout), read(proc.stderr), proc.exited]), signal,
+    );
     signal.throwIfAborted();
     if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
     return parsePiModelListing(stdout, stderr);
   } finally {
-    if (signal.aborted) await proc.exited;
+    if (signal.aborted) await stopDiscoveryProcess(proc);
+  }
+}
+
+async function stopDiscoveryProcess(proc: Bun.Subprocess): Promise<void> {
+  try {
+    if (process.platform !== 'win32') {
+      // The group still identifies a wrapper's children after the wrapper exits.
+      process.kill(-proc.pid, 'SIGKILL');
+    } else if (proc.exitCode === null) {
+      const taskkill = win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe');
+      await Bun.spawn([taskkill, '/T', '/F', '/PID', String(proc.pid)], {
+        stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', timeout: 2_000,
+      }).exited;
+    }
+  } catch (error) {
+    if (!hasNodeErrorCode(error, 'ESRCH') && !hasNodeErrorCode(error, 'ENOENT')) throw error;
+  } finally {
+    if (proc.exitCode === null) proc.kill('SIGKILL');
+    await proc.exited;
   }
 }
 
