@@ -9,6 +9,7 @@ import {
   type PreScheduleFailure,
 } from '../chat-execution/types.ts';
 import { DomainError } from '../../common/domain-error.ts';
+import { publicDispatchFailure } from '../agents/runtime-router-errors.js';
 import type { SteerDeliveryOutcome } from '../../../common/chat-command-contracts.ts';
 
 export class ChatCommandSettlement implements CommandSettlementPort {
@@ -84,10 +85,7 @@ export class ChatCommandSettlement implements CommandSettlementPort {
   }
 
   async settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void> {
-    await this.ledger.settleTerminal(command.key, 'failed', {
-      error: error instanceof Error ? error.message : String(error),
-      errorCode: error instanceof DomainError ? error.code : 'INTERNAL_ERROR',
-    });
+    await this.ledger.settleTerminal(command.key, 'failed', publicDispatchFailure(error));
   }
 
   async settleDuplicateInput(command: AcceptedExecutionCommand): Promise<void> {
