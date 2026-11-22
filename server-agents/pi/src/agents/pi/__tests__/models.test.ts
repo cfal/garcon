@@ -50,19 +50,52 @@ test.skipIf(process.platform === 'win32')('a discovery timeout stops a descendan
   await expectDescendantStopped(binary);
 });
 
-test.skipIf(process.platform === 'win32')('the output cap stops the entire discovery group, not just its writer', async () => {
-  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-oversize-'));
-  const binary = join(dir.path, 'pi');
+async function writeCliWithQuietChild(directory: string, command: string) {
+  const binary = join(directory, 'pi');
   await writeFile(binary, `#!/bin/sh
 while [ -f "$0" ]; do sleep 0.1; done >/dev/null 2>&1 &
 printf '%s' "$!" > "$0.ready"
-exec dd if=/dev/zero bs=65536 count=100
+${command}
 `, { mode: 0o700 });
+  return binary;
+}
+
+test.skipIf(process.platform === 'win32')('successful discovery returns models and stops a quiet descendant', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-success-'));
+  const binary = await writeCliWithQuietChild(dir.path, `echo 'provider  model  context  max-out  thinking  images'
+echo 'fixture   text   32K      4K       no        no'`);
+  expect(await getPiAvailableModels(binary)).toEqual([
+    { value: 'fixture/text', label: 'fixture: text', supportsImages: false },
+  ]);
+  await expectDescendantStopped(binary);
+});
+
+test.skipIf(process.platform === 'win32')('the output cap stops the entire discovery group, not just its writer', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-oversize-'));
+  const binary = await writeCliWithQuietChild(dir.path, 'exec dd if=/dev/zero bs=65536 count=100');
   await expect(getPiAvailableModels(binary)).rejects.toThrow('Pi model discovery failed (exit');
   await expectDescendantStopped(binary);
 });
 
-test('caller cancellation leaves a shared probe running; shutdown drains it without retrying', async () => {
+test('cancelling a catalog reader preserves the shared result for auth and later readers', async () => {
+  const models = [{ value: 'acme/text', label: 'acme: text', supportsImages: false }];
+  const probe = Promise.withResolvers<typeof models>();
+  const discover = mock((_signal: AbortSignal) => probe.promise);
+  const service = new PiModelCatalogService(testPiConfig, discover);
+  const caller = new AbortController();
+  const cancelled = service.getModels(caller.signal);
+  const auth = getPiAuthStatus(service);
+  caller.abort();
+  await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+  expect(discover.mock.calls[0]?.[0].aborted).toBe(false);
+
+  probe.resolve(models);
+  expect((await auth).authenticated).toBe(true);
+  expect(await service.getModelsStrict()).toEqual(models);
+  expect(discover).toHaveBeenCalledTimes(1);
+});
+
+test('executor shutdown drains shared discovery without retrying', async () => {
   const cleanup = Promise.withResolvers<void>();
   const discover = mock(async (lifetime: AbortSignal) => {
     await new Promise<void>(resolve => lifetime.addEventListener('abort', () => resolve(), { once: true }));
@@ -71,20 +104,15 @@ test('caller cancellation leaves a shared probe running; shutdown drains it with
     return [];
   });
   const service = new PiModelCatalogService(testPiConfig, discover);
-  const caller = new AbortController();
-  const first = service.getModelsStrict(caller.signal);
-  const second = service.getModelsStrict();
+  const catalog = service.getModelsStrict();
   const auth = getPiAuthStatus(service).catch((error: unknown) => error);
-  caller.abort();
-  await expect(first).rejects.toMatchObject({ name: 'AbortError' });
-  expect(discover.mock.calls[0]?.[0].aborted).toBe(false);
   let drained = false;
   const stopped = service.stop().then(() => { drained = true; });
   expect(discover.mock.calls[0]?.[0].aborted).toBe(true);
   await new Promise<void>(resolve => setImmediate(resolve));
   expect(drained).toBe(false);
   cleanup.resolve();
-  await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+  await expect(catalog).rejects.toMatchObject({ name: 'AbortError' });
   expect(await auth).toMatchObject({ name: 'AbortError' });
   await stopped;
   await expect(service.getModelsStrict()).rejects.toMatchObject({ name: 'AbortError' });
@@ -133,7 +161,7 @@ test('a transient retry keeps the original discovery deadline', async () => {
     code: 'PI_MODEL_DISCOVERY_UNAVAILABLE', message: 'Discovery timed out',
   });
   expect(discover).toHaveBeenCalledTimes(2);
-  expect(timer).toHaveBeenCalledTimes(1);
+  expect(timer.mock.calls).toEqual([[20_000]]);
 });
 
 test.each([
