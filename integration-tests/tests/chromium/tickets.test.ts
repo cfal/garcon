@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { expect as browserExpect } from "playwright/test";
 import {
   parseTicketBootstrap,
   parseTicketDetail,
@@ -44,9 +45,22 @@ describe("Chromium Tickets interaction", () => {
       expect(collapsed.middle).toBeLessThan(collapsed.before);
       expect(collapsed.middle).toBeGreaterThan(collapsed.after);
 
+      const running = await summary.evaluateHandle(async (control: HTMLElement) => {
+        control.click();
+        await new Promise(requestAnimationFrame);
+        const resize = control.closest('[role="dialog"]')!.getAnimations()
+          .find(animation => animation.id === "dialog-resize")!;
+        resize.pause();
+        return resize;
+      });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe("idle");
+      await running.dispose();
+      await page.setViewportSize({ width: 1440, height: 900 });
+
       await page.emulateMedia({ reducedMotion: "reduce" });
       const osReduced = await measureToggle();
-      expect(osReduced.after).toBeGreaterThan(osReduced.before);
+      expect(osReduced.after).toBeLessThan(osReduced.before);
       expect(osReduced.middle).toBe(osReduced.after);
 
       await page.emulateMedia({ reducedMotion: "no-preference" });
