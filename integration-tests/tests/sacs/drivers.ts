@@ -42,6 +42,7 @@ import type {
   SacsHeldTurn,
   SacsLegacyHistoryImportFacet,
   SacsLegacyTranscriptRow,
+  SacsModelRequest,
   SacsNativeForkingFacet,
   SacsNativeHistoryImportFacet,
   SacsPreparedHistorySource,
@@ -440,6 +441,20 @@ const piHistorySource = filesystemHistorySource('pi', (original) => (
   ].map((entry) => JSON.stringify(entry)).join('\n')}\n`
 ));
 
+function scriptedModelControls(model: {
+  markRequests(): number;
+  requestsSince(cursor: number): readonly SacsModelRequest[];
+  assertSettled(): void;
+  reset(): void;
+}) {
+  return {
+    markRequests: () => model.markRequests(),
+    requestsSince: (_fixture: IntegrationFixture, cursor: number) => model.requestsSince(cursor),
+    assertSettled: () => model.assertSettled(),
+    reset: () => model.reset(),
+  };
+}
+
 const claudeDriver: SacsDriverFactory = {
   id: 'claude',
   label: 'Claude',
@@ -463,12 +478,7 @@ const claudeDriver: SacsDriverFactory = {
         environment.model.scriptHeldTurn([claudeText(content)]),
       ),
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([claudeText(content)]),
-      markRequests: () => environment.model.markRequests(),
-      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -502,12 +512,7 @@ const codexDriver: SacsDriverFactory = {
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([
         codexAssistantMessage(content),
       ]),
-      markRequests: () => environment.model.markRequests(),
-      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -546,12 +551,7 @@ const piDriver: SacsDriverFactory = {
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([
         chatCompletionsText(content),
       ]),
-      markRequests: () => environment.model.markRequests(),
-      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -582,12 +582,7 @@ const antigravityDriver: SacsDriverFactory = {
       // A cooperative cancel abandons the held model request, so no tool step is needed.
       holdInterruptibleAssistant: (_fixture, content) => heldTurn(environment.model.scriptHeldTurn([geminiText(content)])),
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([geminiText(content)]),
-      markRequests: () => environment.model.markRequests(),
-      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -623,12 +618,7 @@ const openCodeDriver: SacsDriverFactory = {
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([
         chatCompletionsText(content),
       ]),
-      markRequests: () => environment.model.markRequests(),
-      requestBodiesSince: (_fixture, cursor) => environment.model.requestsSince(cursor).map((request) => request.body),
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -701,11 +691,9 @@ function directDriver(
           held.releaseText(content);
         },
         markRequests: (fixture) => selectProvider(fixture).requests().at(-1)?.id ?? 0,
-        requestBodiesSince: (fixture, cursor) => selectProvider(fixture).requests()
-          .filter((request) => request.id > cursor).map((request) => request.rawBody),
-        userTextsSince: (fixture, cursor) => selectProvider(fixture).requests()
+        requestsSince: (fixture, cursor) => selectProvider(fixture).requests()
           .filter((request) => request.id > cursor)
-          .map((request) => request.lastUserText),
+          .map((request) => ({ body: request.rawBody, userTexts: [request.lastUserText] })),
         assertSettled: (fixture) => selectProvider(fixture).assertNoProtocolViolations(),
         reset: () => {},
         dispose: () => {},

@@ -195,15 +195,16 @@ for (const factory of sacsScriptedDriverFactories) {
         driver.scriptAssistant(fixture, reply);
         const turn = await fixture.client.runChat(driver.runRequest(fixture, { chatId, command: prompt }));
         expect((await fixture.client.waitForTurnTerminal(chatId, turn.turnId)).type).toBe('agent-run-finished');
-        const requests = driver.requestBodiesSince(fixture, cursor);
+        const requests = driver.requestsSince(fixture, cursor);
         expect(requests).toHaveLength(1);
-        const context = driver.userTextsSince(fixture, cursor).join('\n');
-        expect(context).toContain(source.firstPrompt);
-        expect(context).toContain(source.firstReply);
-        expect(context).toContain(prompt);
-        const request = JSON.stringify(requests[0]);
-        expect(request).not.toContain(source.secondPrompt);
-        expect(request).not.toContain(source.secondReply);
+        const request = requests[0]!;
+        const context = request.userTexts.join('\n');
+        const markers = [source.firstPrompt, source.firstReply, prompt];
+        const observed = Array.from(context.matchAll(new RegExp(markers.join('|'), 'g')), (match) => match[0]);
+        expect(observed).toEqual(markers);
+        const body = JSON.stringify(request.body);
+        expect(body).not.toContain(source.secondPrompt);
+        expect(body).not.toContain(source.secondReply);
         const binding = await waitForPersistedNativeSession({ directories: fixture.dirs, agentId: driver.id, chatId });
         expect(binding.agentSessionId).not.toBe(sourceBinding.agentSessionId);
         expect(assistantContents((await fixture.client.getMessages(chatId)).messages))
