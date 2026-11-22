@@ -1,7 +1,11 @@
 import { expect, test } from 'bun:test';
+import { mkdtempDisposable, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildSessionProjection, type SessionEntry } from '@earendil-works/pi-coding-agent';
 import { rejectionOf } from '../../support/promise-assertions.js';
 import { EventLoopSteps } from '../../../server-agents/common/src/shared/event-loop.js';
+import { loadPiChatMessages } from '../../../server-agents/pi/src/agents/pi/history-loader.js';
 import { projectPiHistory, type PiSessionEntry } from '../../../server-agents/pi/src/agents/pi/session-projection.js';
 
 const at = '2026-01-01T00:00:00.000Z';
@@ -22,6 +26,12 @@ const base = [
   entry('custom', 'tool', { type: 'custom_message', customType: 'synthetic', content: 'synthetic custom', display: true }),
 ];
 
+const uncheckedKeys = [
+  { type: 'message', id: 1, parentId: null, message: { role: 'user', content: 'original' } },
+  { type: 'message', id: true, parentId: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'reply' }] } },
+  { type: 'context_edit', id: 'edit', parentId: true, targetId: 1, replacement: { content: 'edited' } },
+];
+
 const samples: Array<[string, PiSessionEntry[]]> = [
   ['empty', []],
   ['ordinary', base],
@@ -30,11 +40,7 @@ const samples: Array<[string, PiSessionEntry[]]> = [
   ['missing parent', [...base, message('orphan', 'missing', 'user', 'orphan')]],
   ['omitted parent', [...base, message('orphan', undefined, 'user', 'orphan')]],
   ['missing content', [message('user', null, 'user', null), message('answer', 'user', 'assistant', undefined)]],
-  ['unchecked parent and edit keys', [
-    { type: 'message', id: 1, parentId: null, message: { role: 'user', content: 'original' } },
-    { type: 'message', id: true, parentId: 1, message: { role: 'assistant', content: [] } },
-    { type: 'context_edit', id: 'edit', parentId: true, targetId: 1, replacement: { content: 'edited' } },
-  ]],
+  ['unchecked parent and edit keys', uncheckedKeys],
   ['timestamp coercion is limited to synthesized messages', [
     entry('meta', null, { type: 'usage', timestamp: { toString: null } }),
     entry('summary', 'meta', { type: 'branch_summary', summary: 'summary', timestamp: [at] }),
@@ -83,6 +89,16 @@ test.each(samples)('matches the pinned SDK projection: %s', async (_name, entrie
   for (let index = 0; index < actual.length; index += 1) {
     expect<object>(actual[index].sourceEntry).toBe(expected[index].sourceEntry);
   }
+});
+
+test('imports the complete edited transcript when native keys are not strings', async () => {
+  await using home = await mkdtempDisposable(join(tmpdir(), 'pi-history-'));
+  const file = join(home.path, 'session.jsonl');
+  await writeFile(file, uncheckedKeys.map(entry => JSON.stringify(entry)).join('\n'));
+  expect(await loadPiChatMessages(file)).toMatchObject([
+    { type: 'user-message', content: 'edited' },
+    { type: 'assistant-message', content: 'reply' },
+  ]);
 });
 
 for (const container of [null, undefined]) {
