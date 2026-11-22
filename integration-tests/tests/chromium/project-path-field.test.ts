@@ -3,6 +3,7 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { measureDialogHeightChange } from '../../support/dialog-resize.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 
@@ -131,20 +132,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const newWorktree = picker.getByRole('button', { name: 'New worktree', exact: true });
       if (executionBackend === 'in-process') {
         await browserExpect(newWorktree).toBeEnabled();
-        const sizes = await newWorktree.evaluate(async (button: HTMLElement) => {
-          const dialog = button.closest<HTMLElement>('[role="dialog"]')!;
-          const list = dialog.offsetHeight;
-          button.click();
-          await new Promise(requestAnimationFrame);
-          const resize = dialog.getAnimations().find(animation => animation.id === 'dialog-resize')!;
-          resize.pause();
-          resize.currentTime = Number(resize.effect!.getTiming().duration) / 2;
-          const middle = dialog.offsetHeight;
-          resize.finish();
-          return { list, middle, create: dialog.offsetHeight };
-        });
-        expect(sizes.middle).toBeLessThan(sizes.list);
-        expect(sizes.middle).toBeGreaterThan(sizes.create);
+        const { before, middle, after } = await newWorktree.evaluate(measureDialogHeightChange);
+        expect(middle).toBeLessThan(before);
+        expect(middle).toBeGreaterThan(after);
       } else {
         await newWorktree.click();
       }

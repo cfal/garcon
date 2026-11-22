@@ -7,6 +7,8 @@ import {
 import { parseTicketWriteResult } from "../../../common/ticket-records.js";
 import type { TicketMutationPayload } from "../../../common/ticket-commands.js";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import { measureDialogHeightChange } from "../../support/dialog-resize.js";
+import { seedLocalSettings } from "../../support/local-settings-seed.js";
 import {
   clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
@@ -20,21 +22,7 @@ describe("Chromium Tickets interaction", () => {
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       const openTicket = page.getByRole("button", { name: "New ticket", exact: true });
       const summary = page.getByRole("dialog").locator("summary", { hasText: "More details" });
-      const measureToggle = () => summary.evaluate(async (control: HTMLElement) => {
-        const dialog = control.closest<HTMLElement>('[role="dialog"]')!;
-        const before = dialog.offsetHeight;
-        control.focus();
-        control.click();
-        await new Promise(requestAnimationFrame);
-        const resize = dialog.getAnimations().find(animation => animation.id === "dialog-resize");
-        if (resize) {
-          resize.pause();
-          resize.currentTime = Number(resize.effect!.getTiming().duration) / 2;
-        }
-        const middle = dialog.offsetHeight;
-        resize?.finish();
-        return { before, middle, after: dialog.offsetHeight, focused: document.activeElement === control };
-      });
+      const measureToggle = () => summary.evaluate(measureDialogHeightChange, { focus: true });
 
       await openTicket.click();
       const resizedWithoutPainting = await summary.evaluate(async (control: HTMLElement) => {
@@ -72,10 +60,7 @@ describe("Chromium Tickets interaction", () => {
       expect(osReduced.middle).toBe(osReduced.after);
 
       await page.emulateMedia({ reducedMotion: "no-preference" });
-      await page.evaluate(() => {
-        const prefs = JSON.parse(localStorage.getItem("pref_local_settings") ?? "{}");
-        localStorage.setItem("pref_local_settings", JSON.stringify({ ...prefs, reduceMotion: true }));
-      });
+      await page.evaluate(seedLocalSettings, { reduceMotion: true });
       await page.reload();
       await openTicket.click();
       const appReduced = await measureToggle();

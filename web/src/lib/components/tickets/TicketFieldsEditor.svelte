@@ -91,9 +91,9 @@
 		{/if}
 	</div>
 	<details open={draft.current.kind !== 'create'}>
-		<summary onclickcapture={draft.current.kind === 'create' ? resizeDialogOnClick : undefined}
-			>{m.tickets_more_details()}</summary
-		>
+		<summary onclickcapture={draft.current.kind === 'create' ? resizeDialogOnClick : undefined}>
+			{m.tickets_more_details()}
+		</summary>
 		<div class="ticket-properties">
 			<label class="ticket-field"
 				>{m.tickets_priority()}<select
