@@ -120,6 +120,21 @@ async function* directoryEntries(directory: string) {
   yield* handle;
 }
 
+async function readSessionHeader(file: string): Promise<unknown> {
+  let parseError: unknown;
+  // Pi identifies sessions by the first parsed, nonempty entry, skipping malformed prefix lines.
+  for await (const { line } of readJsonlLineEntries(file, { maxReadBytes: 1024 * 1024 })) {
+    try {
+      const entry: unknown = JSON.parse(line);
+      if (entry) return entry;
+    } catch (error) {
+      parseError ??= error;
+    }
+  }
+  if (parseError) throw parseError;
+  return null;
+}
+
 async function findInDirectory(
   directory: string,
   sessionId: string,
@@ -138,10 +153,7 @@ async function findInDirectory(
     const candidate = path.join(directory, entry.name);
     let header: unknown;
     try {
-      for await (const { line } of readJsonlLineEntries(candidate, { maxReadBytes: 1024 * 1024 })) {
-        header = JSON.parse(line);
-        break;
-      }
+      header = await readSessionHeader(candidate);
     } catch (error) {
       if (named) throw new Error('Pi transcript header could not be read', { cause: error });
       continue;

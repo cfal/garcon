@@ -129,6 +129,19 @@ test('bounds the whole header scan, not just individual lines or the size of the
   expect(await lookup()).toBe(file);
 });
 
+test('skips malformed prefix lines but never searches past a parsed entry for a matching header', async () => {
+  override = path.join(home, 'shared');
+  const contents = { ...header, cwd: project };
+  const renamed = await put(path.join(override, 'renamed.jsonl'), contents);
+  await writeFile(renamed, `{broken\nnull\n${JSON.stringify(contents)}\n`);
+  expect(await lookup()).toBe(renamed);
+
+  await writeFile(renamed, `{"type":"message"}\n${JSON.stringify(contents)}\n`);
+  expect(await lookup()).toBeNull();
+  await writeFile(path.join(override, 'date_test.jsonl'), '{broken\n');
+  await expect(lookup()).rejects.toThrow('header could not be read');
+});
+
 test('looks in the default session root and refuses ambiguous or unproved identity', async () => {
   const root = path.join(home, 'agent', 'sessions');
   const first = await put(path.join(root, '--other--', 'renamed.jsonl'), header);
