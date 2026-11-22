@@ -112,6 +112,7 @@
 		<div
 			bind:this={pageBodyElement}
 			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
+			style:scrollbar-gutter="stable"
 		>
 			{#if wizard.pageId === 'welcome'}
 				<OnboardingWelcomePage />

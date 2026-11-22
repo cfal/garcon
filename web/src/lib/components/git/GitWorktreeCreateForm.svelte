@@ -73,7 +73,7 @@
 		create();
 	}}
 >
-	<div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+	<div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4" style:scrollbar-gutter="stable">
 		<GitNameField
 			name={branchName}
 			bind:ref={nameInput}

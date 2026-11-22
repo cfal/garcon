@@ -184,7 +184,7 @@
 			</Dialog.Title>
 			<Dialog.Description>{m.pull_request_repository_description()}</Dialog.Description>
 		</Dialog.Header>
-		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1" style:scrollbar-gutter="stable">
 			<section class={sectionClass}>
 				{#if form.settingsOnlyOffline}
 					<p class="text-sm text-muted-foreground" role="status">

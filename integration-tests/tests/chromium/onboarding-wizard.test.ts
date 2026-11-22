@@ -31,6 +31,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       const wizard = page.getByRole('dialog');
       const body = wizard.locator('div.overflow-y-auto');
       await browserExpect(wizard.getByRole('heading', { name: 'Welcome to Garcon' })).toBeVisible();
+      await browserExpect(body).toHaveCSS('scrollbar-gutter', 'stable');
       const titles = [
         'Welcome to Garcon',
         'Choose your theme',
