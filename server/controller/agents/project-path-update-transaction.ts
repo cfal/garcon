@@ -128,6 +128,7 @@ function projectPathPreparationError(error: unknown): DomainError {
     case 'SESSION_BUSY':
       return new DomainError('CHAT_NOT_IDLE', error.message, 409, error.retryable);
     case 'UNAVAILABLE':
+    case 'EXECUTOR_BUSY':
     case 'BINARY_NOT_FOUND':
       return new DomainError(
         'PROJECT_PATH_UPDATE_FAILED',
