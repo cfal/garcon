@@ -194,17 +194,10 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.clickMenuItem('Settings');
       await app.waitForButton('Automation');
       await app.clickButton('Automation');
-      await fixture.page.waitForFunction(() => {
-        const secondary = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]');
-        const button = secondary?.closest('button');
-        return button instanceof HTMLButtonElement && !button.disabled;
-      });
-      await fixture.page.evaluate(() => {
-        const secondary = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]');
-        const button = secondary?.closest('button');
-        if (!(button instanceof HTMLButtonElement)) throw new Error('Generation model selector is unavailable');
-        button.click();
-      });
+      const commitModel = '[role="group"][aria-label="Commit message model"]';
+      const modelTrigger = `${commitModel} button:not(:disabled):has([data-slot="model-selector-trigger-secondary"])`;
+      await fixture.page.waitForSelector(modelTrigger);
+      await fixture.page.$eval(modelTrigger, button => (button as HTMLButtonElement).click());
       await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
         .some((button) => button.textContent?.trim() === 'Inbound Worker' && !button.disabled));
       await fixture.page.evaluate(() => {
@@ -220,10 +213,10 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForButton('Integration Echo');
       await app.clickButton('Integration Echo');
       await app.clickButton('Default Provider default effort');
-      await fixture.page.waitForFunction(() =>
-        document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Test model"]')?.disabled === false);
-      await app.clickButton('Test model');
-      await app.waitForText('Model responded in');
+      const testModel = `${commitModel} button[aria-label="Test model"]:not(:disabled)`;
+      await fixture.page.waitForSelector(testModel);
+      await fixture.page.$eval(testModel, button => (button as HTMLButtonElement).click());
+      await fixture.page.waitForFunction(selector => document.querySelector(selector)?.textContent?.includes('Model responded in'), {}, commitModel);
       const settings = await fixture.integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings');
       expect(settings.ui.commitMessage?.executorId).toBe(inbound.id);
       await app.clickDialogButton('Close');

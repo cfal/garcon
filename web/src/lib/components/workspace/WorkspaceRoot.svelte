@@ -774,6 +774,7 @@
 
 {#if gitBranchActions.showNewBranchModal}
 	<NewBranchModal
+		contextKey={JSON.stringify([gitBranchActions.executorId, gitBranchActions.newBranchEffectiveProjectKey, gitBranchActions.newBranchSurfaceId])}
 		currentBranch={gitBranchActions.newBranchCurrentBranch || 'HEAD'}
 		newBranchName={gitBranchActions.newBranchName}
 		refOptions={gitBranchActions.newBranchRefs}

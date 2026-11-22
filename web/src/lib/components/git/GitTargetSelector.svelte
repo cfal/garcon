@@ -64,6 +64,7 @@
 
 {#if target.branches.showNewBranchModal}
 	<NewBranchModal
+		contextKey={JSON.stringify([target.branches.executorId, target.branches.newBranchEffectiveProjectKey, target.branches.newBranchSurfaceId])}
 		currentBranch={target.branches.newBranchCurrentBranch || 'HEAD'}
 		newBranchName={target.branches.newBranchName}
 		refOptions={target.branches.newBranchRefs}

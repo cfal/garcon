@@ -17,6 +17,7 @@
 			settingsKey="chatTitle"
 			enabledLabel={m.settings_chat_generate_titles()}
 			modelLabel={m.settings_chat_title_model()}
+			blurb={m.settings_chat_title_model_hint()}
 		/>
 
 		<RemoteGenerationSettingsCard

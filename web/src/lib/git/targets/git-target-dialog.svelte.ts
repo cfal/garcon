@@ -1,14 +1,8 @@
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
-import {
-	getGitTargetCandidates,
-	getGitWorktrees,
-	gitCreateWorktree,
-	type GitTargetCandidate,
-	type GitWorktreeItem,
-} from '$lib/api/git.js';
+import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
-import type { GitProjectTarget } from '$lib/api/git-client.js';
+import { WorktreePickerSession } from './worktree-picker-session.svelte.js';
 
 export type GitTargetValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 
@@ -18,8 +12,8 @@ interface GitTargetDialogOptions {
 	readonly initialPath: string;
 	readonly executorId: string;
 	readonly executorContextKey: string;
+	readonly instanceId: string | null;
 	readonly available: boolean;
-	onMutationError?(error: unknown, target: GitProjectTarget): void;
 }
 
 export class GitTargetDialogState {
@@ -27,18 +21,20 @@ export class GitTargetDialogState {
 	showBrowser = $state(false);
 	validationStatus = $state<GitTargetValidationStatus>('idle');
 	validationError = $state<string | null>(null);
-	worktreePickerOpen = $state(false);
-	worktrees = $state<GitWorktreeItem[]>([]);
-	isLoadingWorktrees = $state(false);
-	isCreatingWorktree = $state(false);
-	worktreeError = $state<string | null>(null);
+	readonly worktreePicker = new WorktreePickerSession({
+		target: () => ({ executorId: this.options.executorId, projectPath: this.nonblankPath }),
+		servingContext: () => this.options.available ? this.options.executorContextKey : null,
+		servingInstanceId: () => this.options.instanceId,
+		select: (path) => {
+			this.setCandidatePath(path);
+			this.validationStatus = 'valid';
+		},
+	});
 	isConfirming = $state(false);
 
 	#validationTimer: ReturnType<typeof setTimeout> | null = null;
 	#validationGeneration = 0;
 	#validationAbort: AbortController | null = null;
-	#worktreeGeneration = 0;
-	#worktreeAbort: AbortController | null = null;
 	#targetAbort: AbortController | null = null;
 	#disposed = false;
 
@@ -66,14 +62,12 @@ export class GitTargetDialogState {
 	setCandidatePath(path: string): void {
 		this.candidatePath = path;
 		this.validationError = null;
-		this.worktreeError = null;
 	}
 
 	scheduleValidation(): void {
 		const path = this.nonblankPath;
 		const executorId = this.options.executorId;
 		const contextKey = this.options.executorContextKey;
-		this.#cancelWorktreeLoad();
 		this.#targetAbort?.abort();
 		this.#validationAbort?.abort();
 		this.#validationAbort = null;
@@ -96,85 +90,7 @@ export class GitTargetDialogState {
 	}
 
 	openWorktreePicker(): void {
-		if (!this.canSelectWorktree) return;
-		this.worktreePickerOpen = true;
-		void this.loadWorktrees();
-	}
-
-	closeWorktreePicker(): void {
-		this.worktreePickerOpen = false;
-		this.worktreeError = null;
-		this.#cancelWorktreeLoad();
-	}
-
-	selectWorktree(worktreePath: string): void {
-		if (!this.options.available) return;
-		this.#cancelWorktreeLoad();
-		this.setCandidatePath(worktreePath);
-		this.validationStatus = 'valid';
-		this.validationError = null;
-		this.worktreePickerOpen = false;
-	}
-
-	async loadWorktrees(): Promise<void> {
-		const path = this.nonblankPath;
-		const executorId = this.options.executorId;
-		const current = this.#captureContext();
-		if (!path || !this.options.available || this.isCreatingWorktree) return;
-
-		this.#worktreeAbort?.abort();
-		const abort = new AbortController();
-		this.#worktreeAbort = abort;
-		const generation = ++this.#worktreeGeneration;
-		this.isLoadingWorktrees = true;
-		this.worktreeError = null;
-
-		try {
-			const result = await getGitWorktrees({ executorId, projectPath: path }, { signal: abort.signal });
-			if (!current() || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
-			this.worktrees = result.worktrees;
-		} catch (error) {
-			if (
-				isAbortError(error) ||
-				!current() ||
-				!this.#isCurrentWorktreeLoad(generation, abort.signal)
-			)
-				return;
-			this.worktreeError = m.git_target_load_worktrees_failed();
-			this.worktrees = [];
-		} finally {
-			if (this.#isCurrentWorktreeLoad(generation, abort.signal)) this.isLoadingWorktrees = false;
-		}
-	}
-
-	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
-		const projectPath = this.nonblankPath;
-		const executorId = this.options.executorId;
-		const current = this.#captureContext();
-		const generation = this.#worktreeGeneration;
-		if (!projectPath || !this.options.available || this.isCreatingWorktree) return;
-
-		this.isCreatingWorktree = true;
-		this.worktreeError = null;
-
-		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
-				branch,
-				baseRef,
-			});
-			if (!result.success) {
-				throw new Error(result.error || result.message || m.git_target_load_worktrees_failed());
-			}
-			if (!current() || generation !== this.#worktreeGeneration) return;
-			this.selectWorktree(result.worktreePath || worktreePath);
-		} catch (error) {
-			this.options.onMutationError?.(error, { executorId, projectPath });
-			if (!current() || generation !== this.#worktreeGeneration) return;
-			this.worktreeError =
-				error instanceof Error ? error.message : m.git_target_load_worktrees_failed();
-		} finally {
-			if (generation === this.#worktreeGeneration) this.isCreatingWorktree = false;
-		}
+		if (this.canSelectWorktree) void this.worktreePicker.open();
 	}
 
 	async resolveConfirmedTarget(): Promise<GitTargetCandidate | null> {
@@ -220,7 +136,7 @@ export class GitTargetDialogState {
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
 		this.#validationTimer = null;
 		this.#validationAbort?.abort();
-		this.#cancelWorktreeLoad();
+		this.worktreePicker.close();
 		this.#targetAbort?.abort();
 	}
 
@@ -271,18 +187,6 @@ export class GitTargetDialogState {
 		return (
 			!signal.aborted && generation === this.#validationGeneration && path === this.nonblankPath
 		);
-	}
-
-	#isCurrentWorktreeLoad(generation: number, signal: AbortSignal): boolean {
-		return !signal.aborted && generation === this.#worktreeGeneration;
-	}
-
-	#cancelWorktreeLoad(): void {
-		this.#worktreeAbort?.abort();
-		this.#worktreeAbort = null;
-		this.#worktreeGeneration += 1;
-		this.isLoadingWorktrees = false;
-		this.isCreatingWorktree = false;
 	}
 
 	#captureContext(): () => boolean {

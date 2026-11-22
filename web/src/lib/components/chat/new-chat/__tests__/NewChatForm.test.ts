@@ -15,7 +15,7 @@ import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { localExecutor, remoteExecutor, localScope } from '$lib/executors/__tests__/fixtures';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
@@ -979,6 +979,7 @@ describe('NewChatForm', () => {
 			isGitRepo: true,
 		});
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...localScope,
 			worktrees: [
 				{
 					name: 'main',
