@@ -100,15 +100,16 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(window.open).not.toHaveBeenCalled();
 	});
 
-	it('ignores a sessionless restore reply from the previous browser owner', async () => {
+	it('does not adopt another browser owner\'s live login when Settings opens', async () => {
 		const catalog = createModelCatalog(['codex']);
-		const status = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
-		vi.mocked(getAgentAuthLoginStatus).mockReturnValueOnce(status.promise);
+		await new SettingsAuthState(catalog).handleLogin('codex');
+		catalog.setOwner('owner-b');
+		catalog.agentMetadata = { codex: nativeCatalogAgent('codex') };
+		vi.mocked(getAgentAuthLoginStatus).mockClear();
 		const view = new SettingsAuthState(catalog);
 		const destroy = view.initialize();
-		catalog.setOwner(null);
-		status.resolve({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: DEVICE_AUTH });
 		await vi.advanceTimersByTimeAsync(0);
+		expect(getAgentAuthLoginStatus).not.toHaveBeenCalled();
 		expect(catalog.pendingLogins.sessionId('codex')).toBeUndefined();
 		expect(view.deviceAuthFor('codex')).toBeUndefined();
 		destroy();
@@ -141,7 +142,6 @@ describe('SettingsAuthState login lifecycle', () => {
 		vi.mocked(completeAgentAuthLogin).mockReturnValueOnce(submitted.promise);
 		const terminal = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
 		vi.mocked(getAgentAuthLoginStatus)
-			.mockResolvedValueOnce({ state: 'idle', running: false })
 			.mockResolvedValueOnce({ state: 'running', running: true, sessionId: SESSION_ID, completionPending: false, deviceAuth })
 			.mockImplementation(async (agent, sessionId, executorId) => {
 				if (agent === 'antigravity' && sessionId === SESSION_ID && executorId === id) return terminal.promise;
@@ -174,7 +174,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		stale.resolve(snapshot([defaultModel]));
 		await preLoginRefresh;
 		expect(fetchCatalog).toHaveBeenCalledTimes(3);
-		expect(fetchCatalog).toHaveBeenLastCalledWith(id, null, 'test-worker');
+		expect(fetchCatalog).toHaveBeenLastCalledWith(id, null, 'test-worker', ['antigravity']);
 		expect(catalog.getModels('antigravity').map(model => model.value)).toEqual(['default', discovered.value]);
 	});
 
@@ -188,6 +188,35 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(settingsAuth.deviceAuthFor('codex')).toEqual(DEVICE_AUTH);
 	});
 
+	it.each(['confirmation', 'discovery'])('supersedes a prior login during %s before the replacement launch replies', async phase => {
+		const catalog = createModelCatalog(['codex']);
+		vi.mocked(catalog.forceRefresh).mockRestore();
+		const discovery = Promise.withResolvers<Response>();
+		const confirmation = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
+		const launch = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		const fetchCatalog = vi.spyOn(catalogApi, 'fetchModelCatalogResponse').mockReturnValue(discovery.promise);
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({ state: 'succeeded', running: false, sessionId: SESSION_ID, instanceId: 'worker' });
+		vi.mocked(getAgentAuthStatus).mockReturnValue(confirmation.promise);
+		const view = new SettingsAuthState(catalog);
+		await view.handleLogin('codex');
+		const auth = { authenticated: true, canReauth: true, label: 'Previous account' };
+		if (phase === 'discovery') {
+			confirmation.resolve(auth);
+			await vi.waitFor(() => expect(fetchCatalog).toHaveBeenCalledOnce());
+		}
+		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launch.promise);
+		const next = view.handleLogin('codex');
+		confirmation.resolve(auth);
+		discovery.resolve(Response.json({ catalog: { agents: [nativeCatalogAgent('codex', [{ value: 'old', label: 'Old' }])], apiProviders: [] } }));
+		await vi.advanceTimersByTimeAsync(0);
+		if (phase === 'confirmation') expect(fetchCatalog).not.toHaveBeenCalled();
+		expect(catalog.getModels('codex')).toEqual([]);
+		expect(catalog.isValidated).toBe(false);
+		launch.resolve({ launched: true, alreadyRunning: false, sessionId: 'second' });
+		await next;
+		catalog.dispose();
+	});
+
 	it('retains a mounted code form across same-owner reauthentication and releases it on owner loss', async () => {
 		const catalog = createModelCatalog(['antigravity']);
 		vi.mocked(getAgentAuthStatus).mockResolvedValue({ authenticated: false, canReauth: true, label: '' });
@@ -195,8 +224,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
 			launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: login,
 		});
-		vi.mocked(getAgentAuthLoginStatus).mockResolvedValueOnce({ state: 'idle', running: false })
-			.mockResolvedValue({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: login });
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: login });
 		const settingsAuth = new SettingsAuthState(catalog);
 		const cleanup = settingsAuth.initialize();
 		render(OtherAgentsSection, { settingsAuth });
@@ -212,7 +240,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		cleanup();
 	});
 
-	it('routes login to the selected executor and ignores replies after leaving that executor', async () => {
+	it('continues polling only the selected executor after leaving its Settings view', async () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
 		const launched = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launched.promise);
@@ -224,7 +252,8 @@ describe('SettingsAuthState login lifecycle', () => {
 		await pending;
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 2);
 		expect(remote.deviceAuthFor('codex')).toBeUndefined();
-		expect(getAgentAuthLoginStatus).not.toHaveBeenCalled();
+		expect(vi.mocked(getAgentAuthLoginStatus).mock.calls).toEqual(Array(3).fill(['codex', SESSION_ID, executorId]));
+		expect(window.open).not.toHaveBeenCalled();
 	});
 
 	it('clears the device code and refreshes auth once the owned session ends', async () => {
@@ -275,6 +304,7 @@ describe('SettingsAuthState login lifecycle', () => {
 
 	it('restores and resumes polling an active session on initialize and reopen', async () => {
 		const settingsAuth = new SettingsAuthState(createModelCatalog(['codex']));
+		await settingsAuth.handleLogin('codex');
 		const firstCleanup = settingsAuth.initialize();
 		await vi.waitFor(() => expect(settingsAuth.deviceAuthFor('codex')).toEqual(DEVICE_AUTH));
 
@@ -286,19 +316,25 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(settingsAuth.isLoginPending('codex')).toBe(true);
 		await settingsAuth.completeLogin('codex', 'synthetic-code');
 		expect(completeAgentAuthLogin).not.toHaveBeenCalled();
-		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(2);
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(1);
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(3);
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(2);
 		expect(settingsAuth.isLoginPending('codex')).toBe(false);
 	});
 
-	it('invalidates an in-flight launch when Settings is destroyed', async () => {
+	it.each(['before', 'after'])('reattaches when Settings reopens %s the owned launch reply', async timing => {
 		const launch = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		vi.mocked(launchAgentAuthLogin).mockReturnValue(launch.promise);
-		const settingsAuth = new SettingsAuthState(createModelCatalog());
+		const catalog = createModelCatalog(['codex']);
+		const settingsAuth = new SettingsAuthState(catalog);
+		const reopened = new SettingsAuthState(catalog);
 		const login = settingsAuth.handleLogin('codex');
 
 		settingsAuth.destroy();
+		if (timing === 'before') reopened.initialize();
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
+			state: 'running', running: true, sessionId: SESSION_ID, completionPending: false, deviceAuth: CLAUDE_AUTH,
+		});
 		launch.resolve({
 			launched: true,
 			alreadyRunning: false,
@@ -306,9 +342,15 @@ describe('SettingsAuthState login lifecycle', () => {
 			deviceAuth: DEVICE_AUTH,
 		});
 		await login;
+		if (timing === 'after') reopened.initialize();
+		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 
 		expect(window.open).not.toHaveBeenCalled();
-		expect(getAgentAuthLoginStatus).not.toHaveBeenCalled();
+		expect(getAgentAuthLoginStatus).toHaveBeenLastCalledWith('codex', SESSION_ID, 'local');
+		expect(reopened.deviceAuthFor('codex')).toEqual(CLAUDE_AUTH);
+		await reopened.completeLogin('codex', 'test-code');
+		expect(completeAgentAuthLogin).toHaveBeenCalledWith('codex', SESSION_ID, 'test-code', 'local');
+		expect(launchAgentAuthLogin).toHaveBeenCalledOnce();
 		expect(settingsAuth.deviceAuthFor('codex')).toBeUndefined();
 		expect(settingsAuth.isLoginPending('codex')).toBe(false);
 	});
@@ -371,6 +413,24 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(getAgentAuthLoginStatus).toHaveBeenLastCalledWith('claude', 'session-b', 'local');
 	});
 
+	it('ignores a detached launch reply after the reopened view starts another sign-in', async () => {
+		const catalog = createModelCatalog(['codex']);
+		const first = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(first.promise);
+		const closed = new SettingsAuthState(catalog);
+		const pending = closed.handleLogin('codex');
+		closed.destroy();
+		const current = new SettingsAuthState(catalog);
+		current.initialize();
+		await current.handleLogin('codex');
+		first.resolve({ launched: true, alreadyRunning: false, sessionId: 'retired', deviceAuth: CLAUDE_AUTH });
+		await pending;
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledExactlyOnceWith('codex', SESSION_ID, 'local');
+		expect(current.deviceAuthFor('codex')).toEqual(DEVICE_AUTH);
+		expect(window.open).toHaveBeenCalledTimes(1);
+		catalog.dispose();
+	});
+
 	it('ignores a stale restored session after a newer login launches', async () => {
 		const staleRestore = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
 		const secondSessionAuth = { url: 'https://example.test/claude-next', needsCode: true };
@@ -380,7 +440,9 @@ describe('SettingsAuthState login lifecycle', () => {
 			sessionId: 'session-b',
 			deviceAuth: secondSessionAuth,
 		});
-		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
+		vi.mocked(launchAgentAuthLogin).mockResolvedValueOnce({
+			launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
+		}).mockResolvedValue({
 			launched: true,
 			alreadyRunning: false,
 			sessionId: 'session-b',
@@ -388,6 +450,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		});
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog(['claude']));
+		await settingsAuth.handleLogin('claude');
 		settingsAuth.initialize();
 		await settingsAuth.handleLogin('claude');
 
@@ -563,7 +626,6 @@ describe('SettingsAuthState login lifecycle', () => {
 			label: 'new@example.com',
 		});
 		vi.mocked(getAgentAuthLoginStatus)
-			.mockResolvedValueOnce({ state: 'idle', running: false })
 			.mockResolvedValue({ state: 'succeeded', instanceId: 'test-worker', running: false, sessionId: SESSION_ID });
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog(['codex']));
@@ -589,6 +651,7 @@ describe('SettingsAuthState login lifecycle', () => {
 			sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
 		});
 		const settingsAuth = new SettingsAuthState(createModelCatalog(['claude']));
+		await settingsAuth.handleLogin('claude');
 		const cleanup = settingsAuth.initialize();
 		await vi.waitFor(() => expect(settingsAuth.deviceAuthFor('claude')).toEqual(CLAUDE_AUTH));
 		expect(settingsAuth.isLoginPending('claude')).toBe(true);
@@ -664,6 +727,7 @@ describe('SettingsAuthState login lifecycle', () => {
 			sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH, retryableError: 'Copy the complete code.',
 		});
 		const settingsAuth = new SettingsAuthState(createModelCatalog(['claude']));
+		await settingsAuth.handleLogin('claude');
 		settingsAuth.initialize();
 		await vi.waitFor(() => expect(settingsAuth.authFor('claude').error).toBe('Copy the complete code.'));
 		initialAuth.resolve({ authenticated: false, canReauth: true, label: '' });

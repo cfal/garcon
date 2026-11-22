@@ -11,7 +11,7 @@ import {
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
-import type { ModelCatalogResponse } from '$shared/model-catalog';
+import { CATALOG_INSTANCE_HEADER, type ModelCatalogResponse } from '$shared/model-catalog';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
 	isAgentSettingLabelKey,
@@ -80,6 +80,7 @@ type AgentModels = Record<string, ModelOption[]>;
 type AgentMetadataMap = Record<string, AgentMetadata>;
 
 interface ModelCatalogSnapshot {
+	instanceId: string | null;
 	agentModels: AgentModels;
 	agentMetadata: AgentMetadataMap;
 	apiProviderCatalog: ApiProviderCatalogEntry[];
@@ -386,6 +387,7 @@ function parseCatalogResponse(data: unknown): {
 
 function emptySnapshot(): ModelCatalogSnapshot {
 	return {
+		instanceId: null,
 		agentModels: {},
 		agentMetadata: {},
 		apiProviderCatalog: [],
@@ -411,6 +413,7 @@ function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapsho
 		typeof parsed.lastValidatedAt === 'number' ? parsed.lastValidatedAt : lastFetchedAt;
 
 	return {
+		instanceId: typeof parsed.instanceId === 'string' ? parsed.instanceId : null,
 		agentModels,
 		agentMetadata,
 		apiProviderCatalog,
@@ -471,24 +474,6 @@ function clearPersistedCatalogs(): void {
 	removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors);
 }
 
-interface CatalogApplyResult {
-	agentModels: AgentModels;
-	agentMetadata: AgentMetadataMap;
-	apiProviderCatalog: ApiProviderCatalogEntry[];
-}
-
-function applyCatalogResult(
-	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>,
-): CatalogApplyResult {
-	const agentModels = catalogResult.agentModels;
-	const agentMetadata = normalizeAgentMetadataMap(catalogResult.agentMetadata);
-	return {
-		agentModels,
-		agentMetadata,
-		apiProviderCatalog: catalogResult.apiProviderCatalog,
-	};
-}
-
 export class ModelCatalogStore {
 	agentModels = $state<AgentModels>({});
 	agentMetadata = $state<AgentMetadataMap>({});
@@ -503,17 +488,23 @@ export class ModelCatalogStore {
 	#lastSyncAttemptAt = 0;
 	#requestVersion = 0;
 	#loginRefreshInstance: string | null = null;
+	#loginAgents = new Set<string>();
+	#instanceId: string | null = null;
+	#inventoryInstance = $state<string | null>(null);
+	#requiresInventoryMatch = $state(false);
 	#owner: string | null;
 	#executorAvailability = new Map<string, Pick<ExecutorSnapshot, 'enabled' | 'availability' | 'instanceId'>>();
 	readonly pendingLogins: PendingAgentLogins;
 
 	constructor(readonly executorId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>(), owner: string | null = null) {
 		this.#owner = owner;
-		this.pendingLogins = new PendingAgentLogins(executorId, (instanceId) => {
+		this.pendingLogins = new PendingAgentLogins(executorId, (agentId, instanceId) => {
 			// Supersedes pre-login discovery without blocking other validated selections.
-			this.#requestVersion++;
-			this.#syncPromise = null;
+			this.#supersedeRefresh();
+			if (this.#loginRefreshInstance !== instanceId) this.#loginAgents.clear();
+			this.#loginAgents.add(agentId);
 			this.#loginRefreshInstance = instanceId;
+			this.#persistSnapshot();
 			void this.forceRefresh();
 		});
 		this.catalogs.set(executorId, this);
@@ -522,11 +513,17 @@ export class ModelCatalogStore {
 
 	forExecutor(executorId?: string | null): ModelCatalogStore {
 		const id = effectiveExecutorId(executorId);
-		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs, this.#owner);
+		const existing = this.catalogs.get(id);
+		if (existing) return existing;
+		const catalog = new ModelCatalogStore(id, this.catalogs, this.#owner);
+		const executor = this.#executorAvailability.get(id);
+		catalog.#inventoryInstance = executor?.availability === 'ready' ? executor.instanceId : null;
+		return catalog;
 	}
 
 	get isValidated(): boolean {
-		return this.lastValidatedAt !== null && this.error === null;
+		const confirmed = !this.#requiresInventoryMatch || (this.#instanceId !== null && this.#instanceId === this.#inventoryInstance);
+		return confirmed && this.lastValidatedAt !== null && this.error === null;
 	}
 
 	reconcileExecutors(executors: readonly ExecutorSnapshot[]): void {
@@ -544,14 +541,16 @@ export class ModelCatalogStore {
 		for (const executor of executors) {
 			const { enabled, availability, instanceId } = executor;
 			const previous = this.#executorAvailability.get(executor.id);
-			if (previous && (enabled !== previous.enabled || availability !== previous.availability || instanceId !== previous.instanceId)) {
+			const catalog = this.catalogs.get(executor.id);
+			if (catalog) catalog.#inventoryInstance = enabled && availability === 'ready' ? instanceId : null;
+			const changed = previous && (enabled !== previous.enabled || availability !== previous.availability || instanceId !== previous.instanceId);
+			if (changed || (catalog && catalog.#instanceId !== null && catalog.#instanceId !== instanceId)) {
 				if (executor.id === 'local' && owner !== null) {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 				} else delete persisted[executor.id];
-				const catalog = this.catalogs.get(executor.id);
 				if (catalog) {
-					if (!enabled || availability === 'offline' || instanceId !== previous.instanceId) catalog.#retireLogins();
+					if (!enabled || availability === 'offline' || instanceId !== previous?.instanceId) catalog.#retireLogins();
 					catalog.invalidate();
 				}
 			}
@@ -560,10 +559,15 @@ export class ModelCatalogStore {
 		if (owner !== null) writeExecutorSnapshots(owner, persisted);
 	}
 
-	invalidate(): void {
+	#supersedeRefresh(): void {
 		this.#requestVersion += 1;
-		this.#lastSyncAttemptAt = 0;
 		this.#syncPromise = null;
+	}
+
+	invalidate(): void {
+		this.#instanceId = null;
+		this.#supersedeRefresh();
+		this.#lastSyncAttemptAt = 0;
 		this.isRefreshing = false;
 		this.lastValidatedAt = null;
 		this.lastFetchedAt = null;
@@ -585,7 +589,18 @@ export class ModelCatalogStore {
 
 	#retireLogins(): void {
 		this.pendingLogins.clear();
+		this.#loginAgents.clear();
 		this.#loginRefreshInstance = null;
+	}
+
+	beginLogin(agentId: string): Promise<void> {
+		if (this.#loginAgents.delete(agentId)) {
+			this.#supersedeRefresh();
+			this.isRefreshing = false;
+			this.#lastSyncAttemptAt = 0;
+			if (this.#loginAgents.size === 0) this.#loginRefreshInstance = null;
+		}
+		return this.pendingLogins.launch(agentId);
 	}
 
 	setOwner(owner: string | null): void {
@@ -778,6 +793,8 @@ export class ModelCatalogStore {
 
 	hydrateFromStorage(): void {
 		const snapshot = this.#owner !== null ? readPersisted(this.executorId, this.#owner) : emptySnapshot();
+		this.#instanceId = snapshot.instanceId;
+		this.#requiresInventoryMatch = snapshot.lastValidatedAt !== null;
 		this.agentModels = snapshot.agentModels;
 		this.agentMetadata = snapshot.agentMetadata;
 		this.apiProviderCatalog = snapshot.apiProviderCatalog;
@@ -793,10 +810,8 @@ export class ModelCatalogStore {
 	}
 
 	isStale(ttlMs: number = DEFAULT_TTL_MS): boolean {
-		if (this.error !== null || this.#loginRefreshInstance !== null) return true;
-		const checkedAt = this.lastValidatedAt ?? this.lastFetchedAt;
-		if (checkedAt === null) return true;
-		return Date.now() - checkedAt >= ttlMs;
+		if (!this.isValidated || this.#loginRefreshInstance !== null) return true;
+		return this.lastValidatedAt === null || Date.now() - this.lastValidatedAt >= ttlMs;
 	}
 
 	async forceRefresh(): Promise<void> {
@@ -820,37 +835,54 @@ export class ModelCatalogStore {
 		this.isRefreshing = true;
 
 		try {
-			const response = this.#loginRefreshInstance === null
-				? await fetchModelCatalogResponse(this.executorId, options.force ? null : this.etag)
-				: await fetchModelCatalogResponse(this.executorId, null, this.#loginRefreshInstance);
+			const confirmation = this.#loginRefreshInstance;
+			let ordinaryFallback = false;
+			let response: Response;
+			if (confirmation === null) {
+				response = await fetchModelCatalogResponse(this.executorId, options.force ? null : this.etag);
+			} else {
+				try {
+					response = await fetchModelCatalogResponse(this.executorId, null, confirmation, [...this.#loginAgents]);
+				} catch (error) {
+					if (requestVersion !== this.#requestVersion) return;
+					const canUseOrdinaryCatalog = !this.isValidated && error instanceof ApiError && error.errorCode === 'MODEL_DISCOVERY_UNAVAILABLE';
+					if (!canUseOrdinaryCatalog) throw error;
+					ordinaryFallback = true;
+					response = await fetchModelCatalogResponse(this.executorId, null);
+				}
+			}
 			if (requestVersion !== this.#requestVersion) return;
 			const responseEtag = response.headers?.get?.('etag') ?? null;
-
-			if (response.status === 304) {
-				this.etag = responseEtag ?? this.etag;
-				this.#recordValidation(Date.now());
-				return;
+			const servingInstance = response.headers?.get?.(CATALOG_INSTANCE_HEADER) ?? null;
+			const data = response.status === 304 ? null : await response.json() as ModelCatalogResponse;
+			if (requestVersion !== this.#requestVersion) return;
+			if ((ordinaryFallback && servingInstance !== confirmation) ||
+				(servingInstance && this.#inventoryInstance && this.#inventoryInstance !== servingInstance)) {
+				throw new Error('Executor changed during model discovery.');
 			}
 
-			const data = (await response.json()) as ModelCatalogResponse;
-			if (requestVersion !== this.#requestVersion) return;
+			if (response.status === 304) {
+				if (ordinaryFallback) throw new Error('Expected a complete executor model catalog.');
+				this.etag = responseEtag ?? this.etag;
+				this.#recordValidation(Date.now(), servingInstance, confirmation);
+				return;
+			}
 
 			const catalogResult = parseCatalogResponse(data);
 			if (!catalogResult || Object.keys(catalogResult.agentMetadata).length === 0) {
 				throw new Error('Model catalog response is invalid');
 			}
-			const applied = applyCatalogResult(catalogResult);
-			this.agentModels = applied.agentModels;
-			this.agentMetadata = applied.agentMetadata;
-			this.apiProviderCatalog = applied.apiProviderCatalog;
+			this.agentModels = catalogResult.agentModels;
+			this.agentMetadata = catalogResult.agentMetadata;
+			this.apiProviderCatalog = catalogResult.apiProviderCatalog;
 
 			this.etag = responseEtag;
 			this.lastFetchedAt = Date.now();
-			this.#recordValidation(this.lastFetchedAt);
+			this.#recordValidation(this.lastFetchedAt, servingInstance, ordinaryFallback ? null : confirmation);
 		} catch (error) {
 			if (requestVersion !== this.#requestVersion) return;
 			if (this.#loginRefreshInstance !== null) {
-				const temporarilyBusy = error instanceof ApiError && error.errorCode === 'EXECUTOR_BUSY';
+				const temporarilyBusy = error instanceof ApiError && (error.errorCode === 'EXECUTOR_BUSY' || error.errorCode === 'MODEL_DISCOVERY_UNAVAILABLE');
 				if (this.isValidated && (temporarilyBusy || isTransientRequestFailure(error))) return;
 				if (error instanceof ApiError && error.errorCode === 'LOGIN_INSTANCE_CHANGED') this.#loginRefreshInstance = null;
 			}
@@ -860,22 +892,29 @@ export class ModelCatalogStore {
 		}
 	}
 
-	#currentSnapshot(): ModelCatalogSnapshot {
-		return {
+	#persistSnapshot(): void {
+		if (this.#owner === null) return;
+		persist(this.executorId, {
+			instanceId: this.#instanceId,
 			agentModels: this.agentModels,
 			agentMetadata: this.agentMetadata,
 			apiProviderCatalog: this.apiProviderCatalog,
 			etag: this.etag,
-			lastFetchedAt: this.lastFetchedAt,
-			lastValidatedAt: this.lastValidatedAt,
-		};
+			lastFetchedAt: this.#loginRefreshInstance === null ? this.lastFetchedAt : null,
+			lastValidatedAt: this.#loginRefreshInstance === null ? this.lastValidatedAt : null,
+		}, this.#owner);
 	}
 
-	#recordValidation(checkedAt: number): void {
-		this.#loginRefreshInstance = null;
+	#recordValidation(checkedAt: number, instanceId: string | null, confirmedLogin: string | null): void {
+		this.#instanceId = instanceId;
+		this.#requiresInventoryMatch = false;
+		if (confirmedLogin !== null) {
+			this.#loginAgents.clear();
+			this.#loginRefreshInstance = null;
+		}
 		this.lastValidatedAt = checkedAt;
 		this.error = null;
-		if (this.#owner !== null) persist(this.executorId, this.#currentSnapshot(), this.#owner);
+		this.#persistSnapshot();
 		this.version += 1;
 	}
 }

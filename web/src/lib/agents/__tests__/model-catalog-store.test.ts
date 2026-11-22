@@ -131,7 +131,7 @@ describe('ModelCatalogStore', () => {
 			await createModelCatalogStore().forExecutor(executorId).forceRefresh();
 			const restored = createModelCatalogStore().forExecutor(executorId);
 			expect(restored.getAgent('sample')).toMatchObject({ executionPolicy, selectionLabel });
-			expect(restored.isValidated).toBe(true);
+			expect(restored.isValidated).toBe(false);
 		});
 
 		it.each([
@@ -216,7 +216,7 @@ describe('ModelCatalogStore', () => {
 		await original.forceRefresh();
 		await original.forExecutor(remoteExecutor.id).forceRefresh();
 		const store = createModelCatalogStore();
-		expect(store.isValidated).toBe(true);
+		expect(store.isValidated).toBe(false);
 		store.invalidateAll();
 		expect(store.isValidated).toBe(false);
 		expect(store.getModels('sample')).toHaveLength(1);
@@ -247,7 +247,7 @@ describe('ModelCatalogStore', () => {
 		})])));
 		await initial.forExecutor(remoteExecutor.id).forceRefresh();
 		const store = createModelCatalogStore();
-		if (instantiate) expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(false);
+		if (instantiate) expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(true);
 		store.reconcileExecutors([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
 		expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(true);
@@ -262,8 +262,26 @@ describe('ModelCatalogStore', () => {
 		await store.forExecutor(remoteExecutor.id).forceRefresh();
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
 		const restored = createModelCatalogStore().forExecutor(remoteExecutor.id);
-		expect(restored.isValidated).toBe(true);
+		expect(restored.isValidated).toBe(false);
 		expect(restored.getAgent('sample')?.executionPolicy).toBe('literal');
+	});
+
+	it.each([false, true])('compares hydrated catalogs to the first worker inventory (already mounted: %s)', async mounted => {
+		const initial = createModelCatalogStore();
+		const agent = agentEntry('sample', { models: [{ label: 'Previous', value: 'previous' }] });
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agent]), 200, {
+			'X-Garcon-Executor-Instance': remoteExecutor.instanceId,
+		}));
+		await initial.forExecutor(remoteExecutor.id).forceRefresh();
+		const restored = createModelCatalogStore();
+		if (mounted) expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(false);
+		restored.reconcileExecutors([remoteExecutor]);
+		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(true);
+		const replaced = createModelCatalogStore();
+		if (mounted) replaced.forExecutor(remoteExecutor.id);
+		replaced.reconcileExecutors([{ ...remoteExecutor, instanceId: 'replacement' }]);
+		expect(replaced.forExecutor(remoteExecutor.id).isValidated).toBe(false);
+		expect(replaced.forExecutor(remoteExecutor.id).isStale()).toBe(true);
 	});
 
 	it('hydrates models, capabilities, modes, and settings from storage', () => {
@@ -444,7 +462,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2, owner: 'test-owner',
+				schemaVersion: 2, owner: 'test-owner', instanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -456,6 +474,7 @@ describe('ModelCatalogStore', () => {
 		);
 		const store = createModelCatalogStore();
 
+		store.reconcileExecutors([localExecutor]);
 		await store.refreshIfStale(60_000);
 		expect(clientApi.apiFetch).not.toHaveBeenCalled();
 

@@ -242,7 +242,12 @@
 	const catalogs = new ModelCatalogStore();
 	setModelCatalog({
 		forExecutor(executorId: string) {
-			return Object.assign({}, this, { executorId, pendingLogins: catalogs.forExecutor(executorId).pendingLogins });
+			const catalog = catalogs.forExecutor(executorId);
+			return Object.assign({}, this, {
+				executorId,
+				pendingLogins: catalog.pendingLogins,
+				beginLogin: (agentId) => catalog.beginLogin(agentId),
+			} satisfies Pick<ModelCatalogStore, 'executorId' | 'pendingLogins' | 'beginLogin'>);
 		},
 		version: 0,
 		apiProviderCatalog: [],

@@ -1,9 +1,7 @@
 import {
 	completeAgentAuthLogin,
-	getAgentAuthLoginStatus,
 	getAgentAuthStatus,
 	getAgentReadiness,
-	launchAgentAuthLogin,
 	type DeviceAuthInfo,
 	type AgentReadiness,
 	type AgentAuthStatus,
@@ -54,7 +52,7 @@ export class SettingsAuthState {
 		const lifecycleId = ++this.#lifecycleId;
 		const checkAgent = (agentId: SettingsAgentId) => {
 			void this.#checkAuth(agentId, lifecycleId);
-			if (this.supportsAuthLogin(agentId)) void this.#restoreLoginSession(agentId, lifecycleId);
+			if (this.supportsAuthLogin(agentId)) this.#observeLogin(agentId, lifecycleId);
 		};
 		void this.#modelCatalog.forceRefresh().then(() => {
 			if (!this.#isActive(lifecycleId)) return;
@@ -101,33 +99,10 @@ export class SettingsAuthState {
 	async handleLogin(agentId: SettingsAgentId): Promise<void> {
 		if (!this.#active || !this.supportsAuthLogin(agentId)) return;
 		const lifecycleId = this.#lifecycleId;
-		const login = this.#beginLoginOperation(agentId);
+		const launch = this.#modelCatalog.beginLogin(agentId);
 		this.#markLoginPending(agentId);
-
-		const lifetime = this.#modelCatalog.pendingLogins.lifetime;
-		const retire = () => {
-			if (this.#isCurrentLogin(agentId, login, lifecycleId)) this.#clearLoginState(agentId, login);
-		};
-		lifetime.addEventListener('abort', retire, { once: true });
-		try {
-			const result = await launchAgentAuthLogin(agentId, this.executorId);
-			if (lifetime.aborted || !this.#isCurrentLogin(agentId, login, lifecycleId)) return;
-			login.sessionId = result.sessionId;
-			if (result.deviceAuth) {
-				this.#deviceAuthInfo[agentId] = result.deviceAuth;
-				if (!result.deviceAuth.needsCode) {
-					window.open(result.deviceAuth.url, '_blank', 'noopener');
-				}
-			}
-			this.#loginPending[agentId] = result.alreadyRunning;
-			this.#observeLogin(agentId, result.sessionId, login, lifecycleId);
-		} catch (err) {
-			if (lifetime.aborted || !this.#isCurrentLogin(agentId, login, lifecycleId)) return;
-			this.#clearLoginState(agentId, login);
-			this.#setLoginError(agentId, err);
-		} finally {
-			lifetime.removeEventListener('abort', retire);
-		}
+		this.#observeLogin(agentId, lifecycleId, true);
+		await launch;
 	}
 
 	async completeLogin(agentId: SettingsAgentId, code: string): Promise<void> {
@@ -194,11 +169,22 @@ export class SettingsAuthState {
 		}
 	}
 
-	#observeLogin(agentId: string, sessionId: string, login: LoginObservation, lifecycleId: number): void {
-		login.detach = this.#modelCatalog.pendingLogins.observe(agentId, sessionId, (event) => {
+	#observeLogin(agentId: string, lifecycleId: number, openOnLaunch = false): void {
+		this.#logins.get(agentId)?.detach?.();
+		const login: LoginObservation = {};
+		this.#logins.set(agentId, login);
+		login.detach = this.#modelCatalog.pendingLogins.attach(agentId, (event, source) => {
 			if (!this.#isCurrentLogin(agentId, login, lifecycleId)) return;
+			if (event.state === 'launching') {
+				this.#loginPending[agentId] = true;
+				return;
+			}
 			if (event.state === 'running') {
+				login.sessionId = event.sessionId;
 				this.#applyRunningLoginStatus(agentId, event);
+				if (openOnLaunch && source === 'launch' && event.deviceAuth && !event.deviceAuth.needsCode) {
+					window.open(event.deviceAuth.url, '_blank', 'noopener');
+				}
 				return;
 			}
 			this.#clearLoginState(agentId, login);
@@ -207,36 +193,10 @@ export class SettingsAuthState {
 				this.#authByAgent[agentId] = { ...event.auth, loading: false, error: null };
 			} else if (event.state === 'credential-error') {
 				this.#authByAgent[agentId] = { ...DEFAULT_AUTH, loading: false, error: event.error };
-			} else if (event.state === 'failed') {
+			} else if (event.state === 'error' || event.state === 'failed') {
 				this.#setLoginError(agentId, event.error);
 			}
 		});
-	}
-
-	async #restoreLoginSession(agentId: SettingsAgentId, lifecycleId: number): Promise<void> {
-		const login = this.#beginLoginOperation(agentId);
-		const observedSession = this.#modelCatalog.pendingLogins.sessionId(agentId);
-		if (observedSession) {
-			login.sessionId = observedSession;
-			this.#loginPending[agentId] = true;
-			this.#observeLogin(agentId, observedSession, login, lifecycleId);
-			return;
-		}
-		const lifetime = this.#modelCatalog.pendingLogins.lifetime;
-		try {
-			const status = await getAgentAuthLoginStatus(agentId, undefined, this.executorId);
-			if (
-				lifetime.aborted || !this.#isCurrentLogin(agentId, login, lifecycleId) ||
-				status.state !== 'running'
-			) {
-				return;
-			}
-			login.sessionId = status.sessionId;
-			this.#applyRunningLoginStatus(agentId, status);
-			this.#observeLogin(agentId, status.sessionId, login, lifecycleId);
-		} catch {
-			// Auth status remains usable when login-session restoration is temporarily unavailable.
-		}
 	}
 
 	#applyRunningLoginStatus(
@@ -260,14 +220,6 @@ export class SettingsAuthState {
 
 	#isActive(lifecycleId: number): boolean {
 		return this.#active && this.#lifecycleId === lifecycleId;
-	}
-
-	#beginLoginOperation(agentId: SettingsAgentId): LoginObservation {
-		const previous = this.#logins.get(agentId);
-		previous?.detach?.();
-		const login = { sessionId: previous?.sessionId };
-		this.#logins.set(agentId, login);
-		return login;
 	}
 
 	#beginAuthRequest(agentId: SettingsAgentId): number {
