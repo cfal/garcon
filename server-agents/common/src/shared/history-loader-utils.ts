@@ -10,6 +10,7 @@ export interface JsonlLineReadOptions {
   completeLinesOnly?: boolean;
   includeEmptyLines?: boolean;
   maxLineBytes?: number;
+  maxReadBytes?: number;
   signal?: AbortSignal;
 }
 
@@ -36,8 +37,12 @@ export async function* readJsonlLineEntries(
       if (options.signal?.aborted) {
         throw new DOMException('Transcript search load cancelled', 'AbortError');
       }
-      const { bytesRead } = await fh.read(readBuffer, 0, readBuffer.length, position);
+      const remaining = (options.maxReadBytes ?? Infinity) - position;
+      // At the limit a one-byte read distinguishes EOF from a truncated record.
+      const readLength = remaining <= 0 ? 1 : Math.min(readBuffer.length, remaining);
+      const { bytesRead } = await fh.read(readBuffer, 0, readLength, position);
       if (bytesRead === 0) break;
+      if (remaining <= 0) throw new Error(`JSONL scan exceeds ${options.maxReadBytes} bytes`);
 
       const chunk = readBuffer.subarray(0, bytesRead);
       const chunkStartOffset = position;

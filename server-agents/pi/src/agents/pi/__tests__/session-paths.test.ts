@@ -71,6 +71,19 @@ test('normalizes Windows shell drive prefixes without changing UNC or native pat
   }
 });
 
+test('bounds the whole header scan, not just individual lines or the size of the file', async () => {
+  override = path.join(home, 'shared');
+  const contents = { ...header, cwd: project };
+  const file = await put(path.join(override, 'renamed.jsonl'), contents);
+  const blankLines = (' '.repeat(1023) + '\n').repeat(1024);
+  await writeFile(file, blankLines + JSON.stringify(contents));
+  expect(await lookup()).toBeNull();
+  await writeFile(file, JSON.stringify(contents) + '\n' + blankLines);
+  expect(await lookup()).toBe(file);
+  await writeFile(file, JSON.stringify(contents).padEnd(blankLines.length, ' '));
+  expect(await lookup()).toBe(file);
+});
+
 test('looks in the default session root and refuses ambiguous or unproved identity', async () => {
   const root = path.join(home, 'agent', 'sessions');
   const first = await put(path.join(root, '--other--', 'renamed.jsonl'), header);

@@ -121,7 +121,7 @@ async function findInDirectory(
     const candidate = path.join(directory, entry.name);
     let header: unknown;
     try {
-      for await (const { line } of readJsonlLineEntries(candidate, { maxLineBytes: 1024 * 1024 })) {
+      for await (const { line } of readJsonlLineEntries(candidate, { maxReadBytes: 1024 * 1024 })) {
         header = JSON.parse(line);
         break;
       }
