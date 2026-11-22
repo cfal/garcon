@@ -8,6 +8,8 @@ import { buildPiCliEnv } from './pi-cli.js';
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const DISCOVERY_TIMEOUT_MS = 20_000;
 const FAILURE_COOLDOWN_MS = 15_000;
+const TABLE_HEADER = /^provider +model +context +max-out +thinking +images$/;
+const EMPTY_BANNER = 'No models available. Use /login ';
 
 class InvalidPiModelListing extends Error {}
 
@@ -25,13 +27,17 @@ export class PiModelDiscoveryUnavailableError extends Error {
 // The metadata command works before a model is selected and reports config errors even on exit 0.
 // https://github.com/earendil-works/pi/blob/b4afdddf44e059c67ccf5097e5317d913521b470/packages/coding-agent/src/cli/list-models.ts#L29-L115
 export function parsePiModelListing(stdout: string, stderr: string): SharedModelOption[] {
-  const [header, ...rows] = stdout.trimEnd().split(/\r?\n/);
-  if (header?.startsWith('No models available. Use /login ') && rows.length === 2
+  const lines = stdout.trimEnd().split(/\r?\n/);
+  // Extensions and migrations can write startup notices before the listing.
+  const start = lines.findIndex(line => TABLE_HEADER.test(line) || line.startsWith(EMPTY_BANNER));
+  const header = lines[start];
+  const rows = lines.slice(start + 1);
+  if (header?.startsWith(EMPTY_BANNER) && rows.length === 2
     && rows[0]?.trimEnd().endsWith('providers.md') && rows[1]?.trimEnd().endsWith('models.md')) {
     if (stderr.trim()) throw new Error('Pi reported discovery errors. Check pi --list-models on this executor.');
     return [];
   }
-  if (!header || !/^provider +model +context +max-out +thinking +images$/.test(header) || !rows.length) {
+  if (!header || !TABLE_HEADER.test(header) || !rows.length) {
     throw new InvalidPiModelListing('Unexpected Pi --list-models output. Check the installed Pi CLI version.');
   }
   const modelStart = header.indexOf('model');
