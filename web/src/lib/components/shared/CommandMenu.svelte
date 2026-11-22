@@ -225,8 +225,11 @@
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
 							onfocus={() => (selectedIndex = i)}
-							onmouseenter={() => {
-								selectedIndex = i;
+							onmouseenter={(event) => {
+								// A focused result owns native Enter and Space activation.
+								if (!event.currentTarget.parentElement?.contains(document.activeElement)) {
+									selectedIndex = i;
+								}
 							}}
 						>
 							<Icon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />

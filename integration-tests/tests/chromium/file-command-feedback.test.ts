@@ -82,6 +82,8 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     await browserExpect(copy).not.toBeFocused();
     await page.keyboard.press(copyIsLast ? 'ArrowDown' : 'ArrowUp');
     await browserExpect(copy).toBeFocused();
+    const otherResult = copyIsLast ? palette.getByRole('option', { disabled: false }).first() : lastResult;
+    await otherResult.hover();
     await browserExpect(copy).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Space');
     await page.getByText('Copied to clipboard', { exact: true }).waitFor();
