@@ -15,7 +15,7 @@ import type {
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import type { PermissionMode } from '../../common/chat-modes.js';
-import { FakeGeminiModel } from './fake-gemini-model.js';
+import { FakeGeminiModel, FAKE_GEMINI_API_KEY } from './fake-gemini-model.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import { waitForPersistedNativeSession } from './persisted-chat.js';
 
@@ -47,7 +47,8 @@ const UPDATER_SPAWN_LOG = 'Spawned background update process';
 // Each agy run writes its own log under `log/`.
 export async function antigravityUpdaterSpawns(directories: IntegrationDirectories): Promise<number> {
   const logDir = join(directories.home, '.gemini', 'antigravity-cli', 'log');
-  const names = await readdir(logDir).catch(() => [] as string[]);
+  const names = await readdir(logDir);
+  if (!names.length) throw new Error(`No agy logs found in ${logDir}`);
   let spawns = 0;
   for (const name of names) {
     const text = await Bun.file(join(logDir, name)).text();
@@ -63,7 +64,7 @@ export function startScriptedAntigravityTestEnvironment(): ScriptedAntigravityTe
     model,
     serverEnvironment: {
       GARCON_ANTIGRAVITY_BINARY: ANTIGRAVITY_BINARY,
-      GEMINI_API_KEY: 'garcon-test-key',
+      GEMINI_API_KEY: FAKE_GEMINI_API_KEY,
       GOOGLE_GEMINI_BASE_URL: model.baseUrl,
       PATH: SYSTEM_PATH,
     },

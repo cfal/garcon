@@ -19,6 +19,7 @@ import type { ChatExecutionCommands } from '../chat-execution/types.js';
 import { hasPendingTurnInput, type StoredChatExecutionControlState } from '../chat-execution/control-state.js';
 
 export type SettingsExecutionPort = Pick<ChatExecutionCommands,
+  | 'ownsExecution'
   | 'reserveTranscriptSnapshot'
   | 'releaseTranscriptSnapshot'
   | 'readChatExecutionControl'
@@ -44,6 +45,7 @@ export class AgentSessionSettingsService {
     directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     execution: SettingsExecutionPort;
+    hasAdmittedProviderTurn(chatId: string): boolean;
     chatMutationLock: KeyedPromiseLock;
     selectionAdmissionLock: KeyedPromiseLock;
     onCommitted?: (chatId: string) => void;
@@ -146,10 +148,18 @@ export class AgentSessionSettingsService {
         await integration.configurationValidation?.validate(configuration, readBefore(deadline, signal));
         this.deps.endpointResolver.resolveEndpointReference(next);
         const applyAndPersistSettings = async (): Promise<AgentChatEntry> => {
-          if (entry.agentSessionId && integration.sessionConfiguration) {
+          const sessionId = this.deps.registry.getChat(chatId)?.agentSessionId;
+          const permissionModeExplicit = patch.permissionMode !== undefined;
+          if (integration.sessionConfiguration
+            && permissionModeExplicit
+            && this.deps.execution.ownsExecution(chatId)
+            && (!sessionId || !this.deps.hasAdmittedProviderTurn(chatId))) {
+            throw new DomainError('SESSION_BUSY', 'The provider has not admitted this turn. Retry the permission change after it starts.', 409, true);
+          }
+          if (sessionId && integration.sessionConfiguration) {
             await integration.sessionConfiguration.apply(
-              entry.agentSessionId,
-              configuration,
+              sessionId,
+              { ...configuration, permissionModeExplicit },
               {
                 model: previous.model,
                 permissionMode: normalizePermissionMode(entry.permissionMode),

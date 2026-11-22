@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import {
   AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+  AgentCallError,
   AgentIntegrationError,
 } from '@garcon/server-agent-interface';
 import {
@@ -257,6 +258,12 @@ describe('refinePrompt', () => {
         code: 'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
         status: 503,
         retryable: true,
+      },
+      {
+        failure: new AgentCallError('not-dispatched', 'Executor busy', 'EXECUTOR_BUSY'),
+        code: 'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',
+        status: 503,
+        retryable: false,
       },
       {
         failure: new AgentIntegrationError('TIMEOUT', 'secret provider timeout detail', true),

@@ -11,23 +11,40 @@ export const ANTIGRAVITY_AUTH_METHODS = [
 
 export type AntigravityAuthMethod = typeof ANTIGRAVITY_AUTH_METHODS[number];
 
+const UNLAUNCHABLE_BINARY_CODES = new Set([
+  'ENOENT', 'ENOTDIR', 'EISDIR', 'ELOOP', 'ENAMETOOLONG', 'EACCES', 'EPERM',
+  'ENOEXEC', 'ELIBBAD', 'EBADARCH', 'EBADEXEC', 'EBADMACHO',
+]);
+
+export function classifyAntigravityLaunchError(error: unknown): unknown {
+  if (error instanceof Error && 'syscall' in error && error.syscall === 'posix_spawn'
+    && 'code' in error && typeof error.code === 'string' && UNLAUNCHABLE_BINARY_CODES.has(error.code)) {
+    return new AgentIntegrationError('BINARY_NOT_FOUND', `Cannot launch Antigravity CLI on this executor: ${error.message}`, false);
+  }
+  return error;
+}
+
 export interface AntigravityConfig {
   readonly binary: () => string;
   readonly apiKey: () => string | null;
-  readonly hasApiKey: () => boolean;
   readonly authMethod: () => AntigravityAuthMethod;
 }
 
 export function createAntigravityConfig(environment: AgentEnvironmentReader): AntigravityConfig {
   const apiKey = () => readEnvironment(environment, 'GEMINI_API_KEY');
-  const hasApiKey = () => apiKey() !== null;
   return Object.freeze({
-    binary: () => readEnvironment(environment, 'GARCON_ANTIGRAVITY_BINARY') ?? 'agy',
+    binary: () => {
+      const command = readEnvironment(environment, 'GARCON_ANTIGRAVITY_BINARY') ?? 'agy';
+      // ACP runs in the chat project, never resolve a relative binary against it.
+      const path = Bun.which(command, { cwd: process.cwd(), PATH: process.env.PATH });
+      if (path) return path;
+      throw new AgentIntegrationError('BINARY_NOT_FOUND',
+        'Antigravity CLI not found on this executor. Install agy or set GARCON_ANTIGRAVITY_BINARY.', false);
+    },
     apiKey,
-    hasApiKey,
     authMethod: () => resolveAuthMethod(
       readEnvironment(environment, 'GARCON_ANTIGRAVITY_AUTH_METHOD'),
-      hasApiKey(),
+      apiKey() !== null,
     ),
   });
 }

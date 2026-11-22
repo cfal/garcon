@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { AgentAuthLoginStatus, AgentDeviceAuthInfo } from '../../../common/agent-auth.js';
+import type { AgentAuthLoginHttpStatus, AgentDeviceAuthInfo } from '../../../common/agent-auth.js';
+import type { ExecutorSnapshot } from '../../../common/executors.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -11,7 +12,8 @@ interface CompletionRequest {
 }
 
 interface AuthLoginScenario {
-  status: AgentAuthLoginStatus;
+  status: AgentAuthLoginHttpStatus;
+  credentialChecks: (string | null)[];
   authenticated: boolean;
   launches: number;
   completions: CompletionRequest[];
@@ -37,6 +39,7 @@ test('Claude sign-in retries a rejected code and restores pending completion whe
       const scenario: AuthLoginScenario = {
         status: { state: 'idle', running: false },
         authenticated: false,
+        credentialChecks: [],
         launches: 0,
         completions: [],
         unexpectedMutations: [],
@@ -51,6 +54,7 @@ test('Claude sign-in retries a rejected code and restores pending completion whe
           const agentId = url.searchParams.get('agent');
           if (url.pathname === '/api/v1/agents/auth' && local) {
             if (agentId === 'claude') {
+              if (scenario.status.state === 'succeeded') scenario.credentialChecks.push(url.searchParams.get('loginInstance'));
               return Promise.resolve(Response.json({
                 claude: { authenticated: scenario.authenticated, canReauth: true, label: '' },
               }));
@@ -64,7 +68,7 @@ test('Claude sign-in retries a rejected code and restores pending completion whe
           if (url.pathname === '/api/v1/agents/auth/login' && init?.method !== 'POST' && local) {
             if (agentId === 'claude') return Promise.resolve(Response.json(scenario.status));
             if (agentId === 'codex') {
-              return Promise.resolve(Response.json({ state: 'idle', running: false } satisfies AgentAuthLoginStatus));
+              return Promise.resolve(Response.json({ state: 'idle', running: false } satisfies AgentAuthLoginHttpStatus));
             }
           }
           if (
@@ -178,11 +182,14 @@ test('Claude sign-in retries a rejected code and restores pending completion whe
     await attemptDuplicateSubmission();
     expect(await fixture.page.evaluate(() => (globalThis as ScenarioScope).__authLoginRetryScenario.completions.length)).toBe(2);
 
-    await fixture.page.evaluate((sessionId) => {
+    const { executors } = await fixture.integration.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
+    const instanceId = executors.find(executor => executor.id === 'local')?.instanceId;
+    if (!instanceId) throw new Error('Missing Local instance');
+    await fixture.page.evaluate(({ sessionId, instanceId }) => {
       const scenario = (globalThis as ScenarioScope).__authLoginRetryScenario;
       scenario.authenticated = true;
-      scenario.status = { state: 'succeeded', running: false, sessionId };
-    }, SESSION_ID);
+      scenario.status = { state: 'succeeded', running: false, sessionId, instanceId };
+    }, { sessionId: SESSION_ID, instanceId });
     await fixture.page.waitForFunction((selector) => {
       const card = [...document.querySelectorAll<HTMLElement>('section[aria-label="Local"] [data-collapsible-root]')]
         .find(element => element.textContent?.includes('Claude OAuth'));
@@ -194,6 +201,7 @@ test('Claude sign-in retries a rejected code and restores pending completion whe
     await app.waitForText('Custom Providers');
     const scenario = await fixture.page.evaluate(() => (globalThis as ScenarioScope).__authLoginRetryScenario);
     expect(scenario.launches).toBe(1);
+    expect(scenario.credentialChecks).toContain(instanceId);
     expect(scenario.completions).toHaveLength(2);
     expect(scenario.unexpectedMutations).toEqual([]);
     fixture.assertNoBrowserErrors();

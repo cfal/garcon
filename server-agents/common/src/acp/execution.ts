@@ -6,8 +6,9 @@ import {
   type AgentRuntimeExecutionContext,
 } from '../execution/runtime-events.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
-import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
+import type { AgentEstablishedSession, AgentSessionConfigurationUpdates } from '@garcon/server-agent-interface';
 import type { AcpAgentRuntime } from './agent-runtime.js';
+import type { AcpStartedSession } from './runtime-types.js';
 
 // Adapts an ACP runtime to the producer-adapter execution port.
 export class AcpExecution implements AgentRuntimeExecution {
@@ -22,7 +23,7 @@ export class AcpExecution implements AgentRuntimeExecution {
   ) {
     const seed = request.carriedContext?.prefix ?? '';
     let established: AgentEstablishedSession | null = null;
-    const establish = (result: { readonly agentSessionId: string; readonly nativePath: string | null }) => {
+    const establish = (result: AcpStartedSession) => {
       if (established) return established;
       established = {
         agentSessionId: result.agentSessionId,
@@ -41,9 +42,9 @@ export class AcpExecution implements AgentRuntimeExecution {
       command: `${seed}${request.prompt}`,
       images: request.attachments,
       operation: runtimeOperation(request.runId, publish),
-      onSessionActivated: (session) => void establish(session),
+      onSessionActivated: establish,
     });
-    return established ?? establish(result);
+    return establish(result);
   }
 
   async resume(
@@ -76,16 +77,13 @@ export class AcpExecution implements AgentRuntimeExecution {
     }));
   }
 
-  async applySessionConfiguration(
-    agentSessionId: string,
-    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
-  ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
-      model: configuration.model,
-      permissionMode: configuration.permissionMode,
-      thinkingMode: configuration.thinkingMode,
-    });
-  }
+  readonly applySessionConfiguration: AgentSessionConfigurationUpdates['apply'] = async (
+    agentSessionId, configuration,
+  ) => {
+    if (configuration.permissionModeExplicit) {
+      this.runtime.updateSessionSettings(agentSessionId, { permissionMode: configuration.permissionMode });
+    }
+  };
 
   async prepareProjectPathUpdate(
     request: import('@garcon/server-agent-interface').AgentProjectPathUpdateRequest,

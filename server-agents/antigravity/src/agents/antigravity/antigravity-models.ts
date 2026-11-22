@@ -1,7 +1,9 @@
 import type { AgentModelOption } from '@garcon/common/agents';
-import type { AgentLogger } from '@garcon/server-agent-interface';
-import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
-import { sharedProbe } from '@garcon/server-agent-common/shared/shared-probe';
+import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
+import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { antigravityChildEnvironment, classifyAntigravityLaunchError, type AntigravityConfig } from '../../config.js';
+import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
 const MODELS_TIMEOUT_MS = 10_000;
 
@@ -11,31 +13,17 @@ export interface AntigravityCliResult {
   readonly exitCode: number | null;
 }
 
-const inFlightModels = new Map<string, Promise<AntigravityCliResult>>();
-
-// `agy models` is the CLI's signed-in check as well as its catalog; unlike
-// `session/new`, it leaves no empty conversation in the user's history. Auth
-// status and catalog discovery run together, so concurrent callers share one
-// process.
-export function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
+export async function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
   const binary = config.binary();
-  // Shared only by callers that would run the identical probe.
   const env = antigravityChildEnvironment(config);
-  const key = JSON.stringify([binary, env.GEMINI_API_KEY ?? null]);
-  return sharedProbe(inFlightModels, key, () => spawnAntigravityModels(binary, env));
-}
-
-async function spawnAntigravityModels(
-  binary: string,
-  env: Record<string, string | undefined>,
-): Promise<AntigravityCliResult> {
-  const proc = Bun.spawn([binary, 'models'], {
-    env,
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
-  });
+  let proc;
+  try {
+    proc = Bun.spawn([binary, 'models'], {
+      env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw classifyAntigravityLaunchError(error);
+  }
   const stdout = pipeText(proc.stdout);
   const stderr = pipeText(proc.stderr);
   // The signal kills only agy; a descendant holding its pipes would keep the
@@ -99,18 +87,30 @@ export function antigravityCliFailure(result: AntigravityCliResult): string {
     || `agy models exited with code ${result.exitCode ?? 'unknown'}`;
 }
 
-export async function getAntigravityModels(
-  config: AntigravityConfig,
-  logger: AgentLogger,
-): Promise<AgentModelOption[]> {
-  try {
-    const result = await runAntigravityModels(config);
-    if (result.exitCode === 0) return parseAntigravityModels(result.stdout);
-    logger.warn('Antigravity model discovery failed', { error: antigravityCliFailure(result) });
-  } catch (error) {
-    logger.warn('Antigravity model discovery failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
+export function createAntigravityCatalog(runModels: () => Promise<AntigravityCliResult>, logger: AgentLogger) {
+  const nativeDefault = { value: 'default', label: 'Default', supportsImages: true };
+  return createModelCatalog({
+    logger,
+    defaultModel: 'default',
+    fallbackModels: [],
+    requiresStrictModelDiscovery: false,
+    // Disposable generation sessions remain in agy's native history.
+    generation: null,
+    discover: ({ signal, requireNativeDiscovery }) => waitUnlessAborted(getAntigravityModels(requireNativeDiscovery), signal),
+  });
+
+  async function getAntigravityModels(requireNativeDiscovery = false): Promise<AgentModelOption[]> {
+    try {
+      const result = await runModels();
+      if (result.exitCode === 0) return [nativeDefault, ...parseAntigravityModels(result.stdout)];
+      throw new Error(antigravityCliFailure(result));
+    } catch (error) {
+      if (error instanceof AgentIntegrationError && (error.code === 'BINARY_NOT_FOUND' || error.code === 'INVALID_SETTINGS')) {
+        throw error;
+      }
+      if (requireNativeDiscovery) throw new AgentIntegrationError('UNAVAILABLE', errorMessage(error), true);
+      logger.warn('Antigravity model discovery failed', { error: errorMessage(error) });
+    }
+    return [nativeDefault];
   }
-  return [];
 }

@@ -154,6 +154,7 @@ export class AgentRuntimeRouter {
     this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
     this.#ledger.subscribe((event) => {
       if (event.type !== 'run-ended') return;
+      this.#bindings.forgetRun(event.runId);
       if (this.#executionHandles.get(event.chatId)?.runId === event.runId) {
         this.#executionHandles.delete(event.chatId);
       }
@@ -188,7 +189,7 @@ export class AgentRuntimeRouter {
         agentId: entry.agentId, executorId: effectiveExecutorId(entry.executorId), projectPath: entry.projectPath,
         transcriptViewId: prepared.viewId, producerLease: producer,
       } });
-      runId = this.#beginRun(chatId, operation.turnId);
+      runId = this.#beginRun(chatId, operation.turnId, opts.executionAdmission);
       assertExecutionAdmissionOpen(opts);
       const outcome = integration.literalExecution ? { kind: 'no-history' as const } : await this.#createCarriedContext({
         chatId,
@@ -270,7 +271,7 @@ export class AgentRuntimeRouter {
         agentId: entry.agentId, executorId: effectiveExecutorId(entry.executorId), projectPath: entry.projectPath,
         transcriptViewId: prepared.viewId, producerLease: producer,
       } });
-      runId = this.#beginRun(chatId, operation.turnId);
+      runId = this.#beginRun(chatId, operation.turnId, opts.executionAdmission);
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, { signal: opts.executionAdmission?.signal }),
@@ -385,9 +386,9 @@ export class AgentRuntimeRouter {
       const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
       this.#events.trackTurn(chatId, operationMetadata(operation));
       const producer = this.#producer(chatId);
-      runId = this.#beginRun(chatId, operation.turnId);
+      runId = this.#beginRun(chatId, operation.turnId, opts.executionAdmission);
       const request = {
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(chatId, entry, selection, runId, {}),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, { signal: opts.executionAdmission?.signal }),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
@@ -507,6 +508,11 @@ export class AgentRuntimeRouter {
 
   isChatRunning(chatId: string): boolean {
     return this.#ledger.isRunActive(chatId);
+  }
+
+  hasAdmittedProviderTurn(chatId: string): boolean {
+    const runId = this.#ledger.activeRunId(chatId);
+    return runId !== null && this.#bindings.hasStarted(runId);
   }
 
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, executorId?: string | null): boolean {
@@ -841,8 +847,9 @@ export class AgentRuntimeRouter {
     }
   }
 
-  #beginRun(chatId: string, turnId: string): string {
+  #beginRun(chatId: string, turnId: string, admission?: AgentExecutionAdmission): string {
     const runId = this.#ledger.beginRun(chatId, turnId);
+    this.#bindings.onStarted(runId, () => admission?.markStarted());
     this.#settingUp.set(chatId, runId);
     return runId;
   }
@@ -916,7 +923,6 @@ export class AgentRuntimeRouter {
       permissionMode?: RunAgentTurnOptions['permissionMode'];
       thinkingMode?: RunAgentTurnOptions['thinkingMode'];
       agentSettings?: RunAgentTurnOptions['agentSettings'];
-      executionAdmission?: AgentExecutionAdmission;
     },
   ) {
     const integration = this.#directory.require(entry.agentId, entry.executorId);
@@ -934,7 +940,6 @@ export class AgentRuntimeRouter {
         ?? entry.agentSettingsById?.[entry.agentId]
         ?? integration.settings.defaults(),
     );
-    if (opts.executionAdmission) this.#bindings.onStarted(runId, () => opts.executionAdmission!.markStarted());
     return {
       chatId,
       projectPath: entry.projectPath,

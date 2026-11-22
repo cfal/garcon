@@ -98,7 +98,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #dispatchTasks = new Set<Promise<void>>();
   #stopTasks = new Map<string, Promise<ChatStopOutcome>>();
   #turnRunner: AgentTurnRunnerPort;
-  #getDrainOptions: QueueDrainOptionsResolver;
+  readonly #readControlRunOptions: (chatId: string, signal: AbortSignal) => Promise<RunAgentTurnOptions>;
   #chatExists: ChatExistsResolver;
   #canDispatch: (chatId: string) => boolean;
   #projectAdmission: ProjectAdmissionPort;
@@ -141,7 +141,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#turnRunner = turnRunner;
     this.#executionPolicy = options.executionPolicy ?? (() => 'conversation');
     this.#workingDirectorySettlement = options.workingDirectorySettlement;
-    this.#getDrainOptions = getDrainOptions;
+    this.#readControlRunOptions = (chatId, signal) =>
+      selectionAdmissionLock.runExclusive(`chat:${chatId}`, async () => getDrainOptions(chatId), signal);
     this.#chatExists = chatExists;
     this.#canDispatch = options.canDispatch;
     this.#projectAdmission = options.projectAdmission;
@@ -184,9 +185,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       // Chat ID disclosures hold no chat lock, so their steers keep their own deadlines.
       captureTarget: (chatId) => this.#steerInputDelivery.captureControlTarget(chatId, null),
       deliverSteer: (chatId, content, viewId, target) => this.#steerInputDelivery.deliverControl(chatId, content, viewId, target),
-      scheduleRun: (chatId, content, viewId, onReserved) => (
-        this.#scheduleControlRun(chatId, content, viewId, onReserved)
-      ),
+      scheduleRun: (...args) => this.#scheduleControlRun(...args),
     });
     this.#acceptedInputHandler = new AcceptedInputHandler({
       controls: this.#controlOperations,
@@ -219,7 +218,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       ownership: this.#ownership,
       controls: this.#controlOperations,
       turnRunner: this.#turnRunner,
-      getDrainOptions: this.#getDrainOptions,
+      getDrainOptions,
       runSelectionAdmissionExclusive: (chatId, operation) =>
         selectionAdmissionLock.runExclusive(`chat:${chatId}`, operation),
       projectAdmission: options.projectAdmission,
@@ -818,12 +817,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (hasPendingTurnInput(control) || control.pause) {
         throw controlInputBlockedError();
       }
-      // Control runs start in the background, holding no chat lock.
+      // Project preparation holds no selection lock; only the settings read waits for an in-flight save.
       await this.#projectAdmission.assertAvailable(chatId, null);
+      const selection = await this.#readControlRunOptions(chatId, reservation.executionAdmission.signal);
       this.#checkpointDirect(reservation);
       reservation.executionAdmission.signal.throwIfAborted();
       options = {
-        ...this.#getDrainOptions(chatId),
+        ...selection,
         clientRequestId,
         clientMessageId: crypto.randomUUID(),
         transcriptViewId,

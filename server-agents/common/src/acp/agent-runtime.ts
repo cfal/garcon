@@ -19,22 +19,17 @@ import {
   type AcpStartRequest,
 } from './runtime-types.js';
 import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
-import { AcpCapabilityCache } from './capability-cache.js';
 import { AcpClient } from './client.js';
 import type {
   AcpJsonRpcId,
   AcpSessionRequestPermission,
   AcpSessionUpdateNotification,
 } from './protocol.js';
-import type { ReconnectStrategy } from './reconnect-policy.js';
-import { reconnectAcpSession, reconnectOrder } from './reconnect-policy.js';
-import { AcpRestoreRegistry } from './restore-registry.js';
+import { reconnectAcpSession } from './reconnect-policy.js';
 import { garconInitializeParams, isJsonRpcId } from './protocol.js';
 import {
   childEnvironmentFor,
-  newSessionModelFor,
   nativePathFor,
-  promptConfigFor,
   promptFor,
   configureSessionFor,
   type AcpAgentPolicy,
@@ -47,15 +42,14 @@ import {
   type AcpTurnContext,
   type PendingPermissionRequest,
 } from './runtime-session.js';
-import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from './event-converter.js';
+import { asObject, asString, type AcpBlockingRequestToolUse, type AcpEventConverter, type AcpSessionUpdateContext } from './event-converter.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
+import { waitUnlessAborted } from '../shared/shared-probe.js';
 import {
-  abortStrategy,
   unlessSettled,
-  untilSettledOrClosed,
   fallbackPermissionToolUse,
   humanizeError,
-  isAutoApproveMode,
+  automaticPermissionChoice,
   permissionCancelledOutcome,
   permissionChoiceOutcome,
 } from './runtime-helpers.js';
@@ -65,10 +59,16 @@ const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 10_000;
 
 export interface AcpAgentRuntimeOptions {
   converter: AcpEventConverter;
-  capabilityCache?: AcpCapabilityCache;
   createTransport?: () => AcpTransport;
   logger?: AgentLogger;
   cancelSettleTimeoutMs?: number;
+}
+
+interface PendingResume {
+  readonly chatId: string;
+  readonly sessionId: string;
+  readonly release: AbortController;
+  permissionMode: AcpResumeRequest['permissionMode'];
 }
 
 const SILENT_LOGGER: AgentLogger = {
@@ -81,13 +81,13 @@ const SILENT_LOGGER: AgentLogger = {
 export class AcpAgentRuntime {
   #policy: AcpAgentPolicy;
   #converter: AcpEventConverter;
-  #capabilityCache: AcpCapabilityCache;
   #createTransport: () => AcpTransport;
   #logger: AgentLogger;
   #cancelSettleTimeoutMs: number;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
-  #restores = new AcpRestoreRegistry<AcpAgentRuntimeSession>();
-  #stopped = false;
+  #restores = new Map<string, { chatId: string; settled: Promise<void> }>();
+  #pendingResumes = new Set<PendingResume>();
+  #lifetime = new AbortController();
   // The model a session opens with when session/new names none, per project
   // path, since agent settings can differ by workspace. It stands in for the
   // default of a resumed session, which reports only its current model.
@@ -103,7 +103,6 @@ export class AcpAgentRuntime {
   constructor(policy: AcpAgentPolicy, options: AcpAgentRuntimeOptions) {
     this.#policy = policy;
     this.#converter = options.converter;
-    this.#capabilityCache = options.capabilityCache ?? new AcpCapabilityCache();
     this.#createTransport = options.createTransport ?? (() => new AcpTransport());
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#cancelSettleTimeoutMs = options.cancelSettleTimeoutMs ?? DEFAULT_CANCEL_SETTLE_TIMEOUT_MS;
@@ -114,78 +113,37 @@ export class AcpAgentRuntime {
     // Built first, so an unusable attachment fails before any process or native
     // conversation exists.
     const prompt = promptFor(this.#policy, request);
-    if (this.#stopped) throw new Error(`The ${this.#policy.agentId} runtime is shutting down.`);
-    const client = await this.#connectClient(request);
-    let created: Awaited<ReturnType<AcpClient['newSession']>>;
-    try {
-      assertAcpExecutionOpen(request);
-      const model = newSessionModelFor(this.#policy, request);
-      created = await client.newSession({
-        cwd: request.projectPath,
-        mcpServers: this.#policy.mcpServers,
-        ...(model ? { model } : {}),
-      });
-    } catch (error) {
-      client.close();
-      throw error;
-    }
-
-    if (this.#stopped) {
-      client.close();
-      throw new Error(`The ${this.#policy.agentId} runtime stopped while the session was starting.`);
-    }
-    const sessionId = created.sessionId;
-    const existing = this.#sessions.get(sessionId);
-    if (existing) {
-      client.close();
-      if (existing.chatId !== request.chatId) {
-        throw new Error(`ACP session ${sessionId} is already bound to another chat`);
-      }
-      throw new Error(`ACP session ${sessionId} is already active`);
-    }
-    const now = new Date().toISOString();
-    const capabilities = client.getAdvertisedCapabilities();
-    const session = newRuntimeSession({
-      id: sessionId,
-      remoteSessionId: sessionId,
-      chatId: request.chatId,
-      projectPath: request.projectPath,
-      client,
-      capabilities,
-      permissionMode: request.permissionMode,
-      configOptions: created.configOptions,
-      models: created.models,
-      agentDefaultModelId: this.#learnAgentDefaultModel(request, created.models?.currentModelId),
-    }, now);
-    this.#registerSession(session);
+    const signal = this.#admissionSignal(request);
+    const session = await this.#openSession(request, signal);
+    const sessionId = session.id;
     const result = {
       agentSessionId: sessionId,
       nativePath: nativePathFor(this.#policy, sessionId),
     };
-    request.onSessionActivated?.(result);
-    let resolveStarted!: () => void;
-    let rejectStarted!: (error: unknown) => void;
-    let executionStarted = false;
-    const started = new Promise<void>((resolve, reject) => {
-      resolveStarted = resolve;
-      rejectStarted = reject;
-    });
-    const promptTask = this.#runPrompt(session, request, prompt, () => {
-      this.#retireSupersededChatSessions(session);
-      if (executionStarted) return;
-      executionStarted = true;
-      resolveStarted();
-    });
-    void promptTask.then(() => {
-      if (!executionStarted) rejectStarted(new Error('ACP session ended before execution started'));
-    }, (error) => {
-      if (!executionStarted) rejectStarted(error);
-    });
+    const started = Promise.withResolvers<void>();
+    const cancelStart = () => {
+      this.#retireSession(session, 'cancelled');
+      started.reject(signal.reason);
+    };
     try {
-      await started;
+      signal.throwIfAborted();
+      if (session.retired) throw new Error(`ACP session ${sessionId} retired before activation`);
+      signal.addEventListener('abort', cancelStart, { once: true });
+      const turn = this.#runPrompt(session, request, prompt, () => {
+        // Publishing the binding also acknowledges any handoff prefix in this prompt.
+        request.onSessionActivated?.(result);
+        signal.throwIfAborted();
+        this.#retireSupersededChatSessions(session);
+        signal.removeEventListener('abort', cancelStart);
+        started.resolve();
+      });
+      void turn.then(() => started.reject(new Error('ACP session ended before execution started')), started.reject);
+      await started.promise;
     } catch (error) {
       this.#retireSession(session, 'cancelled');
       throw error;
+    } finally {
+      signal.removeEventListener('abort', cancelStart);
     }
 
     return result;
@@ -194,26 +152,33 @@ export class AcpAgentRuntime {
   async runTurn(request: AcpResumeRequest): Promise<void> {
     assertAcpExecutionOpen(request);
     const prompt = promptFor(this.#policy, request);
-    let session = await this.#liveSessionForTurn(request, await this.#sessionForTurn(request));
-    // A turn stopped while configuring is still the pending turn.
-    const cancelled = session.activeTurn?.running ? session.activeTurn : session.pendingTurn;
-    if (cancelled?.aborted) {
-      await untilSettledOrClosed(cancelled.settled.promise, request.executionAdmission?.signal);
-      assertAcpExecutionOpen(request);
-      session = await this.#liveSessionForTurn(request, session);
+    const pending: PendingResume = {
+      sessionId: request.agentSessionId,
+      chatId: request.chatId,
+      permissionMode: request.permissionMode,
+      release: new AbortController(),
+    };
+    const signal = AbortSignal.any([this.#admissionSignal(request), pending.release.signal]);
+    this.#pendingResumes.add(pending);
+    try {
+      let session = await this.#sessionForTurn(request, signal);
+      signal.throwIfAborted();
+      const cancelled = session.activeTurn ?? session.pendingTurn;
+      if (cancelled?.aborted) {
+        await waitUnlessAborted(cancelled.settled.promise, signal);
+        signal.throwIfAborted();
+      }
+      if (session.retired) {
+        session = await this.#sessionForTurn(request, signal);
+        signal.throwIfAborted();
+        if (session.retired) throw new Error(`ACP session ${session.id} retired before activation`);
+      }
+      if (this.#isBusy(session)) throw new Error(`Session ${session.id} is already running`);
+      // runPrompt reserves the turn before its first await; it now owns live updates.
+      return this.#runPrompt(session, { ...request, permissionMode: pending.permissionMode }, prompt);
+    } finally {
+      this.#pendingResumes.delete(pending);
     }
-    if (this.#isBusy(session)) {
-      throw new Error(`Session ${request.agentSessionId} is already running`);
-    }
-    await this.#runPrompt(session, request, prompt);
-  }
-
-  // A session can retire while a turn awaits it. One that crashed or timed out is
-  // restored again; one its chat released stays gone.
-  async #liveSessionForTurn(request: AcpResumeRequest, session: AcpAgentRuntimeSession): Promise<AcpAgentRuntimeSession> {
-    const live = session.retired && !session.released ? await this.#sessionForTurn(request) : session;
-    if (live.released) throw this.#releasedError(request.agentSessionId);
-    return live;
   }
 
   #releasedError(agentSessionId: string): Error {
@@ -221,7 +186,7 @@ export class AcpAgentRuntime {
   }
 
   #isBusy(session: AcpAgentRuntimeSession): boolean {
-    return session.activeTurn?.running === true || session.pendingTurn !== null;
+    return session.activeTurn !== null || session.pendingTurn !== null;
   }
 
   // A cooperative cancel settles when the agent answers the open prompt. An
@@ -237,7 +202,7 @@ export class AcpAgentRuntime {
     const agentSessionId = request.agentSessionId;
     if (!agentSessionId) return;
 
-    if (this.#restores.inFlight(agentSessionId)) {
+    if (this.#restores.has(agentSessionId)) {
       throw new AgentIntegrationError('SESSION_BUSY', `Session ${agentSessionId} is being restored`, false);
     }
     const session = this.#sessions.get(agentSessionId);
@@ -257,48 +222,42 @@ export class AcpAgentRuntime {
 
   releaseSession(chatId: string, agentSessionId: string | null): void {
     if (!agentSessionId) return;
-    this.#restores.cancel(agentSessionId, chatId);
+    for (const pending of this.#pendingResumes) {
+      if (pending.chatId === chatId && pending.sessionId === agentSessionId) {
+        pending.release.abort(this.#releasedError(agentSessionId));
+      }
+    }
     const session = this.#sessions.get(agentSessionId);
     if (session?.chatId !== chatId) return;
-    session.released = true;
     this.#retireSession(session, 'cancelled');
   }
 
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return false;
-    const turn = session.activeTurn;
-    if (!turn?.running) {
-      const pending = session.pendingTurn;
-      if (!pending) return false;
-      pending.aborted = true;
-      session.state = 'aborted';
-      // A process-restart agent loses its process at once, as a running turn
-      // would; otherwise a hung configure call is bounded like an unanswered cancel.
-      if (abortStrategy(this.#policy) === 'process-restart') this.#retireSession(session, 'aborted');
-      else this.#armCancelSettleTimeout(pending);
-      return true;
-    }
+    const turn = session.activeTurn ?? session.pendingTurn;
+    if (!turn) return false;
 
-    if (abortStrategy(this.#policy) === 'process-restart') {
-      turn.aborted = true;
-      session.state = 'aborted';
-      this.#completeTurn(turn);
+    turn.aborted = true;
+    session.state = 'aborted';
+    if (this.#policy.abortStrategy === 'process-restart') {
+      if (session.activeTurn === turn) this.#completeTurn(turn);
       this.#retireSession(session, 'aborted');
       return true;
     }
 
-    turn.aborted = true;
-    session.state = 'aborted';
-    this.#cancelPermissionsForTurn(turn, 'aborted');
-    try {
-      session.client.cancelSession({ sessionId: session.remoteSessionId });
-    } catch (error) {
-      this.#logger.warn('ACP cancel could not be delivered.', {
-        agentId: this.#policy.agentId,
-        sessionId: session.id,
-        error: humanizeError(error),
-      });
+    // A configuring turn has no prompt to cancel, but it still needs the settle deadline.
+    if (session.activeTurn === turn) {
+      this.#cancelPermissionsForTurn(turn, 'aborted');
+      try {
+        session.client.cancelSession({ sessionId: session.id });
+      } catch (error) {
+        this.#logger.warn('ACP cancel could not be delivered.', {
+          agentId: this.#policy.agentId,
+          sessionId: session.id,
+          error: humanizeError(error),
+        });
+      }
     }
     this.#armCancelSettleTimeout(turn);
     return true;
@@ -326,7 +285,7 @@ export class AcpAgentRuntime {
     if (!this.#pendingPermissions.has(pending) || pending.turn.sourceRetired) {
       throw new Error('ACP permission occurrence is no longer pending');
     }
-    pending.session.client.respond(
+    pending.turn.session.client.respond(
       pending.requestId,
       pending.responseForDecision(decision),
     );
@@ -335,23 +294,22 @@ export class AcpAgentRuntime {
   }
 
   updateSessionSettings(agentSessionId: string, patch: AcpSessionSettingsPatch): void {
+    const mode = patch.permissionMode;
+    if (mode === undefined) return;
+    for (const pending of this.#pendingResumes) {
+      if (pending.sessionId === agentSessionId) pending.permissionMode = mode;
+    }
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
-    if (patch.permissionMode !== undefined) {
-      session.permissionMode = patch.permissionMode;
-      // A turn still configuring becomes the source when its prompt goes out,
-      // so it carries the change too.
-      for (const turn of [session.sourceTurn, session.pendingTurn]) {
-        if (turn) turn.permissionMode = patch.permissionMode;
-      }
+    // A turn still configuring becomes the source when its prompt goes out.
+    for (const turn of [session.sourceTurn, session.pendingTurn]) {
+      if (turn) turn.permissionMode = mode;
     }
   }
 
   shutdown(): void {
-    // Fences starts still connecting; restores are cancelled below.
-    this.#stopped = true;
+    this.#lifetime.abort(new Error(`The ${this.#policy.agentId} runtime stopped while the session was starting.`));
     this.#idlePurger.stop();
-    this.#restores.cancelAll();
     for (const session of [...this.#sessions.values()]) {
       this.#retireSession(session, 'session-complete');
     }
@@ -360,11 +318,18 @@ export class AcpAgentRuntime {
   }
 
   startPurgeTimer(): void {
-    this.#stopped = false;
+    if (this.#lifetime.signal.aborted) this.#lifetime = new AbortController();
     this.#idlePurger.start();
   }
 
-  async #connectClient(request: AcpStartRequest | AcpResumeRequest): Promise<AcpClient> {
+  #admissionSignal(request: AcpStartRequest | AcpResumeRequest): AbortSignal {
+    const lifetime = this.#lifetime.signal;
+    if (lifetime.aborted) throw new Error(`The ${this.#policy.agentId} runtime is shutting down.`);
+    return request.executionAdmission ? AbortSignal.any([lifetime, request.executionAdmission.signal]) : lifetime;
+  }
+
+  async #openSession(request: AcpStartRequest | AcpResumeRequest, signal: AbortSignal): Promise<AcpAgentRuntimeSession> {
+    signal.throwIfAborted();
     const command = typeof this.#policy.command === 'function'
       ? this.#policy.command()
       : this.#policy.command;
@@ -378,6 +343,10 @@ export class AcpAgentRuntime {
         ? this.#policy.authenticateMethodId()
         : this.#policy.authenticateMethodId,
     });
+    // Before registration the admission owns the process, including a stalled
+    // handshake or native open. After registration the session owns it.
+    const close = () => client.close();
+    signal.addEventListener('abort', close, { once: true });
     try {
       await client.connect({
         command,
@@ -385,104 +354,70 @@ export class AcpAgentRuntime {
         cwd: request.projectPath,
         env: childEnvironmentFor(this.#policy, request),
       });
-      assertAcpExecutionOpen(request);
+      signal.throwIfAborted();
+      const target = { cwd: request.projectPath, mcpServers: this.#policy.mcpServers };
+      const restoring = 'agentSessionId' in request;
+      const opened = restoring
+        ? await reconnectAcpSession(client, { ...target, sessionId: request.agentSessionId })
+        : await client.newSession(target);
+      signal.throwIfAborted();
+      const id = opened.sessionId;
+      const owner = this.#sessions.get(id) ?? (!restoring ? this.#restores.get(id) : undefined);
+      if (owner) {
+        if (owner.chatId !== request.chatId) throw new Error(`ACP session ${id} is already bound to another chat`);
+        throw new Error(`ACP session ${id} is already active`);
+      }
+      const currentModelId = opened.models?.currentModelId;
+      // A new session opens on the native default; a resume reports only its current selection.
+      if (!restoring && currentModelId) this.#agentDefaultModels.set(request.projectPath, currentModelId);
+      const session = newRuntimeSession({
+        id,
+        chatId: request.chatId,
+        projectPath: request.projectPath,
+        client,
+        configOptions: opened.configOptions,
+        models: opened.models,
+      });
+      this.#registerSession(session);
+      return session;
     } catch (error) {
       client.close();
+      signal.throwIfAborted();
       throw error;
+    } finally {
+      signal.removeEventListener('abort', close);
     }
-    this.#capabilityCache.set({
-      command,
-      binaryVersion: this.#policy.binaryVersion ?? 'unknown',
-    }, client.getAdvertisedCapabilities());
-    return client;
   }
 
-  async #sessionForTurn(request: AcpResumeRequest): Promise<AcpAgentRuntimeSession> {
+  async #sessionForTurn(request: AcpResumeRequest, signal: AbortSignal): Promise<AcpAgentRuntimeSession> {
+    const { agentSessionId, chatId } = request;
     // Re-checked after each wait: a waiter woken by a failed restore may find
     // another waiter's new restore already in flight.
-    for (let restoring = this.#restores.inFlight(request.agentSessionId); restoring;
-      restoring = this.#restores.inFlight(request.agentSessionId)) {
-      // Only a waiter that joined before the release fails with it; a turn that
-      // arrives afterwards starts a fresh restore once the cancelled one settles.
-      const joinedBeforeRelease = !restoring.cancelled();
-      await restoring.settled;
-      if (joinedBeforeRelease && restoring.cancelled()) {
-        throw this.#releasedError(request.agentSessionId);
+    for (;;) {
+      const restoring = this.#restores.get(agentSessionId);
+      if (!restoring) break;
+      if (restoring.chatId !== chatId) {
+        throw new Error(`ACP session ${agentSessionId} is already bound to another chat`);
       }
+      await waitUnlessAborted(restoring.settled, signal);
+      signal.throwIfAborted();
     }
-    const existing = this.#sessions.get(request.agentSessionId);
+    const existing = this.#sessions.get(agentSessionId);
     if (existing) {
-      if (existing.chatId !== request.chatId) {
-        throw new Error(`ACP session ${request.agentSessionId} is already bound to another chat`);
+      if (existing.chatId !== chatId) {
+        throw new Error(`ACP session ${agentSessionId} is already bound to another chat`);
       }
-      return existing;
+      if (existing.client.isConnected || this.#isBusy(existing)) return existing;
+      this.#retireSession(existing, 'cancelled', true);
     }
-    return this.#restores.run(request.agentSessionId, request.chatId, (isCancelled) => this.#restoreSession(request, isCancelled));
-  }
-
-  async #restoreSession(request: AcpResumeRequest, isCancelled: () => boolean): Promise<AcpAgentRuntimeSession> {
-    if (this.#stopped) throw new Error(`The ${this.#policy.agentId} runtime is shutting down.`);
-    const client = await this.#connectClient(request);
-    // A release during connect stops the restore before it resumes the session.
-    if (isCancelled() || this.#stopped) {
-      client.close();
-      throw this.#releasedError(request.agentSessionId);
-    }
-    const capabilities = client.getAdvertisedCapabilities();
-    const order = reconnectOrder(capabilities);
-    const baseSession = newRuntimeSession({
-      id: request.agentSessionId,
-      remoteSessionId: request.agentSessionId,
-      chatId: request.chatId,
-      projectPath: request.projectPath,
-      client,
-      capabilities,
-      permissionMode: request.permissionMode,
-    });
-    // Registered only once restored, so a failed restore leaves nothing a later
-    // turn could mistake for a live session.
-    let connected = false;
+    const settled = Promise.withResolvers<void>();
+    this.#restores.set(agentSessionId, { chatId, settled: settled.promise });
     try {
-      connected = await this.#reconnectSession(baseSession, request, order);
+      return await this.#openSession(request, signal);
     } finally {
-      if (!connected) client.close();
+      this.#restores.delete(agentSessionId);
+      settled.resolve();
     }
-    if (!connected) {
-      throw new Error(`Unable to restore ${this.#policy.agentId} session ${request.agentSessionId}. Start a new chat session.`);
-    }
-    if (isCancelled() || this.#stopped) {
-      client.close();
-      throw this.#releasedError(request.agentSessionId);
-    }
-    this.#registerSession(baseSession);
-    return baseSession;
-  }
-
-  async #reconnectSession(
-    session: AcpAgentRuntimeSession,
-    request: AcpResumeRequest,
-    order: ReconnectStrategy[],
-  ): Promise<boolean> {
-    const restored = await reconnectAcpSession(session.client, {
-      sessionId: session.remoteSessionId,
-      cwd: request.projectPath,
-      mcpServers: this.#policy.mcpServers,
-      allowNewSession: this.#policy.reconnectAllowNewSession === true,
-      newSessionModel: newSessionModelFor(this.#policy, request),
-    }, order);
-    if (!restored) return false;
-    session.remoteSessionId = restored.sessionId;
-    session.configOptions = restored.configOptions;
-    session.models = restored.models;
-    session.agentDefaultModelId = this.#agentDefaultModels.get(request.projectPath) ?? restored.models?.currentModelId;
-    return true;
-  }
-
-  #learnAgentDefaultModel(request: AcpStartRequest, currentModelId: string | undefined): string | undefined {
-    if (currentModelId && !newSessionModelFor(this.#policy, request)) {
-      this.#agentDefaultModels.set(request.projectPath, currentModelId);
-    }
-    return this.#agentDefaultModels.get(request.projectPath) ?? currentModelId;
   }
 
   async #runPrompt(
@@ -501,38 +436,33 @@ export class AcpAgentRuntime {
       if (session.pendingTurn === turn) session.pendingTurn = null;
     };
     this.#bindTurnSource(turn);
-    this.#converter.beginTurn?.(session.id);
 
     let success = false;
-    let shouldThrow = false;
-    let failureMessage = '';
+    let failureMessage: string | null = null;
     let executionStarted = false;
     let admissionClosed = false;
 
     try {
-      const promptConfig = promptConfigFor(this.#policy, request);
-      // A default learned after this session was resumed replaces its guess.
-      session.agentDefaultModelId = this.#agentDefaultModels.get(session.projectPath) ?? session.agentDefaultModelId;
-      await configureSessionFor(this.#policy, session, request);
+      await configureSessionFor(this.#policy, session, request, this.#agentDefaultModels.get(session.projectPath));
       // Stopped while configuring: end before admission records the turn as started.
       if (turn.aborted) return;
       if (request.executionAdmission) await markAcpExecutionStarted(request);
       if (turn.aborted) return;
+      assertAcpExecutionOpen(request);
       if (session.retired) throw new Error(`${this.#policy.agentId} ACP process exited before the prompt was sent`);
-      const promptRequest = session.client.promptSession({
-        sessionId: session.remoteSessionId,
+      await session.client.promptSession({
+        sessionId: session.id,
         prompt,
-        ...(promptConfig ? { config: promptConfig } : {}),
       }, () => {
         releasePending();
         if (!this.#activateTurnSource(turn, request.projectPath)) return;
         executionStarted = true;
+        // A cooperative Stop during pipe backpressure can now cancel the delivered prompt.
+        if (turn.aborted) this.abort(session.id);
         onExecutionStarted?.();
       });
-      await promptRequest;
-      const reportedFailure = this.#converter.takeTurnFailure?.(session.id) ?? null;
+      const reportedFailure = this.#canRouteSource(turn) ? this.#converter.takeTurnFailure?.(session.id) : null;
       if (reportedFailure && !turn.aborted) {
-        shouldThrow = true;
         failureMessage = reportedFailure;
       } else {
         success = !turn.aborted;
@@ -541,13 +471,8 @@ export class AcpAgentRuntime {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
       // The transport failure is reported; an in-band failure the agent sent
       // first must not add a second error row at the final flush.
-      this.#converter.takeTurnFailure?.(session.id);
-      if (turn.aborted) {
-        success = false;
-      } else {
-        shouldThrow = true;
-        failureMessage = humanizeError(error);
-      }
+      if (this.#canRouteSource(turn)) this.#converter.takeTurnFailure?.(session.id);
+      if (!turn.aborted) failureMessage = humanizeError(error);
     } finally {
       releasePending();
       const finalMessages = executionStarted ? this.#emitFlushedMessages(turn)
@@ -584,9 +509,11 @@ export class AcpAgentRuntime {
 
       this.#cancelPermissionsForTurn(turn, turn.aborted ? 'aborted' : 'session-complete');
       if (!executionStarted) this.#retireTurnSource(turn, 'cancelled');
+      // A broken pipe is terminal even if the OS has not reported the exit yet.
+      if (!session.client.isConnected) this.#retireSession(session, 'cancelled', true);
     }
 
-    if (shouldThrow) {
+    if (failureMessage !== null) {
       throw new Error(failureMessage);
     }
   }
@@ -601,10 +528,8 @@ export class AcpAgentRuntime {
       pendingPermissions: new Set(),
       detachSourceListeners: [],
       permissionMode: request.permissionMode,
-      running: false,
       completed: false,
       aborted: false,
-      sourceActive: false,
       sourceRetired: false,
       settled: Promise.withResolvers<void>(),
       cancelTimer: null,
@@ -618,11 +543,9 @@ export class AcpAgentRuntime {
     if (previous && previous !== turn) {
       this.#retireTurnSource(previous, 'session-complete');
     }
-    turn.sourceActive = true;
-    turn.running = true;
+    this.#converter.beginTurn?.(session.id);
     session.sourceTurn = turn;
     session.activeTurn = turn;
-    session.permissionMode = turn.permissionMode;
     session.projectPath = projectPath;
     session.state = 'running';
     session.lastActivityAt = Date.now();
@@ -648,27 +571,6 @@ export class AcpAgentRuntime {
       }
     }));
 
-    turn.detachSourceListeners.push(session.client.onExit((exitCode) => {
-      if (!this.#canRouteSource(turn)) return;
-      if (turn.running && !turn.aborted) {
-        // Text streamed before the crash is published ahead of the one failure row.
-        this.#converter.takeTurnFailure?.(session.id);
-        this.#emitFlushedMessages(turn);
-        const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
-        this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), message)]);
-        session.state = 'failed';
-        session.lastActivityAt = Date.now();
-        this.#completeTurn(turn);
-        this.#publishTurnEvent(turn, {
-          type: 'run-ended',
-          runId: turn.operation.runId,
-          outcome: 'failed',
-          error: { code: 'PROVIDER_FAILURE', message },
-        });
-      }
-      this.#retireSession(session, 'cancelled', true);
-    }));
-
     turn.detachSourceListeners.push(session.client.onStderr((line) => {
       if (!this.#canRouteSource(turn)) return;
       if (!line.trim()) return;
@@ -680,7 +582,7 @@ export class AcpAgentRuntime {
     const params = asObject(rawParams) as AcpSessionUpdateNotification;
     const remoteSessionId = asString(params.sessionId);
     const session = turn.session;
-    if (!remoteSessionId || remoteSessionId !== session.remoteSessionId) {
+    if (!remoteSessionId || remoteSessionId !== session.id) {
       this.#logger.warn('Dropped an ACP session update without its owning native session.', {
         agentId: this.#policy.agentId,
         sessionId: session.id,
@@ -703,7 +605,7 @@ export class AcpAgentRuntime {
     const params = asObject(rawParams) as AcpSessionRequestPermission;
     const remoteSessionId = asString(params.sessionId);
     const session = turn.session;
-    if (!remoteSessionId || remoteSessionId !== session.remoteSessionId) {
+    if (!remoteSessionId || remoteSessionId !== session.id) {
       this.#logger.warn('Dropped an ACP permission request without its owning native session.', {
         agentId: this.#policy.agentId,
         sessionId: session.id,
@@ -726,35 +628,22 @@ export class AcpAgentRuntime {
       return;
     }
 
-    if (isAutoApproveMode(turn.permissionMode, this.#policy)) {
-      session.client.respond(requestId, permissionChoiceOutcome(options, 'auto-approve'));
+    const automatic = automaticPermissionChoice(turn.permissionMode, toolCall.kind, this.#policy);
+    const approval = permissionChoiceOutcome(options, automatic ?? 'allow-once');
+    // Interactive controls offer Allow once, never a persistent grant.
+    if (automatic || approval.outcome.outcome === 'cancelled') {
+      session.client.respond(requestId, approval);
       return;
     }
 
     const permissionOccurrenceId = crypto.randomUUID();
-    const requestedTool = convertedTool
-      ?? fallbackPermissionToolUse(toolCall, permissionOccurrenceId, context.timestamp);
-
-    const pending = this.#registerPendingPermission(
-      turn,
-      permissionOccurrenceId,
-      requestId,
-      (decision) => permissionChoiceOutcome(
-        options,
-        decision.allow ? (decision.alwaysAllow ? 'allow-always' : 'allow-once') : 'reject',
-      ),
-      permissionCancelledOutcome,
-    );
-    this.#publishTurnEvent(turn, {
-      type: 'permission',
-      runId: turn.operation.runId,
-      lifecycle: {
-        kind: 'requested',
-        permissionOccurrenceId: pending.permissionOccurrenceId,
-        requestedTool,
-        options: [],
+    this.#requestPermission(turn, requestId, permissionOccurrenceId, {
+      tool: convertedTool ?? fallbackPermissionToolUse(toolCall, permissionOccurrenceId, context.timestamp),
+      responseForDecision: (decision) => {
+        if (!decision.allow) return permissionChoiceOutcome(options, 'reject');
+        return permissionChoiceOutcome(options, decision.alwaysAllow ? 'allow-always' : 'allow-once');
       },
-      decision: this.#decisionCapability(pending),
+      responseForCancellation: permissionCancelledOutcome,
     });
   }
 
@@ -777,51 +666,33 @@ export class AcpAgentRuntime {
       return true;
     }
 
-    const pending = this.#registerPendingPermission(
-      turn,
-      permissionOccurrenceId,
-      requestId,
-      converted.responseForDecision,
-      converted.responseForCancellation,
-    );
-    this.#publishTurnEvent(turn, {
-      type: 'permission',
-      runId: turn.operation.runId,
-      lifecycle: {
-        kind: 'requested',
-        permissionOccurrenceId: pending.permissionOccurrenceId,
-        requestedTool: converted.tool,
-        options: [],
-      },
-      decision: this.#decisionCapability(pending),
-    });
+    this.#requestPermission(turn, requestId, permissionOccurrenceId, converted);
     return true;
   }
 
-  #registerPendingPermission(
+  #requestPermission(
     turn: AcpTurnContext,
-    permissionOccurrenceId: string,
     requestId: AcpJsonRpcId,
-    responseForDecision: PendingPermissionRequest['responseForDecision'],
-    responseForCancellation: PendingPermissionRequest['responseForCancellation'],
-  ): PendingPermissionRequest {
+    permissionOccurrenceId: string,
+    request: AcpBlockingRequestToolUse,
+  ): void {
     const pending: PendingPermissionRequest = {
       permissionOccurrenceId,
-      session: turn.session,
       turn,
       requestId,
-      responseForDecision,
-      responseForCancellation,
+      responseForDecision: request.responseForDecision,
+      responseForCancellation: request.responseForCancellation,
     };
     turn.pendingPermissions.add(pending);
     this.#pendingPermissions.add(pending);
-    return pending;
-  }
-
-  #decisionCapability(pending: PendingPermissionRequest) {
-    return Object.freeze({
-      permissionOccurrenceId: pending.permissionOccurrenceId,
-      respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
+    this.#publishTurnEvent(turn, {
+      type: 'permission',
+      runId: turn.operation.runId,
+      lifecycle: { kind: 'requested', permissionOccurrenceId, requestedTool: request.tool, options: [] },
+      decision: Object.freeze({
+        permissionOccurrenceId,
+        respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
+      }),
     });
   }
 
@@ -832,7 +703,7 @@ export class AcpAgentRuntime {
     for (const pending of [...turn.pendingPermissions]) {
       if (!this.#pendingPermissions.delete(pending)) continue;
       try {
-        pending.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
+        turn.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
       this.#publishTurnEvent(turn, {
         type: 'permission',
@@ -850,7 +721,6 @@ export class AcpAgentRuntime {
   #completeTurn(turn: AcpTurnContext): void {
     if (turn.completed) return;
     turn.completed = true;
-    turn.running = false;
     const session = turn.session;
     if (session.activeTurn === turn) session.activeTurn = null;
     turn.settled.resolve();
@@ -894,7 +764,7 @@ export class AcpAgentRuntime {
   }
 
   #canRouteSource(turn: AcpTurnContext): boolean {
-    return turn.sourceActive && !turn.sourceRetired;
+    return turn.session.sourceTurn === turn && !turn.sourceRetired;
   }
 
   #retireSupersededChatSessions(current: AcpAgentRuntimeSession): void {
@@ -910,7 +780,6 @@ export class AcpAgentRuntime {
   ): void {
     if (turn.sourceRetired) return;
     this.#cancelPermissionsForTurn(turn, reason);
-    turn.sourceActive = false;
     turn.sourceRetired = true;
     for (const detach of turn.detachSourceListeners.splice(0)) detach();
     if (turn.session.sourceTurn === turn) turn.session.sourceTurn = null;
@@ -947,15 +816,11 @@ export class AcpAgentRuntime {
     session.client.close();
   }
 
-  // Each session watches its own process, so a death while no turn is routing
-  // (idle, restored, or still configuring) still retires it. A routable turn's
-  // own listener reports the failure first and retires the session.
   #registerSession(session: AcpAgentRuntimeSession): void {
     this.#sessions.set(session.id, session);
     session.client.onExit(() => {
-      const turn = session.activeTurn;
-      if (turn && this.#canRouteSource(turn)) return;
-      this.#retireSession(session, 'cancelled', true);
+      // An active prompt settles its own outcome before retiring the session.
+      if (!session.activeTurn) this.#retireSession(session, 'cancelled', true);
     });
   }
 
