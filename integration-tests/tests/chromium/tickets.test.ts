@@ -37,6 +37,14 @@ describe("Chromium Tickets interaction", () => {
       });
 
       await openTicket.click();
+      const resizedWithoutPainting = await summary.evaluate(async (control: HTMLElement) => {
+        control.click();
+        control.click();
+        await new Promise(requestAnimationFrame);
+        return control.closest('[role="dialog"]')!.getAnimations()
+          .some(animation => animation.id === "dialog-resize");
+      });
+      expect(resizedWithoutPainting).toBe(false);
       const expanded = await measureToggle();
       expect(expanded.middle).toBeGreaterThan(expanded.before);
       expect(expanded.middle).toBeLessThan(expanded.after);

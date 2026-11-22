@@ -128,7 +128,26 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await route.fulfill({ json: { name: 'picker-review' } });
       });
       await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
-      await picker.getByRole('button', { name: 'New worktree', exact: true }).click();
+      const newWorktree = picker.getByRole('button', { name: 'New worktree', exact: true });
+      if (executionBackend === 'in-process') {
+        await browserExpect(newWorktree).toBeEnabled();
+        const sizes = await newWorktree.evaluate(async (button: HTMLElement) => {
+          const dialog = button.closest<HTMLElement>('[role="dialog"]')!;
+          const list = dialog.offsetHeight;
+          button.click();
+          await new Promise(requestAnimationFrame);
+          const resize = dialog.getAnimations().find(animation => animation.id === 'dialog-resize')!;
+          resize.pause();
+          resize.currentTime = Number(resize.effect!.getTiming().duration) / 2;
+          const middle = dialog.offsetHeight;
+          resize.finish();
+          return { list, middle, create: dialog.offsetHeight };
+        });
+        expect(sizes.middle).toBeLessThan(sizes.list);
+        expect(sizes.middle).toBeGreaterThan(sizes.create);
+      } else {
+        await newWorktree.click();
+      }
       const create = page.getByRole('dialog', { name: 'New worktree', exact: true });
       const name = create.getByRole('textbox', { name: /branch name/i });
       await browserExpect(name).toHaveValue('');

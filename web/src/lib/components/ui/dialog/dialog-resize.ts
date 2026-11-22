@@ -1,4 +1,5 @@
 const resizeId = 'dialog-resize';
+const pendingFrames = new WeakSet<HTMLElement>();
 
 function reduceMotion(): boolean {
 	return (
@@ -9,7 +10,8 @@ function reduceMotion(): boolean {
 
 /** Captures the rendered box before a mode change, including a resize already in progress. */
 export function animateDialogResize(dialog: HTMLElement | null): void {
-	if (!dialog?.animate || reduceMotion()) return;
+	if (!dialog?.animate || reduceMotion() || pendingFrames.has(dialog)) return;
+	pendingFrames.add(dialog);
 	const width = dialog.offsetWidth;
 	const height = dialog.offsetHeight;
 	const viewport = window.visualViewport;
@@ -18,6 +20,7 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 
 	// The next frame includes both Svelte updates and native summary activation.
 	requestAnimationFrame(() => {
+		pendingFrames.delete(dialog);
 		if (!dialog.isConnected || dialog.dataset.state !== 'open') return;
 		dialog
 			.getAnimations()
@@ -31,7 +34,11 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 		if (width === nextWidth && height === nextHeight) return;
 		const dimensions: PropertyIndexedKeyframes = {};
 		if (width !== nextWidth) dimensions.width = [`${width}px`, `${nextWidth}px`];
-		if (height !== nextHeight) dimensions.height = [`${height}px`, `${nextHeight}px`];
+		if (height !== nextHeight) {
+			dimensions.height = [`${height}px`, `${nextHeight}px`];
+			// Avoids a temporary scrollbar rewrapping content that fits at its natural height.
+			if (dialog.scrollHeight <= dialog.clientHeight) dimensions.overflowY = ['hidden', 'hidden'];
+		}
 		const resize = dialog.animate(dimensions, { id: resizeId, duration: 200, easing: 'ease' });
 		// A rotation or software keyboard invalidates the measured destination.
 		const cancel = () => resize.cancel();
