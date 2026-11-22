@@ -71,7 +71,19 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     }
 
     markPhase('copying with the legacy clipboard fallback');
-    await command('Copy File Location');
+    await source.press('Control+p');
+    await search.fill('file');
+    const copy = palette.getByRole('option', { name: 'Copy File Location File', exact: true });
+    const results = palette.locator('button[role="option"]:enabled');
+    const ids = await results.evaluateAll(buttons => buttons.map(button => button.id));
+    const copyIndex = ids.indexOf((await copy.getAttribute('id'))!);
+    expect(copyIndex).toBeGreaterThanOrEqual(0);
+    const previous = copyIndex > 0;
+    await results.nth(previous ? copyIndex - 1 : copyIndex + 1).focus();
+    await page.keyboard.press(previous ? 'ArrowDown' : 'ArrowUp');
+    await browserExpect(copy).toBeFocused();
+    await browserExpect(copy).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Space');
     await page.getByText('Copied to clipboard', { exact: true }).waitFor();
 
     markPhase('reporting appended and duplicate chat content');

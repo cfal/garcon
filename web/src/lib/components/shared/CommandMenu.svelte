@@ -122,11 +122,17 @@
 			if (e.key === 'Escape') e.stopPropagation();
 			return;
 		}
-		if (
-			e.target !== inputRef &&
-			!(e.target instanceof Element && e.target.closest('[role="option"]'))
-		)
+		if (e.target instanceof HTMLButtonElement && e.target.matches('[role="option"]')) {
+			if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+			e.preventDefault();
+			const options = Array.from(
+				e.target.parentElement!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+			);
+			const delta = e.key === 'ArrowDown' ? 1 : -1;
+			options[options.indexOf(e.target) + delta]?.focus();
 			return;
+		}
+		if (e.target !== inputRef) return;
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));

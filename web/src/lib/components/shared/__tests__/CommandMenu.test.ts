@@ -283,7 +283,7 @@ it('switches captured recent chats through the same registry action for keyboard
 });
 
 describe('CommandMenu', () => {
-	it('runs the highlighted command when arrowing from a focused option', async () => {
+	it('moves keyboard focus and the highlight together between result buttons', async () => {
 		const invoke = vi.spyOn(commandRegistry, 'invoke');
 		try {
 			const { component } = render(CommandMenu);
@@ -299,7 +299,8 @@ describe('CommandMenu', () => {
 			focused.focus();
 			await fireEvent.keyDown(focused, { key: 'ArrowDown' });
 			expect(options[index + 1].getAttribute('aria-selected')).toBe('true');
-			await fireEvent.keyDown(focused, { key: 'Enter' });
+			expect(document.activeElement).toBe(options[index + 1]);
+			await fireEvent.click(options[index + 1]);
 			expect(invoke).toHaveBeenCalledOnce();
 			expect(options[index + 1].id.endsWith(encodeURIComponent(invoke.mock.calls[0][0].id))).toBe(
 				true,
