@@ -88,15 +88,6 @@ function normalizeTitle(text: unknown): string {
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-function titleGenerationUnavailable(): TitleGenerationError {
-  return new TitleGenerationError(
-    'TITLE_GENERATION_UNAVAILABLE',
-    TITLE_MODEL_UNAVAILABLE_MESSAGE,
-    409,
-    false,
-  );
-}
-
 async function runTitleGeneration(
   { chatId, agents, settings, recentTitleIcons, signal }: TitleGenerationContext,
   sourceText: string,
@@ -109,7 +100,7 @@ async function runTitleGeneration(
     const query = await resolveTitleModelQuery(agents, ui?.chatTitle, use, signal);
     if (!query) {
       if (use === 'automatic') return null;
-      throw titleGenerationUnavailable();
+      throw new TitleGenerationError('TITLE_GENERATION_UNAVAILABLE', TITLE_MODEL_UNAVAILABLE_MESSAGE, 409);
     }
     if (use === 'automatic' && settings.getChatName(chatId)) return null;
 

@@ -19,6 +19,15 @@ export interface TitleModelAgents extends GenerationDiscoveryAgents {
   runSingleQuery(prompt: string, options: TitleModelQuery): Promise<string>;
 }
 
+function titleModelSelection(persisted: unknown, use: TitleModelUse): unknown {
+  if (use === 'automatic') return persisted;
+  const settings = isRecord(persisted) ? persisted : {};
+  // On demand, a saved target is always enabled. Without one, Auto decides from readiness.
+  const hasSavedTarget = ['agentId', 'model', 'apiProviderId', 'modelEndpointId']
+    .some(key => typeof settings[key] === 'string');
+  return { ...settings, enabled: hasSavedTarget ? true : undefined };
+}
+
 export async function resolveTitleModelQuery(
   agents: GenerationDiscoveryAgents,
   persisted: unknown,
@@ -27,15 +36,10 @@ export async function resolveTitleModelQuery(
 ): Promise<TitleModelQuery | null> {
   const signal = createGenerationRequestSignal(externalSignal);
   const context = await resolveGenerationContextForSelection(agents, persisted, signal);
-  let selection = isRecord(persisted) ? persisted : {};
-  if (use === 'on-demand') {
-    // An explicit request uses the saved target regardless of the automatic-title switch.
-    // With no saved target, the resolver enables generation only when Auto is ready.
-    const hasSavedTarget = ['agentId', 'model', 'apiProviderId', 'modelEndpointId']
-      .some(key => typeof selection[key] === 'string');
-    selection = { ...selection, enabled: hasSavedTarget ? true : undefined };
-  }
-  const { enabled, source: _source, ...target } = resolveEffectiveGenerationConfig({ persisted: selection, ...context });
+  const { enabled, source: _source, ...target } = resolveEffectiveGenerationConfig({
+    persisted: titleModelSelection(persisted, use),
+    ...context,
+  });
   if (!enabled) return null;
   if (!target.agentId || !target.model) {
     if (use === 'automatic') logger.warn('chat-title: generation failed:', TITLE_MODEL_UNAVAILABLE_MESSAGE);
