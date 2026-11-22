@@ -40,7 +40,7 @@
 	}}
 >
 	<Dialog.Content
-		class="w-[calc(100%-2rem)] max-w-xl rounded-lg border border-border bg-popover p-0 shadow-2xl"
+		class="max-h-[calc(var(--app-height)-1rem)] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-lg border border-border bg-popover p-0 shadow-2xl"
 		showCloseButton={false}
 		aria-label={m.git_compare_title()}
 	>
@@ -99,6 +99,7 @@
 							? 'bg-background text-foreground shadow-sm'
 							: 'text-muted-foreground'}"
 						aria-pressed={comparison.toKind === 'revision'}
+						onclickcapture={Dialog.resizeDialogOnClick}
 						onclick={() => comparison.setToKind('revision')}>{m.git_compare_revision()}</button
 					>
 					<button
@@ -107,6 +108,7 @@
 							? 'bg-background text-foreground shadow-sm'
 							: 'text-muted-foreground'}"
 						aria-pressed={comparison.toKind === 'working-tree'}
+						onclickcapture={Dialog.resizeDialogOnClick}
 						onclick={() => comparison.setToKind('working-tree')}
 						>{m.git_compare_working_tree()}</button
 					>

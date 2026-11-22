@@ -271,7 +271,7 @@
 					{m.pull_request_repository_debounce_hint()}
 				</p>
 				<details class="space-y-3">
-					<summary class="cursor-pointer text-sm font-medium">
+					<summary onclickcapture={Dialog.resizeDialogOnClick} class="cursor-pointer text-sm font-medium">
 						{m.pull_request_repository_filters_and_limits()}
 					</summary>
 					<p id="pr-filter-lists-hint" class="text-xs text-muted-foreground">

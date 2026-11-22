@@ -12,6 +12,56 @@ import {
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
+  test("animates native ticket disclosure in both directions unless motion is reduced", async () => {
+    await withChromiumFixture("ticket-disclosure-motion", async ({ page, integration }) => {
+      await page.goto(integration.garcon.baseUrl);
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      const openTicket = page.getByRole("button", { name: "New ticket", exact: true });
+      const summary = page.getByRole("dialog").locator("summary", { hasText: "More details" });
+      const measureToggle = () => summary.evaluate(async (control: HTMLElement) => {
+        const dialog = control.closest<HTMLElement>('[role="dialog"]')!;
+        const before = dialog.offsetHeight;
+        control.focus();
+        control.click();
+        await new Promise(requestAnimationFrame);
+        const resize = dialog.getAnimations().find(animation => animation.id === "dialog-resize");
+        if (resize) {
+          resize.pause();
+          resize.currentTime = Number(resize.effect!.getTiming().duration) / 2;
+        }
+        const middle = dialog.offsetHeight;
+        resize?.finish();
+        return { before, middle, after: dialog.offsetHeight, focused: document.activeElement === control };
+      });
+
+      await openTicket.click();
+      const expanded = await measureToggle();
+      expect(expanded.middle).toBeGreaterThan(expanded.before);
+      expect(expanded.middle).toBeLessThan(expanded.after);
+      expect(expanded.focused).toBe(true);
+      const collapsed = await measureToggle();
+      expect(collapsed.middle).toBeLessThan(collapsed.before);
+      expect(collapsed.middle).toBeGreaterThan(collapsed.after);
+
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const osReduced = await measureToggle();
+      expect(osReduced.after).toBeGreaterThan(osReduced.before);
+      expect(osReduced.middle).toBe(osReduced.after);
+
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await page.evaluate(() => {
+        const prefs = JSON.parse(localStorage.getItem("pref_local_settings") ?? "{}");
+        localStorage.setItem("pref_local_settings", JSON.stringify({ ...prefs, reduceMotion: true }));
+      });
+      await page.reload();
+      await openTicket.click();
+      const appReduced = await measureToggle();
+      expect(appReduced.after).toBeGreaterThan(appReduced.before);
+      expect(appReduced.middle).toBe(appReduced.after);
+    });
+  });
+
   test("opens a chat assignee without source-row navigation on desktop and mobile", async () => {
     await withChromiumFixture("tickets-chat-assignee", async (fixture) => {
       const { page, integration } = fixture;

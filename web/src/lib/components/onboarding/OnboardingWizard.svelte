@@ -234,7 +234,7 @@
 		<Dialog.Footer
 			class="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border px-4 py-4 sm:px-6"
 		>
-			<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
+			<Button variant="ghost" onclickcapture={Dialog.resizeDialogOnClick} onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
 				{m.onboarding_back()}
 			</Button>
 			{#if wizard.isDonePage}
@@ -248,6 +248,7 @@
 				<Button
 					class="justify-self-end"
 					onclick={() => wizard.advance()}
+					onclickcapture={Dialog.resizeDialogOnClick}
 					disabled={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving}
 					>{m.onboarding_continue()}</Button
 				>
