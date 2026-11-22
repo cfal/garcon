@@ -1,6 +1,7 @@
 import { fetchModelCatalogResponse } from '$lib/api/model-catalog';
-import { isTransientRequestFailure } from '$lib/api/client';
+import { ApiError, isTransientRequestFailure } from '$lib/api/client';
 import { effectiveExecutorId, type ExecutorSnapshot } from '$shared/executors';
+import { isRecord } from '$shared/json';
 import { agentLabelFor } from './agent-labels.js';
 import { PendingAgentLogins } from './pending-agent-logins.js';
 import {
@@ -87,6 +88,7 @@ interface ModelCatalogSnapshot {
 	lastValidatedAt: number | null;
 }
 
+const SNAPSHOT_SCHEMA_VERSION = 2;
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 const VALIDATION_RETRY_MS = 30_000;
 
@@ -394,7 +396,7 @@ function emptySnapshot(): ModelCatalogSnapshot {
 }
 
 function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapshot {
-	if (parsed.schemaVersion !== 2) return emptySnapshot();
+	if (parsed.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) return emptySnapshot();
 	if (!parsed.agentMetadata || typeof parsed.agentMetadata !== 'object'
 		|| Array.isArray(parsed.agentMetadata)
 		|| !Object.values(parsed.agentMetadata).every(hasAgentExecutionMetadata)) return emptySnapshot();
@@ -418,37 +420,55 @@ function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapsho
 	};
 }
 
-function readExecutorSnapshots(): Record<string, ModelCatalogSnapshot> {
+function readExecutorSnapshots(owner: string): Record<string, ModelCatalogSnapshot> {
 	try {
 		const parsed: unknown = JSON.parse(getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors) ?? '{}');
-		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-		return Object.fromEntries(Object.entries(parsed).flatMap(([id, value]) =>
-			value && typeof value === 'object' && !Array.isArray(value)
-				? [[id, normalizeSnapshot(value)]] : [],
-		));
-	} catch { return {}; }
+		if (!isRecord(parsed)) return {};
+		const snapshots = new Map<string, ModelCatalogSnapshot>();
+		for (const [id, value] of Object.entries(parsed)) {
+			if (isRecord(value) && value.owner === owner) snapshots.set(id, normalizeSnapshot(value));
+		}
+		return Object.fromEntries(snapshots);
+	} catch {
+		return {};
+	}
 }
 
-function readPersisted(executorId: string): ModelCatalogSnapshot {
+function readPersisted(executorId: string, owner: string): ModelCatalogSnapshot {
 	try {
-		if (executorId !== 'local') return readExecutorSnapshots()[executorId] ?? emptySnapshot();
+		if (executorId !== 'local') return readExecutorSnapshots(owner)[executorId] ?? emptySnapshot();
 		const raw =
 			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog) ??
 			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 		if (!raw) return emptySnapshot();
-		return normalizeSnapshot(JSON.parse(raw) as Record<string, unknown>);
+		const snapshot: unknown = JSON.parse(raw);
+		return isRecord(snapshot) && snapshot.owner === owner ? normalizeSnapshot(snapshot) : emptySnapshot();
 	} catch {
 		return emptySnapshot();
 	}
 }
 
-function persist(executorId: string, snapshot: ModelCatalogSnapshot): void {
-	const persisted = { ...snapshot, schemaVersion: 2 };
-	if (executorId === 'local') setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(persisted));
-	else {
-		const snapshots = Object.fromEntries(Object.entries(readExecutorSnapshots()).map(([id, value]) => [id, { ...value, schemaVersion: 2 }]));
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify({ ...snapshots, [executorId]: persisted }));
+function ownedSnapshot(snapshot: ModelCatalogSnapshot, owner: string) {
+	return { ...snapshot, schemaVersion: SNAPSHOT_SCHEMA_VERSION, owner };
+}
+
+function writeExecutorSnapshots(owner: string, snapshots: Record<string, ModelCatalogSnapshot>): void {
+	const entries = Object.entries(snapshots).map(([id, value]) => [id, ownedSnapshot(value, owner)]);
+	setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify(Object.fromEntries(entries)));
+}
+
+function persist(executorId: string, snapshot: ModelCatalogSnapshot, owner: string): void {
+	if (executorId === 'local') {
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(ownedSnapshot(snapshot, owner)));
+		return;
 	}
+	writeExecutorSnapshots(owner, { ...readExecutorSnapshots(owner), [executorId]: snapshot });
+}
+
+function clearPersistedCatalogs(): void {
+	removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
+	removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
+	removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors);
 }
 
 interface CatalogApplyResult {
@@ -482,17 +502,18 @@ export class ModelCatalogStore {
 	#syncPromise: Promise<void> | null = null;
 	#lastSyncAttemptAt = 0;
 	#requestVersion = 0;
-	#loginRefreshPending = false;
-	#loginOwner: string | null = null;
-	#executorAvailability = new Map<string, string>();
+	#loginRefreshInstance: string | null = null;
+	#owner: string | null;
+	#executorAvailability = new Map<string, Pick<ExecutorSnapshot, 'enabled' | 'availability' | 'instanceId'>>();
 	readonly pendingLogins: PendingAgentLogins;
 
-	constructor(readonly executorId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>()) {
-		this.pendingLogins = new PendingAgentLogins(executorId, () => {
+	constructor(readonly executorId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>(), owner: string | null = null) {
+		this.#owner = owner;
+		this.pendingLogins = new PendingAgentLogins(executorId, (instanceId) => {
 			// Supersedes pre-login discovery without blocking other validated selections.
 			this.#requestVersion++;
 			this.#syncPromise = null;
-			this.#loginRefreshPending = true;
+			this.#loginRefreshInstance = instanceId;
 			void this.forceRefresh();
 		});
 		this.catalogs.set(executorId, this);
@@ -501,7 +522,7 @@ export class ModelCatalogStore {
 
 	forExecutor(executorId?: string | null): ModelCatalogStore {
 		const id = effectiveExecutorId(executorId);
-		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs);
+		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs, this.#owner);
 	}
 
 	get isValidated(): boolean {
@@ -510,36 +531,37 @@ export class ModelCatalogStore {
 
 	reconcileExecutors(executors: readonly ExecutorSnapshot[]): void {
 		const ids = new Set(executors.map((executor) => executor.id));
-		const persisted = readExecutorSnapshots();
+		const owner = this.#owner;
+		const persisted = owner !== null ? readExecutorSnapshots(owner) : {};
 		for (const id of Object.keys(persisted)) if (!ids.has(id)) delete persisted[id];
 		for (const id of this.#executorAvailability.keys()) if (!ids.has(id)) this.#executorAvailability.delete(id);
 		for (const [id, catalog] of this.catalogs) {
 			if (ids.has(id) || id === 'local') continue;
-			catalog.pendingLogins.clear();
+			catalog.#retireLogins();
 			catalog.invalidate();
 			this.catalogs.delete(id);
 		}
 		for (const executor of executors) {
-			const availability = JSON.stringify([executor.enabled, executor.availability, executor.instanceId]);
+			const { enabled, availability, instanceId } = executor;
 			const previous = this.#executorAvailability.get(executor.id);
-			if (previous !== undefined && availability !== previous) {
-				if (executor.id === 'local') {
+			if (previous && (enabled !== previous.enabled || availability !== previous.availability || instanceId !== previous.instanceId)) {
+				if (executor.id === 'local' && owner !== null) {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 				} else delete persisted[executor.id];
 				const catalog = this.catalogs.get(executor.id);
-				catalog?.pendingLogins.clear();
-				catalog?.invalidate();
+				if (catalog) {
+					if (!enabled || availability === 'offline' || instanceId !== previous.instanceId) catalog.#retireLogins();
+					catalog.invalidate();
+				}
 			}
-			this.#executorAvailability.set(executor.id, availability);
+			this.#executorAvailability.set(executor.id, { enabled, availability, instanceId });
 		}
-		const snapshots = Object.fromEntries(Object.entries(persisted).map(([id, value]) => [id, { ...value, schemaVersion: 2 }]));
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify(snapshots));
+		if (owner !== null) writeExecutorSnapshots(owner, persisted);
 	}
 
 	invalidate(): void {
 		this.#requestVersion += 1;
-		this.#loginRefreshPending = false;
 		this.#lastSyncAttemptAt = 0;
 		this.#syncPromise = null;
 		this.isRefreshing = false;
@@ -551,19 +573,31 @@ export class ModelCatalogStore {
 
 	invalidateAll(): void {
 		for (const catalog of this.catalogs.values()) catalog.invalidate();
-		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
-		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
-		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors);
+		if (this.#owner !== null) clearPersistedCatalogs();
 	}
 
-	clearPendingLogins(): void {
-		for (const catalog of this.catalogs.values()) catalog.pendingLogins.clear();
+	dispose(): void {
+		for (const catalog of this.catalogs.values()) {
+			catalog.invalidate();
+			catalog.#retireLogins();
+		}
 	}
 
-	setLoginOwner(owner: string | null): void {
-		if (this.#loginOwner === owner) return;
-		this.#loginOwner = owner;
-		this.clearPendingLogins();
+	#retireLogins(): void {
+		this.pendingLogins.clear();
+		this.#loginRefreshInstance = null;
+	}
+
+	setOwner(owner: string | null): void {
+		if (this.#owner === owner) return;
+		if (this.#owner !== null) clearPersistedCatalogs();
+		for (const catalog of this.catalogs.values()) {
+			catalog.#retireLogins();
+			catalog.invalidate();
+			catalog.#owner = owner;
+			catalog.error = null;
+			catalog.hydrateFromStorage();
+		}
 	}
 
 	getSelectableAgents(): SessionAgentId[] {
@@ -743,7 +777,7 @@ export class ModelCatalogStore {
 	}
 
 	hydrateFromStorage(): void {
-		const snapshot = readPersisted(this.executorId);
+		const snapshot = this.#owner !== null ? readPersisted(this.executorId, this.#owner) : emptySnapshot();
 		this.agentModels = snapshot.agentModels;
 		this.agentMetadata = snapshot.agentMetadata;
 		this.apiProviderCatalog = snapshot.apiProviderCatalog;
@@ -759,7 +793,7 @@ export class ModelCatalogStore {
 	}
 
 	isStale(ttlMs: number = DEFAULT_TTL_MS): boolean {
-		if (this.#loginRefreshPending) return true;
+		if (this.error !== null || this.#loginRefreshInstance !== null) return true;
 		const checkedAt = this.lastValidatedAt ?? this.lastFetchedAt;
 		if (checkedAt === null) return true;
 		return Date.now() - checkedAt >= ttlMs;
@@ -786,16 +820,15 @@ export class ModelCatalogStore {
 		this.isRefreshing = true;
 
 		try {
-			const response = await fetchModelCatalogResponse(this.executorId, options.force ? null : this.etag);
+			const response = this.#loginRefreshInstance === null
+				? await fetchModelCatalogResponse(this.executorId, options.force ? null : this.etag)
+				: await fetchModelCatalogResponse(this.executorId, null, this.#loginRefreshInstance);
 			if (requestVersion !== this.#requestVersion) return;
 			const responseEtag = response.headers?.get?.('etag') ?? null;
 
 			if (response.status === 304) {
-				this.#loginRefreshPending = false;
 				this.etag = responseEtag ?? this.etag;
-				this.lastValidatedAt = Date.now();
-				this.error = null;
-				this.#persistCurrentSnapshot();
+				this.#recordValidation(Date.now());
 				return;
 			}
 
@@ -803,26 +836,24 @@ export class ModelCatalogStore {
 			if (requestVersion !== this.#requestVersion) return;
 
 			const catalogResult = parseCatalogResponse(data);
-			if (catalogResult && Object.keys(catalogResult.agentMetadata).length > 0) {
-				const applied = applyCatalogResult(catalogResult);
-				this.agentModels = applied.agentModels;
-				this.agentMetadata = applied.agentMetadata;
-				this.apiProviderCatalog = applied.apiProviderCatalog;
-			} else {
+			if (!catalogResult || Object.keys(catalogResult.agentMetadata).length === 0) {
 				throw new Error('Model catalog response is invalid');
 			}
+			const applied = applyCatalogResult(catalogResult);
+			this.agentModels = applied.agentModels;
+			this.agentMetadata = applied.agentMetadata;
+			this.apiProviderCatalog = applied.apiProviderCatalog;
 
-			const now = Date.now();
-			this.#loginRefreshPending = false;
 			this.etag = responseEtag;
-			this.lastFetchedAt = now;
-			this.lastValidatedAt = now;
-			this.error = null;
-			persist(this.executorId, this.#currentSnapshot());
-			this.version += 1;
+			this.lastFetchedAt = Date.now();
+			this.#recordValidation(this.lastFetchedAt);
 		} catch (error) {
 			if (requestVersion !== this.#requestVersion) return;
-			if (this.#loginRefreshPending && this.isValidated && isTransientRequestFailure(error)) return;
+			if (this.#loginRefreshInstance !== null) {
+				const temporarilyBusy = error instanceof ApiError && error.errorCode === 'EXECUTOR_BUSY';
+				if (this.isValidated && (temporarilyBusy || isTransientRequestFailure(error))) return;
+				if (error instanceof ApiError && error.errorCode === 'LOGIN_INSTANCE_CHANGED') this.#loginRefreshInstance = null;
+			}
 			this.error = error instanceof Error ? error.message : 'Unknown error';
 		} finally {
 			if (requestVersion === this.#requestVersion) this.isRefreshing = false;
@@ -840,8 +871,11 @@ export class ModelCatalogStore {
 		};
 	}
 
-	#persistCurrentSnapshot(): void {
-		persist(this.executorId, this.#currentSnapshot());
+	#recordValidation(checkedAt: number): void {
+		this.#loginRefreshInstance = null;
+		this.lastValidatedAt = checkedAt;
+		this.error = null;
+		if (this.#owner !== null) persist(this.executorId, this.#currentSnapshot(), this.#owner);
 		this.version += 1;
 	}
 }

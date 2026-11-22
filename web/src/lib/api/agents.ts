@@ -6,9 +6,10 @@ import type { AgentId } from '$shared/agents';
 import type {
 	AgentAuthLoginCompleteResult,
 	AgentAuthLoginLaunchResult,
-	AgentAuthLoginStatus,
+	AgentAuthLoginHttpStatus as AgentAuthLoginStatus,
 	AgentDeviceAuthInfo,
 } from '$shared/agent-auth';
+import { LOGIN_INSTANCE_QUERY } from '$shared/agent-auth';
 
 export type AgentName = AgentId;
 
@@ -31,9 +32,10 @@ export type DeviceAuthInfo = AgentDeviceAuthInfo;
 export type AgentAuthLoginResult = AgentAuthLoginLaunchResult;
 export type { AgentAuthLoginStatus };
 
-export async function getAgentAuthStatus(agent: AgentName, executorId?: string): Promise<AgentAuthStatus> {
+export async function getAgentAuthStatus(agent: AgentName, executorId?: string, loginInstance?: string): Promise<AgentAuthStatus> {
+	const instanceQuery = loginInstance === undefined ? '' : `&${LOGIN_INSTANCE_QUERY}=${encodeURIComponent(loginInstance)}`;
 	const result = await apiGet<Record<string, AgentAuthStatus>>(
-		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}&executorId=${encodeURIComponent(effectiveExecutorId(executorId))}`,
+		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}&executorId=${encodeURIComponent(effectiveExecutorId(executorId))}${instanceQuery}`,
 	);
 	return result[agent];
 }

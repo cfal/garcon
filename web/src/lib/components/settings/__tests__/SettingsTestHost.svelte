@@ -298,7 +298,7 @@
 	} as never);
 
 	onDestroy(() => localSettings.destroy());
-	onDestroy(() => catalogs.clearPendingLogins());
+	onDestroy(() => catalogs.dispose());
 </script>
 
 {#if appShell.showSettings}<Settings />{/if}

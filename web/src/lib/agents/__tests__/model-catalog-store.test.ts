@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as clientApi from '$lib/api/client';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
-import { createModelCatalogStore } from '../model-catalog-store.svelte';
+import { createModelCatalogStore as createCatalog } from '../model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 vi.mock('$lib/api/client', async (importOriginal) => ({
 	...await importOriginal<typeof clientApi>(),
 	apiFetch: vi.fn(),
 }));
+
+function createModelCatalogStore() {
+	const catalog = createCatalog();
+	catalog.setOwner('test-owner');
+	return catalog;
+}
 
 const STORAGE_KEY = LOCAL_STORAGE_KEYS.modelCatalog;
 const LEGACY_STORAGE_KEY = LOCAL_STORAGE_KEYS.modelCatalogLegacy;
@@ -89,13 +95,32 @@ describe('ModelCatalogStore', () => {
 			})])));
 		await store.forceRefresh();
 		await remote.forceRefresh();
-		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(1, '/api/v1/models');
-		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(2, `/api/v1/models?executorId=${remoteExecutor.id}`);
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(1, '/api/v1/models', { cache: 'no-store' });
+		expect(clientApi.apiFetch).toHaveBeenNthCalledWith(2, `/api/v1/models?executorId=${remoteExecutor.id}`, { cache: 'no-store' });
 		expect(store.getModels('sample')[0]?.label).toBe('Local model');
 		expect(remote.getModels('sample')[0]?.label).toBe('Worker model');
 		const restored = createModelCatalogStore();
 		expect(restored.getModels('sample')[0]?.label).toBe('Local model');
 		expect(restored.forExecutor(remoteExecutor.id).getModels('sample')[0]?.label).toBe('Worker model');
+	});
+
+	it.each(['local', remoteExecutor.id])('fences ordinary %s discovery in memory and on disk across an owner switch', async executorId => {
+		const catalog = createModelCatalogStore();
+		const worker = catalog.forExecutor(executorId);
+		const old = catalogBody([agentEntry('old-owner-only')]);
+		const response = Promise.withResolvers<Response>();
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(old)).mockReturnValueOnce(response.promise);
+		await worker.forceRefresh();
+		const late = worker.forceRefresh();
+		const reloaded = createCatalog();
+		reloaded.setOwner('new-owner');
+		expect(reloaded.forExecutor(executorId).getAgent('old-owner-only')).toBeNull();
+		catalog.setOwner('new-owner');
+		response.resolve(mockResponse(old));
+		await late;
+		expect(worker.getAgent('old-owner-only')).toBeNull();
+		expect(worker.isValidated).toBe(false);
+		expect(localStorage.getItem(executorId === 'local' ? STORAGE_KEY : LOCAL_STORAGE_KEYS.modelCatalogExecutors)).toBeNull();
 	});
 
 	describe.each(['local', remoteExecutor.id])('execution metadata on %s', executorId => {
@@ -114,7 +139,7 @@ describe('ModelCatalogStore', () => {
 			{ selectionLabel: undefined }, { selectionLabel: '', inputFormatByModel: {} },
 		])('rejects incomplete HTTP and persisted metadata: %j', async missing => {
 			const entry = agentEntry('sample', missing);
-			const cached = { schemaVersion: 2, agentMetadata: { sample: entry },
+			const cached = { schemaVersion: 2, owner: 'test-owner', agentMetadata: { sample: entry },
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] }, apiProviderCatalog: [],
 				etag: 'old-etag', lastFetchedAt: Date.now(), lastValidatedAt: Date.now() };
 			localStorage.setItem(executorId === 'local' ? STORAGE_KEY : LOCAL_STORAGE_KEYS.modelCatalogExecutors,
@@ -129,7 +154,7 @@ describe('ModelCatalogStore', () => {
 			expect(catalog.error).toBe('Model catalog response is invalid');
 			expect(catalog.isValidated).toBe(false);
 			expect(clientApi.apiFetch).toHaveBeenLastCalledWith(executorId === 'local'
-				? '/api/v1/models' : `/api/v1/models?executorId=${executorId}`);
+				? '/api/v1/models' : `/api/v1/models?executorId=${executorId}`, { cache: 'no-store' });
 		});
 	});
 
@@ -245,7 +270,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: { sample: [{ value: 'sample-model', label: 'Sample Model' }] },
 				agentMetadata: {
 					sample: agentEntry('sample', {
@@ -343,7 +368,7 @@ describe('ModelCatalogStore', () => {
 
 		await store.refreshIfStale();
 
-		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models');
+		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models', { cache: 'no-store' });
 		expect(store.getDefaultModel('sample')).toBe('new-model');
 		expect(store.etag).toBe('W/"catalog:new"');
 		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').etag).toBe('W/"catalog:new"');
@@ -353,7 +378,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -374,6 +399,7 @@ describe('ModelCatalogStore', () => {
 		await store.refreshIfStale();
 
 		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models', {
+			cache: 'no-store',
 			headers: { 'If-None-Match': 'W/"catalog:cached"' },
 		});
 		expect(json).not.toHaveBeenCalled();
@@ -393,11 +419,32 @@ describe('ModelCatalogStore', () => {
 		expect(clientApi.apiFetch).toHaveBeenCalledTimes(1);
 	});
 
+	it('revalidates a failed ordinary refresh on demand after the retry throttle', async () => {
+		vi.useFakeTimers();
+		try {
+			const store = createModelCatalogStore();
+			const ready = () => mockResponse(catalogBody([agentEntry('sample')]));
+			vi.mocked(clientApi.apiFetch)
+				.mockResolvedValueOnce(ready())
+				.mockRejectedValueOnce(new clientApi.ApiError(429, 'Executor busy', 'EXECUTOR_BUSY'))
+				.mockResolvedValueOnce(ready());
+			await store.forceRefresh();
+			await store.forceRefresh();
+			expect(store.isValidated).toBe(false);
+			await store.refreshIfStale();
+			expect(clientApi.apiFetch).toHaveBeenCalledTimes(2);
+			await vi.advanceTimersByTimeAsync(60_000);
+			await store.refreshIfStale();
+			expect(clientApi.apiFetch).toHaveBeenCalledTimes(3);
+			expect(store.isValidated).toBe(true);
+		} finally { vi.useRealTimers(); }
+	});
+
 	it('skips validation while the catalog is inside the requested TTL', async () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -420,7 +467,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: { stale: [{ value: 'stale', label: 'Stale' }] },
 				agentMetadata: { stale: agentEntry('stale', { defaultModel: 'stale' }) },
 				apiProviderCatalog: [],
@@ -493,7 +540,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -604,7 +651,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: {
 					sample: [
 						{ value: 'sol', label: 'Sol' },
@@ -666,7 +713,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 2, owner: 'test-owner',
 				agentModels: { 'Bad Id': [{ value: 'bad', label: 'Bad' }] },
 				agentMetadata: { 'Bad Id': agentEntry('Bad Id', { defaultModel: 'bad' }) },
 				apiProviderCatalog: [],

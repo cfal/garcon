@@ -1,6 +1,7 @@
 import {
 	getAgentAuthLoginStatus, getAgentAuthStatus, type AgentAuthLoginStatus, type AgentAuthStatus,
 } from '$lib/api/agents.js';
+import { ApiError } from '$lib/api/client.js';
 
 type LoginEvent = Exclude<AgentAuthLoginStatus, { state: 'idle' }>
 	| { state: 'cleared' }
@@ -12,7 +13,7 @@ interface PendingLogin {
 	sessionId: string;
 	listener?: Listener;
 	latest?: LoginEvent;
-	confirming: boolean;
+	confirmingInstance?: string;
 	submitting?: boolean;
 	revision: number;
 	timer?: ReturnType<typeof setTimeout>;
@@ -27,8 +28,11 @@ const CREDENTIAL_TIMEOUT_MS = 5 * 60_000;
 /** Owns session-qualified login polling on one executor, independent of the Settings view. */
 export class PendingAgentLogins {
 	#pending = new Map<string, PendingLogin>();
+	#lifetime = new AbortController();
 
-	constructor(private readonly executorId: string, private readonly onAuthenticated: () => void) {}
+	constructor(private readonly executorId: string, private readonly onAuthenticated: (instanceId: string) => void) {}
+
+	get lifetime(): AbortSignal { return this.#lifetime.signal; }
 
 	sessionId(agentId: string): string | undefined {
 		return this.#pending.get(agentId)?.sessionId;
@@ -43,7 +47,7 @@ export class PendingAgentLogins {
 			else if (pending.latest) listener(pending.latest);
 		} else {
 			this.#stop(agentId);
-			pending = { sessionId, listener, confirming: false, revision: 0 };
+			pending = { sessionId, listener, revision: 0 };
 			this.#pending.set(agentId, pending);
 			this.#expireAfter(agentId, pending, SESSION_TIMEOUT_MS);
 			void this.#poll(agentId, pending);
@@ -53,7 +57,7 @@ export class PendingAgentLogins {
 
 	beginSubmission(agentId: string, sessionId: string): (() => void) | undefined {
 		const pending = this.#pending.get(agentId);
-		if (pending?.sessionId !== sessionId || pending.submitting || pending.confirming) return;
+		if (pending?.sessionId !== sessionId || pending.submitting || pending.confirmingInstance) return;
 		pending.submitting = true;
 		clearTimeout(pending.timer);
 		pending.revision++;
@@ -68,6 +72,8 @@ export class PendingAgentLogins {
 	}
 
 	clear(): void {
+		this.#lifetime.abort();
+		this.#lifetime = new AbortController();
 		for (const [agentId, pending] of this.#pending) {
 			this.#stop(agentId);
 			pending.listener?.({ state: 'cleared' });
@@ -99,31 +105,35 @@ export class PendingAgentLogins {
 			pending.listener?.(event);
 		};
 		try {
-			if (!pending.confirming) {
+			if (!pending.confirmingInstance) {
 				const status = await getAgentAuthLoginStatus(agentId, pending.sessionId, this.executorId);
 				if (!current()) return;
 				if (status.state !== 'idle' && status.sessionId === pending.sessionId) {
 					publish(status);
 					if (status.state === 'failed') return this.#stop(agentId);
 					if (status.state === 'succeeded') {
-						pending.confirming = true;
+						pending.confirmingInstance = status.instanceId;
 						this.#expireAfter(agentId, pending, CREDENTIAL_TIMEOUT_MS);
 					}
 				}
 			}
-			if (pending.confirming) {
-				const auth = await getAgentAuthStatus(agentId, this.executorId);
+			if (pending.confirmingInstance) {
+				const auth = await getAgentAuthStatus(agentId, this.executorId, pending.confirmingInstance);
 				if (!current()) return;
 				publish({ state: 'credentials', auth });
 				if (auth.authenticated) {
 					this.#stop(agentId);
-					this.onAuthenticated();
+					this.onAuthenticated(pending.confirmingInstance);
 					return;
 				}
 			}
 		} catch (err) {
 			if (!current()) return;
-			if (pending.confirming) publish({ state: 'credential-error', error: err instanceof Error ? err.message : String(err) });
+			if (err instanceof ApiError && err.errorCode === 'LOGIN_INSTANCE_CHANGED') {
+				publish({ state: 'cleared' });
+				return this.#stop(agentId);
+			}
+			if (pending.confirmingInstance) publish({ state: 'credential-error', error: err instanceof Error ? err.message : String(err) });
 		}
 		pending.timer = setTimeout(() => { void this.#poll(agentId, pending); }, POLL_INTERVAL_MS);
 	}

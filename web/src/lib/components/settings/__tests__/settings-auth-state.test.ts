@@ -28,19 +28,10 @@ const POLL_TICK_MS = 1500;
 
 function createModelCatalog(agentIds = ['claude', 'codex'], executorId = 'local') {
 	const catalog = new ModelCatalogStore(executorId);
+	catalog.setOwner('test-owner');
 	catalog.agentMetadata = Object.fromEntries(agentIds.map(id => [id, nativeCatalogAgent(id)]));
 	vi.spyOn(catalog, 'forceRefresh').mockResolvedValue();
 	return catalog;
-}
-
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	let reject!: (error: unknown) => void;
-	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-		resolve = resolvePromise;
-		reject = rejectPromise;
-	});
-	return { promise, resolve, reject };
 }
 
 describe('SettingsAuthState login lifecycle', () => {
@@ -92,6 +83,37 @@ describe('SettingsAuthState login lifecycle', () => {
 		cleanup();
 	});
 
+	it.each(['owner', 'executor'])('ignores a launch reply after %s retirement while Settings stays mounted', async change => {
+		const catalog = createModelCatalog(['codex'], remoteExecutor.id);
+		catalog.reconcileExecutors([remoteExecutor]);
+		const launch = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launch.promise);
+		const view = new SettingsAuthState(catalog);
+		const pending = view.handleLogin('codex');
+		if (change === 'owner') catalog.setOwner('owner-b');
+		else catalog.reconcileExecutors([{ ...remoteExecutor, instanceId: 'replacement' }]);
+		expect(view.isLoginPending('codex')).toBe(false);
+		launch.resolve({ launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: DEVICE_AUTH });
+		await pending;
+		expect(catalog.pendingLogins.sessionId('codex')).toBeUndefined();
+		expect(view.deviceAuthFor('codex')).toBeUndefined();
+		expect(window.open).not.toHaveBeenCalled();
+	});
+
+	it('ignores a sessionless restore reply from the previous browser owner', async () => {
+		const catalog = createModelCatalog(['codex']);
+		const status = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
+		vi.mocked(getAgentAuthLoginStatus).mockReturnValueOnce(status.promise);
+		const view = new SettingsAuthState(catalog);
+		const destroy = view.initialize();
+		catalog.setOwner(null);
+		status.resolve({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: DEVICE_AUTH });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(catalog.pendingLogins.sessionId('codex')).toBeUndefined();
+		expect(view.deviceAuthFor('codex')).toBeUndefined();
+		destroy();
+	});
+
 	it('publishes only the signed-in executor catalog when Settings closes after submitting a browser code', async () => {
 		const id = remoteExecutor.id;
 		const catalog = createModelCatalog(['antigravity'], id);
@@ -108,16 +130,16 @@ describe('SettingsAuthState login lifecycle', () => {
 			.mockReturnValueOnce(stale.promise)
 			.mockReturnValueOnce(fresh.promise);
 		const deviceAuth = { url: 'https://example.test/login', needsCode: true };
-		const confirmation = deferred<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
+		const confirmation = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
 		vi.mocked(getAgentAuthStatus)
 			.mockResolvedValueOnce({ authenticated: false, canReauth: true, label: '' })
 			.mockReturnValueOnce(confirmation.promise);
 		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
 			launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth,
 		});
-		const submitted = deferred<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
+		const submitted = Promise.withResolvers<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
 		vi.mocked(completeAgentAuthLogin).mockReturnValueOnce(submitted.promise);
-		const terminal = deferred<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
+		const terminal = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
 		vi.mocked(getAgentAuthLoginStatus)
 			.mockResolvedValueOnce({ state: 'idle', running: false })
 			.mockResolvedValueOnce({ state: 'running', running: true, sessionId: SESSION_ID, completionPending: false, deviceAuth })
@@ -140,7 +162,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		view.unmount();
 		expect(fetchCatalog).toHaveBeenCalledTimes(2);
 		submitted.resolve({ submitted: true, sessionId: SESSION_ID });
-		terminal.resolve({ state: 'succeeded', running: false, sessionId: SESSION_ID });
+		terminal.resolve({ state: 'succeeded', instanceId: 'test-worker', running: false, sessionId: SESSION_ID });
 		await vi.waitFor(() => expect(getAgentAuthStatus).toHaveBeenCalledTimes(2));
 		expect(fetchCatalog).toHaveBeenCalledTimes(2);
 		confirmation.resolve({ authenticated: true, canReauth: true, label: 'Google' });
@@ -152,7 +174,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		stale.resolve(snapshot([defaultModel]));
 		await preLoginRefresh;
 		expect(fetchCatalog).toHaveBeenCalledTimes(3);
-		expect(fetchCatalog).toHaveBeenLastCalledWith(id, null);
+		expect(fetchCatalog).toHaveBeenLastCalledWith(id, null, 'test-worker');
 		expect(catalog.getModels('antigravity').map(model => model.value)).toEqual(['default', discovered.value]);
 	});
 
@@ -168,7 +190,6 @@ describe('SettingsAuthState login lifecycle', () => {
 
 	it('retains a mounted code form across same-owner reauthentication and releases it on owner loss', async () => {
 		const catalog = createModelCatalog(['antigravity']);
-		catalog.setLoginOwner('test-owner');
 		vi.mocked(getAgentAuthStatus).mockResolvedValue({ authenticated: false, canReauth: true, label: '' });
 		const login = { ...CLAUDE_AUTH, url: 'https://example.test/oauth' };
 		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
@@ -182,10 +203,10 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.waitFor(() => expect(settingsAuth.authFor('antigravity').loading).toBe(false));
 		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'synthetic-code' } });
-		catalog.setLoginOwner('test-owner');
+		catalog.setOwner('test-owner');
 		await fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
 		expect(completeAgentAuthLogin).toHaveBeenCalledWith('antigravity', SESSION_ID, 'synthetic-code', 'local');
-		catalog.setLoginOwner(null);
+		catalog.setOwner(null);
 		await vi.waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
 		expect(settingsAuth.isLoginPending('antigravity')).toBe(false);
 		cleanup();
@@ -193,7 +214,7 @@ describe('SettingsAuthState login lifecycle', () => {
 
 	it('routes login to the selected executor and ignores replies after leaving that executor', async () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
-		const launched = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		const launched = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launched.promise);
 		const remote = new SettingsAuthState(createModelCatalog(['codex'], executorId));
 		const pending = remote.handleLogin('codex');
@@ -214,7 +235,7 @@ describe('SettingsAuthState login lifecycle', () => {
 				sessionId: SESSION_ID,
 				deviceAuth: DEVICE_AUTH,
 			})
-			.mockResolvedValue({ state: 'succeeded', running: false, sessionId: SESSION_ID });
+			.mockResolvedValue({ state: 'succeeded', instanceId: 'test-worker', running: false, sessionId: SESSION_ID });
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('codex');
@@ -223,7 +244,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 
 		expect(settingsAuth.deviceAuthFor('codex')).toBeUndefined();
-		expect(getAgentAuthStatus).toHaveBeenCalledWith('codex', 'local');
+		expect(getAgentAuthStatus).toHaveBeenCalledWith('codex', 'local', 'test-worker');
 		expect(settingsAuth.authFor('codex').authenticated).toBe(true);
 	});
 
@@ -272,7 +293,7 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it('invalidates an in-flight launch when Settings is destroyed', async () => {
-		const launch = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		const launch = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		vi.mocked(launchAgentAuthLogin).mockReturnValue(launch.promise);
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		const login = settingsAuth.handleLogin('codex');
@@ -293,8 +314,8 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it.each(['resolves', 'rejects'] as const)('preserves a newer login and its polling when an older completion %s', async (settlement) => {
-		const firstCompletion = deferred<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
-		const secondLaunch = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
+		const firstCompletion = Promise.withResolvers<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
+		const secondLaunch = Promise.withResolvers<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		const secondSessionAuth = { url: 'https://example.test/claude-next', needsCode: true };
 		vi.mocked(launchAgentAuthLogin)
 			.mockResolvedValueOnce({
@@ -351,7 +372,7 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it('ignores a stale restored session after a newer login launches', async () => {
-		const staleRestore = deferred<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
+		const staleRestore = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
 		const secondSessionAuth = { url: 'https://example.test/claude-next', needsCode: true };
 		vi.mocked(getAgentAuthLoginStatus).mockReturnValueOnce(staleRestore.promise).mockResolvedValue({
 			state: 'running',
@@ -398,7 +419,7 @@ describe('SettingsAuthState login lifecycle', () => {
 				sessionId: SESSION_ID,
 				deviceAuth: CLAUDE_AUTH,
 			})
-			.mockResolvedValue({ state: 'succeeded', running: false, sessionId: SESSION_ID });
+			.mockResolvedValue({ state: 'succeeded', instanceId: 'test-worker', running: false, sessionId: SESSION_ID });
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('claude');
@@ -407,7 +428,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 
 		expect(settingsAuth.deviceAuthFor('claude')).toBeUndefined();
-		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude', 'local');
+		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude', 'local', 'test-worker');
 	});
 
 	it('keeps the owned Claude session retryable when code submission fails', async () => {
@@ -452,7 +473,7 @@ describe('SettingsAuthState login lifecycle', () => {
 				state: 'running', running: true, completionPending: true,
 				sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
 			})
-			.mockResolvedValue({ state: 'succeeded', running: false, sessionId: SESSION_ID });
+			.mockResolvedValue({ state: 'succeeded', instanceId: 'test-worker', running: false, sessionId: SESSION_ID });
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('claude');
@@ -465,7 +486,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 		expect(settingsAuth.deviceAuthFor('claude')).toBeUndefined();
 		expect(settingsAuth.isLoginPending('claude')).toBe(false);
-		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude', 'local');
+		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude', 'local', 'test-worker');
 	});
 
 	it('surfaces the terminal failure for the owned session', async () => {
@@ -488,7 +509,7 @@ describe('SettingsAuthState login lifecycle', () => {
 
 	it('polls auth after terminal success when credential propagation is delayed', async () => {
 		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
-			state: 'succeeded',
+			state: 'succeeded', instanceId: 'test-worker',
 			running: false,
 			sessionId: SESSION_ID,
 		});
@@ -514,7 +535,7 @@ describe('SettingsAuthState login lifecycle', () => {
 
 	it('polls auth after terminal success when the first credential check is unauthenticated', async () => {
 		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
-			state: 'succeeded',
+			state: 'succeeded', instanceId: 'test-worker',
 			running: false,
 			sessionId: SESSION_ID,
 		});
@@ -535,7 +556,7 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it('ignores an initialize auth response superseded by a login operation', async () => {
-		const staleAuth = deferred<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
+		const staleAuth = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
 		vi.mocked(getAgentAuthStatus).mockReturnValueOnce(staleAuth.promise).mockResolvedValue({
 			authenticated: true,
 			canReauth: true,
@@ -543,7 +564,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		});
 		vi.mocked(getAgentAuthLoginStatus)
 			.mockResolvedValueOnce({ state: 'idle', running: false })
-			.mockResolvedValue({ state: 'succeeded', running: false, sessionId: SESSION_ID });
+			.mockResolvedValue({ state: 'succeeded', instanceId: 'test-worker', running: false, sessionId: SESSION_ID });
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog(['codex']));
 		settingsAuth.initialize();
@@ -603,7 +624,7 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it('guards duplicate completion while the first request is in flight', async () => {
-		const completion = deferred<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
+		const completion = Promise.withResolvers<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
 		vi.mocked(completeAgentAuthLogin).mockReturnValue(completion.promise);
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('claude');
@@ -616,7 +637,7 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it('keeps an uncertain submission disabled until owned server status permits retry', async () => {
-		const reconciliation = deferred<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
+		const reconciliation = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
 		vi.mocked(completeAgentAuthLogin).mockRejectedValue(new Error('Executor connection interrupted'));
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('claude');
@@ -636,7 +657,7 @@ describe('SettingsAuthState login lifecycle', () => {
 	});
 
 	it('preserves a restored retry error when a concurrent auth-status response settles', async () => {
-		const initialAuth = deferred<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
+		const initialAuth = Promise.withResolvers<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
 		vi.mocked(getAgentAuthStatus).mockReturnValue(initialAuth.promise);
 		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
 			state: 'running', running: true, completionPending: false,
