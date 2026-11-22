@@ -1,3 +1,5 @@
+import { resolveExecutableOverride } from '@garcon/server-agent-common/environment/executable-override';
+
 export interface ResolvedCodexCli {
   command: string;
   source: 'env' | 'path';
@@ -10,7 +12,7 @@ export function resolveCodexCli(
   platform: NodeJS.Platform = process.platform,
 ): ResolvedCodexCli {
   const override = env.GARCON_CODEX_CLI?.trim();
-  if (override) return { command: override, source: 'env' };
+  if (override) return { command: resolveExecutableOverride(override, platform), source: 'env' };
   return { command: platform === 'win32' ? 'codex.exe' : 'codex', source: 'path' };
 }
 

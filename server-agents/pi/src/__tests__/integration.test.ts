@@ -1,10 +1,11 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { AgentHost } from '@garcon/server-agent-interface';
 import { LazyPiRuntime } from '../agents/pi/lazy-runtime.js';
 import { PiModelCatalogService } from '../agents/pi/pi-models.js';
+import { createPiConfig } from '../config.js';
 import PiAgentIntegration from '../index.js';
 
 function createHost() {
@@ -29,6 +30,15 @@ function createHost() {
 }
 
 describe('PiAgentIntegration', () => {
+  it('keeps relative executable overrides anchored to the executor across child working directories', () => {
+    for (const key of ['GARCON_PI_BINARY', 'PI_BINARY']) {
+      const config = createPiConfig({ get: name => name === key ? './tools/selected pi' : undefined });
+      expect(config.binary()).toBe(resolve('tools/selected pi'));
+    }
+    const alias = createPiConfig({ get: name => name === 'PI_BINARY' ? 'pi-preview' : undefined });
+    expect(alias.binary()).toBe('pi-preview');
+  });
+
   it('composes the provider facets without reading environment during construction', () => {
     const host = createHost();
     const integration = new PiAgentIntegration(host);

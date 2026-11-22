@@ -1,5 +1,6 @@
 import os from 'node:os';
 import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { resolveExecutableOverride } from '@garcon/server-agent-common/environment/executable-override';
 import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
 export interface PiConfig {
@@ -12,9 +13,10 @@ export interface PiConfig {
 
 export function createPiConfig(environment: AgentEnvironmentReader): PiConfig {
   return Object.freeze({
-    binary: () => readEnvironment(environment, 'GARCON_PI_BINARY')
-      ?? readEnvironment(environment, 'PI_BINARY')
-      ?? 'pi',
+    binary: () => {
+      const override = readEnvironment(environment, 'GARCON_PI_BINARY') ?? readEnvironment(environment, 'PI_BINARY');
+      return override ? resolveExecutableOverride(override) : 'pi';
+    },
     agentDirectoryOverride: () => readEnvironment(environment, 'PI_CODING_AGENT_DIR'),
     sessionDirectoryOverride: () => readEnvironment(environment, 'PI_CODING_AGENT_SESSION_DIR'),
     homeDirectory: () => process.platform === 'win32' ? os.homedir() : readEnvironment(environment, 'HOME') ?? os.homedir(),

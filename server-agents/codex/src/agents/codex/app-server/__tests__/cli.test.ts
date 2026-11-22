@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import path from 'node:path';
 import { assertCompatibleCodex, resolveCodexCli } from '../cli.js';
 import { CodexAppServerClient } from '../client.js';
 
@@ -7,6 +8,9 @@ test('selects the executor override or its native PATH command without invoking 
   expect(resolveCodexCli({ GARCON_CODEX_CLI: ' ' }, 'win32')).toEqual({ command: 'codex.exe', source: 'path' });
   expect(resolveCodexCli({ GARCON_CODEX_CLI: ' C:\\Program Files\\codex.exe ' }, 'win32'))
     .toEqual({ command: 'C:\\Program Files\\codex.exe', source: 'env' });
+  expect(resolveCodexCli({ GARCON_CODEX_CLI: './tools/selected codex' }).command)
+    .toBe(path.resolve('tools/selected codex'));
+  expect(resolveCodexCli({ GARCON_CODEX_CLI: 'codex-preview' }).command).toBe('codex-preview');
 });
 
 test('checks the app-server version, not the Garcon version later in its user agent', () => {
