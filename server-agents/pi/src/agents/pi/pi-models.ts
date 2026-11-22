@@ -89,9 +89,10 @@ async function stopDiscoveryProcess(proc: Bun.Subprocess): Promise<void> {
       // The group still identifies a wrapper's children after the wrapper exits.
       process.kill(-proc.pid, 'SIGKILL');
     } else if (proc.exitCode === null) {
-      const taskkill = win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe');
+      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+      const taskkill = win32.join(systemRoot, 'System32', 'taskkill.exe');
       await Bun.spawn([taskkill, '/T', '/F', '/PID', String(proc.pid)], {
-        stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', timeout: 2_000,
+        env: { SystemRoot: systemRoot }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', timeout: 2_000,
       }).exited;
     }
   } catch (error) {
