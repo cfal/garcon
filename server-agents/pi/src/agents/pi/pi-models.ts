@@ -106,8 +106,7 @@ async function stopDiscoveryProcess(proc: Bun.Subprocess): Promise<void> {
 }
 
 export class PiModelCatalogService {
-  #cachedModels: SharedModelOption[] | null = null;
-  #cachedAt = 0;
+  #cache: { models: SharedModelOption[]; expiresAt: number } | null = null;
   #failure: { error: PiModelDiscoveryUnavailableError; retryAt: number } | null = null;
   #inflight: Promise<SharedModelOption[]> | null = null;
   #lifetime = new AbortController();
@@ -121,9 +120,7 @@ export class PiModelCatalogService {
     signal?.throwIfAborted();
     this.#lifetime.signal.throwIfAborted();
     const now = Date.now();
-    if (this.#cachedModels && now - this.#cachedAt < MODEL_CACHE_TTL_MS) {
-      return this.#cachedModels;
-    }
+    if (this.#cache && now < this.#cache.expiresAt) return this.#cache.models;
     if (this.#failure && now < this.#failure.retryAt) throw this.#failure.error;
     this.#inflight ??= this.#discoverWithRetry(this.#lifetime.signal).finally(() => {
       this.#inflight = null;
@@ -149,12 +146,12 @@ export class PiModelCatalogService {
   async stop(): Promise<void> {
     this.#lifetime.abort();
     await this.#inflight?.catch(() => undefined);
-    this.#cachedModels = null;
+    this.#cache = null;
     this.#failure = null;
   }
 
   #staleModels(): SharedModelOption[] {
-    return this.#cachedModels?.length ? this.#cachedModels : [];
+    return this.#cache?.models.length ? this.#cache.models : [];
   }
 
   async #discoverWithRetry(lifetime: AbortSignal): Promise<SharedModelOption[]> {
@@ -167,8 +164,7 @@ export class PiModelCatalogService {
         signal.throwIfAborted();
         const models = await this.discover(signal);
         signal.throwIfAborted();
-        this.#cachedAt = Date.now();
-        this.#cachedModels = models;
+        this.#cache = { models, expiresAt: Date.now() + MODEL_CACHE_TTL_MS };
         this.#failure = null;
         return models;
       } catch (error) {
