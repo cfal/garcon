@@ -24,12 +24,12 @@ Settings > Providers -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&a
   probes, latest-version lookups, and the installer. The controller validates
   each status with `parseAgentCliUpdateStatus` and never interprets worker paths.
 - Installers, version probes, and lookups run with the executor's process
-  environment minus the credentials Garcon's providers read: the Anthropic,
-  OpenAI, Codex, Cursor, Factory, and Gemini API keys, Claude's OAuth and
-  auth tokens, and the AWS and Google credentials Claude uses for Bedrock and
-  Vertex. The CLI's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is added. Other
-  variables pass through, because installers need registry and proxy settings
-  and an `.npmrc` may read its registry token from any variable.
+  environment minus every provider credential: any `*_API_KEY`, Claude's
+  OAuth and auth tokens, and the AWS and Google credentials Claude uses for
+  Bedrock and Vertex. The CLI's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is
+  added. Registry and proxy settings such as `NPM_TOKEN` and `HTTPS_PROXY`
+  pass through; a private registry token kept in a `*_API_KEY` variable must
+  be renamed for an `.npmrc` to read it during an update.
 - A status check that fails for one agent is reported in `failures` for that
   agent only, including one that outlasts the controller's 25 second deadline.
   An unavailable executor fails the request.

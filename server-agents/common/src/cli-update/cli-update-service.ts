@@ -103,10 +103,14 @@ export class CliUpdateService implements AgentCliUpdates {
   async status(request: AgentCliUpdateStatusRequest): Promise<AgentCliUpdateStatus> {
     const cliLabel = this.#options.label;
     if (this.#runSnapshot) return { cliLabel, ...this.#runSnapshot, run: this.#run };
-    const generation = this.#runGeneration;
+    let generation = this.#runGeneration;
     let status = await this.#sharedInspection(request.refresh);
-    // A run started or finished while this read waited; its result shows the old binary.
-    if (generation !== this.#runGeneration && !this.#runSnapshot) status = await this.#sharedInspection(false);
+    // A run that started or finished while this read waited makes its result describe the old binary.
+    while (generation !== this.#runGeneration && !this.#runSnapshot) {
+      request.signal?.throwIfAborted();
+      generation = this.#runGeneration;
+      status = await this.#sharedInspection(false);
+    }
     request.signal?.throwIfAborted();
     return { cliLabel, ...(this.#runSnapshot ?? status), run: this.#run };
   }

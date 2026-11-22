@@ -1,6 +1,6 @@
 import { getAgentCliUpdates, startAgentCliUpdate } from '$lib/api/agents.js';
 import type { AgentCliUpdateStatus, AgentCliUpdatesResponse } from '$shared/agent-cli-update';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
 import { errorMessage } from '$lib/utils/error-message.js';
 
 export interface CliUpdateApi {
@@ -121,9 +121,12 @@ export class SettingsCliUpdateState {
 		} catch (error) {
 			if (lifecycleId !== this.#lifecycleId) return;
 			this.startErrorByAgent = { ...this.startErrorByAgent, [agentId]: errorMessage(error) };
-			// A 4xx answer is a definite refusal. A timeout, lost reply, or server
-			// failure may still have started the run, so its status is read again.
-			if (!(error instanceof ApiError && error.status >= 400 && error.status < 500)) {
+			// Garcon's own 4xx answer is a definite refusal. A timeout, a lost reply, a
+			// server failure, or an intermediary's answer may still have started the
+			// run, so its status is read again.
+			if (error instanceof ApiError && !isIntermediaryResponse(error) && error.status < 500) {
+				delete this.#startBaseline[agentId];
+			} else {
 				this.#startBaseline[agentId] = baseline;
 				void this.#load({ refresh: false, agentIds: [agentId] }, lifecycleId);
 			}

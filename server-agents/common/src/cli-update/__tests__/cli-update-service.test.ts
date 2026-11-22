@@ -240,14 +240,21 @@ test('reports an unknown latest version when the lookup cannot run', async () =>
 });
 
 test('reads the binary again when a run finishes during a slow status read', async () => {
-  const marker = path.join(fixture.root, 'first-probe');
-  // The first probe reads the old version, then stalls past the whole run.
-  await fixture.writeScript(cli.real, `v=$(cat ${JSON.stringify(cli.versionFile)}); if [ ! -f ${JSON.stringify(marker)} ]; then touch ${JSON.stringify(marker)}; sleep 1.5; fi; echo "$v"`);
+  const started = path.join(fixture.root, 'first-probe-started');
+  const release = path.join(fixture.root, 'first-probe-release');
+  // The first probe reads the old version, then holds until the run has finished.
+  await fixture.writeScript(cli.real, [
+    `v=$(cat ${JSON.stringify(cli.versionFile)})`,
+    `if [ ! -f ${JSON.stringify(started)} ]; then touch ${JSON.stringify(started)};`,
+    `while [ ! -f ${JSON.stringify(release)} ]; do sleep 0.01; done; fi`,
+    'echo "$v"',
+  ].join('\n'));
   await writeNpm({ latest: '2.1.300' });
   const updates = service();
   const read = updates.status({ refresh: false });
-  await Bun.sleep(200);
+  while (!(await Bun.file(started).exists())) await Bun.sleep(5);
   await updates.startUpdate();
   expect((await settled(updates)).run.state).toBe('succeeded');
+  await writeFile(release, 'release');
   expect(await read).toMatchObject({ currentVersion: '2.1.300', run: { state: 'succeeded' } });
 });

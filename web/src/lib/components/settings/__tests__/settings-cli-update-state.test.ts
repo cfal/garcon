@@ -201,6 +201,38 @@ describe('SettingsCliUpdateState', () => {
 		expect(state.startErrorFor('claude')).toBe('Garcon runs its bundled Codex CLI.');
 	});
 
+	it('reads the status again after an intermediary answers a start', async () => {
+		const { api } = createApi([{ statuses: { claude: BEHIND }, failures: {} }]);
+		api.startAgentCliUpdate.mockRejectedValueOnce(new ApiError(429, 'Too Many Requests'));
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
+		await state.startUpdate('claude');
+		await vi.waitFor(() =>
+			expect(api.getAgentCliUpdates).toHaveBeenLastCalledWith(EXECUTOR, { refresh: false, agentIds: ['claude'] }));
+	});
+
+	it('keeps a refusal that follows an uncertain start', async () => {
+		const later = { ...SUCCEEDED, run: { ...SUCCEEDED.run, startedAt: '2026-11-20T00:00:09.000Z' } };
+		const { api } = createApi([
+			{ statuses: { claude: BEHIND }, failures: {} },
+			{ statuses: { claude: BEHIND }, failures: {} },
+			{ statuses: { claude: later }, failures: {} },
+		]);
+		api.startAgentCliUpdate
+			.mockRejectedValueOnce(new Error('Request timed out'))
+			.mockRejectedValueOnce(new ApiError(422, 'Update it with the tool that installed it.', 'OPERATION_UNSUPPORTED'));
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
+		await state.startUpdate('claude');
+		await vi.waitFor(() => expect(api.getAgentCliUpdates).toHaveBeenCalledTimes(2));
+		await state.startUpdate('claude');
+		await state.checkForUpdates();
+		expect(state.statusFor('claude')).toEqual(later);
+		expect(state.startErrorFor('claude')).toBe('Update it with the tool that installed it.');
+	});
+
 	it('ignores responses that arrive after it is destroyed', async () => {
 		let resolveRead!: (response: AgentCliUpdatesResponse) => void;
 		const api = {
