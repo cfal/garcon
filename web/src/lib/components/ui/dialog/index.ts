@@ -9,6 +9,8 @@ import Description from './dialog-description.svelte';
 import Trigger from './dialog-trigger.svelte';
 import Close from './dialog-close.svelte';
 
+export { animateDialogResize, resizeDialogOnClick } from './dialog-resize.js';
+
 export {
 	Root,
 	Title,

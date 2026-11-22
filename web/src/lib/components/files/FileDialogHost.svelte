@@ -85,6 +85,7 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={() => (maximized = !maximized)}
+					onclickcapture={Dialog.resizeDialogOnClick}
 					aria-label={maximized
 						? m.file_session_restore_dialog()
 						: m.file_session_maximize_dialog()}

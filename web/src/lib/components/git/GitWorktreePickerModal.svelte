@@ -50,6 +50,7 @@
 	const notifications = getNotifications();
 	const executors = getExecutors();
 	let filterInputRef: HTMLInputElement | null = $state(null);
+	let dialogElement = $state<HTMLDivElement | null>(null);
 	let createTarget = $state<string | null>(null);
 	let showAdvanced = $state(false);
 	const createOpen = $derived(createTarget === contextKey);
@@ -115,6 +116,7 @@
 
 	function backToList(): void {
 		if (session.isCreating) return;
+		Dialog.animateDialogResize(dialogElement);
 		createTarget = null;
 		void tick().then(() => filterInputRef?.focus());
 	}
@@ -136,6 +138,7 @@
 
 	function openCreateForm(): void {
 		if (!canUseGit) return;
+		Dialog.animateDialogResize(dialogElement);
 		showAdvanced = false;
 		createTarget = contextKey;
 	}
@@ -148,6 +151,7 @@
 	}}
 >
 	<Dialog.Content
+		bind:ref={dialogElement}
 		showCloseButton={false}
 		aria-label={createOpen ? m.git_worktree_new() : m.workspace_worktree_select()}
 		onkeydown={handleDialogKeydown}

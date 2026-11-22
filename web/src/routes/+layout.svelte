@@ -283,6 +283,12 @@
 	let isPublicRoute = $derived(isAuthRoute || page.route.id === '/shared/[token]');
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
+	$effect(() => {
+		const root = document.documentElement;
+		root.toggleAttribute('data-reduce-motion', localSettings.reduceMotion);
+		return () => root.removeAttribute('data-reduce-motion');
+	});
+
 	// Projects presentation-only bounds without coupling Markdown loading to settings.
 	$effect(() => {
 		const root = document.documentElement;
