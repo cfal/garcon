@@ -80,7 +80,7 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   so a request's identity is its event time, model, and counters, and copies
   count once.
 - Codex native forks restamp copied history. A response whose `thread_id` matches
-  the fork's native UUID (`session_meta.id`) ends the copy burst and counts immediately.
+  the fork's native UUID (`session_meta.id`) ends copy suppression immediately.
   Otherwise, the parser treats usage as copied until the first gap of at least one
   second, measured from `session_meta` or the preceding copied usage event.
   Legacy rollouts have no explicit copy boundary

@@ -259,21 +259,19 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   const rawCumulative = payload.info.total_token_usage;
   const hasCumulative = rawCumulative !== undefined && rawCumulative !== null;
   const cumulative = hasCumulative ? readTokenUsage(rawCumulative) : null;
+  const previous = state.lastCumulativeUsage;
+  // Even a copied or malformed request can carry a valid baseline for the next counter.
+  if (cumulative !== null) state.lastCumulativeUsage = cumulative;
 
   if (consumeForkCopy(state, timestampMs)) {
-    // Copied history is billed in the parent but sets the child's baseline.
     const signature = last === null ? null : JSON.stringify(last);
-    if (cumulative !== null) state.lastCumulativeUsage = cumulative;
-    else if (!hasCumulative && last !== null && signature !== state.lastUsageSignature) {
-      state.lastCumulativeUsage = combineUsage(state.lastCumulativeUsage, last, 1);
+    if (!hasCumulative && last !== null && signature !== state.lastUsageSignature) {
+      state.lastCumulativeUsage = combineUsage(previous, last, 1);
     }
     state.lastUsageSignature = signature;
     return null;
   }
 
-  const previous = state.lastCumulativeUsage;
-  // A valid snapshot stays the next baseline even when its paired request is malformed.
-  if (cumulative !== null) state.lastCumulativeUsage = cumulative;
   if (state.sawUsageRecord) return null;
   const malformed: MalformedUsage = { malformed: true, timestampMs };
   if (last === null || (hasCumulative && cumulative === null)) return malformed;
