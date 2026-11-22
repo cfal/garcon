@@ -51,7 +51,7 @@ describe('agent auth login routes', () => {
   };
   const responseCache = new ModelCatalogResponseCache();
   const routes = {
-    ...createAgentRoutes({ agents, apiProviders, responseCache }),
+    ...createAgentRoutes({ agents, apiProviders, responseCache, readyInstanceId: () => 'test-worker' }),
     ...createApiProviderRoutes(apiProviders, responseCache),
   };
 
@@ -163,7 +163,9 @@ describe('agent auth login routes', () => {
     expect(await responseCache.getSnapshot(catalog, executorId)).toBe(remoteBefore);
 
     agents.getAgentAuthLoginStatus.mockResolvedValueOnce({ state: 'succeeded', running: false, sessionId: 'session-a' });
-    expect((await status()).status).toBe(200);
+    const success = await status();
+    expect(success.status).toBe(200);
+    expect(await success.json()).toMatchObject({ state: 'succeeded', sessionId: 'session-a', instanceId: 'test-worker' });
     expect(await responseCache.getSnapshot(catalog, executorId)).not.toBe(remoteBefore);
     expect(await responseCache.getSnapshot(catalog, 'local')).toBe(localBefore);
   });

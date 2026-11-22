@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
-  AgentAuthLoginStatus,
+  AgentAuthLoginHttpStatus,
 } from '../../../common/agent-auth.js';
+import type { ExecutorSnapshot } from '../../../common/executors.js';
 import type { HttpErrorResponse } from '../../../common/http-error.js';
 import { executionBackend } from '../../support/execution-backend.js';
 import {
@@ -37,7 +38,7 @@ test(`Claude auth HTTP recovers a rejected code on its executor (${executionBack
     const query = new URLSearchParams({ agent: 'claude', executorId });
     const authUrl = `/api/v1/agents/auth?${query}`;
     const statusUrl = `/api/v1/agents/auth/login?${query}`;
-    const status = () => client.get<AgentAuthLoginStatus>(statusUrl);
+    const status = () => client.get<AgentAuthLoginHttpStatus>(statusUrl);
 
     expect(await client.get(authUrl)).toMatchObject({ claude: { authenticated: false, canReauth: true } });
     expect(await status()).toEqual({ state: 'idle', running: false });
@@ -51,7 +52,7 @@ test(`Claude auth HTTP recovers a rejected code on its executor (${executionBack
     expect(launched.sessionId.length).toBeGreaterThan(0);
     const sessionTarget = { ...target, sessionId: launched.sessionId };
     const sessionStatusUrl = `${statusUrl}&session=${encodeURIComponent(launched.sessionId)}`;
-    const sessionStatus = () => client.get<AgentAuthLoginStatus>(sessionStatusUrl);
+    const sessionStatus = () => client.get<AgentAuthLoginHttpStatus>(sessionStatusUrl);
     expect(await sessionStatus()).toMatchObject({
       state: 'running', running: true, sessionId: launched.sessionId, completionPending: false,
     });
@@ -60,7 +61,7 @@ test(`Claude auth HTTP recovers a rejected code on its executor (${executionBack
     expect(owner.home).toBe(fixture.executionDirs.home);
     if (executorId !== 'local') {
       expect(owner.parentPid).not.toBe(fixture.garcon.pid);
-      expect(await client.get<AgentAuthLoginStatus>('/api/v1/agents/auth/login?agent=claude&executorId=local')).toEqual({ state: 'idle', running: false });
+      expect(await client.get<AgentAuthLoginHttpStatus>('/api/v1/agents/auth/login?agent=claude&executorId=local')).toEqual({ state: 'idle', running: false });
     }
 
     const complete = (code: string) => client.fetch('/api/v1/agents/auth/login/complete', {
@@ -115,11 +116,17 @@ test(`Claude auth HTTP recovers a rejected code on its executor (${executionBack
     expect(await sessionStatus()).not.toHaveProperty('retryableError');
 
     await writeFile(join(stateDir, 'release-success'), 'release');
-    expect(await waitFor('successful sign-in', sessionStatus, result => result.state === 'succeeded')).toEqual({
+    const { executors } = await client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
+    const instanceId = executors.find(executor => executor.id === executorId)?.instanceId;
+    if (!instanceId) throw new Error('Missing sign-in executor instance');
+    const succeeded = await waitFor('successful sign-in', sessionStatus, result => result.state === 'succeeded');
+    if (succeeded.state !== 'succeeded') throw new Error('Missing terminal login status');
+    expect(succeeded).toEqual({
       state: 'succeeded', running: false, sessionId: launched.sessionId,
+      instanceId,
     });
     expect(await status()).toEqual({ state: 'idle', running: false });
-    expect(await client.get(authUrl)).toMatchObject({
+    expect(await client.get(`${authUrl}&loginInstance=${encodeURIComponent(succeeded.instanceId)}`)).toMatchObject({
       claude: { authenticated: true, canReauth: true, label: ACCOUNT_LABEL },
     });
     expect(await readCodes(stateDir)).toEqual([REJECTED_CODE, ACCEPTED_CODE]);

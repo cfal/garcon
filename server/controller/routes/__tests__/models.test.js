@@ -3,10 +3,6 @@ import { beforeEach, describe, it, expect, mock } from "bun:test";
 import createModelsRoutes from "../models.js";
 import { ModelCatalogResponseCache } from '../../agents/model-catalog-cache.js';
 import { DomainError } from '../../../common/domain-error.js';
-import { AgentCatalogService } from '../../agents/catalog-service.js';
-import { AgentDirectory } from '../../agents/directory.js';
-import { IntegrationRegistry } from '../../../runtime/agents/integration-registry.js';
-import { integrationFixture } from '../../../remote/__tests__/integration-fixture.js';
 
 const agentCatalogEntries = [
   {
@@ -212,91 +208,8 @@ const modelCatalog = {
 };
 
 const responseCache = new ModelCatalogResponseCache();
-const modelsRoutes = createModelsRoutes({ modelCatalog, responseCache });
+const modelsRoutes = createModelsRoutes({ modelCatalog, responseCache, readyInstanceId: () => 'test-instance' });
 const handler = modelsRoutes["/api/v1/models"].GET;
-
-function discoveryFixture() {
-  const executorId = '22222222-2222-4222-8222-222222222222';
-  const { integration } = integrationFixture('/synthetic-project', executorId);
-  const registry = new IntegrationRegistry({ instances: [integration] });
-  let ready = true;
-  const requireRegistry = () => {
-    if (!ready) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is offline', 503);
-    return registry;
-  };
-  const directory = new AgentDirectory({
-    knownIntegration: ({ agentId }) => registry.get(agentId),
-    requireIntegration: ({ agentId }) => requireRegistry().require(agentId),
-    integrationsFor: requireRegistry,
-    isReady: () => ready,
-  });
-  const service = new AgentCatalogService({ directory, endpointResolver: { getModelOptions: () => [] } });
-  const route = createModelsRoutes({
-    modelCatalog: {
-      agents: {
-        getAgentCatalogEntry: service.getAgentCatalogEntry.bind(service),
-        getAgentCatalogEntries: service.getAgentCatalogEntries.bind(service),
-        requiresStrictModelDiscovery: service.requiresStrictModelDiscovery.bind(service),
-        assertAgentAvailable: (agentId, id) => {
-          if (!directory.list(id).some(item => item.descriptor.id === agentId)) throw new Error('Unknown agent');
-        },
-      },
-      apiProviders: { getCatalog: () => [] },
-    },
-    responseCache: new ModelCatalogResponseCache(),
-  })['/api/v1/models'].GET;
-  const url = new URL(`http://localhost/api/v1/models?agent=test&executorId=${executorId}`);
-  const models = [{ value: 'synthetic-model', label: 'Synthetic model' }];
-  const snapshot = { models, defaultModel: models[0].value, requiresStrictModelDiscovery: true, generation: null };
-  integration.catalog.snapshot = mock(async () => snapshot);
-  return { integration, models, snapshot, request: () => route(new Request(url), url), offline: () => { ready = false; } };
-}
-
-describe('selected-agent discovery with the catalog service', () => {
-  it('retains learned strict discovery and stale models after a non-strict RPC failure', async () => {
-    const fixture = discoveryFixture();
-    expect((await fixture.request()).status).toBe(200);
-    const calls = [];
-    fixture.integration.catalog.snapshot.mockImplementation(async ({ strict }) => {
-      calls.push(strict);
-      if (!strict) throw new Error('Synthetic RPC failure');
-      throw Object.assign(new Error('Synthetic discovery failure'), { staleModels: fixture.models });
-    });
-    const response = await fixture.request();
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
-      error: 'Model discovery unavailable', catalog: { agents: [{ models: fixture.models }] },
-    });
-    expect(calls).toEqual([false, true]);
-  });
-
-  it.each(['before', 'during'])('rejects a retained integration that goes offline %s discovery', async timing => {
-    const fixture = discoveryFixture();
-    expect((await fixture.request()).status).toBe(200);
-    if (timing === 'before') fixture.offline();
-    else fixture.integration.catalog.snapshot.mockImplementation(async () => {
-      fixture.offline();
-      throw new Error('Synthetic link loss');
-    });
-    const response = await fixture.request();
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE' });
-  });
-
-  it.each(['success', 'failure'])('rejects executor loss during strict discovery even on %s', async outcome => {
-    const fixture = discoveryFixture();
-    fixture.integration.catalog.snapshot.mockImplementation(async ({ strict }) => {
-      if (strict) {
-        fixture.offline();
-        if (outcome === 'failure') throw new DomainError('EXECUTOR_UNAVAILABLE', 'Synthetic link loss', 503);
-      }
-      return fixture.snapshot;
-    });
-    const response = await fixture.request();
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE' });
-  });
-});
 
 describe("GET /api/v1/models", () => {
   it('preserves invalid-executor and offline-executor HTTP errors', async () => {

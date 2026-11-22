@@ -2,6 +2,8 @@ import type {
   AgentCatalogEntry,
   AgentModelOption,
 } from "../../../common/agents.js";
+import { AgentCallError } from '@garcon/server-agent-interface';
+import { DomainError } from '../../common/domain-error.js';
 import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-resolver.js";
 import type { AgentDirectory } from "./directory.js";
 import { createLogger } from "../../common/log.js";
@@ -15,6 +17,11 @@ export interface AgentModelQuery {
   signal?: AbortSignal;
   timeoutMs?: number;
   dispatchDeadline?: number;
+}
+
+export function isCatalogExecutorFailure(error: unknown): boolean {
+  return (error instanceof AgentCallError && error.outcome !== 'rejected')
+    || (error instanceof DomainError && error.code === 'EXECUTOR_UNAVAILABLE');
 }
 
 function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
@@ -150,7 +157,7 @@ export class AgentCatalogService {
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof Error && error.name === 'AbortError') throw error;
-      if (query.strict) throw error;
+      if (query.strict || isCatalogExecutorFailure(error)) throw error;
       logger.warn('Agent catalog snapshot failed.', {
         code: 'CATALOG_SNAPSHOT_FAILED',
         integrationId: agentId,

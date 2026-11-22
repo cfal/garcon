@@ -10,8 +10,8 @@ import type { AgentRegistryServiceContract } from './registry.js';
 const MODEL_CATALOG_RESPONSE_CACHE_TTL_MS = 60_000;
 
 export interface ModelCatalog {
-  agents: AgentRegistryServiceContract;
-  apiProviders: ApiProviderService;
+  agents: Pick<AgentRegistryServiceContract, 'getAgentCatalogEntry' | 'getAgentCatalogEntries' | 'requiresStrictModelDiscovery' | 'assertAgentAvailable'>;
+  apiProviders: Pick<ApiProviderService, 'getCatalog'>;
 }
 
 export interface ModelCatalogResponseBody {

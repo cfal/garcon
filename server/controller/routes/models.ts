@@ -2,10 +2,12 @@
 // the registry.
 
 import { catalogResponseFromSnapshot } from './model-catalog-response.js';
+import { isCatalogExecutorFailure } from '../agents/catalog-service.js';
 import { type ModelCatalog, type ModelCatalogResponseCache, type ModelCatalogResponseBody } from '../agents/model-catalog-cache.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
-import { executorIdFromUrl } from './executor-target.js';
+import { executorIdFromUrl, onLoginInstance } from './executor-target.js';
+import { LOGIN_INSTANCE_QUERY } from '../../../common/agent-auth.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 
 interface ModelDiscoveryUnavailableError extends Error {
@@ -51,9 +53,11 @@ function modelDiscoveryUnavailableResponse(
 export default function createModelsRoutes({
   modelCatalog,
   responseCache,
+  readyInstanceId,
 }: {
   modelCatalog: ModelCatalog;
   responseCache: ModelCatalogResponseCache;
+  readyInstanceId(executorId: string): string;
 }): RouteMap {
   async function getModels(request: Request, url: URL): Promise<Response> {
     const executorId = executorIdFromUrl(url);
@@ -75,6 +79,7 @@ export default function createModelsRoutes({
           entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: true, executorId }) ?? entry;
         } catch (error) {
           modelCatalog.agents.assertAgentAvailable(agentId, executorId);
+          if (isCatalogExecutorFailure(error)) throw error;
           return modelDiscoveryUnavailableResponse(error, { agents: [entry], apiProviders }, entry);
         }
         modelCatalog.agents.assertAgentAvailable(agentId, executorId);
@@ -87,7 +92,11 @@ export default function createModelsRoutes({
       });
     }
 
-    const snapshot = await responseCache.getSnapshot(modelCatalog, executorId);
+    const instance = url.searchParams.get(LOGIN_INSTANCE_QUERY);
+    const snapshot = await onLoginInstance(() => readyInstanceId(executorId), instance, () => {
+      if (instance !== null) responseCache.clear(executorId);
+      return responseCache.getSnapshot(modelCatalog, executorId);
+    });
     return catalogResponseFromSnapshot(request, snapshot);
   }
 

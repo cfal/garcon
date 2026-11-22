@@ -366,6 +366,11 @@ test('a reconnecting executor holds calls instead of reporting itself unavailabl
   link.dial(url(config.id));
   await waitReady(manager, config.id);
   const executor = manager.requireExecutor(config.id);
+  const transitions: string[] = [];
+  const offSnapshots = manager.onChanged(() => {
+    const availability = manager.list().find(item => item.id === config.id)?.availability;
+    if (availability && transitions.at(-1) !== availability) transitions.push(availability);
+  });
   const reconnecting = new Promise<void>((resolve) => {
     const off = manager.onAvailabilityChanged((executorId, value) => {
       if (executorId === config.id && value === 'reconnecting') { off(); resolve(); }
@@ -379,6 +384,9 @@ test('a reconnecting executor holds calls instead of reporting itself unavailabl
   expect(manager.integrationsFor(config.id).get('test')).not.toBeNull();
   expect((await manager.inspectProject(root, config.id)).kind).toBe('available');
   expect(manager.isReady(config.id)).toBe(true);
+  offSnapshots();
+  expect(transitions.filter(value => value !== 'ready')).toEqual(['reconnecting']);
+  expect(transitions.at(-1)).toBe('ready');
 });
 
 test('two inbound workers share one listener and keep distinct integration/resource scopes', async () => {

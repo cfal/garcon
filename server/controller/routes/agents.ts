@@ -7,16 +7,18 @@ import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js
 import type { ApiProviderService } from '../api-providers/service.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
-import { executorIdFromUrl, executorIdFromValue } from './executor-target.js';
+import { executorIdFromUrl, executorIdFromValue, onLoginInstance } from './executor-target.js';
+import { LOGIN_INSTANCE_QUERY, type AgentAuthLoginHttpStatus } from '../../../common/agent-auth.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 
 interface AgentRouteDeps {
   agents: AgentRegistryServiceContract;
   apiProviders: ApiProviderService;
   responseCache: ModelCatalogResponseCache;
+  readyInstanceId(executorId: string): string;
 }
 
-export default function createAgentRoutes({ agents, apiProviders, responseCache }: AgentRouteDeps): RouteMap {
+export default function createAgentRoutes({ agents, apiProviders, responseCache, readyInstanceId }: AgentRouteDeps): RouteMap {
   function validateAuthLoginAgent(agentId: string, executorId: string): Response | null {
     agents.assertExecutorReady(executorId);
     if (!agents.hasAgent(agentId, executorId)) {
@@ -55,7 +57,11 @@ export default function createAgentRoutes({ agents, apiProviders, responseCache 
     try {
       const executorId = executorIdFromUrl(url);
       if (agentId) {
-        const status = await agents.getAgentAuthStatus(agentId, executorId);
+        const status = await onLoginInstance(
+          () => readyInstanceId(executorId),
+          url.searchParams.get(LOGIN_INSTANCE_QUERY),
+          () => agents.getAgentAuthStatus(agentId, executorId),
+        );
         if (!status) {
           return jsonError(`Unknown agent: ${agentId}`, 400);
         }
@@ -101,8 +107,13 @@ export default function createAgentRoutes({ agents, apiProviders, responseCache 
       const executorId = executorIdFromUrl(url);
       const invalidAgent = validateAuthLoginAgent(agentId, executorId);
       if (invalidAgent) return invalidAgent;
-      const status = await agents.getAgentAuthLoginStatus(agentId, expectedSessionId, executorId);
-      if (status.state === 'succeeded' && status.sessionId === expectedSessionId) responseCache.clear(executorId);
+      const instanceId = readyInstanceId(executorId);
+      const status = await onLoginInstance(() => readyInstanceId(executorId), instanceId,
+        () => agents.getAgentAuthLoginStatus(agentId, expectedSessionId, executorId));
+      if (status.state === 'succeeded') {
+        if (status.sessionId === expectedSessionId) responseCache.clear(executorId);
+        return Response.json({ ...status, instanceId } satisfies AgentAuthLoginHttpStatus);
+      }
       return Response.json(status);
     } catch (error) {
       return jsonErrorFromUnknown(error);

@@ -94,6 +94,12 @@ export class ExecutorManager {
     return !this.#disposed && this.#remotes.get(executorId)?.executor?.availability === 'reconnecting';
   }
 
+  readyInstanceId(executorId: string): string {
+    const id = executorId === LOCAL_EXECUTOR_ID ? this.localInfo.instanceId : this.#remotes.get(executorId)?.info?.instanceId;
+    if (!id || !this.isReady(executorId)) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    return id;
+  }
+
   // Also returns a remote executor that is reconnecting to a worker whose
   // integrations are known; its calls wait for the replacement session within
   // their own deadlines.
@@ -375,7 +381,8 @@ export class ExecutorManager {
   }
   #snapshotAvailability(executorId: string): ExecutorSnapshotAvailability {
     if (this.isReady(executorId)) return 'ready';
-    if (this.isReconnecting(executorId)) return 'reconnecting';
+    // A live replacement link still holds calls until its inventory is prepared.
+    if (this.isReconnecting(executorId) || this.#holdsCalls(executorId)) return 'reconnecting';
     return 'offline';
   }
 }

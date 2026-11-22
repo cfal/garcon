@@ -28,7 +28,8 @@ const PREAMBLE_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 const PREAMBLE_MISSING = '936903ad-8b98-43eb-a7d4-c17ce0dc18d8';
 
 function authRoutes(agents) {
-  return createAgentRoutes({ agents, apiProviders: { getCatalog: () => [] }, responseCache: new ModelCatalogResponseCache() });
+  return createAgentRoutes({ agents, apiProviders: { getCatalog: () => [] }, responseCache: new ModelCatalogResponseCache(),
+    readyInstanceId: () => 'test-instance' });
 }
 
 describe('AgentRegistry session cache', () => {
