@@ -157,7 +157,11 @@ describe('Docker contract', () => {
     expect(dockerfile).not.toContain('opencode-ai@latest');
   });
 
-  test('provisions the integration-tested Codex and Pi versions outside the source workspace', async () => {
+  test('pins integration CLIs outside the source workspace and provisions matching Codex and Pi in Docker', async () => {
+    const integrationLock = Bun.JSONC.parse(await readFile(path.join(repositoryRoot, 'integration-tests/bun.lock'), 'utf8'));
+    for (const name of ['@anthropic-ai/claude-code', '@openai/codex', 'opencode-ai', '@earendil-works/pi-coding-agent']) {
+      expect(integrationLock.packages[name][0]).toBe(`${name}@${integrationPackage.devDependencies[name]}`);
+    }
     expect(dockerfile).toContain(`ARG CODEX_VERSION=${integrationPackage.devDependencies['@openai/codex']}`);
     expect(dockerfile).toContain(`ARG PI_VERSION=${integrationPackage.devDependencies['@earendil-works/pi-coding-agent']}`);
     const lock = Bun.JSONC.parse(await readFile(path.join(repositoryRoot, 'bun.lock'), 'utf8'));
