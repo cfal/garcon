@@ -49,7 +49,6 @@ describe('pinned Codex shutdown compatibility', () => {
         historyMode: 'paginated',
         config: { bypass_hook_trust: true },
       });
-      await client.shutdown();
     } finally {
       await client.shutdown();
     }

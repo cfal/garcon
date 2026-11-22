@@ -65,25 +65,22 @@ describe('PiAgentIntegration', () => {
   it('waits for catalog cleanup even when a session fails to shut down', async () => {
     const cleanup = Promise.withResolvers<void>();
     const failure = new Error('Synthetic session shutdown failure');
-    const catalog = spyOn(PiModelCatalogService.prototype, 'stop').mockReturnValue(cleanup.promise);
-    const sessions = spyOn(LazyPiRuntime.prototype, 'shutdown').mockRejectedValue(failure);
+    using catalog = spyOn(PiModelCatalogService.prototype, 'stop').mockReturnValue(cleanup.promise);
+    using sessions = spyOn(LazyPiRuntime.prototype, 'shutdown').mockRejectedValue(failure);
+    const integration = new PiAgentIntegration(createHost());
+    await integration.lifecycle.start();
+    let observed: unknown;
+    const stopping = integration.lifecycle.stop().catch(error => { observed = error; });
     try {
-      const integration = new PiAgentIntegration(createHost());
-      await integration.lifecycle.start();
-      let observed: unknown;
-      const stopping = integration.lifecycle.stop().catch(error => { observed = error; });
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(catalog).toHaveBeenCalledTimes(1);
       expect(sessions).toHaveBeenCalledTimes(1);
       expect(observed).toBeUndefined();
-      cleanup.resolve();
-      await stopping;
-      expect(observed).toBe(failure);
     } finally {
       cleanup.resolve();
-      catalog.mockRestore();
-      sessions.mockRestore();
+      await stopping;
     }
+    expect(observed).toBe(failure);
   });
 
   it('preserves version 1 settings and stable real native-session envelopes', async () => {
