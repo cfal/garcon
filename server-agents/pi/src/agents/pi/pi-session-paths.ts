@@ -62,7 +62,9 @@ export async function findPiSessionFileBySessionId(
 ): Promise<string | null> {
   if (!sessionId || !projectPath) return null;
   const home = config.homeDirectory();
-  const projectDir = resolvePiPath(projectPath, process.cwd(), home);
+  const selectedProject = resolvePiPath(projectPath, process.cwd(), home);
+  // Pi resolves relative session settings and records the header from its physical working directory.
+  const projectDir = await realpath(selectedProject).catch(() => selectedProject);
   const agentDir = resolvePiPath(config.agentDirectoryOverride() ?? path.join(home, '.pi', 'agent'), projectDir, home);
   const configured = config.sessionDirectoryOverride()
     ?? await sessionDirSetting(path.join(projectDir, '.pi', 'settings.json'))
@@ -75,18 +77,27 @@ export async function findPiSessionFileBySessionId(
     if (samePiPath(directory, localDir)) return findInDirectory(directory, sessionId);
     return findInDirectory(directory, sessionId, (cwd) => {
       if (typeof cwd !== 'string' || !cwd) return false;
-      return samePiPath(resolvePiPath(cwd, process.cwd(), home), projectDir);
+      const recorded = resolvePiPath(cwd, process.cwd(), home);
+      return samePiPath(recorded, projectDir) || samePiPath(recorded, selectedProject);
     });
   }
   const nearby = await findInDirectory(localDir, sessionId);
   if (nearby) return nearby;
   let match: string | null = null;
   for await (const entry of directoryEntries(sessionsRoot)) {
-    if (!entry.isDirectory() || entry.name === local) continue;
-    const candidate = await findInDirectory(path.join(sessionsRoot, entry.name), sessionId);
+    if (entry.name === local || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
+    let candidate: string | null;
+    try {
+      candidate = await findInDirectory(path.join(sessionsRoot, entry.name), sessionId);
+    } catch (error) {
+      if (entry.isSymbolicLink() && (hasNodeErrorCode(error, 'ENOTDIR') || hasNodeErrorCode(error, 'ELOOP'))) continue;
+      throw error;
+    }
     if (!candidate) continue;
-    if (match) throw new Error('Pi transcript discovery found duplicate session IDs');
-    match = candidate;
+    if (match && !samePiPath(await realpath(match), await realpath(candidate))) {
+      throw new Error('Pi transcript discovery found duplicate session IDs');
+    }
+    match ??= candidate;
   }
   return match;
 }

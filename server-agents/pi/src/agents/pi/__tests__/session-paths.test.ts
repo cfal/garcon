@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,7 +14,7 @@ const config: PiConfig = {
   sessionDirectoryOverride: () => override, isTestEnvironment: () => true,
 };
 beforeEach(async () => {
-  home = await mkdtemp(path.join(tmpdir(), 'pi-paths-'));
+  home = await realpath(await mkdtemp(path.join(tmpdir(), 'pi-paths-')));
   project = path.join(home, 'project');
   override = null;
 });
@@ -71,6 +71,33 @@ test('normalizes Windows shell drive prefixes without changing UNC or native pat
   for (const native of ['//server/share', 'D:\\project', '/ordinary/path']) {
     expect(nativePiWindowsPath(native)).toBe(native);
   }
+});
+
+test('matches the physical cwd Pi records for a symlinked project in a shared session directory', async () => {
+  const physical = path.join(home, 'targets', 'physical');
+  await mkdir(physical, { recursive: true });
+  await symlink(physical, project, 'dir');
+  override = '../shared';
+  const shared = path.resolve(physical, override);
+  const file = await put(path.join(shared, 'physical.jsonl'), { ...header, cwd: physical });
+  await put(path.join(shared, 'unrelated.jsonl'), { ...header, cwd: home });
+  expect(await lookup()).toBe(file);
+  await put(file, { ...header, cwd: project });
+  expect(await lookup()).toBe(file);
+});
+
+test('finds relocated project session directories without mistaking two paths to one file for duplicates', async () => {
+  const root = path.join(home, 'agent', 'sessions');
+  await mkdir(root, { recursive: true });
+  const archive = path.join(home, 'archive');
+  const file = await put(path.join(archive, 'session.jsonl'), header);
+  await symlink(file, path.join(root, 'not-a-directory'), 'file');
+  await symlink(archive, path.join(root, '--old-project--'), 'dir');
+  await symlink(archive, path.join(root, '--other-alias--'), 'dir');
+  const match = await lookup();
+  expect(match && await realpath(match)).toBe(await realpath(file));
+  await put(path.join(root, '--distinct--', 'session.jsonl'), header);
+  await expect(lookup()).rejects.toThrow('duplicate');
 });
 
 test('bounds the whole header scan, not just individual lines or the size of the file', async () => {
