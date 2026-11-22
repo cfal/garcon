@@ -348,7 +348,7 @@ Availability depends on your model, account, and workspace policy. Speed is save
 
 Changing speed does not affect an active operation. After Codex exhausts its own capacity retries, Fast and Ultrafast fail without an additional Garcon retry; submit again to recheck availability. Standard retains bounded automatic retries at its admitted speed, unless the native model or tier changed. Stop and submit again to use a new speed.
 
-Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
+Claude Code 2.1.238 or newer is required. Settings > Providers shows the installed Claude Code and Codex CLI versions on each executor and can update them in place; see [agent CLI updates](docs/agent-cli-updates.md). Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 
 ## Automate And Delegate
 

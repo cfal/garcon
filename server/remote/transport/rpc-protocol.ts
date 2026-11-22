@@ -38,7 +38,7 @@ export const NULLABLE_AGENT_FACETS = [
   'readiness',
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
-  'configurationValidation', 'sessionConfiguration', 'projectPathUpdates', 'usageHistory',
+  'configurationValidation', 'sessionConfiguration', 'projectPathUpdates', 'usageHistory', 'cliUpdates',
 ] as const satisfies readonly (keyof AgentIntegration)[];
 
 export interface IntegrationManifest {
@@ -114,6 +114,8 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
   'projectPathUpdates.rollback': Call<Request<'projectPathUpdates', 'rollback'>, void>;
   'usageHistory.read': Call<WithoutSignal<Request<'usageHistory', 'read'>>, Result<'usageHistory', 'read'>>;
+  'cliUpdates.status': Call<WithoutSignal<Request<'cliUpdates', 'status'>>, Result<'cliUpdates', 'status'>>;
+  'cliUpdates.startUpdate': Call<null, Result<'cliUpdates', 'startUpdate'>>;
   'credentials.resolve': Call<WithoutSignal<Parameters<AgentHost['apiProviders']['resolveCredential']>[0]>, Awaited<ReturnType<AgentHost['apiProviders']['resolveCredential']>>>;
   // Settles the journaled calls lost sessions left outstanding; see `RpcContinuity`.
   'calls.reconcile': Call<{ readonly calls: readonly OutstandingCall[] }, { readonly states: readonly OutstandingCallState[] }>;
@@ -196,6 +198,10 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'projectPathUpdates.commit': 'journaled',
   'projectPathUpdates.rollback': 'journaled',
   'usageHistory.read': 'journaled',
+  // The update runs on the worker and outlives the call; a repeated start
+  // while it runs reports that run instead of starting another.
+  'cliUpdates.status': 'journaled',
+  'cliUpdates.startUpdate': 'journaled',
   'credentials.resolve': 'session',
   'calls.reconcile': 'session',
   'terminals.list': 'session',

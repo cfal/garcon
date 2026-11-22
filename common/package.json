@@ -7,6 +7,7 @@
     "./base-path": "./base-path.ts",
     "./command-output": "./command-output.ts",
     "./agent-auth": "./agent-auth.ts",
+    "./agent-cli-update": "./agent-cli-update.ts",
     "./agent-execution": "./agent-execution.ts",
     "./agent-integration": "./agent-integration.ts",
     "./agent-settings": "./agent-settings.ts",

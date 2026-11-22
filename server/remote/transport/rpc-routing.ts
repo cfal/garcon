@@ -59,6 +59,8 @@ const METHOD_LANES = {
   'projectPathUpdates.rollback': 'primary',
   // A report holds a bucket per model per day, which can outgrow a primary reply.
   'usageHistory.read': 'bulk',
+  'cliUpdates.status': 'primary',
+  'cliUpdates.startUpdate': 'primary',
   'credentials.resolve': 'primary',
   'terminals.list': 'primary',
   'terminals.create': 'primary',

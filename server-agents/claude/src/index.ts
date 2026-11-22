@@ -35,9 +35,11 @@ import {
   runSingleQuery,
 } from './agents/claude/claude-cli.js';
 import { ClaudeCliVersionProbe } from './agents/claude/cli-version.js';
+import { createClaudeCliUpdates } from './agents/claude/cli-updates.js';
 import {
   buildClaudeEndpointRuntime,
   buildClaudeHostEnvironment,
+  buildClaudeProcessEnvironment,
 } from './agents/claude/endpoint-runtime.js';
 import { ClaudeExecution } from './agents/claude/execution.js';
 import {
@@ -95,6 +97,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
+  readonly cliUpdates: NonNullable<AgentIntegration['cliUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -198,6 +201,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       format: claudeUsageFormat,
       roots: () => [claudeProjectsDir({ configHomeDir: config.configHomeDir() ?? undefined })],
     });
+    this.cliUpdates = createClaudeCliUpdates({ config, versionProbe, logger });
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,
@@ -377,13 +381,8 @@ function createClaudeNativeEvidence(options: {
 }
 
 function claudeLoginEnvironment(config: ReturnType<typeof createClaudeConfig>): Record<string, string> {
-  const environment: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'CLAUDECODE') environment[key] = value;
-  }
   return {
-    ...environment,
-    ...buildClaudeHostEnvironment(config),
+    ...buildClaudeProcessEnvironment(config),
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     FORCE_COLOR: '3',
