@@ -46,6 +46,7 @@ function emit(finding_id: string, claim: string): string {
 
 const payload = { finding_id: 'observed', claim: 'Two and two make four.' };
 const proof = emit(payload.finding_id, payload.claim);
+const missingClaim = '<garcon-workflow-emit signal="research.finding_ready" content-type="json">{"finding_id":"incomplete"}</garcon-workflow-emit>';
 const prose = `This is an example, not a finding:\n\n${emit('surrounded', 'Surrounding prose.')}`;
 const quote = `> ${emit('quoted', 'Quoted sample.')}`;
 const nested = `<garcon-workflow-emit signal="outer">\n${emit('inner', 'Nested.')}\n\n${emit('tail', 'Still nested.')}`;
@@ -148,7 +149,7 @@ test('published workflow accepts one live pinned Claude finding and starts the w
         expect(assistantContents((await client.getMessages(research.chatId)).messages)).toContain(quote);
         await assertWaiting();
 
-        const signal = hold(proof, 'emit');
+        const signal = hold([missingClaim, proof].join('\n\n'), 'emit');
         malformed.release();
         await requested(signal, 'the turn after the nested tag');
         expect(assistantContents((await client.getMessages(research.chatId)).messages)).toContain(nested);
@@ -178,6 +179,13 @@ test('published workflow accepts one live pinned Claude finding and starts the w
         const completed = await waitForRun(read, 'The published run', detail => detail.status === 'succeeded');
         expect(findings(completed)).toEqual(findings(live));
         expect(step(completed, 'verify').instances).toHaveLength(1);
+        const messages = (await client.getMessages(research.chatId)).messages;
+        expect(messages.flatMap(({ message }) =>
+          message.type === 'transcript-notice' && message.title === 'Workflow signal rejected' ? [message.content] : [],
+        )).toEqual([
+          expect.stringContaining('standalone workflow emit'),
+          expect.stringContaining('field "claim" requires a string'),
+        ]);
         model.assertSettled();
       } finally {
         for (const gate of gates) gate.release();
