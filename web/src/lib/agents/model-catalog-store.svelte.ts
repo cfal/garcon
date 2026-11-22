@@ -1,6 +1,8 @@
 import { fetchModelCatalogResponse } from '$lib/api/model-catalog';
+import { isTransientRequestFailure } from '$lib/api/client';
 import { effectiveExecutorId, type ExecutorSnapshot } from '$shared/executors';
 import { agentLabelFor } from './agent-labels.js';
+import { PendingAgentLogins } from './pending-agent-logins.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -480,9 +482,19 @@ export class ModelCatalogStore {
 	#syncPromise: Promise<void> | null = null;
 	#lastSyncAttemptAt = 0;
 	#requestVersion = 0;
+	#loginRefreshPending = false;
+	#loginOwner: string | null = null;
 	#executorAvailability = new Map<string, string>();
+	readonly pendingLogins: PendingAgentLogins;
 
 	constructor(readonly executorId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>()) {
+		this.pendingLogins = new PendingAgentLogins(executorId, () => {
+			// Supersedes pre-login discovery without blocking other validated selections.
+			this.#requestVersion++;
+			this.#syncPromise = null;
+			this.#loginRefreshPending = true;
+			void this.forceRefresh();
+		});
 		this.catalogs.set(executorId, this);
 		this.hydrateFromStorage();
 	}
@@ -503,6 +515,7 @@ export class ModelCatalogStore {
 		for (const id of this.#executorAvailability.keys()) if (!ids.has(id)) this.#executorAvailability.delete(id);
 		for (const [id, catalog] of this.catalogs) {
 			if (ids.has(id) || id === 'local') continue;
+			catalog.pendingLogins.clear();
 			catalog.invalidate();
 			this.catalogs.delete(id);
 		}
@@ -514,7 +527,9 @@ export class ModelCatalogStore {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 				} else delete persisted[executor.id];
-				this.catalogs.get(executor.id)?.invalidate();
+				const catalog = this.catalogs.get(executor.id);
+				catalog?.pendingLogins.clear();
+				catalog?.invalidate();
 			}
 			this.#executorAvailability.set(executor.id, availability);
 		}
@@ -524,6 +539,7 @@ export class ModelCatalogStore {
 
 	invalidate(): void {
 		this.#requestVersion += 1;
+		this.#loginRefreshPending = false;
 		this.#lastSyncAttemptAt = 0;
 		this.#syncPromise = null;
 		this.isRefreshing = false;
@@ -538,6 +554,16 @@ export class ModelCatalogStore {
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors);
+	}
+
+	clearPendingLogins(): void {
+		for (const catalog of this.catalogs.values()) catalog.pendingLogins.clear();
+	}
+
+	setLoginOwner(owner: string | null): void {
+		if (this.#loginOwner === owner) return;
+		this.#loginOwner = owner;
+		this.clearPendingLogins();
 	}
 
 	getSelectableAgents(): SessionAgentId[] {
@@ -733,6 +759,7 @@ export class ModelCatalogStore {
 	}
 
 	isStale(ttlMs: number = DEFAULT_TTL_MS): boolean {
+		if (this.#loginRefreshPending) return true;
 		const checkedAt = this.lastValidatedAt ?? this.lastFetchedAt;
 		if (checkedAt === null) return true;
 		return Date.now() - checkedAt >= ttlMs;
@@ -764,6 +791,7 @@ export class ModelCatalogStore {
 			const responseEtag = response.headers?.get?.('etag') ?? null;
 
 			if (response.status === 304) {
+				this.#loginRefreshPending = false;
 				this.etag = responseEtag ?? this.etag;
 				this.lastValidatedAt = Date.now();
 				this.error = null;
@@ -785,6 +813,7 @@ export class ModelCatalogStore {
 			}
 
 			const now = Date.now();
+			this.#loginRefreshPending = false;
 			this.etag = responseEtag;
 			this.lastFetchedAt = now;
 			this.lastValidatedAt = now;
@@ -792,7 +821,9 @@ export class ModelCatalogStore {
 			persist(this.executorId, this.#currentSnapshot());
 			this.version += 1;
 		} catch (error) {
-			if (requestVersion === this.#requestVersion) this.error = error instanceof Error ? error.message : 'Unknown error';
+			if (requestVersion !== this.#requestVersion) return;
+			if (this.#loginRefreshPending && this.isValidated && isTransientRequestFailure(error)) return;
+			this.error = error instanceof Error ? error.message : 'Unknown error';
 		} finally {
 			if (requestVersion === this.#requestVersion) this.isRefreshing = false;
 		}

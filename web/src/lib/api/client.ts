@@ -95,6 +95,13 @@ export function isIntermediaryResponse(error: ApiError): boolean {
 	);
 }
 
+export function isTransientRequestFailure(error: unknown): boolean {
+	if (error instanceof ApiError) return isIntermediaryResponse(error);
+	if (error instanceof TypeError) return true;
+	return error instanceof DOMException &&
+		(error.name === 'NetworkError' || error.name === 'TimeoutError' || error.name === 'AbortError');
+}
+
 export class ApiMutationOutcomeUnknownError extends Error {
 	constructor(message: string, options?: ErrorOptions) {
 		super(message, options);

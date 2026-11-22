@@ -11,7 +11,7 @@
 	const catalog = getModelCatalog();
 	const executors = getExecutors();
 	const authExecutorId = $derived(executorId);
-	const settingsAuth = $derived(new SettingsAuthState(catalog.forExecutor(authExecutorId), authExecutorId));
+	const settingsAuth = $derived(new SettingsAuthState(catalog.forExecutor(authExecutorId)));
 	let openByAgent = $state<Record<string, boolean>>({});
 	const authContext = $derived.by(() => {
 		const executor = executors.get(executorId);
