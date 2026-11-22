@@ -4,7 +4,7 @@ import type { GitWorktreeItem } from '$lib/api/git.js';
 import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 import GitWorktreePickerModal from '../GitWorktreePickerModal.svelte';
 import GitWorktreePickerEscapeHost from './GitWorktreePickerEscapeHost.svelte';
-import { pickerFixture, type PickerPort } from './worktree-picker-fixture.js';
+import { pickerFixture, worktree, type PickerPort } from './worktree-picker-fixture.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { generateGitName } from '$lib/api/git-name.js';
@@ -16,31 +16,18 @@ vi.mock('$lib/context', async (original) => ({
 }));
 vi.mock('$lib/api/git-name.js', () => ({ generateGitName: vi.fn() }));
 
-function worktree(
-	name: string,
-	lastModifiedAt: string | null,
-	overrides: Partial<GitWorktreeItem> = {},
-): GitWorktreeItem {
-	return {
-		name,
-		path: `/workspace/${name}`,
-		branch: name,
-		isCurrent: false,
-		isMain: false,
-		isPathMissing: false,
-		lastModifiedAt,
-		...overrides,
-	};
-}
-
-function renderPicker(worktrees: GitWorktreeItem[], { description, ...initial }: Partial<PickerPort> & { description?: string } = {}) {
+function renderPicker(worktrees: GitWorktreeItem[], initial: Partial<PickerPort> & { description?: string } = {}) {
 	let values = { worktrees, ...initial };
-	const view = render(GitWorktreePickerModal, { session: pickerFixture(values), description });
+	function props() {
+		const { description, ...session } = values;
+		return { session: pickerFixture(session), description };
+	}
+	const view = render(GitWorktreePickerModal, props());
 	return {
 		...view,
-		rerender(update: Partial<PickerPort>) {
+		rerender(update: typeof initial) {
 			values = { ...values, ...update };
-			return view.rerender({ session: pickerFixture(values) });
+			return view.rerender(props());
 		},
 	};
 }
@@ -511,6 +498,9 @@ describe('GitWorktreePickerModal', () => {
 		expect(create).toHaveBeenCalledTimes(1);
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		expect(screen.getByRole('dialog', { name: 'Select worktree' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		expect(screen.queryByText('Worktree created at /canonical.')).toBeNull();
+		expect(screen.getByRole<HTMLInputElement>('textbox', { name: /branch name/i }).readOnly).toBe(false);
 	});
 
 	it('uses the current render time for worktrees returned by refresh', async () => {
@@ -757,7 +747,7 @@ describe('GitWorktreePickerModal', () => {
 		expect(screen.getByDisplayValue('stable-draft')).toBe(field);
 	});
 
-	it.each(['edit', 'back', 'executor'] as const)('discards a pending suggestion after %s', async (transition) => {
+	it.each(['edit', 'back', 'executor', 'description'] as const)('discards a pending suggestion after %s', async (transition) => {
 		const response = Promise.withResolvers<{ name: string }>();
 		vi.mocked(generateGitName).mockReturnValueOnce(response.promise);
 		const view = renderPicker([worktree('main', null, { isMain: true })], { contextKey: 'worker-A' });
@@ -766,6 +756,7 @@ describe('GitWorktreePickerModal', () => {
 		const signal = vi.mocked(generateGitName).mock.lastCall![1];
 		if (transition === 'edit') await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'typed' } });
 		if (transition === 'back') await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		if (transition === 'description') await view.rerender({ description: 'Changed task' });
 		if (transition === 'executor') {
 			await view.rerender({ contextKey: 'worker-B' });
 			await view.rerender({ contextKey: 'worker-A' });

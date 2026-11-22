@@ -1,7 +1,25 @@
 import type { ComponentProps } from 'svelte';
+import type { GitWorktreeItem } from '$lib/api/git.js';
 import type GitWorktreePickerModal from '../GitWorktreePickerModal.svelte';
 
 export type PickerPort = ComponentProps<typeof GitWorktreePickerModal>['session'];
+
+export function worktree(
+	name: string,
+	lastModifiedAt: string | null,
+	overrides: Partial<GitWorktreeItem> = {},
+): GitWorktreeItem {
+	return {
+		name,
+		path: `/workspace/${name}`,
+		branch: name,
+		isCurrent: false,
+		isMain: false,
+		isPathMissing: false,
+		lastModifiedAt,
+		...overrides,
+	};
+}
 
 export function pickerFixture(overrides: Partial<PickerPort>): PickerPort {
 	return {

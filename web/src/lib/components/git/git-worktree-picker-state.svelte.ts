@@ -89,7 +89,7 @@ export class GitWorktreePickerState {
 	sortOrder = $state<WorktreeSortOrder>('last-modified');
 	selectedPath = $state<string | null>(null);
 
-	#visibleWorktrees = $derived.by(() =>
+	readonly visibleWorktrees = $derived.by(() =>
 		filterAndSortWorktrees(
 			this.#options.worktrees,
 			this.filterQuery,
@@ -98,35 +98,21 @@ export class GitWorktreePickerState {
 		),
 	);
 	#selectableVisibleWorktrees = $derived.by(() =>
-		this.#visibleWorktrees.filter((worktree) => !worktree.isPathMissing),
+		this.visibleWorktrees.filter((worktree) => !worktree.isPathMissing),
 	);
-	#selectedWorktree = $derived.by(
+	readonly selectedWorktree: GitWorktreeItem | null = $derived.by(
 		() =>
 			this.#selectableVisibleWorktrees.find((worktree) => worktree.path === this.selectedPath) ??
 			this.#selectableVisibleWorktrees[0] ??
 			null,
 	);
-	#selectedIndex = $derived.by(() =>
-		this.#selectedWorktree
-			? this.#visibleWorktrees.findIndex(
-					(worktree) => worktree.path === this.#selectedWorktree?.path,
-				)
-			: -1,
-	);
+	readonly selectedIndex = $derived.by(() => {
+		const selected = this.selectedWorktree;
+		return selected ? this.visibleWorktrees.findIndex((worktree) => worktree.path === selected.path) : -1;
+	});
+
 	constructor(options: GitWorktreePickerStateOptions) {
 		this.#options = options;
-	}
-
-	get visibleWorktrees(): GitWorktreeItem[] {
-		return this.#visibleWorktrees;
-	}
-
-	get selectedWorktree(): GitWorktreeItem | null {
-		return this.#selectedWorktree;
-	}
-
-	get selectedIndex(): number {
-		return this.#selectedIndex;
 	}
 
 	get hasActiveFilter(): boolean {

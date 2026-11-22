@@ -36,13 +36,9 @@
 
 	let { session, description = '' }: Props = $props();
 	const contextKey = $derived(session.contextKey);
-	const worktrees = $derived(session.worktrees);
-	const isCreating = $derived(session.isCreating);
-	const isLoading = $derived(session.isLoading);
-	const loadError = $derived(session.loadError);
 	const picker = new GitWorktreePickerState({
 		get worktrees() {
-			return worktrees;
+			return session.worktrees;
 		},
 		get locale() {
 			return getLocale();
@@ -55,10 +51,8 @@
 	const executors = getExecutors();
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let createTarget = $state<string | null>(null);
-	let submitted = $state(false);
 	let showAdvanced = $state(false);
 	const createOpen = $derived(createTarget === contextKey);
-	const available = $derived(session.catalogContextKey !== null);
 	const canUseGit = $derived(session.canUseGit);
 	$effect(() => {
 		const displayed = session;
@@ -120,7 +114,7 @@
 	}
 
 	function backToList(): void {
-		if (isCreating) return;
+		if (session.isCreating) return;
 		createTarget = null;
 		void tick().then(() => filterInputRef?.focus());
 	}
@@ -133,7 +127,6 @@
 
 	async function createWorktree(creation: GitWorktreeCreation): Promise<void> {
 		if (!createOpen || !canUseGit) return;
-		submitted = true;
 		const notice = await session.create(creation);
 		if (!notice) return;
 		const origin = `${executors.label(notice.target.executorId)}: ${notice.target.projectPath}`;
@@ -144,7 +137,6 @@
 	function openCreateForm(): void {
 		if (!canUseGit) return;
 		showAdvanced = false;
-		submitted = false;
 		createTarget = contextKey;
 	}
 </script>
@@ -181,7 +173,7 @@
 							title={m.workspace_worktree_refresh()}
 							aria-label={m.workspace_worktree_refresh()}
 						>
-							<RefreshCw class="h-3.5 w-3.5 {isLoading ? 'animate-spin' : ''}" />
+							<RefreshCw class="h-3.5 w-3.5 {session.isLoading ? 'animate-spin' : ''}" />
 						</button>
 					{/if}
 					<button
@@ -195,7 +187,7 @@
 				</div>
 			</div>
 
-			{#if !available}
+			{#if session.catalogContextKey === null}
 				<p role="status" class="shrink-0 border-b border-border px-4 py-2 text-sm text-muted-foreground">
 					{m.workspace_executor_unavailable()}
 				</p>
@@ -205,12 +197,12 @@
 				inert={createOpen}
 				class={createOpen ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}
 			>
-				{#if loadError}
+				{#if session.loadError}
 					<div
 						class="flex min-w-0 shrink-0 items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
 					>
 						<AlertTriangle class="h-3.5 w-3.5 shrink-0 text-destructive" />
-						<span class="min-w-0 flex-1 break-words text-destructive">{loadError}</span>
+						<span class="min-w-0 flex-1 break-words text-destructive">{session.loadError}</span>
 						<button
 							type="button"
 							onclick={() => void session.refresh()}
@@ -316,13 +308,13 @@
 			{#if createOpen}
 				<div class="flex min-h-0 flex-1 flex-col" use:createFormLayer>
 					<GitWorktreeCreateForm
-						{worktrees}
+						worktrees={session.worktrees}
 						bind:showAdvanced
 						{contextKey}
 						{description}
-						{isCreating}
+						isCreating={session.isCreating}
 						{canUseGit}
-						result={submitted ? session.createResult : null}
+						lastResult={session.createResult}
 						onBack={backToList}
 						onCreate={createWorktree}
 					/>

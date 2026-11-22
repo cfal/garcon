@@ -14,7 +14,7 @@
 		description: string;
 		isCreating: boolean;
 		canUseGit: boolean;
-		result: WorktreeCreateResult | null;
+		lastResult: WorktreeCreateResult | null;
 		onBack: () => void;
 		onCreate: (creation: GitWorktreeCreation) => void;
 	}
@@ -25,7 +25,7 @@
 		description,
 		isCreating,
 		canUseGit,
-		result,
+		lastResult,
 		onBack,
 		onCreate,
 	}: Props = $props();
@@ -34,14 +34,15 @@
 	let baseRefOverride = $state('');
 	let suggested = $state(false);
 	let generating = $state(false);
+	let submitted = $state(false);
 	let nameInput = $state<HTMLInputElement | null>(null);
 	const repositoryPath = $derived(worktrees.find((worktree) => worktree.isMain)?.path ?? '');
 	const defaultPath = $derived(deriveWorktreePath(repositoryPath, branchName));
 	const effectivePath = $derived(pathOverride.trim() ? pathOverride : defaultPath);
 	const name = $derived(branchName.trim());
 	const baseRef = $derived(baseRefOverride.trim() || undefined);
-	const created = $derived(result !== null && 'createdPath' in result);
-	const readOnly = $derived(isCreating || created);
+	const result = $derived(submitted ? lastResult : null);
+	const readOnly = $derived(isCreating || (result !== null && 'createdPath' in result));
 	const canCreate = $derived(Boolean(name && effectivePath) && canUseGit && !readOnly && !generating);
 	const currentBranch = $derived(worktrees.find((worktree) => worktree.isCurrent)?.branch);
 	const defaultBase = $derived(currentBranch && currentBranch !== '(detached)' ? currentBranch : 'HEAD');
@@ -55,6 +56,7 @@
 
 	function create() {
 		if (!canCreate) return;
+		submitted = true;
 		onCreate({
 			worktreePath: effectivePath,
 			...(suggested ? { newBranch: name } : { branch: name }),

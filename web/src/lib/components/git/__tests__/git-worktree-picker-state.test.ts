@@ -5,23 +5,7 @@ import {
 	GitWorktreePickerState,
 	isWorktreeSortOrder,
 } from '../git-worktree-picker-state.svelte.js';
-
-function worktree(
-	name: string,
-	lastModifiedAt: string | null,
-	overrides: Partial<GitWorktreeItem> = {},
-): GitWorktreeItem {
-	return {
-		name,
-		path: `/workspace/${name}`,
-		branch: name,
-		isCurrent: false,
-		isMain: false,
-		isPathMissing: false,
-		lastModifiedAt,
-		...overrides,
-	};
-}
+import { worktree } from './worktree-picker-fixture.js';
 
 function pickerFor(getWorktrees: () => GitWorktreeItem[]): GitWorktreePickerState {
 	return new GitWorktreePickerState({

@@ -1,6 +1,5 @@
 <script lang="ts">
-	// Dialog for creating a new git branch from the selected base ref.
-
+	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import GitNameField from './GitNameField.svelte';
@@ -87,10 +86,8 @@
 		}
 	}
 
-	$effect(() => {
-		return () => {
-			if (baseRefSearchTimeout) clearTimeout(baseRefSearchTimeout);
-		};
+	onDestroy(() => {
+		if (baseRefSearchTimeout) clearTimeout(baseRefSearchTimeout);
 	});
 </script>
 
