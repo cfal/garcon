@@ -40,7 +40,8 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
     if (!provider || !id || (images !== 'yes' && images !== 'no')) {
       throw new Error('Malformed row in Pi --list-models output.');
     }
-    return { value: `${provider}/${id}`, label: `${provider}: ${id.split('/').at(-1) || id}`, supportsImages: images === 'yes' };
+    const shortId = id.split('/').filter(Boolean).at(-1) ?? id;
+    return { value: `${provider}/${id}`, label: `${provider}: ${shortId}`, supportsImages: images === 'yes' };
   });
 }
 

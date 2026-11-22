@@ -11,10 +11,12 @@ test('reads the padded CLI table without splitting provider/model IDs on single 
   const listing = [
     'provider  model                    context  max-out  thinking  images',
     'cloud     accounts/x/model id      200K     32K      yes       no',
+    'cloud     scope/model/             200K     32K      yes       no',
     'vision    preview                  1M       16K      no        yes',
   ].join('\r\n');
   expect(parsePiModelListing(listing, '')).toEqual([
     { value: 'cloud/accounts/x/model id', label: 'cloud: model id', supportsImages: false },
+    { value: 'cloud/scope/model/', label: 'cloud: model', supportsImages: false },
     { value: 'vision/preview', label: 'vision: preview', supportsImages: true },
   ]);
   expect(() => parsePiModelListing(listing.replace('no        yes', 'no        unknown'), '')).toThrow();
