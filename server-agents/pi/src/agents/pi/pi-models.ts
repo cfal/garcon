@@ -68,19 +68,20 @@ export async function getPiAvailableModels(
     stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     detached: process.platform !== 'win32', maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL',
   });
-  // An extension subprocess can keep a pipe open after Pi exits. The deadline also cancels both reads.
   const read = (stream: ReadableStream<Uint8Array>) =>
     new Response(stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal })).text();
+  // Releasing the group at CLI exit lets buffered output drain even if a helper inherited a pipe.
+  let stopping: Promise<void> | undefined;
+  const stop = () => stopping ??= stopDiscoveryProcess(proc);
   try {
     const [stdout, stderr, code] = await waitUnlessAborted(
-      Promise.all([read(proc.stdout), read(proc.stderr), proc.exited]), signal,
+      Promise.all([read(proc.stdout), read(proc.stderr), proc.exited.finally(stop)]), signal,
     );
     signal.throwIfAborted();
     if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
     return parsePiModelListing(stdout, stderr);
   } finally {
-    // A wrapper can exit or hit the output cap while a quiet helper is still running.
-    await stopDiscoveryProcess(proc);
+    await stop();
   }
 }
 

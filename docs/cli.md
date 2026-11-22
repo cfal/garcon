@@ -35,6 +35,8 @@ Common options and environment variables:
 
 For Codex and Pi, a bare executable name uses `PATH`. A relative path such as `./tools/codex` is relative to the executor service's working directory, not the chat project or login directory.
 
+Pi wrappers must wait for `pi --list-models` to finish before exiting. Wrappers and extensions should stop their helpers before returning. On POSIX, Garcon stops Pi's process group, but not helpers that have left it. On Windows, Garcon cannot reliably stop a helper after its parent exits. On either platform, a surviving helper that keeps Pi's stdout or stderr open can make discovery time out after 20 seconds.
+
 Run `bun run help` for the complete server option list.
 
 Explicit flags take precedence over environment variables; nonempty environment values take precedence over defaults. The controller, executor, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`. Relative roots are resolved from the process's working directory. Workspace options configure controller storage only, not CLI discovery or executor storage.

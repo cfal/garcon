@@ -40,39 +40,41 @@ async function expectDescendantStopped(binary: string) {
   expect(status).toMatch(/^(Z.*)?$/);
 }
 
-test.skipIf(process.platform === 'win32')('a discovery timeout stops a descendant holding pipes after the CLI exits', async () => {
-  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-discovery-'));
-  const binary = join(dir.path, 'pi');
-  // Removing the executable also stops the fixture if group termination regresses.
-  await writeFile(binary, '#!/bin/sh\nwhile [ -f "$0" ]; do sleep 0.1; done &\nprintf "%s" "$!" > "$0.ready"\n', { mode: 0o700 });
-  const probe = getPiAvailableModels(binary, AbortSignal.timeout(500));
-  await expect(Promise.race([probe, delay(3_000, 'still reading', { ref: false })])).rejects.toMatchObject({ name: 'TimeoutError' });
-  await expectDescendantStopped(binary);
-});
-
-async function writeCliWithQuietChild(directory: string, command: string) {
+async function writeCliWithChild(directory: string, command: string, stdio: 'inherit' | 'ignore') {
   const binary = join(directory, 'pi');
+  const redirect = stdio === 'ignore' ? '>/dev/null 2>&1' : '';
+  // Removing the executable also stops the fixture if group termination regresses.
   await writeFile(binary, `#!/bin/sh
-while [ -f "$0" ]; do sleep 0.1; done >/dev/null 2>&1 &
+while [ -f "$0" ]; do sleep 0.1; done ${redirect} &
 printf '%s' "$!" > "$0.ready"
 ${command}
 `, { mode: 0o700 });
   return binary;
 }
 
-test.skipIf(process.platform === 'win32')('successful discovery returns models and stops a quiet descendant', async () => {
-  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-success-'));
-  const binary = await writeCliWithQuietChild(dir.path, `echo 'provider  model  context  max-out  thinking  images'
-echo 'fixture   text   32K      4K       no        no'`);
-  expect(await getPiAvailableModels(binary)).toEqual([
-    { value: 'fixture/text', label: 'fixture: text', supportsImages: false },
-  ]);
+test.skipIf(process.platform === 'win32')('a discovery timeout stops a hanging CLI and its descendant', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-discovery-'));
+  const binary = await writeCliWithChild(dir.path, 'wait', 'inherit');
+  const probe = getPiAvailableModels(binary, AbortSignal.timeout(500));
+  await expect(Promise.race([probe, delay(3_000, 'still reading', { ref: false })])).rejects.toMatchObject({ name: 'TimeoutError' });
   await expectDescendantStopped(binary);
 });
 
+for (const stdio of ['inherit', 'ignore'] as const) {
+  test.skipIf(process.platform === 'win32')(`reads the completed listing and stops a descendant with stdio=${stdio}`, async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-success-'));
+    const binary = await writeCliWithChild(dir.path, `echo 'provider  model  context  max-out  thinking  images'
+echo 'fixture   text   32K      4K       no        no'`, stdio);
+    expect(await getPiAvailableModels(binary, AbortSignal.timeout(2_000))).toEqual([
+      { value: 'fixture/text', label: 'fixture: text', supportsImages: false },
+    ]);
+    await expectDescendantStopped(binary);
+  });
+}
+
 test.skipIf(process.platform === 'win32')('the output cap stops the entire discovery group, not just its writer', async () => {
   await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-oversize-'));
-  const binary = await writeCliWithQuietChild(dir.path, 'exec dd if=/dev/zero bs=65536 count=100');
+  const binary = await writeCliWithChild(dir.path, 'exec dd if=/dev/zero bs=65536 count=100', 'ignore');
   await expect(getPiAvailableModels(binary)).rejects.toThrow('Pi model discovery failed (exit');
   await expectDescendantStopped(binary);
 });
