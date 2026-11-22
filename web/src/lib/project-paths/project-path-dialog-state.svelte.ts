@@ -23,6 +23,7 @@ export class ProjectPathDialogState {
 	readonly worktreePicker = new WorktreePickerSession({
 		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
 		servingContext: () => this.gitAvailable ? (this.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
+		servingInstanceId: () => this.executors?.get(this.executorId)?.instanceId ?? null,
 		select: (path) => {
 			this.setCandidatePath(path);
 			this.validationStatus = 'valid';
@@ -39,7 +40,7 @@ export class ProjectPathDialogState {
 	#validationAbort: AbortController | null = null;
 
 	constructor(
-		private readonly executors?: Pick<ExecutorsStore, 'gitAvailable' | 'gitContextKey'>,
+		private readonly executors?: Pick<ExecutorsStore, 'gitAvailable' | 'gitContextKey' | 'get'>,
 	) {}
 
 	get gitAvailable(): boolean {

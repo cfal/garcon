@@ -18,3 +18,6 @@ export const remoteExecutor = {
 	bulk: { availability: 'ready', lastError: null },
 	executorServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
 } satisfies ExecutorSnapshot;
+
+export const localScope = { executorId: localExecutor.id, instanceId: localExecutor.instanceId };
+export const remoteScope = { executorId: remoteExecutor.id, instanceId: remoteExecutor.instanceId };

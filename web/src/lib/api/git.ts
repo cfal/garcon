@@ -1,4 +1,5 @@
 import type * as Wire from '$shared/git';
+import type { GitExecutorScope } from '$shared/git-execution';
 import { apiPost, type ApiFetchOptions } from './client.js';
 import {
 	gitApiGet,
@@ -695,7 +696,7 @@ export async function gitStageHunk(
 export async function getGitWorktrees(
 	target: GitProjectTarget,
 	options?: ApiFetchOptions,
-): Promise<{ worktrees: GitWorktreeItem[] }> {
+): Promise<Wire.GitResults['getWorktrees'] & GitExecutorScope> {
 	return gitApiGet<{ worktrees: GitWorktreeItem[] }>(
 		target,
 		`/api/v1/git/worktrees?${projectParam(target)}`,
@@ -708,7 +709,7 @@ export type GitWorktreeCreation = Omit<Wire.CreateWorktreeOptions, 'projectPath'
 export async function gitCreateWorktree(
 	target: GitProjectTarget,
 	creation: GitWorktreeCreation,
-): Promise<SuccessResponse> {
+): Promise<SuccessResponse & GitExecutorScope> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/worktrees/create', {
 		...gitProjectFields(target),
 		...creation,

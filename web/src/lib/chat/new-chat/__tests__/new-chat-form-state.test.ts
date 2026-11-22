@@ -7,8 +7,7 @@ import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
 import { browseDirectory } from '$lib/api/files';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import type { GitWorktreeItem } from '$lib/api/git';
+import { localExecutor, remoteExecutor, localScope, remoteScope } from '$lib/executors/__tests__/fixtures';
 import type { AgentMetadata, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -667,7 +666,7 @@ describe('NewChatFormState', () => {
 		executors.applySnapshot([localExecutor, remote]);
 		formState.selectExecutor(remote.id);
 		formState.projectPath = '/worker/project';
-		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		const listing = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
 		const loading = formState.worktreePicker.open();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
@@ -676,6 +675,7 @@ describe('NewChatFormState', () => {
 		);
 		executors.applySnapshot([localExecutor, { ...remote, instanceId: 'replacement' }]);
 		listing.resolve({
+			...remoteScope,
 			worktrees: [
 				{
 					name: 'old',
@@ -693,12 +693,13 @@ describe('NewChatFormState', () => {
 
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		vi.mocked(gitApi.getGitWorktrees).mockResolvedValueOnce({ worktrees: [] });
+		const replacement = { ...remoteScope, instanceId: 'replacement' };
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValueOnce({ ...replacement, worktrees: [] });
 		await formState.worktreePicker.syncCatalog();
 		const creating = formState.worktreePicker.create({ worktreePath: '/worker/feature', branch: 'feature' });
 		formState.selectExecutor('local');
 		formState.projectPath = '/local/draft';
-		creation.resolve({ success: true, worktreePath: '/worker/feature' });
+		creation.resolve({ ...replacement, success: true, worktreePath: '/worker/feature' });
 		await expect(creating).resolves.toEqual({
 			target: { executorId: remote.id, projectPath: '/worker/project' },
 			result: { createdPath: '/worker/feature' },
@@ -711,8 +712,8 @@ describe('NewChatFormState', () => {
 	});
 
 	it('ignores a worktree load superseded after the modal closes', async () => {
-		const first = deferred<{ worktrees: GitWorktreeItem[] }>();
-		const second = deferred<{ worktrees: GitWorktreeItem[] }>();
+		const first = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
+		const second = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		let firstSignal: AbortSignal | null | undefined;
 		vi.mocked(gitApi.getGitWorktrees)
 			.mockImplementationOnce((_project, options) => {
@@ -730,6 +731,7 @@ describe('NewChatFormState', () => {
 		formState.projectPath = '/workspace/repo-b';
 		const secondLoad = formState.worktreePicker.open();
 		second.resolve({
+			...localScope,
 			worktrees: [
 				{
 					name: 'repo-b',
@@ -745,6 +747,7 @@ describe('NewChatFormState', () => {
 		await secondLoad;
 
 		first.resolve({
+			...localScope,
 			worktrees: [
 				{
 					name: 'repo-a',

@@ -1,8 +1,5 @@
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
-import {
-	getGitTargetCandidates,
-	type GitTargetCandidate,
-} from '$lib/api/git.js';
+import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { WorktreePickerSession } from './worktree-picker-session.svelte.js';
@@ -15,6 +12,7 @@ interface GitTargetDialogOptions {
 	readonly initialPath: string;
 	readonly executorId: string;
 	readonly executorContextKey: string;
+	readonly instanceId: string | null;
 	readonly available: boolean;
 }
 
@@ -26,11 +24,11 @@ export class GitTargetDialogState {
 	readonly worktreePicker = new WorktreePickerSession({
 		target: () => ({ executorId: this.options.executorId, projectPath: this.nonblankPath }),
 		servingContext: () => this.options.available ? this.options.executorContextKey : null,
+		servingInstanceId: () => this.options.instanceId,
 		select: (path) => {
 			this.setCandidatePath(path);
 			this.validationStatus = 'valid';
 		},
-
 	});
 	isConfirming = $state(false);
 

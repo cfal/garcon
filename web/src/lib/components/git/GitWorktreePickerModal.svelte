@@ -176,7 +176,7 @@
 						<button
 							type="button"
 							onclick={() => void session.refresh()}
-							disabled={!canUseGit}
+							disabled={!session.canRefresh}
 							class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
 							title={m.workspace_worktree_refresh()}
 							aria-label={m.workspace_worktree_refresh()}
@@ -214,7 +214,7 @@
 						<button
 							type="button"
 							onclick={() => void session.refresh()}
-							disabled={!canUseGit}
+							disabled={!session.canRefresh}
 							class="shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
 						>
 							{m.common_retry()}

@@ -47,6 +47,9 @@
 		get executorContextKey() {
 			return executorContextKey;
 		},
+		get instanceId() {
+			return executors.get(executorId)?.instanceId ?? null;
+		},
 		get available() {
 			return executors.gitAvailable(executorId);
 		},

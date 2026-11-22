@@ -116,6 +116,7 @@ export class NewChatFormState {
 	readonly worktreePicker = new WorktreePickerSession({
 		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
 		servingContext: () => this.gitAvailable ? (this.#options.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
+		servingInstanceId: () => this.#options.executors?.get(this.executorId)?.instanceId ?? null,
 		select: (path) => this.selectProjectPath(path),
 	});
 	// Images (delegated to shared ImageAttachmentState)
