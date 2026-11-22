@@ -238,3 +238,16 @@ test('reports an unknown latest version when the lookup cannot run', async () =>
   const status = await service().status({ refresh: false });
   expect(status).toMatchObject({ currentVersion: '2.1.238', latestVersion: null, advisory: 'unknown' });
 });
+
+test('reads the binary again when a run finishes during a slow status read', async () => {
+  const marker = path.join(fixture.root, 'first-probe');
+  // The first probe reads the old version, then stalls past the whole run.
+  await fixture.writeScript(cli.real, `v=$(cat ${JSON.stringify(cli.versionFile)}); if [ ! -f ${JSON.stringify(marker)} ]; then touch ${JSON.stringify(marker)}; sleep 1.5; fi; echo "$v"`);
+  await writeNpm({ latest: '2.1.300' });
+  const updates = service();
+  const read = updates.status({ refresh: false });
+  await Bun.sleep(200);
+  await updates.startUpdate();
+  expect((await settled(updates)).run.state).toBe('succeeded');
+  expect(await read).toMatchObject({ currentVersion: '2.1.300', run: { state: 'succeeded' } });
+});

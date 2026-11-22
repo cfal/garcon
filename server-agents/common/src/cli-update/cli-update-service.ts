@@ -93,6 +93,8 @@ export class CliUpdateService implements AgentCliUpdates {
   #runSnapshot: InstalledStatus | null = null;
   // Shared by concurrent status reads, so each does not probe the binary again.
   #inspection: Promise<InstalledStatus> | null = null;
+  // Advances when a run starts or finishes; an inspection that spans either is stale.
+  #runGeneration = 0;
 
   constructor(options: CliUpdateServiceOptions) {
     this.#options = options;
@@ -101,15 +103,22 @@ export class CliUpdateService implements AgentCliUpdates {
   async status(request: AgentCliUpdateStatusRequest): Promise<AgentCliUpdateStatus> {
     const cliLabel = this.#options.label;
     if (this.#runSnapshot) return { cliLabel, ...this.#runSnapshot, run: this.#run };
-    if (request.refresh || !this.#inspection) {
-      const inspection = this.#inspect(request.refresh).finally(() => {
+    const generation = this.#runGeneration;
+    let status = await this.#sharedInspection(request.refresh);
+    // A run started or finished while this read waited; its result shows the old binary.
+    if (generation !== this.#runGeneration && !this.#runSnapshot) status = await this.#sharedInspection(false);
+    request.signal?.throwIfAborted();
+    return { cliLabel, ...(this.#runSnapshot ?? status), run: this.#run };
+  }
+
+  #sharedInspection(refresh: boolean): Promise<InstalledStatus> {
+    if (refresh || !this.#inspection) {
+      const inspection = this.#inspect(refresh).finally(() => {
         if (this.#inspection === inspection) this.#inspection = null;
       });
       this.#inspection = inspection;
     }
-    const status = await this.#inspection;
-    request.signal?.throwIfAborted();
-    return { cliLabel, ...(this.#runSnapshot ?? status), run: this.#run };
+    return this.#inspection;
   }
 
   async startUpdate(): Promise<AgentCliUpdateStatus> {
@@ -129,6 +138,7 @@ export class CliUpdateService implements AgentCliUpdates {
     const snapshot = await this.#inspectInstallation(installation, env, true);
     this.#runSnapshot = snapshot;
     this.#inspection = null;
+    this.#runGeneration++;
     this.#run = {
       state: 'running', startedAt: this.#timestamp(), finishedAt: null,
       message: 'Checking for the latest version', output: null,
@@ -298,6 +308,7 @@ export class CliUpdateService implements AgentCliUpdates {
     this.#runSnapshot = null;
     // An inspection started during the run must not report the old binary.
     this.#inspection = null;
+    this.#runGeneration++;
     const log = state === 'failed' ? this.#options.logger.warn : this.#options.logger.info;
     log.call(this.#options.logger, 'CLI update finished.', { state, message: this.#run.message });
   }

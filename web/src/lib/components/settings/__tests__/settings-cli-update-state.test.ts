@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentCliUpdateStatus, AgentCliUpdatesResponse } from '$shared/agent-cli-update';
+import { ApiError } from '$lib/api/client.js';
 import { SettingsCliUpdateState, type CliUpdateApi } from '../settings-cli-update-state.svelte.js';
 
 const EXECUTOR = '22222222-2222-4222-8222-222222222222';
@@ -185,6 +186,19 @@ describe('SettingsCliUpdateState', () => {
 		await state.startUpdate('claude');
 		await vi.waitFor(() => expect(state.statusFor('claude')?.run.state).toBe('succeeded'));
 		expect(state.startErrorFor('claude')).toBeUndefined();
+	});
+
+	it('keeps a definite refusal without reading the status again', async () => {
+		const { api } = createApi([{ statuses: { claude: BEHIND }, failures: {} }]);
+		api.startAgentCliUpdate.mockRejectedValueOnce(new ApiError(422, 'Garcon runs its bundled Codex CLI.', 'OPERATION_UNSUPPORTED'));
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
+		const reads = api.getAgentCliUpdates.mock.calls.length;
+		await state.startUpdate('claude');
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(api.getAgentCliUpdates.mock.calls.length).toBe(reads);
+		expect(state.startErrorFor('claude')).toBe('Garcon runs its bundled Codex CLI.');
 	});
 
 	it('ignores responses that arrive after it is destroyed', async () => {

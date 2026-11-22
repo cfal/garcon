@@ -1,5 +1,6 @@
 import { getAgentCliUpdates, startAgentCliUpdate } from '$lib/api/agents.js';
 import type { AgentCliUpdateStatus, AgentCliUpdatesResponse } from '$shared/agent-cli-update';
+import { ApiError } from '$lib/api/client.js';
 import { errorMessage } from '$lib/utils/error-message.js';
 
 export interface CliUpdateApi {
@@ -22,7 +23,7 @@ export class SettingsCliUpdateState {
 	// polls, recovery reads, and full checks never discard one another.
 	#sequence = 0;
 	#agentWrittenAt: Record<string, number> = {};
-	// The run each failed start replaced; a different run means it started after all.
+	// The run each uncertain start replaced; a different run means it started after all.
 	#startBaseline: Record<string, string | null> = {};
 	#loadsInFlight = 0;
 	#pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,9 +121,12 @@ export class SettingsCliUpdateState {
 		} catch (error) {
 			if (lifecycleId !== this.#lifecycleId) return;
 			this.startErrorByAgent = { ...this.startErrorByAgent, [agentId]: errorMessage(error) };
-			this.#startBaseline[agentId] = baseline;
-			// A request that timed out or lost its reply may still have started the run.
-			void this.#load({ refresh: false, agentIds: [agentId] }, lifecycleId);
+			// A 4xx answer is a definite refusal. A timeout, lost reply, or server
+			// failure may still have started the run, so its status is read again.
+			if (!(error instanceof ApiError && error.status >= 400 && error.status < 500)) {
+				this.#startBaseline[agentId] = baseline;
+				void this.#load({ refresh: false, agentIds: [agentId] }, lifecycleId);
+			}
 		} finally {
 			if (lifecycleId === this.#lifecycleId) this.startingByAgent = omit(this.startingByAgent, agentId);
 		}
