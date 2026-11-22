@@ -40,17 +40,24 @@ describe('Workflow run viewer', () => {
 		render(WorkflowRunViewer, { runId: 'run-a', onOpenChat: open });
 		const step = await screen.findByRole('button', { name: /Verify findings/ });
 		await fireEvent.click(step);
-		await fireEvent.input(screen.getByLabelText('Filter by key'), { target: { value: 'F-02' } });
-		const instance = screen.getByRole('combobox', { name: 'Instance' }) as HTMLSelectElement;
-		expect(Array.from(instance.options).map((entry) => entry.value)).toEqual(['verify-b']);
+		const filter = screen.getByLabelText('Filter by key');
+		const instance = () => screen.getByRole<HTMLSelectElement>('combobox', { name: 'Instance' });
+		await fireEvent.input(filter, { target: { value: '02' } });
+		expect(Array.from(instance().options, (entry) => entry.value)).toEqual(['verify-b']);
+		await fireEvent.input(filter, { target: { value: 'F-' } });
+		expect(Array.from(instance().options, (entry) => entry.value)).toEqual([
+			'verify-a',
+			'verify-b',
+		]);
+		await fireEvent.change(instance(), { target: { value: 'verify-b' } });
 		expect(screen.queryByRole('button', { name: 'Retry step' })).toBeNull();
 		expect(screen.getByText('Connection lost')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Open chat' }));
 		expect(open).toHaveBeenCalledWith('1780000000000002');
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to steps' }));
 		await fireEvent.click(step);
-		expect((screen.getByLabelText('Filter by key') as HTMLInputElement).value).toBe('F-02');
-		expect(instance.value).toBe('verify-b');
+		expect(screen.getByLabelText<HTMLInputElement>('Filter by key').value).toBe('F-');
+		expect(instance().value).toBe('verify-b');
 	});
 
 	it('sends one decision with a stable operation ID and reuses it only on explicit retry', async () => {
