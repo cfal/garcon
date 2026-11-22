@@ -220,7 +220,10 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const exitCode = name === 'run_command' ? asObject(update.rawOutput).exit_code : undefined;
     const commandFailed = typeof exitCode === 'number' && exitCode !== 0;
     const failed = status !== 'completed' || commandFailed;
-    const content = text.trim() ? { raw: text } : commandFailed ? { exitCode } : failed ? { status } : {};
+    const content: ToolResultMessage['content'] = {};
+    if (text.trim()) content.raw = text;
+    else if (commandFailed) content.exitCode = exitCode;
+    else if (failed) content.status = status;
     messages.push(new ToolResultMessage(timestamp, toolCallId, content, failed));
     return messages;
   }

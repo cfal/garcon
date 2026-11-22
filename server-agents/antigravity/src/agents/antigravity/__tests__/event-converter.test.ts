@@ -196,6 +196,21 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
+  it.each([
+    { name: 'run_command', exitCode: 9, content: { exitCode: 9 }, isError: true },
+    { name: 'run_command', exitCode: 0, content: {}, isError: false },
+    { name: 'command_status', exitCode: 9, content: {}, isError: false },
+  ])('classifies a silent $name completion with exit code $exitCode', ({ name, exitCode, content, isError }) => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'silent', name, status: 'completed',
+      rawOutput: { exit_code: exitCode },
+    }), context);
+    expect(plain(rows).at(-1)).toEqual({ type: 'tool-result', toolId: 'silent', content, isError });
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+  });
+
   it('emits the tool row first when a terminal update is the first frame for a call', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
