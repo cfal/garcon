@@ -471,6 +471,54 @@ steps:
 		});
 	});
 
+	it.each(['matching', 'conflicting'] as const)(
+		'reconciles a lost publish reply with a %s revision after reopening, without republishing',
+		async (outcome) => {
+			vi.mocked(api.publishWorkflowDefinition).mockRejectedValueOnce(new Error('Lost reply'));
+			const props = { open: true, onRunStarted: vi.fn() };
+			const host = render(NewWorkflowTestHost, props);
+			await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+			await fireEvent.input(screen.getByLabelText('Definition name'), {
+				target: { value: 'Local draft' },
+			});
+			await fireEvent.click(screen.getByRole('button', { name: 'Apply name' }));
+			const publish = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Publish' });
+			await fireEvent.click(publish());
+			const check = () => screen.getByRole('button', { name: 'Check published revision' });
+			expect(check()).toBeTruthy();
+			await host.rerender({ ...props, open: false });
+			await host.rerender(props);
+			expect(publish().disabled).toBe(true);
+			expect(api.getWorkflowRevision).not.toHaveBeenCalled();
+
+			const request = vi.mocked(api.publishWorkflowDefinition).mock.calls[0][0];
+			const source = outcome === 'matching' ? request.source : workflowRevision().source;
+			const { definition } = parseWorkflowDefinition(source);
+			if (!definition) throw new Error('Invalid published fixture');
+			vi.mocked(api.getWorkflowRevision).mockResolvedValueOnce({
+				...workflowRevision(),
+				definitionId: request.definitionId,
+				revision: 1,
+				source,
+				definition,
+			});
+			await fireEvent.click(check());
+			expect(api.getWorkflowRevision).toHaveBeenCalledExactlyOnceWith(request.definitionId);
+			if (outcome === 'matching') {
+				expect(await screen.findByText('Published revision 1.')).toBeTruthy();
+				expect(screen.getByText('Revision 1')).toBeTruthy();
+			} else {
+				expect(
+					await screen.findByText('A different revision was published. Your draft is kept.'),
+				).toBeTruthy();
+				expect(screen.getByText(/Unpublished.*Unsaved changes/)).toBeTruthy();
+			}
+			expect(screen.getByDisplayValue('Local draft')).toBeTruthy();
+			expect(publish().disabled).toBe(false);
+			expect(api.publishWorkflowDefinition).toHaveBeenCalledOnce();
+		},
+	);
+
 	it('recovers the recent list on Refresh and ignores an older outstanding response', async () => {
 		const old = Promise.withResolvers<Awaited<ReturnType<typeof api.listWorkflowRunsPage>>>();
 		vi.mocked(api.listWorkflowRunsPage)
