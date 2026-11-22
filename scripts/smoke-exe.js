@@ -332,6 +332,9 @@ async function run() {
   if (!(await Bun.file(executablePaths.cli).exists())) {
     throw new Error(`Missing CLI executable at ${executablePaths.cli}. Run "bun run build-exe:compile" first.`);
   }
+  if (!Bun.which(PI_BINARY)) {
+    throw new Error('Missing pinned Pi CLI. Run "bun run setup:integration" before build-exe:smoke.');
+  }
   const cliHelp = Bun.spawnSync([executablePaths.cli, '--help']);
   if (cliHelp.exitCode !== 0 || !cliHelp.stdout.toString().startsWith('Usage:\n  garcon-cli')) {
     throw new Error(`CLI executable help smoke check failed for ${executablePaths.cli}.`);
