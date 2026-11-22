@@ -47,12 +47,7 @@ export function createCodexCliUpdates(options: {
         }),
       },
     },
-    // The pinned app-server binary that Garcon ships wins over PATH unless
-    // GARCON_CODEX_CLI selects another one.
-    target: async () => {
-      const resolved = await resolveCodexCli();
-      return { command: resolved.command, bundled: resolved.source === 'bundled' };
-    },
+    target: async () => ({ command: resolveCodexCli().command, bundled: false }),
     environment: () => installerEnvironment({ CODEX_HOME: config.home() }),
     nativeRelease: async () => ({
       key: CODEX_NATIVE_CHANNEL,

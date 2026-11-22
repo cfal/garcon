@@ -23,14 +23,19 @@ Common options and environment variables:
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
 - `GARCON_TERMINAL_SHELL`: shell used by terminal sessions.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: native CLI overrides.
-- `GARCON_CODEX_CLI`: Codex CLI override. By default Garcon runs the native binary from its bundled `@openai/codex` platform package, then falls back to `codex` on `PATH`.
+- `GARCON_CODEX_CLI`: Codex executable on this executor, including device login. Defaults to `codex` on the service's `PATH` (`codex.exe` on Windows). App-server requires Codex 0.171.0 or newer.
 - `GARCON_CURSOR_BINARY`: Cursor Agent CLI override.
 - `CURSOR_API_KEY`: Cursor Agent API key for native sessions.
 - `GARCON_ANTIGRAVITY_BINARY`: Antigravity CLI (`agy`) override; defaults to `agy` on `PATH`.
 - `GARCON_ANTIGRAVITY_AUTH_METHOD`: Antigravity sign-in method: `oauth-personal`, `oauth-business`, `gemini-api-key`, or `agent-platform`. Defaults to `gemini-api-key` when `GEMINI_API_KEY` is set, otherwise `oauth-personal`.
 - `GEMINI_API_KEY`: Gemini API key for Antigravity sessions. See [Antigravity](antigravity.md).
-- `GARCON_PI_BINARY` / `PI_BINARY`: Pi CLI override.
-- `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
+- `GARCON_PI_BINARY` / `PI_BINARY`: Pi executable on this executor. Chat, single queries, and model discovery all use the same override or `pi` on the service's `PATH`. The reference CLI is Pi 1.5.2; Garcon does not install the Pi SDK.
+- `PI_CODING_AGENT_DIR`: Pi's configuration and data directory on this executor (default: `~/.pi/agent`).
+- `PI_CODING_AGENT_SESSION_DIR`: optional override for the session directory only.
+
+For Codex and Pi, a bare executable name uses `PATH`. A relative path such as `./tools/codex` is relative to the executor service's working directory, not the chat project or login directory.
+
+Pi wrappers must wait for `pi --list-models` to finish before exiting. Wrappers and extensions should stop their helpers before returning. On POSIX, Garcon stops Pi's process group, but not helpers that have left it. On Windows, Garcon cannot reliably stop a helper after its parent exits. On either platform, a surviving helper that keeps Pi's stdout or stderr open can make discovery time out after 20 seconds.
 
 Run `bun run help` for the complete server option list.
 

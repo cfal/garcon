@@ -4,7 +4,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../server-agents/pi/src/agents/pi/__tests__/model-discovery-fixture.js';
+import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../integration-tests/support/pi-model-discovery-fixture.js';
+import { PI_BINARY } from '../integration-tests/support/pinned-agent-binaries.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -36,7 +37,6 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_AGENT_EXECUTOR_CONFIG',
   'DISABLE_AUTH',
   'PI_PACKAGE_DIR',
-  'GARCON_EMBEDDED_PI_PACKAGE_DIR',
 ]);
 const executableNamesByHost = {
   'linux-x64': { server: 'garcon-linux-x64', cli: 'garcon-cli-linux-x64' },
@@ -55,7 +55,7 @@ function isolatedServerEnvironment(piAgentDir) {
   environment.PI_CODING_AGENT_DIR = piAgentDir;
   environment.PI_OFFLINE = '1';
   environment.PI_TELEMETRY = '0';
-  environment.GARCON_PI_BINARY = path.resolve(import.meta.dir, '../server-agents/pi/node_modules/.bin/pi');
+  environment.GARCON_PI_BINARY = PI_BINARY;
   return environment;
 }
 
@@ -158,7 +158,7 @@ async function assertPiModelDiscovery(url, apiFetch, executorId = '') {
   const body = await response.json();
   const models = body.catalog?.agents?.find((agent) => agent.id === 'pi')?.models ?? [];
   if (!response.ok || PI_DISCOVERY_MODELS.some((value) => !models.some((model) => model.value === value))) {
-    throw new Error(`Compiled Pi SDK extension discovery failed: ${JSON.stringify(body)}`);
+    throw new Error(`External Pi CLI extension discovery failed: ${JSON.stringify(body)}`);
   }
 }
 
@@ -331,6 +331,9 @@ async function run() {
   }
   if (!(await Bun.file(executablePaths.cli).exists())) {
     throw new Error(`Missing CLI executable at ${executablePaths.cli}. Run "bun run build-exe:compile" first.`);
+  }
+  if (!Bun.which(PI_BINARY)) {
+    throw new Error('Missing pinned Pi CLI. Run "bun run setup:integration" before build-exe:smoke.');
   }
   const cliHelp = Bun.spawnSync([executablePaths.cli, '--help']);
   if (cliHelp.exitCode !== 0 || !cliHelp.stdout.toString().startsWith('Usage:\n  garcon-cli')) {

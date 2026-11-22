@@ -8,11 +8,11 @@ const provisionedAgents = {
   amp: 'https://ampcode.com/install.sh',
   antigravity: 'https://antigravity.google/cli/install.sh',
   claude: 'https://claude.ai/install.sh',
-  codex: '/app/server-agents/codex/node_modules/.bin/codex',
+  codex: '"@openai/codex@${CODEX_VERSION}"',
   cursor: 'https://cursor.com/install',
   factory: 'https://app.factory.ai/cli',
   opencode: 'npm install -g "opencode-ai@${OPENCODE_VERSION}"',
-  pi: '/app/server-agents/pi/node_modules/.bin/pi',
+  pi: '"@earendil-works/pi-coding-agent@${PI_VERSION}"',
   shell: '/bin/bash',
 };
 const persistedPaths = [
@@ -149,14 +149,26 @@ describe('Docker contract', () => {
     }
   });
 
-  test('keeps coupled CLI versions aligned with the integration tier', () => {
+  test('keeps the OpenCode CLI, SDK, and integration supervisor aligned', () => {
     const openCodeVersion = integrationPackage.devDependencies['opencode-ai'];
     expect(dockerfile).toContain(`ARG OPENCODE_VERSION=${openCodeVersion}`);
     expect(opencodeAgentPackage.dependencies['@opencode-ai/sdk']).toBe(openCodeVersion);
     expect(opencodeSupervisor).toContain(`export const PINNED_OPENCODE_VERSION = '${openCodeVersion}';`);
-    expect(dockerfile).not.toContain('@openai/codex');
-    expect(dockerfile).not.toContain('pi-coding-agent');
     expect(dockerfile).not.toContain('opencode-ai@latest');
+  });
+
+  test('pins integration CLIs outside the source workspace and provisions matching Codex and Pi in Docker', async () => {
+    const integrationLock = Bun.JSONC.parse(await readFile(path.join(repositoryRoot, 'integration-tests/bun.lock'), 'utf8'));
+    for (const name of ['@anthropic-ai/claude-code', '@openai/codex', 'opencode-ai', '@earendil-works/pi-coding-agent']) {
+      expect(integrationLock.packages[name][0]).toBe(`${name}@${integrationPackage.devDependencies[name]}`);
+    }
+    expect(dockerfile).toContain(`ARG CODEX_VERSION=${integrationPackage.devDependencies['@openai/codex']}`);
+    expect(dockerfile).toContain(`ARG PI_VERSION=${integrationPackage.devDependencies['@earendil-works/pi-coding-agent']}`);
+    const lock = Bun.JSONC.parse(await readFile(path.join(repositoryRoot, 'bun.lock'), 'utf8'));
+    expect(Object.keys(lock.workspaces)).not.toContain('integration-tests');
+    const providerPackages = Object.values(lock.packages).map(([locator]) => locator)
+      .filter(name => name.startsWith('@openai/codex@') || name.startsWith('@earendil-works/pi-'));
+    expect(providerPackages).toEqual([]);
   });
 
   test('copies declared patches before installing the workspace', () => {
@@ -203,6 +215,9 @@ describe('Docker contract', () => {
   test('creates every persistent mountpoint as the runtime user', () => {
     const mkdirIndex = dockerfile.indexOf('mkdir -p \\');
     expect(mkdirIndex).toBeGreaterThan(-1);
+    const codexVersionCheck = dockerfile.indexOf('codex --version');
+    expect(codexVersionCheck).toBeGreaterThan(dockerfile.indexOf('USER garcon'));
+    expect(codexVersionCheck).toBeLessThan(dockerfile.lastIndexOf('rm -rf', mkdirIndex));
     expect(dockerfile.lastIndexOf('USER garcon', mkdirIndex)).toBeGreaterThan(
       dockerfile.lastIndexOf('USER root', mkdirIndex),
     );

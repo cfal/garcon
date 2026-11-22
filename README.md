@@ -28,7 +28,7 @@ Garcon runs agents, terminals, files, Git, and pull request commands on the host
 
 ## Install
 
-Requirements: [Bun](https://bun.sh/), `git`, a modern browser, and at least one coding agent CLI (signed in) or API provider. Pull request features also need an authenticated GitHub CLI (`gh`).
+Requirements: [Bun](https://bun.sh/), `git`, a modern browser, and at least one coding agent CLI (signed in) or API provider. Install the CLIs you use on each executor and put them on its service `PATH`. Source setup and prebuilt Garcon executables do not provision them; the Docker image does. Pull request features also need an authenticated GitHub CLI (`gh`).
 
 Choose one path:
 
@@ -48,7 +48,7 @@ bun run setup
 bun run start --project-base-dir ~/repos
 ```
 
-Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C.
+Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C. Contributors running integration tests or the full `bun run check` also need `bun run setup:integration`; normal setup skips those test tools.
 
 Want to use your own domain, such as `https://garcon.example.com`? Interactive setup offers **Connect a custom domain with Cloudflare Tunnel** (optional, default No). The [Cloudflare Tunnel guide](docs/cloudflare-tunnel.md) covers prerequisites, background startup, Docker, and removal. You can also connect later, after starting Garcon and creating your account:
 
@@ -235,7 +235,7 @@ Stopping only the server process makes the loop restart it within about 10 secon
 ## Windows Notes
 
 - The default config folder is `%USERPROFILE%\.garcon`. Garcon ignores `HOME` on Windows, so Git Bash, PowerShell, and scheduled tasks share one folder. Set `GARCON_CONFIG_DIR` only to use a different location.
-- Codex runs from the native `codex.exe` bundled with Garcon. Set `GARCON_CODEX_CLI` only to use a different Codex build.
+- Install Codex CLI 0.171.0 or newer on each executor that uses it. Put the native `codex.exe` on the service's `PATH` or set `GARCON_CODEX_CLI` to its absolute path, particularly if your shell normally launches an npm shim.
 - Always run Garcon as the same non-administrator user. A copy started as administrator can leave files in the config folder that a normal-user copy cannot open.
 
 ## Troubleshooting

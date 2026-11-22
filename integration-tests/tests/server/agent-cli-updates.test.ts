@@ -28,6 +28,7 @@ const toolsDirectory = (directories: IntegrationDirectories) => join(directories
 const npmPrefix = (directories: IntegrationDirectories) => join(directories.root, 'cli-update-npm-prefix');
 const packageDirectory = (directories: IntegrationDirectories) => join(npmPrefix(directories), 'lib', 'node_modules', PACKAGE);
 const claudeLauncher = (directories: IntegrationDirectories) => join(npmPrefix(directories), 'bin', 'claude');
+const codexLauncher = (directories: IntegrationDirectories) => join(toolsDirectory(directories), 'custom-codex');
 const installerLog = (directories: IntegrationDirectories) => join(directories.root, 'cli-update-npm.jsonl');
 
 test(`Claude Code updates through its npm installer on its executor (${executionBackend()})`, async () => {
@@ -56,16 +57,20 @@ test(`Claude Code updates through its npm installer on its executor (${execution
     });
     expect(before.statuses.claude!.updateCommand)
       .toBe(`npm install -g --prefix ${npmPrefix(fixture.executionDirs)} --allow-scripts=${PACKAGE} ${PACKAGE}@latest`);
-    // Garcon runs its pinned Codex app-server, which only a Garcon release replaces.
-    expect(before.statuses.codex).toMatchObject({ installMethod: 'bundled', canUpdate: false });
+    expect(before.statuses.codex).toMatchObject({
+      installMethod: 'unmanaged',
+      installPath: codexLauncher(fixture.executionDirs),
+      currentVersion: '0.171.0',
+      canUpdate: false,
+    });
 
-    const bundled = await client.fetch('/api/v1/agents/cli-updates', {
+    const unmanaged = await client.fetch('/api/v1/agents/cli-updates', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ agentId: 'codex', executorId }),
     });
-    expect(bundled.status).toBe(422);
-    expect(await bundled.json() as HttpErrorResponse).toMatchObject({ success: false, errorCode: 'OPERATION_UNSUPPORTED' });
+    expect(unmanaged.status).toBe(422);
+    expect(await unmanaged.json() as HttpErrorResponse).toMatchObject({ success: false, errorCode: 'OPERATION_UNSUPPORTED' });
 
     const started = parseAgentCliUpdateStatus(await client.post<AgentCliUpdateStatus>('/api/v1/agents/cli-updates', {
       agentId: 'claude', executorId,
@@ -97,6 +102,7 @@ test(`Claude Code updates through its npm installer on its executor (${execution
     resolveServerEnvironment: (directories) => ({
       CLAUDE_BINARY: claudeLauncher(directories),
       CLAUDE_CONFIG_DIR: join(directories.home, '.claude-isolated'),
+      GARCON_CODEX_CLI: codexLauncher(directories),
       PATH: `${toolsDirectory(directories)}:${process.env.PATH ?? ''}`,
     }),
     async prepareWorkspace(directories) {
@@ -105,6 +111,7 @@ test(`Claude Code updates through its npm installer on its executor (${execution
       await writeFile(join(packageDir, 'VERSION'), INSTALLED_VERSION);
       await mkdir(dirname(claudeLauncher(directories)), { recursive: true });
       await symlink(join(packageDir, 'cli.sh'), claudeLauncher(directories));
+      await writeExecutable(codexLauncher(directories), '#!/bin/sh\n[ "$1" = "--version" ] || exit 1\necho "codex-cli 0.171.0"\n');
       await writeExecutable(join(toolsDirectory(directories), 'npm'), fakeNpmSource(directories));
     },
   });

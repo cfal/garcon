@@ -33,20 +33,20 @@ Settings > Providers -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&a
 - A status check that fails for one agent is reported in `failures` for that
   agent only, including one that outlasts the controller's 25 second deadline.
   An unavailable executor fails the request.
-- Starting an update that Garcon cannot run, such as a bundled or unmanaged
+- Starting an update that Garcon cannot run, such as an unmanaged
   install, answers 422 `OPERATION_UNSUPPORTED` with the reason.
 - While a run is active, the page polls every two seconds with `agent` set to
   the running agents, so other CLIs are not probed again.
 
 ## Installation Methods
 
-The executable Garcon runs (`CLAUDE_BINARY`, or for Codex `GARCON_CODEX_CLI`
-or the bundled binary) is resolved on PATH and its symlinks are followed. The
-real path decides who owns it:
+The updater uses the same executable as the agent: `CLAUDE_BINARY` or `claude`
+for Claude Code, and `GARCON_CODEX_CLI` or `codex` (`codex.exe` on Windows)
+for Codex. Bare names use the executor's service PATH. The updater follows
+symlinks to identify the installation:
 
 | Method | Recognized by | Update command | Latest version |
 | --- | --- | --- | --- |
-| `bundled` | Codex's pinned `@openai/codex` dependency | none; it changes with a Garcon release | not checked |
 | `native` | Claude: `~/.local/share/claude/`, `claude/versions/`; Codex: `<CODEX_HOME>/packages/standalone/` | `<launcher> update` | Claude's release channel, Codex's native release channel |
 | `npm` | `<prefix>/lib/node_modules/<package>/` outside any other `node_modules` | `npm install -g --prefix <prefix> --allow-scripts=<package> <package>@latest` | `npm view` |
 | `bun` | `~/.bun/bin/`, `~/.bun/install/global/` | `bun i -g <package>@latest` | `npm view` |
@@ -94,6 +94,6 @@ real path decides who owns it:
 - A start whose reply is lost, for example to a browser timeout, may still have
   started the run, so the page reads that agent's status again instead of
   assuming it did not.
-- In the Docker image, Claude Code is installed natively under
-  `/home/garcon/.local`, outside the state volumes. An update applies to that
-  container until it is recreated; rebuild the image to keep it.
+- In the Docker image, the service user owns both Claude Code's native install
+  and Codex's npm install under `/home/garcon/.local`. Updates last until the
+  container is recreated; the replacement starts with the versions in its image.

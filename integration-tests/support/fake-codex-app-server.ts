@@ -62,7 +62,7 @@ function respond(line: string): void {
   }
   if (request.method === 'initialize') {
     write(request.id, {
-      userAgent: 'integration-fake-codex',
+      userAgent: 'garcon/0.171.0 (synthetic)',
       codexHome: process.env.CODEX_HOME ?? '',
       platformFamily: 'unix',
       platformOs: 'linux',

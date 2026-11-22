@@ -1,16 +1,18 @@
-import { createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { win32 } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { SharedModelOption } from '@garcon/common/models';
-import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { errorMessage, hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
+import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 import type { PiConfig } from '../../config.js';
+import { buildPiCliEnv } from './pi-cli.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const DISCOVERY_TIMEOUT_MS = 20_000;
+const FAILURE_COOLDOWN_MS = 15_000;
+const TABLE_HEADER = /^provider +model +context +max-out +thinking +images$/;
+const EMPTY_BANNER = 'No models available. Use /login ';
 
-class PiModelDiscoveryTransientError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PiModelDiscoveryTransientError';
-  }
-}
+class InvalidPiModelListing extends Error {}
 
 export class PiModelDiscoveryUnavailableError extends Error {
   readonly code = 'PI_MODEL_DISCOVERY_UNAVAILABLE';
@@ -23,157 +25,161 @@ export class PiModelDiscoveryUnavailableError extends Error {
   }
 }
 
-function piModelLabel(provider: string, id: string): string {
-  const tokens = id.split('/').filter(Boolean);
-  const shortId = tokens[tokens.length - 1] || id;
-  return `${provider}: ${shortId}`;
-}
-
-function piSdkModelToOption(model: unknown): SharedModelOption | null {
-  if (!model || typeof model !== 'object') return null;
-  const candidate = model as { provider?: unknown; id?: unknown; input?: unknown };
-  if (typeof candidate.provider !== 'string' || typeof candidate.id !== 'string') return null;
-  return {
-    value: `${candidate.provider}/${candidate.id}`,
-    label: piModelLabel(candidate.provider, candidate.id),
-    supportsImages: Array.isArray(candidate.input) && candidate.input.includes('image'),
-  };
-}
-
-function diagnosticMessage(value: unknown): string {
-  if (value instanceof Error) return value.message;
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    if (typeof record.message === 'string') return record.message;
-    if (record.error instanceof Error) return record.error.message;
-    if (record.error !== undefined) return String(record.error);
+// The metadata command works before a model is selected and reports config errors even on exit 0.
+// https://github.com/earendil-works/pi/blob/b4afdddf44e059c67ccf5097e5317d913521b470/packages/coding-agent/src/cli/list-models.ts#L29-L115
+export function parsePiModelListing(stdout: string, stderr: string): SharedModelOption[] {
+  const lines = stdout.trimEnd().split(/\r?\n/);
+  // Extensions and migrations can write startup notices before the listing.
+  const start = lines.findIndex(line => TABLE_HEADER.test(line) || line.startsWith(EMPTY_BANNER));
+  const header = lines[start];
+  const rows = lines.slice(start + 1);
+  if (header?.startsWith(EMPTY_BANNER) && rows.length === 2
+    && rows[0]?.trimEnd().endsWith('providers.md') && rows[1]?.trimEnd().endsWith('models.md')) {
+    if (stderr.trim()) throw new Error('Pi reported discovery errors. Check pi --list-models on this executor.');
+    return [];
   }
-  return String(value);
-}
-
-interface PiDiagnosticServices {
-  diagnostics?: unknown[];
-  modelRuntime?: { getError?: () => unknown };
-  settingsManager?: { drainErrors?: () => unknown[] };
-}
-
-function collectPiDiscoveryDiagnostics(services: PiDiagnosticServices): string[] {
-  const diagnostics: string[] = [];
-
-  const modelRuntimeError = typeof services?.modelRuntime?.getError === 'function'
-    ? services.modelRuntime.getError()
-    : undefined;
-  if (modelRuntimeError) {
-    diagnostics.push(`model runtime: ${diagnosticMessage(modelRuntimeError)}`);
+  if (!header || !TABLE_HEADER.test(header) || !rows.length) {
+    throw new InvalidPiModelListing('Unexpected Pi --list-models output. Check the installed Pi CLI version.');
   }
-
-  if (Array.isArray(services?.diagnostics)) {
-    for (const diagnostic of services.diagnostics) {
-      const message = diagnosticMessage(diagnostic);
-      if (message) diagnostics.push(message);
+  const modelStart = header.indexOf('model');
+  const contextStart = header.indexOf('context');
+  const imagesStart = header.indexOf('images');
+  return rows.map((row) => {
+    const provider = row.slice(0, modelStart).trim();
+    const id = row.slice(modelStart, contextStart).trim();
+    const images = row.slice(imagesStart).trim();
+    if (!provider || !id || (images !== 'yes' && images !== 'no')) {
+      throw new InvalidPiModelListing('Malformed row in Pi --list-models output.');
     }
-  }
-
-  const settingsErrors = typeof services?.settingsManager?.drainErrors === 'function'
-    ? services.settingsManager.drainErrors()
-    : [];
-  for (const error of settingsErrors) {
-    diagnostics.push(`settings: ${diagnosticMessage(error)}`);
-  }
-
-  return diagnostics;
-}
-
-function delay(ms: number): Promise<void> {
-  return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function readPiModelsFromSdk(): Promise<SharedModelOption[]> {
-  const services = await createAgentSessionServices({
-    cwd: process.cwd(),
-    agentDir: getAgentDir(),
+    const shortId = id.split('/').filter(Boolean).at(-1) ?? id;
+    return { value: `${provider}/${id}`, label: `${provider}: ${shortId}`, supportsImages: images === 'yes' };
   });
-  const available = await services.modelRuntime.getAvailable();
-  const models = available
-    .map(piSdkModelToOption)
-    .filter((model): model is SharedModelOption => Boolean(model));
-  const diagnostics = collectPiDiscoveryDiagnostics(services);
-  if (models.length === 0 && diagnostics.length > 0) {
-    throw new PiModelDiscoveryTransientError(diagnostics.join('; '));
-  }
-  return models;
 }
 
-export const getPiAvailableModels = readPiModelsFromSdk;
+export async function getPiAvailableModels(
+  binary: string,
+  signal = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+): Promise<SharedModelOption[]> {
+  signal.throwIfAborted();
+  const env = buildPiCliEnv({ NO_COLOR: '1' });
+  delete env.FORCE_COLOR;
+  const proc = Bun.spawn([binary, '--list-models'], {
+    env,
+    stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+    detached: process.platform !== 'win32', maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL',
+  });
+  const read = (stream: ReadableStream<Uint8Array>) =>
+    new Response(stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal })).text();
+  // Releasing the group at CLI exit lets buffered output drain even if a helper inherited a pipe.
+  let stopping: Promise<void> | undefined;
+  const stop = () => stopping ??= stopDiscoveryProcess(proc);
+  try {
+    const [stdout, stderr, code] = await waitUnlessAborted(
+      Promise.all([read(proc.stdout), read(proc.stderr), proc.exited.finally(stop)]), signal,
+    );
+    signal.throwIfAborted();
+    if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
+    return parsePiModelListing(stdout, stderr);
+  } finally {
+    await stop();
+  }
+}
+
+async function stopDiscoveryProcess(proc: Bun.Subprocess): Promise<void> {
+  try {
+    if (process.platform !== 'win32') {
+      // The group still identifies a wrapper's children after the wrapper exits.
+      process.kill(-proc.pid, 'SIGKILL');
+    } else if (proc.exitCode === null) {
+      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+      const taskkill = win32.join(systemRoot, 'System32', 'taskkill.exe');
+      await Bun.spawn([taskkill, '/T', '/F', '/PID', String(proc.pid)], {
+        env: { SystemRoot: systemRoot }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', timeout: 2_000,
+      }).exited;
+    }
+  } catch (error) {
+    if (!hasNodeErrorCode(error, 'ESRCH') && !hasNodeErrorCode(error, 'ENOENT')) throw error;
+  } finally {
+    if (proc.exitCode === null) proc.kill('SIGKILL');
+    await proc.exited;
+  }
+}
 
 export class PiModelCatalogService {
-  #cachedModels: SharedModelOption[] | null = null;
-  #cachedAt = 0;
-  #lastKnownGoodModels: SharedModelOption[] | null = null;
+  #cache: { models: SharedModelOption[]; expiresAt: number } | null = null;
+  #failure: { error: PiModelDiscoveryUnavailableError; retryAt: number } | null = null;
   #inflight: Promise<SharedModelOption[]> | null = null;
+  #lifetime = new AbortController();
 
   constructor(
     private readonly config: PiConfig,
-    private readonly discover: () => Promise<SharedModelOption[]> = getPiAvailableModels,
+    private readonly discover: (signal: AbortSignal) => Promise<SharedModelOption[]> = (signal) => getPiAvailableModels(config.binary(), signal),
   ) {}
 
-  async getModelsStrict(): Promise<SharedModelOption[]> {
+  async getModelsStrict(signal?: AbortSignal): Promise<SharedModelOption[]> {
+    signal?.throwIfAborted();
+    this.#lifetime.signal.throwIfAborted();
     const now = Date.now();
-    if (this.#cachedModels && now - this.#cachedAt < MODEL_CACHE_TTL_MS) {
-      return this.#cachedModels;
-    }
-    if (this.#inflight) return this.#inflight;
-
-    this.#inflight = this.#discoverWithRetry().finally(() => {
+    if (this.#cache && now < this.#cache.expiresAt) return this.#cache.models;
+    if (this.#failure && now < this.#failure.retryAt) throw this.#failure.error;
+    this.#inflight ??= this.#discoverWithRetry(this.#lifetime.signal).finally(() => {
       this.#inflight = null;
     });
-    return this.#inflight;
+    return waitUnlessAborted(this.#inflight, signal);
   }
 
-  async getModels(): Promise<SharedModelOption[]> {
+  async getModels(signal?: AbortSignal): Promise<SharedModelOption[]> {
     try {
-      return await this.getModelsStrict();
+      return await this.getModelsStrict(signal);
     } catch (error) {
+      signal?.throwIfAborted();
+      this.#lifetime.signal.throwIfAborted();
       if (isPiModelDiscoveryUnavailableError(error)) return error.staleModels;
-      return this.#lastKnownGoodModels ?? [];
+      return this.#staleModels();
     }
   }
 
-  clearForTests(): void {
-    this.#cachedModels = null;
-    this.#cachedAt = 0;
-    this.#lastKnownGoodModels = null;
-    this.#inflight = null;
+  start(): void {
+    if (this.#lifetime.signal.aborted) this.#lifetime = new AbortController();
   }
 
-  expireForTests(): void {
-    this.#cachedAt = 0;
+  async stop(): Promise<void> {
+    this.#lifetime.abort();
+    await this.#inflight?.catch(() => undefined);
+    this.#cache = null;
+    this.#failure = null;
   }
 
-  #cache(models: SharedModelOption[]): SharedModelOption[] {
-    this.#cachedModels = models;
-    this.#cachedAt = Date.now();
-    this.#lastKnownGoodModels = models.length > 0 ? models : null;
-    return models;
+  #staleModels(): SharedModelOption[] {
+    return this.#cache?.models.length ? this.#cache.models : [];
   }
 
-  async #discoverWithRetry(): Promise<SharedModelOption[]> {
-    const retryDelays = this.config.isTestEnvironment() ? [0, 0] : [75, 250];
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+  async #discoverWithRetry(lifetime: AbortSignal): Promise<SharedModelOption[]> {
+    const signal = AbortSignal.any([lifetime, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)]);
+    const attemptDelays = this.config.isTestEnvironment() ? [0, 0, 0] : [0, 75, 250];
+    let lastError: unknown;
+    for (const retryDelay of attemptDelays) {
       try {
-        return this.#cache(await this.discover());
+        if (retryDelay > 0) await delay(retryDelay, undefined, { signal });
+        signal.throwIfAborted();
+        const models = await this.discover(signal);
+        signal.throwIfAborted();
+        this.#cache = { models, expiresAt: Date.now() + MODEL_CACHE_TTL_MS };
+        this.#failure = null;
+        return models;
       } catch (error) {
-        lastError = error;
-        const retryDelay = retryDelays[attempt];
-        if (retryDelay === undefined) break;
-        await delay(retryDelay);
+        lifetime.throwIfAborted();
+        lastError = signal.aborted ? signal.reason : error;
+        if (hasNodeErrorCode(lastError, 'ENOENT') || lastError instanceof InvalidPiModelListing
+          || (lastError instanceof Error && lastError.name === 'TimeoutError')) break;
       }
     }
-    throw new PiModelDiscoveryUnavailableError(
-      errorMessage(lastError),
-      this.#lastKnownGoodModels ?? [],
-    );
+    const failure = new PiModelDiscoveryUnavailableError(errorMessage(lastError), this.#staleModels());
+    // A new installation must be visible on the very next request.
+    if (!hasNodeErrorCode(lastError, 'ENOENT')) {
+      this.#failure = { error: failure, retryAt: Date.now() + FAILURE_COOLDOWN_MS };
+    }
+    throw failure;
   }
 }
 

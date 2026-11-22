@@ -1,157 +1,170 @@
-import path from 'path';
-import { promises as fs } from 'fs';
-import {
-  getAgentDir,
-  SessionManager,
-  SettingsManager,
-  type SessionHeader,
-} from '@earendil-works/pi-coding-agent';
+import { opendir, readFile, realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isRecord } from '@garcon/common/json';
+import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
+import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import type { PiConfig } from '../../config.js';
 
-function expandTilde(value: string, config: PiConfig): string {
-  if (value === '~') return config.homeDirectory();
-  if (value.startsWith('~/')) return path.join(config.homeDirectory(), value.slice(2));
-  return value;
+// Pi accepts MSYS, WSL, and Cygwin drive spellings but leaves UNC paths intact.
+export function nativePiWindowsPath(value: string): string {
+  if (value.includes('\\')) return value;
+  const drive = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(value);
+  return drive ? `${drive[1]!.toUpperCase()}:\\${(drive[2] ?? '').replaceAll('/', '\\')}` : value;
 }
 
-export function resolvePiConfiguredSessionDir(
-  projectPath: string,
-  config: PiConfig,
-): string | undefined {
-  const sessionDirOverride = config.sessionDirectoryOverride();
-  if (sessionDirOverride) return expandTilde(sessionDirOverride, config);
+function resolvePiPath(value: string, cwd: string, home: string): string {
+  if (process.platform === 'win32') value = nativePiWindowsPath(value);
+  if (value === '~') value = home;
+  else if (value.startsWith('~/') || (process.platform === 'win32' && value.startsWith('~\\'))) {
+    value = path.join(home, value.slice(2));
+  } else if (value.startsWith('file://')) value = fileURLToPath(value);
+  return path.resolve(cwd, value);
+}
 
+function samePiPath(a: string, b: string): boolean {
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+async function sessionDirSetting(settingsFile: string): Promise<string | undefined> {
+  let settings: unknown;
   try {
-    const settings = SettingsManager.create(projectPath, getAgentDir());
-    return settings.getSessionDir();
+    const raw = await readFile(settingsFile, 'utf8');
+    settings = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch {
+    // Pi ignores a missing or invalid settings file without discarding the other scope.
     return undefined;
   }
-}
-
-function resolvePiConfiguredSessionDirStrict(
-  projectPath: string,
-  config: PiConfig,
-): string | undefined {
-  const sessionDirOverride = config.sessionDirectoryOverride();
-  if (sessionDirOverride) return expandTilde(sessionDirOverride, config);
-  const settings = SettingsManager.create(projectPath, getAgentDir());
-  return settings.getSessionDir();
-}
-
-function encodePiCwd(cwd: string): string {
-  return `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
-}
-
-function fileTimestamp(timestamp: string): string {
-  return timestamp.replace(/[:.]/g, '-');
-}
-
-export function piDefaultSessionDir(projectPath: string): string {
-  return path.join(getAgentDir(), 'sessions', encodePiCwd(projectPath));
-}
-
-export function piSessionPathFromHeader(header: SessionHeader, sessionDir?: string): string {
-  const fileName = `${fileTimestamp(header.timestamp)}_${header.id}.jsonl`;
-  return path.join(sessionDir ?? piDefaultSessionDir(header.cwd), fileName);
+  if (!isRecord(settings) || settings.sessionDir === undefined) return undefined;
+  if (settings.sessionDir === null) return '';
+  if (typeof settings.sessionDir !== 'string') {
+    throw new Error('Invalid Pi session directory settings.');
+  }
+  return settings.sessionDir;
 }
 
 export async function canonicalExistingPiSessionPath(value: string): Promise<string | null> {
   if (!path.isAbsolute(value)) return null;
   try {
-    if (!(await fs.stat(value)).isFile()) return null;
-    return path.normalize(await fs.realpath(value));
-  } catch {
-    return null;
+    return (await stat(value)).isFile() ? path.normalize(await realpath(value)) : null;
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return null;
+    throw error;
   }
 }
 
+// Pi selects the session directory before resolving project trust or loading extensions.
+// https://github.com/earendil-works/pi/blob/b4afdddf44e059c67ccf5097e5317d913521b470/packages/coding-agent/src/main.ts#L735-L744
 export async function findPiSessionFileBySessionId(
   sessionId: string,
   projectPath: string,
   config: PiConfig,
 ): Promise<string | null> {
   if (!sessionId || !projectPath) return null;
-  const configuredSessionDir = resolvePiConfiguredSessionDir(projectPath, config);
-
-  try {
-    const localSessions = await SessionManager.list(projectPath, configuredSessionDir);
-    const localMatch = localSessions.find((session) => session.id === sessionId);
-    if (localMatch) {
-      await fs.access(localMatch.path);
-      return localMatch.path;
+  const home = config.homeDirectory();
+  const selectedProject = resolvePiPath(projectPath, process.cwd(), home);
+  // Pi resolves relative session settings and records the header from its physical working directory.
+  const projectDir = await realpath(selectedProject).catch(() => selectedProject);
+  const agentDir = resolvePiPath(config.agentDirectoryOverride() ?? path.join(home, '.pi', 'agent'), projectDir, home);
+  const configured = config.sessionDirectoryOverride()
+    ?? await sessionDirSetting(path.join(projectDir, '.pi', 'settings.json'))
+    ?? await sessionDirSetting(path.join(agentDir, 'settings.json'));
+  const sessionsRoot = path.join(agentDir, 'sessions');
+  const local = `--${projectDir.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
+  const localDir = path.join(sessionsRoot, local);
+  if (configured) {
+    const directory = resolvePiPath(configured, projectDir, home);
+    if (samePiPath(directory, localDir)) return findInDirectory(directory, sessionId);
+    return findInDirectory(directory, sessionId, (cwd) => {
+      if (typeof cwd !== 'string' || !cwd) return false;
+      const recorded = resolvePiPath(cwd, process.cwd(), home);
+      return samePiPath(recorded, projectDir) || samePiPath(recorded, selectedProject);
+    });
+  }
+  const nearby = await findInDirectory(localDir, sessionId);
+  if (nearby) return nearby;
+  let match: string | null = null;
+  let accessError: unknown;
+  for await (const entry of directoryEntries(sessionsRoot)) {
+    if (entry.name === local || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
+    let candidate: string | null;
+    try {
+      candidate = await findInDirectory(path.join(sessionsRoot, entry.name), sessionId);
+    } catch (error) {
+      if (entry.isSymbolicLink() && (hasNodeErrorCode(error, 'ENOTDIR') || hasNodeErrorCode(error, 'ELOOP'))) continue;
+      if (hasNodeErrorCode(error, 'EACCES') || hasNodeErrorCode(error, 'EPERM')) {
+        accessError ??= error;
+        continue;
+      }
+      throw error;
     }
-  } catch {
-    return null;
-  }
-
-  if (configuredSessionDir) return null;
-
-  try {
-    const allSessions = await SessionManager.listAll();
-    const globalMatch = allSessions.find((session) => session.id === sessionId);
-    if (!globalMatch) return null;
-    await fs.access(globalMatch.path);
-    return globalMatch.path;
-  } catch {
-    return null;
-  }
-}
-
-export async function findPiSessionFileBySessionIdStrict(
-  sessionId: string,
-  projectPath: string,
-  config: PiConfig,
-): Promise<string | null> {
-  if (!sessionId || !projectPath) return null;
-  const configuredSessionDir = resolvePiConfiguredSessionDirStrict(projectPath, config);
-  const localDirectory = configuredSessionDir ?? piDefaultSessionDir(projectPath);
-  const localMatch = await findPiSessionFileInDirectory(localDirectory, sessionId);
-  if (localMatch || configuredSessionDir) return localMatch;
-
-  const sessionsRoot = path.join(getAgentDir(), 'sessions');
-  const projectDirectories = await readPiDirectoryEntries(sessionsRoot);
-  let globalMatch: string | null = null;
-  for (const entry of projectDirectories) {
-    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-    const candidate = await findPiSessionFileInDirectory(
-      path.join(sessionsRoot, entry.name),
-      sessionId,
-    );
     if (!candidate) continue;
-    if (globalMatch) throw new Error('Pi transcript discovery found duplicate session IDs');
-    globalMatch = candidate;
+    if (match && !samePiPath(await realpath(match), await realpath(candidate))) {
+      throw new Error('Pi transcript discovery found duplicate session IDs');
+    }
+    match ??= candidate;
   }
-  return globalMatch;
+  // An unreadable sibling cannot rule out a session that wasn't found elsewhere.
+  if (!match && accessError) throw accessError;
+  return match;
 }
 
-async function findPiSessionFileInDirectory(
-  directory: string,
-  sessionId: string,
-): Promise<string | null> {
-  const suffix = `_${sessionId}.jsonl`;
-  const matches = (await readPiDirectoryEntries(directory))
-    .filter((entry) => entry.name.endsWith(suffix));
-  if (matches.length === 0) return null;
-  if (matches.length > 1) throw new Error('Pi transcript discovery found duplicate session files');
-  const match = matches[0]!;
-  if (!match.isFile() || match.isSymbolicLink()) {
-    throw new Error('Pi transcript source is not a regular file');
-  }
-  return path.join(directory, match.name);
-}
-
-async function readPiDirectoryEntries(directory: string): Promise<import('node:fs').Dirent[]> {
+async function* directoryEntries(directory: string) {
+  let handle;
   try {
-    return await fs.readdir(directory, { withFileTypes: true });
+    handle = await opendir(directory);
   } catch (error) {
-    if (hasNodeErrorCode(error, 'ENOENT')) return [];
+    if (hasNodeErrorCode(error, 'ENOENT')) return;
     throw error;
   }
+  yield* handle;
 }
 
-function hasNodeErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error
-    && 'code' in error
-    && (error as NodeJS.ErrnoException).code === code;
+async function readSessionHeader(file: string): Promise<unknown> {
+  let parseError: unknown;
+  // Pi identifies sessions by the first parsed, nonempty entry, skipping malformed prefix lines.
+  for await (const { line } of readJsonlLineEntries(file, { maxReadBytes: 1024 * 1024 })) {
+    try {
+      const entry: unknown = JSON.parse(line);
+      if (entry) return entry;
+    } catch (error) {
+      parseError ??= error;
+    }
+  }
+  if (parseError) throw parseError;
+  return null;
+}
+
+async function findInDirectory(
+  directory: string,
+  sessionId: string,
+  matchesProject: (cwd: unknown) => boolean = () => true,
+): Promise<string | null> {
+  let match: string | null = null;
+  for await (const entry of directoryEntries(directory)) {
+    if (!entry.name.endsWith('.jsonl')) continue;
+    const nativeName = /^\d{4}-\d\d-\d\dT[\d-]+Z_(.+)\.jsonl$/.exec(entry.name);
+    // The filename selects which errors to report; only the header proves identity after a rename.
+    const named = nativeName ? nativeName[1] === sessionId : entry.name.endsWith(`_${sessionId}.jsonl`);
+    if (!entry.isFile()) {
+      if (named) throw new Error('Pi transcript source is not a regular file');
+      continue;
+    }
+    const candidate = path.join(directory, entry.name);
+    let header: unknown;
+    try {
+      header = await readSessionHeader(candidate);
+    } catch (error) {
+      if (named) throw new Error('Pi transcript header could not be read', { cause: error });
+      continue;
+    }
+    if (!isRecord(header) || header.type !== 'session' || header.id !== sessionId) {
+      if (named) throw new Error('Pi transcript header does not match the selected session');
+      continue;
+    }
+    if (!matchesProject(header.cwd)) continue;
+    if (match) throw new Error('Pi transcript discovery found duplicate session files');
+    match = candidate;
+  }
+  return match;
 }

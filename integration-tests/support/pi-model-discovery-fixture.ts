@@ -17,6 +17,7 @@ export async function preparePiModelDiscoveryFixture(home: string): Promise<stri
 import { Type, StringEnum } from '@earendil-works/pi-ai';
 
 export default function (pi) {
+  console.log('Synthetic discovery extension loaded');
   const schema = Type.Object({ mode: StringEnum(['discovery']) });
   if (schema.properties.mode.enum[0] !== 'discovery') throw new Error('Pi extension schema compatibility failed');
   pi.registerProvider('garcon-discovery', {

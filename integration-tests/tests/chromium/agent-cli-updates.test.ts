@@ -30,7 +30,7 @@ test('Settings updates an outdated Claude Code CLI and reports the result', asyn
     const codex = dialog.getByRole('group', { name: 'Codex CLI', exact: true });
     await browserExpect(claude.getByText(`Update available: ${LATEST_VERSION}`)).toBeVisible();
     await browserExpect(claude.getByText(INSTALLED_VERSION, { exact: true })).toBeVisible();
-    await browserExpect(codex.getByText('Garcon runs its bundled Codex CLI, which updates with Garcon.')).toBeVisible();
+    await browserExpect(codex.getByText(/was not found on PATH\./)).toBeVisible();
     await browserExpect(codex.getByRole('button', { name: 'Update', exact: true })).toHaveCount(0);
     await claude.scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(artifacts, 'agent-cli-updates-available.png') });
@@ -58,6 +58,7 @@ test('Settings updates an outdated Claude Code CLI and reports the result', asyn
     resolveServerEnvironment: (directories) => ({
       CLAUDE_BINARY: join(npmPrefix(directories), 'bin', 'claude'),
       CLAUDE_CONFIG_DIR: join(directories.home, '.claude-isolated'),
+      GARCON_CODEX_CLI: join(toolsDirectory(directories), 'missing-codex'),
       PATH: `${toolsDirectory(directories)}:${process.env.PATH ?? ''}`,
     }),
     async prepareWorkspace(directories) {
