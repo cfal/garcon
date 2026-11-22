@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import type { AgentCatalogEntry } from '../../../common/agents.js';
-import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
+import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
 import type { ApiProviderService } from '../api-providers/service.js';
@@ -10,19 +9,12 @@ import type { AgentRegistryServiceContract } from './registry.js';
 const MODEL_CATALOG_RESPONSE_CACHE_TTL_MS = 60_000;
 
 export interface ModelCatalog {
-  agents: AgentRegistryServiceContract;
-  apiProviders: ApiProviderService;
-}
-
-export interface ModelCatalogResponseBody {
-  catalog: {
-    agents: AgentCatalogEntry[];
-    apiProviders: ApiProviderCatalogEntry[];
-  };
+  agents: Pick<AgentRegistryServiceContract, 'getAgentCatalogEntry' | 'getAgentCatalogEntries' | 'requiresStrictModelDiscovery' | 'assertAgentAvailable'>;
+  apiProviders: Pick<ApiProviderService, 'getCatalog'>;
 }
 
 export interface ModelCatalogSnapshot {
-  body: ModelCatalogResponseBody;
+  body: ModelCatalogResponse;
   etag: string;
   createdAt: number;
 }
@@ -48,7 +40,7 @@ function sortedByStringField<T>(items: T[], field: keyof T): T[] {
   );
 }
 
-function catalogForHash(body: ModelCatalogResponseBody): unknown {
+function catalogForHash(body: ModelCatalogResponse): unknown {
   const agents = sortedByStringField(body.catalog.agents, 'id')
     .map((agent) => ({
       ...agent,
@@ -79,7 +71,7 @@ function catalogForHash(body: ModelCatalogResponseBody): unknown {
   });
 }
 
-export function createCatalogEtag(body: ModelCatalogResponseBody): string {
+export function createCatalogEtag(body: ModelCatalogResponse): string {
   const canonical = JSON.stringify(catalogForHash(body));
   const hash = crypto.createHash('sha256').update(canonical).digest('base64url');
   return `W/"model-catalog:${hash}"`;
@@ -89,10 +81,10 @@ function isFresh(snapshot: ModelCatalogSnapshot): boolean {
   return Date.now() - snapshot.createdAt < MODEL_CATALOG_RESPONSE_CACHE_TTL_MS;
 }
 
-async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: string): Promise<ModelCatalogSnapshot> {
+export async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: string, confirmingAgents?: readonly string[]): Promise<ModelCatalogSnapshot> {
   const body = {
     catalog: {
-      agents: await modelCatalog.agents.getAgentCatalogEntries(executorId),
+      agents: await modelCatalog.agents.getAgentCatalogEntries(executorId, confirmingAgents),
       apiProviders: modelCatalog.apiProviders.getCatalog(executorId),
     },
   };
@@ -106,14 +98,15 @@ async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: stri
 
 export class ModelCatalogResponseCache {
   readonly #executors = new Map<string, {
+    instanceId?: string;
     cached: ModelCatalogSnapshot | null;
     inflight: Promise<ModelCatalogSnapshot> | null;
   }>();
 
-  async getSnapshot(modelCatalog: ModelCatalog, executorId = effectiveExecutorId(undefined)): Promise<ModelCatalogSnapshot> {
+  async getSnapshot(modelCatalog: ModelCatalog, executorId = effectiveExecutorId(undefined), instanceId?: string): Promise<ModelCatalogSnapshot> {
     let entry = this.#executors.get(executorId);
-    if (!entry) {
-      entry = { cached: null, inflight: null };
+    if (!entry || entry.instanceId !== instanceId) {
+      entry = { cached: null, inflight: null, instanceId };
       this.#executors.set(executorId, entry);
     }
     if (entry.cached && isFresh(entry.cached)) return entry.cached;

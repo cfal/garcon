@@ -419,7 +419,7 @@ export class ExecutorRpc {
       throw new AgentCallError('not-dispatched', 'The request is too large to send to the executor.');
     }
     if (!this.transport.channel.canAdmit(payload)) {
-      throw new AgentCallError('not-dispatched', 'The connection to the executor is backed up. Try again shortly.');
+      throw new AgentCallError('not-dispatched', 'The connection to the executor is backed up. Try again shortly.', 'EXECUTOR_BUSY');
     }
     this.#sent = seq;
     call.rpc = this;

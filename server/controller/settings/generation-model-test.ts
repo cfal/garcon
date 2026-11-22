@@ -47,7 +47,8 @@ function classifyGenerationModelTestError(error: unknown): GenerationModelTestEr
   // A reconnecting executor holds the query, which fails undispatched if the
   // executor does not return in time.
   if ((error instanceof DomainError && error.code === 'EXECUTOR_UNAVAILABLE')
-    || (error instanceof AgentCallError && error.outcome === 'not-dispatched' && error.code === 'UNAVAILABLE')) {
+    || (error instanceof AgentCallError && error.outcome === 'not-dispatched'
+      && (error.code === 'UNAVAILABLE' || error.code === 'EXECUTOR_BUSY'))) {
     return new GenerationModelTestError('GENERATION_TEST_UNAVAILABLE', 'The selected executor is unavailable.', 503, true, { cause: error });
   }
   if (isUnsupportedSingleQueryThinkingMode(error)) {

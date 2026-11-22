@@ -46,7 +46,8 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           expect(userContents(beforeReply.messages)).toEqual([prompt]);
           expect(assistantContents(beforeReply.messages)).toEqual([]);
           expectAddressedRows(beforeReply.transcriptViewId, beforeReply.messages);
-          expect(activeDriver.userTextsSince(fixture, requestCursor).join('\n')).toContain(prompt);
+          const requests = activeDriver.requestsSince(fixture, requestCursor);
+          expect(requests.flatMap((request) => request.userTexts).join('\n')).toContain(prompt);
 
           held.release();
           expect((await fixture.client.waitForTurnTerminal(chatId, turn.turnId)).type)
@@ -83,8 +84,9 @@ for (const driverFactory of sacsScriptedDriverFactories) {
             status: 'duplicate',
             turnId: first.turnId,
           });
-          expect(activeDriver.requestCountSince(fixture, requestCursor)).toBe(1);
-          expect(activeDriver.userTextsSince(fixture, requestCursor).join('\n')).toContain(prompt);
+          const requests = activeDriver.requestsSince(fixture, requestCursor);
+          expect(requests).toHaveLength(1);
+          expect(requests[0]!.userTexts.join('\n')).toContain(prompt);
           const whileHeld = await fixture.client.getMessages(chatId);
           expect(userContents(whileHeld.messages)).toEqual([prompt]);
           expectAddressedRows(whileHeld.transcriptViewId, whileHeld.messages);
@@ -139,7 +141,8 @@ for (const driverFactory of sacsScriptedDriverFactories) {
             held.release();
             expect((await fixture.client.waitForTurnTerminal(chatId, turn.turnId)).type)
               .toBe('agent-run-finished');
-            expect(activeDriver.userTextsSince(fixture, requestCursor).join('\n')).toContain(steer);
+            const requests = activeDriver.requestsSince(fixture, requestCursor);
+            expect(requests.flatMap((request) => request.userTexts).join('\n')).toContain(steer);
             expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
               .toContain(steeredReply);
             activeDriver.assertSettled(fixture);

@@ -2,6 +2,21 @@ import { effectiveExecutorId, parseExecutorId } from '../../../common/executors.
 import type { IChatRegistry } from '../chats/store.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 
+export async function onLoginInstance<T>(current: () => string, expected: string | null, read: () => Promise<T>): Promise<T> {
+  if (expected === null) return read();
+  const assertCurrent = () => {
+    if (current() !== expected) {
+      throw new DomainError('LOGIN_INSTANCE_CHANGED', 'The executor that handled sign-in was replaced.', 409);
+    }
+  };
+  assertCurrent();
+  try {
+    return await read();
+  } finally {
+    assertCurrent();
+  }
+}
+
 export function executorIdFromUrl(url: URL, registry?: Pick<IChatRegistry, 'getChat'>): string {
   if (url.searchParams.getAll('executorId').length > 1) throw new ValidationDomainError('Invalid executor ID');
   const executorId = parseExecutorId(url.searchParams.get('executorId'));

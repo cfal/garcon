@@ -35,7 +35,7 @@ export class ProducerBindings {
     readonly binding: AgentProducerBinding;
   }>();
   readonly #subscriptions = new WeakSet<AgentIntegration>();
-  readonly #progress = new Map<string, () => Promise<void>>();
+  readonly #progress = new Map<string, 'started' | (() => Promise<void> | undefined)>();
 
   constructor(
     private readonly onError: (error: unknown) => void,
@@ -77,9 +77,11 @@ export class ProducerBindings {
     }
   }
 
-  onStarted(runId: string, callback: () => Promise<void>): void {
+  onStarted(runId: string, callback: () => Promise<void> | undefined): void {
     this.#progress.set(runId, callback);
   }
+
+  hasStarted(runId: string): boolean { return this.#progress.get(runId) === 'started'; }
 
   forgetRun(runId: string): void { this.#progress.delete(runId); }
 
@@ -130,8 +132,10 @@ export class ProducerBindings {
         }
         if (event.type === 'started') {
           const started = this.#progress.get(event.runId);
-          this.#progress.delete(event.runId);
-          if (started) void started().catch(this.onError);
+          if (typeof started === 'function') {
+            this.#progress.set(event.runId, 'started');
+            void started()?.catch(this.onError);
+          }
         } else {
           if (event.type === 'run-ended') this.#progress.delete(event.runId);
           try {

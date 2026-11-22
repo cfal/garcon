@@ -1,5 +1,19 @@
-import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import type { AgentMetadata, ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import type { AgentCatalogEntry } from '$shared/agents';
+import { PERMISSION_MODE_VALUES } from '$shared/chat-modes';
 import type { ResolvedModelSelection } from '$shared/start-selection';
+
+export function nativeCatalogAgent(id: string, models: ModelOption[] = []): AgentMetadata & AgentCatalogEntry {
+	return {
+		id, label: id, kind: 'agent', executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {},
+		supportsCompact: false, supportsFork: true, supportsForkAtMessage: true, supportsForkWhileRunning: true,
+		supportsUpdateProjectPath: false, supportsSteering: false, supportsImages: true,
+		fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false, supportedProtocols: [],
+		authLoginSupported: true, supportedPermissionModes: [...PERMISSION_MODE_VALUES], supportedThinkingModes: [],
+		settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+		generation: null, requiresStrictModelDiscovery: false, defaultModel: models[0]?.value ?? '', models,
+	};
+}
 
 function matchesModel(entry: ModelOption, model: string): boolean {
 	return entry.value === model || entry.rawModel === model;

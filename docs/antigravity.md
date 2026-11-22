@@ -24,10 +24,10 @@ agy 1.5.13 has three surfaces, and ACP is the only one that covers Garcon's need
 | Cancel | `session/cancel` | None documented; closing stdin ends the session after the turn | Interactive |
 | Resume | `session/resume` | `--conversation <id>`, one process per session | `/resume` |
 | Model and mode | `session/set_model`, `mode` config option | Process flags | Interactive |
-| Mid-turn steering | A second `session/prompt` | Undocumented | `queuedMessages` setting |
+| Mid-turn steering | Accepts overlapping prompts; delivery to the active turn is not confirmed | A second input line queued a separate turn in the held-model probe | `queuedMessages` setting |
 | Fork / rewind | Absent (`session/fork` returns -32601; `/fork` is sent to the model as text) | Rejected: "/fork is not available in print mode" | `/fork` (alias `/branch`), `/rewind` (alias `/undo`) |
 
-The engine implements `ForkConversation` (with a step index) and `RewindConversation` internally, but only the TUI exposes them. Garcon therefore forks Antigravity chats through its provider-neutral path: the fork seeds a new chat from the Garcon ledger, and the first turn carries that transcript as a prefix into a fresh agy session. Fork-at-message works the same way. What is lost compared with a native fork is agy's internal state (cached reads, plan state) rather than the conversation itself.
+ACP defines an [optional native fork](https://github.com/agentclientprotocol/agent-client-protocol/blob/c9fef684e0ed6686a7b4aac6b9edb89f5187eed9/docs/rfds/session-fork.mdx#L45). The agy engine implements `ForkConversation` (with a step index) and `RewindConversation` internally, but only the TUI exposes them. Garcon therefore forks Antigravity chats through its provider-neutral path: the fork seeds a new chat from the Garcon ledger, and the first turn carries that transcript as a prefix into a fresh agy session. Fork-at-message works the same way. What is lost compared with a native fork is agy's internal state (cached reads, plan state) rather than the conversation itself.
 
 Native storage cannot back a file-level fork the way Claude's JSONL does:
 
@@ -49,13 +49,15 @@ ACP calls:
 | `session/new` | Starts a chat. The result carries `models.availableModels`, `models.currentModelId`, and the `mode` config option. |
 | `session/resume` | Reopens a session after process loss without replaying history ([t3code AntigravityAdapterV2.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts#L237)). The CLI advertises `sessionCapabilities.resume`, so the shared reconnect order already prefers it. |
 | `session/set_model` | Selects a model before a prompt when the request differs from the session's current model. |
-| `session/set_config_option` (`mode`) | Applies the mapped permission mode before every prompt. The agent can change its own mode, so a cached value does not prove the session is still in it. |
+| `session/set_config_option` (`mode`) | Sets the mapped permission mode before every prompt and checks the mode in the reply. A missing or different mode stops the prompt. The agent can change its own mode, so a cached value is not confirmation. |
 | `session/prompt` | Text, plus inline base64 `image` blocks; `promptCapabilities.image` is true. |
 | `session/cancel` | A notification, per the ACP specification. The open prompt resolves with `stopReason: "cancelled"`, so Antigravity aborts cooperatively and keeps its process. Cursor keeps `process-restart`. |
 
+The prompt RPC determines the turn outcome. Closing stdout fails unanswered requests, but does not undo a final reply. Closing stderr alone has no effect on the turn. After transport loss, the next turn resumes the same native session on a new process and sends only its own input; Garcon does not retry the previous prompt.
+
 ### Stop
 
-A cooperative cancel settles only when the agent answers the open prompt. The next turn on that session waits for the cancelled prompt to settle before it sends a new `session/prompt`. Otherwise agy would treat the new prompt as a mid-turn steer. If the prompt has not settled after 10 s, the runtime retires the process, and the turn reconnects with `session/resume`. Content the agent streams between the cancel and its settlement belongs to the stopped turn and is published with it, because it is also in the agent's native history.
+A cooperative cancel settles only when the agent answers the open prompt. The next turn on that session waits for the cancelled prompt to settle before it sends a new `session/prompt`, so the two prompts never overlap. If the prompt has not settled after 10 s, the runtime retires the process, and the turn reconnects with `session/resume`. Content the agent streams between the cancel and its settlement belongs to the stopped turn and is published with it, because it is also in the agent's native history.
 
 Stop works the same way while a turn is still being configured (model and mode are applied before the prompt). The turn is reserved from admission, so that window counts as busy, and an abort there ends the turn before its prompt is sent. A follow-up that is waiting on a stopped turn gives up as soon as its own admission closes.
 
@@ -74,20 +76,37 @@ Any later message, thought, or tool call means the chunk was ordinary text that 
 
 ## Authentication
 
-The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. Otherwise it is `gemini-api-key` when `GEMINI_API_KEY` is set, and `oauth-personal` when it is not. The accepted values are the CLI's advertised methods: `oauth-personal`, `oauth-business`, `gemini-api-key`, and `agent-platform`.
+The ACP auth method comes from `GARCON_ANTIGRAVITY_AUTH_METHOD` when it is set. Otherwise it is `gemini-api-key` when `GEMINI_API_KEY` is set, and `oauth-personal` when it is not. The accepted values are the CLI's advertised methods: `oauth-personal`, `oauth-business`, `gemini-api-key`, and `agent-platform`. An executor without an executable `agy` is not ready, even if it has a Gemini API key. The controller Compose service forwards both variables; workers take them from their executor environment file.
 
 - **Google account (`oauth-personal`):** uses credentials the CLI cached from an interactive `agy` or `agy acp --login`. When none are cached on a headless executor, `authenticate` fails fast with the CLI's actionable "Run `agy acp --login`..." message, which surfaces as the run error. With a display, agy may open its browser sign-in instead, and the turn waits for it within the ACP request timeout. Sessions keep the display because commands the agent runs inherit its environment; only the status probe and the in-app sign-in drop it.
 - **In-app sign-in:** `auth.launchLogin` runs `agy acp --login` through the shared `CliLoginController` in `browser-code` mode, with `DISPLAY` and `WAYLAND_DISPLAY` removed so the CLI prints its Google link instead of opening a browser ([t3code AntigravityDriver.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/provider/Drivers/AntigravityDriver.ts#L402-L474)). The user opens the link, then pastes the code or the final URL, which is written to the CLI's stdin. Exit code 0 means the credentials are stored. This works when the executor is headless or remote, and was verified on Linux. A macOS executor may also open its own browser, since removing the display variables does not stop LaunchServices; the printed link and code still complete the sign-in. While a sign-in is running, auth status does not probe the CLI. It repeats the last probed status, or "Sign-in in progress" if there is none.
 - **Credential storage:** the CLI stores Google sign-in in the OS keyring (Secret Service over D-Bus on Linux). On a headless executor without a running Secret Service, Antigravity's documented fix is to start a session bus (`export $(dbus-launch)`) before `agy` runs. The Docker image persists `~/.gemini` so CLI settings and history survive container recreation.
 - **Gemini API key / Agent Platform:** Garcon drops any `GEMINI_API_KEY` the process inherited and passes the key from the integration's environment reader, only under the `gemini-api-key` method, so no other method can succeed on a stray key. Google Cloud variables pass through unchanged for `agent-platform`. Antigravity documents that `agy models` needs `"modelProvider": "gemini"` in `~/.gemini/antigravity-cli/settings.json` for API-key accounts. Without that setting, model discovery returns no models and chats use the CLI's default model.
 
-`auth.status` reports `GEMINI_API_KEY` as environment authentication. For `oauth-personal` it runs `agy models` with a 10 s timeout, the CLI's own signed-in check: exit 0 means authenticated, and anything else is reported with its stderr. `agy models` succeeds on any credential the CLI holds, so `oauth-business` and `agent-platform` are checked by starting `agy acp` and calling `authenticate` with that method, as every session does. The probe runs without a display, so on Linux a missing OAuth sign-in fails fast instead of opening a browser, and a missing Google Cloud project is reported in agy's own words. agy opens a browser on macOS regardless of the display, so there these methods fall back to `agy models`, which can report signed in on another credential the CLI holds.
+`auth.status` runs `agy --version` before reporting an API key as environment authentication. This checks that the executor can launch the CLI, not whether Google accepts the key. On Linux, OAuth and Agent Platform status use the same ACP `authenticate` method as a session, without a display, so another cached credential cannot make the selected method appear ready. On macOS, agy can open a browser even without display variables. There, status uses the noninteractive `agy models` check, which cannot distinguish among cached CLI credentials; the session still enforces the configured method.
+
+Closing Settings does not stop sign-in, even while the worker is still launching the CLI. Reopening Settings restores the current browser owner's sign-in without reopening its browser link; after a page reload, use Sign in to reattach to an active CLI login.
+
+Once credentials are confirmed, Garcon requests a fresh catalog from that worker. A successful empty model list offers Default. A missing executable or invalid provider configuration instead removes that provider's native models, leaving healthy providers selectable. A transient native listing failure leaves the refresh pending for the next use, subject to the normal throttle. If reconnecting invalidated the prior catalog, an ordinary listing from the same worker restores usable models without claiming that native discovery succeeded. A replacement worker cannot confirm the old sign-in or validate its cached catalog.
+
+Agent Platform requires a project, location, and Application Default Credentials. Compose forwards `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`, but not a host credentials path. To use a credentials file, add its mount and its **container** path together in a Compose override:
+
+```yaml
+services:
+  garcon:
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/run/secrets/google-adc.json:ro
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-adc.json
+```
+
+For a standalone worker, put the project, location, and container credential path in `executor.env` and add the same read-only mount to the `executor` service in a `docker-compose.executor.yml` override.
 
 ## Models And Modes
 
 `agy models` prints `<id>\t<label>` lines such as `gemini-3.1-pro-high	Gemini 3.1 Pro (High)`. Each ID encodes the model and its thinking level, and the levels differ per model. Garcon therefore exposes these IDs directly as catalog models and declares no thinking modes. Discovery runs no session, so it leaves no empty conversation in the user's history. `session/set_model` accepts the same IDs and updates both the `model` and `thought_level` options.
 
-Choosing Default (an empty model) returns to the model agy picked when the process opened the session. A resumed session reports only its current model, so after a restart or reconnect Default keeps the last model in use. Learning agy's real default would take a `session/new`, which leaves an empty conversation in the user's history.
+When the executor can launch agy with the configured authentication method, the first catalog entry is **Default** (`default`), even when `agy models` exits unsuccessfully or returns no IDs. A missing or unlaunchable binary, or an invalid method, leaves no selectable models. A new chat without a model override uses the native default, not the first model printed by `agy models`. On an existing chat, omitting the override keeps the saved selection; explicitly select **Default** to return to the native default learned for that project. A resumed session reports only its current model. When no default has been learned for the project since executor startup, Default keeps the current model rather than opening an empty conversation to discover another one.
 
 Permission modes:
 
@@ -98,7 +117,7 @@ Permission modes:
 | `plan` | `plan` | Requests go to the user. |
 | `manualBypass`, `bypassPermissions` | `default` | Requests are auto-approved. |
 
-A permission mode change during a turn applies to Garcon's own approval decisions at once, including a turn still being configured. agy's native mode (`accept-edits`, `plan`) changes only with the next turn's `session/set_config_option`, so switching from accept-edits to default mid-turn still lets agy approve the rest of that turn's edits itself.
+Once the provider has admitted a bound turn, explicitly saving a permission mode applies it to Garcon's approval decisions at once, even if the saved mode already has that value and only the turn overrides it. Saving an unrelated setting leaves the override intact. While Garcon is preparing a turn or waiting for the provider to admit it, an explicit permission save returns a retryable conflict, even if a previous turn established a session ID. agy's native mode (`accept-edits`, `plan`) changes only with the next turn's `session/set_config_option`, so switching from accept-edits to default mid-turn still lets agy approve the rest of that turn's edits itself.
 
 The shared runtime chooses permission options by their ACP `kind` (`allow_once`, `allow_always`, `reject_once`, `reject_always`), not by option ID. Antigravity's option IDs are `allow` and `deny`. The runtime used to fall back to the first option when an ID was missing, which would have turned Deny into Allow.
 
@@ -116,6 +135,8 @@ Antigravity is not a default generation agent (`generation: null`, like Cursor),
 ## Tool Normalization
 
 Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `rawOutput`, `content` (text or diffs), and `status`.
+
+For `run_command`, ACP `completed` means the invocation finished, not that the command succeeded. A nonzero `rawOutput.exit_code` marks the tool result as an error; the enclosing agent turn may still finish normally.
 
 | Antigravity tool | Garcon message |
 | --- | --- |
@@ -137,11 +158,14 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 
 - **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, and tool and result normalization. They also cover executor-error detection and the login environment. A runtime suite drives the shared ACP runtime against a fake agent that speaks agy's wire shapes. It covers agent-defined permission option IDs, cancellation (prompt, late, and ignored), in-band executor errors, and resume in a new process.
 - **Shared ACP tests** in `server-agents/common/src/acp/__tests__` cover permission-option selection by kind and the cancel notification.
+- **Web tests** cover executor-scoped auth diagnostics, submitting a sign-in code, catalog refresh after Settings closes, and selecting Default or a discovered model in New Chat.
 - **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, the Gemini sibling of `FakeClaudeModel` and `FakeCodexModel`, in all three execution lanes with an isolated `HOME`. agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method and streams `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`. Requests without tool declarations are auxiliary (title generation, web-search grounding) and get a canned reply outside the script. The suite covers catalog discovery, command approval and denial, file edits in accept-edits mode, and model switching on resume. It also covers Stop, upstream API errors, resume after a server restart, and the refused project path update.
   - agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`, so tool IDs are deterministic.
+  - With no discovered models, the suite starts a chat with the catalog's Default and checks the actual Gemini model and thinking budget. While a turn is held, an explicit steer must be rejected and a queued image must arrive only in the next turn.
+  - A nonzero command exit fails the tool, not the turn. A rejected model request fails that turn, not the next one. A disposable title query must not execute a requested command or publish its tool or reply to the chat. Stop must abort the held model request and retain the same agy process for the follow-up.
   - Scripted calls must satisfy agy's tool schema; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Otherwise the CLI rejects them without emitting a tool call. agy's own rules also auto-approve some commands, such as `touch`.
-  - `ANTIGRAVITY_BIN` supplies the binary. `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. The suite is skipped when `ANTIGRAVITY_BIN` is unset.
-- **Server agent compatibility suite** (`integration-tests/tests/sacs`) registers an Antigravity driver on the same binary and fake model whenever `ANTIGRAVITY_BIN` is set, so every shared transcript, interrupt, crash, and executor-disconnect case runs against agy in all three lanes. The driver has no steering, history-import, or native-forking facets.
+  - `ANTIGRAVITY_BIN` supplies the binary. `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. When `ANTIGRAVITY_BIN` is unset, the real-CLI scenarios are skipped; synthetic discovery-failure cases still run.
+- **Server agent compatibility suite** (`integration-tests/tests/sacs`) registers an Antigravity driver on the same binary and fake model whenever `ANTIGRAVITY_BIN` is set. It exercises transcript lifecycle, interrupt, restart and remote disconnect, plus a handoff fork that submits exactly the selected transcript prefix to a fresh native session. The driver has no steering, history-import, or native-forking facets.
 
 ## Comparison With t3code
 
@@ -162,3 +186,5 @@ Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `raw
 | Text generation | Disposable ACP session | `singleQuery` via a disposable ACP session |
 
 Gaps deliberately left for follow-up are steering, Reload from native history (`session/load` replay), quota reporting, and ACP elicitation for `ask_question`.
+
+In a held-model probe against 1.5.13, a second concurrent ACP v1 `session/prompt` did not acknowledge delivery while the first request was held. Both prompt RPCs later returned `end_turn`. Even [ACP v2](https://github.com/agentclientprotocol/agent-client-protocol/blob/c9fef684e0ed6686a7b4aac6b9edb89f5187eed9/docs/protocol/v2/prompt-lifecycle.mdx#L415) leaves steering versus queueing to the agent. In stream-json mode, agy did not send the second model request until the first reply was available; the second request included that reply and the CLI emitted two separate results. Neither observation establishes delivery into the active turn. In Garcon, normal input to a busy Antigravity chat goes to the next-turn queue; an explicit steer request is rejected as unsupported.

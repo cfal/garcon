@@ -16,7 +16,7 @@ export class RpcAdmission {
 
   acquire(lane: RpcLane): () => void {
     if (this.#total >= this.totalLimit || lane === 'bulk' && this.#bulk >= this.bulkLimit) {
-      throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.');
+      throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.', 'EXECUTOR_BUSY');
     }
     this.#total++;
     if (lane === 'bulk') this.#bulk++;

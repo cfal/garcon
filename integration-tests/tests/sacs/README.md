@@ -27,7 +27,8 @@ modules:
   quarantine, native missing/read-failure/valid-empty behavior, and the
   Direct/OpenCode source constraints represented by its registered drivers;
 - `native-forking.test.ts` covers native point-fork fidelity for providers with
-  that facet;
+  that facet. For providers without native forking, it checks the selected ledger
+  prefix reaches the model in a fresh session and excludes later source turns;
 - `executor-disconnect.test.ts` runs only in remote lanes and holds the
   encrypted link down with both processes alive. It covers the reconnecting
   phase, the resumed turn delivering its reply once, and an explicit followup

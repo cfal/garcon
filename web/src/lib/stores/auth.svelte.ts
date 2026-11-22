@@ -7,7 +7,7 @@ import {
 	changePassword as apiChangePassword,
 	logout as apiLogout,
 } from '$lib/api/auth.js';
-import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
+import { ApiError, isIntermediaryResponse, isTransientRequestFailure } from '$lib/api/client.js';
 import {
 	getAuthToken,
 	retainAuthToken,
@@ -70,15 +70,6 @@ function describeAuthError(error: unknown): string {
 	if (error.errorCode === 'AUTH_STORAGE_UNAVAILABLE') return m.auth_storage_unavailable();
 	if (error.status === 401) return m.auth_errors_invalid_credentials();
 	return error.message;
-}
-
-function isTransientProbeFailure(error: unknown): boolean {
-	if (error instanceof ApiError) return isIntermediaryResponse(error);
-	if (error instanceof TypeError) return true;
-	return (
-		error instanceof DOMException &&
-		(error.name === 'NetworkError' || error.name === 'TimeoutError' || error.name === 'AbortError')
-	);
 }
 
 export class AuthStore {
@@ -523,7 +514,7 @@ export class AuthStore {
 			return;
 		}
 		// A failed transport probe cannot revoke an independently accepted session.
-		if (this.availability === 'active' && !this.#uncertainToken && isTransientProbeFailure(error)) {
+		if (this.availability === 'active' && !this.#uncertainToken && isTransientRequestFailure(error)) {
 			this.#scheduleRepair(2_000);
 			return;
 		}

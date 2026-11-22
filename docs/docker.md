@@ -177,7 +177,7 @@ Compose uses named volumes for credentials, configuration, and native history. T
 | `codex-home` | `/home/garcon/.codex` | Codex credentials and native history |
 | `cursor-home` | `/home/garcon/.cursor` | Cursor credentials and native history |
 | `factory-home` | `/home/garcon/.factory` | Factory credentials and native history |
-| `gemini-home` | `/home/garcon/.gemini` | Antigravity settings, sign-in, and native history |
+| `gemini-home` | `/home/garcon/.gemini` | Antigravity settings and native history |
 | `pi-home` | `/home/garcon/.pi` | Pi credentials, settings, and native history |
 | `opencode-data` | `/home/garcon/.local/share/opencode` | OpenCode credentials and session database |
 | `opencode-state` | `/home/garcon/.local/state/opencode` | OpenCode runtime state |
@@ -190,7 +190,7 @@ Normal builds may reuse cached agent-installer layers. Run `docker compose build
 
 ## Agent And Git Setup
 
-Claude, Codex, and Antigravity login can be started from Settings. Antigravity stores a Google sign-in in the OS keyring, which a container may not provide; if the sign-in does not persist, start a session bus as described in [Antigravity](antigravity.md#authentication) or use `GEMINI_API_KEY`. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
+Claude, Codex, and Antigravity login can be started from Settings. A container may not provide an OS keyring; do not assume the Antigravity history volume also persists sign-in. See [Antigravity authentication](antigravity.md#authentication) for headless sign-in, Gemini API keys, and Agent Platform credentials. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
 
 ```bash
 docker compose exec garcon bash -l

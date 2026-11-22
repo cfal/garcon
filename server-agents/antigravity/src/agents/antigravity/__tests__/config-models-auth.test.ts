@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
-import { antigravityChildEnvironment, createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, normalize, relative } from 'node:path';
+import type { AgentEnvironmentReader, AgentLogger } from '@garcon/server-agent-interface';
+import { antigravityChildEnvironment, classifyAntigravityLaunchError, createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
 import {
+  antigravityLoginCommand,
   antigravityLoginEnvironment,
+  createAntigravityProbes,
   getAntigravityAuthStatus,
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
-import { antigravityCliFailure, parseAntigravityModels } from '../antigravity-models.ts';
+import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels } from '../antigravity-models.ts';
+import { createAntigravityAccount } from '../antigravity-account.ts';
+
+const silentLogger = { debug() {}, info() {}, warn() {}, error() {} } satisfies AgentLogger;
 
 function environment(values: Record<string, string>): AgentEnvironmentReader {
   return { get: (name) => values[name] };
@@ -14,15 +22,24 @@ function environment(values: Record<string, string>): AgentEnvironmentReader {
 
 function config(overrides: Partial<AntigravityConfig> = {}): AntigravityConfig {
   return {
-    binary: () => 'agy',
+    binary: () => process.execPath,
     apiKey: () => null,
-    hasApiKey: () => false,
     authMethod: () => 'oauth-personal',
     ...overrides,
   };
 }
 
 describe('Antigravity configuration', () => {
+  it.each(['EACCES', 'ENOEXEC', 'ELIBBAD', 'EBADARCH'])('reports a permanent executable failure for %s', code => {
+    const cause = Object.assign(new Error('Cannot execute binary'), { syscall: 'posix_spawn', code });
+    expect(classifyAntigravityLaunchError(cause)).toMatchObject({ code: 'BINARY_NOT_FOUND', retryable: false });
+  });
+
+  it.each(['EAGAIN', 'EMFILE', 'ENOMEM', 'ETXTBSY'])('preserves a temporary spawn error for %s', code => {
+    const cause = Object.assign(new Error('Cannot start process yet'), { syscall: 'posix_spawn', code });
+    expect(classifyAntigravityLaunchError(cause)).toBe(cause);
+  });
+
   it('prefers an explicit auth method, then an API key, then Google sign-in', () => {
     expect(resolveAuthMethod('oauth-business', true)).toBe('oauth-business');
     expect(resolveAuthMethod(null, true)).toBe('gemini-api-key');
@@ -30,18 +47,69 @@ describe('Antigravity configuration', () => {
     expect(() => resolveAuthMethod('password', false)).toThrow('GARCON_ANTIGRAVITY_AUTH_METHOD must be one of');
   });
 
-  it('reads the binary and credentials only when asked', () => {
-    const configured = createAntigravityConfig(environment({
-      GARCON_ANTIGRAVITY_BINARY: '/opt/agy/bin/agy',
-      GEMINI_API_KEY: 'synthetic-key',
-    }));
-    expect(configured.binary()).toBe('/opt/agy/bin/agy');
-    expect(configured.authMethod()).toBe('gemini-api-key');
-    expect(createAntigravityConfig(environment({})).binary()).toBe('agy');
+  it('resolves relative overrides and the current PATH against the executor, not the chat project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agy-bin-'));
+    const path = process.env.PATH;
+    try {
+      const binary = join(root, 'agy');
+      const configured = createAntigravityConfig(environment({
+        GARCON_ANTIGRAVITY_BINARY: relative(process.cwd(), binary), GEMINI_API_KEY: 'synthetic-key',
+      }));
+      expect(() => configured.binary()).toThrow('Install agy');
+      await symlink(process.execPath, binary);
+      expect(isAbsolute(configured.binary())).toBe(true);
+      expect(normalize(configured.binary())).toBe(binary);
+      expect(configured.authMethod()).toBe('gemini-api-key');
+      process.env.PATH = root;
+      expect(createAntigravityConfig(environment({})).binary()).toBe(binary);
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
 describe('parseAntigravityModels', () => {
+  it('does not offer Default when agy exists but the OS cannot launch it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agy-launch-'));
+    try {
+      const binary = join(root, 'agy');
+      await writeFile(binary, `#!${join(root, 'missing-interpreter')}\n`, { mode: 0o700 });
+      const config = createAntigravityConfig(environment({ GARCON_ANTIGRAVITY_BINARY: binary }));
+      expect(config.binary()).toBe(binary);
+      const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, silentLogger);
+      const signal = new AbortController().signal;
+      expect((await catalog.snapshot({ signal, strict: false })).models).toEqual([]);
+      await expect(catalog.snapshot({ signal, strict: true })).rejects.toMatchObject({ code: 'BINARY_NOT_FOUND' });
+      for (const authMethod of ['oauth-personal', 'gemini-api-key'] as const) {
+        const account = createAntigravityAccount({ ...config, authMethod: () => authMethod, apiKey: () => 'test-key' }, silentLogger);
+        try {
+          expect(await account.auth.status(signal)).toMatchObject({ authenticated: false, canReauth: false });
+          if (authMethod === 'oauth-personal') await expect(account.auth.launchLogin()).rejects.toMatchObject({ code: 'BINARY_NOT_FOUND' });
+        } finally { account.stop(); }
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('lists no models for an invalid auth method and reports its cause on strict discovery', async () => {
+    const config = createAntigravityConfig(environment({
+      GARCON_ANTIGRAVITY_BINARY: process.execPath, GARCON_ANTIGRAVITY_AUTH_METHOD: 'invalid-method',
+    }));
+    const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, silentLogger);
+    const signal = new AbortController().signal;
+    expect((await catalog.snapshot({ signal, strict: false })).models).toEqual([]);
+    await expect(catalog.snapshot({ signal, strict: true })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+  });
+
+  it.each(['', 'model-a\tModel A\ndefault\tOther'])('puts native Default first independently of discovered IDs: %j', async (stdout) => {
+    const catalog = createAntigravityCatalog(async () => ({ stdout, stderr: '', exitCode: 0 }), silentLogger);
+    const snapshot = await catalog.snapshot({ signal: new AbortController().signal, strict: false });
+    expect(snapshot.defaultModel).toBe('default');
+    expect(snapshot.models).toEqual([{ value: 'default', label: 'Default', supportsImages: true },
+      ...(stdout ? [{ value: 'model-a', label: 'Model A', supportsImages: true }] : [])]);
+  });
+
   it('reads tab-separated ids and labels and ignores status lines', () => {
     expect(parseAntigravityModels([
       'Fetching available models...',
@@ -55,6 +123,14 @@ describe('parseAntigravityModels', () => {
     ]);
   });
 
+  it('keeps Default usable for delegated start selection without confirming failed native discovery', async () => {
+    const catalog = createAntigravityCatalog(async () => ({ exitCode: 1, stdout: '', stderr: 'model listing failed' }), silentLogger);
+    const signal = new AbortController().signal;
+    expect((await catalog.snapshot({ strict: false, signal })).models.map(model => model.value)).toEqual(['default']);
+    expect((await catalog.snapshot({ strict: true, signal })).models.map(model => model.value)).toEqual(['default']);
+    await expect(catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal })).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+
   it('summarizes a signed-out failure without the progress line', () => {
     expect(antigravityCliFailure({
       stdout: '',
@@ -65,21 +141,33 @@ describe('parseAntigravityModels', () => {
 });
 
 describe('getAntigravityAuthStatus', () => {
-  it('reports an API key as environment authentication without spawning the CLI', async () => {
-    const status = await getAntigravityAuthStatus(config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
+  const noProbes = {
+    runModels: () => { throw new Error('Unexpected model listing'); },
+    authenticate: () => { throw new Error('Unexpected authentication probe'); },
+  };
+
+  it.each(['oauth-personal', 'gemini-api-key'])('does not offer sign-in or report ready for %s when agy is missing', async (method) => {
+    const status = await getAntigravityAuthStatus(createAntigravityConfig(environment({
+      GARCON_ANTIGRAVITY_BINARY: '/synthetic/uninstalled/agy', GARCON_ANTIGRAVITY_AUTH_METHOD: method, GEMINI_API_KEY: 'synthetic-key',
+    })), noProbes);
+    expect(status).toMatchObject({ authenticated: false, canReauth: false, detail: expect.stringContaining('Install agy') });
+  });
+
+  it('reports an API key as environment authentication without making a credential or model request', async () => {
+    const status = await getAntigravityAuthStatus(config({ apiKey: () => 'synthetic-key', authMethod: () => 'gemini-api-key' }), noProbes);
     expect(status).toEqual({ authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' });
   });
 
   it('reports an invalid auth-method setting instead of throwing', async () => {
     const status = await getAntigravityAuthStatus(config({
       authMethod: () => resolveAuthMethod('password', false),
-    }), { runModels: () => { throw new Error('must not run'); } });
+    }), noProbes);
     expect(status).toMatchObject({ authenticated: false, source: 'none' });
     expect(status.detail).toContain('GARCON_ANTIGRAVITY_AUTH_METHOD must be one of');
   });
 
   it('reports the configured API-key method as signed out without a key', async () => {
-    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'gemini-api-key' }), { runModels: () => { throw new Error('must not run'); } });
+    const status = await getAntigravityAuthStatus(config({ authMethod: () => 'gemini-api-key' }), noProbes);
     expect(status).toEqual({
       authenticated: false, canReauth: false, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.',
     });
@@ -87,7 +175,7 @@ describe('getAntigravityAuthStatus', () => {
 
   it('stops waiting on the shared probe when the caller aborts', async () => {
     const controller = new AbortController();
-    const pending = getAntigravityAuthStatus(config(), { runModels: () => new Promise(() => {}), signal: controller.signal });
+    const pending = getAntigravityAuthStatus(config(), { ...noProbes, headlessAuthenticate: false, runModels: () => new Promise(() => {}), signal: controller.signal });
     controller.abort(new Error('caller left'));
     await expect(pending).rejects.toThrow('caller left');
   });
@@ -95,28 +183,25 @@ describe('getAntigravityAuthStatus', () => {
   it('keeps the last probed status during a sign-in and ignores it for the API-key method', async () => {
     const signedIn = { authenticated: true, canReauth: true, label: 'Google', source: 'cli' as const };
     expect(await getAntigravityAuthStatus(config(), {
-      runModels: () => { throw new Error('must not run'); }, signInRunning: true, lastProbed: signedIn,
+      ...noProbes, signInRunning: true, lastProbed: signedIn,
     })).toEqual(signedIn);
-    expect(await getAntigravityAuthStatus(config({ hasApiKey: () => true, authMethod: () => 'gemini-api-key' }), {
-      runModels: () => { throw new Error('must not run'); }, signInRunning: true,
+    expect(await getAntigravityAuthStatus(config({ apiKey: () => 'synthetic-key', authMethod: () => 'gemini-api-key' }), {
+      ...noProbes, signInRunning: true,
     })).toMatchObject({ authenticated: true, source: 'environment' });
   });
 
   it('does not probe the CLI while an in-app sign-in is running', async () => {
     const status = await getAntigravityAuthStatus(config(), {
-      runModels: () => { throw new Error('must not run'); },
-      signInRunning: true,
+      ...noProbes, signInRunning: true,
     });
     expect(status).toMatchObject({ authenticated: false, detail: 'Sign-in in progress.' });
   });
 
   it('offers in-app sign-in only for the personal Google method', async () => {
-    const ok = async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 });
-    const mustNotRun = () => { throw new Error('must not run'); };
     expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
-      runModels: mustNotRun, authenticate: async () => {}, headlessAuthenticate: true,
+      ...noProbes, authenticate: async () => {}, headlessAuthenticate: true,
     })).toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
-    expect(await getAntigravityAuthStatus(config(), { runModels: ok, authenticate: mustNotRun }))
+    expect(await getAntigravityAuthStatus(config(), { ...noProbes, authenticate: async () => {}, headlessAuthenticate: true }))
       .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
   });
 
@@ -137,9 +222,9 @@ describe('getAntigravityAuthStatus', () => {
 
   it('checks an enterprise method with agy models where authenticate could open a browser', async () => {
     const status = await getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
+      ...noProbes,
       headlessAuthenticate: false,
       runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }),
-      authenticate: () => { throw new Error('must not run'); },
     });
     expect(status).toEqual({ authenticated: true, canReauth: false, label: 'oauth-business', source: 'cli' });
   });
@@ -147,6 +232,7 @@ describe('getAntigravityAuthStatus', () => {
   it('stops waiting on a shared enterprise probe when the status check is aborted', async () => {
     const controller = new AbortController();
     const pending = getAntigravityAuthStatus(config({ authMethod: () => 'oauth-business' }), {
+      ...noProbes,
       signal: controller.signal,
       authenticate: () => new Promise(() => {}),
       headlessAuthenticate: true,
@@ -155,11 +241,20 @@ describe('getAntigravityAuthStatus', () => {
     await expect(pending).rejects.toThrow('stopped');
   });
 
-  it('uses the CLI model listing as the signed-in check', async () => {
-    const signedIn = await getAntigravityAuthStatus(config(), { runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }) });
+  it('does not accept a model listing as proof of personal sign-in on a headless executor', async () => {
+    const status = await getAntigravityAuthStatus(config(), {
+      headlessAuthenticate: true,
+      runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }),
+      authenticate: async () => { throw new Error('Personal sign-in required'); },
+    });
+    expect(status).toMatchObject({ authenticated: false, canReauth: true, detail: 'Personal sign-in required' });
+  });
+
+  it('uses the CLI model listing where personal authenticate could open a browser', async () => {
+    const signedIn = await getAntigravityAuthStatus(config(), { ...noProbes, headlessAuthenticate: false, runModels: async () => ({ stdout: 'm\tM\n', stderr: '', exitCode: 0 }) });
     expect(signedIn).toMatchObject({ authenticated: true, source: 'cli' });
 
-    const signedOut = await getAntigravityAuthStatus(config(), { runModels: async () => ({
+    const signedOut = await getAntigravityAuthStatus(config(), { ...noProbes, headlessAuthenticate: false, runModels: async () => ({
       stdout: '',
       stderr: 'Error: Please sign in to view available models.',
       exitCode: 1,
@@ -175,6 +270,13 @@ describe('getAntigravityAuthStatus', () => {
 });
 
 describe('Antigravity login', () => {
+  it('does not launch personal sign-in for API-key or enterprise authentication', () => {
+    expect(antigravityLoginCommand(config())).toEqual([process.execPath, 'acp', '--login']);
+    for (const method of ['gemini-api-key', 'oauth-business', 'agent-platform'] as const) {
+      expect(() => antigravityLoginCommand(config({ authMethod: () => method }))).toThrow('requires oauth-personal');
+    }
+  });
+
   it('removes display variables so the CLI prints its sign-in link', () => {
     const previous = { DISPLAY: process.env.DISPLAY, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY };
     process.env.DISPLAY = ':0';

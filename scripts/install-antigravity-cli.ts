@@ -6,7 +6,8 @@
 //   export ANTIGRAVITY_BIN="$(bun scripts/install-antigravity-cli.ts)"
 
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, rename, rm } from 'node:fs/promises';
+import { constants, createReadStream } from 'node:fs';
+import { access, chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,14 +23,16 @@ export const ANTIGRAVITY_CLI_RELEASE = {
   binarySha512: 'fe899320c794f68ae843466b8644b210b225a47b55a12995a0e0d1cef66d205fe3888efd011abe57914e8c9391623a1ec729b6abaaf09ebc82ce149747fb5029',
 } as const;
 
-function sha512(bytes: Uint8Array): string {
-  return createHash('sha512').update(bytes).digest('hex');
+async function fileSha512(path: string): Promise<string> {
+  const hash = createHash('sha512');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
 }
 
-async function run(command: string[]): Promise<Uint8Array> {
+async function run(command: string[]): Promise<string> {
   const proc = Bun.spawn(command, { stdout: 'pipe', stderr: 'pipe' });
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).bytes(),
+    new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
@@ -37,43 +40,45 @@ async function run(command: string[]): Promise<Uint8Array> {
   return stdout;
 }
 
-export async function installAntigravityCli(cacheRoot: string): Promise<string> {
-  const release = ANTIGRAVITY_CLI_RELEASE;
+type CliRelease = Readonly<Record<keyof typeof ANTIGRAVITY_CLI_RELEASE, string>>;
+
+export async function installAntigravityCli(cacheRoot: string, release: CliRelease = ANTIGRAVITY_CLI_RELEASE): Promise<string> {
   if (`${process.platform}-${process.arch}` !== release.platform) {
     throw new Error(`The pinned Antigravity CLI is only installed for ${release.platform}.`);
   }
   const directory = join(cacheRoot, release.version);
   const binary = join(directory, 'agy');
-  if (await Bun.file(binary).exists()) {
-    if (sha512(await Bun.file(binary).bytes()) === release.binarySha512) return binary;
-    await rm(binary, { force: true });
+  if (await Bun.file(binary).exists() && await fileSha512(binary) === release.binarySha512) {
+    // Verified executables are usable even on read-only shared caches.
+    await access(binary, constants.X_OK).catch(() => chmod(binary, 0o755));
+    return binary;
   }
 
   await mkdir(directory, { recursive: true });
-  const archive = join(directory, 'cli.tar.gz');
-  const response = await fetch(release.url);
-  if (!response.ok) throw new Error(`Downloading ${release.url} failed with HTTP ${response.status}.`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const digest = sha512(bytes);
-  if (digest !== release.sha512) {
-    throw new Error(`Antigravity CLI archive SHA-512 mismatch: expected ${release.sha512}, received ${digest}.`);
-  }
-  await Bun.write(archive, bytes);
+  // Concurrent cold installs publish only complete, verified binaries by rename.
+  const staging = await mkdtemp(join(directory, '.install-'));
   try {
-    const members = new TextDecoder().decode(await run(['tar', '-tzf', archive])).trim().split('\n');
+    const archive = join(staging, 'cli.tar.gz');
+    const response = await fetch(release.url);
+    if (!response.ok) throw new Error(`Downloading ${release.url} failed with HTTP ${response.status}.`);
+    await Bun.write(archive, response);
+    const digest = await fileSha512(archive);
+    if (digest !== release.sha512) {
+      throw new Error(`Antigravity CLI archive SHA-512 mismatch: expected ${release.sha512}, received ${digest}.`);
+    }
+    const members = (await run(['tar', '-tzf', archive])).trim().split('\n');
     if (members.length !== 1 || members[0] !== release.member) {
       throw new Error(`Unexpected Antigravity CLI archive members: ${members.join(', ')}`);
     }
-    const staged = `${binary}.partial`;
-    const executable = await run(['tar', '-xOzf', archive, release.member]);
-    if (sha512(executable) !== release.binarySha512) {
+    const staged = join(staging, release.member);
+    await run(['tar', '-xzf', archive, '-C', staging, release.member]);
+    if (await fileSha512(staged) !== release.binarySha512) {
       throw new Error('The extracted Antigravity CLI does not match its pinned SHA-512.');
     }
-    await Bun.write(staged, executable);
     await chmod(staged, 0o755);
     await rename(staged, binary);
   } finally {
-    await rm(archive, { force: true });
+    await rm(staging, { recursive: true, force: true });
   }
   return binary;
 }

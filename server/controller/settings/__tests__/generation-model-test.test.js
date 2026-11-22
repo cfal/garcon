@@ -269,6 +269,11 @@ describe('testGenerationModel', () => {
         code: 'GENERATION_TEST_UNAVAILABLE',
         status: 503,
       },
+      {
+        failure: new AgentCallError('not-dispatched', 'Executor busy', 'EXECUTOR_BUSY'),
+        code: 'GENERATION_TEST_UNAVAILABLE',
+        status: 503,
+      },
     ];
 
     for (const testCase of cases) {
