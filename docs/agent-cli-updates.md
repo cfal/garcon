@@ -23,8 +23,14 @@ Settings > Providers -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&a
 - Everything runs on the executor that runs the CLI: PATH resolution, version
   probes, latest-version lookups, and the installer. The controller validates
   each status with `parseAgentCliUpdateStatus` and never interprets worker paths.
+- Installers, version probes, and lookups run with the executor's process
+  environment minus provider credentials (`ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `CODEX_API_KEY`), plus the CLI's
+  own `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Package install scripts never see
+  keys Garcon holds for its sessions.
 - A status check that fails for one agent is reported in `failures` for that
-  agent only. An unavailable executor fails the request.
+  agent only, including one that outlasts the controller's 25 second deadline.
+  An unavailable executor fails the request.
 - Starting an update that Garcon cannot run, such as a bundled or unmanaged
   install, answers 422 `OPERATION_UNSUPPORTED` with the reason.
 - While a run is active, the page polls every two seconds with `agent` set to
@@ -79,6 +85,13 @@ real path decides who owns it:
 - Running chats keep the process they started with. Claude drops its cached
   version check after a run, so the next session verifies the new binary
   against Garcon's minimum supported version.
+- Sessions are not held back during a run. A package manager replaces its
+  install in place, so a session started while npm, bun, pnpm, yarn, or
+  Homebrew is writing can fail to start; starting it again after the run
+  succeeds. The native installers switch versions atomically.
+- A start whose reply is lost, for example to a browser timeout, may still have
+  started the run, so the page reads that agent's status again instead of
+  assuming it did not.
 - In the Docker image, Claude Code is installed natively under
   `/home/garcon/.local`, outside the state volumes. An update applies to that
   container until it is recreated; rebuild the image to keep it.

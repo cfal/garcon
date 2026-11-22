@@ -18,9 +18,14 @@ const BEHIND: AgentCliUpdateStatus = {
 	run: IDLE,
 };
 
-function renderRow(status: AgentCliUpdateStatus | undefined, options: { failure?: string; starting?: boolean } = {}) {
+function renderRow(
+	status: AgentCliUpdateStatus | undefined,
+	options: { failure?: string; startError?: string; starting?: boolean } = {},
+) {
 	const onUpdate = vi.fn();
-	render(AgentCliUpdateRow, { agentName: 'Codex', status, failure: options.failure, starting: options.starting, onUpdate });
+	render(AgentCliUpdateRow, {
+		agentName: 'Codex', status, failure: options.failure, startError: options.startError, starting: options.starting, onUpdate,
+	});
 	return { onUpdate };
 }
 
@@ -61,6 +66,12 @@ describe('AgentCliUpdateRow', () => {
 	it('reports a failed status check', () => {
 		renderRow(undefined, { failure: 'codex --version timed out' });
 		expect(screen.getByRole('alert').textContent).toBe('CLI update check failed: codex --version timed out');
+	});
+
+	it('reports a refused start separately from the status check', () => {
+		renderRow({ ...BEHIND, canUpdate: false }, { startError: 'Garcon runs its bundled Codex CLI, which updates with Garcon.' });
+		expect(screen.getByRole('alert').textContent)
+			.toBe('Could not start the update: Garcon runs its bundled Codex CLI, which updates with Garcon.');
 	});
 
 	it('shows that an up-to-date CLI needs nothing', () => {

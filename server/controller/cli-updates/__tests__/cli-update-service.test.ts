@@ -97,3 +97,15 @@ test('rejects unknown agents and reports refusals with their HTTP status', async
     expect(await response.json()).toMatchObject({ errorCode: code });
   }
 });
+
+test('reports a check that outlasts the deadline as a failure without waiting for it', async () => {
+  const service = new AgentCliUpdateService(executors({
+    claude: updates(),
+    codex: updates({ status: () => new Promise(() => {}) }),
+  }), 50);
+  const started = Date.now();
+  const result = await service.statuses('local', { refresh: false });
+  expect(Date.now() - started).toBeLessThan(2_000);
+  expect(Object.keys(result.statuses)).toEqual(['claude']);
+  expect(Object.keys(result.failures)).toEqual(['codex']);
+});

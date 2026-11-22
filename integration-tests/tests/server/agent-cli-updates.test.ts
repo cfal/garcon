@@ -80,7 +80,7 @@ test(`Claude Code updates through its npm installer on its executor (${execution
     expect(settled.statuses.claude).toMatchObject({
       currentVersion: LATEST_VERSION,
       advisory: 'current',
-      run: { state: 'succeeded', message: `Updated Claude Code to ${LATEST_VERSION}.` },
+      run: { state: 'succeeded', message: `Updated Claude Code to ${LATEST_VERSION}. Running chats keep the previous version; new sessions use the update.` },
     });
 
     const installs = (await readInstallerRuns(fixture.executionDirs)).filter((run) => run.args.startsWith('install'));

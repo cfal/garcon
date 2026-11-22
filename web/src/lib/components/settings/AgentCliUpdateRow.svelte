@@ -15,12 +15,14 @@
 		agentName,
 		status,
 		failure,
+		startError,
 		starting = false,
 		onUpdate,
 	}: {
 		agentName: string;
 		status: AgentCliUpdateStatus | undefined;
 		failure: string | undefined;
+		startError: string | undefined;
 		starting?: boolean;
 		onUpdate: () => void;
 	} = $props();
@@ -83,7 +85,6 @@
 			class="text-xs break-words {view.outcome === 'succeeded' ? 'text-muted-foreground' : 'text-destructive'}"
 		>
 			{status.run.message}
-			{#if view.outcome === 'succeeded'}{m.settings_cli_update_new_sessions()}{/if}
 		</p>
 		{#if status.run.output && view.outcome !== 'succeeded'}
 			<Button variant="ghost" size="sm" class="h-auto px-0 text-xs" onclick={() => (showOutput = !showOutput)}>
@@ -115,5 +116,9 @@
 
 	{#if failure}
 		<p role="alert" class="text-xs text-destructive break-words">{m.settings_cli_update_error({ error: failure })}</p>
+	{/if}
+
+	{#if startError}
+		<p role="alert" class="text-xs text-destructive break-words">{m.settings_cli_update_start_error({ error: startError })}</p>
 	{/if}
 </div>

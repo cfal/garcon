@@ -1,3 +1,5 @@
+import { parseCliVersion } from '@garcon/server-agent-common/cli-update/cli-version';
+
 // The pinned scripted-model suite verifies --autocompact as well as the persistent protocol.
 const MINIMUM_CLAUDE_CLI_VERSION: readonly [number, number, number] = [2, 1, 238];
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
@@ -6,10 +8,12 @@ const MAX_VERSION_OUTPUT_BYTES = 16 * 1024;
 
 type CliVersion = readonly [number, number, number];
 
+// Shares the update service's parser so both read the same version from one binary.
 function parseClaudeCliVersion(output: string): CliVersion | null {
-  const match = output.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+  const version = parseCliVersion(output);
+  if (!version) return null;
+  const [major, minor, patch] = version.split('-')[0]!.split('.').map(Number);
+  return [major!, minor!, patch!];
 }
 
 function isVersionBefore(version: CliVersion, threshold: CliVersion): boolean {

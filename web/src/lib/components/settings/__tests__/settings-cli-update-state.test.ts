@@ -53,7 +53,7 @@ describe('SettingsCliUpdateState', () => {
 		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
 		const dispose = state.initialize();
 		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
-		expect(state.failureFor('codex')).toBe('codex was not found');
+		expect(state.checkFailureFor('codex')).toBe('codex was not found');
 		await state.checkForUpdates();
 		expect(reads).toEqual([{ executorId: EXECUTOR, refresh: false }, { executorId: EXECUTOR, refresh: true }]);
 		dispose();
@@ -116,9 +116,44 @@ describe('SettingsCliUpdateState', () => {
 		state.initialize();
 		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
 		await state.startUpdate('claude');
-		expect(state.failureFor('claude')).toBe('Update it with the tool that installed it.');
+		expect(state.startErrorFor('claude')).toBe('Update it with the tool that installed it.');
+		expect(state.checkFailureFor('claude')).toBeUndefined();
 		expect(state.isStarting('claude')).toBe(false);
 		expect(state.statusFor('claude')).toEqual(BEHIND);
+	});
+
+	it('finds a run whose start reply was lost', async () => {
+		const { api } = createApi([
+			{ statuses: { claude: BEHIND }, failures: {} },
+			{ statuses: { claude: RUNNING }, failures: {} },
+			{ statuses: { claude: SUCCEEDED }, failures: {} },
+		]);
+		api.startAgentCliUpdate.mockRejectedValueOnce(new Error('Request timed out'));
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
+		await state.startUpdate('claude');
+		await vi.waitFor(() => expect(state.statusFor('claude')?.run.state).toBe('running'));
+		expect(api.getAgentCliUpdates).toHaveBeenLastCalledWith(EXECUTOR, { refresh: false, agentIds: ['claude'] });
+		expect(state.startErrorFor('claude')).toBeUndefined();
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(state.statusFor('claude')).toEqual(SUCCEEDED);
+	});
+
+	it('keeps a started run when an earlier check answers after it', async () => {
+		let answerCheck!: (response: AgentCliUpdatesResponse) => void;
+		const { api } = createApi([{ statuses: { claude: BEHIND }, failures: {} }]);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
+		api.getAgentCliUpdates.mockImplementationOnce(() => new Promise((resolve) => { answerCheck = resolve; }));
+		const checking = state.checkForUpdates();
+		await state.startUpdate('claude');
+		answerCheck({ statuses: { claude: BEHIND }, failures: {} });
+		await checking;
+		expect(state.statusFor('claude')?.run.state).toBe('running');
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(api.getAgentCliUpdates).toHaveBeenLastCalledWith(EXECUTOR, { refresh: false, agentIds: ['claude'] });
 	});
 
 	it('ignores responses that arrive after it is destroyed', async () => {

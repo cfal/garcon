@@ -18,6 +18,10 @@ export class SettingsCliUpdateState {
 	readonly #agentOrder: readonly string[];
 	#lifecycleId = 0;
 	#loadGeneration = 0;
+	// Orders loads and starts; a load issued before an agent's latest start
+	// must not replace the status that start returned.
+	#sequence = 0;
+	#agentWrittenAt: Record<string, number> = {};
 	#pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	statusByAgent = $state<Record<string, AgentCliUpdateStatus>>({});
@@ -59,6 +63,7 @@ export class SettingsCliUpdateState {
 	destroy(): void {
 		this.#lifecycleId += 1;
 		this.#stopPolling();
+		this.#agentWrittenAt = {};
 		this.statusByAgent = {};
 		this.failureByAgent = {};
 		this.startErrorByAgent = {};
@@ -72,8 +77,12 @@ export class SettingsCliUpdateState {
 		return this.statusByAgent[agentId];
 	}
 
-	failureFor(agentId: string): string | undefined {
-		return this.startErrorByAgent[agentId] ?? this.failureByAgent[agentId];
+	checkFailureFor(agentId: string): string | undefined {
+		return this.failureByAgent[agentId];
+	}
+
+	startErrorFor(agentId: string): string | undefined {
+		return this.startErrorByAgent[agentId];
 	}
 
 	isStarting(agentId: string): boolean {
@@ -99,11 +108,14 @@ export class SettingsCliUpdateState {
 		try {
 			const status = await this.#api.startAgentCliUpdate(agentId, this.executorId);
 			if (lifecycleId !== this.#lifecycleId) return;
+			this.#agentWrittenAt[agentId] = ++this.#sequence;
 			this.statusByAgent = { ...this.statusByAgent, [agentId]: status };
 			this.#schedulePoll(lifecycleId);
 		} catch (error) {
 			if (lifecycleId !== this.#lifecycleId) return;
 			this.startErrorByAgent = { ...this.startErrorByAgent, [agentId]: errorMessage(error) };
+			// A request that timed out or lost its reply may still have started the run.
+			void this.#load({ refresh: false, agentIds: [agentId] }, lifecycleId);
 		} finally {
 			if (lifecycleId === this.#lifecycleId) this.startingByAgent = omit(this.startingByAgent, agentId);
 		}
@@ -112,13 +124,22 @@ export class SettingsCliUpdateState {
 	// A read limited to `agentIds` replaces only those agents' entries.
 	async #load(request: { refresh: boolean; agentIds?: readonly string[] }, lifecycleId: number): Promise<void> {
 		const generation = ++this.#loadGeneration;
+		const issuedAt = ++this.#sequence;
 		this.loading = true;
 		try {
 			const response = await this.#api.getAgentCliUpdates(this.executorId, request);
 			if (!this.#isCurrentLoad(generation, lifecycleId)) return;
-			const replaced = request.agentIds ?? [...Object.keys(this.statusByAgent), ...Object.keys(this.failureByAgent)];
-			this.statusByAgent = { ...omitAll(this.statusByAgent, replaced), ...response.statuses };
-			this.failureByAgent = { ...omitAll(this.failureByAgent, replaced), ...response.failures };
+			const current = (agentId: string) => issuedAt > (this.#agentWrittenAt[agentId] ?? 0);
+			const replaced = (request.agentIds ?? [...Object.keys(this.statusByAgent), ...Object.keys(this.failureByAgent)])
+				.filter(current);
+			this.statusByAgent = { ...omitAll(this.statusByAgent, replaced), ...pick(response.statuses, current) };
+			this.failureByAgent = { ...omitAll(this.failureByAgent, replaced), ...pick(response.failures, current) };
+			// A start whose reply failed is cleared once its run is seen.
+			for (const [agentId, status] of Object.entries(response.statuses)) {
+				if (current(agentId) && status.run.state === 'running') {
+					this.startErrorByAgent = omit(this.startErrorByAgent, agentId);
+				}
+			}
 			this.loadError = null;
 		} catch (error) {
 			if (!this.#isCurrentLoad(generation, lifecycleId)) return;
@@ -156,6 +177,10 @@ export class SettingsCliUpdateState {
 
 function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
 	return omitAll(record, [key]);
+}
+
+function pick<T>(record: Readonly<Record<string, T>>, keep: (key: string) => boolean): Record<string, T> {
+	return Object.fromEntries(Object.entries(record).filter(([key]) => keep(key)));
 }
 
 function omitAll<T>(record: Record<string, T>, keys: readonly string[]): Record<string, T> {

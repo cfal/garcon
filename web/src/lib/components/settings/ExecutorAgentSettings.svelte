@@ -96,7 +96,8 @@
 				<AgentCliUpdateRow
 					agentName={nativeSourceLabelFor(agentId)}
 					status={cliUpdates.statusFor(agentId)}
-					failure={cliUpdates.failureFor(agentId)}
+					failure={cliUpdates.checkFailureFor(agentId)}
+					startError={cliUpdates.startErrorFor(agentId)}
 					starting={cliUpdates.isStarting(agentId)}
 					onUpdate={() => void cliUpdates.startUpdate(agentId)}
 				/>

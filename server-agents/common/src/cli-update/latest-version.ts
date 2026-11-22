@@ -20,8 +20,8 @@ interface CacheEntry {
 }
 
 // Caches found versions for an hour and misses for a minute, sharing one
-// in-flight lookup per key. A lookup that throws is not cached; one that
-// yields something other than a version counts as a miss.
+// in-flight lookup per key. A lookup that throws reports no version and is not
+// cached; one that yields something other than a version counts as a miss.
 export class LatestVersionCache {
   readonly #entries = new Map<string, CacheEntry>();
   readonly #now: () => number;
@@ -40,7 +40,7 @@ export class LatestVersionCache {
       (version) => { entry.expiresAt = this.#now() + (version === null ? MISSING_TTL_MS : FOUND_TTL_MS); },
       () => { if (this.#entries.get(key) === entry) this.#entries.delete(key); },
     );
-    return entry.value;
+    return entry.value.catch(() => null);
   }
 
   clear(): void {

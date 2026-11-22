@@ -91,6 +91,8 @@ export class CliUpdateService implements AgentCliUpdates {
   // Taken when a run starts and reported until it finishes, so a status read
   // does not probe a binary mid-install.
   #runSnapshot: InstalledStatus | null = null;
+  // Shared by concurrent status reads, so each does not probe the binary again.
+  #inspection: Promise<InstalledStatus> | null = null;
 
   constructor(options: CliUpdateServiceOptions) {
     this.#options = options;
@@ -99,7 +101,13 @@ export class CliUpdateService implements AgentCliUpdates {
   async status(request: AgentCliUpdateStatusRequest): Promise<AgentCliUpdateStatus> {
     const cliLabel = this.#options.label;
     if (this.#runSnapshot) return { cliLabel, ...this.#runSnapshot, run: this.#run };
-    const status = await this.#inspect(request.refresh);
+    if (request.refresh || !this.#inspection) {
+      const inspection = this.#inspect(request.refresh).finally(() => {
+        if (this.#inspection === inspection) this.#inspection = null;
+      });
+      this.#inspection = inspection;
+    }
+    const status = await this.#inspection;
     request.signal?.throwIfAborted();
     return { cliLabel, ...(this.#runSnapshot ?? status), run: this.#run };
   }
@@ -114,7 +122,7 @@ export class CliUpdateService implements AgentCliUpdates {
 
   async #begin(): Promise<void> {
     const env = this.#options.environment();
-    const installation = await this.#resolve(env);
+    const { installation } = await this.#resolve(env);
     const action = installation.update;
     if (!action) throw new AgentIntegrationError('OPERATION_UNSUPPORTED', this.#manualMessage(installation, null), false);
     // The run installs the latest release, so the check that starts it bypasses the cache.
@@ -171,15 +179,18 @@ export class CliUpdateService implements AgentCliUpdates {
     } else if (latest ? (compareCliVersions(after, latest) ?? -1) < 0 : after === before) {
       this.#finish('unchanged', `The update command finished, but ${this.#options.label} still reports ${after}.`, output);
     } else {
-      this.#finish('succeeded', `Updated ${this.#options.label} to ${after}.`, output);
+      this.#finish(
+        'succeeded',
+        `Updated ${this.#options.label} to ${after}. Running chats keep the previous version; new sessions use the update.`,
+        output,
+      );
     }
   }
 
   async #inspect(refresh: boolean): Promise<InstalledStatus> {
     const env = this.#options.environment();
-    const installation = await this.#resolve(env);
+    const { target, installation } = await this.#resolve(env);
     if (!installation.paths) {
-      const target = await this.#options.target();
       return {
         installMethod: 'missing', installPath: null, currentVersion: null, latestVersion: null, advisory: 'unknown',
         updateCommand: null, canUpdate: false, checkedAt: this.#timestamp(),
@@ -219,15 +230,21 @@ export class CliUpdateService implements AgentCliUpdates {
   }
 
   // Garcon's bundled executable is reported like an installation it cannot update.
-  async #resolve(env: Record<string, string>): Promise<CliInstallation> {
+  async #resolve(env: Record<string, string>): Promise<{ target: CliUpdateTarget; installation: CliInstallation }> {
     const target = await this.#options.target();
     if (!target.bundled) {
-      return resolveCliInstallation(this.#options.definition, { command: target.command, env, platform: process.platform });
+      const installation = await resolveCliInstallation(this.#options.definition, {
+        command: target.command, env, platform: process.platform,
+      });
+      return { target, installation };
     }
     const real = await fs.realpath(target.command).catch(() => target.command);
     return {
-      method: 'bundled', paths: { resolved: target.command, real }, update: null, manualCommand: null,
-      latestVersion: { kind: 'none' },
+      target,
+      installation: {
+        method: 'bundled', paths: { resolved: target.command, real }, update: null, manualCommand: null,
+        latestVersion: { kind: 'none' },
+      },
     };
   }
 

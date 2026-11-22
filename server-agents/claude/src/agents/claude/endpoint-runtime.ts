@@ -37,7 +37,7 @@ export function buildClaudeHostEnvironment(
 }
 
 // The environment of a Claude CLI process Garcon starts outside a session,
-// such as login or an update. CLAUDECODE would mark it as nested in a session.
+// such as login. CLAUDECODE would mark it as nested in a session.
 export function buildClaudeProcessEnvironment(config: ClaudeConfig): Record<string, string> {
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {

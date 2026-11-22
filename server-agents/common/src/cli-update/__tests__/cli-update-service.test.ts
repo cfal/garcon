@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseAgentCliUpdateStatus, type AgentCliUpdateStatus } from '@garcon/common/agent-cli-update';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
@@ -95,7 +95,7 @@ test('updates the CLI and verifies the installed version', async () => {
   const started = await updates.startUpdate();
   expect(started.run).toMatchObject({ state: 'running', startedAt: '2026-11-20T00:00:00.000Z' });
   const status = await settled(updates);
-  expect(status.run).toMatchObject({ state: 'succeeded', message: 'Updated Synthetic CLI to 2.1.300.' });
+  expect(status.run).toMatchObject({ state: 'succeeded', message: 'Updated Synthetic CLI to 2.1.300. Running chats keep the previous version; new sessions use the update.' });
   expect(status.run.output).toContain('added 1 package');
   expect(status).toMatchObject({ currentVersion: '2.1.300', advisory: 'current' });
   expect(updated).toBe(1);
@@ -220,4 +220,21 @@ test('reports the snapshot taken before a run while the installer runs', async (
   expect(during).toMatchObject({ currentVersion: '2.1.238', run: { state: 'running' } });
   await writeFile(gate, 'release');
   expect((await settled(updates)).run.state).toBe('succeeded');
+});
+
+test('shares one inspection between concurrent status reads', async () => {
+  const calls = path.join(fixture.root, 'versions.log');
+  await fixture.writeScript(cli.real, `echo probe >> ${JSON.stringify(calls)}; cat ${JSON.stringify(cli.versionFile)}`);
+  await writeNpm({ latest: '2.1.300' });
+  const updates = service();
+  await Promise.all([updates.status({ refresh: false }), updates.status({ refresh: false })]);
+  expect((await readFile(calls, 'utf8')).trim().split('\n')).toHaveLength(1);
+});
+
+test('reports an unknown latest version when the lookup cannot run', async () => {
+  // An npm on PATH that the kernel cannot execute.
+  await writeFile(path.join(fixture.bin, 'npm'), new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0]));
+  await chmod(path.join(fixture.bin, 'npm'), 0o755);
+  const status = await service().status({ refresh: false });
+  expect(status).toMatchObject({ currentVersion: '2.1.238', latestVersion: null, advisory: 'unknown' });
 });

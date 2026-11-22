@@ -4,13 +4,15 @@ import {
   type AgentCliUpdateStatus,
   type AgentCliUpdatesResponse,
 } from '../../../common/agent-cli-update.js';
+import { waitAbortably } from '../../common/abortable-wait.js';
 import { DomainError } from '../../common/domain-error.js';
 import { errorMessage } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 
 const logger = createLogger('cli-updates');
 
-// A status check probes the CLI and may ask its installer for the latest release.
+// A status check probes the CLI and may ask its installer for the latest release;
+// the controller answers before a browser request's 30 second limit.
 const STATUS_TIMEOUT_MS = 25_000;
 
 interface CliUpdateSource {
@@ -35,20 +37,25 @@ export interface CliUpdateStatusOptions {
 // integration error, which the HTTP layer reports as 422.
 export class AgentCliUpdateService {
   readonly #executors: CliUpdateExecutors;
+  readonly #statusTimeoutMs: number;
 
-  constructor(executors: CliUpdateExecutors) {
+  constructor(executors: CliUpdateExecutors, statusTimeoutMs = STATUS_TIMEOUT_MS) {
     this.#executors = executors;
+    this.#statusTimeoutMs = statusTimeoutMs;
   }
 
   async statuses(executorId: string, options: CliUpdateStatusOptions): Promise<AgentCliUpdatesResponse> {
-    const timeout = AbortSignal.timeout(STATUS_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(this.#statusTimeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     const sources = this.#executors.integrationsFor(executorId).list().flatMap((integration) => (
       integration.cliUpdates && (!options.agentIds || options.agentIds.includes(integration.descriptor.id))
         ? [{ agentId: integration.descriptor.id, updates: integration.cliUpdates }]
         : []
     ));
-    const results = await Promise.allSettled(sources.map(({ updates }) => updates.status({ refresh: options.refresh, signal })));
+    // Stops waiting at the deadline even when a Local check has not yet observed its signal.
+    const results = await Promise.allSettled(sources.map(({ updates }) => (
+      waitAbortably(updates.status({ refresh: options.refresh, signal }), signal)
+    )));
     const statuses: Record<string, AgentCliUpdateStatus> = {};
     const failures: Record<string, string> = {};
     results.forEach((result, index) => {
