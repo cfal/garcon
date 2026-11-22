@@ -111,13 +111,12 @@ async function findInDirectory(
   for await (const entry of directoryEntries(directory)) {
     if (!entry.name.endsWith('.jsonl')) continue;
     const nativeName = /^\d{4}-\d\d-\d\dT[\d-]+Z_(.+)\.jsonl$/.exec(entry.name);
-    if (nativeName && nativeName[1] !== sessionId) continue;
-    const named = entry.name.endsWith(`_${sessionId}.jsonl`);
+    // The filename selects which errors to report; only the header proves identity after a rename.
+    const named = nativeName ? nativeName[1] === sessionId : entry.name.endsWith(`_${sessionId}.jsonl`);
     if (!entry.isFile()) {
       if (named) throw new Error('Pi transcript source is not a regular file');
       continue;
     }
-    // Standard filenames contain their immutable ID. Renamed files need only their header.
     const candidate = path.join(directory, entry.name);
     let header: unknown;
     try {

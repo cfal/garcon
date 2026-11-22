@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   assistantContents,
@@ -153,7 +153,7 @@ describe('scripted Pi persistence', () => {
     }, withScriptedPi());
   }, 120_000);
 
-  test('restarts empty after a crash and resumes the session on the next turn', async () => {
+  test('restarts empty after a crash and resumes a renamed session on the next turn', async () => {
     const testEnvironment = requireEnvironment();
     const firstReply = marker('CRASH_FIRST_REPLY');
     const secondReply = marker('CRASH_SECOND_REPLY');
@@ -176,6 +176,7 @@ describe('scripted Pi persistence', () => {
         afterIndex: firstCursor,
       });
 
+      const native = await piNativeSession(fixture, chatId);
       await fixture.crashAndRestartGarcon();
 
       // Execution state restarts empty: no processing ghost for the crashed chat.
@@ -185,6 +186,8 @@ describe('scripted Pi persistence', () => {
         (entry) => entry.id === chatId,
       )?.isProcessing).toBe(false);
 
+      const archived = join(dirname(native.path), '2026-01-01T00-00-00-000Z_archived.jsonl');
+      await rename(native.path, archived);
       const secondCursor = fixture.client.markEvents();
       const second = await fixture.client.runChat(scriptedPiRunRequest({
         chatId,
@@ -200,6 +203,8 @@ describe('scripted Pi persistence', () => {
       const assistants = assistantContents((await fixture.client.getMessages(chatId)).messages);
       expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
       expect(assistants.some((content) => content.includes(secondReply))).toBe(true);
+      expect(await readFile(archived, 'utf8')).toContain(secondReply);
+      expect(await Bun.file(native.path).exists()).toBe(false);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 120_000);

@@ -42,8 +42,10 @@ test('resolves env, project and global session directories in order, including r
   expect(await lookup()).toBeNull();
   const timestamp = '2026-01-01T00-00-00-000Z';
   await put(path.join(explicitDir, `${timestamp}_other_test.jsonl`), { ...projectHeader, id: 'other_test' });
-  const explicit = await put(path.join(explicitDir, `${timestamp}_test.jsonl`), projectHeader);
-  expect(await lookup()).toBe(explicit);
+  const archived = await put(path.join(explicitDir, `${timestamp}_archived.jsonl`), projectHeader);
+  expect(await lookup()).toBe(archived);
+  await put(path.join(explicitDir, `${timestamp}_test.jsonl`), projectHeader);
+  await expect(lookup()).rejects.toThrow('duplicate');
 });
 
 test('ignores invalid project settings and never imports another project from a shared directory', async () => {
