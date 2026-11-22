@@ -20,43 +20,26 @@
 	import ArrowDownAZ from '@lucide/svelte/icons/arrow-down-a-z';
 	import ArrowDownZA from '@lucide/svelte/icons/arrow-down-z-a';
 	import Clock from '@lucide/svelte/icons/clock';
-	import type { GitWorktreeItem, GitWorktreeCreation } from '$lib/api/git.js';
+	import type { GitWorktreeCreation } from '$lib/api/git.js';
+	import type { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 	import { getLocale } from '$lib/paraglide/runtime.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getOptionalTransientLayers } from '$lib/context';
+	import { getExecutors, getNotifications, getOptionalTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import GitWorktreePickerList from './GitWorktreePickerList.svelte';
 	import { GitWorktreePickerState } from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
-		worktrees: GitWorktreeItem[];
-		contextKey?: string;
-		catalogContextKey?: string | null;
+		session: Omit<WorktreePickerSession, 'isOpen' | 'open'>;
 		description?: string;
-		isLoading: boolean;
-		isCreating: boolean;
-		loadError: string | null;
-		createError: string | null;
-		onSelect: (worktreePath: string) => void;
-		onCreate: (creation: GitWorktreeCreation) => void;
-		onRefresh: () => void;
-		onClose: () => void;
 	}
 
-	let {
-		worktrees,
-		contextKey = '',
-		catalogContextKey = '',
-		description = '',
-		isLoading,
-		isCreating,
-		loadError,
-		createError,
-		onSelect,
-		onCreate,
-		onRefresh,
-		onClose,
-	}: Props = $props();
+	let { session, description = '' }: Props = $props();
+	const contextKey = $derived(session.contextKey);
+	const worktrees = $derived(session.worktrees);
+	const isCreating = $derived(session.isCreating);
+	const isLoading = $derived(session.isLoading);
+	const loadError = $derived(session.loadError);
 	const picker = new GitWorktreePickerState({
 		get worktrees() {
 			return worktrees;
@@ -68,21 +51,23 @@
 	const componentId = $props.id();
 	const listboxId = `${componentId}-worktrees`;
 	const transientLayers = getOptionalTransientLayers();
+	const notifications = getNotifications();
+	const executors = getExecutors();
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let createTarget = $state<string | null>(null);
 	let submitted = $state(false);
 	let showAdvanced = $state(false);
 	const createOpen = $derived(createTarget === contextKey);
-	const available = $derived(catalogContextKey !== null);
-	const canUseGit = $derived(available && !isCreating && !isLoading);
-	const catalogKey = $derived(available ? JSON.stringify([contextKey, catalogContextKey]) : null);
-	let previousCatalogKey = untrack(() => catalogKey);
-	// Reconnects invalidate the repository catalog, not the user's draft.
+	const available = $derived(session.catalogContextKey !== null);
+	const canUseGit = $derived(session.canUseGit);
 	$effect(() => {
-		if (previousCatalogKey === catalogKey) return;
-		if (available && isCreating) return;
-		previousCatalogKey = catalogKey;
-		if (available) untrack(onRefresh);
+		const displayed = session;
+		return () => displayed.close();
+	});
+	$effect(() => {
+		void contextKey;
+		void session.catalogContextKey;
+		untrack(() => void session.syncCatalog());
 	});
 	const dialogHeight = $derived.by(() => {
 		if (!createOpen) return 'h-[min(36rem,calc(var(--app-height)-1rem))]';
@@ -131,20 +116,29 @@
 		if (event.key !== 'Enter') return;
 		event.preventDefault();
 		const selected = picker.selectedWorktree;
-		if (selected && activeOptionId) onSelect(selected.path);
+		if (selected && activeOptionId) session.select(selected.path);
 	}
 
 	function backToList(): void {
 		if (isCreating) return;
 		createTarget = null;
-		if ((loadError || (submitted && createError)) && canUseGit) onRefresh();
 		void tick().then(() => filterInputRef?.focus());
 	}
 
 	function selectVisibleWorktree(worktreePath: string): void {
 		if (!canUseGit) return;
 		const worktree = picker.visibleWorktrees.find((item) => item.path === worktreePath);
-		if (worktree && !worktree.isPathMissing) onSelect(worktreePath);
+		if (worktree && !worktree.isPathMissing) session.select(worktreePath);
+	}
+
+	async function createWorktree(creation: GitWorktreeCreation): Promise<void> {
+		if (!createOpen || !canUseGit) return;
+		submitted = true;
+		const notice = await session.create(creation);
+		if (!notice) return;
+		const origin = `${executors.label(notice.target.executorId)}: ${notice.target.projectPath}`;
+		if ('error' in notice.result) notifications.error(`${origin}: ${notice.result.error}`);
+		else notifications.info(`${origin}: ${m.git_worktree_created_at({ path: notice.result.createdPath })}`);
 	}
 
 	function openCreateForm(): void {
@@ -158,7 +152,7 @@
 <Dialog.Root
 	open={true}
 	onOpenChange={(open) => {
-		if (!open) onClose();
+		if (!open) session.close();
 	}}
 >
 	<Dialog.Content
@@ -181,7 +175,7 @@
 					{#if !createOpen}
 						<button
 							type="button"
-							onclick={onRefresh}
+							onclick={() => void session.refresh()}
 							disabled={!canUseGit}
 							class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
 							title={m.workspace_worktree_refresh()}
@@ -192,7 +186,7 @@
 					{/if}
 					<button
 						type="button"
-						onclick={onClose}
+						onclick={() => session.close()}
 						class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						aria-label={m.share_dialog_close()}
 					>
@@ -219,7 +213,7 @@
 						<span class="min-w-0 flex-1 break-words text-destructive">{loadError}</span>
 						<button
 							type="button"
-							onclick={onRefresh}
+							onclick={() => void session.refresh()}
 							disabled={!canUseGit}
 							class="shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
 						>
@@ -328,13 +322,9 @@
 						{description}
 						{isCreating}
 						{canUseGit}
-						errorMessage={submitted ? createError : null}
+						result={submitted ? session.createResult : null}
 						onBack={backToList}
-						onCreate={(creation) => {
-							if (!createOpen || !canUseGit) return;
-							submitted = true;
-							onCreate(creation);
-						}}
+						onCreate={createWorktree}
 					/>
 				</div>
 			{/if}

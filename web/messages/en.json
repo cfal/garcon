@@ -3002,6 +3002,7 @@
 	"git_worktree_new_branch_base": "Base for new branches",
 	"git_worktree_choose_location": "Choose a location in Advanced.",
 	"git_worktree_create_action": "Create worktree",
+	"git_worktree_created_at": "Worktree created at {path}.",
 	"common_creating": "Creating...",
 	"executors_label": "Executor",
 	"common_unavailable": "Unavailable",

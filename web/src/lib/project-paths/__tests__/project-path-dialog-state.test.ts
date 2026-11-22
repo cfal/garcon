@@ -65,7 +65,7 @@ describe('ProjectPathDialogState', () => {
 		dialog.open('/worker/project', remote.id);
 		const listing = Promise.withResolvers<{ worktrees: GitWorktreeItem[] }>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
-		const loading = dialog.loadWorktrees();
+		const loading = dialog.worktreePicker.open();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
 			expect.any(Object),
@@ -73,11 +73,13 @@ describe('ProjectPathDialogState', () => {
 		executors.applySnapshot([localExecutor, { ...remote, instanceId: 'replacement' }]);
 		listing.resolve({ worktrees: [makeWorktree('/worker/old', 'old')] });
 		await loading;
-		expect(dialog.worktrees).toEqual([]);
+		expect(dialog.worktreePicker.worktrees).toEqual([]);
 
 		const creation = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = dialog.createWorktree({ worktreePath: '/worker/feature', branch: 'feature' });
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValueOnce({ worktrees: [] });
+		await dialog.worktreePicker.syncCatalog();
+		const creating = dialog.worktreePicker.create({ worktreePath: '/worker/feature', branch: 'feature' });
 		dialog.open('/local/project', 'local');
 		creation.resolve({ success: true, worktreePath: '/worker/feature' });
 		await creating;

@@ -157,15 +157,25 @@ test('repository reconnect preserves the worktree result and filter focus', asyn
     const create = page.getByRole('dialog', { name: 'New worktree', exact: true });
     const name = create.getByRole('textbox', { name: /branch name/i });
     const message = 'Worktree outcome unknown; inspect the repository.';
-    await page.route('**/api/v1/git/worktrees/create', route => route.fulfill({
-      status: 503, json: { error: message, errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN' },
-    }));
-    await name.fill('keyboard-reconnect');
-    await name.press('Enter');
+    const dispatched = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let creates = 0;
+    await page.route('**/api/v1/git/worktrees/create', async route => {
+      creates++;
+      dispatched.resolve();
+      await release.promise;
+      await route.fulfill({ status: 503, json: { error: message, errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN' } });
+    });
     const alert = create.getByRole('alert').filter({ hasText: message });
-    await alert.waitFor();
-    await setEnabled(false);
-    await create.getByText('Executor unavailable').waitFor();
+    try {
+      await name.fill('keyboard-reconnect');
+      await name.press('Enter');
+      await dispatched.promise;
+      await setEnabled(false);
+      await create.getByText('Executor unavailable').waitFor();
+      release.resolve();
+      await browserExpect(alert).toBeVisible();
+    } finally { release.resolve(); }
     await setEnabled(true);
     await browserExpect(create.getByRole('button', { name: 'Create worktree' })).toBeEnabled({ timeout: 30_000 });
     const errorRetained = await alert.isVisible();
@@ -180,7 +190,7 @@ test('repository reconnect preserves the worktree result and filter focus', asyn
     expect(await filter.inputValue()).toBe('main');
     const filterFocused = await filter.evaluate(element => document.activeElement === element);
     consumeExpectedBrowserErrors(['console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
-    expect({ errorRetained, filterFocused }).toEqual({ errorRetained: true, filterFocused: true });
+    expect({ errorRetained, filterFocused, creates }).toEqual({ errorRetained: true, filterFocused: true, creates: 1 });
   }, undefined, remoteOptions);
 }, 120_000);
 

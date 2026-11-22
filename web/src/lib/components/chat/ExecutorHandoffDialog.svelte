@@ -234,20 +234,8 @@
 				</Button>
 			</Dialog.Footer>
 		</form>
-		{#if destination.worktreePickerOpen}
-			<GitWorktreePickerModal
-				contextKey={JSON.stringify([executorId, destination.nonblankPath])}
-				catalogContextKey={destination.gitAvailable ? executors.gitContextKey(executorId) : null}
-				worktrees={destination.worktrees}
-				isLoading={destination.isLoadingWorktrees}
-				isCreating={destination.isCreatingWorktree}
-				loadError={destination.worktreeLoadError}
-				createError={destination.worktreeCreateError}
-				onSelect={(path) => destination.selectWorktree(path)}
-				onCreate={(creation) => destination.createWorktree(creation)}
-				onRefresh={() => void destination.loadWorktrees()}
-				onClose={() => destination.closeWorktreePicker()}
-			/>
+		{#if destination.worktreePicker.isOpen}
+			<GitWorktreePickerModal session={destination.worktreePicker} />
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

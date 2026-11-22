@@ -3,6 +3,7 @@
 	import { setTransientLayers } from '$lib/context';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
+	import { pickerFixture } from './worktree-picker-fixture.js';
 	import GitWorktreePickerModal from '../GitWorktreePickerModal.svelte';
 
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
@@ -19,7 +20,7 @@
 
 {#if isOpen}
 	<GitWorktreePickerModal
-		worktrees={[
+		session={pickerFixture({ worktrees: [
 			{
 				name: 'main',
 				path: '/workspace/main',
@@ -29,14 +30,6 @@
 				isPathMissing: false,
 				lastModifiedAt: '2026-07-15T10:00:00.000Z',
 			},
-		]}
-		isLoading={false}
-		isCreating={false}
-		loadError={null}
-		createError={null}
-		onSelect={() => {}}
-		onCreate={() => {}}
-		onRefresh={() => {}}
-		onClose={() => (isOpen = false)}
+		], close: () => { isOpen = false; } })}
 	/>
 {/if}

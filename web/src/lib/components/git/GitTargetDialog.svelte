@@ -3,7 +3,7 @@
 	// only the pending path; the active target changes after OK.
 
 	import { onDestroy, untrack } from 'svelte';
-	import { getExecutors, getNotifications } from '$lib/context';
+	import { getExecutors } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
 	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
@@ -39,13 +39,8 @@
 	}: GitTargetDialogProps = $props();
 
 	const executors = getExecutors();
-	const notifications = getNotifications();
 	const executorContextKey = $derived(executors.gitContextKey(executorId));
 	const dialog = new GitTargetDialogState({
-		onMutationError: (error, target) =>
-			notifications.error(
-				`${executors.label(target.executorId)}: ${target.projectPath}: ${error instanceof Error ? error.message : String(error)}`,
-			),
 		get executorId() {
 			return executorId;
 		},
@@ -105,20 +100,8 @@
 	}
 </script>
 
-{#if dialog.worktreePickerOpen}
-	<GitWorktreePickerModal
-		contextKey={JSON.stringify([executorId, dialog.nonblankPath])}
-		catalogContextKey={executors.gitAvailable(executorId) ? executorContextKey : null}
-		worktrees={dialog.worktrees}
-		isLoading={dialog.isLoadingWorktrees}
-		isCreating={dialog.isCreatingWorktree}
-		loadError={dialog.worktreeLoadError}
-		createError={dialog.worktreeCreateError}
-		onSelect={(path) => dialog.selectWorktree(path)}
-		onCreate={(creation) => dialog.createWorktree(creation)}
-		onRefresh={() => dialog.loadWorktrees()}
-		onClose={() => dialog.closeWorktreePicker()}
-	/>
+{#if dialog.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={dialog.worktreePicker} />
 {:else}
 	<Dialog.Root
 		open={true}
@@ -168,7 +151,6 @@
 							}}
 							oninput={() => {
 								dialog.validationError = null;
-								dialog.worktreeLoadError = null;
 							}}
 							onkeydown={(event) => {
 								if (event.key === 'Enter') {

@@ -117,7 +117,7 @@ describe('GitTargetDialog', () => {
 		expect(notifications.items[0].message).toBe(
 			`${remote.label}: /workspace/repo: Worktree creation outcome unknown`,
 		);
-		expect(screen.queryByText('Worktree creation outcome unknown')).toBeNull();
+		expect(screen.getByRole('alert').textContent).toBe('Worktree creation outcome unknown');
 	});
 
 	it('retains remote worktree creation through unrelated executor snapshot changes', async () => {

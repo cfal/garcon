@@ -4,6 +4,7 @@
 	import type { GitWorktreeCreation, GitWorktreeItem } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
+	import type { WorktreeCreateResult } from '$lib/git/targets/worktree-picker-session.svelte.js';
 	import GitNameField from './GitNameField.svelte';
 
 	interface Props {
@@ -13,7 +14,7 @@
 		description: string;
 		isCreating: boolean;
 		canUseGit: boolean;
-		errorMessage: string | null;
+		result: WorktreeCreateResult | null;
 		onBack: () => void;
 		onCreate: (creation: GitWorktreeCreation) => void;
 	}
@@ -24,7 +25,7 @@
 		description,
 		isCreating,
 		canUseGit,
-		errorMessage,
+		result,
 		onBack,
 		onCreate,
 	}: Props = $props();
@@ -39,7 +40,9 @@
 	const effectivePath = $derived(pathOverride.trim() ? pathOverride : defaultPath);
 	const name = $derived(branchName.trim());
 	const baseRef = $derived(baseRefOverride.trim() || undefined);
-	const canCreate = $derived(Boolean(name && effectivePath) && canUseGit && !generating);
+	const created = $derived(result !== null && 'createdPath' in result);
+	const readOnly = $derived(isCreating || created);
+	const canCreate = $derived(Boolean(name && effectivePath) && canUseGit && !readOnly && !generating);
 	const currentBranch = $derived(worktrees.find((worktree) => worktree.isCurrent)?.branch);
 	const defaultBase = $derived(currentBranch && currentBranch !== '(detached)' ? currentBranch : 'HEAD');
 	const id = $props.id();
@@ -74,7 +77,7 @@
 			bind:generating
 			{contextKey}
 			{description}
-			disabled={isCreating}
+			disabled={readOnly}
 			placeholder={m.workspace_worktree_branch_name_placeholder()}
 			onChange={(value, origin) => {
 				branchName = value;
@@ -112,7 +115,7 @@
 					<input
 						id={id + '-path'}
 						bind:value={pathOverride}
-						readonly={isCreating}
+						readonly={readOnly}
 						placeholder={defaultPath || m.workspace_worktree_path_override_placeholder()}
 						class={fieldClass}
 					/>
@@ -122,15 +125,17 @@
 					<input
 						id={id + '-base'}
 						bind:value={baseRefOverride}
-						readonly={isCreating}
+						readonly={readOnly}
 						placeholder={m.workspace_worktree_base_ref_placeholder()}
 						class={fieldClass}
 					/>
 				</label>
 			</div>
 		{/if}
-		{#if errorMessage}
-			<p role="alert" class="text-sm text-destructive">{errorMessage}</p>
+		{#if result && 'createdPath' in result}
+			<p role="status" class="break-words text-sm">{m.git_worktree_created_at({ path: result.createdPath })}</p>
+		{:else if result && 'error' in result}
+			<p role="alert" class="text-sm text-destructive">{result.error}</p>
 		{/if}
 	</div>
 	<div class="flex shrink-0 justify-between gap-3 border-t border-border px-4 py-3">

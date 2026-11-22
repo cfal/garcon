@@ -583,10 +583,10 @@ describe('NewChatFormState', () => {
 		expect(formState.firstMessage).toBe('Keep this draft');
 		formState.handlePathFocus();
 		await formState.handleTabCompletion();
-		formState.openWorktreeModal();
-		await formState.loadWorktrees();
+		await formState.worktreePicker.open();
+		await formState.worktreePicker.refresh();
 		expect(formState.showBrowser).toBe(false);
-		expect(formState.worktreeModalOpen).toBe(false);
+		expect(formState.worktreePicker.isOpen).toBe(false);
 		expect(browseDirectory).not.toHaveBeenCalled();
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
@@ -652,9 +652,9 @@ describe('NewChatFormState', () => {
 		await formState.handleTabCompletion();
 		expect(browseDirectory).toHaveBeenLastCalledWith('/same', undefined, executorId);
 		expect(formState.projectPath).toBe('/same/remote/');
-		formState.openWorktreeModal();
-		await formState.loadWorktrees();
-		expect(formState.worktreeModalOpen).toBe(false);
+		await formState.worktreePicker.open();
+		await formState.worktreePicker.refresh();
+		expect(formState.worktreePicker.isOpen).toBe(false);
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
 	});
@@ -669,7 +669,7 @@ describe('NewChatFormState', () => {
 		formState.projectPath = '/worker/project';
 		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
-		const loading = formState.loadWorktrees();
+		const loading = formState.worktreePicker.open();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
 			expect.any(Object),
@@ -689,15 +689,20 @@ describe('NewChatFormState', () => {
 			],
 		});
 		await loading;
-		expect(formState.worktreeItems).toEqual([]);
+		expect(formState.worktreePicker.worktrees).toEqual([]);
 
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = formState.createWorktree({ worktreePath: '/worker/feature', branch: 'feature' });
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValueOnce({ worktrees: [] });
+		await formState.worktreePicker.syncCatalog();
+		const creating = formState.worktreePicker.create({ worktreePath: '/worker/feature', branch: 'feature' });
 		formState.selectExecutor('local');
 		formState.projectPath = '/local/draft';
 		creation.resolve({ success: true, worktreePath: '/worker/feature' });
-		await expect(creating).resolves.toBe(false);
+		await expect(creating).resolves.toEqual({
+			target: { executorId: remote.id, projectPath: '/worker/project' },
+			result: { createdPath: '/worker/feature' },
+		});
 		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
 			{ worktreePath: '/worker/feature', branch: 'feature' },
@@ -717,13 +722,13 @@ describe('NewChatFormState', () => {
 			.mockImplementationOnce(() => second.promise);
 
 		formState.projectPath = '/workspace/repo-a';
-		const firstLoad = formState.loadWorktrees();
-		formState.closeWorktreeModal();
+		const firstLoad = formState.worktreePicker.open();
+		formState.worktreePicker.close();
 		expect(firstSignal?.aborted).toBe(true);
-		expect(formState.isLoadingWorktrees).toBe(false);
+		expect(formState.worktreePicker.isLoading).toBe(false);
 
 		formState.projectPath = '/workspace/repo-b';
-		const secondLoad = formState.loadWorktrees();
+		const secondLoad = formState.worktreePicker.open();
 		second.resolve({
 			worktrees: [
 				{
@@ -754,8 +759,8 @@ describe('NewChatFormState', () => {
 		});
 		await firstLoad;
 
-		expect(formState.worktreeItems.map((worktree) => worktree.path)).toEqual(['/workspace/repo-b']);
-		expect(formState.isLoadingWorktrees).toBe(false);
+		expect(formState.worktreePicker.worktrees.map((worktree) => worktree.path)).toEqual(['/workspace/repo-b']);
+		expect(formState.worktreePicker.isLoading).toBe(false);
 	});
 
 	it('loads startup defaults from server settings', async () => {

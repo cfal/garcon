@@ -155,7 +155,7 @@
 				error: startup.validationStatus === 'invalid' ? startup.validationError : null,
 				worktree:
 					startup.gitAvailable && startup.gitRepoStatus === 'git'
-						? { disabled: startup.isUpdatingPinnedPath, onOpen: () => startup.openWorktreeModal() }
+						? { disabled: startup.isUpdatingPinnedPath, onOpen: () => startup.worktreePicker.open() }
 						: undefined,
 			}}
 		>
@@ -289,21 +289,6 @@
 	</ScheduledPromptField>
 </div>
 
-{#if startup.worktreeModalOpen}
-	<GitWorktreePickerModal
-		contextKey={JSON.stringify([startup.executorId, startup.nonblankPath])}
-		catalogContextKey={startup.gitAvailable ? startup.pathContextKey : null}
-		description={prompt}
-		worktrees={startup.worktreeItems}
-		isLoading={startup.isLoadingWorktrees}
-		isCreating={startup.isCreatingWorktree}
-		loadError={startup.worktreeLoadError}
-		createError={startup.worktreeCreateError}
-		onSelect={(path) => startup.selectWorktree(path)}
-		onCreate={(creation) => startup.createWorktree(creation)}
-		onRefresh={() => {
-			void startup.loadWorktrees();
-		}}
-		onClose={() => startup.closeWorktreeModal()}
-	/>
+{#if startup.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={startup.worktreePicker} description={prompt} />
 {/if}

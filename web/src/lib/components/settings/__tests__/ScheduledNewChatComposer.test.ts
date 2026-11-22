@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
+import type { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
@@ -51,17 +52,7 @@ function makeStartup(modelSelectionError: string | null = null, executorId = 'lo
 		toggleTagInput: vi.fn(),
 		addTag: vi.fn(() => true),
 		removeTag: vi.fn(),
-		openWorktreeModal: vi.fn(),
-		worktreeModalOpen: false,
-		worktreeItems: [],
-		isLoadingWorktrees: false,
-		isCreatingWorktree: false,
-		worktreeCreateError: null,
-		worktreeLoadError: null,
-		selectWorktree: vi.fn(),
-		createWorktree: vi.fn(),
-		loadWorktrees: vi.fn(),
-		closeWorktreeModal: vi.fn(),
+		worktreePicker: { isOpen: false, open: vi.fn() } satisfies Pick<WorktreePickerSession, 'isOpen' | 'open'>,
 		setPermissionMode: vi.fn(),
 		setThinkingMode: vi.fn(),
 		setAgentSetting: vi.fn(),
@@ -161,7 +152,7 @@ describe('ScheduledNewChatComposer', () => {
 		expect(screen.getByText('No preambles currently apply')).toBeTruthy();
 
 		await fireEvent.click(selectWorktree);
-		expect(startup.openWorktreeModal).toHaveBeenCalledOnce();
+		expect(startup.worktreePicker.open).toHaveBeenCalledOnce();
 		await fireEvent.click(addTags);
 		expect(startup.toggleTagInput).toHaveBeenCalledOnce();
 	});

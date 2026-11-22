@@ -711,7 +711,7 @@
 						error: form.validationStatus === 'invalid' ? form.validationError : null,
 						worktree:
 							form.gitAvailable && form.gitRepoStatus === 'git'
-								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.openWorktreeModal() }
+								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.worktreePicker.open() }
 								: undefined,
 					}}
 				>
@@ -953,23 +953,8 @@
 	</div>
 </div>
 
-{#if form.worktreeModalOpen}
-	<GitWorktreePickerModal
-		contextKey={JSON.stringify([form.executorId, form.nonblankPath])}
-		catalogContextKey={form.gitAvailable ? form.pathContextKey : null}
-		description={form.firstMessage}
-		worktrees={form.worktreeItems}
-		isLoading={form.isLoadingWorktrees}
-		isCreating={form.isCreatingWorktree}
-		loadError={form.worktreeLoadError}
-		createError={form.worktreeCreateError}
-		onSelect={(path) => form.selectWorktree(path)}
-		onCreate={(creation) => form.createWorktree(creation)}
-		onRefresh={() => {
-			void form.loadWorktrees();
-		}}
-		onClose={() => form.closeWorktreeModal()}
-	/>
+{#if form.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={form.worktreePicker} description={form.firstMessage} />
 {/if}
 
 {#if composerEditor.open}

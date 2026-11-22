@@ -11,8 +11,7 @@ import {
 	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
-import { getGitWorktrees, gitCreateWorktree, type GitWorktreeCreation } from '$lib/api/git.js';
-import type { GitWorktreeItem } from '$lib/api/git.js';
+import { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
@@ -53,7 +52,6 @@ import {
 	savePinnedProjectPathsOptimistically,
 } from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
-import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface NewChatFormStateOptions {
@@ -85,8 +83,6 @@ export class NewChatFormState {
 	validationStatus = $state<PathValidationStatus>('idle');
 	validationError = $state<string | null>(null);
 	readonly #pathValidation = new NewChatPathValidationController(this);
-	#worktreeRequestVersion = 0;
-	#worktreeAbort: AbortController | null = null;
 
 	// Modes
 	permissionMode = $state<PermissionMode>('default');
@@ -117,13 +113,11 @@ export class NewChatFormState {
 	// Git repo status from validate-start endpoint.
 	gitRepoStatus = $state<'unknown' | 'git' | 'non-git'>('unknown');
 
-	// Worktree modal
-	worktreeModalOpen = $state(false);
-	worktreeItems = $state<GitWorktreeItem[]>([]);
-	isLoadingWorktrees = $state(false);
-	isCreatingWorktree = $state(false);
-	worktreeLoadError = $state<string | null>(null);
-	worktreeCreateError = $state<string | null>(null);
+	readonly worktreePicker = new WorktreePickerSession({
+		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
+		servingContext: () => this.gitAvailable ? (this.#options.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
+		select: (path) => this.selectProjectPath(path),
+	});
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();
 
@@ -185,7 +179,7 @@ export class NewChatFormState {
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
-		this.closeWorktreeModal();
+		this.worktreePicker.close();
 		this.showBrowser = false;
 		this.resetTabCompletions();
 		this.selectedModelsByAgent = {};
@@ -556,113 +550,6 @@ export class NewChatFormState {
 		this.#images.revokeAll();
 	}
 
-	// Worktree modal
-
-	openWorktreeModal(): void {
-		if (!this.gitAvailable) return;
-		this.worktreeModalOpen = true;
-		this.worktreeCreateError = null;
-		this.worktreeLoadError = null;
-		this.worktreeItems = [];
-		void this.loadWorktrees();
-	}
-
-	closeWorktreeModal(): void {
-		this.worktreeModalOpen = false;
-		this.worktreeCreateError = null;
-		this.worktreeLoadError = null;
-		this.#cancelWorktreeLoad();
-	}
-
-	async loadWorktrees(): Promise<void> {
-		if (!this.gitAvailable) return;
-		const projectPath = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.pathContextKey;
-		if (!projectPath) return;
-
-		this.#worktreeAbort?.abort();
-		const abort = new AbortController();
-		this.#worktreeAbort = abort;
-		const requestVersion = ++this.#worktreeRequestVersion;
-		const current = () =>
-			this.#isCurrentWorktreeLoad(requestVersion, abort.signal) &&
-			executorId === this.executorId &&
-			projectPath === this.nonblankPath &&
-			contextKey === this.pathContextKey;
-		this.isLoadingWorktrees = true;
-		this.worktreeLoadError = null;
-
-		try {
-			const result = await getGitWorktrees({ executorId, projectPath }, { signal: abort.signal });
-			if (!current()) return;
-			this.worktreeItems = result.worktrees;
-		} catch (error) {
-			if (isAbortError(error) || !current()) return;
-			this.worktreeLoadError = m.git_target_load_worktrees_failed();
-			this.worktreeItems = [];
-		} finally {
-			if (this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) {
-				this.#worktreeAbort = null;
-				this.isLoadingWorktrees = false;
-			}
-		}
-	}
-
-	#cancelWorktreeLoad(): void {
-		this.#worktreeAbort?.abort();
-		this.#worktreeAbort = null;
-		this.#worktreeRequestVersion += 1;
-		this.isLoadingWorktrees = false;
-		this.isCreatingWorktree = false;
-	}
-
-	#isCurrentWorktreeLoad(requestVersion: number, signal: AbortSignal): boolean {
-		return !signal.aborted && requestVersion === this.#worktreeRequestVersion;
-	}
-
-	selectWorktree(worktreePath: string): void {
-		if (!this.gitAvailable) return;
-		this.#cancelWorktreeLoad();
-		this.selectProjectPath(worktreePath);
-		this.worktreeModalOpen = false;
-	}
-
-	async createWorktree(creation: GitWorktreeCreation): Promise<boolean> {
-		if (!this.gitAvailable || this.isCreatingWorktree) return false;
-		const projectPath = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.pathContextKey;
-		if (!projectPath) return false;
-		const generation = this.#worktreeRequestVersion;
-		const current = () =>
-			generation === this.#worktreeRequestVersion &&
-			executorId === this.executorId &&
-			projectPath === this.nonblankPath &&
-			contextKey === this.pathContextKey;
-		this.isCreatingWorktree = true;
-		this.worktreeCreateError = null;
-
-		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
-			if (!current()) return false;
-			if (!result.success) {
-				this.worktreeCreateError =
-					result.error || result.message || m.chat_new_chat_create_worktree_failed();
-				return false;
-			}
-			this.selectWorktree(result.worktreePath || creation.worktreePath);
-			return true;
-		} catch (err) {
-			if (!current()) return false;
-			this.worktreeCreateError =
-				err instanceof Error ? err.message : m.chat_new_chat_create_worktree_failed();
-			return false;
-		} finally {
-			if (generation === this.#worktreeRequestVersion) this.isCreatingWorktree = false;
-		}
-	}
-
 	// Path validation
 
 	selectProjectPath(path: string): void {
@@ -732,6 +619,7 @@ export class NewChatFormState {
 	}
 
 	dispose(): void {
+		this.worktreePicker.close();
 		this.#pathCompletion.reset();
 		this.#pathValidation.dispose();
 	}
@@ -834,8 +722,7 @@ export class NewChatFormState {
 		this.showBrowser = false;
 		this.hasAutoOpened = false;
 		this.gitRepoStatus = 'unknown';
-		this.closeWorktreeModal();
-		this.worktreeItems = [];
+		this.worktreePicker.close();
 		this.chatTags = [];
 		this.showTagInput = false;
 		this.#permissionModeTouched = false;

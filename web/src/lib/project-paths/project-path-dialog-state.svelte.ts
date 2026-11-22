@@ -1,6 +1,6 @@
 import { ApiError } from '$lib/api/client.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
-import { getGitWorktrees, gitCreateWorktree, type GitWorktreeCreation, type GitWorktreeItem } from '$lib/api/git.js';
+import { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { effectiveExecutorId } from '$shared/executors';
@@ -20,12 +20,16 @@ export class ProjectPathDialogState {
 	submitError = $state<string | null>(null);
 	isSubmitting = $state(false);
 	gitRepoStatus = $state<ProjectPathGitRepoStatus>('unknown');
-	worktreePickerOpen = $state(false);
-	worktrees = $state<GitWorktreeItem[]>([]);
-	isLoadingWorktrees = $state(false);
-	isCreatingWorktree = $state(false);
-	worktreeLoadError = $state<string | null>(null);
-	worktreeCreateError = $state<string | null>(null);
+	readonly worktreePicker = new WorktreePickerSession({
+		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
+		servingContext: () => this.gitAvailable ? (this.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
+		select: (path) => {
+			this.setCandidatePath(path);
+			this.validationStatus = 'valid';
+			this.gitRepoStatus = 'git';
+			this.showBrowser = false;
+		},
+	});
 
 	currentProjectPath = '';
 
@@ -33,8 +37,6 @@ export class ProjectPathDialogState {
 	#validationGeneration = 0;
 	#validationContextKey = '';
 	#validationAbort: AbortController | null = null;
-	#worktreeGeneration = 0;
-	#worktreeAbort: AbortController | null = null;
 
 	constructor(
 		private readonly executors?: Pick<ExecutorsStore, 'gitAvailable' | 'gitContextKey'>,
@@ -87,14 +89,8 @@ export class ProjectPathDialogState {
 		this.submitError = null;
 		this.isSubmitting = false;
 		this.gitRepoStatus = 'unknown';
-		this.worktreePickerOpen = false;
-		this.worktrees = [];
-		this.worktreeCreateError = null;
-		this.worktreeLoadError = null;
-		this.isLoadingWorktrees = false;
-		this.isCreatingWorktree = false;
 		this.#clearPendingValidation();
-		this.#clearPendingWorktreeLoad();
+		this.worktreePicker.close();
 		this.#validationGeneration += 1;
 	}
 
@@ -102,18 +98,14 @@ export class ProjectPathDialogState {
 		this.showBrowser = false;
 		this.submitError = null;
 		this.isSubmitting = false;
-		this.worktreePickerOpen = false;
-		this.worktreeCreateError = null;
-		this.worktreeLoadError = null;
 		this.#clearPendingValidation();
-		this.#clearPendingWorktreeLoad();
+		this.worktreePicker.close();
 	}
 
 	setCandidatePath(path: string): void {
 		this.candidatePath = path;
 		this.validationError = null;
 		this.submitError = null;
-		this.worktreeLoadError = null;
 	}
 
 	scheduleValidation(executorContextKey = ''): void {
@@ -150,102 +142,7 @@ export class ProjectPathDialogState {
 	}
 
 	openWorktreePicker(): void {
-		if (!this.canSelectWorktree) return;
-		this.worktreePickerOpen = true;
-		this.worktreeCreateError = null;
-		this.worktreeLoadError = null;
-		this.worktrees = [];
-		void this.loadWorktrees();
-	}
-
-	closeWorktreePicker(): void {
-		this.worktreePickerOpen = false;
-		this.worktreeLoadError = null;
-		this.#clearPendingWorktreeLoad();
-		this.isLoadingWorktrees = false;
-	}
-
-	selectWorktree(worktreePath: string): void {
-		if (!this.gitAvailable) return;
-		this.#clearPendingWorktreeLoad();
-		this.isLoadingWorktrees = false;
-		this.setCandidatePath(worktreePath);
-		this.validationStatus = 'valid';
-		this.validationError = null;
-		this.gitRepoStatus = 'git';
-		this.showBrowser = false;
-		this.worktreePickerOpen = false;
-	}
-
-	async loadWorktrees(): Promise<void> {
-		if (!this.gitAvailable) return;
-		const path = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.executors?.gitContextKey(executorId);
-		if (!path) return;
-
-		this.#clearPendingWorktreeLoad();
-		const abort = new AbortController();
-		this.#worktreeAbort = abort;
-		const generation = ++this.#worktreeGeneration;
-		const current = () =>
-			this.#isCurrentWorktreeLoad(generation, abort.signal) &&
-			executorId === this.executorId &&
-			path === this.nonblankPath &&
-			contextKey === this.executors?.gitContextKey(executorId);
-		this.isLoadingWorktrees = true;
-		this.worktreeLoadError = null;
-
-		try {
-			const result = await getGitWorktrees(
-				{ executorId, projectPath: path },
-				{ signal: abort.signal },
-			);
-			if (!current()) return;
-			this.worktrees = result.worktrees;
-		} catch (error) {
-			if (isAbortError(error) || !current()) return;
-			this.worktreeLoadError = m.git_target_load_worktrees_failed();
-			this.worktrees = [];
-		} finally {
-			if (this.#isCurrentWorktreeLoad(generation, abort.signal)) {
-				this.isLoadingWorktrees = false;
-			}
-		}
-	}
-
-	async createWorktree(creation: GitWorktreeCreation): Promise<void> {
-		if (!this.gitAvailable || this.isCreatingWorktree) return;
-		const projectPath = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.executors?.gitContextKey(executorId);
-		const generation = this.#worktreeGeneration;
-		const current = () =>
-			generation === this.#worktreeGeneration &&
-			executorId === this.executorId &&
-			projectPath === this.nonblankPath &&
-			contextKey === this.executors?.gitContextKey(executorId);
-		if (!projectPath) return;
-
-		this.isCreatingWorktree = true;
-		this.worktreeCreateError = null;
-
-		try {
-			const result = await gitCreateWorktree({ executorId, projectPath }, creation);
-			if (!current()) return;
-			if (!result.success) {
-				this.worktreeCreateError =
-					result.error || result.message || m.chat_new_chat_create_worktree_failed();
-				return;
-			}
-			this.selectWorktree(result.worktreePath || creation.worktreePath);
-		} catch (error) {
-			if (!current()) return;
-			this.worktreeCreateError =
-				error instanceof Error ? error.message : m.chat_new_chat_create_worktree_failed();
-		} finally {
-			if (generation === this.#worktreeGeneration) this.isCreatingWorktree = false;
-		}
+		if (this.canSelectWorktree) void this.worktreePicker.open();
 	}
 
 	setSubmitFailure(error: unknown): void {
@@ -259,7 +156,7 @@ export class ProjectPathDialogState {
 
 	dispose(): void {
 		this.#clearPendingValidation();
-		this.#clearPendingWorktreeLoad();
+		this.worktreePicker.close();
 	}
 
 	async #validatePath(path: string, generation: number): Promise<void> {
@@ -299,21 +196,10 @@ export class ProjectPathDialogState {
 		this.#validationAbort = null;
 	}
 
-	#clearPendingWorktreeLoad(): void {
-		this.#worktreeGeneration++;
-		this.isCreatingWorktree = false;
-		this.#worktreeAbort?.abort();
-		this.#worktreeAbort = null;
-	}
-
 	#isCurrentValidation(path: string, generation: number, signal: AbortSignal): boolean {
 		return (
 			!signal.aborted && generation === this.#validationGeneration && path === this.nonblankPath
 		);
-	}
-
-	#isCurrentWorktreeLoad(generation: number, signal: AbortSignal): boolean {
-		return !signal.aborted && generation === this.#worktreeGeneration;
 	}
 
 	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
