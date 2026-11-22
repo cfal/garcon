@@ -77,10 +77,9 @@ export class AcpExecution implements AgentRuntimeExecution {
   }
 
   readonly applySessionConfiguration: AgentSessionConfigurationUpdates['apply'] = async (
-    agentSessionId, configuration, previous,
+    agentSessionId, configuration,
   ) => {
-    // Unrelated saves must preserve the permission mode explicitly requested for this turn.
-    if (configuration.permissionMode !== previous.permissionMode) {
+    if (configuration.permissionModeExplicit) {
       this.runtime.updateSessionSettings(agentSessionId, { permissionMode: configuration.permissionMode });
     }
   };

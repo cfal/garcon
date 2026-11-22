@@ -149,9 +149,9 @@ export class AgentSessionSettingsService {
         this.deps.endpointResolver.resolveEndpointReference(next);
         const applyAndPersistSettings = async (): Promise<AgentChatEntry> => {
           const sessionId = this.deps.registry.getChat(chatId)?.agentSessionId;
-          const previousPermissionMode = normalizePermissionMode(entry.permissionMode);
+          const permissionModeExplicit = patch.permissionMode !== undefined;
           if (integration.sessionConfiguration
-            && permissionMode !== previousPermissionMode
+            && permissionModeExplicit
             && this.deps.execution.ownsExecution(chatId)
             && (!sessionId || !this.deps.hasAdmittedProviderTurn(chatId))) {
             throw new DomainError('SESSION_BUSY', 'The provider has not admitted this turn. Retry the permission change after it starts.', 409, true);
@@ -159,10 +159,10 @@ export class AgentSessionSettingsService {
           if (sessionId && integration.sessionConfiguration) {
             await integration.sessionConfiguration.apply(
               sessionId,
-              configuration,
+              { ...configuration, permissionModeExplicit },
               {
                 model: previous.model,
-                permissionMode: previousPermissionMode,
+                permissionMode: normalizePermissionMode(entry.permissionMode),
                 thinkingMode: normalizeSupportedThinkingMode(
                   entry.thinkingMode,
                   integration.descriptor.supportedThinkingModes,

@@ -242,6 +242,20 @@ function runEnded(events: readonly AgentRuntimeEvent[]) {
 }
 
 describe('Antigravity ACP runtime', () => {
+  it('reapplies an explicitly saved default to a turn with a bypass override', async () => {
+    const { agent, runtime, events, request } = harness();
+    const execution = new AcpExecution(runtime, createPathNativeSessionCodec('antigravity'));
+    const saved = { permissionMode: 'default', thinkingMode: 'none', model: 'default', endpoint: null,
+      settings: { ownerId: 'antigravity', schemaVersion: 1, values: {} } } as const;
+    try {
+      const { agentSessionId } = await runtime.startSession(request({ permissionMode: 'bypassPermissions' }));
+      await execution.applySessionConfiguration(agentSessionId, { ...saved, permissionModeExplicit: true }, saved);
+      agent.requestPermission(agentSessionId, 'explicit-reset');
+      await waitFor(() => events.some(event => event.type === 'permission' && event.lifecycle.kind === 'requested'));
+      expect(agent.received.some(frame => frame.id === 'permission-1')).toBe(false);
+    } finally { runtime.shutdown(); }
+  });
+
   it('preserves explicit approval during a cold resume when only the saved model changes', async () => {
     const { agent, runtime, events, request } = harness();
     const execution = new AcpExecution(runtime, createPathNativeSessionCodec('antigravity'));
@@ -256,7 +270,7 @@ describe('Antigravity ACP runtime', () => {
     try {
       const turn = runtime.runTurn({ ...request({ permissionMode: 'default' }), agentSessionId: 'saved' });
       await waitFor(() => agent.requests('session/resume').length === 1);
-      await execution.applySessionConfiguration('saved', { ...saved, model: 'gemini-test-high' }, saved);
+      await execution.applySessionConfiguration('saved', { ...saved, model: 'gemini-test-high', permissionModeExplicit: false }, saved);
       gate.resolve();
       await turn;
       expect(events.some((event) => event.type === 'permission' && event.lifecycle.kind === 'requested')).toBe(true);

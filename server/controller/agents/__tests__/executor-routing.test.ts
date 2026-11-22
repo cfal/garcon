@@ -75,7 +75,7 @@ async function fixture(chatExecutors: readonly string[] = IDS, mentionGate?: () 
   return { root, chats, providers, directory, ledger, router, mentions, ready, registries };
 }
 
-test('a saved permission downgrade cannot miss a bound turn still preparing on the controller', async () => {
+test.each(['default', 'bypassPermissions'] as const)('a permission reset from saved %s waits for provider admission', async savedMode => {
   const preparing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const f = await fixture([FIRST], () => { preparing.resolve(); return release.promise; });
@@ -89,7 +89,7 @@ test('a saved permission downgrade cannot miss a bound turn still preparing on t
     descriptor: { ...provider.integration.descriptor, supportedPermissionModes: ['default', 'bypassPermissions'] },
     sessionConfiguration: { apply },
   }] }));
-  await f.chats.updateChat(chatId, { agentSessionId: 'bound-session', permissionMode: 'bypassPermissions' });
+  await f.chats.updateChat(chatId, { agentSessionId: 'bound-session', permissionMode: savedMode });
   f.router.publishSessionFact(chatId, { agentSessionId: 'bound-session', nativeSession: null, nativeSeedReceipt: null });
   const unused = () => { throw new Error('Unexpected queue operation'); };
   const settings = new AgentSessionSettingsService({
@@ -103,9 +103,9 @@ test('a saved permission downgrade cannot miss a bound turn still preparing on t
   const expectBusy = async () => {
     await expect(downgrade()).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
     expect(apply).not.toHaveBeenCalled();
-    expect(f.chats.getChat(chatId)?.permissionMode).toBe('bypassPermissions');
+    expect(f.chats.getChat(chatId)?.permissionMode).toBe(savedMode);
   };
-  const turn = f.router.runAgentTurn(chatId, 'Synthetic input');
+  const turn = f.router.runAgentTurn(chatId, 'Synthetic input', { permissionMode: 'bypassPermissions' });
   try {
     await preparing.promise;
     await expectBusy();

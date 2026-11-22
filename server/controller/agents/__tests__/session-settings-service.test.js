@@ -306,6 +306,7 @@ describe('AgentSessionSettingsService', () => {
       {
         model: 'large',
         permissionMode: 'manualBypass',
+        permissionModeExplicit: true,
         thinkingMode: 'medium',
         settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
         endpoint: null,

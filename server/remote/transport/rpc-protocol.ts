@@ -14,6 +14,7 @@ import type {
   AgentResourceRef,
   AgentResourceScope,
   AgentSessionConfiguration,
+  AgentSessionConfigurationUpdate,
   ExecutorInfo,
   ExecutionRuntimeApi,
   ExecutionProjectService,
@@ -32,7 +33,7 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 50;
+export const EXECUTOR_PROTOCOL_REVISION = 51;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
@@ -108,7 +109,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'nativeSessions.release': Call<WithoutSignal<Request<'nativeSessions', 'release'>>, void>;
   'configurationValidation.validate': Call<Request<'configurationValidation', 'validate'>, void>;
   'sessionConfiguration.apply': Call<{
-    readonly args: readonly [agentSessionId: string, configuration: AgentSessionConfiguration, previousConfiguration: AgentSessionConfiguration];
+    readonly args: readonly [agentSessionId: string, configuration: AgentSessionConfigurationUpdate, previousConfiguration: AgentSessionConfiguration];
   }, void>;
   'projectPathUpdates.prepare': Call<Request<'projectPathUpdates', 'prepare'>, Result<'projectPathUpdates', 'prepare'>>;
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
