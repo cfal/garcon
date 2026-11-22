@@ -24,7 +24,7 @@
     "@anthropic-ai/claude-code": "2.1.325",
     "@antithesishq/bombadil": "0.7.10",
     "@earendil-works/pi-coding-agent": "1.5.2",
-    "@openai/codex": "0.169.0",
+    "@openai/codex": "0.171.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/bun": "1.4.3",
     "bun-pty": "0.5.1",

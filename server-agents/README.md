@@ -240,8 +240,10 @@ Do not add another provider registry, search switch, endpoint switch, or
 build-script provider special case. Build contributions come from package
 metadata and runtime behavior comes through the registered aggregate.
 
-Run the provider's strongest non-live tier. Claude, Codex, OpenCode, and Pi
-have scripted real-binary coverage; Cursor remains unit-only by policy. The
+Run the provider's strongest non-live tier. Claude, Codex, OpenCode, Pi, and
+Antigravity have scripted real-binary coverage; Cursor remains unit-only by
+policy. Cursor and Antigravity share the ACP client and runtime in
+`server-agents/common/src/acp`. The
 repository gate is:
 
 ```sh

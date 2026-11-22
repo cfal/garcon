@@ -115,7 +115,7 @@ describe('ChatExecutionControlOperations', () => {
 
     const dequeued = await operations.dequeueNextTurn('chat-1', (turn) => {
       expect(turn).toMatchObject({ kind: 'control', entry: input });
-      return true;
+      return 'inserted';
     });
     expect(dequeued?.input.kind).toBe('control');
     expect(dequeued?.control.controlEntries).toEqual([]);

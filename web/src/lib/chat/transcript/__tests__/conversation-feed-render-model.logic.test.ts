@@ -59,15 +59,17 @@ describe('ConversationFeedRenderModelController', () => {
 	it.each([false, true])('refreshes delivery state when an append is %s', (append) => {
 		const controller = new ConversationFeedRenderModelController();
 		const message = new UserMessage(TS, 'Synthetic pending input');
-		const pending: ChatDisplayRow = { ...row(1, message), awaitingDelivery: true };
+		const pending: ChatDisplayRow = { ...row(1, message), inputStatus: 'sending' };
 		const previous = controller.reconcile('surface', [pending]);
+		const waiting = controller.reconcile('surface', [{ ...pending, inputStatus: 'waiting-to-steer' }]);
+		expect(waiting.items[0]).toHaveProperty('inputStatus', 'waiting-to-steer');
 		const delivered = row(1, message);
 		const rows = append ? [delivered, row(2, new AssistantMessage(TS, 'Delivered'))] : [delivered];
 		const actual = controller.reconcileDetailed('surface', rows);
 		expect(actual.change.kind).toBe('rebuilt');
 		expect(actual.model).toEqual(buildConversationFeedRenderModel(rows));
-		expect(actual.model.items[0]).not.toHaveProperty('awaitingDelivery');
-		expect(previous.items[0]).toHaveProperty('awaitingDelivery', true);
+		expect(actual.model.items[0]).not.toHaveProperty('inputStatus');
+		expect(previous.items[0]).toHaveProperty('inputStatus', 'sending');
 	});
 
 	it.each(['prepend', 'replacement', 'surface', 'reset'])('resets FIFO pairing after %s', (transition) => {

@@ -39,6 +39,7 @@ COPY native/package.json native/
 COPY server-agents/interface/package.json server-agents/interface/
 COPY server-agents/common/package.json server-agents/common/
 COPY server-agents/amp/package.json server-agents/amp/
+COPY server-agents/antigravity/package.json server-agents/antigravity/
 COPY server-agents/claude/package.json server-agents/claude/
 COPY server-agents/codex/package.json server-agents/codex/
 COPY server-agents/cursor/package.json server-agents/cursor/
@@ -103,6 +104,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -fsSL https://cursor.com/install | bash
 RUN curl -fsSL https://ampcode.com/install.sh | bash
 RUN curl -fsSL https://app.factory.ai/cli | sh
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
 # Removes installer-created machine state before persistent volumes are initialized.
 RUN rm -rf \
@@ -114,6 +116,7 @@ RUN rm -rf \
       "${HOME}/.cursor" \
       "${HOME}/.factory" \
       "${HOME}/.garcon" \
+      "${HOME}/.gemini" \
       "${HOME}/.local/share/amp" \
       "${HOME}/.local/share/opencode" \
       "${HOME}/.local/state/opencode" \
@@ -130,6 +133,7 @@ RUN rm -rf \
       "${HOME}/.cursor" \
       "${HOME}/.factory" \
       "${HOME}/.garcon" \
+      "${HOME}/.gemini" \
       "${HOME}/.local/share/amp" \
       "${HOME}/.local/share/opencode" \
       "${HOME}/.local/state/opencode" \

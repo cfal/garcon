@@ -22,6 +22,7 @@ services:
       - executor-codex-home:/home/garcon/.codex
       - executor-cursor-home:/home/garcon/.cursor
       - executor-factory-home:/home/garcon/.factory
+      - executor-gemini-home:/home/garcon/.gemini
       - executor-pi-home:/home/garcon/.pi
       - executor-opencode-data:/home/garcon/.local/share/opencode
       - executor-opencode-state:/home/garcon/.local/state/opencode
@@ -37,6 +38,7 @@ volumes:
   executor-codex-home:
   executor-cursor-home:
   executor-factory-home:
+  executor-gemini-home:
   executor-pi-home:
   executor-opencode-data:
   executor-opencode-state:

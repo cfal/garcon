@@ -147,11 +147,11 @@ export class QueueDrainer {
                   entryId: input.entry.id,
                   transcriptViewId: input.entry.transcriptViewId,
                 });
-                return false;
+                return 'discarded';
               }
               callbacks.appendControlReceipt(chatId, input.entry);
               inputInserted = true;
-              return true;
+              return 'inserted';
             }
             // The selection may have changed since enqueue. Throwing aborts the
             // dequeue uncommitted, so the entry and its attachments stay queued.
@@ -165,9 +165,9 @@ export class QueueDrainer {
             } catch (error) {
               if (!isRecoverablePreambleAdmissionError(error)) throw error;
               admission.failure = error;
-              return false;
+              return 'discarded';
             }
-            return inputInserted;
+            return inputInserted ? 'inserted' : 'already-committed';
           }),
         );
       } catch (error) {

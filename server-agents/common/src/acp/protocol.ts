@@ -6,6 +6,10 @@ export interface AcpJsonRpcError {
 
 export type AcpJsonRpcId = number | string;
 
+export function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
+  return typeof value === 'number' || typeof value === 'string';
+}
+
 export interface AcpClientCapabilities {
   fs?: { readTextFile?: boolean; writeTextFile?: boolean };
   terminal?: boolean;
@@ -27,6 +31,19 @@ export interface AcpInitializeParams {
   clientInfo?: { name: string; version: string };
   clientCapabilities?: AcpClientCapabilities;
   mcpServers?: unknown[];
+}
+
+// The handshake every Garcon ACP client sends: chat sessions, one-shot queries,
+// and auth probes negotiate identically.
+export function garconInitializeParams(
+  options: Pick<AcpInitializeParams, 'clientCapabilities' | 'mcpServers'> = {},
+): AcpInitializeParams {
+  return {
+    protocolVersion: 1,
+    clientInfo: { name: 'garcon', version: '1.0.0' },
+    clientCapabilities: options.clientCapabilities ?? {},
+    ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+  };
 }
 
 export interface AcpInitializeResult {
@@ -62,10 +79,16 @@ export interface AcpSessionConfigOptionsResult {
   configOptions?: AcpSessionConfigOption[];
 }
 
+// The unstable ACP model selector; agents that support it accept `session/set_model`.
+export interface AcpSessionModelState {
+  currentModelId?: string;
+  availableModels?: Array<{ modelId: string; name?: string; description?: string }>;
+}
+
 export interface AcpSessionNewResult {
   sessionId: string;
   modes?: unknown;
-  models?: unknown;
+  models?: AcpSessionModelState;
   configOptions?: AcpSessionConfigOption[];
 }
 
@@ -76,7 +99,7 @@ export interface AcpSessionPromptResult {
 
 export interface AcpSessionLoadResult {
   modes?: unknown;
-  models?: unknown;
+  models?: AcpSessionModelState;
   configOptions?: AcpSessionConfigOption[];
 }
 

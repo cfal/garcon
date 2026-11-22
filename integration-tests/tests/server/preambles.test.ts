@@ -353,8 +353,9 @@ describe('preambles', () => {
         { afterIndex: queuedSlashCursor },
       );
       expect(queuedSlashFailure.error).toContain('Matching preambles haven’t been sent yet');
-      expect((await fixture.client.getExecutionControl(queuedSlashForkChatId)).queue.entries)
-        .toHaveLength(0);
+      const rejectedQueue = (await fixture.client.getExecutionControl(queuedSlashForkChatId)).queue;
+      expect(rejectedQueue.entries).toHaveLength(0);
+      expect(rejectedQueue.recentlyDispatched).toHaveLength(0);
       expect(userContents((await fixture.client.getMessages(queuedSlashForkChatId)).messages))
         .not.toContain('/queued-provider-command');
 

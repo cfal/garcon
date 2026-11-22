@@ -6,6 +6,7 @@ import path from 'node:path';
 const repositoryRoot = path.resolve(import.meta.dir, '../..');
 const provisionedAgents = {
   amp: 'https://ampcode.com/install.sh',
+  antigravity: 'https://antigravity.google/cli/install.sh',
   claude: 'https://claude.ai/install.sh',
   codex: '/app/server-agents/codex/node_modules/.bin/codex',
   cursor: 'https://cursor.com/install',
@@ -22,6 +23,7 @@ const persistedPaths = [
   '/home/garcon/.cursor',
   '/home/garcon/.factory',
   '/home/garcon/.garcon',
+  '/home/garcon/.gemini',
   '/home/garcon/.local/share/amp',
   '/home/garcon/.local/share/opencode',
   '/home/garcon/.local/state/opencode',

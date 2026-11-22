@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./acp/*": "./src/acp/*.ts",
     "./shared/*": "./src/shared/*.ts",
     "./lib/*": "./src/lib/*.ts",
     "./chats/*": "./src/chats/*.ts",
