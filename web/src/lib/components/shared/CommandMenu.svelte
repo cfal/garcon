@@ -166,7 +166,7 @@
 {#if isOpen}
 	<Dialog.Root open={true} requestClose={close}>
 		<Dialog.Content
-			class="top-[20%] translate-y-0 gap-0 overflow-hidden rounded-md bg-popover p-0 shadow-2xl"
+			class="top-[20%] translate-y-0 grid-cols-1 gap-0 overflow-hidden rounded-md bg-popover p-0 shadow-2xl"
 			showCloseButton={false}
 			aria-label={m.command_command_palette()}
 			onkeydowncapture={handleKeydown}
@@ -182,7 +182,7 @@
 					value={query}
 					oninput={handleQueryInput}
 					placeholder={m.command_placeholder()}
-					class="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
+					class="min-w-0 flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
 					type="text"
 					role="combobox"
 					aria-expanded="true"

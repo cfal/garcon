@@ -132,6 +132,18 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     await close.press('Enter');
     await details.waitFor({ state: 'detached' });
     expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
+
+    markPhase('keeping palette Close reachable with a large font on a narrow screen');
+    await page.setViewportSize({ width: 320, height: 568 });
+    await trigger.press('Control+p');
+    await search.evaluate(input => {
+      input.style.fontFamily = 'monospace';
+      input.style.fontSize = '20px';
+    });
+    const closeBounds = await palette.getByRole('button', { name: 'Close command menu' }).boundingBox();
+    const paletteBounds = await palette.boundingBox();
+    expect(closeBounds!.x + closeBounds!.width).toBeLessThanOrEqual(paletteBounds!.x + paletteBounds!.width);
+    await search.press('Escape');
     fixture.assertNoBrowserErrors();
   });
 }, 180_000);
