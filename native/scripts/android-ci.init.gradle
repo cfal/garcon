@@ -1,0 +1,21 @@
+def centralMirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+
+beforeSettings { settings ->
+    if (settings.settingsDir.name == 'buildSrc') {
+        // The Plugin Portal redirects kotlin-dsl's Kotlin dependencies to Maven Central.
+        settings.pluginManagement.repositories {
+            maven { url = centralMirror }
+            gradlePluginPortal()
+        }
+    }
+}
+
+allprojects {
+    [buildscript.repositories, repositories].each { repos ->
+        repos.withType(MavenArtifactRepository).configureEach { repo ->
+            if (repo.url.toString() == ArtifactRepositoryContainer.MAVEN_CENTRAL_URL) {
+                repo.url = centralMirror
+            }
+        }
+    }
+}
