@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, normalize, relative } from 'node:path';
-import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
-import { antigravityChildEnvironment, createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
+import type { AgentEnvironmentReader, AgentLogger } from '@garcon/server-agent-interface';
+import { antigravityChildEnvironment, classifyAntigravityLaunchError, createAntigravityConfig, resolveAuthMethod, type AntigravityConfig } from '../../../config.ts';
 import {
   antigravityLoginCommand,
   antigravityLoginEnvironment,
@@ -12,6 +12,9 @@ import {
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
 import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels } from '../antigravity-models.ts';
+import { createAntigravityAccount } from '../antigravity-account.ts';
+
+const silentLogger = { debug() {}, info() {}, warn() {}, error() {} } satisfies AgentLogger;
 
 function environment(values: Record<string, string>): AgentEnvironmentReader {
   return { get: (name) => values[name] };
@@ -27,6 +30,16 @@ function config(overrides: Partial<AntigravityConfig> = {}): AntigravityConfig {
 }
 
 describe('Antigravity configuration', () => {
+  it.each(['EACCES', 'ENOEXEC', 'ELIBBAD', 'EBADARCH'])('reports a permanent executable failure for %s', code => {
+    const cause = Object.assign(new Error('Cannot execute binary'), { syscall: 'posix_spawn', code });
+    expect(classifyAntigravityLaunchError(cause)).toMatchObject({ code: 'BINARY_NOT_FOUND', retryable: false });
+  });
+
+  it.each(['EAGAIN', 'EMFILE', 'ENOMEM', 'ETXTBSY'])('preserves a temporary spawn error for %s', code => {
+    const cause = Object.assign(new Error('Cannot start process yet'), { syscall: 'posix_spawn', code });
+    expect(classifyAntigravityLaunchError(cause)).toBe(cause);
+  });
+
   it('prefers an explicit auth method, then an API key, then Google sign-in', () => {
     expect(resolveAuthMethod('oauth-business', true)).toBe('oauth-business');
     expect(resolveAuthMethod(null, true)).toBe('gemini-api-key');
@@ -65,12 +78,17 @@ describe('parseAntigravityModels', () => {
       await writeFile(binary, `#!${join(root, 'missing-interpreter')}\n`, { mode: 0o700 });
       const config = createAntigravityConfig(environment({ GARCON_ANTIGRAVITY_BINARY: binary }));
       expect(config.binary()).toBe(binary);
-      const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, {
-        debug() {}, info() {}, warn() {}, error() {},
-      });
+      const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, silentLogger);
       const signal = new AbortController().signal;
       expect((await catalog.snapshot({ signal, strict: false })).models).toEqual([]);
       await expect(catalog.snapshot({ signal, strict: true })).rejects.toMatchObject({ code: 'BINARY_NOT_FOUND' });
+      for (const authMethod of ['oauth-personal', 'gemini-api-key'] as const) {
+        const account = createAntigravityAccount({ ...config, authMethod: () => authMethod, apiKey: () => 'test-key' }, silentLogger);
+        try {
+          expect(await account.auth.status(signal)).toMatchObject({ authenticated: false, canReauth: false });
+          if (authMethod === 'oauth-personal') await expect(account.auth.launchLogin()).rejects.toMatchObject({ code: 'BINARY_NOT_FOUND' });
+        } finally { account.stop(); }
+      }
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -78,18 +96,14 @@ describe('parseAntigravityModels', () => {
     const config = createAntigravityConfig(environment({
       GARCON_ANTIGRAVITY_BINARY: process.execPath, GARCON_ANTIGRAVITY_AUTH_METHOD: 'invalid-method',
     }));
-    const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, {
-      debug() {}, info() {}, warn() {}, error() {},
-    });
+    const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, silentLogger);
     const signal = new AbortController().signal;
     expect((await catalog.snapshot({ signal, strict: false })).models).toEqual([]);
     await expect(catalog.snapshot({ signal, strict: true })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
   });
 
   it.each(['', 'model-a\tModel A\ndefault\tOther'])('puts native Default first independently of discovered IDs: %j', async (stdout) => {
-    const catalog = createAntigravityCatalog(async () => ({ stdout, stderr: '', exitCode: 0 }), {
-      debug() {}, info() {}, warn() {}, error() {},
-    });
+    const catalog = createAntigravityCatalog(async () => ({ stdout, stderr: '', exitCode: 0 }), silentLogger);
     const snapshot = await catalog.snapshot({ signal: new AbortController().signal, strict: false });
     expect(snapshot.defaultModel).toBe('default');
     expect(snapshot.models).toEqual([{ value: 'default', label: 'Default', supportsImages: true },
@@ -107,6 +121,14 @@ describe('parseAntigravityModels', () => {
       { value: 'gemini-test-pro-high', label: 'Gemini Test Pro (High)', supportsImages: true },
       { value: 'gemini-test-pro-low', label: 'Gemini Test Pro (Low)', supportsImages: true },
     ]);
+  });
+
+  it('keeps Default usable for delegated start selection without confirming failed native discovery', async () => {
+    const catalog = createAntigravityCatalog(async () => ({ exitCode: 1, stdout: '', stderr: 'model listing failed' }), silentLogger);
+    const signal = new AbortController().signal;
+    expect((await catalog.snapshot({ strict: false, signal })).models.map(model => model.value)).toEqual(['default']);
+    expect((await catalog.snapshot({ strict: true, signal })).models.map(model => model.value)).toEqual(['default']);
+    await expect(catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal })).rejects.toMatchObject({ code: 'UNAVAILABLE' });
   });
 
   it('summarizes a signed-out failure without the progress line', () => {
@@ -131,7 +153,7 @@ describe('getAntigravityAuthStatus', () => {
     expect(status).toMatchObject({ authenticated: false, canReauth: false, detail: expect.stringContaining('Install agy') });
   });
 
-  it('reports an API key as environment authentication without spawning the CLI', async () => {
+  it('reports an API key as environment authentication without making a credential or model request', async () => {
     const status = await getAntigravityAuthStatus(config({ apiKey: () => 'synthetic-key', authMethod: () => 'gemini-api-key' }), noProbes);
     expect(status).toEqual({ authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' });
   });

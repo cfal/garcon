@@ -208,7 +208,7 @@ const modelCatalog = {
 };
 
 const responseCache = new ModelCatalogResponseCache();
-const modelsRoutes = createModelsRoutes({ modelCatalog, responseCache, readyInstanceId: () => 'test-instance' });
+const modelsRoutes = createModelsRoutes({ modelCatalog, responseCache, instanceId: () => 'test-instance' });
 const handler = modelsRoutes["/api/v1/models"].GET;
 
 describe("GET /api/v1/models", () => {

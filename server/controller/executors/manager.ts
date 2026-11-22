@@ -95,8 +95,14 @@ export class ExecutorManager {
   }
 
   readyInstanceId(executorId: string): string {
+    if (!this.isReady(executorId)) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    return this.instanceId(executorId);
+  }
+
+  instanceId(executorId: string): string {
+    this.requireExecutor(executorId);
     const id = executorId === LOCAL_EXECUTOR_ID ? this.localInfo.instanceId : this.#remotes.get(executorId)?.info?.instanceId;
-    if (!id || !this.isReady(executorId)) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    if (!id) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
     return id;
   }
 

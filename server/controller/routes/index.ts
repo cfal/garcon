@@ -245,7 +245,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
-      readyInstanceId,
+      instanceId: id => executors.instanceId(id),
     }),
     createScheduledPromptRoutes(scheduledPrompts),
     createPullRequestReviewRoutes(pullRequestReviews),

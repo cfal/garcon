@@ -6,7 +6,7 @@ import { garconInitializeParams } from '@garcon/server-agent-common/acp/protocol
 import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import type { CliLoginCommand } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
-import { antigravityChildEnvironment, authMethodOrNull, type AntigravityConfig } from '../../config.js';
+import { antigravityChildEnvironment, authMethodOrNull, classifyAntigravityLaunchError, type AntigravityConfig } from '../../config.js';
 import {
   antigravityCliFailure,
   runAntigravityModels,
@@ -16,12 +16,17 @@ import { sharedProbe, waitUnlessAborted } from '@garcon/server-agent-common/shar
 
 const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
 
-// A completed login replaces both maps. Older callers can finish without
-// publishing their credential snapshot into a new caller's probe.
-export function createAntigravityProbes(config: AntigravityConfig) {
+interface AntigravityProbes {
+  readonly runModels: () => Promise<AntigravityCliResult>;
+  readonly authenticate: () => Promise<void>;
+}
+
+// A completed login replaces both in-flight probes and their last observed status.
+export function createAntigravityProbes(config: AntigravityConfig): AntigravityProbes & { lastProbed: AgentAuthStatus | null } {
   const authentication = new Map<string, Promise<void>>();
   const models = new Map<string, Promise<AntigravityCliResult>>();
   return {
+    lastProbed: null,
     authenticate: () => sharedProbe(authentication, JSON.stringify([config.binary(), config.authMethod()]),
       () => authenticateOnce(config)),
     runModels: () => sharedProbe(models, JSON.stringify([config.binary(), config.authMethod(), config.apiKey()]),
@@ -41,9 +46,7 @@ async function authenticateOnce(config: AntigravityConfig): Promise<void> {
   }
 }
 
-export interface AntigravityAuthStatusOptions {
-  readonly runModels: () => Promise<AntigravityCliResult>;
-  readonly authenticate: () => Promise<void>;
+export interface AntigravityAuthStatusOptions extends AntigravityProbes {
   // Dropping the display keeps agy from opening a browser only on Linux; on
   // macOS it would open one on every status check of a signed-out OAuth method.
   readonly headlessAuthenticate?: boolean;
@@ -53,6 +56,10 @@ export interface AntigravityAuthStatusOptions {
   // stands in for the probe meanwhile.
   readonly signInRunning?: boolean;
   readonly lastProbed?: AgentAuthStatus | null;
+}
+
+function signedOut(canReauth: boolean, detail: string): AgentAuthStatus {
+  return { authenticated: false, canReauth, label: '', source: 'none', detail };
 }
 
 export async function getAntigravityAuthStatus(
@@ -73,14 +80,19 @@ export async function getAntigravityAuthStatus(
     // cannot change an API-key setup, so none is offered for it.
     const method = config.authMethod();
     // Even API-key sessions require a runnable CLI on this executor.
-    config.binary();
+    const binary = config.binary();
     if (method === 'gemini-api-key') {
-      return config.apiKey() !== null
-        ? { authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' }
-        : { authenticated: false, canReauth: false, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
+      if (!config.apiKey()) return signedOut(false, 'GEMINI_API_KEY is not set.');
+      const probe = Bun.spawn([binary, '--version'], {
+        env: antigravityChildEnvironment(config), stdin: 'ignore', stdout: 'ignore', stderr: 'ignore',
+        signal: AbortSignal.any([AbortSignal.timeout(AUTHENTICATE_PROBE_TIMEOUT_MS), ...(signal ? [signal] : [])]),
+      });
+      if (await probe.exited !== 0) throw new Error('Antigravity CLI version check failed.');
+      signal?.throwIfAborted();
+      return { authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' };
     }
     if (signInRunning) {
-      return lastProbed ?? { authenticated: false, canReauth: true, label: '', source: 'none', detail: 'Sign-in in progress.' };
+      return lastProbed ?? signedOut(true, 'Sign-in in progress.');
     }
     // Model listing accepts any cached credential. Prefer the same method
     // check as a real session wherever it cannot open a browser.
@@ -90,22 +102,16 @@ export async function getAntigravityAuthStatus(
     } else {
       const result = await waitUnlessAborted(runModels(), signal);
       if (result.exitCode !== 0) {
-        return { authenticated: false, canReauth, label: '', source: 'none', detail: antigravityCliFailure(result) };
+        return signedOut(canReauth, antigravityCliFailure(result));
       }
     }
     return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    return {
-      authenticated: false,
-      // A failed probe or invalid setting is not fixed by a personal sign-in
-      // unless that is the configured method.
-      canReauth: !(error instanceof AgentIntegrationError && error.code === 'BINARY_NOT_FOUND')
-        && authMethodOrNull(config) === 'oauth-personal',
-      label: '',
-      source: 'none',
-      detail: errorMessage(error),
-    };
+  } catch (cause) {
+    signal?.throwIfAborted();
+    const error = classifyAntigravityLaunchError(cause);
+    const canReauth = !(error instanceof AgentIntegrationError && error.code === 'BINARY_NOT_FOUND')
+      && authMethodOrNull(config) === 'oauth-personal';
+    return signedOut(canReauth, errorMessage(error));
   }
 }
 

@@ -2,7 +2,7 @@ import type { AgentModelOption } from '@garcon/common/agents';
 import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
-import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
+import { antigravityChildEnvironment, classifyAntigravityLaunchError, type AntigravityConfig } from '../../config.js';
 import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
 const MODELS_TIMEOUT_MS = 10_000;
@@ -22,7 +22,7 @@ export async function runAntigravityModels(config: AntigravityConfig): Promise<A
       env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
     });
   } catch (error) {
-    throw new AgentIntegrationError('BINARY_NOT_FOUND', `Cannot launch Antigravity CLI on this executor: ${errorMessage(error)}`, false);
+    throw classifyAntigravityLaunchError(error);
   }
   const stdout = pipeText(proc.stdout);
   const stderr = pipeText(proc.stderr);
@@ -96,18 +96,19 @@ export function createAntigravityCatalog(runModels: () => Promise<AntigravityCli
     requiresStrictModelDiscovery: false,
     // Disposable generation sessions remain in agy's native history.
     generation: null,
-    discover: ({ signal }) => waitUnlessAborted(getAntigravityModels(), signal),
+    discover: ({ signal, requireNativeDiscovery }) => waitUnlessAborted(getAntigravityModels(requireNativeDiscovery), signal),
   });
 
-  async function getAntigravityModels(): Promise<AgentModelOption[]> {
+  async function getAntigravityModels(requireNativeDiscovery = false): Promise<AgentModelOption[]> {
     try {
       const result = await runModels();
       if (result.exitCode === 0) return [nativeDefault, ...parseAntigravityModels(result.stdout)];
-      logger.warn('Antigravity model discovery failed', { error: antigravityCliFailure(result) });
+      throw new Error(antigravityCliFailure(result));
     } catch (error) {
       if (error instanceof AgentIntegrationError && (error.code === 'BINARY_NOT_FOUND' || error.code === 'INVALID_SETTINGS')) {
         throw error;
       }
+      if (requireNativeDiscovery) throw new AgentIntegrationError('UNAVAILABLE', errorMessage(error), true);
       logger.warn('Antigravity model discovery failed', { error: errorMessage(error) });
     }
     return [nativeDefault];

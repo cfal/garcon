@@ -142,7 +142,7 @@ export interface AgentRegistryServiceContract {
   getAgentAuthStatusMap(executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null>;
-  getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]>;
+  getAgentCatalogEntries(executorId?: string | null, confirmingAgents?: readonly string[]): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
     readonly executorId?: string | null;
@@ -805,7 +805,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
-  getAgentCatalogEntries(executorId?: string | null) { return this.#catalog.getAgentCatalogEntries(executorId); }
+  getAgentCatalogEntries(executorId?: string | null, confirmingAgents?: readonly string[]) { return this.#catalog.getAgentCatalogEntries(executorId, confirmingAgents); }
 }
 
 function inputAttachments(options: UserInputAdmissionOptions) {

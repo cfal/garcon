@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { once } from 'node:events';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AgentAuthStatus } from '../../../common/agent-execution.js';
+import { CATALOG_INSTANCE_HEADER, type ModelCatalogResponse } from '../../../common/model-catalog.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { withTimeout } from '../../support/deferred.js';
 import {
@@ -45,6 +47,89 @@ function withScriptedAntigravity() {
 function marker(name: string): string {
   return `${name}_${crypto.randomUUID().slice(0, 8)}`;
 }
+
+test('a failed agy listing offers Default for selection but does not confirm login discovery', async () => {
+  await withIntegrationFixture('antigravity-discovery-unavailable', async ({ client }) => {
+    const query = new URLSearchParams({ executorId: client.executorId });
+    const ordinary = await client.fetch(`/api/v1/models?${query}`);
+    expect(ordinary.status).toBe(200);
+    const { catalog } = await ordinary.json() as ModelCatalogResponse;
+    expect(catalog.agents.find(agent => agent.id === 'antigravity')?.models)
+      .toEqual([expect.objectContaining({ value: 'default' })]);
+
+    const instance = ordinary.headers.get(CATALOG_INSTANCE_HEADER);
+    if (!instance) throw new Error('Catalog response omitted its serving instance');
+    query.set('loginInstance', instance);
+    query.set('loginAgent', 'antigravity');
+    expect(await rejectionOf(client.get(`/api/v1/models?${query}`))).toMatchObject({
+      status: 503, body: { errorCode: 'MODEL_DISCOVERY_UNAVAILABLE', retryable: true },
+    });
+  }, {
+    resolveServerEnvironment: dirs => ({ GARCON_ANTIGRAVITY_BINARY: join(dirs.home, 'unavailable-agy') }),
+    async prepareWorkspace(dirs) {
+      await writeFile(join(dirs.home, 'unavailable-agy'), '#!/bin/sh\nexit 1\n', { mode: 0o700 });
+    },
+  });
+}, TURN_TIMEOUT_MS);
+
+test('keeps healthy models available if agy disappears after credentials are confirmed', async () => {
+  await withIntegrationFixture('antigravity-disappearing-cli', async ({ client, executionDirs }) => {
+    const query = new URLSearchParams({ executorId: client.executorId });
+    const healthy = await client.fetch(`/api/v1/models?agent=codex&${query}`);
+    const instance = healthy.headers.get(CATALOG_INSTANCE_HEADER);
+    if (!instance) throw new Error('Codex catalog omitted its serving instance');
+    const healthyModels = (await healthy.json() as ModelCatalogResponse).catalog.agents[0]?.models;
+    expect(healthyModels?.length).toBeGreaterThan(0);
+    query.set('loginInstance', instance);
+    const auth = await client.get<Record<string, AgentAuthStatus>>(`/api/v1/agents/auth?agent=antigravity&${query}`);
+    expect(auth.antigravity?.authenticated).toBe(true);
+    await unlink(join(executionDirs.home, 'removable-agy'));
+    query.append('loginAgent', 'codex');
+    query.append('loginAgent', 'antigravity');
+    const reply = await client.fetch(`/api/v1/models?${query}`);
+    expect(reply.status).toBe(200);
+    expect(reply.headers.get(CATALOG_INSTANCE_HEADER)).toBe(instance);
+    const { catalog } = await reply.json() as ModelCatalogResponse;
+    expect(catalog.agents.find(agent => agent.id === 'antigravity')?.models).toEqual([]);
+    expect(catalog.agents.find(agent => agent.id === 'codex')?.models).toEqual(healthyModels);
+  }, {
+    executorEnvironment: { GEMINI_API_KEY: FAKE_GEMINI_API_KEY, GARCON_ANTIGRAVITY_AUTH_METHOD: 'gemini-api-key' },
+    resolveServerEnvironment: dirs => ({ GARCON_ANTIGRAVITY_BINARY: join(dirs.home, 'removable-agy') }),
+    async prepareWorkspace(dirs) {
+      await writeFile(join(dirs.home, 'removable-agy'), '#!/bin/sh\n[ "$1" = --version ]\n', { mode: 0o700 });
+    },
+  });
+}, TURN_TIMEOUT_MS);
+
+test('retries post-login discovery after temporary spawn pressure on the executor', async () => {
+  await withIntegrationFixture('antigravity-spawn-pressure', async ({ client, executionDirs }) => {
+    const query = new URLSearchParams({ executorId: client.executorId });
+    const ordinary = await client.fetch(`/api/v1/models?${query}`);
+    const instance = ordinary.headers.get(CATALOG_INSTANCE_HEADER);
+    if (!instance) throw new Error('Catalog response omitted its serving instance');
+    const { catalog } = await ordinary.json() as ModelCatalogResponse;
+    query.set('loginInstance', instance);
+    query.set('loginAgent', 'antigravity');
+    const route = `/api/v1/models?${query}`;
+    const failed = await client.fetch(route);
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toMatchObject({ errorCode: 'MODEL_DISCOVERY_UNAVAILABLE', retryable: true });
+    expect(catalog.agents.find(agent => agent.id === 'antigravity')?.models.map(model => model.value)).toEqual(['default']);
+
+    await unlink(join(executionDirs.home, 'fixture-agy.busy'));
+    const retried = await client.get<ModelCatalogResponse>(route);
+    expect(retried.catalog.agents.find(agent => agent.id === 'antigravity')?.models.map(model => model.value))
+      .toEqual(['default', 'fixture-model']);
+  }, {
+    resolveServerEnvironment: dirs => ({ GARCON_ANTIGRAVITY_BINARY: join(dirs.home, 'fixture-agy') }),
+    executorEnvironment: { BUN_OPTIONS: `--preload=${fileURLToPath(new URL('../../support/antigravity-spawn-pressure.ts', import.meta.url))}` },
+    async prepareWorkspace(dirs) {
+      const binary = join(dirs.home, 'fixture-agy');
+      await writeFile(binary, "#!/bin/sh\nprintf 'fixture-model\\tFixture model\\n'\n", { mode: 0o700 });
+      await writeFile(`${binary}.busy`, '');
+    },
+  });
+}, TURN_TIMEOUT_MS);
 
 describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
   beforeEach(() => {
@@ -131,13 +216,18 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
   test('refuses a permission change until the first handoff fork prompt binds its session', async () => {
     const env = requireEnvironment();
     env.model.scriptTurn([geminiText('Source reply')]);
-    const held = env.model.scriptHeldTurn([geminiText('Fork reply')]);
+    const file = 'fork-permission-result.txt';
+    const command = `printf approved > ${file} && cat ${file}`;
+    const held = env.model.scriptHeldTurn([geminiFunctionCall('fork-command', 'run_command', {
+      CommandLine: command, toolSummary: 'Write a marker', WaitMsBeforeAsync: 5000,
+    })]);
+    env.model.scriptTurn([geminiText('Fork reply')]);
     await withIntegrationFixture('antigravity-unbound-permission', async (fixture) => {
       const { client } = fixture;
       const sourceChatId = fixture.newChatId();
       const first = await client.startChat(scriptedAntigravityStartRequest({
         chatId: sourceChatId, projectPath: fixture.executionDirs.project,
-        command: 'Create a handoff source', permissionMode: 'bypassPermissions',
+        command: 'Create a handoff source', permissionMode: 'default',
       }));
       expect((await client.waitForTurnTerminal(sourceChatId, first.turnId)).type).toBe('agent-run-finished');
       const transcript = await client.getMessages(sourceChatId);
@@ -148,10 +238,11 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       const gate = join(fixture.executionDirs.home, 'hold-acp');
       await writeFile(gate, '');
       const changeMode = () => client.patch('/api/v1/chats/execution-settings', { chatId, permissionMode: 'default' });
+      const cursor = client.markEvents();
       const fork = await client.runChat(scriptedAntigravityRunRequest({ chatId, command: 'Continue', permissionMode: 'bypassPermissions' }));
       try {
         expect(await rejectionOf(changeMode())).toMatchObject({ status: 409, body: { errorCode: 'SESSION_BUSY', retryable: true } });
-        expect((await client.getChatSnapshot(chatId)).chat.permissionMode).toBe('bypassPermissions');
+        expect((await client.getChatSnapshot(chatId)).chat.permissionMode).toBe('default');
       } finally { await unlink(gate); }
       try {
         await withTimeout(held.requested, LIVE_TURN_TIMEOUT_MS, () => 'Fork prompt was not sent');
@@ -159,7 +250,16 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
         await changeMode();
         expect((await client.getChatSnapshot(chatId)).chat.permissionMode).toBe('default');
       } finally { held.release(); }
+      const permission = await client.waitForTransientPermission(chatId,
+        row => row.message.type === 'permission-request' && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command === command, { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS });
+      if (permission.message.type !== 'permission-request') throw new Error('Missing fork permission request');
+      const markerFile = Bun.file(join(fixture.executionDirs.project, file));
+      expect(await markerFile.exists()).toBe(false);
+      await client.sendPermissionDecision({ chatId, clientRequestId: crypto.randomUUID(),
+        permissionOccurrenceId: permission.message.permissionOccurrenceId, allow: true, alwaysAllow: false });
       expect((await client.waitForTurnTerminal(chatId, fork.turnId)).type).toBe('agent-run-finished');
+      expect(await readFile(join(fixture.executionDirs.project, file), 'utf8')).toBe('approved');
       env.model.assertSettled();
     }, {
       serverEnvironment: { ...env.serverEnvironment, SCRIPTED_AGY: ANTIGRAVITY_BINARY },

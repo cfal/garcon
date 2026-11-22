@@ -33,7 +33,7 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 51;
+export const EXECUTOR_PROTOCOL_REVISION = 52;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
@@ -78,7 +78,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'execution.resume': Call<Request<'execution', 'resume'>, Result<'execution', 'resume'>>;
   'execution.abort': Call<Request<'execution', 'abort'>, boolean>;
   'execution.runningSessions': Call<null, Result<'execution', 'runningSessions'>>;
-  'catalog.snapshot': Call<{ readonly strict: boolean }, Result<'catalog', 'snapshot'>>;
+  'catalog.snapshot': Call<Pick<Request<'catalog', 'snapshot'>, 'strict' | 'requireNativeDiscovery'>, Result<'catalog', 'snapshot'>>;
   'settings.migrate': Call<AgentSettingsEnvelope, AgentSettingsEnvelope>;
   'lifecycle.start': Call<null, void>;
   'lifecycle.stop': Call<null, void>;

@@ -11,6 +11,19 @@ export const ANTIGRAVITY_AUTH_METHODS = [
 
 export type AntigravityAuthMethod = typeof ANTIGRAVITY_AUTH_METHODS[number];
 
+const UNLAUNCHABLE_BINARY_CODES = new Set([
+  'ENOENT', 'ENOTDIR', 'EISDIR', 'ELOOP', 'ENAMETOOLONG', 'EACCES', 'EPERM',
+  'ENOEXEC', 'ELIBBAD', 'EBADARCH', 'EBADEXEC', 'EBADMACHO',
+]);
+
+export function classifyAntigravityLaunchError(error: unknown): unknown {
+  if (error instanceof Error && 'syscall' in error && error.syscall === 'posix_spawn'
+    && 'code' in error && typeof error.code === 'string' && UNLAUNCHABLE_BINARY_CODES.has(error.code)) {
+    return new AgentIntegrationError('BINARY_NOT_FOUND', `Cannot launch Antigravity CLI on this executor: ${error.message}`, false);
+  }
+  return error;
+}
+
 export interface AntigravityConfig {
   readonly binary: () => string;
   readonly apiKey: () => string | null;

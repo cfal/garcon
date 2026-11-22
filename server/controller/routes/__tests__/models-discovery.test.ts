@@ -17,11 +17,12 @@ function discoveryFixture() {
   const models = [{ value: 'synthetic-model', label: 'Synthetic model' }];
   const snapshot = { models, defaultModel: models[0]!.value, requiresStrictModelDiscovery: true, generation: null };
   const discover = mock<AgentCatalog['snapshot']>(async () => snapshot);
+  const healthyDiscover = mock<AgentCatalog['snapshot']>(async () => snapshot);
   const registry = new IntegrationRegistry({ instances: [
     { ...integration, catalog: { snapshot: discover } },
     { ...integration, descriptor: { ...integration.descriptor, id: 'healthy' },
       settings: createVersionedSettings({ ownerId: 'healthy', schemaVersion: 1, defaults: {}, descriptors: [] }),
-      catalog: { snapshot: async () => snapshot } },
+      catalog: { snapshot: healthyDiscover } },
   ] });
   let ready = true;
   let instanceId = 'first';
@@ -47,18 +48,28 @@ function discoveryFixture() {
       apiProviders: { getCatalog: () => [] },
     },
     responseCache: new ModelCatalogResponseCache(),
-    readyInstanceId: () => instanceId,
+    instanceId: () => instanceId,
   })['/api/v1/models']!.GET!;
-  const request = (agent: string | null = 'test', loginInstance?: string) => {
+  const request = (agent: string | null = 'test', loginInstance?: string, ...loginAgents: string[]) => {
     const url = new URL(`http://localhost/api/v1/models?executorId=${executorId}`);
     if (agent) url.searchParams.set('agent', agent);
     if (loginInstance) url.searchParams.set('loginInstance', loginInstance);
+    for (const id of loginAgents) url.searchParams.append('loginAgent', id);
     return route(new Request(url), url);
   };
-  return { discover, models, snapshot, request, offline: () => { ready = false; }, replace: () => { instanceId = 'second'; } };
+  return { discover, healthyDiscover, models, snapshot, request, offline: () => { ready = false; }, replace: () => { instanceId = 'second'; } };
 }
 
 describe('selected-agent discovery with the catalog service', () => {
+  it('reports a missing binary during direct strict selection instead of validating an empty entry', async () => {
+    const fixture = discoveryFixture();
+    expect((await fixture.request()).status).toBe(200);
+    fixture.discover.mockRejectedValue(new AgentIntegrationError('BINARY_NOT_FOUND', 'Provider missing', false));
+    const response = await fixture.request();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'Model discovery unavailable', reason: 'Provider missing' });
+  });
+
   it('retains learned strict discovery and stale models after a non-strict RPC failure', async () => {
     const fixture = discoveryFixture();
     expect((await fixture.request()).status).toBe(200);
@@ -105,6 +116,49 @@ describe('selected-agent discovery with the catalog service', () => {
 });
 
 describe('executor catalog discovery', () => {
+  it.each(['success', 'failure'])('isolates ordinary discovery from an overlapping login %s', async outcome => {
+    const fixture = discoveryFixture();
+    const gate = Promise.withResolvers<void>();
+    fixture.discover.mockImplementation(async ({ strict }) => {
+      if (!strict) return fixture.snapshot;
+      await gate.promise;
+      if (outcome === 'failure') throw new AgentIntegrationError('UNAVAILABLE', 'Native discovery failed', true);
+      return { ...fixture.snapshot, models: [{ value: 'login-only', label: 'Login only' }] };
+    });
+    const login = fixture.request(null, 'first', 'test');
+    const ordinary = fixture.request(null);
+    gate.resolve();
+    expect((await login).status).toBe(outcome === 'success' ? 200 : 503);
+    for (const reply of [await ordinary, await fixture.request(null)]) {
+      expect(reply.status).toBe(200);
+      expect((await reply.json()).catalog.agents[0].models).toEqual(fixture.models);
+    }
+    expect(fixture.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it('never publishes ordinary discovery from a replaced worker', async () => {
+    const fixture = discoveryFixture();
+    fixture.discover.mockImplementationOnce(async () => { fixture.replace(); return fixture.snapshot; });
+    const result = await fixture.request(null);
+    expect(result.status).toBe(503);
+    expect(await result.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE' });
+    expect((await fixture.request(null)).headers.get('X-Garcon-Executor-Instance')).toBe('second');
+    expect(fixture.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it('requires successful native discovery for the confirmed login, even with a usable fallback', async () => {
+    const fixture = discoveryFixture();
+    fixture.discover.mockImplementation(async ({ strict }) => {
+      if (strict) throw new AgentIntegrationError('UNAVAILABLE', 'Native discovery temporarily failed', true);
+      return fixture.snapshot;
+    });
+    expect((await fixture.request(null)).headers.get('X-Garcon-Executor-Instance')).toBe('first');
+    const result = await fixture.request(null, 'first', 'test');
+    expect(result.status).toBe(503);
+    expect(await result.json()).toMatchObject({ errorCode: 'MODEL_DISCOVERY_UNAVAILABLE', retryable: true });
+    fixture.discover.mockResolvedValue({ ...fixture.snapshot, models: [] });
+    expect((await fixture.request(null, 'first', 'test')).status).toBe(200);
+  });
   it('bypasses a pre-confirmation cache entry only for the worker that completed login', async () => {
     const fixture = discoveryFixture();
     fixture.discover.mockResolvedValueOnce({ ...fixture.snapshot, models: [] });
@@ -154,6 +208,23 @@ describe('executor catalog discovery', () => {
       { id: 'test', models: [] }, { id: 'healthy', models: fixture.models },
     ]);
   });
+
+  it.each(['BINARY_NOT_FOUND', 'INVALID_SETTINGS', 'INVALID_ENDPOINT'] as const)(
+    'removes only the unavailable native models after login discovery reports %s', async code => {
+      const fixture = discoveryFixture();
+      const signedInModels = [{ value: 'signed-in-model', label: 'Signed-in model' }];
+      fixture.healthyDiscover.mockImplementation(async ({ strict, requireNativeDiscovery }) =>
+        strict && requireNativeDiscovery ? { ...fixture.snapshot, defaultModel: signedInModels[0]!.value, models: signedInModels } : fixture.snapshot);
+      expect((await (await fixture.request(null)).json()).catalog.agents[0].models).toEqual(fixture.models);
+      fixture.discover.mockRejectedValueOnce(new AgentIntegrationError(code, 'Provider unavailable', false));
+      const response = await fixture.request(null, 'first', 'test', 'healthy');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('X-Garcon-Executor-Instance')).toBe('first');
+      expect((await response.json()).catalog.agents).toMatchObject([
+        { id: 'test', defaultModel: '', models: [] }, { id: 'healthy', models: signedInModels },
+      ]);
+    },
+  );
 
   it('returns the delivery error when strict discovery loses its reply', async () => {
     const fixture = discoveryFixture();
