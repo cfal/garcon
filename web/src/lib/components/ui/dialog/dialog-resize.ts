@@ -1,16 +1,18 @@
 const resizeId = 'dialog-resize';
 const pendingFrames = new WeakSet<HTMLElement>();
 
-function reduceMotion(): boolean {
+function skipResizeMotion(): boolean {
+	const root = document.documentElement;
 	return (
-		document.documentElement.hasAttribute('data-reduce-motion') ||
+		root.hasAttribute('data-reduce-motion') ||
+		root.dataset.themeAppearance === 'terminal' ||
 		window.matchMedia('(prefers-reduced-motion: reduce)').matches
 	);
 }
 
 /** Captures the rendered box before a mode change, including a resize already in progress. */
 export function animateDialogResize(dialog: HTMLElement | null): void {
-	if (!dialog?.animate || reduceMotion() || pendingFrames.has(dialog)) return;
+	if (!dialog?.animate || skipResizeMotion() || pendingFrames.has(dialog)) return;
 	pendingFrames.add(dialog);
 	const width = dialog.offsetWidth;
 	const height = dialog.offsetHeight;
@@ -26,8 +28,11 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 			.getAnimations()
 			.find((animation) => animation.id === resizeId)
 			?.cancel();
-		if (reduceMotion() || viewport?.width !== viewportWidth || viewport?.height !== viewportHeight)
-			return;
+		if (
+			skipResizeMotion() ||
+			viewport?.width !== viewportWidth ||
+			viewport?.height !== viewportHeight
+		) return;
 
 		const nextWidth = dialog.offsetWidth;
 		const nextHeight = dialog.offsetHeight;

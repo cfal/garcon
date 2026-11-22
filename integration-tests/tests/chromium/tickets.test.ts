@@ -60,6 +60,11 @@ describe("Chromium Tickets interaction", () => {
       expect(osReduced.middle).toBe(osReduced.after);
 
       await page.emulateMedia({ reducedMotion: "no-preference" });
+      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = "terminal"; });
+      const terminal = await measureToggle();
+      expect(terminal.after).toBeGreaterThan(terminal.before);
+      expect(terminal.middle).toBe(terminal.after);
+
       await page.evaluate(seedLocalSettings, { reduceMotion: true });
       await page.reload();
       await openTicket.click();
