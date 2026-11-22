@@ -4,7 +4,7 @@ import { chmod, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { installAntigravityCli } from '../install-antigravity-cli.ts';
+import { installAntigravityCli } from '../../../../scripts/install-antigravity-cli.ts';
 
 it.skipIf(process.platform !== 'linux')('publishes a verified binary for concurrent installers and reuses it without writing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'test-agy-install-'));
@@ -15,7 +15,7 @@ it.skipIf(process.platform !== 'linux')('publishes a verified binary for concurr
     const cache = join(root, 'cache');
     await writeFile(join(root, member), contents);
     expect(Bun.spawnSync(['tar', '-czf', archive, '-C', root, member]).exitCode).toBe(0);
-    const digest = bytes => createHash('sha512').update(bytes).digest('hex');
+    const digest = (bytes: string | Uint8Array) => createHash('sha512').update(bytes).digest('hex');
     const release = {
       version: 'fixture', platform: `${process.platform}-${process.arch}`, url: pathToFileURL(archive).href, member,
       sha512: digest(await Bun.file(archive).bytes()), binarySha512: digest(contents),

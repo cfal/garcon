@@ -29,10 +29,10 @@ async function fileSha512(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-async function run(command: string[]): Promise<Uint8Array> {
+async function run(command: string[]): Promise<string> {
   const proc = Bun.spawn(command, { stdout: 'pipe', stderr: 'pipe' });
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).bytes(),
+    new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
@@ -66,7 +66,7 @@ export async function installAntigravityCli(cacheRoot: string, release: CliRelea
     if (digest !== release.sha512) {
       throw new Error(`Antigravity CLI archive SHA-512 mismatch: expected ${release.sha512}, received ${digest}.`);
     }
-    const members = new TextDecoder().decode(await run(['tar', '-tzf', archive])).trim().split('\n');
+    const members = (await run(['tar', '-tzf', archive])).trim().split('\n');
     if (members.length !== 1 || members[0] !== release.member) {
       throw new Error(`Unexpected Antigravity CLI archive members: ${members.join(', ')}`);
     }
