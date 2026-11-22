@@ -84,6 +84,7 @@ export async function findPiSessionFileBySessionId(
   const nearby = await findInDirectory(localDir, sessionId);
   if (nearby) return nearby;
   let match: string | null = null;
+  let accessError: unknown;
   for await (const entry of directoryEntries(sessionsRoot)) {
     if (entry.name === local || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
     let candidate: string | null;
@@ -91,6 +92,10 @@ export async function findPiSessionFileBySessionId(
       candidate = await findInDirectory(path.join(sessionsRoot, entry.name), sessionId);
     } catch (error) {
       if (entry.isSymbolicLink() && (hasNodeErrorCode(error, 'ENOTDIR') || hasNodeErrorCode(error, 'ELOOP'))) continue;
+      if (hasNodeErrorCode(error, 'EACCES') || hasNodeErrorCode(error, 'EPERM')) {
+        accessError ??= error;
+        continue;
+      }
       throw error;
     }
     if (!candidate) continue;
@@ -99,6 +104,8 @@ export async function findPiSessionFileBySessionId(
     }
     match ??= candidate;
   }
+  // An unreadable sibling cannot rule out a session that wasn't found elsewhere.
+  if (!match && accessError) throw accessError;
   return match;
 }
 

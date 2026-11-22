@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -98,6 +98,22 @@ test('finds relocated project session directories without mistaking two paths to
   expect(match && await realpath(match)).toBe(await realpath(file));
   await put(path.join(root, '--distinct--', 'session.jsonl'), header);
   await expect(lookup()).rejects.toThrow('duplicate');
+});
+
+test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('an unreadable sibling cannot hide a verified session or prove a missing one', async () => {
+  const root = path.join(home, 'agent', 'sessions');
+  const locked = path.join(root, '--locked--');
+  await mkdir(locked, { recursive: true });
+  await chmod(locked, 0);
+  try {
+    await expect(lookup()).rejects.toMatchObject({ code: 'EACCES' });
+    const file = await put(path.join(root, '--other--', 'session.jsonl'), header);
+    expect(await lookup()).toBe(file);
+    override = locked;
+    await expect(lookup()).rejects.toMatchObject({ code: 'EACCES' });
+  } finally {
+    await chmod(locked, 0o700);
+  }
 });
 
 test('bounds the whole header scan, not just individual lines or the size of the file', async () => {
