@@ -4,13 +4,14 @@ import type { AcpResumeRequest, AcpStartRequest } from './runtime-types.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import { buildEnvFallback, buildPromptFallback } from './runtime-helpers.js';
 
-// The per-agent contract the shared ACP runtime is configured with.
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
+type AcpRequest = AcpStartRequest | AcpResumeRequest;
+export type AcpPrompt = Array<{ type: string; text?: string; [key: string]: unknown }>;
 
 export interface AcpSessionConfigurationContext {
   client: AcpClient;
   sessionId: string;
-  request: AcpStartRequest | AcpResumeRequest;
+  request: AcpRequest;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
   agentDefaultModelId?: string;
@@ -36,12 +37,10 @@ export interface AcpAgentPolicy {
   mcpServers?: unknown[];
   clientCapabilities?: AcpInitializeParams['clientCapabilities'];
   configureSession?: (context: AcpSessionConfigurationContext) => Promise<void>;
-  buildEnv?: (request: AcpStartRequest | AcpResumeRequest) => Record<string, string | undefined>;
-  buildPrompt?: (request: AcpStartRequest | AcpResumeRequest) => Array<{ type: string; text?: string; [key: string]: unknown }>;
+  buildEnv?: (request: AcpRequest) => Record<string, string | undefined>;
+  buildPrompt?: (request: AcpRequest) => AcpPrompt;
   resolveNativePath?: (sessionId: string) => string | null;
 }
-
-type AcpRequest = AcpStartRequest | AcpResumeRequest;
 
 // Garcon names the agent's default as an empty model or `default`; returns the
 // explicitly requested model otherwise.
@@ -76,8 +75,6 @@ export async function configureSessionFor(
     },
   });
 }
-
-export type AcpPrompt = Array<{ type: string; text?: string; [key: string]: unknown }>;
 
 export function promptFor(policy: AcpAgentPolicy, request: AcpRequest): AcpPrompt {
   const prompt = policy.buildPrompt ? policy.buildPrompt(request) : buildPromptFallback(request);

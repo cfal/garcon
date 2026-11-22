@@ -53,6 +53,8 @@ ACP calls:
 | `session/prompt` | Text, plus inline base64 `image` blocks; `promptCapabilities.image` is true. |
 | `session/cancel` | A notification, per the ACP specification. The open prompt resolves with `stopReason: "cancelled"`, so Antigravity aborts cooperatively and keeps its process. Cursor keeps `process-restart`. |
 
+The prompt RPC determines the turn outcome. Closing stdout fails unanswered requests, but does not undo a final reply. Closing stderr alone has no effect on the turn. After transport loss, the next turn resumes the same native session on a new process and sends only its own input; Garcon does not retry the previous prompt.
+
 ### Stop
 
 A cooperative cancel settles only when the agent answers the open prompt. The next turn on that session waits for the cancelled prompt to settle before it sends a new `session/prompt`, so the two prompts never overlap. If the prompt has not settled after 10 s, the runtime retires the process, and the turn reconnects with `session/resume`. Content the agent streams between the cancel and its settlement belongs to the stopped turn and is published with it, because it is also in the agent's native history.

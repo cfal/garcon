@@ -407,7 +407,8 @@ export class AcpAgentRuntime {
       if (existing.chatId !== chatId) {
         throw new Error(`ACP session ${agentSessionId} is already bound to another chat`);
       }
-      return existing;
+      if (existing.client.isConnected || this.#isBusy(existing)) return existing;
+      this.#retireSession(existing, 'cancelled', true);
     }
     const settled = Promise.withResolvers<void>();
     this.#restores.set(agentSessionId, { chatId, settled: settled.promise });
@@ -437,8 +438,7 @@ export class AcpAgentRuntime {
     this.#bindTurnSource(turn);
 
     let success = false;
-    let shouldThrow = false;
-    let failureMessage = '';
+    let failureMessage: string | null = null;
     let executionStarted = false;
     let admissionClosed = false;
 
@@ -450,19 +450,19 @@ export class AcpAgentRuntime {
       if (turn.aborted) return;
       assertAcpExecutionOpen(request);
       if (session.retired) throw new Error(`${this.#policy.agentId} ACP process exited before the prompt was sent`);
-      const promptRequest = session.client.promptSession({
+      await session.client.promptSession({
         sessionId: session.id,
         prompt,
       }, () => {
         releasePending();
         if (!this.#activateTurnSource(turn, request.projectPath)) return;
         executionStarted = true;
+        // A cooperative Stop during pipe backpressure can now cancel the delivered prompt.
+        if (turn.aborted) this.abort(session.id);
         onExecutionStarted?.();
       });
-      await promptRequest;
       const reportedFailure = this.#canRouteSource(turn) ? this.#converter.takeTurnFailure?.(session.id) : null;
       if (reportedFailure && !turn.aborted) {
-        shouldThrow = true;
         failureMessage = reportedFailure;
       } else {
         success = !turn.aborted;
@@ -472,12 +472,7 @@ export class AcpAgentRuntime {
       // The transport failure is reported; an in-band failure the agent sent
       // first must not add a second error row at the final flush.
       if (this.#canRouteSource(turn)) this.#converter.takeTurnFailure?.(session.id);
-      if (turn.aborted) {
-        success = false;
-      } else {
-        shouldThrow = true;
-        failureMessage = humanizeError(error);
-      }
+      if (!turn.aborted) failureMessage = humanizeError(error);
     } finally {
       releasePending();
       const finalMessages = executionStarted ? this.#emitFlushedMessages(turn)
@@ -514,9 +509,11 @@ export class AcpAgentRuntime {
 
       this.#cancelPermissionsForTurn(turn, turn.aborted ? 'aborted' : 'session-complete');
       if (!executionStarted) this.#retireTurnSource(turn, 'cancelled');
+      // A broken pipe is terminal even if the OS has not reported the exit yet.
+      if (!session.client.isConnected) this.#retireSession(session, 'cancelled', true);
     }
 
-    if (shouldThrow) {
+    if (failureMessage !== null) {
       throw new Error(failureMessage);
     }
   }
@@ -572,27 +569,6 @@ export class AcpAgentRuntime {
           session.client.respondError(message.id, -32601, `Unsupported ACP request method: ${message.method}`);
         }
       }
-    }));
-
-    turn.detachSourceListeners.push(session.client.onExit((exitCode) => {
-      if (!this.#canRouteSource(turn)) return;
-      if (session.activeTurn === turn && !turn.aborted) {
-        // Text streamed before the crash is published ahead of the one failure row.
-        this.#converter.takeTurnFailure?.(session.id);
-        this.#emitFlushedMessages(turn);
-        const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
-        this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), message)]);
-        session.state = 'failed';
-        session.lastActivityAt = Date.now();
-        this.#completeTurn(turn);
-        this.#publishTurnEvent(turn, {
-          type: 'run-ended',
-          runId: turn.operation.runId,
-          outcome: 'failed',
-          error: { code: 'PROVIDER_FAILURE', message },
-        });
-      }
-      this.#retireSession(session, 'cancelled', true);
     }));
 
     turn.detachSourceListeners.push(session.client.onStderr((line) => {
@@ -840,15 +816,11 @@ export class AcpAgentRuntime {
     session.client.close();
   }
 
-  // Each session watches its own process, so a death while no turn is routing
-  // (idle, restored, or still configuring) still retires it. A routable turn's
-  // own listener reports the failure first and retires the session.
   #registerSession(session: AcpAgentRuntimeSession): void {
     this.#sessions.set(session.id, session);
     session.client.onExit(() => {
-      const turn = session.activeTurn;
-      if (turn && this.#canRouteSource(turn)) return;
-      this.#retireSession(session, 'cancelled', true);
+      // An active prompt settles its own outcome before retiring the session.
+      if (!session.activeTurn) this.#retireSession(session, 'cancelled', true);
     });
   }
 

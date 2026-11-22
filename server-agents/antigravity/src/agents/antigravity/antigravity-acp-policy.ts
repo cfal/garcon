@@ -70,8 +70,10 @@ function offeredModel(
   models: AcpSessionConfigurationContext['models'],
   model: string | undefined,
 ): string | undefined {
-  const available = models?.availableModels ?? [];
-  return model && (available.length === 0 || available.some((entry) => entry.modelId === model)) ? model : undefined;
+  const available = models?.availableModels;
+  if (!model || available === undefined) return model;
+  if (!Array.isArray(available)) return undefined;
+  return available.length === 0 || available.some((entry) => entry?.modelId === model) ? model : undefined;
 }
 
 // Returns the updated model state, or undefined when the session already uses
@@ -85,7 +87,7 @@ export async function applyAntigravityModel(
 ): Promise<AcpSessionConfigurationContext['models'] | undefined> {
   if (!model || model === models?.currentModelId) return undefined;
   const available = models?.availableModels ?? [];
-  if (available.length > 0 && !available.some((entry) => entry.modelId === model)) {
+  if (Array.isArray(available) && available.length > 0 && !available.some((entry) => entry?.modelId === model)) {
     throw new AgentIntegrationError(
       'PROVIDER_FAILURE',
       `Antigravity model ${model} is not available for this account.`,

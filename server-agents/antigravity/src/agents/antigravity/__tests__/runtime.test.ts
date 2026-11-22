@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import type { AcpInitializeResult, AcpJsonRpcMessage } from '@garcon/server-agent-common/acp/protocol';
 import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
@@ -46,7 +46,7 @@ class FakeAntigravityAgent {
   #nextSession = 1;
   readonly #sessionModels = new Map<string, string>();
   // When set, sessions offer only these models, as another account would.
-  offeredModelIds: readonly string[] | null = null;
+  resumeAvailableModels: unknown = MODELS.availableModels;
   #stdout!: ReadableStreamDefaultController<Uint8Array>;
   #openPrompt: { id: number | string; sessionId: string } | null = null;
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
@@ -65,11 +65,27 @@ class FakeAntigravityAgent {
   resumeErrorCode = -32603;
   // When set, `session/set_config_option` replies only after this settles.
   configReplyGate: Promise<void> | null = null;
+  promptFlush: Promise<number> | null = null;
+  exitAfterKill: Promise<void> | null = null;
 
   // Each spawn is a fresh process; later frames go to the newest one.
   // Ends the newest process as a crash would.
   crash(code = 1): void {
     this.#exitCurrent?.(code);
+  }
+
+  breakStdout(): void {
+    this.#stdout.error(new Error('Synthetic stdout failure'));
+  }
+
+  closeStdout(): void {
+    this.#stdout.close();
+  }
+
+  endPromptAtEof(): void {
+    const reply = { id: this.#takeOpenPrompt().id, result: { stopReason: 'end_turn' } };
+    this.#stdout.enqueue(new TextEncoder().encode(JSON.stringify(reply)));
+    this.closeStdout();
   }
 
   #exitCurrent: ((code: number) => void) | null = null;
@@ -78,11 +94,15 @@ class FakeAntigravityAgent {
     const exited = Promise.withResolvers<number>();
     this.#exitCurrent = exited.resolve;
     return {
-      stdin: { write: (data: string | Uint8Array) => this.#receive(String(data)) },
+      stdin: { write: (data: string | Uint8Array) => this.#receive(String(data)), flush: () => this.promptFlush ?? 0 },
       stdout: new ReadableStream<Uint8Array>({ start: (controller) => { this.#stdout = controller; } }),
       stderr: new ReadableStream<Uint8Array>(),
       exited: exited.promise,
-      kill: () => { this.processesKilled++; exited.resolve(143); },
+      kill: () => {
+        this.processesKilled++;
+        if (this.exitAfterKill) void this.exitAfterKill.then(() => exited.resolve(143));
+        else exited.resolve(143);
+      },
     };
   }
 
@@ -111,31 +131,36 @@ class FakeAntigravityAgent {
     });
   }
 
-  failPrompt(message: string): void {
+  #takeOpenPrompt() {
     const prompt = this.#openPrompt;
     if (!prompt) throw new Error('No open prompt');
     this.#openPrompt = null;
-    this.#send({ jsonrpc: '2.0', id: prompt.id, error: { code: -32603, message } });
+    return prompt;
+  }
+
+  failPrompt(message: string): void {
+    this.#send({ jsonrpc: '2.0', id: this.#takeOpenPrompt().id, error: { code: -32603, message } });
   }
 
   endPrompt(stopReason = 'end_turn'): void {
-    const prompt = this.#openPrompt;
-    if (!prompt) throw new Error('No open prompt');
-    this.#openPrompt = null;
-    this.#send({ jsonrpc: '2.0', id: prompt.id, result: { stopReason } });
+    this.#send({ jsonrpc: '2.0', id: this.#takeOpenPrompt().id, result: { stopReason } });
   }
 
   #receive(data: string): number {
     for (const line of data.split('\n')) {
       if (line.trim()) this.#handle(JSON.parse(line) as AcpJsonRpcMessage);
     }
-    return data.length;
+    return Buffer.byteLength(data);
   }
 
   #handle(message: AcpJsonRpcMessage): void {
     this.received.push(message);
     const params = (message.params ?? {}) as Record<string, unknown>;
-    const reply = (result: unknown) => this.#send({ jsonrpc: '2.0', id: message.id, result });
+    const reply = (result: unknown, gate?: Promise<void> | null) => {
+      const send = () => this.#send({ jsonrpc: '2.0', id: message.id, result });
+      if (gate) void gate.then(send);
+      else send();
+    };
     switch (message.method) {
       case 'initialize':
         return reply({ protocolVersion: 1, agentCapabilities: this.capabilities });
@@ -149,39 +174,25 @@ class FakeAntigravityAgent {
         const sessionId = `session-${this.#nextSession++}`;
         this.sessions.add(sessionId);
         const result = { sessionId, models: MODELS, configOptions: [{ ...MODE_OPTION, options: this.modeOptions }] };
-        if (this.newSessionGate) {
-          void this.newSessionGate.then(() => reply(result));
-          return;
-        }
-        return reply(result);
+        return reply(result, this.newSessionGate);
       }
-      case 'session/resume':
+      case 'session/resume': {
         if (this.resumeFailure) {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: this.resumeErrorCode, message: this.resumeFailure } });
         }
         if (!this.sessions.has(String(params.sessionId))) {
           return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Failed to read session' } });
         }
-      {
         const models = {
           currentModelId: this.#sessionModels.get(String(params.sessionId)) ?? MODELS.currentModelId,
-          availableModels: MODELS.availableModels.filter((entry) => this.offeredModelIds?.includes(entry.modelId) ?? true),
+          availableModels: this.resumeAvailableModels,
         };
         const result = this.resumeConfigOptions ? { models, configOptions: this.resumeConfigOptions } : { models };
-        if (this.resumeGate) {
-          void this.resumeGate.then(() => reply(result));
-          return;
-        }
-        return reply(result);
+        return reply(result, this.resumeGate);
       }
-      case 'session/set_config_option':
-      {
+      case 'session/set_config_option': {
         const result = this.configReply ?? { configOptions: [{ ...MODE_OPTION, options: this.modeOptions, currentValue: params.value }] };
-        if (this.configReplyGate) {
-          void this.configReplyGate.then(() => reply(result));
-          return;
-        }
-        return reply(result);
+        return reply(result, this.configReplyGate);
       }
       case 'session/prompt':
         this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
@@ -206,8 +217,9 @@ const CONFIG: AntigravityConfig = {
 
 function harness(options: { readonly requestTimeoutMs?: number } = {}) {
   const agent = new FakeAntigravityAgent();
+  const converter = new AntigravityAcpEventConverter();
   const runtime = new AcpAgentRuntime(createAntigravityAcpPolicy(CONFIG), {
-    converter: new AntigravityAcpEventConverter(),
+    converter,
     createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: options.requestTimeoutMs ?? 2_000 }),
     cancelSettleTimeoutMs: 100,
   });
@@ -222,7 +234,7 @@ function harness(options: { readonly requestTimeoutMs?: number } = {}) {
     operation: runtimeOperation('run-1', (event) => events.push(event)),
     ...overrides,
   });
-  return { agent, runtime, events, request };
+  return { agent, runtime, events, request, converter };
 }
 
 function waitFor(predicate: () => boolean): Promise<void> {
@@ -297,6 +309,11 @@ describe('Antigravity ACP runtime', () => {
 
       events.length = 0;
       agent.configReply = undefined;
+      agent.onPrompt(() => { throw new Error('Synthetic prompt write failure'); });
+      await expect(execution.start({ ...request, runId: 'failed-write' }, event => events.push(event))).rejects.toThrow('prompt write failure');
+      expect(events.filter(event => event.type === 'session')).toEqual([]);
+      agent.received.length = 0;
+      events.length = 0;
       agent.onPrompt((fake) => fake.endPrompt());
       const result = await execution.start({ ...request, runId: 'run-2' }, (event) => events.push(event));
       await waitFor(() => runEnded(events).length > 0);
@@ -305,6 +322,120 @@ describe('Antigravity ACP runtime', () => {
       }]);
       expect(events.map((event) => event.type)).toEqual(['session', 'run-ended']);
       expect(result.nativeSeedReceipt).toEqual(receiptForCarriedContext(request.carriedContext, result.agentSessionId));
+    } finally { runtime.shutdown(); }
+  });
+
+  it('does not acknowledge a handoff when the child closes stdin before confirming its mode', async () => {
+    const child = `
+      import { closeSync, readSync } from 'node:fs';
+      const byte = Buffer.alloc(1);
+      let line = '';
+      while (readSync(0, byte, 0, 1, null)) {
+        if (byte[0] !== 10) { line += String.fromCharCode(byte[0]); continue; }
+        const { id, method } = JSON.parse(line);
+        line = '';
+        if (id === undefined) continue;
+        let result = {};
+        if (method === 'session/new') result = { sessionId: 'synthetic' };
+        if (method === 'session/set_config_option') {
+          closeSync(0);
+          result = { configOptions: [{ id: 'mode', currentValue: 'default' }] };
+        }
+        console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
+        if (method === 'session/set_config_option') { await Bun.sleep(10_000); break; }
+      }
+    `;
+    const runtime = new AcpAgentRuntime({ ...createAntigravityAcpPolicy(CONFIG), command: process.execPath, args: ['-e', child] }, {
+      converter: new AntigravityAcpEventConverter(),
+    });
+    const execution = new AcpExecution(runtime, createPathNativeSessionCodec('antigravity'));
+    const events: AgentRuntimeEvent[] = [];
+    const markStarted = mock(async () => {});
+    try {
+      await expect(execution.start({
+        chatId: 'chat', runId: 'run', projectPath: process.cwd(), model: 'default', permissionMode: 'default',
+        thinkingMode: 'none', endpoint: null, attachments: [], settings: { ownerId: 'antigravity', schemaVersion: 1, values: {} },
+        carriedContext: { prefix: 'Selected history.\n\n' }, prompt: 'Continue.',
+        admission: { signal: new AbortController().signal, markStarted },
+      }, event => events.push(event))).rejects.toThrow();
+      expect(markStarted).toHaveBeenCalledTimes(1);
+      expect(events.filter(event => event.type === 'session')).toEqual([]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('resumes on a new pipe after a failed send without waiting for the old child to exit', async () => {
+    const { agent, runtime, events, request } = harness();
+    const exit = Promise.withResolvers<void>();
+    const flush = Promise.withResolvers<number>();
+    agent.onPrompt(fake => fake.endPrompt());
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      await waitFor(() => runEnded(events).length === 1);
+      agent.exitAfterKill = exit.promise;
+      agent.promptFlush = flush.promise;
+      const resume = () => runtime.runTurn({ ...request(), agentSessionId });
+      const failed = resume();
+      await waitFor(() => agent.requests('session/prompt').length === 2);
+      flush.reject(new Error('Prompt pipe failed'));
+      await expect(failed).rejects.toThrow('Prompt pipe failed');
+      expect(agent.processesKilled).toBe(1);
+      agent.promptFlush = null;
+      await resume();
+      exit.resolve();
+      await Bun.sleep(0);
+      await resume();
+      expect(agent.requests('session/resume').map(frame => frame.params)).toMatchObject([{ sessionId: agentSessionId }]);
+      expect(runEnded(events).map(event => event.outcome)).toEqual(['finished', 'failed', 'finished', 'finished']);
+    } finally { exit.resolve(); runtime.shutdown(); }
+  });
+
+  const stdoutFailures = [['idle', 'error'], ['mid-turn', 'error'], ['idle', 'EOF'], ['mid-turn', 'EOF']];
+  it.each(stdoutFailures)('recovers from %s stdout %s before process exit', async (phase, failure) => {
+    const { agent, runtime, events, request, converter } = harness();
+    const released = spyOn(converter, 'releaseSession');
+    const exit = Promise.withResolvers<void>();
+    agent.exitAfterKill = exit.promise;
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      if (phase === 'idle') {
+        agent.endPrompt();
+        await waitFor(() => runEnded(events).length === 1);
+      }
+      if (failure === 'EOF') agent.closeStdout();
+      else agent.breakStdout();
+      await waitFor(() => agent.processesKilled === 1 && runEnded(events).length === 1);
+      if (phase === 'mid-turn') {
+        expect(released.mock.calls).toEqual([[agentSessionId]]);
+        expect(runEnded(events)[0]).toMatchObject({ error: { code: 'PROVIDER_FAILURE',
+          message: failure === 'EOF' ? 'ACP transport stdout closed' : 'Synthetic stdout failure' } });
+        expect(events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message.type) : [])).toEqual(['error']);
+      }
+      agent.onPrompt(fake => fake.endPrompt());
+      const resume = (command: string) => runtime.runTurn({ ...request({ command }), agentSessionId });
+      await resume('Continue on the new pipe.');
+      exit.resolve();
+      await Bun.sleep(0);
+      await resume('After the old child exits.');
+      expect(agent.requests('session/prompt').map(frame => frame.params)).toEqual(
+        ['Do the thing.', 'Continue on the new pipe.', 'After the old child exits.'].map(text =>
+          ({ sessionId: agentSessionId, prompt: [{ type: 'text', text }] })));
+      expect(agent.requests('session/resume').map(frame => frame.params)).toMatchObject([{ sessionId: agentSessionId }]);
+      expect(runEnded(events).map(event => event.outcome)).toEqual([phase === 'idle' ? 'finished' : 'failed', 'finished', 'finished']);
+    } finally { exit.resolve(); runtime.shutdown(); }
+  });
+
+  it('finishes a turn whose final prompt reply ends at EOF and resumes on a fresh pipe', async () => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      agent.endPromptAtEof();
+      agent.crash(7);
+      await waitFor(() => runEnded(events).length === 1);
+      expect(runEnded(events)[0]?.outcome).toBe('finished');
+      agent.onPrompt(fake => fake.endPrompt());
+      await runtime.runTurn({ ...request(), agentSessionId });
+      expect(agent.requests('session/resume')).toHaveLength(1);
+      expect(runEnded(events).map(event => event.outcome)).toEqual(['finished', 'finished']);
     } finally { runtime.shutdown(); }
   });
 
@@ -886,13 +1017,13 @@ describe('Antigravity ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('leaves a remembered default alone when the resumed session no longer offers it', async () => {
+  it.each([[MODELS.availableModels.slice(1)], [{}], [null]])('leaves a remembered default alone when the resumed list does not offer it: %j', async availableModels => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());
     const started = await runtime.startSession(request({ model: 'gemini-test-high' }));
     await waitFor(() => runEnded(events).length === 1);
     runtime.releaseSession('chat-1', started.agentSessionId);
-    agent.offeredModelIds = ['gemini-test-high'];
+    agent.resumeAvailableModels = availableModels;
 
     await runtime.runTurn({ ...request(), agentSessionId: started.agentSessionId });
 
@@ -939,6 +1070,23 @@ describe('Antigravity ACP runtime', () => {
 
     await expect(start).rejects.toThrow();
     expect(agent.requests('session/prompt')).toEqual([]);
+  });
+
+  it('delivers a cooperative Stop held until the prompt flushes', async () => {
+    const { agent, runtime, request } = harness();
+    const flush = Promise.withResolvers<number>();
+    agent.promptFlush = flush.promise;
+    try {
+      const start = runtime.startSession(request());
+      await waitFor(() => agent.requests('session/prompt').length === 1);
+      expect(runtime.abort('session-1')).toBe(true);
+      expect(agent.requests('session/cancel')).toHaveLength(0);
+      flush.resolve(0);
+      await start;
+      await waitFor(() => !runtime.isRunning('session-1'));
+      expect(agent.requests('session/cancel')).toHaveLength(1);
+      expect(agent.processesKilled).toBe(0);
+    } finally { runtime.shutdown(); }
   });
 
   it('stops waiting on a stopped turn when the follow-up itself is cancelled', async () => {

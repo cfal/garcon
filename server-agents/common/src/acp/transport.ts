@@ -3,8 +3,19 @@ import { AcpRpcError } from './errors.js';
 import { isJsonRpcId, type AcpJsonRpcId, type AcpJsonRpcMessage } from './protocol.js';
 
 interface WritableProcessStdin {
-  write(data: string | Uint8Array): unknown;
+  write(data: string | Uint8Array): number | void | Promise<number>;
+  flush?(): number | Promise<number>;
   end?(): unknown;
+}
+
+function writeFrame(stdin: WritableProcessStdin, frame: string, confirm: boolean) {
+  const written = stdin.write(frame);
+  if (!confirm) return written;
+  const flush = (bytes: number | void) => {
+    if (bytes !== undefined && bytes !== Buffer.byteLength(frame)) throw new Error('Incomplete ACP frame write');
+    return stdin.flush?.();
+  };
+  return written instanceof Promise ? written.then(flush) : flush(written);
 }
 
 export interface AcpProcess {
@@ -12,7 +23,7 @@ export interface AcpProcess {
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
-  kill(): void;
+  kill(signal?: 'SIGTERM' | 'SIGKILL'): void;
 }
 
 type PendingRequest = {
@@ -34,6 +45,7 @@ export interface AcpTransportOptions {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_OUTPUT_DURING_SEND = 4 * 1024 * 1024;
 
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
   const process = Bun.spawn([command, ...args], {
@@ -48,14 +60,20 @@ function defaultSpawn(command: string, args: string[], options: { cwd: string; e
     stdout: process.stdout,
     stderr: process.stderr,
     exited: process.exited,
-    kill: () => { process.kill(); },
+    kill: signal => { process.kill(signal); },
   };
 }
 
 export class AcpTransport extends EventEmitter {
   #process: AcpProcess | null = null;
+  #stdoutRead: Promise<unknown> | null = null;
   #nextId = 1;
   #pending = new Map<AcpJsonRpcId, PendingRequest>();
+  #sendTimers = new Set<ReturnType<typeof setTimeout>>();
+  #heldOutput: Array<() => void> = [];
+  #heldBytes = 0;
+  #releaseExit: (() => void) | null = null;
+  #generation = 0;
   #spawn: NonNullable<AcpTransportOptions['spawn']>;
   #requestTimeoutMs: number;
   #exitCode: number | null = null;
@@ -66,6 +84,10 @@ export class AcpTransport extends EventEmitter {
     this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
+  get isConnected(): boolean {
+    return this.#process !== null;
+  }
+
   async connect(spec: AcpSpawnSpec): Promise<void> {
     if (this.#process) return;
     this.#exitCode = null;
@@ -73,9 +95,9 @@ export class AcpTransport extends EventEmitter {
       cwd: spec.cwd,
       env: spec.env,
     });
-    void this.#readStdout(this.#process.stdout ?? null);
-    void this.#readStderr(this.#process.stderr ?? null);
-    void this.#watchExit(this.#process.exited);
+    void this.#readLines(this.#process, this.#process.stdout, line => this.#handleStdoutLine(line));
+    void this.#readLines(this.#process, this.#process.stderr, line => this.emit('stderr', line));
+    void this.#watchExit(this.#process.exited, ++this.#generation);
   }
 
   // `timeoutMs` overrides the transport default for one request; 0 disables it.
@@ -100,8 +122,7 @@ export class AcpTransport extends EventEmitter {
           id,
           method,
           ...(params === undefined ? {} : { params }),
-        });
-        onSent?.();
+        }, onSent && (() => { if (this.#pending.has(id)) onSent(); }));
       } catch (error) {
         this.#rejectPending(id, error instanceof Error ? error : new Error(String(error)));
       }
@@ -137,9 +158,20 @@ export class AcpTransport extends EventEmitter {
   }
 
   close(): void {
-    this.#rejectAllPending(new Error('ACP transport closed'));
-    this.#process?.kill();
+    this.#closeWithError(new Error('ACP transport closed'), 'SIGTERM');
+  }
+
+  #closeWithError(error: Error, signal: 'SIGTERM' | 'SIGKILL' = 'SIGKILL'): void {
+    const process = this.#process;
+    this.#disconnect(error);
+    process?.kill(signal);
+  }
+
+  #disconnect(error: Error): void {
+    this.#takeHeldOutput();
+    this.#rejectAllPending(error);
     this.#process = null;
+    this.#stdoutRead = null;
   }
 
   onRpcMessage(cb: (message: AcpJsonRpcMessage) => void): () => void {
@@ -167,32 +199,94 @@ export class AcpTransport extends EventEmitter {
     return () => this.off('exit', cb);
   }
 
-  #write(payload: AcpJsonRpcMessage): void {
-    const stdin = this.#process?.stdin;
-    if (!stdin) throw new Error('ACP transport stdin is unavailable');
-    stdin.write(`${JSON.stringify(payload)}\n`);
+  #write(payload: AcpJsonRpcMessage, onSent?: () => void): void {
+    const process = this.#process;
+    if (!process?.stdin) throw new Error('ACP transport stdin is unavailable');
+    const onFailure = (error: Error) => {
+      if (this.#process !== process) return;
+      this.#closeWithError(error);
+    };
+    let flushed;
+    try {
+      flushed = writeFrame(process.stdin, `${JSON.stringify(payload)}\n`, onSent !== undefined);
+    } catch (error) {
+      onFailure(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+    if (!(flushed instanceof Promise)) {
+      onSent?.();
+      return;
+    }
+    if (!onSent) {
+      void flushed.catch(onFailure);
+      return;
+    }
+    const timer = setTimeout(() => onFailure(new Error('ACP frame write timed out')), this.#requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS);
+    timer.unref?.();
+    this.#sendTimers.add(timer);
+    void flushed.then(() => {
+      if (this.#process !== process) return;
+      clearTimeout(timer);
+      this.#sendTimers.delete(timer);
+      onSent();
+      if (this.#sendTimers.size) return;
+      for (const deliver of this.#takeHeldOutput()) {
+        if (this.#process !== process) break;
+        deliver();
+      }
+    }).catch(onFailure);
   }
 
-  async #readStdout(stream: ReadableStream<Uint8Array> | null): Promise<void> {
+  #takeHeldOutput(): Array<() => void> {
+    for (const timer of this.#sendTimers) clearTimeout(timer);
+    this.#sendTimers.clear();
+    const output = this.#heldOutput;
+    this.#heldOutput = [];
+    this.#heldBytes = 0;
+    this.#releaseExit?.();
+    this.#releaseExit = null;
+    return output;
+  }
+
+  async #readLines(process: AcpProcess, stream: AcpProcess['stdout'], receive: (line: string) => void): Promise<void> {
     if (!stream) return;
     const reader = stream.getReader();
     const decoder = new TextDecoder();
+    const stdout = stream === process.stdout;
     let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    const consume = (value?: Uint8Array) => {
+      buffer += value ? decoder.decode(value, { stream: true }) : decoder.decode();
       const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+      buffer = value ? lines.pop() ?? '' : '';
       for (const line of lines) {
-        if (!line.trim()) continue;
-        this.#handleStdoutLine(line.trim());
+        if (line.trim()) receive(line.trim());
       }
-    }
+      if (!value && stdout && this.#process === process) {
+        this.#closeWithError(new Error('ACP transport stdout closed'));
+      }
+    };
 
-    buffer += decoder.decode();
-    if (buffer.trim()) this.#handleStdoutLine(buffer.trim());
+    try {
+      while (this.#process === process) {
+        const read = reader.read();
+        if (stdout) this.#stdoutRead = read;
+        const { done, value } = await read;
+        if (this.#process !== process) break;
+        // Drain both pipes; delay publication, not reads, until the prompt is acknowledged.
+        if (this.#sendTimers.size) {
+          this.#heldBytes += Math.max(value?.byteLength ?? 0, 64);
+          if (this.#heldBytes > MAX_OUTPUT_DURING_SEND) throw new Error('ACP output exceeded the pending send buffer');
+          this.#heldOutput.push(() => consume(value));
+        } else consume(value);
+        if (done) break;
+      }
+    } catch (error) {
+      if (this.#process === process) this.#closeWithError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      if (stdout && this.#process === process) this.#stdoutRead = null;
+      reader.releaseLock();
+    }
   }
 
   #handleStdoutLine(line: string): void {
@@ -221,34 +315,20 @@ export class AcpTransport extends EventEmitter {
     this.emit('rpc-message', message);
   }
 
-  async #readStderr(stream: ReadableStream<Uint8Array> | null): Promise<void> {
-    if (!stream) return;
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        this.emit('stderr', line.trim());
-      }
-    }
-
-    buffer += decoder.decode();
-    if (buffer.trim()) this.emit('stderr', buffer.trim());
-  }
-
-  async #watchExit(exited: Promise<number>): Promise<void> {
+  async #watchExit(exited: Promise<number>, generation: number): Promise<void> {
     const exitCode = await exited;
+    // Drains already-readable protocol bytes, but never waits for a pipe a descendant kept open.
+    while (generation === this.#generation && this.#stdoutRead && Bun.peek.status(this.#stdoutRead) === 'fulfilled') {
+      await this.#stdoutRead;
+    }
+    if (generation !== this.#generation) return;
+    // A bounded send still owns these bytes. Its flush publishes them in order or discards them on failure.
+    if (this.#heldOutput.length) {
+      await new Promise<void>(resolve => { this.#releaseExit = resolve; });
+      if (generation !== this.#generation) return;
+    }
     this.#exitCode = exitCode;
-    this.#process = null;
-    const error = new Error(`ACP transport process exited with code ${exitCode}`);
-    this.#rejectAllPending(error);
+    this.#disconnect(new Error(`ACP transport process exited with code ${exitCode}`));
     this.emit('exit', exitCode);
   }
 
