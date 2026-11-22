@@ -45,6 +45,10 @@
 <Dialog.Root open={true} requestClose={onClose}>
 	<Dialog.Content
 		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 sm:max-w-none"
+		onOpenAutoFocus={(event) => {
+			event.preventDefault();
+			textareaElement?.focus();
+		}}
 	>
 		<Dialog.Header class="shrink-0 border-b border-border px-4 py-3 text-start">
 			<Dialog.Title class="pe-8 text-sm font-medium">{m.git_comment_add_to_chat()}</Dialog.Title>
