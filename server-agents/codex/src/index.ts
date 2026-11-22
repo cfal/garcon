@@ -38,6 +38,7 @@ import {
   createCodexAuthStatusResolver,
   resolveCodexExecAuthStatus,
 } from './agents/codex/codex-auth.js';
+import { createCodexCliUpdates } from './agents/codex/cli-updates.js';
 import { CodexExecution } from './agents/codex/execution.js';
 import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
 import {
@@ -99,6 +100,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates = null;
   readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
+  readonly cliUpdates: NonNullable<AgentIntegration['cliUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -174,6 +176,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       format: codexUsageFormat,
       roots: () => [path.join(config.home(), 'sessions'), path.join(config.home(), 'archived_sessions')],
     });
+    this.cliUpdates = createCodexCliUpdates({ config, logger });
     // Codex compacts natively through its app-server; the execution object owns
     // the call, the facet advertises that it exists.
     this.compaction = {

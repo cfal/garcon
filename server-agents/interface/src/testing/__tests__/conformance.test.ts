@@ -39,6 +39,7 @@ const integration = {
   sessionConfiguration: null,
   projectPathUpdates: null,
   usageHistory: null,
+  cliUpdates: null,
   catalog: {
     snapshot: async () => ({
       models: [],
@@ -129,6 +130,7 @@ describe('validateAgentIntegration', () => {
       'sessionConfiguration',
       'projectPathUpdates',
       'usageHistory',
+      'cliUpdates',
     ] as const;
 
     for (const facet of nullableFacets) {
@@ -172,6 +174,7 @@ describe('validateAgentIntegration', () => {
       ['sessionConfiguration', {}],
       ['projectPathUpdates', {}],
       ['usageHistory', {}],
+      ['cliUpdates', { status: async () => ({}) }],
     ] as const;
 
     for (const [facet, value] of invalidFacets) {

@@ -29,6 +29,7 @@ import type {
   AgentNativeSessionAccess,
 } from './native-history.js';
 import type { AgentUsageHistory } from './usage-history.js';
+import type { AgentCliUpdates } from './cli-updates.js';
 
 export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
@@ -59,6 +60,7 @@ export interface AgentIntegration {
   readonly sessionConfiguration: AgentSessionConfigurationUpdates | null;
   readonly projectPathUpdates: AgentProjectPathUpdates | null;
   readonly usageHistory: AgentUsageHistory | null;
+  readonly cliUpdates: AgentCliUpdates | null;
 }
 
 export interface AgentIntegrationClass {

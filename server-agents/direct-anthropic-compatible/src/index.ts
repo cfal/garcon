@@ -67,6 +67,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   readonly sessionConfiguration = null;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly usageHistory = null;
+  readonly cliUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
