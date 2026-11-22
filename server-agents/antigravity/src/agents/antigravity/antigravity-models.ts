@@ -1,6 +1,7 @@
 import type { AgentModelOption } from '@garcon/common/agents';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { antigravityChildEnvironment, type AntigravityConfig } from '../../config.js';
 import { waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
@@ -12,21 +13,17 @@ export interface AntigravityCliResult {
   readonly exitCode: number | null;
 }
 
-export function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
-  return spawnAntigravityModels(config.binary(), antigravityChildEnvironment(config));
-}
-
-async function spawnAntigravityModels(
-  binary: string,
-  env: Record<string, string | undefined>,
-): Promise<AntigravityCliResult> {
-  const proc = Bun.spawn([binary, 'models'], {
-    env,
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
-  });
+export async function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
+  const binary = config.binary();
+  const env = antigravityChildEnvironment(config);
+  let proc;
+  try {
+    proc = Bun.spawn([binary, 'models'], {
+      env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new AgentIntegrationError('BINARY_NOT_FOUND', `Cannot launch Antigravity CLI on this executor: ${errorMessage(error)}`, false);
+  }
   const stdout = pipeText(proc.stdout);
   const stderr = pipeText(proc.stderr);
   // The signal kills only agy; a descendant holding its pipes would keep the
@@ -99,19 +96,20 @@ export function createAntigravityCatalog(runModels: () => Promise<AntigravityCli
     requiresStrictModelDiscovery: false,
     // Disposable generation sessions remain in agy's native history.
     generation: null,
-    discover: async ({ signal }) => [nativeDefault, ...await waitUnlessAborted(getAntigravityModels(), signal)],
+    discover: ({ signal }) => waitUnlessAborted(getAntigravityModels(), signal),
   });
 
   async function getAntigravityModels(): Promise<AgentModelOption[]> {
     try {
       const result = await runModels();
-      if (result.exitCode === 0) return parseAntigravityModels(result.stdout);
+      if (result.exitCode === 0) return [nativeDefault, ...parseAntigravityModels(result.stdout)];
       logger.warn('Antigravity model discovery failed', { error: antigravityCliFailure(result) });
     } catch (error) {
-      logger.warn('Antigravity model discovery failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      if (error instanceof AgentIntegrationError && (error.code === 'BINARY_NOT_FOUND' || error.code === 'INVALID_SETTINGS')) {
+        throw error;
+      }
+      logger.warn('Antigravity model discovery failed', { error: errorMessage(error) });
     }
-    return [];
+    return [nativeDefault];
   }
 }

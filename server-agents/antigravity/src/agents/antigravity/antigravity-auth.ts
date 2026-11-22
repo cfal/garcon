@@ -5,6 +5,7 @@ import { AcpClient } from '@garcon/server-agent-common/acp/client';
 import { garconInitializeParams } from '@garcon/server-agent-common/acp/protocol';
 import { AcpTransport } from '@garcon/server-agent-common/acp/transport';
 import type { CliLoginCommand } from '@garcon/server-agent-common/auth/cli-login-controller';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { antigravityChildEnvironment, authMethodOrNull, type AntigravityConfig } from '../../config.js';
 import {
   antigravityCliFailure,
@@ -41,8 +42,8 @@ async function authenticateOnce(config: AntigravityConfig): Promise<void> {
 }
 
 export interface AntigravityAuthStatusOptions {
-  readonly runModels?: (config: AntigravityConfig) => Promise<AntigravityCliResult>;
-  readonly authenticate?: (config: AntigravityConfig) => Promise<void>;
+  readonly runModels: () => Promise<AntigravityCliResult>;
+  readonly authenticate: () => Promise<void>;
   // Dropping the display keeps agy from opening a browser only on Linux; on
   // macOS it would open one on every status check of a signed-out OAuth method.
   readonly headlessAuthenticate?: boolean;
@@ -57,13 +58,13 @@ export interface AntigravityAuthStatusOptions {
 export async function getAntigravityAuthStatus(
   config: AntigravityConfig,
   {
-    runModels = runAntigravityModels,
-    authenticate = authenticateOnce,
+    runModels,
+    authenticate,
     headlessAuthenticate = process.platform === 'linux',
     signal,
     signInRunning = false,
     lastProbed = null,
-  }: AntigravityAuthStatusOptions = {},
+  }: AntigravityAuthStatusOptions,
 ): Promise<AgentAuthStatus> {
   signal?.throwIfAborted();
   try {
@@ -71,9 +72,10 @@ export async function getAntigravityAuthStatus(
     // fall back to another credential the CLI happens to hold. A Google sign-in
     // cannot change an API-key setup, so none is offered for it.
     const method = config.authMethod();
+    // Even API-key sessions require a runnable CLI on this executor.
     config.binary();
     if (method === 'gemini-api-key') {
-      return config.hasApiKey()
+      return config.apiKey() !== null
         ? { authenticated: true, canReauth: false, label: 'GEMINI_API_KEY', source: 'environment' }
         : { authenticated: false, canReauth: false, label: '', source: 'none', detail: 'GEMINI_API_KEY is not set.' };
     }
@@ -84,20 +86,14 @@ export async function getAntigravityAuthStatus(
     // check as a real session wherever it cannot open a browser.
     const canReauth = method === 'oauth-personal';
     if (headlessAuthenticate) {
-      await waitUnlessAborted(authenticate(config), signal);
-      return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
+      await waitUnlessAborted(authenticate(), signal);
+    } else {
+      const result = await waitUnlessAborted(runModels(), signal);
+      if (result.exitCode !== 0) {
+        return { authenticated: false, canReauth, label: '', source: 'none', detail: antigravityCliFailure(result) };
+      }
     }
-    const result = await waitUnlessAborted(runModels(config), signal);
-    if (result.exitCode === 0) {
-      return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
-    }
-    return {
-      authenticated: false,
-      canReauth,
-      label: '',
-      source: 'none',
-      detail: antigravityCliFailure(result),
-    };
+    return { authenticated: true, canReauth, label: canReauth ? 'Google' : method, source: 'cli' };
   } catch (error) {
     if (signal?.aborted) throw error;
     return {
@@ -108,7 +104,7 @@ export async function getAntigravityAuthStatus(
         && authMethodOrNull(config) === 'oauth-personal',
       label: '',
       source: 'none',
-      detail: error instanceof Error ? error.message : String(error),
+      detail: errorMessage(error),
     };
   }
 }

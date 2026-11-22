@@ -201,7 +201,6 @@ class FakeAntigravityAgent {
 const CONFIG: AntigravityConfig = {
   binary: () => 'agy',
   apiKey: () => null,
-  hasApiKey: () => false,
   authMethod: () => 'oauth-personal',
 };
 
@@ -1181,7 +1180,7 @@ describe('Antigravity ACP runtime', () => {
   });
 
   it('passes the configured Gemini API key to the agent process', () => {
-    const policy = createAntigravityAcpPolicy({ ...CONFIG, apiKey: () => 'synthetic-key', hasApiKey: () => true, authMethod: () => 'gemini-api-key' });
+    const policy = createAntigravityAcpPolicy({ ...CONFIG, apiKey: () => 'synthetic-key', authMethod: () => 'gemini-api-key' });
     expect(policy.buildEnv?.({ ...harness().request(), envOverrides: {} })?.GEMINI_API_KEY).toBe('synthetic-key');
   });
 

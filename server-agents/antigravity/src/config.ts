@@ -14,13 +14,11 @@ export type AntigravityAuthMethod = typeof ANTIGRAVITY_AUTH_METHODS[number];
 export interface AntigravityConfig {
   readonly binary: () => string;
   readonly apiKey: () => string | null;
-  readonly hasApiKey: () => boolean;
   readonly authMethod: () => AntigravityAuthMethod;
 }
 
 export function createAntigravityConfig(environment: AgentEnvironmentReader): AntigravityConfig {
   const apiKey = () => readEnvironment(environment, 'GEMINI_API_KEY');
-  const hasApiKey = () => apiKey() !== null;
   return Object.freeze({
     binary: () => {
       const command = readEnvironment(environment, 'GARCON_ANTIGRAVITY_BINARY') ?? 'agy';
@@ -31,10 +29,9 @@ export function createAntigravityConfig(environment: AgentEnvironmentReader): An
         'Antigravity CLI not found on this executor. Install agy or set GARCON_ANTIGRAVITY_BINARY.', false);
     },
     apiKey,
-    hasApiKey,
     authMethod: () => resolveAuthMethod(
       readEnvironment(environment, 'GARCON_ANTIGRAVITY_AUTH_METHOD'),
-      hasApiKey(),
+      apiKey() !== null,
     ),
   });
 }

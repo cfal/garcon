@@ -8,9 +8,13 @@ import {
 } from './antigravity-auth.js';
 import { createAntigravityCatalog } from './antigravity-models.js';
 
+type ProbeGeneration = ReturnType<typeof createAntigravityProbes> & { lastProbed: AgentAuthStatus | null };
+
 export function createAntigravityAccount(config: AntigravityConfig, logger: AgentLogger) {
-  let probes = createAntigravityProbes(config);
-  let lastProbed: AgentAuthStatus | null = null;
+  function createProbeGeneration(): ProbeGeneration {
+    return { ...createAntigravityProbes(config), lastProbed: null };
+  }
+  let probes = createProbeGeneration();
   const login = new CliLoginController({
     command: () => antigravityLoginCommand(config),
     mode: 'browser-code',
@@ -18,16 +22,15 @@ export function createAntigravityAccount(config: AntigravityConfig, logger: Agen
     environment: () => antigravityLoginEnvironment(config),
     validateCode: validateAntigravityLoginCode,
     onSucceeded: () => {
-      probes = createAntigravityProbes(config);
-      lastProbed = null;
+      probes = createProbeGeneration();
     },
   });
   const auth = {
     async status(signal) {
       const signInRunning = login.status().state === 'running';
       const current = probes;
-      const status = await getAntigravityAuthStatus(config, { ...current, signal, signInRunning, lastProbed });
-      if (!signInRunning && current === probes) lastProbed = status;
+      const status = await getAntigravityAuthStatus(config, { ...current, signal, signInRunning });
+      if (!signInRunning) current.lastProbed = status;
       return status;
     },
     launchLogin: () => login.launch(),
