@@ -88,14 +88,49 @@ test('retries transient errors, caches success, and preserves last-known-good on
   expect(await service.getModels()).toEqual(expected);
   expect(discover).toHaveBeenCalledTimes(2);
   clock.mockReturnValue(fiveMinutes);
-  await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: expected });
   expect(await service.getModels()).toEqual(expected);
+  clock.mockReturnValue(fiveMinutes + 14_999);
+  await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: expected });
+  expect(discover).toHaveBeenCalledTimes(5);
 
   discover.mockResolvedValueOnce([]);
+  clock.mockReturnValue(fiveMinutes + 15_000);
   expect(await service.getModelsStrict()).toEqual([]);
   expect(await service.getModelsStrict()).toEqual([]);
-  clock.mockReturnValue(2 * fiveMinutes);
+  clock.mockReturnValue(2 * fiveMinutes + 15_000);
   await expect(service.getModelsStrict()).rejects.toMatchObject({ staleModels: [] });
+});
+
+test('a transient retry keeps the original discovery deadline', async () => {
+  const deadline = new AbortController();
+  using timer = spyOn(AbortSignal, 'timeout').mockReturnValueOnce(deadline.signal);
+  const discover = mock(async (signal: AbortSignal) => {
+    deadline.abort(new DOMException('Discovery timed out', 'TimeoutError'));
+    signal.throwIfAborted();
+    return [];
+  }).mockRejectedValueOnce(new Error('temporarily unavailable'));
+  const service = new PiModelCatalogService(testPiConfig, discover);
+  await expect(service.getModelsStrict()).rejects.toMatchObject({
+    code: 'PI_MODEL_DISCOVERY_UNAVAILABLE', message: 'Discovery timed out',
+  });
+  expect(discover).toHaveBeenCalledTimes(2);
+  expect(timer).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  ['timeout', () => { throw new DOMException('Discovery timed out', 'TimeoutError'); }],
+  ['unsupported listing', () => parsePiModelListing('new format', '')],
+  ['malformed row', () => parsePiModelListing('provider  model  context  max-out  thinking  images\ninvalid', '')],
+] as const)('treats %s as final and forgets the failure on restart', async (_name, fail) => {
+  const discover = mock(async () => fail());
+  const service = new PiModelCatalogService(testPiConfig, discover);
+  expect(await service.getModels()).toEqual([]);
+  await expect(service.getModelsStrict()).rejects.toMatchObject({ code: 'PI_MODEL_DISCOVERY_UNAVAILABLE' });
+  expect(discover).toHaveBeenCalledTimes(1);
+  await service.stop();
+  service.start();
+  discover.mockResolvedValueOnce([]);
+  expect(await service.getModelsStrict()).toEqual([]);
 });
 
 test('a missing Pi executable fails discovery once and is checked again on the next request', async () => {

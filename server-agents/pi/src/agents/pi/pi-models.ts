@@ -6,6 +6,10 @@ import type { PiConfig } from '../../config.js';
 import { buildPiCliEnv } from './pi-cli.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const DISCOVERY_TIMEOUT_MS = 20_000;
+const FAILURE_COOLDOWN_MS = 15_000;
+
+class InvalidPiModelListing extends Error {}
 
 export class PiModelDiscoveryUnavailableError extends Error {
   readonly code = 'PI_MODEL_DISCOVERY_UNAVAILABLE';
@@ -28,7 +32,7 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
     return [];
   }
   if (!header || !/^provider +model +context +max-out +thinking +images$/.test(header) || !rows.length) {
-    throw new Error('Unexpected Pi --list-models output. Check the installed Pi CLI version.');
+    throw new InvalidPiModelListing('Unexpected Pi --list-models output. Check the installed Pi CLI version.');
   }
   const modelStart = header.indexOf('model');
   const contextStart = header.indexOf('context');
@@ -38,7 +42,7 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
     const id = row.slice(modelStart, contextStart).trim();
     const images = row.slice(imagesStart).trim();
     if (!provider || !id || (images !== 'yes' && images !== 'no')) {
-      throw new Error('Malformed row in Pi --list-models output.');
+      throw new InvalidPiModelListing('Malformed row in Pi --list-models output.');
     }
     const shortId = id.split('/').filter(Boolean).at(-1) ?? id;
     return { value: `${provider}/${id}`, label: `${provider}: ${shortId}`, supportsImages: images === 'yes' };
@@ -47,10 +51,8 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
 
 export async function getPiAvailableModels(
   binary: string,
-  lifetime?: AbortSignal,
+  signal = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
 ): Promise<SharedModelOption[]> {
-  const deadline = AbortSignal.timeout(20_000);
-  const signal = lifetime ? AbortSignal.any([lifetime, deadline]) : deadline;
   signal.throwIfAborted();
   const env = buildPiCliEnv({ NO_COLOR: '1' });
   delete env.FORCE_COLOR;
@@ -75,6 +77,7 @@ export async function getPiAvailableModels(
 export class PiModelCatalogService {
   #cachedModels: SharedModelOption[] | null = null;
   #cachedAt = 0;
+  #failure: { error: PiModelDiscoveryUnavailableError; retryAt: number } | null = null;
   #inflight: Promise<SharedModelOption[]> | null = null;
   #lifetime = new AbortController();
 
@@ -90,6 +93,7 @@ export class PiModelCatalogService {
     if (this.#cachedModels && now - this.#cachedAt < MODEL_CACHE_TTL_MS) {
       return this.#cachedModels;
     }
+    if (this.#failure && now < this.#failure.retryAt) throw this.#failure.error;
     this.#inflight ??= this.#discoverWithRetry(this.#lifetime.signal).finally(() => {
       this.#inflight = null;
     });
@@ -115,30 +119,40 @@ export class PiModelCatalogService {
     this.#lifetime.abort();
     await this.#inflight?.catch(() => undefined);
     this.#cachedModels = null;
+    this.#failure = null;
   }
 
   #staleModels(): SharedModelOption[] {
     return this.#cachedModels?.length ? this.#cachedModels : [];
   }
 
-  async #discoverWithRetry(signal: AbortSignal): Promise<SharedModelOption[]> {
-    const retryDelays = this.config.isTestEnvironment() ? [0, 0] : [75, 250];
-    for (let attempt = 0; ; attempt += 1) {
+  async #discoverWithRetry(lifetime: AbortSignal): Promise<SharedModelOption[]> {
+    const signal = AbortSignal.any([lifetime, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)]);
+    const attemptDelays = this.config.isTestEnvironment() ? [0, 0, 0] : [0, 75, 250];
+    let lastError: unknown;
+    for (const retryDelay of attemptDelays) {
       try {
+        if (retryDelay > 0) await delay(retryDelay, undefined, { signal });
+        signal.throwIfAborted();
         const models = await this.discover(signal);
         signal.throwIfAborted();
         this.#cachedAt = Date.now();
         this.#cachedModels = models;
+        this.#failure = null;
         return models;
       } catch (error) {
-        signal.throwIfAborted();
-        const retryDelay = retryDelays[attempt];
-        if (retryDelay === undefined || hasNodeErrorCode(error, 'ENOENT')) {
-          throw new PiModelDiscoveryUnavailableError(errorMessage(error), this.#staleModels());
-        }
-        if (retryDelay > 0) await delay(retryDelay, undefined, { signal });
+        lifetime.throwIfAborted();
+        lastError = signal.aborted ? signal.reason : error;
+        if (hasNodeErrorCode(lastError, 'ENOENT') || lastError instanceof InvalidPiModelListing
+          || (lastError instanceof Error && lastError.name === 'TimeoutError')) break;
       }
     }
+    const failure = new PiModelDiscoveryUnavailableError(errorMessage(lastError), this.#staleModels());
+    // A new installation must be visible on the very next request.
+    if (!hasNodeErrorCode(lastError, 'ENOENT')) {
+      this.#failure = { error: failure, retryAt: Date.now() + FAILURE_COOLDOWN_MS };
+    }
+    throw failure;
   }
 }
 
