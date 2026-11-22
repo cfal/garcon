@@ -2,9 +2,12 @@ import { expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { liveCodexStartRequest } from '../../support/live-codex.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('Codex auth distinguishes an absent CLI from a failed probe and uses the installed override for device login', async () => {
-  await withIntegrationFixture('codex-optional-cli', async ({ client, executionDirs }) => {
+  await withIntegrationFixture('codex-optional-cli', async (fixture) => {
+    const { client, executionDirs } = fixture;
     const query = new URLSearchParams({ executorId: client.executorId });
     const authUrl = `/api/v1/agents/auth?agent=codex&${query}`;
     expect(await client.get(authUrl)).toMatchObject({
@@ -12,6 +15,15 @@ test('Codex auth distinguishes an absent CLI from a failed probe and uses the in
     });
     expect(await client.get(`/api/v1/agents/readiness?${query}`)).toMatchObject({
       codex: { nativeReady: false }, shell: { ready: true },
+    });
+
+    const chatId = fixture.newChatId();
+    const cursor = client.markEvents();
+    await rejectionOf(client.startChat(liveCodexStartRequest({
+      chatId, projectPath: executionDirs.project, command: 'Synthetic request.',
+    })));
+    expect(await client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor })).toMatchObject({
+      type: 'agent-run-failed', error: expect.stringContaining('GARCON_CODEX_CLI'),
     });
 
     const binary = join(executionDirs.home, 'selected codex');
