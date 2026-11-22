@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as Dialog from '$lib/components/ui/dialog';
 import { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
 import GitComparisonDialog from '../GitComparisonDialog.svelte';
 
@@ -31,6 +32,23 @@ function renderDialog(comparison = new GitComparisonController()) {
 
 describe('GitComparisonDialog', () => {
 	afterEach(cleanup);
+
+	it('requests a resize only when the comparison target changes', async () => {
+		const resize = vi.spyOn(Dialog, 'resizeDialogOnClick');
+		try {
+			const comparison = new GitComparisonController();
+			comparison.openDialog({ fromRevision: 'HEAD', toKind: 'working-tree' });
+			renderDialog(comparison);
+			await fireEvent.click(screen.getByRole('button', { name: 'Working Tree' }));
+			expect(resize).not.toHaveBeenCalled();
+			const revision = screen.getByRole('button', { name: 'Revision' });
+			await fireEvent.click(revision);
+			await fireEvent.click(revision);
+			expect(resize).toHaveBeenCalledOnce();
+		} finally {
+			resize.mockRestore();
+		}
+	});
 
 	it('explains the complete Working Tree target and hides merge-base controls', () => {
 		const comparison = new GitComparisonController();
