@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
@@ -12,6 +12,7 @@ import {
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
+import { PI_BINARY } from '../../support/pinned-agent-binaries.js';
 import {
   PI_TEST_MODEL,
   PI_TEST_MODEL_ID,
@@ -24,6 +25,7 @@ import {
 } from '../../support/scripted-pi.js';
 
 let environment: ScriptedPiTestEnvironment | undefined;
+const LEGACY_ASSISTANT_ID = 'legacy-assistant';
 
 describe('scripted Pi persistence', () => {
   beforeEach(() => {
@@ -96,12 +98,13 @@ describe('scripted Pi persistence', () => {
     }, withScriptedPi());
   }, 120_000);
 
-  test('resumes a Pi 0.80.10 JSON-mode session through the RPC runtime', async () => {
+  test('imports and reloads a Pi 0.80.10 session without the CLI, then resumes it after installation', async () => {
     const testEnvironment = requireEnvironment();
     const chatId = String(Date.now() * 1_000 + 901);
     const agentSessionId = crypto.randomUUID();
     const legacyPrompt = marker('LEGACY_PROMPT');
     const legacyReply = marker('LEGACY_REPLY');
+    const editedReply = marker('LEGACY_EDITED_REPLY');
     const resumedPrompt = marker('LEGACY_RESUME_PROMPT');
     const resumedReply = marker('LEGACY_RESUME_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
@@ -123,10 +126,20 @@ describe('scripted Pi persistence', () => {
           });
         },
       });
+      const query = new URLSearchParams({ agent: 'pi', executorId: fixture.client.executorId });
+      expect((await fixture.client.fetch(`/api/v1/models?${query}`)).status).toBe(503);
       const restored = await fixture.client.getMessages(chatId);
       expect(userContents(restored.messages)).toEqual([legacyPrompt]);
       expect(assistantContents(restored.messages)).toEqual([legacyReply]);
 
+      await appendFile(nativePath, JSON.stringify({
+        type: 'context_edit', id: 'native-edit', parentId: LEGACY_ASSISTANT_ID, targetId: LEGACY_ASSISTANT_ID,
+        timestamp: '2026-01-01T00:00:03.000Z', replacement: { content: [{ type: 'text', text: editedReply }] },
+      }) + '\n');
+      await fixture.client.reloadChat(chatId);
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([editedReply]);
+
+      await symlink(PI_BINARY, join(fixture.executionDirs.home, 'selected-pi'));
       const turnCursor = fixture.client.markEvents();
       const turn = await fixture.client.runChat(scriptedPiRunRequest({
         chatId,
@@ -150,7 +163,10 @@ describe('scripted Pi persistence', () => {
       expect(userContents((await fixture.client.getMessages(chatId)).messages))
         .toEqual([legacyPrompt, resumedPrompt]);
       testEnvironment.model.assertSettled();
-    }, withScriptedPi());
+    }, {
+      ...withScriptedPi(),
+      resolveServerEnvironment: ({ home }) => ({ GARCON_PI_BINARY: join(home, 'selected-pi') }),
+    });
   }, 120_000);
 
   test('restarts empty after a crash and resumes a renamed session on the next turn', async () => {
@@ -397,7 +413,6 @@ async function writeLegacyPiSession(input: {
     `2026-01-01T00-00-00-000Z_${input.agentSessionId}.jsonl`,
   );
   const userId = 'legacy-user';
-  const assistantId = 'legacy-assistant';
   const timestamp = '2026-01-01T00:00:00.000Z';
   await mkdir(sessionDirectory, { recursive: true });
   await writeFile(nativePath, `${[
@@ -417,7 +432,7 @@ async function writeLegacyPiSession(input: {
     },
     {
       type: 'message',
-      id: assistantId,
+      id: LEGACY_ASSISTANT_ID,
       parentId: userId,
       timestamp: '2026-01-01T00:00:02.000Z',
       message: {
