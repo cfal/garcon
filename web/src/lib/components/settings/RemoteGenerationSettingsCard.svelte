@@ -84,7 +84,7 @@
 	}
 </script>
 
-<div class="bg-muted/50 border border-border rounded-lg px-4">
+<div role="group" aria-label={modelLabel} class="bg-muted/50 border border-border rounded-lg px-4">
 	{#if cardState.saveError}
 		<div
 			class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
