@@ -21,14 +21,14 @@ export async function projectPiHistory(
   steps: EventLoopSteps,
 ): Promise<ProjectedSessionEntry[]> {
   const context = await activeContextEntries(entries, steps);
-  const edits = new Map<string, PiSessionEntry>();
+  const edits = new Map<unknown, PiSessionEntry>();
   await steps.forEach(context, (entry) => {
-    if (entry.type === 'context_edit' && typeof entry.targetId === 'string') edits.set(entry.targetId, entry);
+    if (entry.type === 'context_edit') edits.set(entry.targetId, entry);
   });
 
   const projected: ProjectedSessionEntry[] = [];
   await steps.forEach(context, (sourceEntry) => {
-    const edit = typeof sourceEntry.id === 'string' ? edits.get(sourceEntry.id) : undefined;
+    const edit = edits.get(sourceEntry.id);
     const isOlderCompaction = sourceEntry.type === 'compaction' && sourceEntry !== context[0];
     projected.push({ sourceEntry, messages: isOlderCompaction ? [] : projectEntry(sourceEntry, edit) });
   });
@@ -36,9 +36,9 @@ export async function projectPiHistory(
 }
 
 async function activeContextEntries(entries: readonly PiSessionEntry[], steps: EventLoopSteps): Promise<PiSessionEntry[]> {
-  const byId = new Map<string, PiSessionEntry>();
+  const byId = new Map<unknown, PiSessionEntry>();
   await steps.forEach(entries, (entry) => {
-    if (typeof entry.id === 'string') byId.set(entry.id, entry);
+    byId.set(entry.id, entry);
   });
 
   const reversePath: PiSessionEntry[] = [];
@@ -48,7 +48,7 @@ async function activeContextEntries(entries: readonly PiSessionEntry[], steps: E
     if (visited.has(current)) throw new Error('Pi transcript parent graph contains a cycle');
     visited.add(current);
     reversePath.push(current);
-    current = typeof current.parentId === 'string' && current.parentId ? byId.get(current.parentId) : undefined;
+    current = current.parentId ? byId.get(current.parentId) : undefined;
     if (steps.due) await steps.next();
   }
 
@@ -105,6 +105,11 @@ function projectEntry(
   });
 }
 
+// Pi passes the raw JSON value to Date, including in older, unchecked records.
+function entryTimestamp(entry: PiSessionEntry): number {
+  return new Date(entry.timestamp as string | number).getTime();
+}
+
 function entryMessages(entry: PiSessionEntry): unknown[] {
   if (entry.type === 'message') {
     const message = entry.message;
@@ -116,15 +121,17 @@ function entryMessages(entry: PiSessionEntry): unknown[] {
     }
     return [message];
   }
-  const timestamp = new Date(typeof entry.timestamp === 'string' ? entry.timestamp : Number(entry.timestamp)).getTime();
   switch (entry.type) {
     case 'custom_message':
       return [{ role: 'custom', customType: entry.customType, content: entry.content ?? [],
-        display: entry.display, details: entry.details, timestamp }];
+        display: entry.display, details: entry.details, timestamp: entryTimestamp(entry) }];
     case 'branch_summary':
-      return entry.summary ? [{ role: 'branchSummary', summary: entry.summary, fromId: entry.fromId, timestamp }] : [];
+      if (!entry.summary) return [];
+      return [{ role: 'branchSummary', summary: entry.summary, fromId: entry.fromId, timestamp: entryTimestamp(entry) }];
     case 'compaction': {
-      const summary = { role: 'compactionSummary', summary: entry.summary, tokensBefore: entry.tokensBefore, timestamp };
+      const summary = {
+        role: 'compactionSummary', summary: entry.summary, tokensBefore: entry.tokensBefore, timestamp: entryTimestamp(entry),
+      };
       return entry.systemMessage ? [entry.systemMessage, summary] : [summary];
     }
     default: return [];

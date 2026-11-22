@@ -30,6 +30,15 @@ const samples: Array<[string, PiSessionEntry[]]> = [
   ['missing parent', [...base, message('orphan', 'missing', 'user', 'orphan')]],
   ['omitted parent', [...base, message('orphan', undefined, 'user', 'orphan')]],
   ['missing content', [message('user', null, 'user', null), message('answer', 'user', 'assistant', undefined)]],
+  ['unchecked parent and edit keys', [
+    { type: 'message', id: 1, parentId: null, message: { role: 'user', content: 'original' } },
+    { type: 'message', id: true, parentId: 1, message: { role: 'assistant', content: [] } },
+    { type: 'context_edit', id: 'edit', parentId: true, targetId: 1, replacement: { content: 'edited' } },
+  ]],
+  ['timestamp coercion is limited to synthesized messages', [
+    entry('meta', null, { type: 'usage', timestamp: { toString: null } }),
+    entry('summary', 'meta', { type: 'branch_summary', summary: 'summary', timestamp: [at] }),
+  ]],
   ['unchecked native values', [
     message('user', null, 'user', 'request'),
     edit('edit', 'user', 'user', 'incomplete'),
