@@ -523,7 +523,7 @@ describe('GitRepositoryController', () => {
 		});
 	});
 
-	describe('prepareToolbarPush', () => {
+	describe('loadPushRemotes', () => {
 		it('prepares push data when a remote exists without opening presentation state', async () => {
 			controller.remoteStatus = {
 				hasRemote: true,
@@ -534,12 +534,13 @@ describe('GitRepositoryController', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await expect(
-				controller.prepareToolbarPush({ executorId: 'local', projectPath: '/project' }),
-			).resolves.toBe(true);
+			const remotes = await controller.loadPushRemotes({
+				executorId: 'local',
+				projectPath: '/project',
+			});
+			expect(remotes.map((remote) => remote.name)).toEqual(['origin']);
 			expect(controller.showPushModal).toBe(false);
-			expect(controller.pushRemotes).toHaveLength(1);
-			expect(controller.pushRemotes[0].name).toBe('origin');
+			expect(controller.pushRemotes).toHaveLength(0);
 		});
 
 		it('prepares push data when no upstream exists', async () => {
@@ -554,8 +555,8 @@ describe('GitRepositoryController', () => {
 				isUpToDate: false,
 			};
 			await expect(
-				controller.prepareToolbarPush({ executorId: 'local', projectPath: '/project' }),
-			).resolves.toBe(true);
+				controller.loadPushRemotes({ executorId: 'local', projectPath: '/project' }),
+			).resolves.toHaveLength(1);
 			expect(controller.showPushModal).toBe(false);
 			expect(controller.confirmAction).toBeNull();
 		});
@@ -563,8 +564,8 @@ describe('GitRepositoryController', () => {
 		it('does nothing when no remote', async () => {
 			controller.remoteStatus = null;
 			await expect(
-				controller.prepareToolbarPush({ executorId: 'local', projectPath: '/project' }),
-			).resolves.toBe(false);
+				controller.loadPushRemotes({ executorId: 'local', projectPath: '/project' }),
+			).resolves.toEqual([]);
 			expect(controller.showPushModal).toBe(false);
 		});
 	});

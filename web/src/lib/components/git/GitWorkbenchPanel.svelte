@@ -51,6 +51,15 @@
 	const activeProjectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
 	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
+	let pushOpenGeneration = 0;
+
+	$effect(() => {
+		if (!presentationVisible) return;
+		// A remote list from an earlier panel visit cannot open a prompt in its replacement.
+		return () => {
+			pushOpenGeneration++;
+		};
+	});
 
 	$effect(() => {
 		const target = activeTarget;
@@ -118,8 +127,17 @@
 	async function openPush(): Promise<void> {
 		const target = activeTarget;
 		if (!presentationVisible || !target || !controller.target.canChangeTarget) return;
-		if (!(await repository.prepareToolbarPush(target))) return;
-		if (presentationVisible && sameGitProject(target, activeTarget)) repository.showPushModal = true;
+		const generation = ++pushOpenGeneration;
+		const remotes = await repository.loadPushRemotes(target);
+		if (
+			!remotes.length ||
+			generation !== pushOpenGeneration ||
+			!presentationVisible ||
+			!sameGitProject(target, activeTarget)
+		)
+			return;
+		repository.pushRemotes = remotes;
+		repository.showPushModal = true;
 	}
 
 	function openInEditor(relativePath: string, line: number): void {

@@ -319,21 +319,16 @@ export class GitRepositoryController {
 		);
 	}
 
-	async prepareToolbarPush(project: GitProjectTarget): Promise<boolean> {
+	async loadPushRemotes(project: GitProjectTarget): Promise<GitRemoteEntry[]> {
 		const contextGeneration = this.captureContext(project);
-		if (contextGeneration === null) return false;
-		if (!this.remoteStatus?.hasRemote) return false;
-
+		if (contextGeneration === null || !this.remoteStatus?.hasRemote) return [];
 		try {
 			const data = await getGitRemotes(project);
-			if (!this.isCurrentContext(project, contextGeneration)) return false;
-			this.pushRemotes = data.remotes ?? [];
+			if (!this.isCurrentContext(project, contextGeneration)) return [];
+			return data.remotes ?? [];
 		} catch {
-			if (!this.isCurrentContext(project, contextGeneration)) return false;
-			this.pushRemotes = [];
+			return [];
 		}
-
-		return this.pushRemotes.length > 0;
 	}
 
 	async handleSwitchBranch(

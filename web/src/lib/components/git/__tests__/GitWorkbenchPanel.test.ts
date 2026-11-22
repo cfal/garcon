@@ -41,26 +41,36 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 		vi.clearAllMocks();
 	});
 
-	it('does not open a push prompt after its tab becomes hidden', async () => {
-		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
-		controller.presentationVisible = true;
-		controller.target.baseProjectPath = '/project';
-		vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
-		vi.spyOn(controller.workbench, 'checkFreshness').mockResolvedValue();
-		const remotes = Promise.withResolvers<boolean>();
-		const prepare = vi
-			.spyOn(controller.repository, 'prepareToolbarPush')
-			.mockReturnValue(remotes.promise);
-		const props = { controller, presentation: 'window-main' as const };
-		const view = render(GitWorkbenchPanel, props);
-		await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
-		expect(prepare).toHaveBeenCalledOnce();
-		await view.rerender({ ...props, visible: false });
-		remotes.resolve(true);
-		await remotes.promise;
-		expect(controller.repository.showPushModal).toBe(false);
-		controller.dispose();
-	});
+	it.each(['stay', 'hide', 'hide and return', 'unmount'])(
+		'only opens Push in its original visit: %s',
+		async (change) => {
+			const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
+			controller.presentationVisible = true;
+			controller.target.baseProjectPath = '/project';
+			vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
+			vi.spyOn(controller.workbench, 'checkFreshness').mockResolvedValue();
+			const remotes = Promise.withResolvers<typeof controller.repository.pushRemotes>();
+			const prepare = vi
+				.spyOn(controller.repository, 'loadPushRemotes')
+				.mockReturnValue(remotes.promise);
+			const props = { controller, presentation: 'window-main' as const };
+			const view = render(GitWorkbenchPanel, props);
+			await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+			expect(prepare).toHaveBeenCalledOnce();
+			if (change === 'unmount') {
+				view.unmount();
+			} else if (change !== 'stay') {
+				await view.rerender({ ...props, visible: false });
+				if (change === 'hide and return') await view.rerender({ ...props, visible: true });
+			}
+			const fetched = [{ name: 'backup', url: '/repos/backup' }];
+			remotes.resolve(fetched);
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(controller.repository.showPushModal).toBe(change === 'stay');
+			expect(controller.repository.pushRemotes).toEqual(change === 'stay' ? fetched : []);
+			controller.dispose();
+		},
+	);
 
 	it('keeps the chosen push remote when the owning tab is hidden and shown', async () => {
 		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
