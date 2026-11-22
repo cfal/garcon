@@ -111,11 +111,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new AcpExecution(runtime, nativeSessions);
-    this.sessionConfiguration = {
-      apply: (agentSessionId, configuration) => (
-        providerExecution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
+    this.sessionConfiguration = { apply: providerExecution.applySessionConfiguration };
     const producer = createAgentProducerAdapter(providerExecution, host);
     this.execution = producer.execution;
     this.producers = producer.producers;

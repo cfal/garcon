@@ -704,7 +704,7 @@ describe('Cursor ACP runtime', () => {
       ...createCursorAcpPolicy(TEST_CURSOR_CONFIG),
       // A call the fake never answers; it ends only when the process does.
       async configureSession(context) {
-        configurationStarted.resolve();
+        configurationStarted.resolve(context.sessionId);
         await context.client.setSessionModel({ sessionId: context.sessionId, modelId: 'unanswered' });
       },
     };
@@ -712,11 +712,8 @@ describe('Cursor ACP runtime', () => {
       converter: new CursorAcpEventConverter(),
       createTransport: acp.createTransport,
     });
-    let agentSessionId = '';
-    const start = runtime.startSession(startRequest({
-      onSessionActivated: (session) => { agentSessionId = session.agentSessionId; },
-    })).then(() => null, (error) => error);
-    await configurationStarted.promise;
+    const start = runtime.startSession(startRequest()).then(() => null, (error) => error);
+    const agentSessionId = await configurationStarted.promise;
 
     expect(runtime.abort(agentSessionId)).toBe(true);
 

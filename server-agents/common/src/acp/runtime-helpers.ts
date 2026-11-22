@@ -2,7 +2,7 @@ import { UnknownToolUseMessage } from '@garcon/common/chat-types';
 import { normalizeToolInput } from '../shared/normalize-util.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import { asString } from './event-converter.js';
-import type { AcpAbortStrategy, AcpAgentPolicy } from './policy.js';
+import type { AcpAgentPolicy } from './policy.js';
 import type { AcpResumeRequest, AcpStartRequest } from './runtime-types.js';
 
 export function buildPromptFallback(
@@ -81,10 +81,6 @@ export function humanizeError(error: unknown): string {
   return String(error);
 }
 
-export function abortStrategy(policy: AcpAgentPolicy): AcpAbortStrategy {
-  return policy.abortStrategy ?? 'cancel';
-}
-
 // Describes a permission request the agent's converter does not recognize.
 export function fallbackPermissionToolUse(
   toolCall: Record<string, unknown>,
@@ -101,20 +97,6 @@ export function fallbackPermissionToolUse(
     if (title) input.title = title;
   }
   return new UnknownToolUseMessage(timestamp, toolId, rawName, input);
-}
-
-// A follow-up waiting on a stopped turn stops waiting once its own admission closes.
-export function untilSettledOrClosed(settled: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
-  if (!signal) return settled;
-  if (signal.aborted) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const done = () => {
-      signal.removeEventListener('abort', done);
-      resolve();
-    };
-    signal.addEventListener('abort', done, { once: true });
-    void settled.then(done);
-  });
 }
 
 // Runs `onTimeout` if `settled` has not resolved within `ms`.

@@ -96,29 +96,35 @@ export async function applyAntigravityModel(
   return { ...models, currentModelId: model };
 }
 
-// The mode is set before every turn, even when the cached options already show
-// it: the agent can change its own mode, and Garcon tracks no notification
-// that would prove the session is still in the cached one. Unknown
-// options (a resume that returned none) still get the mode. A session that does
-// not offer a non-default mode fails rather than running in another one; single
-// queries rely on `plan`.
+function sessionModeOption(configOptions: AcpSessionConfigurationContext['configOptions']) {
+  if (configOptions == null) return undefined;
+  if (!Array.isArray(configOptions) || configOptions.some((option) => typeof option?.id !== 'string')) {
+    throw new AgentIntegrationError('PROVIDER_FAILURE', 'Antigravity returned invalid session config options.', false);
+  }
+  return configOptions.find((option) => option.id === 'mode');
+}
+
+// The agent can change its own mode, so only a fresh setter reply confirms it.
 export async function applyAntigravityMode(
   client: Pick<AcpSessionConfigurationContext['client'], 'setSessionConfigOption'>,
   sessionId: string,
   configOptions: AcpSessionConfigurationContext['configOptions'],
   mode: AntigravityMode,
 ): Promise<AcpSessionConfigurationContext['configOptions'] | undefined> {
-  const modeOption = configOptions?.find((option) => option.id === 'mode');
-  if (configOptions) {
-    const offered = modeOption?.options?.some((option) => option.value === mode) ?? false;
-    if (!offered) {
-      if (mode === 'default' && !modeOption) return undefined;
+  if (configOptions != null) {
+    const modeOption = sessionModeOption(configOptions);
+    const mustBeAdvertised = modeOption !== undefined || mode !== 'default';
+    const choices = modeOption?.options;
+    if (mustBeAdvertised && !(Array.isArray(choices) && choices.some((option) => option?.value === mode))) {
       throw new AgentIntegrationError('PROVIDER_FAILURE', `Antigravity does not offer the ${mode} mode for this session.`, false);
     }
   }
   const result = await client.setSessionConfigOption({ sessionId, configId: 'mode', value: mode });
-  const applied = result.configOptions?.find((option) => option.id === 'mode')?.currentValue;
-  if (applied !== undefined && applied !== mode) {
+  const applied = sessionModeOption(result?.configOptions)?.currentValue;
+  if (typeof applied !== 'string') {
+    throw new AgentIntegrationError('PROVIDER_FAILURE', `Antigravity did not confirm the requested ${mode} mode.`, false);
+  }
+  if (applied !== mode) {
     throw new AgentIntegrationError('PROVIDER_FAILURE', `Antigravity did not apply the requested mode: expected ${mode}, got ${applied}.`, false);
   }
   return result.configOptions;
@@ -136,9 +142,6 @@ export function createAntigravityAcpPolicy(config: AntigravityConfig): AcpAgentP
     abortStrategy: 'cancel',
     authenticateMethodId: config.authMethod,
     clientCapabilities: {},
-    newSessionModelConfig: false,
-    promptModelConfig: false,
-    promptModeConfig: false,
     configureSession: configureAntigravitySession,
     buildPrompt: antigravityPrompt,
     buildEnv: (request) => antigravityChildEnvironment(config, request.envOverrides),

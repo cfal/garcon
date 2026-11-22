@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import type { AcpInitializeResult, AcpJsonRpcMessage } from '@garcon/server-agent-common/acp/protocol';
 import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
+import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type { AcpStartRequest } from '@garcon/server-agent-common/acp/runtime-types';
 import { AcpTransport, type AcpProcess } from '@garcon/server-agent-common/acp/transport';
 import {
@@ -9,7 +12,7 @@ import {
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { AntigravityConfig } from '../../../config.ts';
 import { AntigravityAcpEventConverter } from '../antigravity-acp-event-converter.ts';
-import { createAntigravityAcpPolicy } from '../antigravity-acp-policy.ts';
+import { applyAntigravityMode, createAntigravityAcpPolicy } from '../antigravity-acp-policy.ts';
 import { runAntigravitySingleQuery } from '../run-single-query.ts';
 
 const MODELS = {
@@ -49,12 +52,9 @@ class FakeAntigravityAgent {
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
   // Delays or drops the reply to `session/cancel`, as a slow or unresponsive agent would.
   cancelReply: 'immediate' | 'deferred' | 'ignored' = 'immediate';
-  // Whether `session/resume` reports the session's config options.
-  resumeReportsOptions = true;
+  resumeConfigOptions: (typeof MODE_OPTION)[] | undefined = [MODE_OPTION];
   modeOptions: Array<{ value: string }> = MODE_OPTION.options;
-  // Whether `session/set_config_option` replies with the session's options.
-  configReplyReportsOptions = true;
-  reportedMode?: string;
+  configReply?: Record<string, unknown>;
   // When set, `session/resume` fails with this internal error.
   resumeFailure: string | null = null;
   // When set, `session/resume` replies only after this settles.
@@ -167,7 +167,7 @@ class FakeAntigravityAgent {
           currentModelId: this.#sessionModels.get(String(params.sessionId)) ?? MODELS.currentModelId,
           availableModels: MODELS.availableModels.filter((entry) => this.offeredModelIds?.includes(entry.modelId) ?? true),
         };
-        const result = this.resumeReportsOptions ? { models, configOptions: [MODE_OPTION] } : { models };
+        const result = this.resumeConfigOptions ? { models, configOptions: this.resumeConfigOptions } : { models };
         if (this.resumeGate) {
           void this.resumeGate.then(() => reply(result));
           return;
@@ -176,7 +176,7 @@ class FakeAntigravityAgent {
       }
       case 'session/set_config_option':
       {
-        const result = this.configReplyReportsOptions ? { configOptions: [{ ...MODE_OPTION, options: this.modeOptions, currentValue: this.reportedMode ?? params.value }] } : {};
+        const result = this.configReply ?? { configOptions: [{ ...MODE_OPTION, options: this.modeOptions, currentValue: params.value }] };
         if (this.configReplyGate) {
           void this.configReplyGate.then(() => reply(result));
           return;
@@ -242,6 +242,58 @@ function runEnded(events: readonly AgentRuntimeEvent[]) {
 }
 
 describe('Antigravity ACP runtime', () => {
+  it('preserves explicit approval during a cold resume when only the saved model changes', async () => {
+    const { agent, runtime, events, request } = harness();
+    const execution = new AcpExecution(runtime, createPathNativeSessionCodec('antigravity'));
+    const saved = {
+      permissionMode: 'bypassPermissions', thinkingMode: 'none', model: 'gemini-test-low',
+      settings: { ownerId: 'antigravity', schemaVersion: 1, values: {} }, endpoint: null,
+    } as const;
+    const gate = Promise.withResolvers<void>();
+    agent.sessions.add('saved');
+    agent.resumeGate = gate.promise;
+    agent.onPrompt((fake, id) => { fake.requestPermission(id, 'tool-1'); fake.endPrompt(); });
+    try {
+      const turn = runtime.runTurn({ ...request({ permissionMode: 'default' }), agentSessionId: 'saved' });
+      await waitFor(() => agent.requests('session/resume').length === 1);
+      await execution.applySessionConfiguration('saved', { ...saved, model: 'gemini-test-high' }, saved);
+      gate.resolve();
+      await turn;
+      expect(events.some((event) => event.type === 'permission' && event.lifecycle.kind === 'requested')).toBe(true);
+      expect(agent.received.find((frame) => frame.id === 'permission-1')?.result)
+        .toEqual({ outcome: { outcome: 'cancelled' } });
+    } finally { runtime.shutdown(); }
+  });
+
+  it('publishes the handoff seed receipt only when the first prompt is written', async () => {
+    const { agent, runtime, events } = harness();
+    const execution = new AcpExecution(runtime, createPathNativeSessionCodec('antigravity'));
+    const request = {
+      chatId: 'chat-1', runId: 'run-1', projectPath: '/work', model: '',
+      permissionMode: 'default', thinkingMode: 'none', endpoint: null, attachments: [],
+      settings: { ownerId: 'antigravity', schemaVersion: 1, values: {} },
+      carriedContext: { prefix: 'Selected history.\n\n' }, prompt: 'Continue.',
+      admission: { signal: new AbortController().signal, markStarted: async () => {} },
+    } as const;
+    try {
+      agent.configReply = {};
+      await expect(execution.start(request, (event) => events.push(event))).rejects.toThrow('did not confirm');
+      expect(agent.requests('session/prompt')).toEqual([]);
+      expect(events.filter((event) => event.type === 'session')).toEqual([]);
+
+      events.length = 0;
+      agent.configReply = undefined;
+      agent.onPrompt((fake) => fake.endPrompt());
+      const result = await execution.start({ ...request, runId: 'run-2' }, (event) => events.push(event));
+      await waitFor(() => runEnded(events).length > 0);
+      expect(agent.requests('session/prompt').map((frame) => frame.params)).toEqual([{
+        sessionId: result.agentSessionId, prompt: [{ type: 'text', text: 'Selected history.\n\nContinue.' }],
+      }]);
+      expect(events.map((event) => event.type)).toEqual(['session', 'run-ended']);
+      expect(result.nativeSeedReceipt).toEqual(receiptForCarriedContext(request.carriedContext, result.agentSessionId));
+    } finally { runtime.shutdown(); }
+  });
+
   it.each(['shutdown', 'cancel'] as const)('closes an unregistered start on %s without activating it', async (cause) => {
     const { runtime, agent, request } = harness();
     const admission = new AbortController();
@@ -485,7 +537,7 @@ describe('Antigravity ACP runtime', () => {
     const started = await runtime.startSession(request());
     await waitFor(() => runEnded(events).length === 1);
     runtime.releaseSession('chat-1', started.agentSessionId);
-    agent.resumeReportsOptions = false;
+    agent.resumeConfigOptions = undefined;
 
     await runtime.runTurn({ ...request({ permissionMode: 'plan' }), agentSessionId: started.agentSessionId });
 
@@ -604,6 +656,27 @@ describe('Antigravity ACP runtime', () => {
     expect(runtime.isRunning(started.agentSessionId)).toBe(true);
     await waitFor(() => !runtime.isRunning(started.agentSessionId));
     expect(runtime.getRunningSessions()).toEqual([]);
+  });
+
+  it('rejects malformed mode options instead of treating them as omitted', async () => {
+    const setSessionConfigOption = mock(async () => ({}));
+    const wireReply = JSON.parse('{"configOptions":false}');
+    await expect(applyAntigravityMode({ setSessionConfigOption }, 'session-1', wireReply.configOptions, 'plan'))
+      .rejects.toMatchObject({ code: 'PROVIDER_FAILURE', message: expect.stringContaining('config options') });
+    expect(setSessionConfigOption).not.toHaveBeenCalled();
+  });
+
+  it('does not resume in an unconfirmed default mode when the native options omit mode', async () => {
+    const { agent, runtime, request } = harness();
+    agent.sessions.add('restored');
+    agent.resumeConfigOptions = [];
+    agent.configReply = {};
+    agent.onPrompt((fake) => fake.endPrompt());
+    await expect(runtime.runTurn({ ...request(), permissionMode: 'default', agentSessionId: 'restored' }))
+      .rejects.toThrow('did not confirm');
+    expect(agent.requests('session/set_config_option')[0]?.params).toMatchObject({ value: 'default' });
+    expect(agent.requests('session/prompt')).toEqual([]);
+    runtime.shutdown();
   });
 
   it('refuses a mode the session does not offer instead of running in another one', async () => {
@@ -784,6 +857,19 @@ describe('Antigravity ACP runtime', () => {
     expect(agent.requests('session/set_model').map((message) => (message.params as { modelId: string }).modelId))
       .toEqual(['gemini-test-high', 'gemini-test-low']);
     restarted.shutdown();
+  });
+
+  it('keeps the current selection on Default when only a resumed model is known', async () => {
+    const { agent, runtime, request } = harness();
+    agent.sessions.add('restored');
+    agent.onPrompt((fake) => fake.endPrompt());
+    await runtime.runTurn({ ...request({ model: 'gemini-test-high' }), agentSessionId: 'restored' });
+    await runtime.runTurn({ ...request({ model: 'default' }), agentSessionId: 'restored' });
+    expect(agent.requests('session/new')).toHaveLength(0);
+    expect(agent.requests('session/set_model').map((frame) => frame.params)).toEqual([
+      { sessionId: 'restored', modelId: 'gemini-test-high' },
+    ]);
+    runtime.shutdown();
   });
 
   it('leaves a remembered default alone when the resumed session no longer offers it', async () => {
@@ -1313,14 +1399,20 @@ describe('Antigravity ACP runtime', () => {
 });
 
 describe('Antigravity one-shot query', () => {
-  it('sends no prompt when the agent reports that plan mode did not take effect', async () => {
+  it.each([
+    { reply: { configOptions: [{ ...MODE_OPTION, currentValue: 'default' }] }, reason: 'expected plan, got default' },
+    { reply: {}, reason: 'did not confirm' },
+    { reply: { configOptions: [] }, reason: 'did not confirm' },
+    { reply: { configOptions: [{ id: 'mode' }] }, reason: 'did not confirm' },
+    { reply: { configOptions: false }, reason: 'config options' },
+  ])('sends no prompt without confirmation of plan mode: $reply', async ({ reply, reason }) => {
     const agent = new FakeAntigravityAgent();
-    agent.reportedMode = 'default';
+    agent.configReply = reply;
     agent.onPrompt((fake) => fake.endPrompt());
     await expect(runAntigravitySingleQuery('Name this chat.', {
       projectPath: '/work',
       createTransport: () => new AcpTransport({ spawn: () => agent.process() }),
-    }, CONFIG)).rejects.toThrow('expected plan, got default');
+    }, CONFIG)).rejects.toMatchObject({ code: 'PROVIDER_FAILURE', message: expect.stringContaining(reason) });
     expect(agent.requests('session/prompt')).toEqual([]);
     expect(agent.processesKilled).toBe(1);
   });

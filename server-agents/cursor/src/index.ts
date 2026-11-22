@@ -115,11 +115,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new AcpExecution(runtime, nativeSessions);
-    this.sessionConfiguration = {
-      apply: (agentSessionId, configuration) => (
-        providerExecution.applySessionConfiguration(agentSessionId, configuration)
-      ),
-    };
+    this.sessionConfiguration = { apply: providerExecution.applySessionConfiguration };
     this.projectPathUpdates = createAgentProjectPathUpdates(host.scope,
       (request) => providerExecution.prepareProjectPathUpdate(request));
     const nativeEvidence = createCursorNativeEvidence(transcriptReader, nativeSessions, runtime);

@@ -49,13 +49,13 @@ ACP calls:
 | `session/new` | Starts a chat. The result carries `models.availableModels`, `models.currentModelId`, and the `mode` config option. |
 | `session/resume` | Reopens a session after process loss without replaying history ([t3code AntigravityAdapterV2.ts](https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts#L237)). The CLI advertises `sessionCapabilities.resume`, so the shared reconnect order already prefers it. |
 | `session/set_model` | Selects a model before a prompt when the request differs from the session's current model. |
-| `session/set_config_option` (`mode`) | Applies the mapped permission mode before every prompt. The agent can change its own mode, so a cached value does not prove the session is still in it. |
+| `session/set_config_option` (`mode`) | Sets the mapped permission mode before every prompt and checks the mode in the reply. A missing or different mode stops the prompt. The agent can change its own mode, so a cached value is not confirmation. |
 | `session/prompt` | Text, plus inline base64 `image` blocks; `promptCapabilities.image` is true. |
 | `session/cancel` | A notification, per the ACP specification. The open prompt resolves with `stopReason: "cancelled"`, so Antigravity aborts cooperatively and keeps its process. Cursor keeps `process-restart`. |
 
 ### Stop
 
-A cooperative cancel settles only when the agent answers the open prompt. The next turn on that session waits for the cancelled prompt to settle before it sends a new `session/prompt`. Otherwise agy would treat the new prompt as a mid-turn steer. If the prompt has not settled after 10 s, the runtime retires the process, and the turn reconnects with `session/resume`. Content the agent streams between the cancel and its settlement belongs to the stopped turn and is published with it, because it is also in the agent's native history.
+A cooperative cancel settles only when the agent answers the open prompt. The next turn on that session waits for the cancelled prompt to settle before it sends a new `session/prompt`, so the two prompts never overlap. If the prompt has not settled after 10 s, the runtime retires the process, and the turn reconnects with `session/resume`. Content the agent streams between the cancel and its settlement belongs to the stopped turn and is published with it, because it is also in the agent's native history.
 
 Stop works the same way while a turn is still being configured (model and mode are applied before the prompt). The turn is reserved from admission, so that window counts as busy, and an abort there ends the turn before its prompt is sent. A follow-up that is waiting on a stopped turn gives up as soon as its own admission closes.
 

@@ -8,7 +8,6 @@ export type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
 export interface PendingPermissionRequest {
   readonly permissionOccurrenceId: string;
-  readonly session: AcpAgentRuntimeSession;
   readonly turn: AcpTurnContext;
   readonly requestId: AcpJsonRpcId;
   readonly responseForDecision: (decision: PermissionDecisionPayload) => Record<string, unknown>;
@@ -32,9 +31,6 @@ export interface AcpAgentRuntimeSession {
   pendingTurn: AcpTurnContext | null;
   configOptions?: AcpSessionConfigOption[];
   models?: AcpSessionModelState;
-  // The model an empty request returns to: the agent's own default when this
-  // process has seen it, otherwise the model a resumed session reported.
-  agentDefaultModelId?: string;
   startedAt: string;
   lastActivityAt: number;
 }
@@ -45,10 +41,8 @@ export interface AcpTurnContext {
   readonly pendingPermissions: Set<PendingPermissionRequest>;
   readonly detachSourceListeners: Array<() => void>;
   permissionMode: PermissionMode;
-  running: boolean;
   completed: boolean;
   aborted: boolean;
-  sourceActive: boolean;
   sourceRetired: boolean;
   readonly settled: PromiseWithResolvers<void>;
   cancelTimer: ReturnType<typeof setTimeout> | null;
@@ -56,10 +50,10 @@ export interface AcpTurnContext {
 
 type AcpRuntimeSessionIdentity = Pick<AcpAgentRuntimeSession,
   'id' | 'chatId' | 'projectPath' | 'client'
-  | 'configOptions' | 'models' | 'agentDefaultModelId'>;
+  | 'configOptions' | 'models'>;
 
 // An idle, unregistered session for a process that just opened or resumed it.
-export function newRuntimeSession(identity: AcpRuntimeSessionIdentity, startedAt = new Date().toISOString()): AcpAgentRuntimeSession {
+export function newRuntimeSession(identity: AcpRuntimeSessionIdentity): AcpAgentRuntimeSession {
   return {
     ...identity,
     state: 'idle',
@@ -67,7 +61,7 @@ export function newRuntimeSession(identity: AcpRuntimeSessionIdentity, startedAt
     activeTurn: null,
     sourceTurn: null,
     pendingTurn: null,
-    startedAt,
+    startedAt: new Date().toISOString(),
     lastActivityAt: Date.now(),
   };
 }

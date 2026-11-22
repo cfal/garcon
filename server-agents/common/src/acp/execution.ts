@@ -6,7 +6,7 @@ import {
   type AgentRuntimeExecutionContext,
 } from '../execution/runtime-events.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
-import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
+import type { AgentEstablishedSession, AgentSessionConfigurationUpdates } from '@garcon/server-agent-interface';
 import type { AcpAgentRuntime } from './agent-runtime.js';
 
 // Adapts an ACP runtime to the producer-adapter execution port.
@@ -76,16 +76,14 @@ export class AcpExecution implements AgentRuntimeExecution {
     }));
   }
 
-  async applySessionConfiguration(
-    agentSessionId: string,
-    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
-  ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
-      model: configuration.model,
-      permissionMode: configuration.permissionMode,
-      thinkingMode: configuration.thinkingMode,
-    });
-  }
+  readonly applySessionConfiguration: AgentSessionConfigurationUpdates['apply'] = async (
+    agentSessionId, configuration, previous,
+  ) => {
+    // Unrelated saves must preserve the permission mode explicitly requested for this turn.
+    if (configuration.permissionMode !== previous.permissionMode) {
+      this.runtime.updateSessionSettings(agentSessionId, { permissionMode: configuration.permissionMode });
+    }
+  };
 
   async prepareProjectPathUpdate(
     request: import('@garcon/server-agent-interface').AgentProjectPathUpdateRequest,
