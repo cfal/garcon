@@ -32,6 +32,14 @@ test('accepts only a clean empty listing, not failed or unrecognized discovery',
   expect(() => parsePiModelListing('', '')).toThrow();
 });
 
+async function expectDescendantStopped(binary: string) {
+  const pid = (await Bun.file(`${binary}.ready`).text()).trim();
+  expect(pid).toMatch(/^[1-9]\d*$/);
+  const status = Bun.spawnSync(['ps', '-p', pid, '-o', 'stat=']).stdout.toString().trim();
+  // The system may not have reaped an orphan that has already terminated.
+  expect(status).toMatch(/^(Z.*)?$/);
+}
+
 test.skipIf(process.platform === 'win32')('a discovery timeout stops a descendant holding pipes after the CLI exits', async () => {
   await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-discovery-'));
   const binary = join(dir.path, 'pi');
@@ -39,11 +47,19 @@ test.skipIf(process.platform === 'win32')('a discovery timeout stops a descendan
   await writeFile(binary, '#!/bin/sh\nwhile [ -f "$0" ]; do sleep 0.1; done &\nprintf "%s" "$!" > "$0.ready"\n', { mode: 0o700 });
   const probe = getPiAvailableModels(binary, AbortSignal.timeout(500));
   await expect(Promise.race([probe, delay(3_000, 'still reading', { ref: false })])).rejects.toMatchObject({ name: 'TimeoutError' });
-  const pid = (await Bun.file(`${binary}.ready`).text()).trim();
-  expect(pid).toMatch(/^[1-9]\d*$/);
-  const status = Bun.spawnSync(['ps', '-p', pid, '-o', 'stat=']).stdout.toString().trim();
-  // The system may not have reaped an orphan that has already terminated.
-  expect(status).toMatch(/^(Z.*)?$/);
+  await expectDescendantStopped(binary);
+});
+
+test.skipIf(process.platform === 'win32')('the output cap stops the entire discovery group, not just its writer', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'pi-oversize-'));
+  const binary = join(dir.path, 'pi');
+  await writeFile(binary, `#!/bin/sh
+while [ -f "$0" ]; do sleep 0.1; done >/dev/null 2>&1 &
+printf '%s' "$!" > "$0.ready"
+exec dd if=/dev/zero bs=65536 count=100
+`, { mode: 0o700 });
+  await expect(getPiAvailableModels(binary)).rejects.toThrow('Pi model discovery failed (exit');
+  await expectDescendantStopped(binary);
 });
 
 test('caller cancellation leaves a shared probe running; shutdown drains it without retrying', async () => {

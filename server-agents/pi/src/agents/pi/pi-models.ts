@@ -79,7 +79,8 @@ export async function getPiAvailableModels(
     if (code !== 0) throw new Error(`Pi model discovery failed (exit ${code}). Check pi --list-models on this executor.`);
     return parsePiModelListing(stdout, stderr);
   } finally {
-    if (signal.aborted) await stopDiscoveryProcess(proc);
+    // A wrapper can exit or hit the output cap while a quiet helper is still running.
+    await stopDiscoveryProcess(proc);
   }
 }
 
