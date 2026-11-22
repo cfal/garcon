@@ -101,7 +101,7 @@ async function verifyControllerStartup() {
   assert.match(help.stdout, /Usage:\s+garcon-cli/);
   const uid = await docker(['exec', controller, 'id', '-u']);
   assert.notEqual(uid.stdout.trim(), '0');
-  await docker(['exec', controller, 'sh', '-ec', `
+  await docker(['exec', controller, 'sh', '-exc', `
     test "$(command -v codex)" = "$HOME/.local/bin/codex"
     test -w "$HOME/.local/bin"
     test -w "$HOME/.local/lib/node_modules/@openai"
