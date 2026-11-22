@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseUsageSummary, type UsageSummary } from '../../../common/usage.js';
 import { executionBackend } from '../../support/execution-backend.js';
+import type { GarconTestClient } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
@@ -46,22 +47,71 @@ function agent(summary: UsageSummary, agentId: string) {
   return entry;
 }
 
+async function readUsage(client: GarconTestClient, executorId = client.executorId): Promise<UsageSummary> {
+  const query = new URLSearchParams({ executorId, ...window() });
+  const summary = parseUsageSummary(await client.get(`/api/v1/usage?${query}`));
+  if (!summary) throw new Error('Invalid usage summary');
+  return summary;
+}
+
 const EXECUTOR_USAGE = { claudeModel: 'claude-sonnet-5-5', codexModel: 'gpt-6.1-terra' };
 const CONTROLLER_USAGE = { claudeModel: 'claude-haiku-5-5', codexModel: 'gpt-6-luna' };
 
 const backend = executionBackend();
 
+test(`usage counts Codex fork responses once across incremental scans (${backend})`, async () => {
+  await withIntegrationFixture('usage-codex-fork', async (fixture) => {
+    const dir = join(fixture.executionDirs.home, '.codex', 'sessions', ...day(-1).split('-'));
+    await mkdir(dir, { recursive: true });
+    const parentId = '00000000-0000-7000-8000-000000000001';
+    const forkId = '00000000-0000-7000-8000-000000000002';
+    const copyId = '00000000-0000-4000-8000-000000000003';
+    const forkPath = join(dir, `rollout-synthetic-${forkId}.jsonl`);
+    const copyPath = join(dir, `rollout-synthetic-${copyId}.jsonl`);
+    const start = Date.parse(`${day(-1)}T12:00:00Z`);
+    const row = (ms: number, type: string, payload: object) =>
+      JSON.stringify({ timestamp: new Date(start + ms).toISOString(), type, payload }) + '\n';
+    const model = 'gpt-6-sol';
+    const usage = (output: number) => ({ input_tokens: 0, output_tokens: output, total_tokens: output });
+    const response = (ms: number, threadId: string, turnId: string, responseId: string, output: number) =>
+      row(ms, 'token_usage_record', { thread_id: threadId, turn_id: turnId, response_id: responseId, usage: usage(output) });
+    const turn = (ms: number, turnId: string, tier: string) =>
+      row(ms, 'event_msg', { type: 'thread_settings_applied', thread_settings: { model, service_tier: tier } })
+      + row(ms, 'event_msg', { type: 'task_started', turn_id: turnId })
+      + row(ms, 'turn_context', { turn_id: turnId, model });
+    // A point fork retargets metadata, not the response IDs or their owning thread.
+    const prefix = (id: string) => row(0, 'session_meta', { id, forked_from_id: parentId })
+      + turn(1, 'inherited-turn', 'default') + response(5, parentId, 'inherited-turn', 'inherited', 1000)
+      + turn(10, 'source-turn', 'priority');
+    await writeFile(forkPath, prefix(forkId));
+    await writeFile(copyPath, prefix(copyId));
+    const read = async () => agent(await readUsage(fixture.client), 'codex');
+    expect(await read()).toMatchObject({ status: 'ok', scannedFiles: 2, buckets: [] });
+
+    const quickResponse = response(500, forkId, 'source-turn', 'first', 100);
+    await appendFile(forkPath, quickResponse);
+    await appendFile(copyPath, quickResponse);
+    const first = await read();
+    expect(first).toMatchObject({ status: 'ok', scannedFiles: 2, distinctSessions: 1, buckets: [{
+      day: day(-1), model, records: 1, totals: { outputTokens: 100 }, costUsd: 100 * 20 / 1_000_000,
+    }] });
+
+    const rest = row(2000, 'event_msg', { type: 'token_count', info: { last_token_usage: usage(100), total_token_usage: usage(100) } })
+      + response(3000, forkId, 'source-turn', 'second', 25);
+    await appendFile(forkPath, rest);
+    await appendFile(copyPath, rest + turn(4000, 'copy-turn', 'default') + response(4100, copyId, 'copy-turn', 'third', 10));
+    const resumed = await read();
+    expect(resumed).toMatchObject({ status: 'ok', scannedFiles: 2, distinctSessions: 2, buckets: [{
+      day: day(-1), model, records: 3, totals: { outputTokens: 135 }, costUsd: (125 * 20 + 10 * 10) / 1_000_000,
+    }] });
+  });
+}, 60_000);
+
 test(`usage reads Claude and Codex transcripts on the selected executor (${backend})`, async () => {
   await withIntegrationFixture(`usage-${backend}`, async (fixture) => {
     const { client } = fixture;
     const executorId = client.executorId;
-    const read = async (target: string) => {
-      const summary = parseUsageSummary(await client.get(`/api/v1/usage?${new URLSearchParams({ executorId: target, ...window() })}`));
-      if (!summary) throw new Error('Invalid usage summary');
-      return summary;
-    };
-
-    const summary = await read(executorId);
+    const summary = await readUsage(client);
     expect(summary).toMatchObject({ executorId, ...window(), pricingAsOf: expect.any(String) });
     const claude = agent(summary, 'claude');
     expect(claude).toMatchObject({ status: 'ok', scannedFiles: 1, distinctSessions: 1 });
@@ -85,7 +135,7 @@ test(`usage reads Claude and Codex transcripts on the selected executor (${backe
 
     if (executorId !== 'local') {
       // Local reads the controller's own home, never the worker's.
-      const local = await read('local');
+      const local = await readUsage(client, 'local');
       expect(agent(local, 'claude').buckets.map((bucket) => bucket.model)).toEqual([CONTROLLER_USAGE.claudeModel]);
       expect(agent(local, 'codex').buckets.map((bucket) => bucket.model)).toEqual([CONTROLLER_USAGE.codexModel]);
     }

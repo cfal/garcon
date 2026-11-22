@@ -15,9 +15,13 @@ function isMalformed(line: string, state: CodexUsageState): boolean {
   return result !== null && isMalformedUsage(result);
 }
 
-const SESSION_ID = '00000000-0000-4000-8000-0000000000c1';
+const SESSION_ID = '00000000-0000-7000-8000-0000000000c1';
 const PARENT_THREAD_ID = '00000000-0000-4000-8000-0000000000c0';
 const COPY_THREAD_ID = '00000000-0000-4000-8000-0000000000c2';
+const forkOrigins = [
+  ['native fork', { forked_from_id: PARENT_THREAD_ID }],
+  ['subagent spawn', { source: { subagent: { thread_spawn: { parent_thread_id: PARENT_THREAD_ID } } } }],
+] as const;
 const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10-01T05:17:41.289Z') =>
   JSON.stringify({ type: 'session_meta', timestamp, payload: { id: SESSION_ID, ...payload } });
 const turnContext = (model = 'gpt-6-sol', turnId?: string) =>
@@ -227,14 +231,12 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(tokenCount(counters(300, 10)), state)?.speed).toBe('standard');
   });
 
-  test('suppress the copied parent history at the start of a fork', () => {
-    const state = createCodexUsageState();
-    parseCodexUsageLine(sessionMeta({ forked_from_id: '00000000-0000-4000-8000-0000000000c0' }, '2026-10-01T05:00:00.000Z'), state);
-    parseCodexUsageLine(turnContext(), state);
+  test.each(forkOrigins)('suppresses inherited counters in a %s and bills the child delta', (_kind, meta) => {
+    const state = started(sessionMeta(meta, afterFork(0)));
     const parent = counters(100, 20);
-    expect(parseCodexUsageLine(tokenCount(parent, parent, '2026-10-01T05:00:00.020Z'), state)).toBeNull();
-    // Genuine child usage arrives after a model turn and extends the copied baseline.
-    const child = parseCodexUsageLine(tokenCount(counters(40, 4), counters(140, 24), '2026-10-01T05:00:09.000Z'), state);
+    expect(parseCodexUsageLine(tokenCount(parent, parent, afterFork(20)), state)).toBeNull();
+    expect(parseCodexUsageLine(tokenCount(parent, parent, afterFork(1020)), state)).toBeNull();
+    const child = parseCodexUsageLine(tokenCount(counters(40, 4), counters(140, 24), afterFork(1021)), state);
     expect(child?.totals.uncachedInputTokens).toBe(40);
   });
 
@@ -277,15 +279,14 @@ describe('Codex usage lines', () => {
 
   test('give a verbatim fork copy of a usage record the same identity', () => {
     const parent = started();
-    const copy = createCodexUsageState();
-    parseCodexUsageLine(sessionMeta({}, '2026-10-02T00:00:00Z'), copy);
-    parseCodexUsageLine(turnContext(), copy);
+    const copy = started(sessionMeta({ id: COPY_THREAD_ID }));
     const line = usageRecordLine('resp_1', counters(100, 10));
-    expect(parseCodexUsageLine(line, copy)?.dedupeKey).toBe(parseCodexUsageLine(line, parent)?.dedupeKey ?? 'missing');
+    expect(parseCodexUsageLine(line, parent)).toMatchObject({ sessionId: SESSION_ID, dedupeKey: 'codex-response:resp_1' });
+    expect(parseCodexUsageLine(line, copy)).toMatchObject({ sessionId: COPY_THREAD_ID, dedupeKey: 'codex-response:resp_1' });
   });
 
-  test('counts the first child response even when it lands immediately after the fork', () => {
-    const state = startedFork();
+  test.each(forkOrigins)('counts the first child response immediately after a %s', (_kind, meta) => {
+    const state = started(sessionMeta(meta, afterFork(0)));
     parseCodexUsageLine(threadSettings('priority'), state);
     const usage = counters(40, 4);
     expect(parseCodexUsageLine(usageRecordLine('fast-child', usage, afterFork(350)), state))
@@ -293,15 +294,17 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(tokenCount(usage, usage), state)).toBeNull();
   });
 
-  test('skips a restamped parent record but counts the child response immediately after it', () => {
-    const state = startedFork();
+  test('a matching child response ends copy suppression for subsequent records', () => {
+    const state = startedFork({ id: COPY_THREAD_ID });
     const parent = counters(100, 10);
     const copiedRecord = usageRecordLine('resp_parent', parent, afterFork(20), 'parent-turn', PARENT_THREAD_ID);
     expect(parseCodexUsageLine(copiedRecord, state)).toBeNull();
     expect(parseCodexUsageLine(tokenCount(parent, parent, afterFork(30)), state)).toBeNull();
     const child = counters(40, 4);
-    expect(parseCodexUsageLine(usageRecordLine('resp_child', child, afterFork(40)), state))
+    expect(parseCodexUsageLine(usageRecordLine('resp_child', child, afterFork(40), 'turn-1', COPY_THREAD_ID), state))
       .toMatchObject({ dedupeKey: 'codex-response:resp_child', totals: { uncachedInputTokens: 40 } });
+    const unowned = usageRecordLine('next-response', child, afterFork(41), 'turn-2', null);
+    expect(parseCodexUsageLine(unowned, state)?.dedupeKey).toBe('codex-response:next-response');
     expect(parseCodexUsageLine(tokenCount(child, child, afterFork(2030)), state)).toBeNull();
   });
 
@@ -328,9 +331,11 @@ describe('Codex usage lines', () => {
   ] as const)('falls back to timing when %s', (_case, meta, threadId) => {
     const state = startedFork(meta);
     const usage = counters(40, 4);
-    const copy = usageRecordLine('copy', usage, afterFork(10), 'turn-1', threadId);
-    const child = usageRecordLine('child', usage, afterFork(9000), 'turn-2', threadId);
-    expect(parseCodexUsageLine(copy, state)).toBeNull();
+    const firstCopy = usageRecordLine('first-copy', usage, afterFork(999), 'turn-1', threadId);
+    const nextCopy = usageRecordLine('next-copy', usage, afterFork(1998), 'turn-1', threadId);
+    const child = usageRecordLine('child', usage, afterFork(2998), 'turn-2', threadId);
+    expect(parseCodexUsageLine(firstCopy, state)).toBeNull();
+    expect(parseCodexUsageLine(nextCopy, state)).toBeNull();
     expect(parseCodexUsageLine(child, state)?.dedupeKey).toBe('codex-response:child');
   });
 
