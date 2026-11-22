@@ -5,8 +5,8 @@ import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`opens and revision-saves a workflow file without a chat (${executionBackend})`, async () => {
-    await withChromiumFixture(`workflow-file-${executionBackend}`, async ({ page, integration, assertNoBrowserErrors }) => {
+  test(`saves a workflow file without a chat and requires comparison after an external edit (${executionBackend})`, async () => {
+    await withChromiumFixture(`workflow-file-${executionBackend}`, async ({ page, integration, withExpectedConsoleErrors }) => {
       const path = join(integration.executionDirs.project, 'review.workflow.yaml');
       const source = 'version: 1\nname: Clean file\nsteps:\n  - {id: review, kind: decision, prompt: "Ready?", choices: {ok: Approve}}\n';
       await writeFile(path, source);
@@ -24,18 +24,42 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await picker.getByRole('button', { name: 'Open source file' }).click();
       const heading = studio.getByRole('heading', { name: 'Clean file' });
       await browserExpect(heading).toBeVisible();
-      for (const width of [390, 1440]) {
-        await page.setViewportSize({ width, height: 900 });
-        await browserExpect(heading).toBeVisible();
-      }
-      await studio.getByLabel('Definition name').fill('Revised file');
-      await studio.getByRole('button', { name: 'Apply name' }).click();
+      const mobile = page.locator('#mobile-panel-new-workflow');
+      await page.setViewportSize({ width: 390, height: 900 });
+      await browserExpect(mobile.getByRole('heading', { name: 'Clean file' })).toBeVisible();
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await browserExpect(mobile).toBeHidden();
+      await browserExpect(heading).toBeVisible();
+      const rename = async (name: string) => {
+        await studio.getByLabel('Definition name').fill(name);
+        await studio.getByRole('button', { name: 'Apply name' }).click();
+      };
+      await rename('Revised file');
       const save = studio.getByRole('button', { name: 'Save draft file' });
+      const unsaved = studio.getByText(/Unsaved changes/);
+      await browserExpect(unsaved).toBeVisible();
       await save.click();
+      await browserExpect(unsaved).toHaveCount(0);
       await browserExpect(save).toBeDisabled();
-      await browserExpect.poll(() => readFile(path, 'utf8')).toContain('name: "Revised file"');
+      expect(await readFile(path, 'utf8')).toContain('name: "Revised file"');
+
+      const external = source.replace('Clean file', 'External revision');
+      await writeFile(path, external);
+      await rename('Retained draft');
+      await withExpectedConsoleErrors(['Failed to load resource: the server responded with a status of 409 (Conflict)'], async () => {
+        await save.click();
+        await browserExpect(studio.getByRole('alert')).toContainText('Compare with disk before saving again');
+      });
+      await browserExpect(save).toHaveCount(0);
+      expect(await readFile(path, 'utf8')).toBe(external);
+      await studio.getByRole('button', { name: 'Compare with disk' }).click();
+      const comparison = studio.getByRole('tabpanel', { name: 'Disk' });
+      await browserExpect(comparison).toContainText('External revision');
+      await browserExpect(comparison).toContainText('Retained draft');
+      await studio.getByRole('button', { name: 'Save against displayed disk' }).click();
+      await browserExpect(unsaved).toHaveCount(0);
+      expect(await readFile(path, 'utf8')).toBe(source.replace('name: Clean file', 'name: "Retained draft"'));
       expect((await integration.client.listChats()).sessions).toEqual([]);
-      assertNoBrowserErrors();
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 90_000);
 }
