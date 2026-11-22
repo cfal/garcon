@@ -40,6 +40,27 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 		vi.clearAllMocks();
 	});
 
+	it('does not open a push prompt after its tab becomes hidden', async () => {
+		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
+		controller.presentationVisible = true;
+		controller.target.baseProjectPath = '/project';
+		vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
+		vi.spyOn(controller.workbench, 'checkFreshness').mockResolvedValue();
+		const remotes = Promise.withResolvers<boolean>();
+		const prepare = vi
+			.spyOn(controller.repository, 'prepareToolbarPush')
+			.mockReturnValue(remotes.promise);
+		const props = { controller, presentation: 'window-main' as const };
+		const view = render(GitWorkbenchPanel, props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+		expect(prepare).toHaveBeenCalledOnce();
+		await view.rerender({ ...props, visible: false });
+		remotes.resolve(true);
+		await remotes.promise;
+		expect(controller.repository.showPushModal).toBe(false);
+		controller.dispose();
+	});
+
 	it.each([
 		['window-main', '/other'],
 		['mobile', '/other'],

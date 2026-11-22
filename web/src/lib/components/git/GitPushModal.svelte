@@ -1,15 +1,10 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	// Push dialog that lets the user choose a remote and confirm pushing
-	// the current branch to the matching remote branch.
-
 	import { untrack } from 'svelte';
-	import X from '@lucide/svelte/icons/x';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import Upload from '@lucide/svelte/icons/upload';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitRemoteEntry } from '$lib/api/git.js';
-	import { getTransientLayers } from '$lib/context';
-	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface Props {
 		remotes: GitRemoteEntry[];
@@ -20,11 +15,6 @@
 	}
 
 	let { remotes, currentBranch, isPushing, onPush, onClose }: Props = $props();
-	const transientLayers = getTransientLayers();
-	const focusReturnTarget =
-		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
-			? document.activeElement
-			: null;
 
 	let selectedRemote = $state(
 		untrack(() => remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name ?? ''),
@@ -37,61 +27,30 @@
 		onPush(selectedRemote);
 	}
 
-	function handleBackdropClick(e: MouseEvent): void {
-		if (e.target === e.currentTarget) onClose();
-	}
-
 	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			onClose();
-		}
 		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canPush) {
 			e.preventDefault();
+			e.stopPropagation();
 			handlePush();
 		}
 	}
-
-	function handleLayerEscape(): boolean {
-		onClose();
-		return true;
-	}
 </script>
 
-<div
-	role="dialog"
-	aria-modal="true"
-	tabindex="-1"
-	class="fixed inset-0 z-50 flex items-center justify-center transient-backdrop"
-	onclick={handleBackdropClick}
-	onkeydown={handleKeydown}
-	use:transientLayer={{
-		registry: transientLayers,
-		id: 'git-push-dialog',
-		kind: 'application-dialog',
-		modality: 'main-inert',
-		onEscape: handleLayerEscape,
-		restoreFocus: () => focusReturnTarget?.focus(),
-	}}
->
-	<div
-		class="bg-background border border-border rounded-lg shadow-xl w-[400px] max-h-[80vh] flex flex-col"
+<Dialog.Root open={true} requestClose={onClose}>
+	<Dialog.Content
+		class="flex max-h-[80dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[400px]"
+		onkeydowncapture={handleKeydown}
 	>
-		<!-- Header -->
-		<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-			<h2 class="text-sm font-medium text-foreground">{m.git_push_title()}</h2>
-			<button
-				onclick={onClose}
-				class="p-1 rounded hover:bg-muted transition-colors text-muted-foreground"
-			>
-				<X class="w-4 h-4" />
-			</button>
-		</div>
+		<Dialog.Header class="shrink-0 border-b border-border px-4 py-3 text-start">
+			<Dialog.Title class="pe-8 text-sm font-medium">{m.git_push_title()}</Dialog.Title>
+		</Dialog.Header>
 
 		<!-- Remote list -->
-		<div class="px-4 py-3 space-y-3 shrink-0">
+		<div class="min-h-0 space-y-3 overflow-y-auto px-4 py-3">
 			<div class="space-y-1.5">
-				<div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">{m.git_push_remote()}</div>
+				<div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+					{m.git_push_remote()}
+				</div>
 				<div class="space-y-1">
 					{#each remotes as remote (remote.name)}
 						<label
@@ -144,5 +103,5 @@
 				{m.git_push_action()}
 			</button>
 		</div>
-	</div>
-</div>
+	</Dialog.Content>
+</Dialog.Root>

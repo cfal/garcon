@@ -19,7 +19,6 @@ export const CUSTOM_TRANSIENT_SOURCES = [
 export const TRANSIENT_BACKDROP_SOURCES = [
 	'components/ui/dialog/dialog-overlay.svelte',
 	'components/shared/CommandMenu.svelte',
-	'components/git/GitPushModal.svelte',
 	'components/layout/AppShell.svelte',
 ] as const;
 

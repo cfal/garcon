@@ -117,9 +117,9 @@
 
 	async function openPush(): Promise<void> {
 		const target = activeTarget;
-		if (!target || !controller.target.canChangeTarget) return;
+		if (!presentationVisible || !target || !controller.target.canChangeTarget) return;
 		if (!(await repository.prepareToolbarPush(target))) return;
-		if (sameGitProject(target, activeTarget)) repository.showPushModal = true;
+		if (presentationVisible && sameGitProject(target, activeTarget)) repository.showPushModal = true;
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
@@ -207,7 +207,7 @@
 			/>
 		{/if}
 
-		{#if repository.showPushModal}
+		{#if presentationVisible && repository.showPushModal}
 			<GitPushModal
 				remotes={repository.pushRemotes}
 				currentBranch={repository.currentBranch}
