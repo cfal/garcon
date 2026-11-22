@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { expect as browserExpect } from 'playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -36,6 +37,29 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     await source.press('Alt+ArrowLeft');
     expect(await source.getAttribute('data-history-key-prevented')).toBe('true');
     expect(page.url()).toBe(`${integration.garcon.baseUrl}/chat/${chatId}`);
+
+    markPhase('keeping command search stationary and returning focus to the editor');
+    await source.press('Control+p');
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    const search = palette.getByRole('combobox');
+    await browserExpect(search).toBeFocused();
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      expect(await search.evaluate((input, init) => input.dispatchEvent(
+        new KeyboardEvent('keydown', { ...init, key: 'Escape', bubbles: true, cancelable: true }),
+      ), composition)).toBe(true);
+      await browserExpect(search).toBeFocused();
+    }
+    await palette.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)).then(() => undefined));
+    const top = await search.evaluate(el => el.getBoundingClientRect().top);
+    await search.fill('no-such-fixture-command-00000');
+    await browserExpect(palette.getByRole('option')).toHaveCount(0);
+    expect(await search.evaluate(el => el.getBoundingClientRect().top)).toBeCloseTo(top, 0);
+    await search.press('Tab');
+    await browserExpect(palette.getByRole('button', { name: 'Close command menu' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await browserExpect(search).toBeFocused();
+    await search.press('Escape');
+    await browserExpect(source).toBeFocused();
 
     async function command(label: string): Promise<void> {
       await source.click();

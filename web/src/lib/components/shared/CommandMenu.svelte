@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
+	import { flushSync } from 'svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import Fuse from 'fuse.js';
 	import Search from '@lucide/svelte/icons/search';
+	import X from '@lucide/svelte/icons/x';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getWorkbenchCommands, getTransientLayers } from '$lib/context';
-	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
 		WorkbenchCommand,
@@ -26,13 +28,11 @@
 	const transientLayers = getTransientLayers();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
-	let focusReturnTarget: HTMLElement | null = null;
 
 	let isOpen = $state(false);
 	let query = $state('');
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
-	let paletteRef = $state<HTMLDivElement | null>(null);
 
 	let commandContext = $derived(commandRegistry.context());
 	let commands = $state.raw<readonly WorkbenchCommand[]>([]);
@@ -90,14 +90,11 @@
 	}
 
 	function open() {
-		focusReturnTarget =
-			document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		transientLayers.open('main-inert', () => {
 			commands = captureCommands();
 			isOpen = true;
 			query = '';
 			selectedIndex = 0;
-			requestAnimationFrame(() => inputRef?.focus());
 		});
 	}
 
@@ -114,28 +111,23 @@
 
 	function selectItem(item: WorkbenchCommand) {
 		if (!isEnabled(item)) return;
-		void commandRegistry.invoke(item, commandContext);
-		close();
+		const context = commandContext;
+		// Releases the focus trap before a command focuses another surface.
+		flushSync(close);
+		void commandRegistry.invoke(item, context);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.isComposing) return;
-		if (e.key === 'Tab') {
-			const focusable = Array.from(
-				paletteRef?.querySelectorAll<HTMLElement>(
-					'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
-				) ?? [],
-			);
-			if (focusable.length === 0) {
-				e.preventDefault();
-				return;
-			}
-			const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-			const atBoundary = e.shiftKey ? currentIndex <= 0 : currentIndex === focusable.length - 1;
-			if (!atBoundary) return;
-			e.preventDefault();
-			focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
-		} else if (e.key === 'ArrowDown') {
+		if (e.isComposing || e.keyCode === 229) {
+			if (e.key === 'Escape') e.stopPropagation();
+			return;
+		}
+		if (
+			e.target !== inputRef &&
+			!(e.target instanceof Element && e.target.closest('[role="option"]'))
+		)
+			return;
+		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
 		} else if (e.key === 'ArrowUp') {
@@ -146,10 +138,6 @@
 			const item = filteredCommands[selectedIndex];
 			if (item) selectItem(item);
 		}
-	}
-
-	function handleBackdropClick() {
-		close();
 	}
 
 	function getCategoryIcon(category: WorkbenchCommandCategory) {
@@ -171,32 +159,15 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 transient-backdrop" role="presentation">
-		<button
-			class="absolute inset-0 w-full h-full cursor-default"
-			onclick={handleBackdropClick}
-			aria-label={m.command_close_menu()}
-			tabindex="-1"
-		></button>
-
-		<div
-			bind:this={paletteRef}
-			class="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-popover border border-border rounded-md shadow-2xl overflow-hidden"
-			role="dialog"
-			aria-modal="true"
+	<Dialog.Root open={true} requestClose={close}>
+		<Dialog.Content
+			class="top-[20%] translate-y-0 gap-0 overflow-hidden rounded-md bg-popover p-0 shadow-2xl"
+			showCloseButton={false}
 			aria-label={m.command_command_palette()}
-			tabindex="-1"
-			onkeydown={handleKeydown}
-			use:transientLayer={{
-				registry: transientLayers,
-				id: 'command-palette',
-				kind: 'application-dialog',
-				modality: 'main-inert',
-				onEscape: () => {
-					close();
-					return true;
-				},
-				restoreFocus: () => focusReturnTarget?.focus(),
+			onkeydowncapture={handleKeydown}
+			onOpenAutoFocus={(event) => {
+				event.preventDefault();
+				inputRef?.focus();
 			}}
 		>
 			<div class="flex items-center gap-2 px-4 py-3 border-b border-border">
@@ -214,11 +185,18 @@
 					aria-autocomplete="list"
 					aria-activedescendant={selectedCommand ? optionIdFor(selectedCommand.id) : undefined}
 				/>
-				<kbd
-					class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
+				<Dialog.Close
+					class="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground"
+					aria-label={m.command_close_menu()}
 				>
-					{m.command_escape_hint()}
-				</kbd>
+					<X class="size-4 sm:hidden" />
+					<span class="sm:hidden"><span class="ansi-glyph" aria-hidden="true">[x]</span></span>
+					<kbd
+						class="hidden rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] sm:inline"
+					>
+						{m.command_escape_hint()}
+					</kbd>
+				</Dialog.Close>
 			</div>
 
 			<div id={listId} class="max-h-[300px] overflow-y-auto p-2" role="listbox">
@@ -241,6 +219,7 @@
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
+							onfocus={() => (selectedIndex = i)}
 							onmouseenter={() => {
 								selectedIndex = i;
 							}}
@@ -264,6 +243,6 @@
 					{/each}
 				{/if}
 			</div>
-		</div>
-	</div>
+		</Dialog.Content>
+	</Dialog.Root>
 {/if}

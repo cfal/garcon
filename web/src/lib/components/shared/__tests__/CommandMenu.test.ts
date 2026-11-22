@@ -283,6 +283,31 @@ it('switches captured recent chats through the same registry action for keyboard
 });
 
 describe('CommandMenu', () => {
+	it('runs the highlighted command when arrowing from a focused option', async () => {
+		const invoke = vi.spyOn(commandRegistry, 'invoke');
+		try {
+			const { component } = render(CommandMenu);
+			component.toggle();
+			const options = await screen.findAllByRole('option');
+			const index = options.findIndex(
+				(option, i) =>
+					!option.hasAttribute('disabled') &&
+					options[i + 1]?.getAttribute('aria-disabled') === 'false',
+			);
+			expect(index).toBeGreaterThanOrEqual(0);
+			const focused = options[index];
+			focused.focus();
+			await fireEvent.keyDown(focused, { key: 'ArrowDown' });
+			expect(options[index + 1].getAttribute('aria-selected')).toBe('true');
+			await fireEvent.keyDown(focused, { key: 'Enter' });
+			expect(invoke).toHaveBeenCalledOnce();
+			expect(options[index + 1].id.endsWith(encodeURIComponent(invoke.mock.calls[0][0].id))).toBe(
+				true,
+			);
+		} finally {
+			invoke.mockRestore();
+		}
+	});
 	it('routes the settings command to the combined settings dialog', async () => {
 		expect(commandRegistry.isEnabled('open-app-settings')).toBe(false);
 		await commandRegistry.execute('open-settings');
