@@ -59,10 +59,24 @@ async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
   }
 }
 
-// Git's worktree add -b creates the branch before rejecting an occupied destination.
-async function assertFreshWorktreeDestination(projectPath: string, destination: string): Promise<void> {
+async function isRegisteredDestination(projectPath: string, destination: string): Promise<boolean> {
   const registered = await readPorcelainWorktreeRecords(projectPath);
-  if (registered.some(worktree => path.relative(destination, worktree.path) === '')) {
+  const paths = registered.map(worktree => path.resolve(worktree.path));
+  if (paths.includes(destination)) return true;
+
+  // Git folds ASCII case when core.ignoreCase is set, even for missing worktrees.
+  const foldCase = (value: string) => value.replace(/[A-Z]/g, letter => letter.toLowerCase());
+  const folded = foldCase(destination);
+  if (!paths.some(registeredPath => foldCase(registeredPath) === folded)) return false;
+  const { stdout } = await runGit(
+    projectPath, ['config', '--type=bool', '--default=false', '--get', 'core.ignoreCase'], readOnlyGitOptions(),
+  );
+  return stdout.trim() === 'true';
+}
+
+// Git can create a branch before rejecting an occupied destination.
+async function assertFreshWorktreeDestination(projectPath: string, destination: string): Promise<void> {
+  if (await isRegisteredDestination(projectPath, destination)) {
     throw new GitServiceError('GIT_CONFLICT', 'A worktree is already registered at this location.');
   }
   let directory;
@@ -280,18 +294,16 @@ export function createWorktreeOperations(
     const name = newBranch ?? branch;
     if (name) await assertSafeBranchName(projectPath, name, "branch name");
     const resolvedPath = path.resolve(projectPath, worktreePath);
-    if (newBranch) await assertFreshWorktreeDestination(projectPath, resolvedPath);
+    await assertFreshWorktreeDestination(projectPath, resolvedPath);
 
     const args: string[] = ["worktree", "add"];
     let checkoutRef = baseRef;
     if (detach) {
       args.push("--detach");
+    } else if (name && !newBranch && await localBranchExists(projectPath, name)) {
+      checkoutRef = name;
     } else if (name) {
-      if (!newBranch && await localBranchExists(projectPath, name)) {
-        checkoutRef = name;
-      } else {
-        args.push("--no-track", "-b", name);
-      }
+      args.push("--no-track", "-b", name);
     }
     args.push(worktreePath);
     if (checkoutRef) args.push(checkoutRef);
