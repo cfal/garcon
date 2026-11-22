@@ -141,8 +141,7 @@
 			selectedIndex = Math.max(selectedIndex - 1, 0);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
-			const item = filteredCommands[selectedIndex];
-			if (item) selectItem(item);
+			if (selectedCommand) selectItem(selectedCommand);
 		}
 	}
 

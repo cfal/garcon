@@ -49,7 +49,9 @@ test('reports command outcomes, reveals after tree startup, and restores status 
       ), composition)).toBe(true);
       await browserExpect(search).toBeFocused();
     }
-    await palette.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)).then(() => undefined));
+    await palette.evaluate(async el => {
+      await Promise.all(el.getAnimations().map(animation => animation.finished));
+    });
     const top = await search.evaluate(el => el.getBoundingClientRect().top);
     await search.fill('no-such-fixture-command-00000');
     await browserExpect(palette.getByRole('option')).toHaveCount(0);
@@ -64,8 +66,7 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     async function command(label: string): Promise<void> {
       await source.click();
       await source.press('Control+p');
-      const palette = page.getByRole('dialog', { name: 'Command palette' });
-      await palette.getByRole('combobox').fill(label);
+      await search.fill(label);
       await palette.getByRole('option', { name: `${label} File`, exact: true }).click();
       await palette.waitFor({ state: 'detached' });
     }
@@ -74,13 +75,12 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     await source.press('Control+p');
     await search.fill('file');
     const copy = palette.getByRole('option', { name: 'Copy File Location File', exact: true });
-    const results = palette.locator('button[role="option"]:enabled');
-    const ids = await results.evaluateAll(buttons => buttons.map(button => button.id));
-    const copyIndex = ids.indexOf((await copy.getAttribute('id'))!);
-    expect(copyIndex).toBeGreaterThanOrEqual(0);
-    const previous = copyIndex > 0;
-    await results.nth(previous ? copyIndex - 1 : copyIndex + 1).focus();
-    await page.keyboard.press(previous ? 'ArrowDown' : 'ArrowUp');
+    await copy.focus();
+    const lastResult = palette.getByRole('option', { disabled: false }).last();
+    const copyIsLast = (await lastResult.and(copy).count()) > 0;
+    await page.keyboard.press(copyIsLast ? 'ArrowUp' : 'ArrowDown');
+    await browserExpect(copy).not.toBeFocused();
+    await page.keyboard.press(copyIsLast ? 'ArrowDown' : 'ArrowUp');
     await browserExpect(copy).toBeFocused();
     await browserExpect(copy).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Space');

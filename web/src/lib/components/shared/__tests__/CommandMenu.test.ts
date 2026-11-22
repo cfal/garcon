@@ -285,29 +285,17 @@ it('switches captured recent chats through the same registry action for keyboard
 describe('CommandMenu', () => {
 	it('moves keyboard focus and the highlight together between result buttons', async () => {
 		const invoke = vi.spyOn(commandRegistry, 'invoke');
-		try {
-			const { component } = render(CommandMenu);
-			component.toggle();
-			const options = await screen.findAllByRole('option');
-			const index = options.findIndex(
-				(option, i) =>
-					!option.hasAttribute('disabled') &&
-					options[i + 1]?.getAttribute('aria-disabled') === 'false',
-			);
-			expect(index).toBeGreaterThanOrEqual(0);
-			const focused = options[index];
-			focused.focus();
-			await fireEvent.keyDown(focused, { key: 'ArrowDown' });
-			expect(options[index + 1].getAttribute('aria-selected')).toBe('true');
-			expect(document.activeElement).toBe(options[index + 1]);
-			await fireEvent.click(options[index + 1]);
-			expect(invoke).toHaveBeenCalledOnce();
-			expect(options[index + 1].id.endsWith(encodeURIComponent(invoke.mock.calls[0][0].id))).toBe(
-				true,
-			);
-		} finally {
-			invoke.mockRestore();
-		}
+		const { component } = render(CommandMenu);
+		component.toggle();
+		const options = await screen.findAllByRole('option');
+		const [first, next] = options.filter((option) => !option.hasAttribute('disabled'));
+		first.focus();
+		await fireEvent.keyDown(first, { key: 'ArrowDown' });
+		expect(document.activeElement).toBe(next);
+		expect(next.getAttribute('aria-selected')).toBe('true');
+		await fireEvent.click(next);
+		expect(invoke).toHaveBeenCalledOnce();
+		expect(next.id.endsWith(encodeURIComponent(invoke.mock.calls[0][0].id))).toBe(true);
 	});
 	it('routes the settings command to the combined settings dialog', async () => {
 		expect(commandRegistry.isEnabled('open-app-settings')).toBe(false);
