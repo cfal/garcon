@@ -82,6 +82,16 @@ describe('ClaudeCliVersionProbe', () => {
     expect(calls.trim().split('\n')).toHaveLength(1);
   });
 
+  it('probes again after an in-place update invalidates it', async () => {
+    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.1.238 (Claude Code)');
+    const probe = createProbe();
+    await probe.assertCompatible(binaryPath);
+    probe.invalidate();
+    await probe.assertCompatible(binaryPath);
+    const calls = await fs.readFile(callLogPath, 'utf8');
+    expect(calls.trim().split('\n')).toHaveLength(2);
+  });
+
   it('retries a binary after a transient probe failure', async () => {
     const { binaryPath, callLogPath } = await createFlakyClaudeBinary();
     const probe = createProbe();

@@ -46,14 +46,13 @@ export function jsonErrorFromUnknown(
   }
   if (error instanceof AgentIntegrationError) {
     switch (error.code) {
-      case 'OPERATION_UNSUPPORTED':
-        return jsonError(error.message, 501, error.code, false);
       case 'BINARY_NOT_FOUND':
         return jsonError(error.message, 503, error.code, false);
       case 'TRANSCRIPT_UNAVAILABLE':
         return jsonError(transcriptUnavailableMessage(error.retryable), 503, error.code, error.retryable);
       case 'INVALID_SETTINGS':
       case 'INVALID_ENDPOINT':
+      case 'OPERATION_UNSUPPORTED':
         return jsonError(error.message, 422, error.code, false);
     }
   }

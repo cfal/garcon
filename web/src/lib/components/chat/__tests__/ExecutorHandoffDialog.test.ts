@@ -184,6 +184,8 @@ describe('ExecutorHandoffDialog', () => {
 	it('lists worktrees on the destination and replaces its pins when the destination changes', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			executorId: worker.id,
+			instanceId: worker.instanceId,
 			worktrees: [
 				makeWorktree('/workspace/project', 'main'),
 				makeWorktree('/workspace/project-feature', 'feature'),

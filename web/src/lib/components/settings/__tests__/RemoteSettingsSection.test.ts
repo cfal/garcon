@@ -99,7 +99,12 @@ describe('remote settings sections', () => {
 			await waitFor(() =>
 				expect(updateRemoteSettings).toHaveBeenCalledWith({ ui: { [settingsKey]: preferences } }),
 			);
-			await waitFor(() => expect(card.queryByRole('button', { name: 'Auto (Local)' })).toBeNull());
+			if (settingsKey === 'chatTitle') {
+				await waitFor(() => expect(card.getByRole('button', { name: 'Auto (Local)' }).getAttribute('aria-pressed')).toBe('true'));
+				expect(card.getByText(/also suggests worktree and branch names/)).toBeTruthy();
+			} else {
+				await waitFor(() => expect(card.queryByRole('button', { name: 'Auto (Local)' })).toBeNull());
+			}
 			expect(toggle.getAttribute('aria-checked')).toBe('false');
 		},
 	);
@@ -319,6 +324,7 @@ describe('remote settings sections', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		const chatTitle = screen.getByText('Automatically generate chat titles');
+		expect(screen.getByText(/also suggests worktree and branch names/)).toBeTruthy();
 		const compactionToggle = screen.getByText('Enable agent switch compaction');
 		const commitModel = screen.getByText('Commit message model');
 		const refinementModel = screen.getByText('Prompt refinement model');

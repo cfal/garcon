@@ -164,6 +164,8 @@ jobs:
         run: bun run build
       - name: Generate Android project
         run: bun run tauri android init --ci --skip-targets-install
+      - name: Use Google's Maven Central mirror for Android builds
+        run: install -Dm644 scripts/android-ci.init.gradle "${GRADLE_USER_HOME:-$HOME/.gradle}/init.d/garcon-android.gradle"
       - name: Build Android APK
         run: bun run tauri android build --ci --debug --apk --target aarch64 --target x86_64
       - name: Prepare tracked Android safety tests

@@ -1,28 +1,18 @@
-import {
-  type FileEntry,
-  type SessionEntry,
-} from '@earendil-works/pi-coding-agent';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import {
-  type ChatMessage,
-} from '@garcon/common/chat-types';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import { convertPiMessage } from './message-converter.js';
-import { projectPiHistory } from './session-projection.js';
-
-function isSessionEntry(entry: FileEntry): entry is SessionEntry {
-  return entry.type !== 'session';
-}
+import { isPiSessionEntry, projectPiHistory, type PiSessionEntry } from './session-projection.js';
 
 // Every resumed turn, reload, and fork reads the whole session, so the file is
 // read in chunks and the passes over its entries share time-bounded steps.
-async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
+export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessage[]> {
   const steps = new EventLoopSteps('pi-history-load');
-  const sessionEntries: SessionEntry[] = [];
+  const sessionEntries: PiSessionEntry[] = [];
   for await (const { line, lineNumber } of readJsonlLineEntries(sessionPath)) {
     const entry = parseStrictPiSessionEntry(line, lineNumber!);
-    if (isSessionEntry(entry)) sessionEntries.push(entry);
+    if (entry.type !== 'session') sessionEntries.push(entry);
     if (steps.due) await steps.next();
   }
   const projection = await projectPiHistory(sessionEntries, steps);
@@ -43,24 +33,15 @@ async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
   return messages;
 }
 
-export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessage[]> {
-  return readPiSessionFile(sessionPath);
-}
-
-function parseStrictPiSessionEntry(line: string, lineNumber: number): FileEntry {
+function parseStrictPiSessionEntry(line: string, lineNumber: number): PiSessionEntry {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch {
     throw new Error(`Pi transcript record ${lineNumber} is invalid`);
   }
-  if (
-    !value
-    || typeof value !== 'object'
-    || Array.isArray(value)
-    || typeof (value as Record<string, unknown>).type !== 'string'
-  ) {
+  if (!isPiSessionEntry(value)) {
     throw new Error(`Pi transcript record ${lineNumber} is invalid`);
   }
-  return value as FileEntry;
+  return value;
 }

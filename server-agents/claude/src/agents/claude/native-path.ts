@@ -40,7 +40,7 @@ function simpleHash(value: string): string {
   return Math.abs(hash).toString(36);
 }
 
-function claudeConfigHomeDir(options: ClaudeNativePathOptions): string {
+export function claudeConfigHomeDir(options: ClaudeNativePathOptions): string {
   return (
     options.configHomeDir
     ?? path.join(os.homedir(), '.claude')

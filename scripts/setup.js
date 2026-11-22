@@ -3,7 +3,6 @@ import path from "node:path";
 import { offerTunnelSetup } from './setup-tunnel.js';
 
 const repositoryRoot = path.resolve(import.meta.dir, "..");
-const integrationTestsRoot = path.join(repositoryRoot, "integration-tests");
 
 async function findWorkspaceRoots() {
   const manifest = await Bun.file(
@@ -90,7 +89,6 @@ const installRoots = [
   repositoryRoot,
   path.join(repositoryRoot, "server"),
   path.join(repositoryRoot, "web"),
-  integrationTestsRoot,
 ];
 for (const installRoot of installRoots) {
   await installDependencies(installRoot);

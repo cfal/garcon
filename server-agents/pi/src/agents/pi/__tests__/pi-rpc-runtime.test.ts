@@ -370,8 +370,6 @@ describe('PiRpcRuntime', () => {
     process.env.PI_SESSION_ID = 'outer-session';
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, 'sessions');
     process.env.PI_MODELS_DEV_OVERRIDE_PROVIDERS = 'all';
-    process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = '/tmp/embedded-pi';
-    process.env.PI_PACKAGE_DIR = '/tmp/embedded-pi';
     const runtime = createRuntime();
     await runtime.startSession(baseStartRequest());
 
@@ -379,8 +377,6 @@ describe('PiRpcRuntime', () => {
     expect(env.PI_SESSION_FILE).toBeUndefined();
     expect(env.PI_SESSION_ID).toBeUndefined();
     expect(env.PI_CODING_AGENT_SESSION_DIR).toBeUndefined();
-    expect(env.GARCON_EMBEDDED_PI_PACKAGE_DIR).toBeUndefined();
-    expect(env.PI_PACKAGE_DIR).toBeUndefined();
     expect(env.PI_OFFLINE).toBe('1');
     expect(env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(env.PI_TELEMETRY).toBe('0');

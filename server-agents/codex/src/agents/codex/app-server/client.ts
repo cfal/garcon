@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfigObject } from '../runtime-types.js';
-import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
+import { assertCompatibleCodex, resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import { appendCodexConfigArgs } from './config-overrides.js';
 import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from './protocol.js';
 import type {
@@ -187,7 +187,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.#resolveCli = options.resolveCli
       ?? (resolveCommand
         ? async () => ({ command: await resolveCommand(), source: 'path' })
-        : resolveCodexCli);
+        : async () => resolveCodexCli(this.#env));
     this.#env = mergedEnv(options.env);
     this.#config = options.config;
     this.#modelCatalogPath = options.modelCatalogPath;
@@ -356,6 +356,12 @@ export class CodexAppServerClient extends EventEmitter {
         requestAttestation: false,
       },
     });
+    try {
+      assertCompatibleCodex(initialized.userAgent);
+    } catch (error) {
+      await this.shutdown();
+      throw error;
+    }
     this.#emitMetric({
       name: 'codex.app_server.startup',
       durationMs: Math.round(performance.now() - startedAt),

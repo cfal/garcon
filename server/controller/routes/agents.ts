@@ -93,6 +93,9 @@ export default function createAgentRoutes({ agents, apiProviders, responseCache,
       if (invalidAgent) return invalidAgent;
       return Response.json(await agents.launchAgentAuthLogin(agentId, executorId));
     } catch (error) {
+      if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
+        return jsonError(error.message, 501, error.code, false);
+      }
       return jsonErrorFromUnknown(error);
     }
   }

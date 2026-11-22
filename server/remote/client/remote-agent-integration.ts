@@ -2,6 +2,7 @@ import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
 import { isInputFormatByModel } from '@garcon/common/input-format';
 import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import { parseAgentUsageReport } from '@garcon/common/usage';
+import { parseAgentCliUpdateStatus, type AgentCliUpdateStatus } from '@garcon/common/agent-cli-update';
 import {
   AgentCallError,
   AgentIntegrationError,
@@ -91,6 +92,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: AgentIntegration['sessionConfiguration'];
   readonly projectPathUpdates: AgentIntegration['projectPathUpdates'];
   readonly usageHistory: AgentIntegration['usageHistory'];
+  readonly cliUpdates: AgentIntegration['cliUpdates'];
   readonly #listeners = new Set<(event: AgentProducerNotification) => void>();
   readonly #log: Logger;
   readonly #bindings = new Map<string, RemoteProducerBinding>();
@@ -342,6 +344,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
         return report;
       },
     } : null;
+    this.cliUpdates = cap.cliUpdates ? {
+      status: async ({ signal, ...request }) => parseCliUpdateStatus(await call('cliUpdates.status', request, { signal })),
+      startUpdate: async () => parseCliUpdateStatus(await call('cliUpdates.startUpdate', null)),
+    } : null;
   }
 
   async initializeReplacement(backing: RemoteSessionBacking, initial = false): Promise<void> {
@@ -557,6 +563,12 @@ export class RemoteAgentIntegration implements AgentIntegration {
     }, PRODUCER_ACK_DELAY_MS);
     this.#ackTimer.unref?.();
   }
+}
+
+function parseCliUpdateStatus(value: unknown): AgentCliUpdateStatus {
+  const status = parseAgentCliUpdateStatus(value);
+  if (!status) throw new AgentIntegrationError('PROVIDER_FAILURE', 'Executor returned an invalid CLI update status', false);
+  return status;
 }
 
 function isFailureDetail(value: unknown): value is { readonly code: string; readonly message?: string } {

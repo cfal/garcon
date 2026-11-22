@@ -86,17 +86,17 @@ jobs:
           echo "GARCON_BUN_COMPILE_LINUX_X64_EXECUTABLE=${linux_executable}" >> "$GITHUB_ENV"
           echo "GARCON_BUN_COMPILE_WINDOWS_X64_EXECUTABLE=${windows_executable}" >> "$GITHUB_ENV"
 
-      - name: Install server dependencies
-        working-directory: server
-        run: bun install --frozen-lockfile
+      - name: Verify source setup skips integration fixtures
+        run: |
+          bun run setup
+          test ! -e integration-tests/node_modules
 
-      - name: Install web dependencies
-        working-directory: web
-        run: bun install --frozen-lockfile
-
-      - name: Install integration-test dependencies
-        working-directory: integration-tests
-        run: bun install --frozen-lockfile
+      - name: Verify integration setup installs the pinned CLIs
+        run: |
+          bun run setup:integration
+          for cli in claude codex opencode pi; do
+            test -x "integration-tests/node_modules/.bin/${cli}"
+          done
 
       - name: Compile Paraglide messages
         working-directory: web

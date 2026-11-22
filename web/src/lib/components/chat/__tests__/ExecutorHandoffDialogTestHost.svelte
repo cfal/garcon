@@ -6,6 +6,7 @@
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
+		setNotifications,
 		setRemoteSettings,
 	} from '$lib/context';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
@@ -13,6 +14,7 @@
 	import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { ExecutorHandoffProjectState } from '$lib/chat/conversation/executor-handoff-project.svelte.js';
 	import type { ExecutorSnapshot } from '$shared/executors';
@@ -29,6 +31,7 @@
 
 	setExecutorsTestContext(untrack(() => executors));
 	setModelCatalog(new ModelCatalogStore());
+	setNotifications(createNotificationsStore());
 	setRemoteSettings(untrack(() => remoteSettings));
 	setLocalSettings(createLocalSettingsStore());
 	setAppShell(createAppShellStore());

@@ -1,4 +1,5 @@
 import type { GitMutationResult } from '../../../common/git.js';
+import { GitServiceError } from '../../../common/git-error.js';
 import path from "path";
 import { promises as fs } from "fs";
 import type {
@@ -20,6 +21,7 @@ import {
   assertSafeBranchName,
 } from "./ref-validation.js";
 import { mapWithConcurrency } from "../../common/concurrency.js";
+import { hasNodeErrorCode } from "../../common/errors.js";
 import { createLogger } from "../../common/log.js";
 import { probeWorktreeLayout } from "./worktree-layout.js";
 import { readAdminWorktreeRecords } from "./worktree-admin.js";
@@ -54,6 +56,43 @@ async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
   } catch {
     worktree.isPathMissing = true;
     worktree.lastModifiedAt = null;
+  }
+}
+
+async function isRegisteredDestination(projectPath: string, destination: string): Promise<boolean> {
+  const registered = await readPorcelainWorktreeRecords(projectPath);
+  const paths = registered.map(worktree => path.resolve(worktree.path));
+  if (paths.includes(destination)) return true;
+
+  // Git folds ASCII case when core.ignoreCase is set, even for missing worktrees.
+  const foldCase = (value: string) => value.replace(/[A-Z]/g, letter => letter.toLowerCase());
+  const folded = foldCase(destination);
+  if (!paths.some(registeredPath => foldCase(registeredPath) === folded)) return false;
+  const { stdout } = await runGit(
+    projectPath, ['config', '--type=bool', '--default=false', '--get', 'core.ignoreCase'], readOnlyGitOptions(),
+  );
+  return stdout.trim() === 'true';
+}
+
+// Git can create a branch before rejecting an occupied destination.
+async function assertFreshWorktreeDestination(projectPath: string, destination: string): Promise<void> {
+  if (await isRegisteredDestination(projectPath, destination)) {
+    throw new GitServiceError('GIT_CONFLICT', 'A worktree is already registered at this location.');
+  }
+  let directory;
+  try {
+    directory = await fs.opendir(destination);
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return;
+    if (hasNodeErrorCode(error, 'ENOTDIR')) {
+      throw new GitServiceError('GIT_CONFLICT', 'The worktree location must be a directory.');
+    }
+    throw error;
+  }
+  try {
+    if (await directory.read()) throw new GitServiceError('GIT_CONFLICT', 'The worktree location is not empty.');
+  } finally {
+    await directory.close();
   }
 }
 
@@ -233,44 +272,43 @@ export function createWorktreeOperations(
     return { targets };
   }
 
+  async function localBranchExists(projectPath: string, name: string): Promise<boolean> {
+    try {
+      await runGit(projectPath, ["rev-parse", "--verify", `refs/heads/${name}`], readOnlyGitOptions());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function createWorktree({
     projectPath,
     baseRef,
     worktreePath,
     branch,
+    newBranch,
     detach,
   }: CreateWorktreeOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
     if (baseRef) await assertExistingCommitRef(projectPath, baseRef, "base");
-    if (branch) await assertSafeBranchName(projectPath, branch, "branch name");
+    const name = newBranch ?? branch;
+    if (name) await assertSafeBranchName(projectPath, name, "branch name");
+    const resolvedPath = path.resolve(projectPath, worktreePath);
+    await assertFreshWorktreeDestination(projectPath, resolvedPath);
 
     const args: string[] = ["worktree", "add"];
+    let checkoutRef = baseRef;
     if (detach) {
-      args.push("--detach", worktreePath);
-      if (baseRef) args.push(baseRef);
-    } else if (branch) {
-      // Check if the branch already exists to avoid `-b` failure.
-      const branchExists = await runGit(
-        projectPath,
-        ["rev-parse", "--verify", `refs/heads/${branch}`],
-        readOnlyGitOptions(),
-      )
-        .then(() => true)
-        .catch(() => false);
-      if (branchExists) {
-        // Checkout existing branch into the new worktree path.
-        args.push(worktreePath, branch);
-      } else {
-        args.push("--no-track", "-b", branch, worktreePath);
-        if (baseRef) args.push(baseRef);
-      }
-    } else {
-      args.push(worktreePath);
-      if (baseRef) args.push(baseRef);
+      args.push("--detach");
+    } else if (name && !newBranch && await localBranchExists(projectPath, name)) {
+      checkoutRef = name;
+    } else if (name) {
+      args.push("--no-track", "-b", name);
     }
+    args.push(worktreePath);
+    if (checkoutRef) args.push(checkoutRef);
 
     const { stdout } = await runGit(projectPath, args);
-    const resolvedPath = path.resolve(projectPath, worktreePath);
     return {
       success: true,
       output: stdout || "Worktree created",

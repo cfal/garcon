@@ -67,8 +67,11 @@ FROM base AS runtime
 ARG GARCON_UID=1000
 ARG GARCON_GID=1000
 ARG OPENCODE_VERSION=1.19.5
+ARG CODEX_VERSION=0.171.0
+ARG PI_VERSION=1.5.2
 
-RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" && npm cache clean --force
+RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
+      "@earendil-works/pi-coding-agent@${PI_VERSION}" && npm cache clean --force
 RUN set -eu; \
     if [ "${GARCON_UID}" -eq 0 ]; then \
       echo "GARCON_UID must identify a non-root user" >&2; \
@@ -100,14 +103,16 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 USER garcon
 
+RUN npm install -g --prefix "${HOME}/.local" "@openai/codex@${CODEX_VERSION}" && npm cache clean --force
 RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -fsSL https://cursor.com/install | bash
 RUN curl -fsSL https://ampcode.com/install.sh | bash
 RUN curl -fsSL https://app.factory.ai/cli | sh
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
-# Removes installer-created machine state before persistent volumes are initialized.
-RUN rm -rf \
+# Version checks can create native state. Leaves persistent volumes clean and owned by garcon.
+RUN codex --version && pi --version && \
+    rm -rf \
       "${HOME}/.agents" \
       "${HOME}/.claude" \
       "${HOME}/.claude.json" \
@@ -153,11 +158,7 @@ COPY --from=build /app/web/build/ web/build/
 COPY --from=build /app/cli/ cli/
 COPY --chmod=755 docker/garcon-cli /usr/local/bin/garcon-cli
 
-RUN test -x /app/server-agents/codex/node_modules/.bin/codex && \
-    test -x /app/server-agents/pi/node_modules/.bin/pi && \
-    ln -s /app/server-agents/codex/node_modules/.bin/codex /usr/local/bin/codex && \
-    ln -s /app/server-agents/pi/node_modules/.bin/pi /usr/local/bin/pi && \
-    printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/garcon-path.sh
+RUN printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/garcon-path.sh
 
 ENV CODEX_HOME="${HOME}/.codex"
 ENV GARCON_CONFIG_DIR="${HOME}/.garcon"

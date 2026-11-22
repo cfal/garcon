@@ -82,6 +82,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates = null;
   readonly usageHistory = null;
+  readonly cliUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;

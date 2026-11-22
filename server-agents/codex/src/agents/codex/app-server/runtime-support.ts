@@ -1,5 +1,6 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { CODEX_USER_INPUT_METHOD } from '../user-input.js';
+import { CODEX_CLI_NOT_FOUND } from './cli.js';
 import { CodexAppServerRpcError } from './client.js';
 import type { CodexTurnError } from './protocol.js';
 import type {
@@ -41,8 +42,8 @@ export function humanizeCodexAppServerError(error: unknown): string {
       }
     }
   }
-  if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
-    return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';
+  if (/executable not found|spawn.*ENOENT|ENOENT.*(?:spawn|codex)/i.test(raw)) {
+    return CODEX_CLI_NOT_FOUND;
   }
   if (/authentication|unauthorized|401|api.?key/i.test(raw)) {
     return 'Codex authentication failed. Run "codex" in your terminal to sign in.';

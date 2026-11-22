@@ -274,7 +274,7 @@ class FakeClient extends EventEmitter {
     this.steerTurn = mock(script.steerTurn ?? (async ({ expectedTurnId }) => ({ turnId: expectedTurnId })));
     this.interruptTurn = mock(script.interruptTurn ?? (async () => ({})));
     this.compactThread = mock(script.compactThread ?? (async () => ({})));
-    this.connect = mock(script.connect ?? (async () => ({ userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
+    this.connect = mock(script.connect ?? (async () => ({ userAgent: 'garcon/0.171.0', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
     this.respond = mock();
     this.reject = mock();
     this.shutdown = mock(script.shutdown ?? (() => undefined));
@@ -351,7 +351,7 @@ function createRpcClientFixture(responder, options = {}) {
     env: options.env,
     config: options.config,
     modelCatalogPath: options.modelCatalogPath,
-    resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'bundled' })),
+    resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'path' })),
     shutdownGraceMs: options.shutdownGraceMs,
     shutdownTerminateMs: options.shutdownTerminateMs,
     shutdownKillMs: options.shutdownKillMs,
@@ -371,7 +371,7 @@ function createRpcClientFixture(responder, options = {}) {
 }
 
 const initializeResponse = {
-  userAgent: 'codex',
+  userAgent: 'garcon/0.171.0',
   codexHome: '/tmp/codex-home',
   platformFamily: 'unix',
   platformOs: 'linux',
@@ -481,7 +481,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     );
     const connecting = client.connect();
     await client.shutdown();
-    resolved.resolve({ command: '/tmp/codex', source: 'bundled' });
+    resolved.resolve({ command: '/tmp/codex', source: 'path' });
     try {
       await expect(connecting).rejects.toThrow('Codex app-server client is shut down');
       expect(spawn).not.toHaveBeenCalled();
@@ -887,7 +887,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       params: { threadId: 'thread-1' },
     }));
     expect(metrics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'codex.app_server.startup', commandSource: 'bundled' }),
+      expect.objectContaining({ name: 'codex.app_server.startup', commandSource: 'path' }),
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: true }),
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/unsubscribe', success: true }),
     ]));
@@ -2789,7 +2789,7 @@ describe('CodexAppServerRuntime', () => {
       connect: async () => {
         connectStarted.resolve();
         await connected.promise;
-        return { userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
+        return { userAgent: 'garcon/0.171.0', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
       },
     });
     const provider = createRuntime({ createClient: () => fake });

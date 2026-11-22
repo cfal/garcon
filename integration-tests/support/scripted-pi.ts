@@ -1,13 +1,11 @@
 // Runs the real pinned Pi CLI with its model swapped for a script. The CLI speaks the OpenAI
 // Chat Completions API to the provider in models.json, which points at
 // FakeChatCompletionsModel, so CLI behavior stays real while every model choice is
-// deterministic and no credential is required. The fixture's HOME isolation keeps the user's
-// ~/.pi untouched: both the spawned CLI and the in-server SDK discovery resolve ~/.pi/agent
-// inside the temp home.
+// deterministic and no credential is required. Model discovery and RPC sessions both use
+// the pinned CLI and the fixture's isolated ~/.pi/agent.
 
 import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
   AgentRunCommandRequest,
@@ -16,6 +14,7 @@ import type {
 import { FakeChatCompletionsModel } from './fake-chat-completions-model.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import { waitForPersistedNativeSession } from './persisted-chat.js';
+import { PI_BINARY } from './pinned-agent-binaries.js';
 
 export const PI_TEST_PROVIDER = 'garcon-fake';
 export const PI_TEST_MODEL_ID = 'fake-model';
@@ -55,7 +54,7 @@ export function startScriptedPiTestEnvironment(
     throw new Error('node is required to run the pinned Pi CLI in integration tests');
   }
   const serverEnvironment: Record<string, string> = {
-    GARCON_PI_BINARY: fileURLToPath(new URL('../node_modules/.bin/pi', import.meta.url)),
+    GARCON_PI_BINARY: PI_BINARY,
     PATH: SYSTEM_PATH,
   };
   return {

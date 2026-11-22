@@ -78,9 +78,12 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   latest `thread_settings_applied`. Cumulative counters reconcile each request
   delta; inconsistent events are skipped and reported as malformed. Garcon's JSONL fork copies events verbatim under a new session id,
   so a request's identity is its event time, model, and counters, and copies
-  count once. Codex's native forks restamp the copied history; those copies are
-  recognized as the burst of events right after the fork's `session_meta`,
-  since legacy rollouts record no explicit boundary
+  count once.
+- Codex native forks restamp copied history. A response whose `thread_id` matches
+  the fork's native UUID (`session_meta.id`) ends copy suppression immediately.
+  Otherwise, the parser treats usage as copied until the first gap of at least one
+  second, measured from `session_meta` or the preceding copied usage event.
+  Legacy rollouts have no explicit copy boundary
   (`forked_from_ordinal_exclusive` is set only for reverts and paginated
   history).
 - Both parsers read the first JSON value of a line that lost its newline, as

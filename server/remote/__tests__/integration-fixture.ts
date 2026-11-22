@@ -9,8 +9,10 @@ import {
   type AgentImportedTranscriptRow,
   type AgentSingleQueryRequest,
   type AgentUsageReadRequest,
+  type AgentCliUpdateStatusRequest,
 } from '@garcon/server-agent-interface';
 import type { AgentUsageReport } from '@garcon/common/usage';
+import { IDLE_AGENT_CLI_UPDATE_RUN, type AgentCliUpdateStatus } from '@garcon/common/agent-cli-update';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
@@ -31,7 +33,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
   const scope: AgentResourceScope = { executorId, instanceId: crypto.randomUUID(), integrationId: 'test' };
   const published: AgentProducerNotification[] = [];
   const nativePublishers: AgentRuntimePublisher[] = [];
-  const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0, usage: 0 };
+  const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0, usage: 0, cliStatus: 0, cliUpdate: 0 };
   const hooks = {
     start: async (_request: AgentRuntimeStartRequest) => {},
     resume: async (_request: AgentRuntimeResumeRequest) => {},
@@ -43,6 +45,13 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
       status: 'missing', buckets: [], scannedFiles: 0, unreadableFiles: 0, malformedRecords: 0, distinctSessions: 0,
       pricingAsOf: '2026-10-27',
     }),
+    cliStatus: async (_request: AgentCliUpdateStatusRequest): Promise<AgentCliUpdateStatus> => ({
+      cliLabel: 'Test CLI',
+      installMethod: 'missing', installPath: null, currentVersion: null, latestVersion: null, advisory: 'unknown',
+      updateCommand: null, canUpdate: false, message: null, checkedAt: '2026-11-20T00:00:00.000Z',
+      run: IDLE_AGENT_CLI_UPDATE_RUN,
+    }),
+    cliUpdate: async (): Promise<AgentCliUpdateStatus> => { throw new AgentCallError('rejected', 'Unused CLI update'); },
   };
   const runtime: AgentRuntimeExecution = {
     async start(request, publish) {
@@ -81,6 +90,10 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
     legacyHistoryImport: null, nativeActivity: null, nativeSessions: null, configurationValidation: null,
     sessionConfiguration: null, projectPathUpdates: null,
     usageHistory: { async read(request: AgentUsageReadRequest) { calls.usage++; return hooks.usage(request); } },
+    cliUpdates: {
+      async status(request: AgentCliUpdateStatusRequest) { calls.cliStatus++; return hooks.cliStatus(request); },
+      async startUpdate() { calls.cliUpdate++; return hooks.cliUpdate(); },
+    },
   } satisfies AgentIntegration;
   let disposed = false;
   const projects = new ProjectService(projectBasePath, (options) => {

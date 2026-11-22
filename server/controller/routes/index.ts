@@ -79,6 +79,8 @@ import { PreambleProjectPathService } from '../preambles/project-path-service.js
 import { createExecutorRoutes } from './executors.js';
 import { createUsageRoutes } from './usage.js';
 import { UsageService } from '../usage/usage-service.js';
+import { createAgentCliUpdateRoutes } from './agent-cli-updates.js';
+import { AgentCliUpdateService } from '../cli-updates/cli-update-service.js';
 import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS } from '../../../common/git-execution.js';
 import { USAGE_READ_TIMEOUT_MS } from '../../../common/usage.js';
@@ -181,6 +183,7 @@ export default function createAllRoutes(workspaceDir: string, {
   return composeRoutes(
     createExecutorRoutes(executors),
     createUsageRoutes(new UsageService(executors), usageBudget),
+    createAgentCliUpdateRoutes(new AgentCliUpdateService(executors)),
     createRuntimeRoutes(runtimeState, workspaceName),
     createAgentTurnReceiptRoutes(commandLedger),
     createChatSnapshotRoutes({
