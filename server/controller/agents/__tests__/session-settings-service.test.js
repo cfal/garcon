@@ -46,6 +46,7 @@ function makeService(thinkingMode = 'high') {
   const onCommitted = mock(() => undefined);
   const control = { entries: [], controlEntries: [], pause: null };
   const execution = {
+    ownsExecution: mock(() => false),
     reserveTranscriptSnapshot: mock(chatId => ({ chatId, reservationId: 'settings-reservation' })),
     releaseTranscriptSnapshot: mock(async () => {}),
     readChatExecutionControl: mock(async () => control),
@@ -54,6 +55,7 @@ function makeService(thinkingMode = 'high') {
   const locks = controllerSafetyDependencies();
   const service = new AgentSessionSettingsService({ ...locks,
     execution,
+    hasAdmittedProviderTurn: () => false,
     onCommitted,
     registry: {
       getChat: () => entry,

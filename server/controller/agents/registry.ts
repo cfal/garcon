@@ -221,7 +221,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     onSettingsCommitted?: (chatId: string) => void;
     chatMutationLock: KeyedPromiseLock;
-    settingsExecution: SettingsExecutionPort;
+    getSettingsExecution(): SettingsExecutionPort;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
@@ -261,7 +261,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       chatMutationLock: args.chatMutationLock,
       selectionAdmissionLock: args.selectionAdmissionLock,
       onCommitted: args.onSettingsCommitted,
-      execution: args.settingsExecution,
+      get execution() { return args.getSettingsExecution(); },
+      hasAdmittedProviderTurn: (chatId) => this.#runtime.hasAdmittedProviderTurn(chatId),
     });
     this.#ledger.subscribeSessionCommitted((event) => {
       this.#registry.updateChat(event.chatId, {
@@ -551,16 +552,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       const nativeReady = status?.authenticated === true;
       const endpointReady = integration.endpoints !== null
         && this.#catalog.hasEndpointModels(integration.descriptor.id, executorId);
-      return [integration.descriptor.id, {
-        ready: nativeReady || endpointReady,
-        nativeReady,
-        endpointReady,
-        reason: endpointReady
-          ? 'At least one compatible API provider endpoint is configured.'
-          : nativeReady
-            ? 'Native agent authentication is available.'
-            : status?.detail?.trim() || 'No native authentication or compatible API provider endpoint is configured.',
-      }];
+      let reason: string;
+      if (endpointReady) reason = 'At least one compatible API provider endpoint is configured.';
+      else if (nativeReady) reason = 'Native agent authentication is available.';
+      else reason = status?.detail?.trim() || 'No native authentication or compatible API provider endpoint is configured.';
+      return [integration.descriptor.id, { ready: nativeReady || endpointReady, nativeReady, endpointReady, reason }];
     })));
   }
 

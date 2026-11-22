@@ -14,7 +14,7 @@ import type { AgentUsageReport } from '@garcon/common/usage';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
-import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
+import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeResumeRequest, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import type { SessionSocket } from '../transport/message-session.js';
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
@@ -34,6 +34,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
   const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0, usage: 0 };
   const hooks = {
     start: async (_request: AgentRuntimeStartRequest) => {},
+    resume: async (_request: AgentRuntimeResumeRequest) => {},
     initialize: async () => {},
     stop: async () => {},
     query: async (_request: AgentSingleQueryRequest) => 'query result',
@@ -50,7 +51,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
       await hooks.start(request);
       return { agentSessionId: 'test-session', nativeSession: null, nativeSeedReceipt: null };
     },
-    async resume(_request, publish) { calls.resume++; nativePublishers.push(publish); },
+    async resume(request, publish) { calls.resume++; nativePublishers.push(publish); await hooks.resume(request); },
     async abort() { calls.abort++; return true; },
     runningSessions() { return []; },
   };

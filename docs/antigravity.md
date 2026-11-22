@@ -111,7 +111,7 @@ Permission modes:
 | `plan` | `plan` | Requests go to the user. |
 | `manualBypass`, `bypassPermissions` | `default` | Requests are auto-approved. |
 
-A permission mode change during a turn applies to Garcon's own approval decisions at once, including a turn still being configured. agy's native mode (`accept-edits`, `plan`) changes only with the next turn's `session/set_config_option`, so switching from accept-edits to default mid-turn still lets agy approve the rest of that turn's edits itself.
+Once the provider has admitted a bound turn, a permission mode change applies to Garcon's own approval decisions at once. While Garcon is preparing a turn or waiting for the provider to admit it, a permission change returns a retryable conflict, even if a previous turn established a session ID. agy's native mode (`accept-edits`, `plan`) changes only with the next turn's `session/set_config_option`, so switching from accept-edits to default mid-turn still lets agy approve the rest of that turn's edits itself.
 
 The shared runtime chooses permission options by their ACP `kind` (`allow_once`, `allow_always`, `reject_once`, `reject_always`), not by option ID. Antigravity's option IDs are `allow` and `deny`. The runtime used to fall back to the first option when an ID was missing, which would have turned Deny into Allow.
 
