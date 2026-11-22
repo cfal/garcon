@@ -45,7 +45,6 @@
 			<Dialog.Title class="pe-8 text-sm font-medium">{m.git_push_title()}</Dialog.Title>
 		</Dialog.Header>
 
-		<!-- Remote list -->
 		<div class="min-h-0 space-y-3 overflow-y-auto px-4 py-3">
 			<div class="space-y-1.5">
 				<div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -63,10 +62,7 @@
 								type="radio"
 								name="remote"
 								value={remote.name}
-								checked={selectedRemote === remote.name}
-								onchange={() => {
-									selectedRemote = remote.name;
-								}}
+								bind:group={selectedRemote}
 								class="accent-interactive-accent"
 							/>
 							<div class="flex-1 min-w-0">
@@ -78,15 +74,12 @@
 				</div>
 			</div>
 
-			<div class="space-y-1.5">
-				<div class="text-xs text-muted-foreground px-1">
-					{m.git_push_progress()} <span class="font-medium text-foreground">{currentBranch}</span>
-					&rarr;
-					<span class="font-medium text-foreground">{selectedRemote}/{currentBranch}</span>
-				</div>
+			<div class="text-xs text-muted-foreground px-1">
+				{m.git_push_progress()} <span class="font-medium text-foreground">{currentBranch}</span>
+				&rarr;
+				<span class="font-medium text-foreground">{selectedRemote}/{currentBranch}</span>
 			</div>
 
-			<!-- Action -->
 			<button
 				onclick={handlePush}
 				disabled={!canPush}

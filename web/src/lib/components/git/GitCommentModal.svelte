@@ -1,18 +1,18 @@
 <script lang="ts">
-	// Full-screen modal for composing an inline review comment on mobile.
-
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import type {
+		CommentComposerState,
+		GitDiffSeverity,
+	} from '$lib/git/review/git-inline-comment.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { gitCommentSeverityLabel } from './git-comment-labels';
 	import GitCommentAppendError from './GitCommentAppendError.svelte';
 
-	import type { CommentComposerState } from '$lib/git/review/git-inline-comment.svelte.js';
-
 	interface Props {
 		composer: CommentComposerState;
 		onBodyChange: (body: string) => void;
-		onSeverityChange: (severity: 'note' | 'warning' | 'blocker') => void;
+		onSeverityChange: (severity: GitDiffSeverity) => void;
 		onSubmit: () => void;
 		onClose: () => void;
 		onFocusHandled: () => void;
@@ -31,6 +31,7 @@
 		copyText = null,
 	}: Props = $props();
 	let textareaElement = $state<HTMLTextAreaElement | null>(null);
+	const canSubmit = $derived(composer.body.trim().length > 0);
 
 	$effect(() => {
 		if (!textareaElement || !composer.focusPending) return;
@@ -50,27 +51,24 @@
 		</Dialog.Header>
 
 		<div class="flex-1 overflow-y-auto p-4 space-y-3">
-			<!-- File context -->
 			<div class="text-[11px] text-muted-foreground font-mono truncate">
 				{composer.filePath}:{composer.line} ({composer.side})
 			</div>
 
-			<!-- Severity -->
 			<div class="flex gap-3">
-				{#each ['note', 'warning', 'blocker'] as const as sev (sev)}
+				{#each ['note', 'warning', 'blocker'] as const as severity (severity)}
 					<label class="flex items-center gap-1.5 text-xs cursor-pointer">
 						<input
 							type="radio"
-							checked={composer.severity === sev}
-							onchange={() => onSeverityChange(sev)}
+							checked={composer.severity === severity}
+							onchange={() => onSeverityChange(severity)}
 							class="accent-interactive-accent"
 						/>
-						{gitCommentSeverityLabel(sev)}
+						{gitCommentSeverityLabel(severity)}
 					</label>
 				{/each}
 			</div>
 
-			<!-- Body -->
 			<textarea
 				{@attach contentSizing}
 				bind:this={textareaElement}
@@ -82,7 +80,6 @@
 			{#if error}<GitCommentAppendError {error} {copyText} />{/if}
 		</div>
 
-		<!-- Sticky actions -->
 		<div class="flex gap-2 px-4 py-3 border-t border-border shrink-0">
 			<button
 				onclick={onClose}
@@ -92,9 +89,9 @@
 			</button>
 			<button
 				onclick={onSubmit}
-				disabled={!composer.body.trim()}
+				disabled={!canSubmit}
 				class="flex-1 px-3 py-2 text-xs rounded transition-all
-				{composer.body.trim()
+				{canSubmit
 					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
 					: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 			>
