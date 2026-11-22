@@ -118,6 +118,40 @@ test('concurrent resends of an addition return the same single committed amendme
   }
 });
 
+test('a future listener loses to a decision made while its settings are being prepared', async () => {
+  const preparing = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const { service, post, publish } = fixture(async steps => {
+    if (steps[0]?.id === 'followup') {
+      preparing.resolve();
+      await resume.promise;
+    }
+    return () => ({});
+  });
+  await publish(null, source + '  - {id: keep-open, kind: decision, prompt: Finish?, choices: {ok: OK}}\n');
+  const launch = await post(workflowPaths.runs, { definitionId: 'review', inputs: {} });
+  const run = await launch.json() as WorkflowRunDetail;
+  const append = post(workflowPaths.addStep, {
+    runId: run.id, operationId: 'listen',
+    executionContext: { defaultTarget: { executorId: 'local', projectPath: '/project' } },
+    source: 'id: followup\nkind: agent\non: {kind: once, signal: review.approve}\nprompt: Inspect the approved report.',
+  });
+  await preparing.promise;
+  try {
+    service.decide({ runId: run.id, instanceId: run.steps[0]!.instances[0]!.id, operationId: 'choice', choice: 'approve' },
+      { id: 'reader', name: 'Reader' });
+  } finally {
+    resume.resolve();
+  }
+  const response = await append;
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ errorCode: 'WORKFLOW_CONFLICT', error: expect.stringContaining('stored result') });
+  const after = service.getRun(run.id);
+  expect(after.steps.map(({ step }) => step.id)).toEqual(['review', 'keep-open']);
+  expect(after.signals).toMatchObject([{ ref: { stepId: 'review', signal: 'approve' } }]);
+  expect(after.amendments).toEqual([]);
+});
+
 test('handoffs cannot be approved by a local CLI or delegated executor; revoked launch never mutates', async () => {
   let revoked = false;
   const { service, post, publish } = fixture(async () => { revoked = true; return () => ({}); });
