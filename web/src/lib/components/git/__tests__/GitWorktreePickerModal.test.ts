@@ -109,6 +109,20 @@ describe('GitWorktreePickerModal', () => {
 		expect(screen.getByRole('option', { name: /loaded/ })).toBeTruthy();
 	});
 
+	it('shows a reopened picker as busy until the pending creation settles, not as empty', async () => {
+		const view = renderPicker([], { isCreating: true });
+		const list = screen.getByRole('listbox', { name: 'Select worktree' });
+		expect(list.getAttribute('aria-busy')).toBe('true');
+		expect(screen.queryByText('No worktrees found')).toBeNull();
+
+		await view.rerender({ isCreating: false, catalogContextKey: null });
+		expect(screen.getByRole('status').textContent).toContain('Executor unavailable');
+		expect(screen.queryByText('No worktrees found')).toBeNull();
+		await view.rerender({ catalogContextKey: 'ready', worktrees: [worktree('main', null)] });
+		expect(list.getAttribute('aria-busy')).toBe('false');
+		expect(screen.getByRole('option', { name: /main/ })).toBeTruthy();
+	});
+
 	it('uses mobile-safe input text and compact two-line row metadata', () => {
 		renderPicker([worktree('mobile', '2026-07-15T10:00:00.000Z')]);
 
@@ -491,7 +505,8 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.click(submit);
 		await view.rerender({ createResult: { createdPath: '/canonical' } });
 		expect(screen.getByRole('status').textContent).toBe('Worktree created at /canonical.');
-		expect(submit.disabled).toBe(true);
+		expect(submit.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(submit);
 		await fireEvent.keyDown(field, { key: 'Enter' });
 		expect(create).toHaveBeenCalledTimes(1);
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -644,7 +659,9 @@ describe('GitWorktreePickerModal', () => {
 			target: { value: 'example2' },
 		});
 		const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Create worktree' });
-		expect(button.disabled).toBe(true);
+		expect(button.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(button);
+		expect(create).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
 		const location = screen.getByLabelText<HTMLInputElement>('Location');
@@ -656,7 +673,7 @@ describe('GitWorktreePickerModal', () => {
 		});
 
 		await fireEvent.input(location, { target: { value: '   ' } });
-		expect(button.disabled).toBe(true);
+		expect(button.getAttribute('aria-disabled')).toBe('true');
 		await view.rerender({ worktrees: [worktree('repo', null, { path: '/repo ', isMain: true })] });
 		expect(location.placeholder).toBe('/repo /.worktrees/example2');
 		await fireEvent.click(button);

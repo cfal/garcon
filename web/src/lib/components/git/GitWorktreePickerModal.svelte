@@ -280,9 +280,9 @@
 					totalWorktreeCount={picker.totalCount}
 					selectedIndex={picker.selectedIndex}
 					selectedPath={picker.selectedWorktree?.path}
-					{isLoading}
+					isBusy={session.isLoading || session.isCreating}
 					disabled={!canUseGit}
-					hasLoadError={Boolean(loadError)}
+					hasLoadError={Boolean(session.loadError)}
 					onActivate={(worktreePath) => picker.selectPath(worktreePath)}
 					onSelect={selectVisibleWorktree}
 					onActiveOptionIdChange={(optionId) => {

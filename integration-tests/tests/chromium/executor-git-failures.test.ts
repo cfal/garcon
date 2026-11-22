@@ -105,7 +105,8 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
     });
     try {
       phase('worktree picker');
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+      const openPicker = page.getByRole('button', { name: 'Select a different worktree', exact: true });
+      await openPicker.click();
       await page.getByRole('option', { name: /main/ }).waitFor();
       await page.getByRole('button', { name: 'New worktree', exact: true }).click();
       await page.getByPlaceholder('Branch name (e.g. fix/login-bug)').fill('feature');
@@ -116,6 +117,10 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
       const count = lists;
       const refresh = page.getByRole('button', { name: 'Refresh worktrees', exact: true });
       expect(await refresh.count()).toBe(0);
+      await page.getByRole('dialog', { name: 'New worktree' }).getByRole('button', { name: 'Close' }).click();
+      await openPicker.click();
+      await browserExpect(page.getByRole('listbox', { name: 'Select worktree' })).toHaveAttribute('aria-busy', 'true');
+      await browserExpect(refresh).toBeDisabled();
       expect(lists).toBe(count);
       phase('disconnect after worktree creation');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
@@ -156,6 +161,7 @@ test('repository reconnect preserves the worktree result and filter focus', asyn
     await newWorktree.click();
     const create = page.getByRole('dialog', { name: 'New worktree', exact: true });
     const name = create.getByRole('textbox', { name: /branch name/i });
+    const submit = create.getByRole('button', { name: 'Create worktree', exact: true });
     const message = 'Worktree outcome unknown; inspect the repository.';
     const dispatched = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -169,15 +175,18 @@ test('repository reconnect preserves the worktree result and filter focus', asyn
     const alert = create.getByRole('alert').filter({ hasText: message });
     try {
       await name.fill('keyboard-reconnect');
-      await name.press('Enter');
+      await submit.focus();
+      await submit.press('Enter');
       await dispatched.promise;
       await setEnabled(false);
       await create.getByText('Executor unavailable').waitFor();
       release.resolve();
       await browserExpect(alert).toBeVisible();
+      await browserExpect(submit).toBeFocused();
     } finally { release.resolve(); }
     await setEnabled(true);
-    await browserExpect(create.getByRole('button', { name: 'Create worktree' })).toBeEnabled({ timeout: 30_000 });
+    await browserExpect(submit).toBeEnabled({ timeout: 30_000 });
+    await browserExpect(submit).toBeFocused();
     const errorRetained = await alert.isVisible();
     await create.getByRole('button', { name: 'Back', exact: true }).click();
     const filter = page.getByRole('combobox', { name: 'Filter worktrees' });

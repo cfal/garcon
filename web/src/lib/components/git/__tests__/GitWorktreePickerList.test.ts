@@ -32,7 +32,7 @@ function renderList(worktrees: GitWorktreeItem[], overrides: Record<string, unkn
 		totalWorktreeCount: worktrees.length,
 		selectedIndex: worktrees.length > 0 ? 0 : -1,
 		selectedPath: worktrees[0]?.path,
-		isLoading: false,
+		isBusy: false,
 		hasLoadError: false,
 		onActivate: vi.fn(),
 		onSelect: vi.fn(),

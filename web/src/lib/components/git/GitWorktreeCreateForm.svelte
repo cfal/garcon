@@ -149,7 +149,6 @@
 		</button>
 		<button
 			type="submit"
-			disabled={!canCreate && !isCreating}
 			aria-disabled={!canCreate}
 			aria-busy={isCreating}
 			class="inline-flex items-center gap-2 rounded-md bg-interactive-accent px-4 py-2 text-sm font-medium text-interactive-accent-foreground aria-disabled:opacity-50"
