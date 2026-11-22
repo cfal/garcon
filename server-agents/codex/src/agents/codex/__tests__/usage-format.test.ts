@@ -18,8 +18,10 @@ function isMalformed(line: string, state: CodexUsageState): boolean {
 const SESSION_ID = '00000000-0000-7000-8000-0000000000c1';
 const PARENT_THREAD_ID = '00000000-0000-4000-8000-0000000000c0';
 const COPY_THREAD_ID = '00000000-0000-4000-8000-0000000000c2';
+const nativeFork = { forked_from_id: PARENT_THREAD_ID };
+const pointForkCopy = { ...nativeFork, id: COPY_THREAD_ID };
 const forkOrigins = [
-  ['native fork', { forked_from_id: PARENT_THREAD_ID }],
+  ['native fork', nativeFork],
   ['subagent spawn', { source: { subagent: { thread_spawn: { parent_thread_id: PARENT_THREAD_ID } } } }],
 ] as const;
 const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10-01T05:17:41.289Z') =>
@@ -71,8 +73,8 @@ function started(meta = sessionMeta()): CodexUsageState {
 
 const afterFork = (ms: number) => new Date(Date.parse('2026-10-01T05:17:42.694Z') + ms).toISOString();
 
-function startedFork(meta: Record<string, unknown> = {}): CodexUsageState {
-  return started(sessionMeta({ forked_from_id: PARENT_THREAD_ID, ...meta }, afterFork(0)));
+function startedFork(meta: Record<string, unknown>): CodexUsageState {
+  return started(sessionMeta(meta, afterFork(0)));
 }
 
 describe('Codex usage lines', () => {
@@ -232,7 +234,7 @@ describe('Codex usage lines', () => {
   });
 
   test.each(forkOrigins)('suppresses inherited counters in a %s and bills the child delta', (_kind, meta) => {
-    const state = started(sessionMeta(meta, afterFork(0)));
+    const state = startedFork(meta);
     const parent = counters(100, 20);
     expect(parseCodexUsageLine(tokenCount(parent, parent, afterFork(20)), state)).toBeNull();
     expect(parseCodexUsageLine(tokenCount(parent, parent, afterFork(1020)), state)).toBeNull();
@@ -286,7 +288,7 @@ describe('Codex usage lines', () => {
   });
 
   test.each(forkOrigins)('counts the first child response immediately after a %s', (_kind, meta) => {
-    const state = started(sessionMeta(meta, afterFork(0)));
+    const state = startedFork(meta);
     parseCodexUsageLine(threadSettings('priority'), state);
     const usage = counters(40, 4);
     expect(parseCodexUsageLine(usageRecordLine('fast-child', usage, afterFork(350)), state))
@@ -295,7 +297,7 @@ describe('Codex usage lines', () => {
   });
 
   test('a matching child response ends copy suppression for subsequent records', () => {
-    const state = startedFork({ id: COPY_THREAD_ID });
+    const state = startedFork(pointForkCopy);
     const parent = counters(100, 10);
     const copiedRecord = usageRecordLine('resp_parent', parent, afterFork(20), 'parent-turn', PARENT_THREAD_ID);
     expect(parseCodexUsageLine(copiedRecord, state)).toBeNull();
@@ -309,7 +311,7 @@ describe('Codex usage lines', () => {
   });
 
   test('preserves the response id in a verbatim copy of a fork, without billing a delayed counter', () => {
-    const copy = startedFork({ id: COPY_THREAD_ID });
+    const copy = startedFork(pointForkCopy);
     const usage = counters(40, 4);
     const record = usageRecordLine('original-response', usage, afterFork(2000));
     expect(parseCodexUsageLine(record, copy)?.dedupeKey).toBe('codex-response:original-response');
@@ -317,7 +319,7 @@ describe('Codex usage lines', () => {
   });
 
   test('does not bill a delayed token_count when its response record was skipped as a fork copy', () => {
-    const copy = startedFork({ id: COPY_THREAD_ID });
+    const copy = startedFork(pointForkCopy);
     const usage = counters(40, 4);
     expect(parseCodexUsageLine(usageRecordLine('copied-response', usage, afterFork(500)), copy)).toBeNull();
     expect(parseCodexUsageLine(tokenCount(usage, usage, afterFork(2000)), copy)).toBeNull();
@@ -329,7 +331,7 @@ describe('Codex usage lines', () => {
     ['the fork id is malformed', { id: 'not-a-thread-id', session_id: SESSION_ID }, 'not-a-thread-id'],
     ['the response has no thread id', {}, null],
   ] as const)('falls back to timing when %s', (_case, meta, threadId) => {
-    const state = startedFork(meta);
+    const state = startedFork({ ...nativeFork, ...meta });
     const usage = counters(40, 4);
     const firstCopy = usageRecordLine('first-copy', usage, afterFork(999), 'turn-1', threadId);
     const nextCopy = usageRecordLine('next-copy', usage, afterFork(1998), 'turn-1', threadId);

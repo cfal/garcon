@@ -61,14 +61,13 @@ const backend = executionBackend();
 
 test(`usage counts Codex fork responses once across incremental scans (${backend})`, async () => {
   await withIntegrationFixture('usage-codex-fork', async (fixture) => {
-    const dir = join(fixture.executionDirs.home, '.codex', 'sessions', ...day(-1).split('-'));
+    const usageDay = day(-1);
+    const dir = join(fixture.executionDirs.home, '.codex', 'sessions', ...usageDay.split('-'));
     await mkdir(dir, { recursive: true });
     const parentId = '00000000-0000-7000-8000-000000000001';
     const forkId = '00000000-0000-7000-8000-000000000002';
     const copyId = '00000000-0000-4000-8000-000000000003';
-    const forkPath = join(dir, `rollout-synthetic-${forkId}.jsonl`);
-    const copyPath = join(dir, `rollout-synthetic-${copyId}.jsonl`);
-    const start = Date.parse(`${day(-1)}T12:00:00Z`);
+    const start = Date.parse(`${usageDay}T12:00:00Z`);
     const row = (ms: number, type: string, payload: object) =>
       JSON.stringify({ timestamp: new Date(start + ms).toISOString(), type, payload }) + '\n';
     const model = 'gpt-6-sol';
@@ -79,30 +78,40 @@ test(`usage counts Codex fork responses once across incremental scans (${backend
       row(ms, 'event_msg', { type: 'thread_settings_applied', thread_settings: { model, service_tier: tier } })
       + row(ms, 'event_msg', { type: 'task_started', turn_id: turnId })
       + row(ms, 'turn_context', { turn_id: turnId, model });
+    const sourceTurn = 'source-turn';
+    const sharedHistory = turn(1, 'inherited-turn', 'default')
+      + response(5, parentId, 'inherited-turn', 'inherited', 1000)
+      + turn(10, sourceTurn, 'priority');
     // A point fork retargets metadata, not the response IDs or their owning thread.
-    const prefix = (id: string) => row(0, 'session_meta', { id, forked_from_id: parentId })
-      + turn(1, 'inherited-turn', 'default') + response(5, parentId, 'inherited-turn', 'inherited', 1000)
-      + turn(10, 'source-turn', 'priority');
-    await writeFile(forkPath, prefix(forkId));
-    await writeFile(copyPath, prefix(copyId));
-    const read = async () => agent(await readUsage(fixture.client), 'codex');
-    expect(await read()).toMatchObject({ status: 'ok', scannedFiles: 2, buckets: [] });
+    const seedRollout = async (id: string) => {
+      const path = join(dir, `rollout-synthetic-${id}.jsonl`);
+      await writeFile(path, row(0, 'session_meta', { id, forked_from_id: parentId }) + sharedHistory);
+      return path;
+    };
+    const forkPath = await seedRollout(forkId);
+    const copyPath = await seedRollout(copyId);
+    const readCodexUsage = async () => agent(await readUsage(fixture.client), 'codex');
+    expect(await readCodexUsage()).toMatchObject({ status: 'ok', scannedFiles: 2, buckets: [] });
 
-    const quickResponse = response(500, forkId, 'source-turn', 'first', 100);
+    const firstOutput = 100;
+    const quickResponse = response(500, forkId, sourceTurn, 'first', firstOutput);
     await appendFile(forkPath, quickResponse);
     await appendFile(copyPath, quickResponse);
-    const first = await read();
-    expect(first).toMatchObject({ status: 'ok', scannedFiles: 2, distinctSessions: 1, buckets: [{
-      day: day(-1), model, records: 1, totals: { outputTokens: 100 }, costUsd: 100 * 20 / 1_000_000,
+    expect(await readCodexUsage()).toMatchObject({ status: 'ok', scannedFiles: 2, distinctSessions: 1, buckets: [{
+      day: usageDay, model, records: 1, totals: { outputTokens: 100 }, costUsd: 100 * 20 / 1_000_000,
     }] });
 
-    const rest = row(2000, 'event_msg', { type: 'token_count', info: { last_token_usage: usage(100), total_token_usage: usage(100) } })
-      + response(3000, forkId, 'source-turn', 'second', 25);
-    await appendFile(forkPath, rest);
-    await appendFile(copyPath, rest + turn(4000, 'copy-turn', 'default') + response(4100, copyId, 'copy-turn', 'third', 10));
-    const resumed = await read();
-    expect(resumed).toMatchObject({ status: 'ok', scannedFiles: 2, distinctSessions: 2, buckets: [{
-      day: day(-1), model, records: 3, totals: { outputTokens: 135 }, costUsd: (125 * 20 + 10 * 10) / 1_000_000,
+    // The copy skipped the first response; its delayed counter must not bill it again.
+    const snapshot = usage(firstOutput);
+    const delayedCounter = row(2000, 'event_msg', {
+      type: 'token_count', info: { last_token_usage: snapshot, total_token_usage: snapshot },
+    });
+    const sharedTail = delayedCounter + response(3000, forkId, sourceTurn, 'second', 25);
+    const copyTurn = turn(4000, 'copy-turn', 'default') + response(4100, copyId, 'copy-turn', 'third', 10);
+    await appendFile(forkPath, sharedTail);
+    await appendFile(copyPath, sharedTail + copyTurn);
+    expect(await readCodexUsage()).toMatchObject({ status: 'ok', scannedFiles: 2, distinctSessions: 2, buckets: [{
+      day: usageDay, model, records: 3, totals: { outputTokens: 135 }, costUsd: (125 * 20 + 10 * 10) / 1_000_000,
     }] });
   });
 }, 60_000);
