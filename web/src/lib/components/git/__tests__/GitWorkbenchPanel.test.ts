@@ -16,6 +16,7 @@ vi.mock('$lib/context', () => ({
 	getFileSessions: () => ({ open: vi.fn() }),
 	getLocalSettings: () => ({ gitDiffFontSize: '12' }),
 	getNotifications: () => ({ info: harness.info, error: vi.fn() }),
+	getOptionalTransientLayers: () => null,
 	getSingletonSurfaces: () => ({ commit: () => harness.commit }),
 	getTransientLayers: () => ({ open: vi.fn() }),
 	getWorkspaceShortcuts: () => ({ registerSurface: () => () => {} }),
@@ -59,6 +60,27 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 		await remotes.promise;
 		expect(controller.repository.showPushModal).toBe(false);
 		controller.dispose();
+	});
+
+	it('keeps the chosen push remote when the owning tab is hidden and shown', async () => {
+		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
+		controller.presentationVisible = true;
+		controller.repository.pushRemotes = ['origin', 'backup'].map((name) => ({
+			name,
+			url: `/repos/${name}`,
+		}));
+		controller.repository.showPushModal = true;
+		const props = { controller, presentation: 'window-main' as const };
+		const view = render(GitWorkbenchPanel, props);
+		try {
+			await fireEvent.click(await screen.findByRole('radio', { name: /backup/ }));
+			await view.rerender({ ...props, visible: false });
+			expect(screen.queryByRole('dialog')).toBeNull();
+			await view.rerender({ ...props, visible: true });
+			expect(await screen.findByRole('radio', { name: /backup/, checked: true })).toBeTruthy();
+		} finally {
+			controller.dispose();
+		}
 	});
 
 	it.each([

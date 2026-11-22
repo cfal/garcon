@@ -6,6 +6,7 @@ afterEach(cleanup);
 
 it('uses the selected remote and applies the same busy guard to keyboard and button', async () => {
 	const props = {
+		open: true,
 		remotes: ['backup', 'origin'].map((name) => ({ name, url: `/repos/${name}` })),
 		currentBranch: 'main',
 		isPushing: false,

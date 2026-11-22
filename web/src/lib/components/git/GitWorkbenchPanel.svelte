@@ -207,8 +207,9 @@
 			/>
 		{/if}
 
-		{#if presentationVisible && repository.showPushModal}
+		{#if repository.showPushModal}
 			<GitPushModal
+				open={presentationVisible}
 				remotes={repository.pushRemotes}
 				currentBranch={repository.currentBranch}
 				isPushing={repository.isPushing}
