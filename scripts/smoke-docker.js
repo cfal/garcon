@@ -101,6 +101,11 @@ async function verifyControllerStartup() {
   assert.match(help.stdout, /Usage:\s+garcon-cli/);
   const uid = await docker(['exec', controller, 'id', '-u']);
   assert.notEqual(uid.stdout.trim(), '0');
+  await docker(['exec', controller, 'sh', '-ec', `
+    test "$(command -v codex)" = "$HOME/.local/bin/codex"
+    test -w "$HOME/.local/bin"
+    test -w "$HOME/.local/lib/node_modules/@openai"
+  `]);
   const local = await jsonCli(controller, ['--runtime', 'controller', 'executor', 'show', 'local']);
   assert.equal(local.projectBasePath, '/projects');
   await docker(['exec', controller, 'bun', '-e', String.raw`

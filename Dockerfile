@@ -70,7 +70,7 @@ ARG OPENCODE_VERSION=1.19.5
 ARG CODEX_VERSION=0.171.0
 ARG PI_VERSION=1.5.2
 
-RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" "@openai/codex@${CODEX_VERSION}" \
+RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
       "@earendil-works/pi-coding-agent@${PI_VERSION}" && npm cache clean --force
 RUN set -eu; \
     if [ "${GARCON_UID}" -eq 0 ]; then \
@@ -103,6 +103,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 USER garcon
 
+RUN npm install -g --prefix "${HOME}/.local" "@openai/codex@${CODEX_VERSION}" && npm cache clean --force
 RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -fsSL https://cursor.com/install | bash
 RUN curl -fsSL https://ampcode.com/install.sh | bash

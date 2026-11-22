@@ -94,6 +94,6 @@ symlinks to identify the installation:
 - A start whose reply is lost, for example to a browser timeout, may still have
   started the run, so the page reads that agent's status again instead of
   assuming it did not.
-- In the Docker image, Claude Code is installed natively under
-  `/home/garcon/.local`, outside the state volumes. An update applies to that
-  container until it is recreated; rebuild the image to keep it.
+- In the Docker image, the service user owns both Claude Code's native install
+  and Codex's npm install under `/home/garcon/.local`. Updates last until the
+  container is recreated; the replacement starts with the versions in its image.
