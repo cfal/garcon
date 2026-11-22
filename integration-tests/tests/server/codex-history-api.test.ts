@@ -1,40 +1,37 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtempDisposable, realpath, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { CodexAppServerClient, CodexAppServerRpcError } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
+import { basename, delimiter, dirname, join } from 'node:path';
+import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
+import integrationPackage from '../../package.json' with { type: 'json' };
 import { CODEX_BINARY } from '../../support/pinned-agent-binaries.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
-async function rpcFailure(request: Promise<unknown>): Promise<CodexAppServerRpcError> {
-  const failure = await rejectionOf(request);
-  if (!(failure instanceof CodexAppServerRpcError)) throw new Error('Expected a Codex RPC failure', { cause: failure });
-  return failure;
-}
-
 describe('pinned Codex history API compatibility', () => {
-  it('recognizes paginated turn and item list methods', async () => {
+  it('connects and handles a history request after Codex is installed on the service PATH', async () => {
     await using directory = await mkdtempDisposable(join(tmpdir(), 'garcon-codex-handshake-'));
     const home = await realpath(directory.path);
+    const installed = join(home, 'bin');
+    const node = Bun.which('node');
+    if (!node) throw new Error('The pinned Codex CLI requires Node.');
+    await symlink(node, join(home, basename(node)));
     const client = new CodexAppServerClient({
-      env: { GARCON_CODEX_CLI: CODEX_BINARY, CODEX_HOME: home, HOME: home },
+      env: { GARCON_CODEX_CLI: '', PATH: [installed, home].join(delimiter), CODEX_HOME: home, HOME: home },
       shutdownGraceMs: 100,
     });
     try {
       // Prevents background marketplace fetches from outliving the fixture.
       // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core-plugins/src/manager.rs#L2824-L2834
       await writeFile(join(home, 'config.toml'), '[features]\nplugins = false\n');
+      expect(await rejectionOf(client.connect())).toMatchObject({ code: 'ENOENT' });
+      await symlink(dirname(CODEX_BINARY), installed, 'junction');
       const initialized = await client.connect();
-      expect(initialized.userAgent).toBeString();
-      expect(initialized.userAgent.length).toBeGreaterThan(0);
+      expect(initialized.userAgent.split(' ')[0]).toEndWith(`/${integrationPackage.devDependencies['@openai/codex']}`);
       expect(initialized.codexHome).toBe(home);
 
-      const page = { threadId: '00000000-0000-0000-0000-000000000000', limit: 1, sortDirection: 'asc' } as const;
-      const turnsError = await rpcFailure(client.listThreadTurns({ ...page, itemsView: 'full' }));
-      expect(turnsError.code).not.toBe(-32601);
-
-      const itemsError = await rpcFailure(client.listThreadItems(page));
-      expect(itemsError.message).not.toMatch(/^method not found$/i);
+      const threadId = '00000000-0000-0000-0000-000000000000';
+      const failure = await rejectionOf(client.listThreadTurns({ threadId, limit: 1, sortDirection: 'asc', itemsView: 'full' }));
+      expect(failure).toMatchObject({ code: -32600, message: expect.stringContaining(threadId) });
     } finally {
       await client.shutdown();
     }
