@@ -128,6 +128,7 @@ export class CliUpdateService implements AgentCliUpdates {
     // The run installs the latest release, so the check that starts it bypasses the cache.
     const snapshot = await this.#inspectInstallation(installation, env, true);
     this.#runSnapshot = snapshot;
+    this.#inspection = null;
     this.#run = {
       state: 'running', startedAt: this.#timestamp(), finishedAt: null,
       message: 'Checking for the latest version', output: null,
@@ -295,6 +296,8 @@ export class CliUpdateService implements AgentCliUpdates {
       output: output ? output.slice(-AGENT_CLI_UPDATE_OUTPUT_MAX_CHARS) : null,
     };
     this.#runSnapshot = null;
+    // An inspection started during the run must not report the old binary.
+    this.#inspection = null;
     const log = state === 'failed' ? this.#options.logger.warn : this.#options.logger.info;
     log.call(this.#options.logger, 'CLI update finished.', { state, message: this.#run.message });
   }

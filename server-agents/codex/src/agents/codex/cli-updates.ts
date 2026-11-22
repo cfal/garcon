@@ -9,7 +9,6 @@ import { installerEnvironment } from '@garcon/server-agent-common/cli-update/ins
 // https://github.com/pingdotgg/t3code/blob/be9176761ce2f6597013678b4538c772ae507400/apps/server/src/provider/Drivers/CodexDriver.ts#L105-L128
 const CODEX_NATIVE_CHANNEL = 'https://releases.openai.com/codex/channels/latest';
 const STANDALONE_HOME_PATTERN = /^(.*)\/packages\/standalone\//is;
-const CODEX_CREDENTIAL_KEYS = ['OPENAI_API_KEY', 'CODEX_API_KEY'];
 
 // The standalone installer keeps its executables under `<CODEX_HOME>/packages/standalone/`.
 export function codexStandaloneHome(commandPath: string): string | null {
@@ -54,7 +53,7 @@ export function createCodexCliUpdates(options: {
       const resolved = await resolveCodexCli();
       return { command: resolved.command, bundled: resolved.source === 'bundled' };
     },
-    environment: () => installerEnvironment(CODEX_CREDENTIAL_KEYS, { CODEX_HOME: config.home() }),
+    environment: () => installerEnvironment({ CODEX_HOME: config.home() }),
     nativeRelease: async () => ({
       key: CODEX_NATIVE_CHANNEL,
       lookup: channelLatestVersion(CODEX_NATIVE_CHANNEL, parseCodexChannelRelease),

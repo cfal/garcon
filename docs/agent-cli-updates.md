@@ -24,10 +24,11 @@ Settings > Providers -> GET /api/v1/agents/cli-updates?executorId[&refresh=1][&a
   probes, latest-version lookups, and the installer. The controller validates
   each status with `parseAgentCliUpdateStatus` and never interprets worker paths.
 - Installers, version probes, and lookups run with the executor's process
-  environment minus provider credentials (`ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `CODEX_API_KEY`), plus the CLI's
-  own `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Package install scripts never see
-  keys Garcon holds for its sessions.
+  environment minus every provider credential (any `*_API_KEY`, plus
+  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, and
+  `AWS_BEARER_TOKEN_BEDROCK`), plus the CLI's own `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME`. Registry and proxy settings such as `NPM_TOKEN` and
+  `HTTPS_PROXY` are kept for the installers that need them.
 - A status check that fails for one agent is reported in `failures` for that
   agent only, including one that outlasts the controller's 25 second deadline.
   An unavailable executor fails the request.

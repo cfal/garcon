@@ -33,14 +33,22 @@ export class LatestVersionCache {
   get(key: string, lookup: LatestVersionLookup, options: { readonly fresh: boolean }): Promise<string | null> {
     const existing = this.#entries.get(key);
     if (existing && !options.fresh && existing.expiresAt > this.#now()) return existing.value;
-    const value = lookup().then((version) => (version && isCliVersion(version) ? version : null));
+    // Every caller sharing the entry gets no version from a failed lookup.
+    let failed = false;
+    const value = lookup().then(
+      (version) => (version && isCliVersion(version) ? version : null),
+      () => {
+        failed = true;
+        return null;
+      },
+    );
     const entry: CacheEntry = { value, expiresAt: Number.POSITIVE_INFINITY };
     this.#entries.set(key, entry);
-    entry.value.then(
-      (version) => { entry.expiresAt = this.#now() + (version === null ? MISSING_TTL_MS : FOUND_TTL_MS); },
-      () => { if (this.#entries.get(key) === entry) this.#entries.delete(key); },
-    );
-    return entry.value.catch(() => null);
+    void value.then((version) => {
+      if (!failed) entry.expiresAt = this.#now() + (version === null ? MISSING_TTL_MS : FOUND_TTL_MS);
+      else if (this.#entries.get(key) === entry) this.#entries.delete(key);
+    });
+    return value;
   }
 
   clear(): void {

@@ -1,5 +1,5 @@
 import { getAgentCliUpdates, startAgentCliUpdate } from '$lib/api/agents.js';
-import type { AgentCliUpdateStatus } from '$shared/agent-cli-update';
+import type { AgentCliUpdateStatus, AgentCliUpdatesResponse } from '$shared/agent-cli-update';
 import { errorMessage } from '$lib/utils/error-message.js';
 
 export interface CliUpdateApi {
@@ -17,11 +17,14 @@ export class SettingsCliUpdateState {
 	readonly #api: CliUpdateApi;
 	readonly #agentOrder: readonly string[];
 	#lifecycleId = 0;
-	#loadGeneration = 0;
-	// Orders loads and starts; a load issued before an agent's latest start
-	// must not replace the status that start returned.
+	// Orders reads and starts per agent: a response replaces an agent's entry
+	// only when its request was issued after that entry was written, so agent
+	// polls, recovery reads, and full checks never discard one another.
 	#sequence = 0;
 	#agentWrittenAt: Record<string, number> = {};
+	// The run each failed start replaced; a different run means it started after all.
+	#startBaseline: Record<string, string | null> = {};
+	#loadsInFlight = 0;
 	#pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	statusByAgent = $state<Record<string, AgentCliUpdateStatus>>({});
@@ -64,6 +67,8 @@ export class SettingsCliUpdateState {
 		this.#lifecycleId += 1;
 		this.#stopPolling();
 		this.#agentWrittenAt = {};
+		this.#startBaseline = {};
+		this.#loadsInFlight = 0;
 		this.statusByAgent = {};
 		this.failureByAgent = {};
 		this.startErrorByAgent = {};
@@ -105,6 +110,7 @@ export class SettingsCliUpdateState {
 		const lifecycleId = this.#lifecycleId;
 		this.startingByAgent = { ...this.startingByAgent, [agentId]: true };
 		this.startErrorByAgent = omit(this.startErrorByAgent, agentId);
+		const baseline = this.statusFor(agentId)?.run.startedAt ?? null;
 		try {
 			const status = await this.#api.startAgentCliUpdate(agentId, this.executorId);
 			if (lifecycleId !== this.#lifecycleId) return;
@@ -114,6 +120,7 @@ export class SettingsCliUpdateState {
 		} catch (error) {
 			if (lifecycleId !== this.#lifecycleId) return;
 			this.startErrorByAgent = { ...this.startErrorByAgent, [agentId]: errorMessage(error) };
+			this.#startBaseline[agentId] = baseline;
 			// A request that timed out or lost its reply may still have started the run.
 			void this.#load({ refresh: false, agentIds: [agentId] }, lifecycleId);
 		} finally {
@@ -123,34 +130,54 @@ export class SettingsCliUpdateState {
 
 	// A read limited to `agentIds` replaces only those agents' entries.
 	async #load(request: { refresh: boolean; agentIds?: readonly string[] }, lifecycleId: number): Promise<void> {
-		const generation = ++this.#loadGeneration;
 		const issuedAt = ++this.#sequence;
+		this.#loadsInFlight += 1;
 		this.loading = true;
 		try {
 			const response = await this.#api.getAgentCliUpdates(this.executorId, request);
-			if (!this.#isCurrentLoad(generation, lifecycleId)) return;
-			const current = (agentId: string) => issuedAt > (this.#agentWrittenAt[agentId] ?? 0);
-			const replaced = (request.agentIds ?? [...Object.keys(this.statusByAgent), ...Object.keys(this.failureByAgent)])
-				.filter(current);
-			this.statusByAgent = { ...omitAll(this.statusByAgent, replaced), ...pick(response.statuses, current) };
-			this.failureByAgent = { ...omitAll(this.failureByAgent, replaced), ...pick(response.failures, current) };
-			// A start whose reply failed is cleared once its run is seen.
-			for (const [agentId, status] of Object.entries(response.statuses)) {
-				if (current(agentId) && status.run.state === 'running') {
-					this.startErrorByAgent = omit(this.startErrorByAgent, agentId);
-				}
-			}
+			if (lifecycleId !== this.#lifecycleId) return;
+			this.#apply(response, request.agentIds ?? null, issuedAt);
 			this.loadError = null;
 		} catch (error) {
-			if (!this.#isCurrentLoad(generation, lifecycleId)) return;
+			if (lifecycleId !== this.#lifecycleId) return;
 			this.loadError = errorMessage(error);
 		} finally {
-			if (this.#isCurrentLoad(generation, lifecycleId)) {
-				this.loading = false;
+			if (lifecycleId === this.#lifecycleId) {
+				this.#loadsInFlight -= 1;
+				this.loading = this.#loadsInFlight > 0;
 				// A failed read during a run retries, since the run's outcome is still to come.
 				this.#schedulePoll(lifecycleId);
 			}
 		}
+	}
+
+	#apply(response: AgentCliUpdatesResponse, scope: readonly string[] | null, issuedAt: number): void {
+		const agents = new Set([
+			...(scope ?? [...Object.keys(this.statusByAgent), ...Object.keys(this.failureByAgent)]),
+			...Object.keys(response.statuses),
+			...Object.keys(response.failures),
+		]);
+		const statuses = { ...this.statusByAgent };
+		const failures = { ...this.failureByAgent };
+		let startErrors = this.startErrorByAgent;
+		for (const agentId of agents) {
+			if (issuedAt <= (this.#agentWrittenAt[agentId] ?? 0)) continue;
+			this.#agentWrittenAt[agentId] = issuedAt;
+			const status = response.statuses[agentId];
+			if (status) statuses[agentId] = status;
+			else delete statuses[agentId];
+			const failure = response.failures[agentId];
+			if (failure !== undefined) failures[agentId] = failure;
+			else delete failures[agentId];
+			const baseline = this.#startBaseline[agentId];
+			if (baseline !== undefined && status?.run.startedAt && status.run.startedAt !== baseline) {
+				startErrors = omit(startErrors, agentId);
+				delete this.#startBaseline[agentId];
+			}
+		}
+		this.statusByAgent = statuses;
+		this.failureByAgent = failures;
+		this.startErrorByAgent = startErrors;
 	}
 
 	#schedulePoll(lifecycleId: number): void {
@@ -169,20 +196,8 @@ export class SettingsCliUpdateState {
 		if (this.#pollTimer) clearTimeout(this.#pollTimer);
 		this.#pollTimer = null;
 	}
-
-	#isCurrentLoad(generation: number, lifecycleId: number): boolean {
-		return generation === this.#loadGeneration && lifecycleId === this.#lifecycleId;
-	}
 }
 
 function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
-	return omitAll(record, [key]);
-}
-
-function pick<T>(record: Readonly<Record<string, T>>, keep: (key: string) => boolean): Record<string, T> {
-	return Object.fromEntries(Object.entries(record).filter(([key]) => keep(key)));
-}
-
-function omitAll<T>(record: Record<string, T>, keys: readonly string[]): Record<string, T> {
-	return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+	return Object.fromEntries(Object.entries(record).filter(([entry]) => entry !== key));
 }

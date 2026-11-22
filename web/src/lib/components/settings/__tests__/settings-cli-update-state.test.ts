@@ -156,6 +156,37 @@ describe('SettingsCliUpdateState', () => {
 		expect(api.getAgentCliUpdates).toHaveBeenLastCalledWith(EXECUTOR, { refresh: false, agentIds: ['claude'] });
 	});
 
+	it('keeps a recovery read when another agent is polled meanwhile', async () => {
+		const codexRunning = { ...RUNNING, cliLabel: 'Codex CLI' };
+		let answerRecovery!: (response: AgentCliUpdatesResponse) => void;
+		const { api } = createApi([{ statuses: { claude: BEHIND, codex: codexRunning }, failures: {} }]);
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('codex')?.run.state).toBe('running'));
+		api.startAgentCliUpdate.mockRejectedValueOnce(new Error('Request timed out'));
+		api.getAgentCliUpdates.mockImplementationOnce(() => new Promise((resolve) => { answerRecovery = resolve; }));
+		await state.startUpdate('claude');
+		api.getAgentCliUpdates.mockResolvedValueOnce({ statuses: { codex: codexRunning }, failures: {} });
+		await vi.advanceTimersByTimeAsync(2_000);
+		answerRecovery({ statuses: { claude: RUNNING }, failures: {} });
+		await vi.waitFor(() => expect(state.statusFor('claude')?.run.state).toBe('running'));
+		expect(state.startErrorFor('claude')).toBeUndefined();
+	});
+
+	it('clears a failed start once its run is seen, even after it finished', async () => {
+		const { api } = createApi([
+			{ statuses: { claude: BEHIND }, failures: {} },
+			{ statuses: { claude: { ...SUCCEEDED, run: { ...SUCCEEDED.run, startedAt: '2026-11-20T00:00:05.000Z' } } }, failures: {} },
+		]);
+		api.startAgentCliUpdate.mockRejectedValueOnce(new Error('Request timed out'));
+		const state = new SettingsCliUpdateState(EXECUTOR, ['claude', 'codex'], api);
+		state.initialize();
+		await vi.waitFor(() => expect(state.statusFor('claude')).toEqual(BEHIND));
+		await state.startUpdate('claude');
+		await vi.waitFor(() => expect(state.statusFor('claude')?.run.state).toBe('succeeded'));
+		expect(state.startErrorFor('claude')).toBeUndefined();
+	});
+
 	it('ignores responses that arrive after it is destroyed', async () => {
 		let resolveRead!: (response: AgentCliUpdatesResponse) => void;
 		const api = {

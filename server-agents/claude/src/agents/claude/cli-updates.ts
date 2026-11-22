@@ -10,8 +10,6 @@ import { installerEnvironment } from '@garcon/server-agent-common/cli-update/ins
 import type { ClaudeCliVersionProbe } from './cli-version.js';
 
 const CLAUDE_RELEASES_URL = 'https://downloads.claude.ai/claude-code-releases';
-// CLAUDECODE would mark the updater as running inside a Claude session.
-const CLAUDE_CREDENTIAL_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDECODE'];
 
 // Managed settings override the user's release channel.
 const MANAGED_SETTINGS_PATHS: Partial<Record<NodeJS.Platform, string>> = {
@@ -42,7 +40,7 @@ export function createClaudeCliUpdates(options: {
     target: async () => ({ command: config.binary(), bundled: false }),
     environment: () => {
       const configHomeDir = config.configHomeDir();
-      return installerEnvironment(CLAUDE_CREDENTIAL_KEYS, configHomeDir ? { CLAUDE_CONFIG_DIR: configHomeDir } : {});
+      return installerEnvironment(configHomeDir ? { CLAUDE_CONFIG_DIR: configHomeDir } : {});
     },
     nativeRelease: async () => {
       const url = `${CLAUDE_RELEASES_URL}/${await readClaudeReleaseChannel(config)}`;

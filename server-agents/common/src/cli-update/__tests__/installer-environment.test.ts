@@ -7,11 +7,19 @@ afterEach(() => {
   Object.assign(process.env, saved);
 });
 
-test('passes the process environment without provider credentials', () => {
-  process.env.SYNTHETIC_API_KEY = 'synthetic-secret';
-  process.env.SYNTHETIC_REGISTRY = 'https://registry.example.test';
-  const environment = installerEnvironment(['SYNTHETIC_API_KEY'], { SYNTHETIC_HOME: '/synthetic/home' });
-  expect(environment.SYNTHETIC_API_KEY).toBeUndefined();
-  expect(environment.SYNTHETIC_REGISTRY).toBe('https://registry.example.test');
-  expect(environment.SYNTHETIC_HOME).toBe('/synthetic/home');
+test('withholds every provider credential and keeps installer settings', () => {
+  Object.assign(process.env, {
+    OPENAI_API_KEY: 'synthetic-openai', ANTHROPIC_API_KEY: 'synthetic-anthropic',
+    GEMINI_API_KEY: 'synthetic-gemini', CLAUDE_CODE_OAUTH_TOKEN: 'synthetic-oauth',
+    ANTHROPIC_AUTH_TOKEN: 'synthetic-auth', AWS_BEARER_TOKEN_BEDROCK: 'synthetic-bedrock', CLAUDECODE: '1',
+    NPM_TOKEN: 'synthetic-registry', HTTPS_PROXY: 'http://proxy.example.test',
+  });
+  const environment = installerEnvironment({ CODEX_HOME: '/synthetic/codex' });
+  for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK', 'CLAUDECODE']) {
+    expect(environment[key]).toBeUndefined();
+  }
+  expect(environment.NPM_TOKEN).toBe('synthetic-registry');
+  expect(environment.HTTPS_PROXY).toBe('http://proxy.example.test');
+  expect(environment.CODEX_HOME).toBe('/synthetic/codex');
 });

@@ -65,3 +65,16 @@ test('keys a native release by its channel', async () => {
   const stable = await cache.get('https://example.test/stable', async () => '2.1.250', { fresh: false });
   expect([latest, stable]).toEqual(['2.1.300', '2.1.250']);
 });
+
+test('gives every caller sharing a failed lookup no version', async () => {
+  const cache = new LatestVersionCache();
+  const gate = Promise.withResolvers<string>();
+  const failing = async () => gate.promise;
+  const first = cache.get('shared', failing, { fresh: false });
+  const second = cache.get('shared', failing, { fresh: false });
+  gate.reject(new Error('npm could not start'));
+  expect(await Promise.all([first, second])).toEqual([null, null]);
+  let lookups = 0;
+  expect(await cache.get('shared', async () => { lookups++; return '1.0.0'; }, { fresh: false })).toBe('1.0.0');
+  expect(lookups).toBe(1);
+});
