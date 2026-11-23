@@ -9,6 +9,7 @@ import {
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
+  type ChatCompletionsFault,
   type HeldChatCompletionsTurn,
 } from '../../support/fake-chat-completions-model.js';
 import {
@@ -108,7 +109,7 @@ describe.skipIf(process.platform !== 'linux')('OpenCode V1 automatic compaction 
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(3);
 
       const native = await openCodeNativeSession(fixture, chatId);
-      assertThresholdMarkerChain(readOpenCodeSessionRows(native));
+      assertNoReplayMarkerChain(readOpenCodeSessionRows(native), 'threshold');
       testEnvironment.model.assertSettled();
 
       const liveProjection = renderingProjection(live.messages);
@@ -133,55 +134,22 @@ describe.skipIf(process.platform !== 'linux')('OpenCode V1 automatic compaction 
   }, 120_000);
 
   test('[TLV5-OPENCODE.01-SCRIPTED-02] first-turn overflow compacts without replay and continues', async () => {
-    const testEnvironment = requireEnvironment();
-    const prompt = marker('NO_REPLAY_PROMPT');
-    const overflow = marker('NO_REPLAY_OVERFLOW');
-    const summary = marker('NO_REPLAY_SUMMARY');
-    const answer = marker('NO_REPLAY_ANSWER');
-    const requestCursor = testEnvironment.model.markRequests();
-    testEnvironment.model.scriptFault({
+    await exerciseFirstTurnOverflow({
       kind: 'http-error',
       status: 400,
-      message: overflow,
+      message: marker('NO_REPLAY_OVERFLOW'),
       code: 'context_length_exceeded',
     });
-    testEnvironment.model.scriptTurn([chatCompletionsText(summary)]);
-    testEnvironment.model.scriptTurn([chatCompletionsText(answer)]);
-
-    await withIntegrationFixture('opencode-scripted-overflow-no-replay', async (fixture) => {
-      const chatId = fixture.newChatId();
-      const eventCursor = fixture.client.markEvents();
-      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
-        chatId,
-        projectPath: fixture.dirs.project,
-        command: prompt,
-      }));
-      await waitForVisibleResponse({
-        fixture,
-        chatId,
-        turnId: turn.turnId,
-        marker: answer,
-        afterIndex: eventCursor,
-      });
-
-      const transcript = await fixture.client.getMessages(chatId);
-      expect(transcript.messages.map((entry) => entry.message.type)).toEqual([
-        'user-message',
-        'compaction',
-        'assistant-message',
-      ]);
-      expect(userContents(transcript.messages)).toEqual([prompt]);
-      expect(assistantContents(transcript.messages)).toEqual([answer]);
-      expect(messagesOfType(transcript.messages, 'compaction')).toEqual([
-        expect.objectContaining({ trigger: 'auto' }),
-      ]);
-      expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
-      expectCompactionInternalsHidden(transcript.messages, [overflow, summary]);
-      expectTurnTerminalCount(fixture, eventCursor, chatId, turn.turnId, 'agent-run-finished');
-      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(3);
-      testEnvironment.model.assertSettled();
-    }, withScriptedOpenCode());
   }, 120_000);
+
+  // https://github.com/anomalyco/opencode/blob/f4e363c8295fa90a03dddc451882fffe8fbce357/packages/llm/src/provider-error.ts#L21-L25
+  test.each(['Request body too large', 'multimodal data size is too large'])(
+    'classifies a plain HTTP 400 "%s" as overflow and continues through compaction',
+    async (message) => {
+      await exerciseFirstTurnOverflow({ kind: 'http-error', status: 400, message });
+    },
+    120_000,
+  );
 
   test('[TLV5-OPENCODE.01-SCRIPTED-03] overflow replay inherits operation metadata without duplicating the user row', async () => {
     const testEnvironment = requireEnvironment();
@@ -548,6 +516,58 @@ describe.skipIf(process.platform !== 'linux')('OpenCode V1 automatic compaction 
   }, 120_000);
 });
 
+async function exerciseFirstTurnOverflow(
+  fault: Extract<ChatCompletionsFault, { kind: 'http-error' }>,
+): Promise<void> {
+  const testEnvironment = requireEnvironment();
+  const prompt = marker('NO_REPLAY_PROMPT');
+  const summary = marker('NO_REPLAY_SUMMARY');
+  const answer = marker('NO_REPLAY_ANSWER');
+  const requestCursor = testEnvironment.model.markRequests();
+  testEnvironment.model.scriptFault(fault);
+  testEnvironment.model.scriptTurn([chatCompletionsText(summary)]);
+  testEnvironment.model.scriptTurn([chatCompletionsText(answer)]);
+
+  await withIntegrationFixture('opencode-scripted-overflow-no-replay', async (fixture) => {
+    const chatId = fixture.newChatId();
+    const eventCursor = fixture.client.markEvents();
+    const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+      chatId,
+      projectPath: fixture.dirs.project,
+      command: prompt,
+    }));
+    await waitForVisibleResponse({
+      fixture,
+      chatId,
+      turnId: turn.turnId,
+      marker: answer,
+      afterIndex: eventCursor,
+    });
+
+    const transcript = await fixture.client.getMessages(chatId);
+    expect(transcript.messages.map((entry) => entry.message.type)).toEqual([
+      'user-message',
+      'compaction',
+      'assistant-message',
+    ]);
+    expect(userContents(transcript.messages)).toEqual([prompt]);
+    expect(assistantContents(transcript.messages)).toEqual([answer]);
+    expect(messagesOfType(transcript.messages, 'compaction')).toEqual([
+      expect.objectContaining({ trigger: 'auto', summary: '' }),
+    ]);
+    expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
+    expectCompactionInternalsHidden(transcript.messages, [fault.message, summary]);
+    expectTurnTerminalCount(fixture, eventCursor, chatId, turn.turnId, 'agent-run-finished');
+    const requests = testEnvironment.model.requestsSince(requestCursor);
+    expect(requests).toHaveLength(3);
+    expect(requests[0].lastUserText).toBe(prompt);
+    expect(requests[2].lastUserText).toContain(AUTOCONTINUE_TEXT);
+    const native = await openCodeNativeSession(fixture, chatId);
+    assertNoReplayMarkerChain(readOpenCodeSessionRows(native), 'overflow');
+    testEnvironment.model.assertSettled();
+  }, withScriptedOpenCode());
+}
+
 async function exerciseInterruptedCompaction(
   phase: 'summary' | 'continuation',
 ): Promise<void> {
@@ -682,11 +702,11 @@ async function stopChat(fixture: IntegrationFixture, chatId: string): Promise<vo
   );
 }
 
-function assertThresholdMarkerChain(rows: OpenCodeSessionRows): void {
+function assertNoReplayMarkerChain(rows: OpenCodeSessionRows, trigger: 'threshold' | 'overflow'): void {
   const control = rows.parts.find((row) => row.data.type === 'compaction');
   if (!control) throw new Error('OpenCode did not persist its compaction control part.');
   expect(control.data.auto).toBe(true);
-  expect(control.data.overflow ?? false).toBe(false);
+  expect(control.data.overflow ?? false).toBe(trigger === 'overflow');
 
   const summary = rows.messages.find((row) => row.data.summary === true);
   if (!summary) throw new Error('OpenCode did not persist its compaction summary assistant.');
