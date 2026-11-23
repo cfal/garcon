@@ -2,6 +2,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import Network from '@lucide/svelte/icons/network';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import { MediaQuery } from 'svelte/reactivity';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -40,6 +41,7 @@
 		side?: 'top' | 'bottom';
 		class?: string;
 	} = $props();
+	const narrowViewport = new MediaQuery('(max-width: 640px)');
 
 	const executorLabel = $derived(
 		!executors.get(executorId) &&
@@ -110,7 +112,14 @@
 			<Network class="size-4 text-file-icon-folder" />
 			<MenuValueLabel label={m.executors_label()} value={executorLabel} />
 		</DropdownMenuSubTrigger>
-		<DropdownMenuSubContent>{@render choices()}</DropdownMenuSubContent>
+		<DropdownMenuSubContent
+			side={narrowViewport.current ? side : 'right'}
+			{align}
+			collisionPadding={8}
+			class="max-h-(--bits-dropdown-menu-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto"
+		>
+			{@render choices()}
+		</DropdownMenuSubContent>
 	</DropdownMenuSub>
 {:else if presentation === 'composer' ? executors.showComposerExecutor(executorId) : executors.hasRemoteExecutors}
 	<DropdownMenu

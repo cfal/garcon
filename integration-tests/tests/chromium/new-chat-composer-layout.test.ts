@@ -116,9 +116,19 @@ describe("Chromium New Chat composer layout", () => {
         expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(382);
         await fixture.page.keyboard.press("Escape");
 
-        markPhase("opening the compact model picker from overflow");
+        markPhase("checking permission choices fit on a phone");
         const settingsMenu = bottomBar.getByRole("button", { name: "More model settings" });
         await settingsMenu.click();
+        await fixture.page.getByRole("menuitem", { name: /^Permission mode:/ }).press("ArrowRight");
+        const permissionMenu = fixture.page.getByRole("menu").filter({
+          has: fixture.page.getByRole("menuitemradio", { checked: true }),
+        }).last();
+        const permissionBox = await bounds(permissionMenu);
+        expect(permissionBox.x).toBeGreaterThanOrEqual(0);
+        expect(permissionBox.x + permissionBox.width).toBeLessThanOrEqual(390);
+        await fixture.page.keyboard.press("ArrowLeft");
+
+        markPhase("opening the compact model picker from overflow");
         await fixture.page.getByRole("menuitem", { name: /Agent \/ model.*Claude.*Opus/ }).click();
         const compactSelector = fixture.page.locator(
           '[data-slot="model-selector-compact"]',

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -38,6 +39,7 @@
 		rainbow?: boolean;
 	} = $props();
 	const name = $derived(value ? `${label}: ${value}` : label);
+	const narrowViewport = new MediaQuery('(max-width: 640px)');
 </script>
 
 {#if overflow}
@@ -52,7 +54,12 @@
 			{@render icon()}
 			<MenuValueLabel {label} {value} />
 		</DropdownMenuSubTrigger>
-		<DropdownMenuSubContent class="w-64 max-w-[calc(100vw-1rem)]">
+		<DropdownMenuSubContent
+			side={narrowViewport.current ? side : 'right'}
+			{align}
+			collisionPadding={8}
+			class="max-h-(--bits-dropdown-menu-content-available-height) w-64 max-w-[calc(100vw-1rem)] overflow-y-auto"
+		>
 			{@render children()}
 		</DropdownMenuSubContent>
 	</DropdownMenuSub>
