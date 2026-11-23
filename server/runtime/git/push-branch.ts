@@ -23,14 +23,15 @@ function readPushReport(stdout: string, refspec: string) {
     let row = parseRefStatus(line);
     if (!row) {
       // A skipped URL's Done can follow hook text on the same line. A To header precedes a row.
-      if (line.endsWith('Done') && !(line.includes('To ') && parseRefStatus(lines[index + 1]))) {
+      if (line.endsWith('Done') && !(line.startsWith('To ') && parseRefStatus(lines[index + 1]))) {
         confirmed = false;
       }
       index++;
       continue;
     }
 
-    // One destination's report is a consecutive block of rows followed immediately by Done.
+    // A hook can print status rows of its own. Only Git's To/rows/Done frame counts.
+    const hasHeader = index > 0 && lines[index - 1].startsWith('To ');
     let branchAccepted = false;
     while (row) {
       if (row.flag === '!') rejections.add(row.summary);
@@ -38,7 +39,7 @@ function readPushReport(stdout: string, refspec: string) {
       index++;
       row = parseRefStatus(lines[index]);
     }
-    if (!branchAccepted || lines[index] !== 'Done') confirmed = false;
+    if (!hasHeader || !branchAccepted || lines[index] !== 'Done') confirmed = false;
     index++;
   }
   return { confirmed, rejections };

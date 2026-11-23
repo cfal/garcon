@@ -242,6 +242,20 @@ test.each([
   expect(await listRefs(remote)).toBe(`refs/heads/main ${tip}\n`);
 });
 
+test('does not pair a hook preview row with a skipped destination', async () => {
+  const { git, root, projectPath, remote } = await pushFixture();
+  await runGit(projectPath, ['push', 'origin', 'HEAD:refs/heads/refs/heads/main', 'HEAD:refs/heads/other']);
+  const before = await listRefs(remote);
+  const preview = await createBareRemote(root, 'preview.git');
+  await runGit(projectPath, ['remote', 'add', 'preview', preview]);
+  await installHook(projectPath, 'pre-push',
+    `git push --no-verify --dry-run --porcelain preview refs/heads/main:refs/heads/main | awk -F '\\t' 'NF == 3'`);
+
+  await expect(git.push({ projectPath })).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  expect(await listRefs(remote)).toBe(before);
+  expect(await listRefs(preview)).toBe('');
+});
+
 test('allows ordinary hook logs but does not confirm a truncated push report', async () => {
   const { git, projectPath, remote } = await pushFixture('remoteDone');
   await installHook(projectPath, 'pre-push', 'printf "To address all issues, run:\\n%040000d\\n" 0\nprintf "%02200000d\\n" 0 >&2');
