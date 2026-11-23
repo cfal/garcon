@@ -1658,6 +1658,26 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
+	it('keeps the focused composer action when path validation finishes', async () => {
+		stubMatchMedia(false);
+		await renderSubmittableForm(vi.fn());
+		const chatsApi = await import('$lib/api/chats');
+		const validation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		const validate = vi.mocked(chatsApi.validateStart).mockClear().mockReturnValueOnce(validation.promise);
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Project Path' }), {
+			target: { value: '/workspace/next' },
+		});
+		await waitFor(() => expect(validate).toHaveBeenCalled());
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const snippets = await screen.findByRole('menuitem', { name: /Snippets/ });
+		snippets.focus();
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Start session' })).toHaveProperty('disabled', false),
+		);
+		expect(document.activeElement).toBe(snippets);
+	});
+
 	it('does not let late path validation steal focus from argument entry', async () => {
 		stubMatchMedia(false);
 		const onStartChat = vi.fn();

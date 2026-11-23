@@ -288,12 +288,13 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
-	// Layer changes alone must not take focus back from a toolbar picker.
+	// Late path validation must not take focus from a menu or another form control.
 	$effect(() => {
 		if (
 			initialContentReady &&
 			form.validationStatus === 'valid' &&
 			!form.showBrowser &&
+			(document.activeElement === document.body || document.activeElement?.id === 'project-path-input') &&
 			untrack(canFocusTextarea)
 		) {
 			untrack(returnTextareaFocus);
@@ -814,7 +815,10 @@
 					onAddImage={openImagePicker}
 					onOpenSnippetPalette={() => void markdown.openSnippets()}
 					onOpenExpandedEditor={openExpandedEditor}
-					onRefinePrompt={() => promptRefinement.handleAction()}
+					onRefinePrompt={() => {
+						returnTextareaFocus();
+						promptRefinement.handleAction();
+					}}
 					canRefinePrompt={promptRefinement.canStart}
 					isPromptRefinementPending={promptRefinement.pending}
 					isPromptTransformPending={promptTransformPending}
