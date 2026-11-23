@@ -88,6 +88,9 @@
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		bind:ref={dialogElement}
+		data-resize-motion={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving
+			? 'none'
+			: undefined}
 		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
