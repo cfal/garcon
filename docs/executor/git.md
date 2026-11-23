@@ -131,6 +131,8 @@ Keep domain operations rather than exposing `git(args)` or serializing arbitrary
 
 `initialCommit` preserves today's operation on an already initialized repository; this is not a new `git init` or clone workflow. `push` preserves its current remote/branch restrictions and does not acquire force-push or upstream-setting behavior. PR operations are read-only except the two comment writes, which the controller alone calls when it posts a review; the browser has no route to them.
 
+### Workbench Push
+
 Push reads the attached local branch from symbolic HEAD, not a display label. When the caller supplies `remoteBranch`, the executor rejects a mismatch before dispatch. An unborn branch or a name that cannot round-trip through UTF-8 is not pushed. Remote status obtains the tracking counts and remote name from Git's configured upstream; the abbreviation is for display only.
 
 The refspec uses the full branch ref on both sides and negative refspecs (Git 2.29+) to exclude writable namespace aliases. Git can still reject an ambiguous source (such as a tag named `refs/heads/release`) or two competing destinations (such as `refs/heads/release` and `refs/refs/heads/release`). Workbench does not retry with a shorter name.
@@ -139,13 +141,13 @@ Push has three outcomes:
 
 - **Not dispatched:** request, repository, branch, admission, or process-start validation fails before the push process starts. Return the specific error.
 - **Confirmed:** Git exits zero, porcelain stdout is complete and untruncated, and every reported destination confirms the exact branch pair as created, fast-forwarded, or already up to date. There must be at least one report. Confirmation describes what Git reported, not an atomic update across remotes.
-- **Not confirmed:** every other outcome after dispatch returns HTTP 503 / `GIT_MUTATION_OUTCOME_UNKNOWN`. The bounded message gives Git's rejection summaries (such as `non-fast-forward`) and the end of the captured diagnostic. It does not turn one rejection into an aggregate HTTP 409. Inspect the remote before retrying; the executor does not automatically repeat the push.
+- **Not confirmed:** every other outcome after dispatch returns HTTP 503 / `GIT_MUTATION_OUTCOME_UNKNOWN`. The bounded message gives Git's rejection summaries (such as `non-fast-forward`) and the end of the captured diagnostic, with URL tokens redacted before clipping. It does not turn one rejection into an aggregate HTTP 409. Inspect the remote before retrying; the executor does not automatically repeat the push.
 
-A bare `Done`, an incomplete report, or hook output indistinguishable from a report can leave an update unconfirmed. Clipped stderr does not invalidate intact positive porcelain. A receiver can apply the update and then disconnect. Errors do not roll back other refs or earlier push URLs; tag-following and submodule recursion remain Git configuration.
+A bare `Done`, an incomplete report, or a pre-push hook line ending in `Done` can leave an update unconfirmed. Hook logs written to stderr do not interfere with the report. A receiver can apply the update and then disconnect. Errors do not roll back other refs or earlier push URLs; tag-following and submodule recursion remain Git configuration.
 
 Confirmation identifies the advertised remote ref. If the receiving repository makes that branch a symbolic ref to a tag or another branch, Git can update its referent and still report the requested name. Enforcing direct branch refs is a receive-side policy; a client lookup before pushing is not atomic with the update.
 
-Illustrative calls:
+### Example Calls
 
 ```text
 git.getWorkbenchSnapshot({ projectPath, mode, context, selectedFile }, callOptions)
@@ -245,7 +247,7 @@ Bound admission before queueing, check cancellation while waiting, and revalidat
 | --- | --- |
 | Invalid target, unavailable executor, unsupported service, or rejected admission before dispatch | Typed rejection; no controller-local fallback or queued retry. |
 | Confirmed mutation result | Return the exact result; invalidate views for the captured executor/repository. Preserve warnings such as `indexSynchronized: false`. |
-| Git exits with an error after starting | Preserve the operation-specific error and refresh state. Pull/stash/conflict/multi-step failures can leave real changes; failure does not mean unchanged. |
+| Git exits with an error after starting | [Workbench Push](#workbench-push) returns `GIT_MUTATION_OUTCOME_UNKNOWN`, even for a reported rejection. Other operations retain their specific errors. Refresh state; failure does not mean unchanged. |
 | Connection/deadline lost after possible dispatch, or mutation reply cannot be validated | Return an explicit `GIT_MUTATION_OUTCOME_UNKNOWN`-class error. Keep drafts, invalidate captured repository views, and require inspection before another deliberate mutation. |
 | Connection loss | The RPC fails; a mutation may have applied. Refresh before an explicit retry. There is no transport replay. |
 | Fresh session or worker/controller restart | Reads may be requested again from a fresh snapshot. Never replay Git mutations from disk or browser recovery. |

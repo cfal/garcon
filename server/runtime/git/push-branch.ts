@@ -44,9 +44,10 @@ function readPushReport(stdout: string, refspec: string) {
   return { confirmed, rejections };
 }
 
-function unconfirmedPush(rejections: Set<string>, diagnostic: string): GitDomainError {
+function unconfirmedPush(rejections: Set<string>, diagnostic: string, reportHint?: string): GitDomainError {
   const lines = ['Git did not confirm the push. Inspect the remote before pushing again.'];
   if (gitOutputTruncated()) lines.push(`Git output exceeded ${PUSH_REPORT_MAX_BYTES} bytes and was truncated.`);
+  else if (reportHint) lines.push(reportHint);
   const summaries = redactGitDiagnostic([...rejections].join('\n')).slice(0, GIT_ERROR_MESSAGE_LIMIT / 4);
   if (summaries) lines.push(summaries);
   const notice = lines.join('\n');
@@ -75,5 +76,7 @@ export async function pushBranchRef(projectPath: string, remote: string, ref: st
     throw unconfirmedPush(rejections, errorMessage(error));
   }
   const { confirmed, rejections } = readPushReport(result.stdout, refspec);
-  if (!confirmed || gitOutputTruncated()) throw unconfirmedPush(rejections, result.stderr);
+  if (!confirmed || gitOutputTruncated()) {
+    throw unconfirmedPush(rejections, result.stderr, 'Git exited successfully. Check for a skipped destination or pre-push hook output mixed into the report.');
+  }
 }

@@ -2,6 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { withGitOperation } from '../operation-context.js';
+import { pushBranchRef } from '../push-branch.js';
+import { gitServiceError } from '../service-errors.js';
 import { cleanupExecutorRuntimeFixtures, executorRuntimeFixture, runFixtureGit as runGit } from './executor-runtime-fixture.js';
 
 const temporary = path.join(homedir(), 'tmp');
@@ -56,6 +59,15 @@ async function pushFixture(remoteDirectory = 'remote.git') {
   await runGit(projectPath, ['remote', 'add', 'origin', remote]);
   return { git, root, projectPath, remote };
 }
+
+test('preserves errors that prevent the push process from starting', async () => {
+  const { root, projectPath } = await executorRuntimeFixture();
+  const failure = (signal?: AbortSignal) => withGitOperation(root, { mutation: true, signal }, () =>
+    pushBranchRef(projectPath, 'origin', 'refs/heads/main', { env: { PATH: projectPath } }),
+  ).then(() => null, gitServiceError);
+  expect(await failure()).toMatchObject({ code: 'GIT_MISSING' });
+  expect(await failure(AbortSignal.abort())).toMatchObject({ code: 'GIT_TIMEOUT' });
+});
 
 test('keeps a non-fast-forward diagnostic without claiming the whole push was rejected', async () => {
   const { git, root, projectPath, remote } = await pushFixture();
@@ -218,13 +230,14 @@ test.each([
 
 test.each([
   ['a bare Done', 'Done'],
+  ['a hook line ending in Done', 'Build Done'],
   ['an unterminated report', 'To unfinished\n=\trefs/heads/main:refs/heads/main\t[up to date]'],
 ])('does not confirm %s even when the next report succeeds', async (_description, prefix) => {
   const { git, projectPath, remote } = await pushFixture();
   await installHook(projectPath, 'pre-push', `printf '%s\\n' '${prefix}'\necho 'Hook completed' >&2`);
   const tip = await oid(projectPath);
   await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('Hook completed'),
+    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringMatching(/pre-push hook[\s\S]*Hook completed/),
   });
   expect(await listRefs(remote)).toBe(`refs/heads/main ${tip}\n`);
 });
