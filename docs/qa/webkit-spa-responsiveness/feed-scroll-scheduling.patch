@@ -1,0 +1,144 @@
+--- /dev/null
++++ b/web/src/lib/components/chat/transcript/feed-scheduling-probe.ts
+@@ -0,0 +1,2 @@
++export const feedProbe = typeof location === 'undefined'
++	? '' : new URLSearchParams(location.search).get('feedProbe') ?? '';
+--- a/web/src/lib/components/chat/transcript/ConversationFeed.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationFeed.svelte
+@@ -2,0 +3 @@
++	import { feedProbe } from './feed-scheduling-probe.js';
+@@ -535,0 +537 @@
++	data-qa-feed-probe={feedProbe || undefined}
+@@ -579,0 +582 @@
++	{#if feedProbe !== 'no-track'}
+@@ -592,0 +596 @@
++	{/if}
+@@ -604,0 +609,5 @@
++	:global([data-qa-feed-probe='no-track'] [data-chat-scroll-viewport]) { overflow-y: scroll !important; }
++	:global([data-qa-feed-probe='hidden-track'] [data-chat-feed-scrollbar]) { visibility: hidden !important; }
++	:global([data-qa-feed-probe='viewport-layout'] [data-chat-scroll-viewport]) { contain: layout; }
++	:global([data-qa-feed-probe='row-layout'] [data-chat-virtual-item]) { contain: layout; }
++
+--- a/web/src/lib/components/chat/transcript/conversation-feed-viewport-geometry.ts
++++ b/web/src/lib/components/chat/transcript/conversation-feed-viewport-geometry.ts
+@@ -1,0 +2 @@
++import { feedProbe } from './feed-scheduling-probe.js';
+@@ -96,0 +98,7 @@
++	}
++	if (overscanRange && visibleRange && (feedProbe === 'chunk' || feedProbe === 'extra')) {
++		const start = overscanRange.startIndex;
++		const end = Math.max(overscanRange.endIndex, visibleRange.endIndex + followingRowCount);
++		const begin = feedProbe === 'chunk' ? start - start % 4 : start - 2;
++		const stop = feedProbe === 'chunk' ? Math.ceil((end + 1) / 4) * 4 - 1 : end + 2;
++		for (let i = Math.max(0, begin); i <= Math.min(count - 1, stop); i++) indexes.add(i);
+--- a/integration-tests/scripts/transcript-row-scroll.ts
++++ b/integration-tests/scripts/transcript-row-scroll.ts
+@@ -14,0 +15 @@
++  'count-mutations': { type: 'boolean' },
+@@ -24,0 +26,4 @@
++const scheduling = ['no-track','hidden-track','viewport-layout','row-layout','chunk','extra'];
++for (const mode of scheduling) queries[mode] = '?feedProbe=' + mode;
++queries['always-track'] = '';
++queries['track-paint'] = '?rowPaint=track-paint';
+@@ -38,0 +44,2 @@
++  visible: number[][]; thumb: number[]; allRowsContained: boolean; trackContain: string;
++  probe: string; autoHide: string; overflow: string; track: string; trackOpacity: number | null; viewContain: string; rowContain: string;
+@@ -47,0 +55,23 @@
++const normalRanges = new Map<string, number[]>();
++const visible = new Map<string, number[][]>();
++const thumbBoxes = new Map<string, number[]>();
++function checkRange(pos: Position, mode: string) {
++  const id = pos.index + ':' + pos.offset;
++  if (!normalRanges.has(id) && mode === 'normal') normalRanges.set(id, pos.mounted);
++  if (!visible.has(id) && mode === 'normal') visible.set(id, pos.visible);
++  if (!thumbBoxes.has(id) && mode === 'normal') thumbBoxes.set(id,pos.thumb);
++  if (mode === 'track-paint') assert.ok(pos.thumb.every((v,i)=>Math.abs(v - thumbBoxes.get(id)![i]!) <= 1), 'Thumb moved under paint containment');
++  assert.deepEqual(pos.visible, visible.get(id), 'Different visible row rectangles at ' + id);
++  const baseline = normalRanges.get(id);
++  assert.ok(baseline, 'No reference for ' + id);
++  const expected = new Set(baseline);
++  if (mode === 'chunk' || mode === 'extra') {
++    let begin = pos.index, end = pos.index;
++    while (expected.has(begin - 1)) begin--;
++    while (expected.has(end + 1)) end++;
++    begin = mode === 'extra' ? begin - 2 : Math.floor(begin / 4) * 4;
++    end = mode === 'extra' ? end + 2 : Math.ceil((end + 1) / 4) * 4 - 1;
++    for (let i = Math.max(0, begin); i <= Math.min(99, end); i++) expected.add(i);
++  }
++  assert.deepEqual(pos.mounted, [...expected].sort((a,b) => a-b), 'Unexpected mounted range');
++}
+@@ -48,0 +79,10 @@
++  assert.equal(pos.probe, scheduling.includes(mode) ? mode : '');
++  assert.equal(pos.autoHide, mode === 'always-track' ? 'false' : 'true');
++  assert.equal(pos.overflow, 'scroll');
++  assert.equal(pos.track, mode === 'no-track' ? 'absent' : mode === 'hidden-track' ? 'hidden' : 'visible');
++  assert.equal(pos.trackContain, mode === 'track-paint' ? 'paint' : mode === 'no-track' ? 'absent' : 'none');
++  assert.equal(pos.thumb.length, mode === 'no-track' ? 0 : 4, 'Expected a nonempty thumb');
++  assert.ok(pos.allRowsContained, 'Inconsistent wrapper containment');
++  assert.equal(pos.viewContain, mode === 'viewport-layout' ? 'layout' : 'none');
++  assert.equal(pos.rowContain, mode === 'row-layout' ? 'layout' : 'none');
++  checkRange(pos, mode);
+@@ -102,0 +143 @@
++    let firstDigest: string | undefined;
+@@ -103,0 +145,4 @@
++      if (modes.includes('always-track')) {
++        await d.evaluate(`const k='pref_local_settings', prefs=JSON.parse(localStorage.getItem(k) || '{}');
++          localStorage.setItem(k,JSON.stringify({...prefs,autoHideChatScrollbar:arguments[0]}));`,mode !== 'always-track');
++      }
+@@ -111,0 +157,2 @@
++      if (firstDigest === undefined) firstDigest = contentDigest;
++      assert.equal(contentDigest, firstDigest, 'Different ordered row digest');
+@@ -115 +162,2 @@
+-        if (pair > 0) checkVariant(pre, mode);
++        if (pair > 0 || mode === 'normal' || scheduling.includes(mode)) checkVariant(pre, mode);
++        if (values['count-mutations']) await probe('watchRows');
+@@ -122 +170 @@
+-        const { timing: t, post } = await probe<{ timing: Timing; post: Position }>('finish');
++        const { timing: t, post, mutations } = await probe<{ timing: Timing; post: Position; mutations: {batches:number;adds:number;drops:number} | null }>('finish');
+@@ -129,0 +178 @@
++          preIndexes: pre.mounted, postIndexes: post.mounted, trackOpacityBefore: pre.trackOpacity, trackOpacityAfter: post.trackOpacity, mutations,
+--- a/integration-tests/scripts/transcript-scroll-probe.ts
++++ b/integration-tests/scripts/transcript-scroll-probe.ts
+@@ -15,0 +16 @@
++    'track-paint': ['[data-chat-feed-scrollbar]', 'contain:paint;'],
+@@ -106,0 +108,4 @@
++    const area = view.closest<HTMLElement>('[data-chat-scrollbar-auto-hide]')!;
++    const track = area.querySelector('[data-chat-feed-scrollbar]');
++    const thumb = track?.querySelector<HTMLElement>('[data-scroll-area-thumb], [data-slot="scroll-area-thumb"]');
++    const thumbBox = thumb?.getBoundingClientRect();
+@@ -107,0 +113,13 @@
++      visible: mounted.flatMap(r => {
++        const rect = r.getBoundingClientRect();
++        return rect.height > 0 && rect.bottom > v.top && rect.top < v.bottom
++          ? [[Number(r.dataset.index), rect.left - v.left, rect.top - v.top, rect.width, rect.height]] : [];
++      }),
++      thumb: thumbBox && thumbBox.width > 0 && thumbBox.height > 0
++        ? [thumbBox.left - v.left, thumbBox.top - v.top, thumbBox.width, thumbBox.height] : [],
++      allRowsContained: mounted.every(r => getComputedStyle(r).contain === getComputedStyle(first).contain),
++      probe: area.dataset.qaFeedProbe ?? '', autoHide: area.dataset.chatScrollbarAutoHide, overflow: getComputedStyle(view).overflowY,
++      track: track ? getComputedStyle(track).visibility : 'absent',
++      trackContain: track ? getComputedStyle(track).contain : 'absent',
++      trackOpacity: track ? Number(getComputedStyle(track).opacity) : null,
++      viewContain: getComputedStyle(view).contain, rowContain: getComputedStyle(first).contain,
+@@ -144,0 +163,11 @@
++  let changes: MutationObserver | undefined, batches = 0, adds = 0, drops = 0;
++  function watchRows() {
++    batches = adds = drops = 0;
++    changes = new MutationObserver(records => {
++      let a = 0, d = 0;
++      const count = (nodes: NodeList) => [...nodes].filter(n => n instanceof HTMLElement && n.hasAttribute('data-chat-virtual-item')).length;
++      for (const r of records) { a += count(r.addedNodes); d += count(r.removedNodes); }
++      if (a || d) { batches++; adds += a; drops += d; }
++    });
++    changes.observe(sizer, {childList: true});
++  }
+@@ -146 +175 @@
+-    prepare, anchor,
++    prepare, anchor, watchRows,
+@@ -151,0 +181,3 @@
++        const mutations = changes ? {batches, adds, drops} : null;
++        changes?.disconnect();
++        changes = undefined;
+@@ -153 +185 @@
+-        return { timing, post: snapshot() };
++        return { timing, mutations, post: snapshot() };

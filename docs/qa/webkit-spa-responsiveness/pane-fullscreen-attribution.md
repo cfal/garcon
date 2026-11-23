@@ -50,3 +50,44 @@ The end/keyed unit reproducer measured **two synchronous reads and two publicati
 | 12 | Exit | 364 / 694.5 | 374.5 / 696 |
 
 Twelve-pane exit ranged from **550 to 747 ms** on stock and **592 to 818 ms** on candidate. Entry, which does not resume the eleven panes, varied too. All 64 gestures, including warmups, retained original feed and panel nodes, the correct command owner and draft; every 12-pane exit restored its detached row and offset with zero observed drift. The separate hidden response delivery, draft selection and shortcut checks passed in all four fixtures. The reduction in redundant work is deterministic; the reveal still has to lay out eleven panes. [Candidate comparison samples](pane-fullscreen-resume.csv).
+
+## Keeping hidden tile boxes
+
+**Keep the stock hiding policy.** On `e6e3fb1f8`, retaining hidden layout boxes helped in the fixed-width control but did not preserve tile geometry or improve both directions with the default sidebar. Used the same GTK 2.50.6 production build, fixture and trusted button probe as above. Only the originally admitted desktop non-owner chat sections received a study marker. A kept stock `display:none`; B enabled this rule outside the timed gestures:
+
+```css
+[data-fullscreen-study-retained].hidden[inert][aria-hidden="true"] {
+  display: flex;
+  visibility: hidden;
+}
+```
+
+| Layout | Direction | Stock: median to label / two frames, ms | Keep boxes: same, ms | Two-frame ranges: stock / keep, ms |
+| --- | --- | ---: | ---: | --- |
+| 12, sidebar stays | Enter | 79 / 461 | 72 / 409 | 385-575 / 376-458 |
+| 12, sidebar stays | Exit | 325.5 / 506 | 326.5 / 460 | 466-621 / 399-518 |
+| 12, default | Enter | 118.5 / 461 | 110 / 498.5 | 438-493 / 477-522 |
+| 12, default | Exit | 356 / 562.5 | 376 / 529 | 461-615 / 463-590 |
+| 1, default (no eligible neighbor) | Enter | 29.5 / 98.5 | 19.5 / 95 | 87-101 / 70-132 |
+| 1, default (no eligible neighbor) | Exit | 26 / 100 | 32.5 / 105.5 | 82-114 / 91-136 |
+
+One loaded document per layout; A/B/B/A, one discarded warmup and three measured enter/exit pairs per block, six measured gestures per cell. [All 96 gestures](pane-fullscreen-boxes.csv). Frame callbacks are not physical paint measurements.
+
+The [window rectangles](../../../web/src/lib/components/workspace/WorkspaceRoot.svelte#L520) are percentages of the desktop host. With `fullscreenCoversSidebar:false` and autohide off, B preserved all eleven original window **and feed** rectangles; the host stayed 1520 x 960. With [default sidebar collapse](../../../web/src/lib/components/layout/AppShell.svelte#L182), the host widened to 1840 and all eleven tiles widened from 380 to 460 px. No original hidden rectangle survived in that arm. Stock had no hidden boxes in either case. Both arms restored every original rectangle on exit; all retained feeds stayed connected, only the owner was presented and claimed commands and the composer, its draft and focus survived, and reader drift and exit end gap were zero.
+
+Separate from timing, one held turn in a hidden reader in each of three cycles (stock fixed-width, B fixed-width, B default) preserved its suspended model and all mounted wrappers. Each cycle recorded two hidden-feed mutation records, a complete processing transition, the response on reveal, and correct shortcut selection and draft switching. Sampled tile centers never hit hidden descendants. In a full descendant audit, eight nodes in default B still had computed `visibility:visible` and a client rect, versus none in fixed-width B; this does **not** establish painted leakage. A short static fixture cannot guarantee invisible layout is free during sustained updates. No CSS policy or sidebar behavior was changed.
+
+## Tab measurements
+
+A scratch titlebar cached the widths of tab labels only for ResizeObserver deliveries confined to the unpadded tab viewport. A changed label or rail, a new observer, or crossing zero width still forced measurement. Equivalent layout/measurement publications were suppressed. In a mounted three-label unit control, three viewport-only deliveries reduced nine label rectangle reads and three gap reads to zero. That is not the delivery pattern produced by fullscreen.
+
+In a separate attribution pass on the real button, both builds delivered rail or label changes and **zero viewport-only deliveries** on the observed warm enter and exit at both 1 and 12 panes. The candidate still reduced label rect, client width and gap reads from three to two per pane by avoiding duplicate work (33 to 22 across the eleven neighbors). It did not eliminate the required layout.
+
+In four uninstrumented GTK 2.50.6 runs, stock/candidate/candidate/stock, six measured gestures per build/size/direction, median time from trusted button input to two callbacks was:
+
+| Panes | Enter, stock / candidate | Exit, stock / candidate |
+| ---: | ---: | ---: |
+| 1 | 175 / 149.5 ms | 213.5 / 133.5 ms |
+| 12 | 630 / 633 ms | 606 / 711.5 ms |
+
+The one-pane control improved in this run, but the hypothesized fast path did not run on the target gesture and the 12-pane result did not improve. **No titlebar cache shipped.** All four fixtures passed the usual draft, command-owner, hidden-delivery and reading-position checks. [All 64 trusted gestures](titlebar-measurement.csv); same [fullscreen runner and setup](pane-fullscreen.md#reproduce-the-toggle-matrix), three measured rounds per block.
