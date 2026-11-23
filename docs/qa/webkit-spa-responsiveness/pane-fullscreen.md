@@ -15,6 +15,8 @@ Median (minimum to maximum), eight warm gestures per cell. [Individual gestures]
 
 **Where to look next (source inference, not a trace):** Entry suspends eleven feeds. Exit makes those same feeds run their [visible projection](../../../web/src/lib/components/chat/transcript/ConversationFeed.svelte#L362) again. For each, the DOM driver [re-observes the viewport and mounted rows](../../../web/src/lib/virt/virtual-list-dom-driver.ts#L270), and the [resume transaction](../../../web/src/lib/virt/virtual-list-transaction.ts#L398) reads geometry, publishes the range and restores the end or keyed reading position. A [full remeasurement of mounted rows](../../../web/src/lib/components/chat/transcript/ConversationFeedVirtualController.svelte.ts#L799) is conditional, for example on a width change while hidden; it is not an unconditional scan of every transcript. The probe verified retention and timings, not how many milliseconds each path took.
 
+The [production fullscreen attribution](pane-fullscreen-attribution.md) measures which of those calls actually took time and tests bypassing the first slow width read at fixed tile geometry.
+
 ## Behavior
 
 - On every entry, the current pane filled the workspace. At 4 and 12 panes, respectively, 3 and 11 other panes had no presented rectangle and were both inert and ARIA-hidden. Their original panel and scroll viewport elements remained connected; no hidden pane claimed the primary scroll region, commands, or composer anchor. Every exit restored all original pane rectangles within one CSS pixel.

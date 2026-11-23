@@ -1,6 +1,8 @@
 # What makes the transcript slow to scroll?
 
-On Linux WebKitGTK, repeatedly bringing **real message rows** into a tall viewport is expensive. Two different controls removed most of the delay: leaving all real rows mounted, or preserving the virtualizer and giving it cheap rows of the correct size. Neither is a production fix. This is stronger evidence than attributing a long frame to whichever callback happened to be running when it was sampled.
+On Linux WebKitGTK, the **resting box shadow on ordinary user-message bubbles** was one substantial, removable cost of scrolling a tall transcript. The app now omits that shadow only while an ordinary bubble's menu is closed. With no diagnostic styles on either build, the typical callback gap fell from **99 to 44.5 ms** on paragraphs and **83.75 to 40.25 ms** on mixed Markdown. Repeated samples still showed some missing output pixels on the faster build. [Matched experiments, interaction checks and residual gaps](qa/webkit-spa-responsiveness/row-entry-rendering.md).
+
+The investigation started with two broader controls on the old rendering: leaving all real rows mounted, or giving the virtualizer cheap rows of the correct size. Neither is a production fix. The following experiments separate the cost of drawing actual rows, missing output pixels and fullscreen transitions; improving one does not prove the others are fixed.
 
 ## Same gesture, different row work
 
@@ -50,10 +52,20 @@ Every panel and feed stayed connected; eleven hidden panes became inert, no hidd
 
 **Is it expensive just to keep eleven hidden panes?** After entering fullscreen and letting the workspace settle, the active production feed was exactly 1840 x 806 in both cases. With one pane the typical callback gap / typical worst gap was **119 / 205 ms**; with twelve retained but only one presented it was **109 / 197 ms**. Twelve warm gestures per condition. One driver session had to be replaced; a supplemental twelve-pane block and the final one-pane block in the same fresh session measured **118 / 243** and **126 / 241 ms**, respectively. No consistent penalty from merely retaining eleven quiet, hidden panes surfaced. This does not test eleven **visible** or streaming conversations, nor is it a claim that hidden panes improve scrolling. [Matched-size fullscreen scroll trains](qa/webkit-spa-responsiveness/pane-fullscreen-scroll.csv).
 
+## Follow-up tests
+
+Keeping the **visible** text and row geometry changed the diagnosis. Removing ordinary menu machinery or using warm pre-parsed paragraphs did not consistently recover the fast scroll control. Even completely inert clones of the real DOM still had long gaps. In contrast, retaining live components and flattening their visual decorations reduced the typical gap from 182.5 to 55 ms in a separately baselined GTK comparison. [Paired row measurements, exact controls and reproduction](qa/webkit-spa-responsiveness/row-entry-rendering.md).
+
+On fullscreen exit the [first revealed feed's width read](qa/webkit-spa-responsiveness/pane-fullscreen-attribution.md) took 243 to 335 ms. Supplying the **correct** cached width moved that delay to the next scroll offset read. Preserving the post-commit check but removing a redundant pre-commit range publication is justified by the one-publication contract, not by latency: twelve-pane exit was 694.5 ms stock versus 696 ms with that change.
+
+The [upstream research](qa/webkit-spa-responsiveness/webkit-virtualization-references.md) found a GTK tile-damage fix and a separate Safari momentum/offset bug. Neither demonstrates what happened on this setup: the GTK report required a scrollbar fade, the Safari test interrupted momentum with a programmatic scroll, and our detector had already found exposed pixels during ordinary wheel input.
+
+[Two output columns 1,004 px apart](qa/webkit-spa-responsiveness/scroll-row-paired-stripes.md) later showed the sizer at common vertical positions in **three of four** normal trains, up to 221 px in common. There were **zero intercepted JavaScript writes to the sampled viewport's scroll offset** during all six trains; the detector recognized a deliberate write before timing. No late-window sample showed the band. The custom scrollbar stayed visible, so this did not exercise the upstream fade. Two short `top`-positioned trains showed no band; that is too small a control to recommend replacing transforms, and the callback comparison above did not favor `top`.
+
 ## What to optimize next
 
-- **Keep real text, make entering rows cheaper.** Test one layer at a time with the same visible Markdown. For example, message menu *contents* already mount lazily; the [per-row menu root and trigger](../web/src/lib/components/chat/transcript/ConversationMessage.svelte#L620) still mount. Compare their cost separately from the text renderer, without changing geometry or range. Before shipping, require equivalent selection, keyboard invocation, copy, disclosure and accessibility. Test plain text first, then code, tools, long messages and incoming output. A cheaper blank row is a useful control, not success.
-- **Trace the twelve-pane exit on its own.** Measure observer reattachment, per-feed projection, geometry reads and render phases between the trusted click and restored layout. Compare a single changed visible pane to eleven being revealed. Keep immediate stale-view fencing, correct drafts, pinned ends and detached anchors. This is a better target than suspending already hidden, quiet panes more aggressively.
+- **Keep real text and interactions.** Test individual visual changes against the live row's dimensions, content, controls and reading anchor. Repeat useful findings on code, tools, long messages and incoming output; a cheaper blank row is not success.
+- **Reduce the work that dirties layout on fullscreen transitions.** Skipping a getter is not the same as avoiding that work. Keep immediate stale-view fencing, correct drafts, pinned ends and detached anchors.
 - **Keep two scroll checks.** Use the uninstrumented wheel trains to track interactive latency and the independent output check to catch painted gaps. Neither can substitute for the other. A physical Linux GPU would test rasterization and presentation; a real iPhone would test touch momentum, the compact layout, keyboard and VoiceOver. Neither is necessary to reproduce the real-row cost in this report. The earlier [popup and stylesheet experiments](webkit-spa-responsiveness.md) cover separate bugs; there is no single proven cause of every slow action.
 
 ## Reproduce

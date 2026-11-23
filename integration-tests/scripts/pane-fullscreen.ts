@@ -8,7 +8,7 @@ import type { PersistedWorkspaceLayoutNode, PersistedWorkspaceLayoutV2 } from '.
 import { withTimeout } from '../support/deferred.js';
 import { createIntegrationFixture } from '../support/integration-fixture.js';
 import { requireCurrentWebBuild } from '../support/web-build-gate.js';
-import { fullscreenViewport, openFullscreenDriver } from './pane-fullscreen-driver.js';
+import { openPaneBenchmarkDriver, paneViewport } from './pane-benchmark-driver.js';
 import { installFullscreenProbe } from './pane-fullscreen-probe.js';
 
 const { values } = parseArgs({ options: {
@@ -82,7 +82,7 @@ try {
       await finished(chatId, started.turnId);
     }
   }
-  const d = await openFullscreenDriver(engine, values.webdriver);
+  const d = await openPaneBenchmarkDriver(engine, values.webdriver);
   try {
     const probe = <T>(method: string, ...args: unknown[]) =>
       d.evaluate<T>(`return window.fullscreenQA.${method}(...arguments);`, ...args);
@@ -98,9 +98,9 @@ try {
         ids.forEach((id, i) => localStorage.setItem('chat_draft_' + id, 'Synthetic draft ' + i));
       `, fixture.garcon.authToken, layout(ids.slice(0, panes)), ids);
       await d.navigate(fixture.garcon.baseUrl + '/chat/' + ids[0]);
-      const inner = await d.evaluate<typeof fullscreenViewport>(`return (${installFullscreenProbe})(arguments[0]);`, panes);
+      const inner = await d.evaluate<typeof paneViewport>(`return (${installFullscreenProbe})(arguments[0]);`, panes);
       emit({ kind: 'layout', version: d.version, panes, catalog, turnsPerChat, ...inner });
-      assert.deepEqual(inner, fullscreenViewport, 'Viewport mismatch; do not mix these conditions');
+      assert.deepEqual(inner, paneViewport, 'Viewport mismatch; do not mix these conditions');
       assertSnapshot(await probe<Snapshot>('snapshot'), panes, false);
       if (panes > 1) await probe('detachReader');
       assert.ok(Math.abs(await probe<number>('endGap')) <= 1, 'Expected an end-pinned active chat');

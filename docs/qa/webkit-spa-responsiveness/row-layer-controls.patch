@@ -1,0 +1,156 @@
+--- a/web/src/lib/components/chat/transcript/ConversationFeedVirtualRow.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationFeedVirtualRow.svelte
+@@ -0,0 +1,4 @@
++<script module lang="ts">
++	const probeTop = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('rowPosition') === 'top';
++</script>
++
+@@ -97 +101,2 @@
+-	style:transform={`translateY(${virtualItem.start}px)`}
++	style:top={probeTop ? `${virtualItem.start}px` : undefined}
++	style:transform={probeTop ? undefined : `translateY(${virtualItem.start}px)`}
+--- a/web/src/lib/components/chat/transcript/ConversationMessage.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationMessage.svelte
+@@ -0,0 +1,5 @@
++<script module lang="ts">
++	const inertRowMenuRequested = typeof location !== 'undefined' &&
++		new URLSearchParams(location.search).get('rowMenu') === 'inert';
++</script>
++
+@@ -72,0 +78,2 @@
++	import InertRowMenu from './InertRowMenu.svelte';
++	import InertRowMenuTrigger from './InertRowMenuTrigger.svelte';
+@@ -213,0 +221,4 @@
++	const inertRowMenu = $derived(inertRowMenuRequested &&
++		Boolean((asUser && !userMessagePresentation) || (asAssistant && !asAssistant.questions)));
++	const RowMenu = $derived(inertRowMenu ? InertRowMenu : ContextMenu);
++	const RowMenuTrigger = $derived(inertRowMenu ? InertRowMenuTrigger : ContextMenuTrigger);
+@@ -599 +610 @@
+-		onclick={openContextMenuFromButton}
++		onclick={inertRowMenu ? undefined : openContextMenuFromButton}
+@@ -620,2 +631,2 @@
+-				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
+-					<ContextMenuTrigger
++				<RowMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
++					<RowMenuTrigger
+@@ -695 +706 @@
+-					</ContextMenuTrigger>
++					</RowMenuTrigger>
+@@ -697 +708 @@
+-				</ContextMenu>
++				</RowMenu>
+@@ -834,2 +845,2 @@
+-						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
+-							<ContextMenuTrigger
++						<RowMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
++							<RowMenuTrigger
+@@ -860 +871 @@
+-							</ContextMenuTrigger>
++							</RowMenuTrigger>
+@@ -862 +873 @@
+-						</ContextMenu>
++						</RowMenu>
+--- /dev/null
++++ b/web/src/lib/components/chat/transcript/InertRowMenu.svelte
+@@ -0,0 +1,7 @@
++<script lang="ts">
++	import type { ContextMenu } from 'bits-ui';
++
++	let { children }: ContextMenu.RootProps = $props();
++</script>
++
++{@render children?.()}
+--- /dev/null
++++ b/web/src/lib/components/chat/transcript/InertRowMenuTrigger.svelte
+@@ -0,0 +1,28 @@
++<script lang="ts">
++	import type { ContextMenu } from 'bits-ui';
++
++	const uid = $props.id();
++	let {
++		children,
++		class: triggerClass,
++		disabled = false,
++		ref = $bindable(null),
++		'data-user-message-presentation': presentation,
++	}: ContextMenu.TriggerProps & { 'data-user-message-presentation'?: string } = $props();
++</script>
++
++<div
++	id={`bits-${uid}`}
++	class={triggerClass}
++	style="pointer-events: auto;"
++	data-slot="context-menu-trigger"
++	data-context-menu-trigger=""
++	data-state="closed"
++	data-disabled={disabled ? '' : undefined}
++	{...disabled ? { disabled: true } : {}}
++	data-user-message-presentation={presentation}
++	data-row-menu-probe="inert"
++	tabindex="-1"
++>
++	{@render children?.()}
++</div>
+--- a/web/src/lib/components/rich-text/Markdown.svelte
++++ b/web/src/lib/components/rich-text/Markdown.svelte
+@@ -14,0 +15 @@
++		type Token,
+@@ -20,0 +22,3 @@
++	import { cachedMarkdownParagraphs, rememberMarkdownParagraphs, simpleMarkdownKey } from './simple-markdown-paragraphs';
++
++	const simpleRowsEnabled = typeof location !== 'undefined' && new URLSearchParams(location.search).get('rowText') === 'simple';
+@@ -178,0 +183,8 @@
++	const simpleKey = $derived(simpleRowsEnabled
++		? simpleMarkdownKey(source, markdownOptions?.breaks ?? false, markdownExtensions === bareChatIdMarkdownExtensions)
++		: undefined);
++	const simpleParagraphs = $derived(simpleKey === undefined ? undefined : cachedMarkdownParagraphs(simpleKey));
++	const rememberParsed = $derived.by(() => {
++		const key = simpleKey;
++		return key === undefined ? undefined : (tokens: Token[]) => rememberMarkdownParagraphs(key, tokens);
++	});
+@@ -196 +208,6 @@
+-<div class={containerClass}>
++<div class={containerClass} data-row-text-probe={simpleParagraphs ? 'simple' : undefined}>
++	{#if simpleParagraphs}
++		{#each simpleParagraphs as text}
++			<div class="mb-1 last:mb-0 break-words">{text}</div>
++		{/each}
++	{:else}
+@@ -198,0 +216 @@
++		parsed={rememberParsed}
+@@ -305,0 +324 @@
++	{/if}
+--- /dev/null
++++ b/web/src/lib/components/rich-text/simple-markdown-paragraphs.ts
+@@ -0,0 +1,31 @@
++import { MemoryCache, type Token } from '@humanspeak/svelte-markdown';
++
++const MAX_SOURCE_LENGTH = 4096;
++const MAX_TOKENS = 128;
++const paragraphs = new MemoryCache<readonly string[]>({ maxSize: 128, ttl: 5 * 60_000 });
++
++export function simpleMarkdownKey(
++	source: string,
++	breaks: boolean,
++	bareChatReferences: boolean,
++): string | undefined {
++	if (!source.length || source.length > MAX_SOURCE_LENGTH) return undefined;
++	return `${Number(breaks)}${Number(bareChatReferences)}:${source}`;
++}
++
++export function cachedMarkdownParagraphs(key: string): readonly string[] | undefined {
++	return paragraphs.get(key);
++}
++
++export function rememberMarkdownParagraphs(key: string, tokens: readonly Token[]): void {
++	if (tokens.length > MAX_TOKENS) return;
++	const text: string[] = [];
++	for (const block of tokens) {
++		if (block.type === 'space') continue;
++		if (block.type !== 'paragraph' || ('imageOnly' in block && block.imageOnly) || block.tokens?.length !== 1) return;
++		const leaf = block.tokens[0];
++		if (leaf.type !== 'text' || leaf.tokens || typeof leaf.text !== 'string') return;
++		text.push(leaf.text);
++	}
++	if (text.length) paragraphs.set(key, text);
++}

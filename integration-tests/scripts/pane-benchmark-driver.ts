@@ -1,28 +1,33 @@
 import { chromium } from 'playwright';
 
-export interface FullscreenDriver {
+interface PaneBenchmarkDriver {
   version: string;
   navigate(url: string): Promise<void>;
   evaluate<T>(body: string, ...args: unknown[]): Promise<T>;
   click(x: number, y: number): Promise<void>;
+  wheel(x: number, y: number, deltaY: number): Promise<void>;
   shortcut(): Promise<void>;
   close(): Promise<void>;
 }
 
-export const fullscreenViewport = { width: 1840, height: 960 };
+export const paneViewport = { width: 1840, height: 960 };
 
-export async function openFullscreenDriver(
+export async function openPaneBenchmarkDriver(
   engine: 'chromium' | 'gtk', endpoint?: string,
-): Promise<FullscreenDriver> {
+): Promise<PaneBenchmarkDriver> {
   if (engine === 'chromium') {
     const browser = await chromium.launch({ headless: true });
     try {
-      const page = await browser.newPage({ viewport: fullscreenViewport, serviceWorkers: 'block' });
+      const page = await browser.newPage({ viewport: paneViewport, serviceWorkers: 'block' });
       return {
         version: browser.version(),
         navigate: async url => { await page.goto(url, { waitUntil: 'load' }); },
         evaluate: (body, ...args) => page.evaluate(`(function(){${body}}).apply(null,${JSON.stringify(args)})`),
         click: (x, y) => page.mouse.click(x, y),
+        wheel: async (x, y, deltaY) => {
+          await page.mouse.move(x, y);
+          await page.mouse.wheel(0, deltaY);
+        },
         shortcut: () => page.keyboard.press('Control+Shift+F'),
         close: () => browser.close(),
       };
@@ -49,7 +54,8 @@ export async function openFullscreenDriver(
   const session = await request('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'MiniBrowser' } } });
   const route = '/session/' + session.sessionId;
   const post = (path: string, payload: unknown) => request('POST', route + path, payload);
-  const driver: FullscreenDriver = {
+  let wheelSequence = 0;
+  const driver: PaneBenchmarkDriver = {
     version: session.capabilities.browserVersion,
     navigate: url => post('/url', { url }),
     async evaluate(body, ...args) {
@@ -64,6 +70,11 @@ export async function openFullscreenDriver(
       type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' },
       actions: [{ type: 'pointerMove', x, y }, { type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 }],
     }] }),
+    // WebKitGTK 2.50.6 delivers only the first notch when the same input source is reused.
+    wheel: (x, y, deltaY) => post('/actions', { actions: [{
+      type: 'wheel', id: 'wheel-' + ++wheelSequence,
+      actions: [{ type: 'scroll', x, y, deltaX: 0, deltaY, duration: 0 }],
+    }] }),
     shortcut: () => post('/actions', { actions: [{
       type: 'key', id: 'keyboard', actions: [
         { type: 'keyDown', value: '\uE009' }, { type: 'keyDown', value: '\uE008' },
@@ -75,13 +86,13 @@ export async function openFullscreenDriver(
   };
   try {
     await post('/timeouts', { script: 35_000, pageLoad: 35_000 });
-    await post('/window/rect', fullscreenViewport);
+    await post('/window/rect', paneViewport);
     const outer = await request('GET', route + '/window/rect');
-    const inner = await driver.evaluate<{ width: number; height: number }>('return { width: innerWidth, height: innerHeight };');
-    if (inner.width !== fullscreenViewport.width || inner.height !== fullscreenViewport.height) {
+    const inner = await driver.evaluate<typeof paneViewport>('return { width: innerWidth, height: innerHeight };');
+    if (inner.width !== paneViewport.width || inner.height !== paneViewport.height) {
       await post('/window/rect', {
-        width: outer.width + fullscreenViewport.width - inner.width,
-        height: outer.height + fullscreenViewport.height - inner.height,
+        width: outer.width + paneViewport.width - inner.width,
+        height: outer.height + paneViewport.height - inner.height,
       });
     }
     return driver;
