@@ -266,6 +266,16 @@ describe("Chromium New Chat composer layout", () => {
         await expectLocator(longModelTrigger).toHaveText(`Direct (Chat Completions) ${LONG_MODEL_LABEL}`);
         await expectLocator(addTrigger).toHaveCount(0);
         await expectLocator(settingsMenu).toHaveCount(0);
+        markPhase("dropping the agent prefix before folding any buttons");
+        await bottomBar.evaluate(bar => {
+          const [prompt, settings] = Array.from(bar.querySelectorAll('[data-composer-group]'),
+            group => group.getBoundingClientRect());
+          const spaceBetweenGroups = settings!.left - prompt!.right;
+          bar.style.width = `${Math.floor(bar.getBoundingClientRect().width - spaceBetweenGroups)}px`;
+        });
+        await expectLocator(longModelTrigger).toHaveText(LONG_MODEL_LABEL);
+        await expectLocator(addTrigger).toHaveCount(0);
+        await expectLocator(settingsMenu).toHaveCount(0);
         markPhase("folding the focused permission picker without activating Project Path");
         const permissionTrigger = bottomBar.getByRole("button", { name: /^Permission mode:/ });
         await permissionTrigger.press("ArrowDown");

@@ -41,14 +41,22 @@ describe('composer toolbar fit', () => {
 		expect(fit.settingsMenu).toBe(true);
 	});
 
-	it('never removes a short agent prefix to promote a shortcut as the tile grows', () => {
-		const modes = new Set<string>();
-		for (let pixels = 120; pixels <= 640; pixels++) {
-			const { modelDisplay } = fitComposerToolbar(chat, pixels / 16, { model: 7, combined: 8 });
-			if (modes.has('combined')) expect(modelDisplay).toBe('combined');
-			modes.add(modelDisplay);
+	it('drops the agent prefix before moving a button into either menu', () => {
+		for (const [width, modelDisplay] of [[37.75, 'combined'], [29.75, 'model']] as const) {
+			const fit = fitComposerToolbar(chat, width, labels);
+			expect(fit.inline).toEqual(new Set([...chat.prompt, ...chat.settings]));
+			expect(fit).toMatchObject({ promptMenu: false, settingsMenu: false, modelDisplay });
 		}
-		expect([...modes]).toEqual(['overflow', 'model', 'combined']);
+	});
+
+	it('uses spare space for a short prefix without delaying the next button', () => {
+		const shortPrefix = { model: 7, combined: 8 };
+		const spare = fitComposerToolbar(chat, 15.75, shortPrefix);
+		expect([...spare.inline]).toEqual(['model']);
+		expect(spare.modelDisplay).toBe('combined');
+		const nextButton = fitComposerToolbar(chat, 17.25, shortPrefix);
+		expect([...nextButton.inline]).toEqual(['model', 'executor']);
+		expect(nextButton.modelDisplay).toBe('model');
 	});
 
 	it('preserves cancellation and a configurable bypass ahead of ordinary controls', () => {
