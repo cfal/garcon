@@ -45,6 +45,10 @@
 <Dialog.Root open={true} requestClose={onClose}>
 	<Dialog.Content
 		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 sm:max-w-none"
+		onkeydowncapture={(event) => {
+			if (event.key === 'Escape' && (event.isComposing || event.keyCode === 229))
+				event.stopPropagation();
+		}}
 		onOpenAutoFocus={(event) => {
 			event.preventDefault();
 			textareaElement?.focus();
