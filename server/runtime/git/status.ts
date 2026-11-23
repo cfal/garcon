@@ -195,7 +195,7 @@ function creatorDateIso(value: string | undefined): string | null {
 type AttachedBranch = { branch: string; ref: string };
 type GitHeadIdentity = AttachedBranch | { branch: null; oid: string };
 
-function parseGitRefLine(line: string, head: GitHeadIdentity | undefined): GitRefOption | null {
+function parseGitRefLine(line: string, detachedOid: string | undefined): GitRefOption | null {
   if (!line) return null;
   const [refname, objectName, creatorDate, headMarker] = line.split('\0');
   if (!refname) return null;
@@ -205,7 +205,7 @@ function parseGitRefLine(line: string, head: GitHeadIdentity | undefined): GitRe
   const isCurrent =
     kind === 'local-branch'
       ? headMarker === '*'
-      : head?.branch === null && Boolean(head.oid) && objectName === head.oid;
+      : Boolean(detachedOid) && objectName === detachedOid;
   return {
     name,
     ref: refname,
@@ -215,6 +215,11 @@ function parseGitRefLine(line: string, head: GitHeadIdentity | undefined): GitRe
   };
 }
 
+// Ref names can end in Unicode whitespace; only Git's line ending is formatting.
+function stripGitLineEnding(stdout: string): string {
+  return stdout.replace(/\r?\n$/, '');
+}
+
 async function readAttachedBranch(
   projectPath: string,
   signal?: AbortSignal,
@@ -222,7 +227,7 @@ async function readAttachedBranch(
   try {
     // Revision lookup can select refs/HEAD instead of an unborn branch.
     const { stdout } = await runGit(projectPath, ['symbolic-ref', '--quiet', 'HEAD'], readOnlyGitOptions({ signal }));
-    const ref = stdout.replace(/\r?\n$/, '');
+    const ref = stripGitLineEnding(stdout);
     const prefix = 'refs/heads/';
     if (ref.startsWith(prefix)) return { branch: ref.slice(prefix.length), ref };
   } catch (error) {
@@ -251,7 +256,7 @@ async function hasHeadCommit(projectPath: string): Promise<boolean> {
   }
 }
 
-async function readCheckedOutRefFields(projectPath: string, ref: string, ...fields: string[]): Promise<string[]> {
+async function verifyCheckedOutRef(projectPath: string, ref: string, ...fields: string[]): Promise<string[]> {
   const format = ['%(HEAD)', ...fields].join('%00');
   const { stdout } = await runGit(
     projectPath,
@@ -259,7 +264,7 @@ async function readCheckedOutRefFields(projectPath: string, ref: string, ...fiel
     readOnlyGitOptions({ env: { LC_ALL: 'C' } }),
   );
   // Git checks existence and the original ref bytes, even if UTF-8 decoding lost the distinction.
-  const [marker, ...values] = stdout.replace(/\r?\n$/, '').split('\0');
+  const [marker, ...values] = stripGitLineEnding(stdout).split('\0');
   if (marker !== '*') {
     throw new GitDomainError('INVALID_INPUT', 'The checked-out branch has no commits or its exact name could not be verified.');
   }
@@ -506,10 +511,12 @@ export function createStatusOperations() {
     if (identityResult.status === 'rejected' && signal?.aborted) throw identityResult.reason;
     if (refResult.status === 'rejected') throw refResult.reason;
 
-    const head = identityResult.status === 'fulfilled' ? identityResult.value : undefined;
+    const detachedOid = identityResult.status === 'fulfilled' && identityResult.value.branch === null
+      ? identityResult.value.oid
+      : undefined;
     const refs = refResult.value.stdout
       .split('\n')
-      .map((line) => parseGitRefLine(line, head))
+      .map((line) => parseGitRefLine(line, detachedOid))
       .filter((ref): ref is GitRefOption => Boolean(ref));
     return { refs };
   }
@@ -560,7 +567,7 @@ export function createStatusOperations() {
     const head = await readGitHeadIdentity(projectPath);
     if (head.branch === null) return statusWithoutUpstream(projectPath, 'HEAD');
 
-    const [remoteName, remoteBranch, track] = await readCheckedOutRefFields(
+    const [remoteName, remoteBranch, track] = await verifyCheckedOutRef(
       projectPath, head.ref, '%(upstream:remotename)', '%(upstream:short)', '%(upstream:track,nobracket)',
     );
     if (!remoteName || !remoteBranch || track === 'gone') {
@@ -667,7 +674,7 @@ export function createStatusOperations() {
     if (remoteBranch !== undefined && remoteBranch !== head.branch) {
       throw new GitDomainError('INVALID_INPUT', 'Remote branch must match the current local branch.');
     }
-    await readCheckedOutRefFields(projectPath, head.ref);
+    await verifyCheckedOutRef(projectPath, head.ref);
 
     await pushBranchRef(projectPath, targetRemote, head.ref, networkGitOptions());
     return {

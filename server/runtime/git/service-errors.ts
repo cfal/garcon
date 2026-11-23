@@ -17,8 +17,10 @@ function boundedServiceError(domain: Domain, { code, message }: { code: string; 
   const candidate = code === 'GIT_LOCKED' || code === 'GH_MISSING' ? code : `${domain.toUpperCase()}_${code}`;
   const fallback = domain === 'git' ? 'GIT_OPERATION_FAILED' : 'GH_OPERATION_FAILED';
   const serviceCode = isGitServiceErrorCode(candidate) ? candidate : fallback;
-  const redacted = message.includes('://') ? message.replace(/\S+/g, word => word.includes('://') ? '<remote>' : word) : message;
-  return new GitServiceError(serviceCode, redacted.slice(0, GIT_ERROR_MESSAGE_LIMIT));
+  if (message.includes('://')) {
+    message = message.replace(/\S+/g, word => word.includes('://') ? '<remote>' : word);
+  }
+  return new GitServiceError(serviceCode, message.slice(0, GIT_ERROR_MESSAGE_LIMIT));
 }
 
 export function gitServiceError(error: unknown, domain: Domain = 'git'): Error {

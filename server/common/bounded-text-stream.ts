@@ -8,23 +8,22 @@ export async function readTextStreamPrefix(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   const chunks: string[] = [];
-  let byteCount = 0;
+  let remainingBytes = maxBytes;
   try {
     while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      const remainingBytes = maxBytes - byteCount;
-      if (next.value.byteLength > remainingBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      let chunk = value;
+      if (chunk.byteLength > remainingBytes) {
         onTruncate?.();
         onTruncate = undefined;
-        if (remainingBytes > 0) {
-          chunks.push(decoder.decode(next.value.subarray(0, remainingBytes), { stream: true }));
-          byteCount = maxBytes;
-        }
-        continue;
+        if (remainingBytes <= 0) continue;
+        chunk = chunk.subarray(0, remainingBytes);
+        remainingBytes = 0;
+      } else {
+        remainingBytes -= chunk.byteLength;
       }
-      byteCount += next.value.byteLength;
-      chunks.push(decoder.decode(next.value, { stream: true }));
+      chunks.push(decoder.decode(chunk, { stream: true }));
     }
     chunks.push(decoder.decode());
     return chunks.join('');

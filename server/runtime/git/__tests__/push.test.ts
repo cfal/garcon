@@ -204,30 +204,29 @@ test('distinguishes up-to-date, behind and diverged upstreams', async () => {
 });
 
 test.each([
-  { alias: 'refs/refs/heads/main', onlyRef: true, joined: false },
-  { alias: 'refs/heads/refs/heads/main', onlyRef: false, joined: true },
-  { alias: 'refs/remotes/refs/heads/main/HEAD', onlyRef: false, joined: false },
+  { alias: 'refs/refs/heads/main', seedOtherBranch: false, joinedHookOutput: false },
+  { alias: 'refs/heads/refs/heads/main', seedOtherBranch: true, joinedHookOutput: true },
+  { alias: 'refs/remotes/refs/heads/main/HEAD', seedOtherBranch: true, joinedHookOutput: false },
 ])(
-  'does not update or confirm a Git-expanded destination at a global push URL: $alias', async ({ alias, onlyRef, joined }) => {
+  'does not update or confirm a Git-expanded destination at a global push URL: $alias', async ({ alias, seedOtherBranch, joinedHookOutput }) => {
     const { git, root, projectPath } = await executorRuntimeFixture();
-    const exact = path.join(root, 'exact.git');
-    const ambiguous = path.join(root, 'ambiguous.git');
-    const last = path.join(root, 'last.git');
+    const exact = await createBareRemote(root, 'exact.git');
+    const ambiguous = await createBareRemote(root, 'ambiguous.git');
+    const last = joinedHookOutput ? await createBareRemote(root, 'last.git') : undefined;
     await runGit(projectPath, ['config', '--global', 'remote.origin.url', exact]);
-    for (const remote of joined ? [exact, ambiguous, last] : [exact, ambiguous]) {
-      await runGit(root, ['init', '--bare', remote]);
+    for (const remote of last ? [exact, ambiguous, last] : [exact, ambiguous]) {
       await runGit(projectPath, ['config', '--global', '--add', 'remote.origin.pushurl', remote]);
     }
-    await runGit(projectPath, ['push', ambiguous, `HEAD:${alias}`, ...(onlyRef ? [] : ['HEAD:refs/heads/other'])]);
+    await runGit(projectPath, ['push', ambiguous, `HEAD:${alias}`, ...(seedOtherBranch ? ['HEAD:refs/heads/other'] : [])]);
     const before = await listRefs(ambiguous);
     await runGit(projectPath, ['commit', '--allow-empty', '-m', 'Advance main']);
     const tip = await oid(projectPath);
-    if (joined) await installHook(projectPath, 'pre-push', 'printf "checking refs: "');
+    if (joinedHookOutput) await installHook(projectPath, 'pre-push', 'printf "checking refs: "');
 
     await expect(git.push({ projectPath, remoteBranch: 'main' })).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
     expect(await listRefs(exact)).toBe(`refs/heads/main ${tip}\n`);
     expect(await listRefs(ambiguous)).toBe(before);
-    if (joined) expect(await listRefs(last)).toBe(`refs/heads/main ${tip}\n`);
+    if (last) expect(await listRefs(last)).toBe(`refs/heads/main ${tip}\n`);
   },
 );
 
@@ -260,10 +259,14 @@ test('does not pair a hook preview row with a skipped destination', async () => 
 test.each(['unterminated', 'truncated'])('an interrupted push reports its cancellation and only complete rejection reasons (%s stdout)', async capture => {
   const { git, projectPath, remote } = await pushFixture();
   const row = '!\trefs/heads/main:refs/heads/main\t[rejected]';
-  const output = ['private-hook-output', 'To first', row + ' (fetch first)',
+  const output = [
+    'private-hook-output',
+    'To incomplete', row + ' (needs force)',
+    'To first', row + ' (fetch first)',
     '!\trefs/tags/v1:refs/tags/v1\t[remote rejected] (custom receiver detail)',
     '!\trefs/tags/v2:refs/tags/v2\t[remote rejected] (hook declined)\textra field', 'Done',
-    'To second', row + ' (non-fast-forward)', 'Done'].join('\n');
+    'To second', row + ' (non-fast-forward)', 'Done',
+  ].join('\n');
   const overflow = capture === 'truncated' ? "printf '%02000000d' 0" : '';
   await installHook(projectPath, 'pre-push', `printf '%s' '${output}'\n${overflow}\n: > .git/push-ready\nexec sleep 30`);
   const abort = new AbortController();

@@ -1,7 +1,7 @@
 import { GitDomainError } from './git-domain-error.js';
 import { gitMutationDispatched, gitOutputTruncated, isGitCancellation } from './operation-context.js';
 import { runGit } from './run.js';
-import type { GitCommandOptions, GitCommandResult, GitProcessError } from './types.js';
+import type { GitCommandOptions, GitProcessError } from './types.js';
 
 // Pre-push hook output shares stdout with Git's per-URL porcelain reports.
 const PUSH_REPORT_MAX_BYTES = 1024 * 1024;
@@ -21,24 +21,19 @@ function parseRefStatus(line = '') {
 }
 
 function readPushReport(stdout: string, refspec: string) {
-  let confirmed = /(?:^|\n)Done\r?\n$/.test(stdout);
-  const rejections = new Set<string>();
   const lines = stdout.split(/\r?\n/);
+  let confirmed = lines.at(-2) === 'Done' && lines.at(-1) === '';
+  const rejections = new Set<string>();
   let index = 0;
   while (index < lines.length) {
-    const line = lines[index];
-    let row = parseRefStatus(line);
+    const line = lines[index++];
+    let row = line.startsWith('To ') ? parseRefStatus(lines[index]) : undefined;
     if (!row) {
-      // A skipped URL's Done can follow hook text on the same line. A To header precedes a row.
-      if (line.endsWith('Done') && !(line.startsWith('To ') && parseRefStatus(lines[index + 1]))) {
-        confirmed = false;
-      }
-      index++;
+      // A skipped destination's Done can share a line with hook output.
+      if (line.endsWith('Done') || parseRefStatus(line)) confirmed = false;
       continue;
     }
 
-    // A hook can print status rows of its own. Only Git's To/rows/Done frame counts.
-    const hasHeader = index > 0 && lines[index - 1].startsWith('To ');
     const blockRejections = new Set<string>();
     let branchAccepted = false;
     while (row) {
@@ -47,22 +42,15 @@ function readPushReport(stdout: string, refspec: string) {
       index++;
       row = parseRefStatus(lines[index]);
     }
-    if (hasHeader && lines[index] === 'Done' && index < lines.length - 1) {
-      for (const reason of blockRejections) rejections.add(reason);
-      if (!branchAccepted) confirmed = false;
-    } else {
+    if (lines[index] !== 'Done' || index === lines.length - 1) {
       confirmed = false;
+      continue;
     }
     index++;
+    for (const reason of blockRejections) rejections.add(reason);
+    if (!branchAccepted) confirmed = false;
   }
   return { confirmed, rejections };
-}
-
-function unconfirmedPush(rejections: Set<string>, interrupted = false): GitDomainError {
-  const lines = ['Git did not confirm the push. Inspect the remote before pushing again.'];
-  if (interrupted) lines.push('Git push was cancelled or timed out.');
-  if (gitOutputTruncated()) lines.push('Git push output was truncated.');
-  return new GitDomainError('MUTATION_OUTCOME_UNKNOWN', [...lines, ...rejections].join('\n'));
 }
 
 export async function pushBranchRef(projectPath: string, remote: string, ref: string, options: GitCommandOptions): Promise<void> {
@@ -70,19 +58,29 @@ export async function pushBranchRef(projectPath: string, remote: string, ref: st
   // Git expands even full destinations. Wildcards exclude writable aliases without requiring them
   // in submodules; tags are left to Git's ordinary non-force and follow-tags rules.
   const excludedAliases = ['refs', 'refs/heads', 'refs/remotes'].map(prefix => `^${prefix}/${ref}*`);
-  let result: GitCommandResult;
+  let stdout: string;
+  let exit: 'exited-zero' | 'failed' | 'interrupted';
   try {
-    result = await runGit(projectPath, ['push', '--porcelain', remote, refspec, ...excludedAliases], {
+    const result = await runGit(projectPath, ['push', '--porcelain', remote, refspec, ...excludedAliases], {
       ...options, maxStdoutBytes: PUSH_REPORT_MAX_BYTES, maxStderrBytes: 0,
     });
+    stdout = result.stdout;
+    exit = 'exited-zero';
   } catch (error) {
     const failure: GitProcessError | undefined = error instanceof Error ? error : undefined;
-    const stdout = typeof failure?.stdout === 'string' ? failure.stdout : undefined;
+    const captured = typeof failure?.stdout === 'string' ? failure.stdout : undefined;
     const interrupted = isGitCancellation(error);
-    if (!gitMutationDispatched() && (stdout === undefined || interrupted)) throw error;
-    const { rejections } = readPushReport(stdout ?? '', refspec);
-    throw unconfirmedPush(rejections, interrupted);
+    if (!gitMutationDispatched() && (captured === undefined || interrupted)) throw error;
+    stdout = captured ?? '';
+    exit = interrupted ? 'interrupted' : 'failed';
   }
-  const { confirmed, rejections } = readPushReport(result.stdout, refspec);
-  if (!confirmed || gitOutputTruncated()) throw unconfirmedPush(rejections);
+
+  const { confirmed, rejections } = readPushReport(stdout, refspec);
+  const truncated = gitOutputTruncated();
+  if (exit === 'exited-zero' && confirmed && !truncated) return;
+
+  const lines = ['Git did not confirm the push. Inspect the remote before pushing again.'];
+  if (exit === 'interrupted') lines.push('Git push was cancelled or timed out.');
+  if (truncated) lines.push('Git push output was truncated.');
+  throw new GitDomainError('MUTATION_OUTCOME_UNKNOWN', [...lines, ...rejections].join('\n'));
 }
