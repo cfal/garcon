@@ -53,6 +53,11 @@ test('reports command outcomes, reveals after tree startup, and restores status 
       await Promise.all(el.getAnimations().map(animation => animation.finished));
     });
     const top = await search.evaluate(el => el.getBoundingClientRect().top);
+    await search.fill('file');
+    await palette.getByRole('listbox').click({ position: { x: 2, y: 2 } });
+    const highlighted = await search.getAttribute('aria-activedescendant');
+    await page.keyboard.press('ArrowDown');
+    await browserExpect(search).not.toHaveAttribute('aria-activedescendant', highlighted!);
     await search.fill('no-such-fixture-command-00000');
     await browserExpect(palette.getByRole('option')).toHaveCount(0);
     expect(await search.evaluate(el => el.getBoundingClientRect().top)).toBeCloseTo(top, 0);

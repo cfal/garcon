@@ -122,7 +122,8 @@
 			if (e.key === 'Escape') e.stopPropagation();
 			return;
 		}
-		if (e.target instanceof HTMLButtonElement && e.target.matches('[role="option"]')) {
+		if (e.target instanceof HTMLButtonElement) {
+			if (!e.target.matches('[role="option"]')) return;
 			if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
 			e.preventDefault();
 			const options = Array.from(
@@ -132,7 +133,6 @@
 			options[options.indexOf(e.target) + delta]?.focus();
 			return;
 		}
-		if (e.target !== inputRef) return;
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
@@ -169,6 +169,7 @@
 			class="top-[20%] translate-y-0 grid-cols-1 gap-0 overflow-hidden rounded-md bg-popover p-0 shadow-2xl"
 			showCloseButton={false}
 			aria-label={m.command_command_palette()}
+			tabindex={-1}
 			onkeydowncapture={handleKeydown}
 			onOpenAutoFocus={(event) => {
 				event.preventDefault();
