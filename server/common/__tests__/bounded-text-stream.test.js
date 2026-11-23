@@ -38,10 +38,12 @@ describe('bounded text streams', () => {
     reader.releaseLock();
   });
 
-  test.each([0, 1, 2, 3, 4, 8])('retains at most %i bytes while draining all chunks', async (limit) => {
-    const bytes = encoder.encode('a\u00e9xyz');
+  test.each([0, 1, 2, 3, 4, 8, 9, 10])('retains at most %i bytes while draining all chunks', async (limit) => {
+    const bytes = encoder.encode('\ufeffa\u00e9xyz');
     const stream = streamOf(bytes.subarray(0, 2), bytes.subarray(2, 4), bytes.subarray(4));
-    expect(await readTextStreamPrefix(stream, limit)).toBe(new TextDecoder().decode(bytes.subarray(0, limit)));
+    let truncations = 0;
+    expect(await readTextStreamPrefix(stream, limit, () => truncations++)).toBe(new TextDecoder().decode(bytes.subarray(0, limit)));
+    expect(truncations).toBe(bytes.length > limit ? 1 : 0);
     expect(stream.locked).toBe(false);
     const reader = stream.getReader();
     expect((await reader.read()).done).toBe(true);

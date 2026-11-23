@@ -8,6 +8,14 @@ import { withGitOperation } from "../operation-context.js";
 const fakeGitScript = `#!${process.execPath}
 const argv = process.argv.slice(2);
 const cmd = argv[0];
+if (cmd === "symbolic-ref" && argv[2] === "HEAD") {
+  console.log("refs/heads/main");
+  process.exit(0);
+}
+if (cmd === "for-each-ref" && argv.includes("--format=%(HEAD)") && argv.at(-1) === "refs/heads/main") {
+  console.log("*");
+  process.exit(0);
+}
 if (cmd === "rev-parse") {
   if (argv.includes("--is-inside-work-tree")) {
     console.log("true");
@@ -24,8 +32,11 @@ if (cmd === "fetch" || cmd === "pull" || cmd === "push") {
     process.env.FAKE_GIT_RECORD,
     JSON.stringify({ argv, terminalPrompt: process.env.GIT_TERMINAL_PROMPT ?? null }) + "\\n",
   );
-  if (process.env.FAKE_GIT_SLEEP === "1") await new Promise(() => {});
-  console.log("network ok");
+  if (process.env.FAKE_GIT_SLEEP === "1") {
+    console.error("Waiting for remote acknowledgment");
+    await new Promise(() => {});
+  }
+  console.log(cmd === "push" ? "To /repos/origin\\n=\\trefs/heads/main:refs/heads/main\\t[up to date]\\nDone" : "network ok");
   process.exit(0);
 }
 console.log("");
@@ -91,7 +102,10 @@ describe("network git options wiring", () => {
     expect(calls).toEqual([
       { command: "fetch", args: ["origin"], terminalPrompt: "0" },
       { command: "pull", args: ["origin", "main"], terminalPrompt: "0" },
-      { command: "push", args: ["origin", "main:main"], terminalPrompt: "0" },
+      { command: "push", args: [
+        "--porcelain", "origin", "refs/heads/main:refs/heads/main", "^refs/refs/heads/main*",
+        "^refs/heads/refs/heads/main*", "^refs/remotes/refs/heads/main*",
+      ], terminalPrompt: "0" },
     ]);
   });
 
@@ -101,9 +115,10 @@ describe("network git options wiring", () => {
     try {
       const runs = await Promise.all(["fetch", "pull", "push"].map(async (op) => {
         const startedAt = performance.now();
-        await expect(withGitOperation(projectPath, { timeoutMs: 2000 }, () => operations[op]({ projectPath }))).rejects.toMatchObject({
-          aborted: true,
-        });
+        const call = withGitOperation(projectPath, { timeoutMs: 2000, mutation: op === "push" }, () => operations[op]({ projectPath }));
+        await expect(call).rejects.toMatchObject(op === "push"
+          ? { code: "MUTATION_OUTCOME_UNKNOWN", message: "Git did not confirm the push. Inspect the remote before pushing again.\nGit push was cancelled or timed out." }
+          : { aborted: true });
         return performance.now() - startedAt;
       }));
       for (const elapsed of runs) {

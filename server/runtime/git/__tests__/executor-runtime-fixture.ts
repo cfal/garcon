@@ -6,6 +6,11 @@ import { runGit } from '../run.js';
 import type { GitReviewDocumentRegistry } from '../review-document-registry.js';
 
 const cleanups: Array<() => Promise<unknown>> = [];
+export function runFixtureGit(cwd: string, args: string[]) {
+  // Bun's test-scoped environment is not necessarily the native process's inherited environment.
+  return runGit(cwd, args, { env: process.env });
+}
+
 export async function cleanupExecutorRuntimeFixtures(): Promise<void> {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 }
@@ -17,12 +22,12 @@ export async function executorRuntimeFixture(reviewRegistry?: GitReviewDocumentR
   cleanups.push(() => fs.rm(root, { force: true, recursive: true }));
   const projectPath = path.join(root, 'repo');
   await fs.mkdir(projectPath);
-  await runGit(projectPath, ['init', '-b', 'main']);
-  await runGit(projectPath, ['config', 'user.email', 'test@example.invalid']);
-  await runGit(projectPath, ['config', 'user.name', 'Synthetic Author']);
+  await runFixtureGit(projectPath, ['init', '-b', 'main']);
+  await runFixtureGit(projectPath, ['config', 'user.email', 'test@example.invalid']);
+  await runFixtureGit(projectPath, ['config', 'user.name', 'Synthetic Author']);
   await fs.writeFile(path.join(projectPath, 'tracked.txt'), 'initial\n');
-  await runGit(projectPath, ['add', '.']);
-  await runGit(projectPath, ['commit', '-m', 'initial']);
+  await runFixtureGit(projectPath, ['add', '.']);
+  await runFixtureGit(projectPath, ['commit', '-m', 'initial']);
   const runtime = new GitRuntime({
     executorId: 'local', instanceId: 'test-instance', projectBasePath: root,
     assertAvailable() {}, reviewRegistry,
