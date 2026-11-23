@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Editor, type TiptapEditorHTMLElement } from '@tiptap/core';
+import { EditorView } from '@tiptap/pm/view';
 import ComposerMarkdownEditor from '../ComposerMarkdownEditor.svelte';
 import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
 import { parseComposerMarkdown } from '../composer-markdown-parser.js';
@@ -17,7 +18,7 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 	const onSnippet = vi.fn<(text: string, caret: number) => boolean>(() => handsOverSnippets);
 	const onOverflow = vi.fn<(source: string) => void>();
 	const onMarkdownPaste = vi.fn<(source: string, caret: number) => void>();
-	render(ComposerMarkdownEditor, {
+	const { rerender } = render(ComposerMarkdownEditor, {
 		...parsed,
 		readOnly: false,
 		snippetTrigger: ';;',
@@ -33,7 +34,7 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 		onOverflow,
 	});
 	const editor = (screen.getByRole('textbox') as TiptapEditorHTMLElement).editor!;
-	return { editor, onChange, onMention, onSnippet, onOverflow, onMarkdownPaste };
+	return { editor, onChange, onMention, onSnippet, onOverflow, onMarkdownPaste, rerender };
 }
 
 function type(editor: ReturnType<typeof mount>['editor'], text: string) {
@@ -73,6 +74,44 @@ it('bundles the same base rules as the installed Tiptap editor', () => {
 		expect(rules(bundled)).toEqual(rules(injected!));
 	} finally {
 		reference.destroy();
+	}
+});
+
+it('leaves the initial empty caret and editability in place until read-only changes', async () => {
+	const dispatch = vi.spyOn(EditorView.prototype, 'dispatch');
+	const setEditable = vi.spyOn(Editor.prototype, 'setEditable');
+	try {
+		const { editor, rerender } = mount('');
+		expect({
+			caretTransactions: dispatch.mock.calls.filter(([tr]) => tr.selectionSet).length,
+			editabilityRefreshes: setEditable.mock.calls.length,
+		}).toEqual({ caretTransactions: 0, editabilityRefreshes: 0 });
+		expect(editor.state.selection.from).toBe(1);
+
+		await rerender({ placeholder: 'New placeholder' });
+		expect(editor.view.dom.querySelector('p')?.getAttribute('data-placeholder')).toBe('New placeholder');
+		await rerender({ readOnly: true });
+		expect(editor.isEditable).toBe(false);
+		expect(editor.view.dom.tabIndex).toBe(-1);
+		await rerender({ readOnly: false });
+		expect(editor.isEditable).toBe(true);
+		expect(editor.view.dom.tabIndex).toBe(0);
+	} finally {
+		dispatch.mockRestore();
+		setEditable.mockRestore();
+	}
+});
+
+it('publishes an ordinary edit without walking the document for the node limit', () => {
+	const { editor, onChange } = mount('Draft');
+	const edit = editor.state.tr.insertText(' changed');
+	const walk = vi.spyOn(edit.doc, 'descendants');
+	try {
+		editor.view.dispatch(edit);
+		expect(onChange).toHaveBeenLastCalledWith('Draft changed');
+		expect(walk).not.toHaveBeenCalled();
+	} finally {
+		walk.mockRestore();
 	}
 });
 

@@ -13,8 +13,8 @@
 	import { composerMarkdownNewline } from './composer-markdown-newline.js';
 	import { ComposerMarkdownCache } from './composer-markdown-cache.js';
 	import {
+		exceedsComposerMarkdownNodeLimit,
 		MAX_COMPOSER_MARKDOWN_LENGTH,
-		MAX_COMPOSER_MARKDOWN_NODES,
 	} from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
@@ -81,18 +81,21 @@
 		onOverflow: (source: string) => void;
 	} = $props();
 	let container: HTMLDivElement;
-	let editor: Editor | undefined = $state.raw();
+	const viewOptions = $derived({
+		editable: !readOnly,
+		placeholder,
+		label: m.chat_composer_formatted_markdown(),
+	});
 	onMount(() => {
+		let appliedViewOptions = viewOptions;
 		const extensions = composerMarkdownEditorExtensions();
 		const cache = new ComposerMarkdownCache(composerMarkdownCodec.serialize);
-		const topLevel = (doc: DocumentNode) =>
-			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
-		let original: DocumentNode[] = [];
+		let original: readonly DocumentNode[] = [];
 		let originalSources: (string | null)[] = [];
 		// Native history retains fragments; their source baselines avoid lossy reserialization on Undo.
 		const sourceHistory = new WeakMap<
 			DocumentNode['content'],
-			{ original: DocumentNode[]; sources: (string | null)[] }
+			{ original: readonly DocumentNode[]; sources: (string | null)[] }
 		>();
 		const rememberSource = (doc: DocumentNode) => {
 			sourceHistory.set(doc.content, { original, sources: originalSources });
@@ -101,7 +104,7 @@
 			planComposerMarkdownBlocks(
 				original,
 				originalSources,
-				topLevel(doc),
+				doc.children,
 				(a, b) => a === b || a.eq(b),
 			);
 		let mentionOpen = false;
@@ -181,7 +184,7 @@
 				(parsed.selectionMarks ?? []).map((mark) => mountedEditor.schema.markFromJSON(mark)),
 			);
 			rememberSource(mountedEditor.state.doc);
-			original = topLevel(transaction.doc);
+			original = transaction.doc.children;
 			originalSources = parsed.sources;
 			rememberSource(transaction.doc);
 			mountedEditor.view.dispatch(transaction);
@@ -246,27 +249,19 @@
 			extensions: [
 				...extensions,
 				composerMarkdownEmptyMarks,
-				Placeholder.configure({ placeholder: () => placeholder }),
+				Placeholder.configure({ placeholder: () => viewOptions.placeholder }),
 				composerMarkdownTableInput(composerMarkdownCodec.parse),
 				...(initialSelection !== undefined && selectionMarks
 					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
 					: []),
 			],
 			content: documentContent,
-			editable: !readOnly,
+			editable: appliedViewOptions.editable,
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
 				const source = serialize(doc);
-				let nodeCount = 1;
-				doc.descendants(() => {
-					nodeCount++;
-					return nodeCount <= MAX_COMPOSER_MARKDOWN_NODES;
-				});
-				if (
-					source.length > MAX_COMPOSER_MARKDOWN_LENGTH ||
-					nodeCount > MAX_COMPOSER_MARKDOWN_NODES
-				) {
+				if (source.length > MAX_COMPOSER_MARKDOWN_LENGTH || exceedsComposerMarkdownNodeLimit(doc)) {
 					onOverflow(source);
 					return;
 				}
@@ -299,8 +294,8 @@
 			editorProps: {
 				attributes: () => ({
 					role: 'textbox',
-					tabindex: readOnly ? '-1' : '0',
-					'aria-label': m.chat_composer_formatted_markdown(),
+					tabindex: viewOptions.editable ? '0' : '-1',
+					'aria-label': viewOptions.label,
 					'aria-multiline': 'true',
 				}),
 				handleKeyDown(_view, event) {
@@ -357,25 +352,27 @@
 				},
 			},
 		});
-		editor = mountedEditor;
-		original = topLevel(mountedEditor.state.doc);
+		original = mountedEditor.state.doc.children;
 		originalSources = sources.length === original.length ? sources : original.map(() => null);
+		rememberSource(mountedEditor.state.doc);
+		const restored = mountedEditor.state.tr;
 		const selection =
 			initialSelection === undefined
-				? resolveFocusPosition(mountedEditor.state.doc, 'end')
-				: TextSelection.create(mountedEditor.state.doc, initialSelection);
-		if (selection) mountedEditor.view.dispatch(mountedEditor.state.tr.setSelection(selection));
+				? resolveFocusPosition(restored.doc, 'end')
+				: TextSelection.create(restored.doc, initialSelection);
+		if (selection && (!selection.eq(restored.selection) || restored.storedMarks !== null))
+			restored.setSelection(selection);
 		if (selectionMarks)
-			mountedEditor.view.dispatch(
-				mountedEditor.state.tr.setStoredMarks(
-					selectionMarks.map((mark) => mountedEditor.schema.markFromJSON(mark)),
-				),
-			);
+			restored.setStoredMarks(selectionMarks.map((mark) => mountedEditor.schema.markFromJSON(mark)));
+		if (restored.selectionSet || restored.storedMarksSet) mountedEditor.view.dispatch(restored);
 		onReady(mountedEditor.view.dom);
+		$effect(() => {
+			// setEditable refreshes view attributes and decorations even when no option changed.
+			if (viewOptions === appliedViewOptions) return;
+			appliedViewOptions = viewOptions;
+			mountedEditor.setEditable(appliedViewOptions.editable, false);
+		});
 		return () => mountedEditor.destroy();
-	});
-	$effect(() => {
-		editor?.setEditable(!readOnly, false);
 	});
 </script>
 

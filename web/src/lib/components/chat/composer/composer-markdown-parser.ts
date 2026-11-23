@@ -64,9 +64,19 @@ function wrapBlockImages(node: JSONContent): JSONContent {
 	};
 }
 
+function parseTokenNodes(raw: string): JSONContent[] {
+	return (wrapBlockImages(composerMarkdownCodec.parse(raw)).content ?? []).filter(
+		// Blank lines stay in the source instead of becoming empty paragraphs.
+		(node) => node.type !== 'paragraph' || Boolean(node.content?.length),
+	);
+}
+
 // Parses each top-level token on its own so every node maps to the source that produced it.
 // `ended` reports that the source stops where its last node does, with nothing left after it.
-function parseBlocks(source: string): (ComposerMarkdownDocument & { ended: boolean }) | null {
+function parseBlocks(
+	source: string,
+	tokenNodes: (raw: string) => JSONContent[],
+): (ComposerMarkdownDocument & { ended: boolean }) | null {
 	const tokens = composerMarkdownCodec.lex(source);
 	// Reference definitions have no editable node and would disappear when their block changes.
 	if (Object.keys(tokens.links).length > 0) return null;
@@ -77,13 +87,7 @@ function parseBlocks(source: string): (ComposerMarkdownDocument & { ended: boole
 	let ended = false;
 	for (const token of tokens) {
 		lexed += token.raw;
-		const nodes =
-			token.type === 'space'
-				? []
-				: (wrapBlockImages(composerMarkdownCodec.parse(token.raw)).content ?? []).filter(
-						// Blank lines stay in the source instead of becoming empty paragraphs.
-						(node) => node.type !== 'paragraph' || Boolean(node.content?.length),
-					);
+		const nodes = token.type === 'space' ? [] : tokenNodes(token.raw);
 		if (nodes.length === 0) {
 			const last = sources.length - 1;
 			if (last < 0) leading += token.raw;
@@ -137,8 +141,13 @@ function placeCaret(
 	caret: number,
 	document: JSONContent,
 	marker: string,
+	originalTokens: ReadonlyMap<string, JSONContent[]>,
 ): CaretPlacement | null {
-	const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret))?.document;
+	// The marker can change token boundaries, but each identical raw token still parses independently.
+	const marked = parseBlocks(
+		source.slice(0, caret) + marker + source.slice(caret),
+		(raw) => originalTokens.get(raw) ?? parseTokenNodes(raw),
+	)?.document;
 	if (!marked) return null;
 	let placement: CaretPlacement | null = null;
 	const strip = (node: JSONContent, position: number): JSONContent => {
@@ -171,7 +180,12 @@ export function parseComposerMarkdown({
 	caret,
 }: ComposerMarkdownRequest): ComposerMarkdownDocument | null {
 	if (!isComposerMarkdownSized(source)) return null;
-	const blocks = parseBlocks(source);
+	const originalTokens = new Map<string, JSONContent[]>();
+	const blocks = parseBlocks(source, (raw) => {
+		const nodes = parseTokenNodes(raw);
+		if (caret !== undefined) originalTokens.set(raw, nodes);
+		return nodes;
+	});
 	if (!blocks) return null;
 	const { ended, ...parsed } = blocks;
 	const pending = [parsed.document];
@@ -186,8 +200,8 @@ export function parseComposerMarkdown({
 		while (source.includes(marker)) marker += 'X';
 		// Word characters after a closing `_` keep it from closing, so punctuation leads a second try.
 		const placement =
-			placeCaret(source, caret, parsed.document, marker) ??
-			placeCaret(source, caret, parsed.document, '\u2e31' + marker);
+			placeCaret(source, caret, parsed.document, marker, originalTokens) ??
+			placeCaret(source, caret, parsed.document, '\u2e31' + marker, originalTokens);
 		if (placement) {
 			parsed.selection = placement.selection;
 			parsed.selectionMarks = placement.marks;

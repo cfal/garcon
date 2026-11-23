@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MarkdownManager } from '@tiptap/markdown';
 import { getSchema, type JSONContent } from '@tiptap/core';
 import {
@@ -54,6 +54,24 @@ function editFirstCell(table: JSONContent, text: string): JSONContent {
 }
 
 describe('composer Markdown parsing', () => {
+	it('reparses only the changed token when mapping a caret into a restored draft', () => {
+		const paragraphs = Array.from({ length: 24 }, (_, i) => `Paragraph **item ${i}**.`);
+		const source = paragraphs.join('\n\n');
+		const caret = source.indexOf('item 12') + 3;
+		const reference = parseComposerMarkdown({ source })!;
+		const parse = vi.spyOn(composerMarkdownCodec, 'parse');
+		try {
+			const restored = parseComposerMarkdown({ source, caret })!;
+			expect(restored.document).toEqual(reference.document);
+			expect(restored.sources).toEqual(reference.sources);
+			expect(restored.selection).toBeDefined();
+			expect(restored.selectionMarks?.map((mark) => mark.type)).toEqual(['bold']);
+			expect(parse).toHaveBeenCalledTimes(paragraphs.length + 1);
+		} finally {
+			parse.mockRestore();
+		}
+	});
+
 	it.each([
 		'[destination]: https://example.test/resource',
 		'Review this\n\n[destination]: https://example.test/resource',
