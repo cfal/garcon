@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
+import * as gitApi from '$lib/api/git.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
@@ -58,12 +59,27 @@ async function readyWorkbench() {
 	controller.setPresentationVisible(true);
 	await controller.target.activate();
 	controller.repository.currentBranch = 'main';
+	controller.repository.remoteStatus = {
+		hasRemote: true,
+		hasUpstream: false,
+		branch: 'main',
+		remoteName: 'origin',
+	};
 	return controller;
+}
+
+async function openPush() {
+	vi.spyOn(gitApi, 'getGitRemotes').mockResolvedValue({
+		remotes: ['origin', 'backup'].map((name) => ({ name, url: `/repos/${name}` })),
+	});
+	await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+	return screen.findByRole('dialog', { name: 'Push to remote' });
 }
 
 describe('GitWorkbenchPanel', () => {
 	afterEach(() => {
 		cleanup();
+		vi.restoreAllMocks();
 		vi.clearAllMocks();
 	});
 
@@ -76,12 +92,11 @@ describe('GitWorkbenchPanel', () => {
 		'completed checkout',
 		'external checkout',
 		'external checkout and return',
+		'conflicting remote status and return',
 	])('only opens Push in its original visit: %s', async (change) => {
 		const controller = await readyWorkbench();
-		const remotes = Promise.withResolvers<typeof controller.repository.pushRemotes>();
-		const prepare = vi
-			.spyOn(controller.repository, 'loadPushRemotes')
-			.mockReturnValue(remotes.promise);
+		const remotes = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.getGitRemotes>>>();
+		const prepare = vi.spyOn(gitApi, 'getGitRemotes').mockReturnValue(remotes.promise);
 		const props = { controller, presentation: 'window-main' as const };
 		const view = render(GitWorkbenchPanel, props);
 		await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
@@ -93,6 +108,10 @@ describe('GitWorkbenchPanel', () => {
 				controller.repository.currentBranch = 'next';
 				controller.target.branchChangePending = false;
 			}
+		} else if (change === 'conflicting remote status and return') {
+			controller.repository.remoteStatus!.branch = 'next';
+			await tick();
+			controller.repository.remoteStatus!.branch = 'main';
 		} else if (change.startsWith('external checkout')) {
 			// History publishes the branch without starting a checkout in this panel.
 			controller.repository.currentBranch = 'next';
@@ -107,62 +126,94 @@ describe('GitWorkbenchPanel', () => {
 			if (change === 'hide and return') await view.rerender({ ...props, visible: true });
 		}
 		const fetched = [{ name: 'backup', url: '/repos/backup' }];
-		remotes.resolve(fetched);
+		remotes.resolve({ remotes: fetched });
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
-		expect(controller.repository.showPushModal).toBe(change === 'stay');
-		expect(controller.repository.pushRemotes).toEqual(change === 'stay' ? fetched : []);
+		expect(controller.repository.pushPrompt).toEqual(
+			change === 'stay'
+				? {
+						project: { executorId: 'local', projectPath: '/project' },
+						branch: 'main',
+						remotes: fetched,
+						selectedRemote: 'backup',
+					}
+				: null,
+		);
 		controller.dispose();
 	});
 
-	it('keeps the chosen push remote when the owning tab is hidden and shown', async () => {
+	it.each(['hide', 'unmount'])(
+		'requires a fresh Push click after the presenter leaves (%s)',
+		async (exit) => {
+			const controller = await readyWorkbench();
+			const props = { controller, presentation: 'window-main' as const };
+			const view = render(GitWorkbenchPanel, props);
+			try {
+				await openPush();
+				await fireEvent.click(await screen.findByRole('radio', { name: /backup/ }));
+				if (exit === 'hide') await view.rerender({ ...props, visible: false });
+				else view.unmount();
+				expect(screen.queryByRole('dialog')).toBeNull();
+				if (exit === 'hide') await view.rerender({ ...props, visible: true });
+				else render(GitWorkbenchPanel, props);
+				expect(screen.queryByRole('dialog')).toBeNull();
+				await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+				expect(await screen.findByRole('radio', { name: /origin/, checked: true })).toBeTruthy();
+				expect(gitApi.getGitRemotes).toHaveBeenCalledTimes(2);
+			} finally {
+				controller.dispose();
+			}
+		},
+	);
+
+	it('discards an open Push prompt after a branch change', async () => {
 		const controller = await readyWorkbench();
-		controller.repository.pushRemotes = ['origin', 'backup'].map((name) => ({
-			name,
-			url: `/repos/${name}`,
-		}));
-		controller.repository.showPushModal = true;
 		const props = { controller, presentation: 'window-main' as const };
-		const view = render(GitWorkbenchPanel, props);
-		try {
-			await fireEvent.click(await screen.findByRole('radio', { name: /backup/ }));
-			await view.rerender({ ...props, visible: false });
-			expect(screen.queryByRole('dialog')).toBeNull();
-			await view.rerender({ ...props, visible: true });
-			expect(await screen.findByRole('radio', { name: /backup/, checked: true })).toBeTruthy();
-		} finally {
-			controller.dispose();
-		}
+		render(GitWorkbenchPanel, props);
+		await openPush();
+		controller.repository.currentBranch = 'next';
+		await tick();
+		expect(screen.queryByRole('dialog')).toBeNull();
+		controller.repository.currentBranch = 'main';
+		await tick();
+		expect(screen.queryByRole('dialog')).toBeNull();
+		controller.dispose();
 	});
 
 	it.each([false, true])(
 		'submits only the confirmed branch while ready (checkout=%s)',
 		async (checkout) => {
 			const controller = await readyWorkbench();
-			controller.repository.currentBranch = 'main';
-			controller.repository.pushRemotes = [{ name: 'origin', url: '/repos/origin' }];
-			controller.repository.showPushModal = true;
 			const dispatch = vi.spyOn(controller.repository, 'handlePush').mockResolvedValue(false);
 			render(GitWorkbenchPanel, { controller, presentation: 'window-main' });
-			const dialog = await screen.findByRole('dialog');
+			const dialog = await openPush();
+			await fireEvent.click(screen.getByRole('radio', { name: /backup/ }));
 			controller.target.branchChangePending = checkout;
-			await fireEvent.keyDown(dialog, { key: 'Enter', ctrlKey: true });
-			if (checkout) expect(dispatch).not.toHaveBeenCalled();
-			else
+			// Dispatch before Svelte removes the prompt; a detached dialog cannot receive user input.
+			dialog.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+			);
+			await tick();
+			if (checkout) {
+				expect(dispatch).not.toHaveBeenCalled();
+				controller.target.branchChangePending = false;
+				await tick();
+				expect(screen.queryByRole('dialog')).toBeNull();
+			} else {
 				expect(dispatch).toHaveBeenCalledWith(
 					expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
-					'origin',
+					'backup',
 					'main',
 				);
+			}
 			controller.dispose();
 		},
 	);
 
 	it('hides portaled Git actions until the replacement project is applied', async () => {
 		const controller = await readyWorkbench();
-		controller.repository.showPushModal = true;
 		controller.workbench.drafts.openCommentComposer('first.ts', 'after', 1);
 		render(GitWorkbenchPanel, { controller, presentation: 'mobile' });
-		expect(await screen.findByRole('dialog')).toBeTruthy();
+		await openPush();
 		const replacement = Promise.withResolvers<boolean>();
 		vi.mocked(controller.target.ensureTargets).mockReturnValue(replacement.promise);
 		controller.setProjectState(availableProject('/replacement'));
@@ -171,7 +222,7 @@ describe('GitWorkbenchPanel', () => {
 		expect(screen.getByTestId('git-compare-panel-content').dataset.active).toBe('false');
 		replacement.resolve(false);
 		await controller.target.activate();
-		expect(controller.repository.showPushModal).toBe(false);
+		expect(controller.repository.pushPrompt).toBeNull();
 		expect(controller.workbench.drafts.commentComposer.open).toBe(false);
 		controller.dispose();
 	});

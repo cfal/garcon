@@ -275,8 +275,12 @@ describe('GitRepositoryController', () => {
 			controller.expandedFiles = new Set(['a.txt']);
 			controller.selectedFiles = new Set(['a.txt']);
 			controller.confirmAction = { type: 'discard', file: 'a.txt' };
-			controller.showPushModal = true;
-			controller.pushRemotes = [{ name: 'origin', url: 'git@example.com:a.git' }];
+			controller.pushPrompt = {
+				project: { executorId: 'local', projectPath: '/project' },
+				branch: 'main',
+				remotes: [{ name: 'origin', url: 'git@example.com:a.git' }],
+				selectedRemote: 'origin',
+			};
 
 			controller.resetForProject(
 				{ executorId: 'local', projectPath: '/project-b' },
@@ -287,8 +291,7 @@ describe('GitRepositoryController', () => {
 			expect(controller.expandedFiles.size).toBe(0);
 			expect(controller.selectedFiles.size).toBe(0);
 			expect(controller.confirmAction).toBeNull();
-			expect(controller.showPushModal).toBe(false);
-			expect(controller.pushRemotes).toEqual([]);
+			expect(controller.pushPrompt).toBeNull();
 		});
 
 		it('does not publish an accepted action from the previous project', async () => {
@@ -456,7 +459,10 @@ describe('GitRepositoryController', () => {
 			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
 			controller.confirmAction = { type: 'pull' };
 
-			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(ok).toBe(true);
 			expect(gitPull).toHaveBeenCalledWith(
@@ -478,7 +484,10 @@ describe('GitRepositoryController', () => {
 			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
 			controller.confirmAction = { type: 'push' };
 
-			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(ok).toBe(true);
 			expect(gitPush).toHaveBeenCalledWith(
@@ -510,7 +519,10 @@ describe('GitRepositoryController', () => {
 			controller.selectedFiles = new Set(['a.txt']);
 			controller.confirmAction = { type: 'discard', file: 'a.txt' };
 
-			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(ok).toBe(true);
 			expect(gitDiscard).toHaveBeenCalledWith(
@@ -524,7 +536,10 @@ describe('GitRepositoryController', () => {
 			vi.mocked(gitPush).mockResolvedValue({ success: false, error: 'rejected' });
 			controller.confirmAction = { type: 'push' };
 
-			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({
+				executorId: 'local',
+				projectPath: '/project',
+			});
 
 			expect(ok).toBe(false);
 			expect(controller.lastError).toBe('rejected');
@@ -532,8 +547,9 @@ describe('GitRepositoryController', () => {
 		});
 	});
 
-	describe('loadPushRemotes', () => {
-		it('prepares push data when a remote exists without opening presentation state', async () => {
+	describe('preparePush', () => {
+		it('captures the branch and selects the default remote', async () => {
+			controller.currentBranch = 'main';
 			controller.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: true,
@@ -543,13 +559,11 @@ describe('GitRepositoryController', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			const remotes = await controller.loadPushRemotes({
+			await controller.preparePush({
 				executorId: 'local',
 				projectPath: '/project',
 			});
-			expect(remotes.map((remote) => remote.name)).toEqual(['origin']);
-			expect(controller.showPushModal).toBe(false);
-			expect(controller.pushRemotes).toHaveLength(0);
+			expect(controller.pushPrompt).toMatchObject({ branch: 'main', selectedRemote: 'origin' });
 		});
 
 		it('prepares push data when no upstream exists', async () => {
@@ -563,19 +577,15 @@ describe('GitRepositoryController', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await expect(
-				controller.loadPushRemotes({ executorId: 'local', projectPath: '/project' }),
-			).resolves.toHaveLength(1);
-			expect(controller.showPushModal).toBe(false);
+			await controller.preparePush({ executorId: 'local', projectPath: '/project' });
+			expect(controller.pushPrompt?.branch).toBe('feature-branch');
 			expect(controller.confirmAction).toBeNull();
 		});
 
 		it('does nothing when no remote', async () => {
 			controller.remoteStatus = null;
-			await expect(
-				controller.loadPushRemotes({ executorId: 'local', projectPath: '/project' }),
-			).resolves.toEqual([]);
-			expect(controller.showPushModal).toBe(false);
+			await controller.preparePush({ executorId: 'local', projectPath: '/project' });
+			expect(controller.pushPrompt).toBeNull();
 		});
 	});
 

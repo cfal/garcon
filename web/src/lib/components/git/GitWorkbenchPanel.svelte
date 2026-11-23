@@ -51,16 +51,22 @@
 	const activeProjectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
 	const pushBranch = $derived(
-		presentationVisible && controller.target.canChangeTarget ? repository.currentBranch : '',
+		presentationVisible && controller.target.canChangeTarget ? repository.pushBranch : '',
+	);
+	const prompt = $derived(repository.pushPrompt);
+	const canConfirmPush = $derived(
+		prompt &&
+			prompt.selectedRemote &&
+			prompt.branch === pushBranch &&
+			sameGitProject(prompt.project, activeTarget),
 	);
 	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
-	let pushOpenGeneration = 0;
-
 	$effect(() => {
+		const owner = repository;
 		if (!pushBranch) return;
-		// A remote list belongs to one uninterrupted visit to the branch that requested it.
+		// Both the pending request and the displayed prompt end with this branch visit.
 		return () => {
-			pushOpenGeneration++;
+			owner.pushPrompt = null;
 		};
 	});
 
@@ -118,7 +124,10 @@
 		const target = controller.target.requestTarget;
 		if (!target || !controller.target.canChangeTarget) return;
 		const commit = surfaces.commit();
-		if (!commit.target.selectProject(target) && !sameGitProject(commit.target.requestTarget, target)) {
+		if (
+			!commit.target.selectProject(target) &&
+			!sameGitProject(commit.target.requestTarget, target)
+		) {
 			notifications.info(m.commit_surface_busy_target_retained(), { key: 'commit-busy-target' });
 		}
 		const opening = openCommitFromGitWorkbench(workspace, presentation);
@@ -127,27 +136,16 @@
 		});
 	}
 
-	async function openPush(): Promise<void> {
-		const target = activeTarget;
-		const branch = pushBranch;
-		if (!branch || !target) return;
-		const generation = ++pushOpenGeneration;
-		const remotes = await repository.loadPushRemotes(target);
-		if (
-			!remotes.length ||
-			generation !== pushOpenGeneration ||
-			branch !== pushBranch ||
-			!sameGitProject(target, activeTarget)
-		)
-			return;
-		repository.pushRemotes = remotes;
-		repository.showPushModal = true;
+	function openPush(): void {
+		const target = controller.target.requestTarget;
+		if (target && pushBranch) void repository.preparePush(target);
 	}
 
-	function submitPush(remote: string, branch: string): void {
-		if (!branch || branch !== pushBranch) return;
+	function submitPush(): void {
+		if (!prompt || !canConfirmPush) return;
+		const { branch, selectedRemote } = prompt;
 		void runMutation(async (project) => {
-			const ok = await repository.handlePush(project, remote, branch);
+			const ok = await repository.handlePush(project, selectedRemote, branch);
 			if (ok) await wb.refresh({ reason: 'git-action' });
 			return ok;
 		});
@@ -176,7 +174,7 @@
 		{controller}
 		{presentation}
 		onCommit={openCommit}
-		onPush={() => void openPush()}
+		onPush={openPush}
 		onRefresh={() => void refresh()}
 	/>
 	<GitProjectContent
@@ -237,14 +235,14 @@
 			/>
 		{/if}
 
-		{#if repository.showPushModal}
+		{#if prompt && canConfirmPush}
 			<GitPushModal
-				open={Boolean(pushBranch)}
-				remotes={repository.pushRemotes}
-				currentBranch={repository.currentBranch}
+				remotes={prompt.remotes}
+				bind:selectedRemote={prompt.selectedRemote}
+				currentBranch={prompt.branch}
 				isPushing={repository.isPushing}
 				onPush={submitPush}
-				onClose={() => (repository.showPushModal = false)}
+				onClose={() => (repository.pushPrompt = null)}
 			/>
 		{/if}
 	</GitProjectContent>

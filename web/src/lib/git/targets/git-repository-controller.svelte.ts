@@ -54,8 +54,12 @@ export class GitRepositoryController {
 	isFetching = $state(false);
 	isPulling = $state(false);
 	isPushing = $state(false);
-	showPushModal = $state(false);
-	pushRemotes = $state<GitRemoteEntry[]>([]);
+	pushPrompt = $state<{
+		project: GitProjectTarget;
+		branch: string;
+		remotes: GitRemoteEntry[];
+		selectedRemote: string;
+	} | null>(null);
 	isCommitAreaCollapsed = $state(false);
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
@@ -74,6 +78,10 @@ export class GitRepositoryController {
 
 	get currentBranch(): string {
 		return this.branchSelector.currentBranch;
+	}
+
+	get pushBranch(): string {
+		return this.remoteStatus?.branch === this.currentBranch ? this.currentBranch : '';
 	}
 
 	set currentBranch(value: string) {
@@ -222,7 +230,7 @@ export class GitRepositoryController {
 		this.isFetching = false;
 		this.isPulling = false;
 		this.isPushing = false;
-		this.showPushModal = false;
+		this.pushPrompt = null;
 		this.confirmAction = null;
 	}
 
@@ -245,8 +253,7 @@ export class GitRepositoryController {
 		this.expandedFiles = new Set();
 		this.selectedFiles = new Set();
 		this.confirmAction = null;
-		this.showPushModal = false;
-		this.pushRemotes = [];
+		this.pushPrompt = null;
 		this.lastError = null;
 		this.isLoading = false;
 		this.isCommitting = false;
@@ -311,7 +318,7 @@ export class GitRepositoryController {
 
 	handlePush(project: GitProjectTarget, remote?: string, remoteBranch?: string): Promise<boolean> {
 		if (this.captureContext(project) === null) return Promise.resolve(false);
-		this.showPushModal = false;
+		this.pushPrompt = null;
 		return this.postGitAction(
 			project,
 			() => gitPush(project, remote, remoteBranch),
@@ -319,16 +326,20 @@ export class GitRepositoryController {
 		);
 	}
 
-	async loadPushRemotes(project: GitProjectTarget): Promise<GitRemoteEntry[]> {
-		const contextGeneration = this.captureContext(project);
-		if (contextGeneration === null || !this.remoteStatus?.hasRemote) return [];
-		try {
-			const data = await getGitRemotes(project);
-			if (!this.isCurrentContext(project, contextGeneration)) return [];
-			return data.remotes ?? [];
-		} catch {
-			return [];
+	async preparePush(project: GitProjectTarget): Promise<void> {
+		const branch = this.pushBranch;
+		if (!branch || !this.remoteStatus?.hasRemote || this.captureContext(project) === null) return;
+		this.pushPrompt = { project, branch, remotes: [], selectedRemote: '' };
+		const prompt = this.pushPrompt;
+		const { remotes } = await getGitRemotes(project).catch(() => ({ remotes: [] }));
+		if (this.pushPrompt !== prompt) return;
+		if (!remotes?.length || branch !== this.pushBranch) {
+			this.pushPrompt = null;
+			return;
 		}
+		prompt.remotes = remotes;
+		prompt.selectedRemote =
+			remotes.find((remote) => remote.name === 'origin')?.name ?? remotes[0].name;
 	}
 
 	async handleSwitchBranch(
