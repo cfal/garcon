@@ -11,7 +11,7 @@ import {
   getAntigravityAuthStatus,
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
-import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels } from '../antigravity-models.ts';
+import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels, runAntigravityModels } from '../antigravity-models.ts';
 import { createAntigravityAccount } from '../antigravity-account.ts';
 
 const silentLogger = { debug() {}, info() {}, warn() {}, error() {} } satisfies AgentLogger;
@@ -136,7 +136,30 @@ describe('parseAntigravityModels', () => {
       stdout: '',
       stderr: 'Fetching available models...\nError: Please sign in to view available models.\n',
       exitCode: 1,
-    })).toBe('Please sign in to view available models.');
+    })).toBe('agy models exited with code 1: Please sign in to view available models.');
+  });
+
+  it('retains the listing exit status even when stderr contains only a banner', async () => {
+    const catalog = createAntigravityCatalog(async () => ({ exitCode: 7, stdout: '', stderr: 'Using current profile' }), silentLogger);
+    await expect(catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal: new AbortController().signal }))
+      .rejects.toThrow('agy models exited with code 7: Using current profile');
+  });
+
+  it('accepts a successful listing with a diagnostic on stderr', async () => {
+    const catalog = createAntigravityCatalog(async () => ({ exitCode: 0, stdout: 'm\tModel\n', stderr: 'Using current profile' }), silentLogger);
+    const snapshot = await catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal: new AbortController().signal });
+    expect(snapshot.models.map(model => model.value)).toEqual(['default', 'm']);
+  });
+
+  it('reports a listing timeout rather than the subprocess banner or termination code', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agy-models-timeout-'));
+    try {
+      const binary = join(root, 'agy');
+      await writeFile(binary, '#!/bin/sh\necho "Using current profile" >&2\nexec sleep 15\n', { mode: 0o700 });
+      await expect(runAntigravityModels(config({ binary: () => binary }), 100)).rejects.toThrow('agy models timed out');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -281,7 +304,7 @@ read -r next && case "$next" in *'"method":"authenticate"'*) echo '{"jsonrpc":"2
       canReauth: true,
       label: '',
       source: 'none',
-      detail: 'Please sign in to view available models.',
+      detail: 'agy models exited with code 1: Please sign in to view available models.',
     });
   });
 });
