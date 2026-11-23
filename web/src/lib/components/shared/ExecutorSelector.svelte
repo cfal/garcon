@@ -1,7 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import Network from '@lucide/svelte/icons/network';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { MediaQuery } from 'svelte/reactivity';
 	import {
 		DropdownMenu,
@@ -157,10 +156,6 @@
 			<Network class="size-4 shrink-0 text-file-icon-folder" aria-hidden="true" />
 			{#if !compact}
 				<span class="executor-label min-w-0 truncate">{executorLabel}</span>
-				<ChevronDown
-					class="executor-chevron size-3.5 shrink-0 text-muted-foreground"
-					aria-hidden="true"
-				/>
 			{/if}
 		</DropdownMenuTrigger>
 		<DropdownMenuContent
